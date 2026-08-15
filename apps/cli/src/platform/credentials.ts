@@ -545,11 +545,20 @@ export class DefaultPlatformUnusableError extends Error {
  * The half-applied move, refused rather than acted on. Deleting the platform
  * block is one edit; deleting the identifiers it was keeping in place is four
  * more. Between those two moments the repository names nothing and still holds
- * everything — and the step below "names nothing" is now egma's own platform,
- * so without this the next command carries another platform's identifiers to
- * hosted egma. ADR-0008's rule is that they cannot silently cross that line.
+ * everything, and ADR-0008's rule is that those identifiers cannot silently
+ * cross a platform boundary.
  *
- * It ends with the same block every other refusal about moving ends with,
+ * **The deleted line is the one that said which platform they belong to**, so
+ * once it is gone there is no address egma can safely send them to — not the
+ * built-in one it would have chosen, and not one somebody types either. That is
+ * why this cannot end by offering to use another platform, and why the two ways
+ * out are the only two there are: put the line back, or take the identifiers
+ * out. Both are named, because somebody who deleted that block by mistake is
+ * not making the move at all and must not be told to throw away four working
+ * identifiers to recover from a typo. The block is committed, which is exactly
+ * what makes putting it back an ordinary thing to do.
+ *
+ * It ends with the same list every other refusal about moving ends with,
  * because the developer is in the middle of exactly that list: what they need
  * next is the rest of it, not a new set of words for the same five lines.
  */
@@ -557,7 +566,7 @@ export class UnboundPlatformIdentifiersError extends Error {
   constructor(held: readonly string[]) {
     super(
       teachingTheMove(
-        `This repository names no Egma platform, and it still holds identifiers that only the platform which issued them can resolve — under ${held.join(", ")} in egma/config.yaml. egma will not send those to its own platform. Put the platform: block back to use the platform they came from, or finish the move below by deleting them. Nothing was sent.`,
+        `This repository names no Egma platform, and it still holds identifiers that only the platform which issued them can resolve — under ${held.join(", ")} in egma/config.yaml. egma will not send them anywhere, because the line that said which platform they came from is the one that is gone. Two ways on: put the platform: block back in egma/config.yaml, which is committed and so is in this repository's history, or delete the identifiers below and connect again on whichever platform you name next. Nothing was sent.`,
       ),
     );
     this.name = "UnboundPlatformIdentifiersError";
@@ -643,15 +652,20 @@ export async function choosePlatform(choice: {
 
   // And refused before anybody is asked anything for the other direction: a
   // folder that names no platform and is still holding one platform's
-  // identifiers. Only against the built-in address, because that is the step
-  // nobody typed — an address a developer named on the command line or in their
-  // shell is a deliberate act, and it is how a self-hoster worked before there
-  // was any built-in address to fall back to.
+  // identifiers.
   //
-  // A folder with no identifiers at all is untouched by this, which is what
-  // keeps `egma init`'s own output — a bare `platform:` line and three names —
+  // Whichever of the three places named the address, because the question this
+  // asks is about the folder and not about the address. Once the platform block
+  // is gone, egma cannot tell the platform that issued these identifiers from
+  // any other — that is the one fact the deleted line held — so there is no
+  // address it can safely send them to, including one somebody typed. Refusing
+  // only the address egma chose would also be the wrong half: somebody moving a
+  // repository types `--url` mid-move, which is exactly when this is true.
+  //
+  // A folder with no identifiers at all is untouched, which is what keeps
+  // `egma init`'s own output — a bare `platform:` line and three names —
   // working exactly as it did.
-  if (binding === null && selected.source === "default" && committed !== null) {
+  if (binding === null && committed !== null) {
     const held = platformOwnedIds(committed);
     if (held.length > 0) throw new UnboundPlatformIdentifiersError(held);
   }

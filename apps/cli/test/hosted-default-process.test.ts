@@ -509,14 +509,19 @@ describe("a repository that names no platform", () => {
    * command carries somebody else's identifiers to hosted egma, which is the
    * one thing ADR-0008 exists to stop.
    *
-   * It is refused on what is already on this machine, so the address egma would
-   * have used is not asked so much as who it is.
+   * It is refused on what is already on this machine, so no address is asked so
+   * much as who it is — and it is refused **whichever of the three places named
+   * that address.** The deleted line is the one that said which platform these
+   * identifiers belong to, so once it is gone there is nowhere egma can safely
+   * send them, including somewhere a developer typed. `--url` is not an escape
+   * from this; it is the flag somebody reaches for in the middle of the move.
    */
   it("refuses a folder holding identifiers from a platform it no longer names", async () => {
-    const workspace = await makeWorkspace();
-    try {
+    /** The half-applied move: the binding gone, everything it held still here. */
+    async function halfMoved(): Promise<Workspace> {
+      const workspace = await makeWorkspace();
       await workspace.signIn(own.url, PLATFORM_KEY);
-      const paths = folderPathsIn(workspace.dir);
+      await workspace.signIn(elsewhere.url, PLATFORM_KEY);
       await createEgmaFolder({
         repository: workspace.dir,
         config: {
@@ -526,43 +531,80 @@ describe("a repository that names no platform", () => {
           suite: { name: "first-suite", id: "sui_01K3XQ7M4E8YB2FVN0H9TZQWET" },
         },
       });
-      // The one edit that unbinds it, and nothing else — a developer starting
-      // the move at the wrong end of the list.
-      await updateConfig(paths.config, { platform: null });
+      // The one edit that unbinds it, and nothing else — somebody starting the
+      // move at the wrong end of the list.
+      await updateConfig(folderPathsIn(workspace.dir).config, { platform: null });
+      return workspace;
+    }
 
-      const before = own.records.length;
-      const elsewhereBefore = elsewhere.records.length;
-      const refused = await egma(workspace, ["pull"], { EGMA_TEST_DEFAULT_URL: own.url });
+    // Every way a platform gets selected, and the same answer from all three.
+    for (const [how, args, extra] of [
+      ["the built-in address", ["pull"], {}],
+      ["--url", ["pull", "--url", own.url], {}],
+      ["EGMA_URL", ["pull"], { EGMA_URL: own.url }],
+    ] as const) {
+      const workspace = await halfMoved();
+      try {
+        const before = own.records.length;
+        const elsewhereBefore = elsewhere.records.length;
+        const refused = await egma(workspace, [...args], {
+          EGMA_TEST_DEFAULT_URL: own.url,
+          ...extra,
+        });
 
-      expect(refused.code).toBe(4);
-      expect(refused.stdout).toContain("status: refused");
-      expect(refused.stderr).toContain("This repository names no Egma platform");
-      expect(refused.stderr).toContain("agent, connection, suite");
-      expect(refused.stderr).toContain("Nothing was sent");
-      // The rest of the list, so the developer can finish what they started
-      // rather than meet a second refusal for the next line.
-      expect(refused.stderr).toContain(
-        "To move this repository to another platform, delete these in this order and run egma again:",
-      );
+        expect(refused.code, how).toBe(4);
+        expect(refused.stdout, how).toContain("status: refused");
+        expect(refused.stderr, how).toContain("This repository names no Egma platform");
+        expect(refused.stderr, how).toContain("agent, connection, suite");
+        expect(refused.stderr, how).toContain("Nothing was sent");
 
-      // Nothing reached the address egma would have fallen back to, and nothing
-      // reached the platform the identifiers came from either.
-      expect(own.records.slice(before)).toEqual([]);
-      expect(elsewhere.records.slice(elsewhereBefore)).toEqual([]);
+        // Both ways out, because somebody who deleted that block by mistake is
+        // not making the move at all and must not be told to throw away four
+        // working identifiers to recover from a typo.
+        expect(refused.stderr, how).toContain("put the platform: block back");
+        expect(refused.stderr, how).toContain(
+          "To move this repository to another platform, delete these in this order and run egma again:",
+        );
 
-      // And the folder egma writes for a repository that has connected nothing
-      // is untouched by this: a bare platform: line with no identifiers under
-      // it is what `egma init` leaves behind, and it still resolves.
+        // Nothing reached the address egma would have used, and nothing reached
+        // the platform the identifiers came from either.
+        expect(own.records.slice(before), how).toEqual([]);
+        expect(elsewhere.records.slice(elsewhereBefore), how).toEqual([]);
+      } finally {
+        await workspace.remove();
+      }
+    }
+
+    // The first way out: the block put back. It is a committed line, so this is
+    // recovering a file from history rather than knowing something egma hid.
+    const restored = await halfMoved();
+    try {
+      await updateConfig(folderPathsIn(restored.dir).config, {
+        platform: { origin: elsewhere.url, instance: elsewhere.instanceId },
+      });
+      const pulled = await egma(restored, ["pull"], { EGMA_TEST_DEFAULT_URL: own.url });
+      expect(pulled.code, pulled.stderr).toBe(0);
+      expect(pulled.stdout).toContain(`url: ${elsewhere.url}`);
+    } finally {
+      await restored.remove();
+    }
+
+    // The second: the identifiers taken out. That is also the shape `egma init`
+    // leaves behind — a bare platform: line and three names with no ids under
+    // them — which this must never refuse.
+    const emptied = await halfMoved();
+    try {
+      const paths = folderPathsIn(emptied.dir);
       await updateConfig(paths.config, {
         agent: { name: "receptionist", id: null },
         connection: { name: "retell-1", id: null },
         suite: { name: "first-suite", id: null },
       });
-      const pulled = await egma(workspace, ["pull"], { EGMA_TEST_DEFAULT_URL: own.url });
+      const pulled = await egma(emptied, ["pull"], { EGMA_TEST_DEFAULT_URL: own.url });
       expect(pulled.code, pulled.stderr).toBe(0);
       expect(pulled.stdout).toContain(`url: ${own.url}`);
     } finally {
-      await workspace.remove();
+      await emptied.remove();
     }
   });
 
