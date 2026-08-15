@@ -379,8 +379,10 @@ services:
       EGMA_PERSONA_MODEL_PROVIDER: ${EGMA_PERSONA_MODEL_PROVIDER:-}
       EGMA_PERSONA_MODEL: ${EGMA_PERSONA_MODEL:-}
       EGMA_PERSONA_MODEL_API_KEY: ${EGMA_PERSONA_MODEL_API_KEY:-}
+      EGMA_PERSONA_MODEL_REASONING_EFFORT: ${EGMA_PERSONA_MODEL_REASONING_EFFORT:-}
       EGMA_PERSONA_STT_PROVIDER: ${EGMA_PERSONA_STT_PROVIDER:-}
       EGMA_PERSONA_STT_API_KEY: ${EGMA_PERSONA_STT_API_KEY:-}
+      EGMA_PERSONA_STT_MODEL: ${EGMA_PERSONA_STT_MODEL:-}
       EGMA_PERSONA_TTS_PROVIDER: ${EGMA_PERSONA_TTS_PROVIDER:-}
       EGMA_PERSONA_TTS_API_KEY: ${EGMA_PERSONA_TTS_API_KEY:-}
       EGMA_PERSONA_TTS_MODEL: ${EGMA_PERSONA_TTS_MODEL:-}
@@ -475,7 +477,14 @@ services:
       # what it has room for, so a big run degrades to a queue rather than
       # to overload — raise this, or start a second simulator, and they
       # distribute between themselves with nothing in front of them.
-      EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-4}
+      #
+      # **It is also this deployment's ceiling on concurrent phone calls**,
+      # because a voice simulation holds a channel on the carrier trunk for
+      # as long as it lasts, and nothing else counts them. Two simulators at
+      # this number is twice this number of calls, and the trunk's own limit
+      # is the one that matters: past it the carrier refuses, and a refused
+      # call is a failed simulation rather than a queued one.
+      EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-2}
       # **No provider setting reaches this container.** Which model the
       # persona thinks with, what it speaks and hears with, what tells it
       # the agent has stopped talking, which bridge places a call and which
@@ -495,6 +504,13 @@ services:
       # And this is which model the listening leg asks for, which the
       # platform's settings do not carry:
       EGMA_SIMULATOR_STT_MODEL: ${EGMA_SIMULATOR_STT_MODEL:-}
+      # How hard the persona's model thinks before it speaks, and the key a
+      # cartesia mouth needs. Both are the platform's settings first — it
+      # holds them and hands them down with the work — and both are here for
+      # the same reason the two above are: a container may hold its own
+      # answer, and what the platform holds wins over it.
+      EGMA_SIMULATOR_MODEL_REASONING_EFFORT: ${EGMA_SIMULATOR_MODEL_REASONING_EFFORT:-}
+      EGMA_SIMULATOR_CARTESIA_API_KEY: ${EGMA_SIMULATOR_CARTESIA_API_KEY:-}
       # The media server this container talks to. It is a third-party
       # binary that reads its own key and secret when it is *created*, so
       # it can never reach the platform's database and its address and

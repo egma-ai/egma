@@ -68,6 +68,22 @@ function member(role: "member" | "viewer"): AuthContext {
 }
 
 /**
+ * The context a claim mints, which is the only one the plaintext door opens
+ * for. Written here rather than inside one describe because two of them need
+ * it: what a simulator is really handed is the only honest way to assert that
+ * a stranded setting is gone.
+ */
+function claimedBySimulator(): AuthContext {
+  return {
+    userId: "simulator",
+    organizationId: acme.organization,
+    projectId: acme.project,
+    role: "member",
+    via: "simulator",
+  };
+}
+
+/**
  * A deployment that is one team, which is what every self-host is and what the
  * default flag says. It is the precondition on being here at all, so it is
  * written out at every call rather than hidden in a helper's default.
@@ -139,8 +155,10 @@ describe("a platform that has been given no settings", () => {
       ["persona_model_provider", false],
       ["persona_model", false],
       ["persona_model_key", true],
+      ["persona_model_reasoning_effort", false],
       ["speech_to_text_provider", false],
       ["speech_to_text_key", true],
+      ["speech_to_text_model", false],
       ["text_to_speech_provider", false],
       ["text_to_speech_key", true],
       ["text_to_speech_model", false],
@@ -518,5 +536,97 @@ describe("the one door to the plaintext", () => {
     );
 
     await expect(resolvePlatformSettings(claimed())).rejects.toThrow();
+  });
+});
+
+describe("a provider change, and what it strands", () => {
+  // Its own slate, and at the end of the file, because everything here writes
+  // providers and models that the ordered chain above reads. A block that
+  // changed `persona_model` in the middle of that chain would be a test
+  // failing somewhere it says nothing about.
+  beforeAll(async () => {
+    await database.sql("delete from platform_setting");
+  });
+
+  it("drops the old provider's model and voice when the provider changes", async () => {
+    // A model name and a voice id belong to the provider that coined them, so
+    // the moment the provider beside them changes they stop being
+    // configuration and become a trap: the simulator would ask the newly
+    // chosen provider for the old one's model and be refused at the first
+    // word, which reads as a broken deployment rather than as a setting
+    // nobody updated.
+    await writePlatformSettings(owner(), ONE_TEAM, {
+      text_to_speech_provider: "openai",
+      text_to_speech_model: "gpt-4o-mini-tts",
+      text_to_speech_voice: "alloy",
+      speech_to_text_provider: "openai",
+      speech_to_text_model: "gpt-4o-transcribe",
+    });
+
+    await writePlatformSettings(owner(), ONE_TEAM, {
+      text_to_speech_provider: "cartesia",
+      speech_to_text_provider: "openai_realtime",
+    });
+
+    const held = await resolvePlatformSettings(claimedBySimulator());
+    expect(held.text_to_speech_provider).toBe("cartesia");
+    expect(held.speech_to_text_provider).toBe("openai_realtime");
+    // Gone, so each built leg answers with its own provider's default rather
+    // than with a name the new provider has never heard of.
+    expect(held.text_to_speech_model).toBeUndefined();
+    expect(held.text_to_speech_voice).toBeUndefined();
+    expect(held.speech_to_text_model).toBeUndefined();
+  });
+
+  it("keeps the new provider's own model when it is supplied in the same write", async () => {
+    // Supplying the new provider's model in the same breath is the careful
+    // thing to do, and it must not then be deleted for having arrived beside
+    // the change that made it necessary.
+    await writePlatformSettings(owner(), ONE_TEAM, {
+      text_to_speech_provider: "openai",
+      text_to_speech_model: "gpt-4o-mini-tts",
+    });
+
+    await writePlatformSettings(owner(), ONE_TEAM, {
+      text_to_speech_provider: "cartesia",
+      text_to_speech_model: "sonic-3.5",
+    });
+
+    const held = await resolvePlatformSettings(claimedBySimulator());
+    expect(held.text_to_speech_model).toBe("sonic-3.5");
+  });
+
+  it("leaves the model and voice alone when the provider is rewritten unchanged", async () => {
+    // A form that submits every field it holds rewrites the provider with the
+    // value already stored. That is not a change, and it must not throw away
+    // the model beside it.
+    await writePlatformSettings(owner(), ONE_TEAM, {
+      text_to_speech_provider: "cartesia",
+      text_to_speech_model: "sonic-3.5",
+      text_to_speech_voice: "a-cartesia-voice",
+    });
+
+    await writePlatformSettings(owner(), ONE_TEAM, {
+      text_to_speech_provider: "cartesia",
+    });
+
+    const held = await resolvePlatformSettings(claimedBySimulator());
+    expect(held.text_to_speech_model).toBe("sonic-3.5");
+    expect(held.text_to_speech_voice).toBe("a-cartesia-voice");
+  });
+
+  it("drops a reasoning effort the newly chosen model may never have heard of", async () => {
+    await writePlatformSettings(owner(), ONE_TEAM, {
+      persona_model: "a-model-that-reasons",
+      persona_model_reasoning_effort: "high",
+    });
+
+    await writePlatformSettings(owner(), ONE_TEAM, {
+      persona_model: "a-model-that-does-not",
+    });
+
+    const held = await resolvePlatformSettings(claimedBySimulator());
+    expect(held.persona_model).toBe("a-model-that-does-not");
+    expect(held.persona_model_reasoning_effort).toBeUndefined();
   });
 });

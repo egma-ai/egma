@@ -130,6 +130,11 @@
           "description": "The provider key, in the clear for exactly this hand-off. Held in memory for the simulation, registered for redaction, and never logged, persisted or reported. No report document has anywhere to put it.",
           "type": "string",
           "minLength": 1
+        },
+        "reasoning_effort": {
+          "description": "How hard the model should think before the persona speaks, in the provider's own vocabulary — an open string, not an enum here, because the accepted values differ between providers speaking one chat-completions shape and have grown more than once. Absent means send nothing at all, which is what keeps a model that has never heard of the field working exactly as it did. A persona is a caller in a hurry rather than a puzzle-solver: the reasoning under test is the agent's, and every moment the persona spends thinking is silence on a live line that no real caller would leave.",
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -145,6 +150,11 @@
         },
         "stt_key": {
           "description": "The listening leg's provider key, on the same terms as the model key above.",
+          "type": "string",
+          "minLength": 1
+        },
+        "stt_model": {
+          "description": "Which model the listening leg asks for, where its provider has more than one. Here beside tts_model rather than left in each simulator's environment, which is where it used to live alone: that asymmetry was the one speech setting a deployment could not change centrally, so moving the persona's mouth was a settings page and moving its ears was editing a container and restarting it.",
           "type": "string",
           "minLength": 1
         },

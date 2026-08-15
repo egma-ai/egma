@@ -84,8 +84,10 @@ describe("egma self-host setup, with somebody watching", () => {
         EGMA_PERSONA_MODEL_PROVIDER: "",
         EGMA_PERSONA_MODEL: "",
         EGMA_PERSONA_MODEL_API_KEY: "",
+        EGMA_PERSONA_MODEL_REASONING_EFFORT: "",
         EGMA_PERSONA_STT_PROVIDER: "",
         EGMA_PERSONA_STT_API_KEY: "",
+        EGMA_PERSONA_STT_MODEL: "",
         EGMA_PERSONA_TTS_PROVIDER: "",
         EGMA_PERSONA_TTS_API_KEY: "",
         EGMA_PERSONA_TTS_MODEL: "",
@@ -108,25 +110,35 @@ describe("egma self-host setup, with somebody watching", () => {
     // jumping between accounts.
     await showing(terminal, "the persona's model provider [openai]");
     terminal.write("\r");
-    await showing(terminal, "the persona's model [gpt-4o]");
+    await showing(terminal, "the persona's model [gpt-5.6-terra]");
     terminal.write("\r");
     await showing(terminal, "the persona's model key (not shown as you type)");
     terminal.write(`${MODEL_KEY}\r`);
+    // The one model setting egma does suggest a value for, because it is a
+    // behavior rather than a provider's model name: a caller on a live line
+    // does not pause to reason, so the suggestion turns it off.
+    await showing(terminal, "the persona's reasoning effort [none]");
+    terminal.write("\r");
 
-    await showing(terminal, "the speech-to-text provider [openai]");
+    // The listening leg's suggestion is the streaming transport, not the
+    // segmented one: a leg that cannot start transcribing until the agent
+    // stops talking adds the whole length of every agent turn to that turn.
+    await showing(terminal, "the speech-to-text provider [openai_realtime]");
     terminal.write("\r");
     await showing(terminal, "the speech-to-text key");
     terminal.write(`${LISTENING_KEY}\r`);
+    // The three model-and-voice names are offered with no suggestion of egma's
+    // own, because a name invented here would be a second opinion about a
+    // provider's catalogue, stored, and wrong the week one is retired. An
+    // empty answer leaves the platform holding none of them, and each built
+    // leg then answers with its own provider's default.
+    await showing(terminal, "the speech-to-text model");
+    terminal.write("\r");
 
-    await showing(terminal, "the text-to-speech provider [openai]");
+    await showing(terminal, "the text-to-speech provider [cartesia]");
     terminal.write("\r");
     await showing(terminal, "the text-to-speech key");
     terminal.write(`${SPEAKING_KEY}\r`);
-
-    // The two the simulator has a working default for are offered with no
-    // suggestion of egma's own, because a model name invented here would be a
-    // second opinion about a provider's catalogue, stored, and wrong the week
-    // one is retired. An empty answer leaves the platform holding neither.
     await showing(terminal, "the text-to-speech model");
     terminal.write("\r");
     await showing(terminal, "the text-to-speech voice");
@@ -217,7 +229,7 @@ describe("egma self-host setup, with somebody watching", () => {
       if (answerFirst) {
         await showing(terminal, "the persona's model provider [openai]");
         terminal.write("\r");
-        await showing(terminal, "the persona's model [gpt-4o]");
+        await showing(terminal, "the persona's model [gpt-5.6-terra]");
         terminal.write("\r");
       }
       await showing(terminal, prompt);

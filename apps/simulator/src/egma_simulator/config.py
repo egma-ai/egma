@@ -30,10 +30,18 @@ MODEL_PROVIDERS = ("scripted", "openai")
 DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1"
 LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
 
-STT_PROVIDERS = ("scripted", "deepgram", "openai")
-"""What the persona hears with. ``scripted`` needs no account and no network."""
+STT_PROVIDERS = ("scripted", "deepgram", "openai", "openai_realtime")
+"""What the persona hears with. ``scripted`` needs no account and no network.
 
-TTS_PROVIDERS = ("scripted", "elevenlabs", "openai")
+``openai`` and ``openai_realtime`` are one account and two transports, and
+they are two names here because the transport is what differs and a model
+name cannot be trusted to imply it. ``openai`` posts a finished recording
+of each turn and waits for the answer; ``openai_realtime`` holds a socket
+open and transcribes while the agent is still talking. On a phone line the
+second is the one worth having — the first adds the length of every turn
+to that turn's own latency, and hears nothing until the turn is over."""
+
+TTS_PROVIDERS = ("scripted", "elevenlabs", "openai", "cartesia")
 """What the persona speaks with. ``scripted`` needs no account and no network."""
 
 VAD_PROVIDERS = ("scripted", "silero")
@@ -45,24 +53,46 @@ SPEECH_PROVIDER_KEYS = {
     "deepgram": "EGMA_SIMULATOR_DEEPGRAM_API_KEY",
     "elevenlabs": "EGMA_SIMULATOR_ELEVENLABS_API_KEY",
     "openai": "EGMA_SIMULATOR_OPENAI_API_KEY",
+    "openai_realtime": "EGMA_SIMULATOR_OPENAI_API_KEY",
+    "cartesia": "EGMA_SIMULATOR_CARTESIA_API_KEY",
 }
 """The variable each real speech provider's key arrives in. Naming a
 provider is what makes its key required, and the refusal names this.
 
 ``openai`` is one entry for both legs on purpose: one account speaks and
 listens, so a self-hoster who set up the phone path supplied one key and
-must not be asked for a second under another name."""
+must not be asked for a second under another name. ``openai_realtime``
+reads that same variable for the same reason — it is the same account
+reached over a different transport, and asking for the key twice under
+two names would be egma inventing a second account nobody has."""
 
 DEFAULT_STT_MODEL = "gpt-4o-transcribe"
-"""What the openai listening leg asks for when a deployment names none."""
+"""What the segmented openai listening leg asks for when nobody names one."""
+
+DEFAULT_REALTIME_STT_MODEL = "gpt-live-transcribe"
+"""What the streaming openai listening leg asks for when nobody names one."""
 
 DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
 DEFAULT_TTS_VOICE = "alloy"
-"""What the openai speaking leg asks for when a deployment names none.
+"""What the openai speaking leg asks for when nobody names one.
 
 Models are configuration rather than a constant of the product: the
 provider retires and adds them on its own schedule, and a deployment must
 be able to move without waiting for a release."""
+
+DEFAULT_CARTESIA_TTS_MODEL = "sonic-3.5"
+"""What the cartesia speaking leg asks for when nobody names one."""
+
+# **A model name belongs to the provider that coined it, and every default
+# above is therefore one provider's.** They are separate constants rather
+# than one, because one shared default is a name that is right for exactly
+# one leg and wrong for every other: a deployment that switched its mouth
+# to cartesia and named no model would otherwise ask cartesia for an
+# openai model and fail at the first word. So each leg carries its own
+# fallback, and what a deployment *says* is the only thing that crosses
+# between providers — which is also why the three fields on the config
+# below are optional rather than pre-filled. `None` there means nobody
+# named one, and the leg that is actually built answers with its own.
 
 MEDIA_BACKENDS = ("scripted", "livekit")
 """How a phone call's audio may travel. Naming one is what makes a
@@ -673,6 +703,24 @@ class SimulatorConfig:
     """The provider key. Required for the ``openai`` provider; kept out of
     the dataclass repr so no log line can carry it by accident."""
 
+    model_reasoning_effort: str | None = None
+    """How hard the model should think before the persona speaks, passed to
+    the provider verbatim, or ``None`` to send nothing at all.
+
+    **Verbatim and unchecked, on purpose.** The vocabulary is the
+    provider's — it has grown more than once and it differs between
+    providers speaking the same chat-completions shape — so a list here
+    would be egma holding a second opinion about somebody else's API and
+    refusing a value that works. Sending nothing when nobody asked is what
+    keeps a model that has never heard of the field working exactly as it
+    did.
+
+    A persona is a caller in a hurry, not a puzzle-solver: the thing being
+    tested is the agent's reasoning, and every millisecond the persona
+    spends thinking is silence on a live line that no real caller would
+    leave. So a deployment that turns reasoning off here is the ordinary
+    one."""
+
     stt_provider: str = "scripted"
     """The persona's ears, for a voice simulation: ``scripted`` (the exactly
     invertible test codec, what CI and the free local demo run on) or
@@ -703,11 +751,20 @@ class SimulatorConfig:
     too — one account, one key, which is what a self-hoster supplies once at
     `egma self-host setup` when both legs are on the same account."""
 
-    stt_model: str = DEFAULT_STT_MODEL
-    tts_model: str = DEFAULT_TTS_MODEL
-    tts_voice: str = DEFAULT_TTS_VOICE
-    """Which models and which voice the openai legs ask for. Read at
-    pipeline assembly, ignored by every other pair."""
+    cartesia_api_key: str | None = field(default=None, repr=False)
+    """The Cartesia key. Required when the ``cartesia`` mouth is chosen;
+    kept out of the dataclass repr, and registered for redaction."""
+
+    stt_model: str | None = None
+    tts_model: str | None = None
+    tts_voice: str | None = None
+    """Which models and which voice the legs ask for, or ``None`` where
+    nobody named one and the built leg answers with its own provider's
+    default. Read at pipeline assembly and nowhere else.
+
+    ``None`` rather than a pre-filled name, because these three cross
+    providers and a name does not: see the note beside the defaults at the
+    top of this file."""
 
     media: MediaSettings | None = None
     """How a phone call's audio travels, for a deployment that dials at
@@ -754,6 +811,7 @@ class SimulatorConfig:
                 self.deepgram_api_key,
                 self.elevenlabs_api_key,
                 self.openai_api_key,
+                self.cartesia_api_key,
                 self.model_api_key,
             )
             if key is not None
@@ -772,6 +830,8 @@ class SimulatorConfig:
             "deepgram": self.deepgram_api_key,
             "elevenlabs": self.elevenlabs_api_key,
             "openai": self.openai_api_key,
+            "openai_realtime": self.openai_api_key,
+            "cartesia": self.cartesia_api_key,
         }.get(provider)
 
     @property
@@ -804,7 +864,7 @@ class SimulatorConfig:
                 f"https://, got {url!r}"
             )
 
-        capacity = _whole("EGMA_SIMULATOR_CAPACITY", 4)
+        capacity = _whole("EGMA_SIMULATOR_CAPACITY", 2)
         if capacity < 1:
             raise ValueError(
                 f"EGMA_SIMULATOR_CAPACITY must be at least 1, got {capacity}"
@@ -880,15 +940,20 @@ class SimulatorConfig:
             ).rstrip("/"),
             model_name=model_name,
             model_api_key=model_api_key,
+            model_reasoning_effort=_text("EGMA_SIMULATOR_MODEL_REASONING_EFFORT"),
             stt_provider=stt_provider,
             tts_provider=tts_provider,
             vad_provider=vad_provider,
             deepgram_api_key=speech_keys.get("deepgram"),
             elevenlabs_api_key=speech_keys.get("elevenlabs"),
-            openai_api_key=speech_keys.get("openai"),
-            stt_model=_text("EGMA_SIMULATOR_STT_MODEL", DEFAULT_STT_MODEL),
-            tts_model=_text("EGMA_SIMULATOR_TTS_MODEL", DEFAULT_TTS_MODEL),
-            tts_voice=_text("EGMA_SIMULATOR_TTS_VOICE", DEFAULT_TTS_VOICE),
+            # One variable, whichever of the two openai transports asked
+            # for it — `key_for` reads this same value under both names.
+            openai_api_key=speech_keys.get("openai")
+            or speech_keys.get("openai_realtime"),
+            cartesia_api_key=speech_keys.get("cartesia"),
+            stt_model=_text("EGMA_SIMULATOR_STT_MODEL"),
+            tts_model=_text("EGMA_SIMULATOR_TTS_MODEL"),
+            tts_voice=_text("EGMA_SIMULATOR_TTS_VOICE"),
             media=MediaSettings.from_env(),
             object_store=object_store,
         )

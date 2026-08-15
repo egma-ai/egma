@@ -1,7 +1,7 @@
 import { newId } from "@egma/ids";
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
-import { db } from "../client.ts";
+import { db, type Transaction } from "../client.ts";
 import {
   platformSetting,
   PLATFORM_SETTINGS,
@@ -276,23 +276,104 @@ export async function writePlatformSettings(
 ): Promise<readonly PlatformSetting[]> {
   onlyASingleOrganizationsOwner(auth, deployment);
 
-  // One statement for however many settings were named, so a form that changes
-  // three of them cannot land one and then fail: each row carries its own new
-  // value, and `excluded` is how the conflicting row's own values are taken
-  // rather than the same value being written to every one of them.
-  await db()
-    .insert(platformSetting)
-    .values(rowsFor(values, new Date()))
-    .onConflictDoUpdate({
-      target: platformSetting.name,
-      set: {
-        value: sql`excluded.value`,
-        hint: sql`excluded.hint`,
-        updatedAt: sql`excluded.updated_at`,
-      },
-    });
+  await db().transaction(async (tx) => {
+    // What the provider being replaced takes with it, before anything is
+    // written — read inside the transaction so the comparison is against the
+    // row this write is really replacing.
+    const stale = await staleUnder(tx, values);
+
+    // One statement for however many settings were named, so a form that
+    // changes three of them cannot land one and then fail: each row carries
+    // its own new value, and `excluded` is how the conflicting row's own
+    // values are taken rather than the same value being written to every one
+    // of them.
+    await tx
+      .insert(platformSetting)
+      .values(rowsFor(values, new Date()))
+      .onConflictDoUpdate({
+        target: platformSetting.name,
+        set: {
+          value: sql`excluded.value`,
+          hint: sql`excluded.hint`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
+
+    // In the same transaction as the change that stranded them, so there is
+    // no moment where the new provider is stored beside the old provider's
+    // model.
+    if (stale.length > 0) {
+      await tx
+        .delete(platformSetting)
+        .where(inArray(platformSetting.name, stale));
+    }
+  });
 
   return answer(await heldSettings());
+}
+
+/**
+ * Which settings a provider change has just stranded, and why they go.
+ *
+ * **A model name and a voice id belong to the provider that coined them.**
+ * `sonic-3.5` means nothing to OpenAI and `alloy` means nothing to Cartesia,
+ * and a reasoning effort a model accepts is refused outright by one that has
+ * never heard of the field. So the moment the provider beside them changes,
+ * those values stop being configuration and become a trap: the simulator asks
+ * the newly chosen provider for the old one's model and is refused at the
+ * first word — which reads as a broken deployment rather than as a setting
+ * nobody updated.
+ *
+ * Nothing else could clear them. Writing a setting is writing a *value*, and
+ * an empty one is refused precisely so that a half-filled form cannot wipe a
+ * key — so without this an operator who changed provider had no way back to
+ * the working state through the API at all.
+ *
+ * **Only ever a narrowing, and only on a real change.** A write that does not
+ * name a provider strands nothing; a write that names the provider already
+ * stored strands nothing; and a write that names the dependent value itself
+ * strands nothing, because supplying the new provider's model in the same
+ * breath is exactly the careful thing to do and must not then delete it.
+ */
+const DEPENDS_ON: Readonly<
+  Partial<Record<PlatformSettingName, readonly PlatformSettingName[]>>
+> = {
+  persona_model: ["persona_model_reasoning_effort"],
+  speech_to_text_provider: ["speech_to_text_model"],
+  text_to_speech_provider: ["text_to_speech_model", "text_to_speech_voice"],
+};
+
+async function staleUnder(
+  tx: Transaction,
+  values: PlatformSettingValues,
+): Promise<PlatformSettingName[]> {
+  const stale: PlatformSettingName[] = [];
+
+  for (const [chosen, dependents] of Object.entries(DEPENDS_ON) as [
+    PlatformSettingName,
+    readonly PlatformSettingName[],
+  ][]) {
+    const wanted = values[chosen];
+    if (wanted === undefined) continue;
+
+    const [held] = await tx
+      .select({ value: platformSetting.value })
+      .from(platformSetting)
+      .where(eq(platformSetting.name, chosen));
+    // Nothing stored is a first write rather than a change, and there is no
+    // older provider for anything to be stale under.
+    if (held === undefined) continue;
+    if (openCredentials(held.value) === wanted) continue;
+
+    for (const dependent of dependents) {
+      // Named in this same write, so it is the new provider's own value and
+      // the whole point of it is that it survives.
+      if (values[dependent] !== undefined) continue;
+      stale.push(dependent);
+    }
+  }
+
+  return stale;
 }
 
 /**

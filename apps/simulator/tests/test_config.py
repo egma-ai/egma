@@ -33,7 +33,7 @@ def test_one_variable_is_enough(env, tmp_path):
     config = SimulatorConfig.from_env()
 
     assert config.control_plane_url == A_URL
-    assert config.capacity == 4
+    assert config.capacity == 2
     assert config.model_provider == "scripted"
     assert config.service_token is None
     assert config.claimant.startswith("egma-simulator-")
@@ -63,7 +63,7 @@ def test_empty_means_unset(env):
 
     config = SimulatorConfig.from_env()
 
-    assert config.capacity == 4
+    assert config.capacity == 2
     assert config.claimant.startswith("egma-simulator-")
     assert config.heartbeat_seconds == 5.0
     assert config.log_level == "INFO"

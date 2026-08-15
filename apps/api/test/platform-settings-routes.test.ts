@@ -389,6 +389,13 @@ describe("what the platform says about its own setup", () => {
         (setting) => setting.name,
       ),
     ).toEqual([
+      // Turning the persona's reasoning off is what a live line wants, but
+      // absent has to stay absent: a model that has never heard of the field
+      // refuses a request carrying it, so egma cannot require an answer.
+      "persona_model_reasoning_effort",
+      // The three model-and-voice names, each of which the built leg answers
+      // for out of its own provider's defaults.
+      "speech_to_text_model",
       "text_to_speech_model",
       "text_to_speech_voice",
       // A trunk the carrier authenticates by the address it came from is a

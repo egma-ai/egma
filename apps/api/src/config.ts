@@ -384,8 +384,11 @@ function platformSettings(
     persona_model_provider: environment.EGMA_PERSONA_MODEL_PROVIDER?.trim(),
     persona_model: environment.EGMA_PERSONA_MODEL?.trim(),
     persona_model_key: environment.EGMA_PERSONA_MODEL_API_KEY?.trim(),
+    persona_model_reasoning_effort:
+      environment.EGMA_PERSONA_MODEL_REASONING_EFFORT?.trim(),
     speech_to_text_provider: environment.EGMA_PERSONA_STT_PROVIDER?.trim(),
     speech_to_text_key: environment.EGMA_PERSONA_STT_API_KEY?.trim(),
+    speech_to_text_model: environment.EGMA_PERSONA_STT_MODEL?.trim(),
     text_to_speech_provider: environment.EGMA_PERSONA_TTS_PROVIDER?.trim(),
     text_to_speech_key: environment.EGMA_PERSONA_TTS_API_KEY?.trim(),
     text_to_speech_model: environment.EGMA_PERSONA_TTS_MODEL?.trim(),
