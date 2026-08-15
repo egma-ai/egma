@@ -25,6 +25,7 @@ import {
 
 import {
   createConnectedDatabase,
+  openSingleConnection,
   type MigratedDatabase,
 } from "./support/database.ts";
 import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
@@ -904,5 +905,194 @@ describe("re-grading with a grader named", () => {
       regrade(actingAsAcme("viewer"), { runId, graderId }),
     ).rejects.toThrow(NotPermittedError);
     expect((await theJobFor(simulationId)).status).toBe("graded");
+  });
+});
+
+/**
+ * A re-grade is asked for most often while grading is running, which is exactly
+ * when the queue is moving under it.
+ *
+ * Which conversations have settled, which are already waiting, which are being
+ * judged under a narrowing that does not cover the ask, and which are reopened
+ * are four readings of one queue. Read apart, a worker moving one job between
+ * two of them made them four readings of four different queues — and the worst
+ * of those said *already waiting, nothing was asked twice* about a job that had
+ * just gone back into the queue still narrowed to somebody else's grader. The
+ * ask went nowhere and nobody was told.
+ *
+ * So the whole decision is one transaction over jobs held still, and that is
+ * what is proved here: not by reading the source, but by holding a worker's own
+ * transaction open at the moment the race needs it and watching the re-grade
+ * refuse to answer across it.
+ *
+ * Deterministic: the worker's transaction is held open by hand and released by a
+ * statement, never by a timer.
+ */
+describe("a re-grade asked while a worker is moving the same job", () => {
+  /** Long enough for a blocked query to be blocked rather than merely slow. */
+  const A_BEAT = 250;
+
+  async function hasFinished(work: Promise<unknown>): Promise<boolean> {
+    const finished = Symbol("finished");
+    const outcome = await Promise.race([
+      work.then(
+        () => finished,
+        () => finished,
+      ),
+      new Promise((resolve) => setTimeout(resolve, A_BEAT)),
+    ]);
+    return outcome === finished;
+  }
+
+  /**
+   * One conversation queued for `graderId` alone and taken by a copy of the
+   * grader service — the state both races below start from, because the column
+   * decides nothing for a claimed job and finishing or releasing it is what
+   * changes what the ask should be told.
+   */
+  async function aNarrowedJudgmentUnderWay(): Promise<{
+    readonly runId: string;
+    readonly jobId: string;
+  }> {
+    const { runId, simulationId } = await aJudgedSimulation();
+    await regrade(auth, { runId, graderId });
+
+    const job = await theJobFor(simulationId);
+    const claimant = `grader-holding-${job.id.slice(-6)}`;
+    const claimed = await claimGradingJobs({ claimant, capacity: 50 });
+    if (!claimed.some((claim) => claim.id === job.id)) {
+      throw new Error("the narrowed job was not claimed");
+    }
+    expect(await narrowedTo(job.id)).toBe(graderId);
+
+    return { runId, jobId: job.id };
+  }
+
+  it("waits for a release to land, and widens the job the worker put back", async () => {
+    const { runId, jobId } = await aNarrowedJudgmentUnderWay();
+    const otherGrader = await aGrader();
+
+    const worker = await openSingleConnection(database.url);
+    try {
+      // The copy that took this conversation gives it up, in its own
+      // transaction and not yet committed: the row is held, and outside this
+      // connection the job still reads as claimed.
+      await worker.sql("begin");
+      await worker.sql(
+        `update grading_job
+            set status = 'pending', claimed_by = null, claimed_at = null,
+                heartbeat_at = null, last_error = 'this copy could not finish'
+          where id = $1`,
+        [jobId],
+      );
+
+      const asking = regrade(auth, { runId, graderId: otherGrader });
+      // Held rather than raced. A re-grade that answered here would answer about
+      // a queue the worker is in the middle of moving.
+      expect(await hasFinished(asking)).toBe(false);
+
+      await worker.sql("commit");
+      const second = await asking;
+
+      // And what it answers is about the queue as the worker left it: the job is
+      // waiting again, narrowed to a grader nobody asked about, so the widen
+      // reaches it. This is the whole of what was lost when the statements ran
+      // apart — the ask used to be reported as covered and the job used to stay
+      // narrowed to somebody else's grader.
+      expect(await narrowedTo(jobId)).toBeNull();
+      expect(second?.reopened).toEqual([]);
+      expect(second?.alreadyWaiting).toBe(1);
+      expect(second?.beingJudgedNarrower).toBe(0);
+    } finally {
+      await worker.sql("rollback").catch(() => undefined);
+      await worker.close();
+    }
+  });
+
+  it("waits for a finish to land, and asks again for the conversation it judged", async () => {
+    const { runId, jobId } = await aNarrowedJudgmentUnderWay();
+
+    const worker = await openSingleConnection(database.url);
+    try {
+      // The judgment finishes, in its own transaction and not yet committed.
+      await worker.sql("begin");
+      await worker.sql(
+        `update grading_job
+            set status = 'graded', finished_at = now(), heartbeat_at = now(),
+                last_error = null, regrade_grader_id = null
+          where id = $1`,
+        [jobId],
+      );
+
+      const asking = regrade(auth, { runId });
+      expect(await hasFinished(asking)).toBe(false);
+
+      await worker.sql("commit");
+      const second = await asking;
+
+      // The conversation was judged a moment ago, so there is something to ask
+      // for again. Answering across the finish found it neither settled nor
+      // outstanding and reported a conversation nobody had ever judged.
+      expect(second?.reopened.map((row) => row.id)).toEqual([jobId]);
+      expect(second?.alreadyWaiting).toBe(0);
+      expect(second?.beingJudgedNarrower).toBe(0);
+      expect((await getGradingJob(auth, jobId))?.status).toBe("pending");
+    } finally {
+      await worker.sql("rollback").catch(() => undefined);
+      await worker.close();
+    }
+  });
+
+  /**
+   * The other half of holding a whole window still: what it costs the service
+   * that is trying to work. A claim is `for update skip locked`, so it never
+   * queues behind a re-grade — it passes the held conversations over and takes
+   * whatever else is waiting, and the reopen's notification brings it back.
+   */
+  it("costs a claim nothing: held work is passed over rather than waited on", async () => {
+    // Whatever this file has left waiting is taken out of the way first, so what
+    // the claim below reaches is about the hold and about nothing else.
+    for (let sweep = 0; sweep < 20; sweep += 1) {
+      const drained = await claimGradingJobs({
+        claimant: "grader-clearing-the-way",
+        capacity: 50,
+      });
+      if (drained.length === 0) break;
+    }
+
+    const held = await aFinishedSimulation();
+    const free = await aFinishedSimulation();
+    const heldJob = await theJobFor(held.simulationId);
+    const freeJob = await theJobFor(free.simulationId);
+
+    const holder = await openSingleConnection(database.url);
+    try {
+      // Exactly the hold a re-grade takes, on one of the two.
+      await holder.sql("begin");
+      await holder.sql(
+        "select id from grading_job where id = $1 order by id for update",
+        [heldJob.id],
+      );
+
+      const claimant = `grader-past-a-hold-${heldJob.id.slice(-6)}`;
+      const claiming = claimGradingJobs({ claimant, capacity: 50 });
+      expect(await hasFinished(claiming)).toBe(true);
+
+      const claimed = await claiming;
+      expect(claimed.some((claim) => claim.id === heldJob.id)).toBe(false);
+      expect(claimed.some((claim) => claim.id === freeJob.id)).toBe(true);
+
+      // And the moment the hold ends, the conversation is claimable again — it
+      // was passed over for the length of a transaction, never lost.
+      await holder.sql("rollback");
+      const after = await claimGradingJobs({
+        claimant: `${claimant}-again`,
+        capacity: 50,
+      });
+      expect(after.some((claim) => claim.id === heldJob.id)).toBe(true);
+    } finally {
+      await holder.sql("rollback").catch(() => undefined);
+      await holder.close();
+    }
   });
 });

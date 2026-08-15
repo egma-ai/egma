@@ -1057,7 +1057,9 @@ export async function reopenGradingJob(
 ): Promise<GradingJob | undefined> {
   authorize(auth, "revisit_verdicts", here(auth));
 
-  const [only] = await reopenJobs(theJob(auth, id), null);
+  const [only] = await db().transaction((tx) =>
+    reopenJobs(tx, theJob(auth, id), null),
+  );
   return only;
 }
 
@@ -1071,8 +1073,15 @@ export async function reopenGradingJob(
  * `forGrader` is written every time, `null` included, so that what the engine
  * will read off these jobs is what this reopen asked for and never what an
  * earlier one did.
+ *
+ * **Where it runs is the caller's**, because both callers already own a
+ * transaction this has to be inside. The notification has to commit with the
+ * update that made the work claimable, exactly as the enqueue's does, so a
+ * service woken by it always finds the row pending; and a re-grade's reopen has
+ * to commit with the reading that decided it.
  */
 async function reopenJobs(
+  on: Queryable,
   theseJobs: SQL | undefined,
   forGrader: string | null,
 ): Promise<readonly GradingJob[]> {
@@ -1080,39 +1089,37 @@ async function reopenJobs(
     throw new Error("reopening grading work always names whose work it reaches");
   }
 
-  return db().transaction(async (tx) => {
-    const rows = await tx
-      .update(gradingJob)
-      .set({
-        status: "pending",
-        claimedBy: null,
-        claimedAt: null,
-        heartbeatAt: null,
-        attempts: 0,
-        lastError: null,
-        finishedAt: null,
-        regradeGraderId: forGrader,
-      })
-      .where(and(theseJobs, inArray(gradingJob.status, [...SETTLED])))
-      .returning(JOB_COLUMNS);
+  const rows = await on
+    .update(gradingJob)
+    .set({
+      status: "pending",
+      claimedBy: null,
+      claimedAt: null,
+      heartbeatAt: null,
+      attempts: 0,
+      lastError: null,
+      finishedAt: null,
+      regradeGraderId: forGrader,
+    })
+    .where(and(theseJobs, inArray(gradingJob.status, [...SETTLED])))
+    .returning(JOB_COLUMNS);
 
-    if (rows.length === 0) return [];
+  if (rows.length === 0) return [];
 
-    // One notification per conversation, which is what the enqueue raises and
-    // what a copy of the service expects to be woken by. The payload is the job
-    // id and nothing reads it — a claim is a query that sees everything
-    // outstanding — so this is a nudge repeated, never a delivery.
-    await tx.execute(
-      sql`select pg_notify(${GRADING_WORK_CHANNEL}, ${gradingJob.id})
-          from ${gradingJob}
-          where ${inArray(
-            gradingJob.id,
-            rows.map((row) => row.id),
-          )}`,
-    );
+  // One notification per conversation, which is what the enqueue raises and
+  // what a copy of the service expects to be woken by. The payload is the job
+  // id and nothing reads it — a claim is a query that sees everything
+  // outstanding — so this is a nudge repeated, never a delivery.
+  await on.execute(
+    sql`select pg_notify(${GRADING_WORK_CHANNEL}, ${gradingJob.id})
+        from ${gradingJob}
+        where ${inArray(
+          gradingJob.id,
+          rows.map((row) => row.id),
+        )}`,
+  );
 
-    return rows.map(jobFromRow);
-  });
+  return rows.map(jobFromRow);
 }
 
 /**
@@ -1275,6 +1282,14 @@ export type Regraded = {
  * thing that is not there is not there, whichever of them was named. A window
  * that holds nothing still answers, because a window with nothing in it is a
  * different fact from a window that is not there.
+ *
+ * **All of it is one act.** Which conversations have settled, which are already
+ * waiting, which are being judged under a narrowing that does not cover the ask,
+ * and which are reopened are four readings of one queue, and a re-grade is most
+ * likely to be asked exactly while that queue is moving. So they run in one
+ * transaction over jobs held still — `holdTheConversations` below — and a
+ * worker's claim, release or finish lands on either side of the whole answer
+ * rather than in the middle of it.
  */
 export async function regrade(
   auth: AuthContext,
@@ -1288,12 +1303,78 @@ export async function regrade(
   const named = await conversationsNamed(auth, target);
   if (named === undefined) return undefined;
 
-  // One over the cap, so the refusal is decided without reading a window that
-  // holds a hundred thousand conversations in order to say it holds too many.
-  const settled = await db()
+  return db().transaction(async (tx) => {
+    // Asked twice, and for two different reasons. The first time refuses an
+    // over-wide window while nothing is held yet, so a window somebody got wrong
+    // costs one bounded read rather than a hold on every conversation it names.
+    // The second time is the list that is acted on, and it has to be read after
+    // the hold, because a list read before it is a list that can still move.
+    await theSettledConversations(tx, named);
+    await holdTheConversations(tx, named);
+    const settled = await theSettledConversations(tx, named);
+
+    await widenWhatIsAlreadyWaiting(tx, named, graderId);
+
+    // One read for both numbers, and — because the conversations are held — a
+    // fact about the same instant as the settled read above it, the widen beside
+    // it and the reopen below it. The widen has settled every pending job, so
+    // what is still narrowed away here is exactly the work somebody had already
+    // taken when this re-grade began.
+    const [waiting] = await tx
+      .select({
+        howMany: count(),
+        narrower: sql<number>`count(*) filter (where ${and(
+          eq(gradingJob.status, "claimed"),
+          narrowedAwayFrom(graderId),
+        )})`.mapWith(Number),
+      })
+      .from(gradingJob)
+      .where(and(named, inArray(gradingJob.status, [...OUTSTANDING])));
+
+    const alreadyWaiting = Number(waiting?.howMany ?? 0);
+    const beingJudgedNarrower = Number(waiting?.narrower ?? 0);
+    if (settled.length === 0) {
+      return { reopened: [], graderId, alreadyWaiting, beingJudgedNarrower };
+    }
+
+    return {
+      reopened: await reopenJobs(
+        tx,
+        and(
+          named,
+          inArray(
+            gradingJob.id,
+            settled.map((row) => row.id),
+          ),
+        ),
+        graderId,
+      ),
+      graderId,
+      alreadyWaiting,
+      beingJudgedNarrower,
+    };
+  });
+}
+
+/**
+ * The conversations a re-grade names that are finished with, one way or the
+ * other, and can therefore be asked for again.
+ *
+ * One over the cap, so the refusal is decided without reading a window that
+ * holds a hundred thousand conversations in order to say it holds too many. The
+ * refusal lives here rather than at the caller because the read that would
+ * discover it and the read that acts on it are the same read asked twice, and a
+ * cap enforced at only one of them is a cap on whichever one somebody edits
+ * last.
+ */
+async function theSettledConversations(
+  on: Queryable,
+  theseJobs: SQL,
+): Promise<readonly { readonly id: string }[]> {
+  const settled = await on
     .select({ id: gradingJob.id })
     .from(gradingJob)
-    .where(and(named, inArray(gradingJob.status, [...SETTLED])))
+    .where(and(theseJobs, inArray(gradingJob.status, [...SETTLED])))
     .orderBy(asc(gradingJob.id))
     .limit(MOST_CONVERSATIONS_PER_REGRADE + 1);
 
@@ -1303,44 +1384,56 @@ export async function regrade(
     );
   }
 
-  await widenWhatIsAlreadyWaiting(named, graderId);
+  return settled;
+}
 
-  // One read for both numbers, so the second is a fact about the same instant
-  // as the first rather than about a queue that moved between two queries. The
-  // widen above has settled every pending job, so what is still narrowed away
-  // afterwards is exactly the work somebody has already taken.
-  const [waiting] = await db()
-    .select({
-      howMany: count(),
-      narrower: sql<number>`count(*) filter (where ${and(
-        eq(gradingJob.status, "claimed"),
-        narrowedAwayFrom(graderId),
-      )})`.mapWith(Number),
-    })
-    .from(gradingJob)
-    .where(and(named, inArray(gradingJob.status, [...OUTSTANDING])));
-
-  const alreadyWaiting = Number(waiting?.howMany ?? 0);
-  const beingJudgedNarrower = Number(waiting?.narrower ?? 0);
-  if (settled.length === 0) {
-    return { reopened: [], graderId, alreadyWaiting, beingJudgedNarrower };
-  }
-
-  return {
-    reopened: await reopenJobs(
-      and(
-        named,
-        inArray(
-          gradingJob.id,
-          settled.map((row) => row.id),
-        ),
-      ),
-      graderId,
-    ),
-    graderId,
-    alreadyWaiting,
-    beingJudgedNarrower,
-  };
+/**
+ * Every job a re-grade names, held still until the transaction it runs in ends.
+ *
+ * **This is what makes a re-grade one act rather than four.** Finding the
+ * settled work, widening what is already waiting, counting what is outstanding
+ * and reopening each decide something on the strength of a job's status, and a
+ * worker moving a job between two of them left the answer describing a queue
+ * that no longer existed. The worst of those was silent rather than loud: a
+ * claimed job released back to `pending` after the widen had swept was neither
+ * widened nor countable as narrowed, so the ask came back reported as already
+ * covered, and the verdicts it wanted were never coming.
+ *
+ * **Ascending id, which is the order `claimGradingJobs` takes**, and one
+ * statement rather than one per status — two lock orders is how a fix for a race
+ * becomes a deadlock under exactly the load it was meant to survive.
+ *
+ * **It costs the grader service almost nothing.** A claim is `for update skip
+ * locked`, so it never waits here: it passes over these conversations for as
+ * long as the re-grade lasts, takes other work, and is woken again by the
+ * reopen's own notification the moment the re-grade commits. A heartbeat, a
+ * release and a finish do wait, because each is an ordinary update of one row —
+ * and that is the whole point of this. They land before the re-grade reads or
+ * after it has written, never in the middle of it, and the wait is four
+ * statements long with no judging inside it.
+ *
+ * **What is held is what the target named**, which for a window is every
+ * conversation in it. That is unbounded on purpose: the cap above bounds what
+ * may be *reopened*, and a window holding ten thousand conversations that are
+ * all still waiting is an ordinary thing to ask about. It costs one more
+ * index-ordered pass over the rows the count was already going to scan.
+ *
+ * The `count(*)` is a wrapper and not an interest. The rows are locked to be
+ * held, never to be carried out, and a window naming a hundred thousand
+ * conversations should not send a hundred thousand identifiers back to say so.
+ */
+async function holdTheConversations(
+  on: Queryable,
+  theseJobs: SQL,
+): Promise<void> {
+  await on.execute(
+    sql`select count(*)
+        from (select ${gradingJob.id}
+                from ${gradingJob}
+               where ${theseJobs}
+               order by ${gradingJob.id}
+                 for update) as held`,
+  );
 }
 
 /**
@@ -1378,10 +1471,11 @@ function narrowedAwayFrom(forGrader: string | null): SQL {
  * counted as covered. `Regraded.beingJudgedNarrower` is where that is said.
  */
 async function widenWhatIsAlreadyWaiting(
+  on: Queryable,
   theseJobs: SQL,
   forGrader: string | null,
 ): Promise<void> {
-  await db()
+  await on
     .update(gradingJob)
     .set({ regradeGraderId: null })
     .where(
