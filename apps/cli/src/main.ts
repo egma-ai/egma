@@ -462,6 +462,11 @@ function retellReach(env: NodeJS.ProcessEnv): { readonly url: string } | undefin
  * sentence or the number they get.
  */
 function platformRefusal(error: unknown): "refused" | "unreachable" | null {
+  // egma's own built-in address is the one refusal that can be either. Nobody
+  // typed it, so what is at it decides: a redirect or a page that is not a
+  // platform will still be there in a minute, and saying `unreachable` about it
+  // would send whoever is driving into a retry loop that cannot end.
+  if (error instanceof DefaultPlatformUnusableError) return error.refusal;
   if (
     error instanceof PlatformBindingMismatchError ||
     error instanceof BoundPlatformAddressError ||
@@ -473,8 +478,7 @@ function platformRefusal(error: unknown): "refused" | "unreachable" | null {
   if (
     error instanceof PlatformUnreachableError ||
     error instanceof PlatformIdentityError ||
-    error instanceof BoundPlatformUnavailableError ||
-    error instanceof DefaultPlatformUnusableError
+    error instanceof BoundPlatformUnavailableError
   ) {
     return "unreachable";
   }

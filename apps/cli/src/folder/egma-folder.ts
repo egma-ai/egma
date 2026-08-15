@@ -32,6 +32,7 @@ import {
   writeMockTools,
   type MockToolEntry,
 } from "./mock-tools.ts";
+import { normalizePlatformOrigin } from "../platform/identity.ts";
 import { parseTestFile, serializeTestFile, type TestFile } from "./test-file.ts";
 import { mappingAtKey, readYaml, textAt, yamlScalar } from "./yaml.ts";
 
@@ -144,6 +145,27 @@ export function serializeConfig(config: FolderConfig): string {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * The committed origin, in the one shape every origin is compared in.
+ *
+ * A person edits this file, and a person writes `https://egma.example/`, or
+ * `https://EGMA.example`, or the default port spelled out, where egma would
+ * have written `https://egma.example`. All of them name the same platform, so
+ * all of them have to read back as the same platform — otherwise the binding
+ * disagrees with itself, and a repository is refused for moving nowhere.
+ *
+ * An origin egma cannot make sense of is left exactly as it was written. It is
+ * refused by name one step later, at the edge that takes addresses, and quietly
+ * rewriting it here would hide which line in the file is the wrong one.
+ */
+function committedOrigin(written: string): string {
+  try {
+    return normalizePlatformOrigin(written);
+  } catch {
+    return written;
+  }
+}
+
 export function parseConfig(document: string, where: string): FolderConfig {
   const mapping = readYaml(document, where);
   const platformMapping = mappingAtKey(mapping, "platform");
@@ -166,7 +188,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
               `${where} has an incomplete platform binding. Run the Egma wizard to repair it.`,
             );
           }
-          return { origin, instance };
+          return { origin: committedOrigin(origin), instance };
         })();
   const read = (key: (typeof CONFIG_KEYS)[number]): NamedThing | null => {
     const under = mappingAtKey(mapping, key);
@@ -229,14 +251,26 @@ export async function updateConfig(
  * It is a block of plain lines rather than a paragraph because a coding agent
  * reads this too, and it should be able to act on it without a person reading
  * the message out to it.
+ *
+ * **The platform block comes out last, and that order is the safety.** Deleting
+ * it is what unbinds the repository, and an unbound repository falls back to
+ * egma's own platform — so a list that named it first would have somebody
+ * working top-down arrive, one line in, at a repository holding another
+ * platform's identifiers and nothing left to keep them there. The next command
+ * would carry them to hosted egma. Identifiers and version pins come out first
+ * and the binding comes out last, so every partial application of this list
+ * leaves the repository still bound, and ADR-0008's rule that resource
+ * identifiers cannot silently cross platform boundaries holds at every step
+ * rather than only at the end.
  */
 export const MOVE_TO_ANOTHER_PLATFORM: readonly string[] = [
-  "To move this repository to another platform, delete these and run egma again:",
-  `  - the whole platform: block in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  "To move this repository to another platform, delete these in this order and run egma again:",
   `  - the id: line under agent: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
   `  - the id: line under connection: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
   `  - the id: line under suite: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
   `  - the version: line at the top of every file in ${FOLDER_NAME}/${TESTS_FOLDER_NAME}/`,
+  `  - last of all, the whole platform: block in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  "Delete the platform block last: it is what keeps every id above it on the platform that issued it, so until it is gone nothing can leave for another one.",
   "Keep every name. Your tests move with you and are created again on the new platform; the runs you have already done stay on the platform that ran them, because a run's numbers only mean anything against the versions that platform minted.",
 ];
 

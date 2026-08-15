@@ -13,7 +13,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -22,10 +22,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   createEgmaFolder,
   folderPathsIn,
+  MOVE_TO_ANOTHER_PLATFORM,
   readConfig,
   updateConfig,
   writeTestFile,
 } from "../src/folder/egma-folder.ts";
+import { parseTestFile } from "../src/folder/test-file.ts";
 import { DEFAULT_TEST_COUNT } from "../src/wizard/test-generation.ts";
 import { startFakeRetell, type FakeRetell } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -351,6 +353,136 @@ describe("a repository that names no platform", () => {
       expect(byBinding.stdout).toContain(`url: ${elsewhere.url}`);
 
       expect(own.records.slice(before)).toEqual([]);
+    } finally {
+      await workspace.remove();
+    }
+  });
+
+  /**
+   * egma's own instructions, followed the way they are written.
+   *
+   * The refusal that keeps a bound repository where it belongs ends with a list
+   * of lines to delete, and a developer — or the coding agent reading it out of
+   * their terminal — works down that list from the top. Every state on the way
+   * down is a real repository somebody runs a command in.
+   *
+   * Deleting the platform block is the line that unbinds the repository, and an
+   * unbound repository falls back to egma's own platform. So if that line came
+   * first, applying egma's own list top-down would leave, after one edit, a
+   * repository with no binding and every other platform's identifiers still
+   * committed — and the next command would carry them to hosted egma. That is
+   * why it is last, and this is the check that keeps it there: the list is
+   * driven in its own order, and nothing may reach the built-in address until
+   * the last line has been applied and there is nothing left to leak.
+   */
+  it("applies its own list top-down without anything reaching the built-in address", async () => {
+    const workspace = await makeWorkspace();
+    try {
+      await workspace.signIn(own.url, PLATFORM_KEY);
+      await workspace.signIn(elsewhere.url, PLATFORM_KEY);
+
+      const paths = folderPathsIn(workspace.dir);
+      await createEgmaFolder({
+        repository: workspace.dir,
+        config: {
+          platform: { origin: elsewhere.url, instance: elsewhere.instanceId },
+          agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
+          connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
+          suite: { name: "first-suite", id: "sui_01K3XQ7M4E8YB2FVN0H9TZQWET" },
+        },
+      });
+      const pinned = path.join(paths.tests, "moves-appointment.md");
+      await writeTestFile(pinned, {
+        name: "moves-appointment",
+        personas: [],
+        version: "tv_01K3XQ7M4E8YB2FVN0H9TZQWEU",
+        scenario: "The persona needs a different appointment time.",
+        expectedBehaviors: ["The agent confirms the new time."],
+        mockTools: [],
+      });
+
+      /** One line of egma's list, and the edit it asks for. */
+      const deletions: readonly {
+        readonly mentions: string;
+        readonly apply: () => Promise<void>;
+      }[] = [
+        {
+          mentions: "under agent:",
+          apply: async () => {
+            const held = await readConfig(paths.config);
+            await updateConfig(paths.config, {
+              agent: { name: held.agent?.name ?? "receptionist", id: null },
+            });
+          },
+        },
+        {
+          mentions: "under connection:",
+          apply: async () => {
+            const held = await readConfig(paths.config);
+            await updateConfig(paths.config, {
+              connection: { name: held.connection?.name ?? "retell-1", id: null },
+            });
+          },
+        },
+        {
+          mentions: "under suite:",
+          apply: async () => {
+            const held = await readConfig(paths.config);
+            await updateConfig(paths.config, {
+              suite: { name: held.suite?.name ?? "first-suite", id: null },
+            });
+          },
+        },
+        {
+          mentions: "the version: line",
+          apply: async () => {
+            const held = parseTestFile(
+              await readFile(pinned, "utf8"),
+              "moves-appointment.md",
+              "moves-appointment",
+            );
+            await writeTestFile(pinned, { ...held, version: null });
+          },
+        },
+        {
+          mentions: "the whole platform: block",
+          apply: async () => {
+            await updateConfig(paths.config, { platform: null });
+          },
+        },
+      ];
+
+      // Driven in the list's own order, so that reordering the list is what
+      // this check reads — not a copy of the order written out again here.
+      const listed = MOVE_TO_ANOTHER_PLATFORM.filter((line) => line.startsWith("  - "));
+      expect(listed).toHaveLength(deletions.length);
+
+      const seam = { EGMA_TEST_DEFAULT_URL: own.url };
+      for (const [index, line] of listed.entries()) {
+        const deletion = deletions.find((step) => line.includes(step.mentions));
+        expect(deletion, line).toBeDefined();
+        await deletion?.apply();
+
+        const before = own.records.length;
+        const pulled = await egma(workspace, ["pull"], seam);
+        const reached = own.records.slice(before);
+        const last = index === listed.length - 1;
+
+        expect(pulled.code, `${line}: ${pulled.stderr}`).toBe(0);
+        if (last) {
+          // The list is applied. Nothing in the folder belongs to the old
+          // platform any more, so the repository is free to reach egma's own —
+          // which is the whole point of doing the deletions.
+          expect(pulled.stdout).toContain(`url: ${own.url}`);
+          expect(reached.map((request) => request.path)).toContain("/api/platform");
+        } else {
+          // Part way down the list, and still bound. Every command still goes
+          // to the platform that issued these identifiers, and egma's own
+          // address is not asked so much as who it is.
+          expect(pulled.stdout, line).toContain(`url: ${elsewhere.url}`);
+          expect(reached, line).toEqual([]);
+        }
+      }
     } finally {
       await workspace.remove();
     }

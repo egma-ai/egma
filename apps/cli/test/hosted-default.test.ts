@@ -20,6 +20,7 @@ import {
   selectPlatform,
   TEST_DEFAULT_URL_VARIABLE,
 } from "../src/platform/credentials.ts";
+import { makeWorkspace, NO_DEFAULT_PLATFORM } from "./support/workspace.ts";
 
 const CLI = fileURLToPath(new URL("..", import.meta.url));
 
@@ -61,6 +62,31 @@ describe("the built-in address", () => {
       if (held.includes(hosted)) naming.push(path.relative(CLI, file));
     }
     expect(naming).toEqual(["test/hosted-default.test.ts"]);
+  });
+
+  /**
+   * The fence above scans text, and text is a proxy. **This is the guard.**
+   *
+   * What actually keeps the suite away from hosted egma is that every workspace
+   * hands the command a closed port in the built-in address's place. A check
+   * that resolved a platform without going through a workspace would dial
+   * production, and the scan above would still pass — it names no host, because
+   * it names no address at all. So the mechanism is asserted, not assumed.
+   */
+  it("is stood aside by every workspace, which is what really keeps the suite off it", async () => {
+    const workspace = await makeWorkspace();
+    try {
+      expect(workspace.env()[TEST_DEFAULT_URL_VARIABLE]).toBe(NO_DEFAULT_PLATFORM);
+      expect(defaultPlatformUrlIn(workspace.env())).toBe(NO_DEFAULT_PLATFORM);
+      expect(defaultPlatformUrlIn(workspace.env())).not.toBe(DEFAULT_PLATFORM_URL);
+      // And a check that names its own platform still never reaches the real
+      // one: what it names replaces the stand-in, not the fence.
+      expect(
+        defaultPlatformUrlIn(workspace.env({ [TEST_DEFAULT_URL_VARIABLE]: "http://own.example" })),
+      ).toBe("http://own.example");
+    } finally {
+      await workspace.remove();
+    }
   });
 
   it("is replaced by the test seam whenever the seam names one", () => {

@@ -282,19 +282,25 @@ describe("moving a bound repository to another platform", () => {
     // line rather than trailing off the end of a sentence.
     const said = refused.stderr.split("\n").map((line) => line.trimEnd());
     const opens = said.indexOf(
-      "To move this repository to another platform, delete these and run egma again:",
+      "To move this repository to another platform, delete these in this order and run egma again:",
     );
     expect(opens).toBeGreaterThan(0);
     expect(said[opens - 1]).toBe("");
+    // In that order, and the platform block last. Deleting it is what unbinds
+    // the repository, and an unbound repository falls back to egma's own
+    // platform — so a developer following this list top-down must never be one
+    // line in and holding another platform's identifiers with nothing left to
+    // keep them there.
     expect(said.slice(opens + 1, opens + 6)).toEqual([
-      "  - the whole platform: block in egma/config.yaml",
       "  - the id: line under agent: in egma/config.yaml",
       "  - the id: line under connection: in egma/config.yaml",
       "  - the id: line under suite: in egma/config.yaml",
       "  - the version: line at the top of every file in egma/tests/",
+      "  - last of all, the whole platform: block in egma/config.yaml",
     ]);
-    expect(said[opens + 6]).toContain("Your tests move with you");
-    expect(said[opens + 6]).toContain("stay on the platform that ran them");
+    expect(said[opens + 6]).toContain("Delete the platform block last");
+    expect(said[opens + 7]).toContain("Your tests move with you");
+    expect(said[opens + 7]).toContain("stay on the platform that ran them");
 
     // No command performs the move, so none is offered.
     expect(refused.stderr).not.toMatch(/egma rebind|--rebind|egma move/u);

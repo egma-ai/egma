@@ -25,6 +25,7 @@ import {
 import {
   normalizePlatformOrigin,
   readPlatformIdentity,
+  whatAnswered,
   type PlatformIdentity,
 } from "./identity.ts";
 import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
@@ -468,14 +469,21 @@ export class PlatformBindingMismatchError extends Error {
  * keeps its own sentence, because editing one address is not the move and
  * treating it as one would have somebody throw away identifiers that are still
  * good.
+ *
+ * The sentence offers two edits that contradict each other — change the
+ * platform origin, or delete the whole platform block — so it says which one
+ * belongs to which situation. Under ADR-0007 a refusal that holds both without
+ * a condition is one a coding agent cannot act on.
+ *
+ * The block under it is attached only when a developer really is being told no
+ * about another platform. `binding` as the source would be the binding refusing
+ * itself, which is not a move and must never end with four deletions.
  */
 export class BoundPlatformAddressError extends Error {
   constructor(binding: PlatformBinding, source: PlatformSource, selected: string) {
-    super(
-      teachingTheMove(
-        `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and ${SOURCE_NAMES[source]} names ${selected} instead. Drop it to use the bound platform. If that platform has only changed address, edit the platform origin in egma/config.yaml on purpose. egma does not move a repository between platforms, and no repository identifiers were sent.`,
-      ),
-    );
+    const named = SOURCE_NAMES[source];
+    const refusal = `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and ${named} names ${selected} instead. Drop ${named} to use the bound platform. If ${selected} is that same platform at a new address, edit the platform origin in egma/config.yaml to ${selected} and change nothing else — the move below is for a different platform, not a new address for this one. egma does not move a repository between platforms, and no repository identifiers were sent.`;
+    super(source === "binding" ? refusal : teachingTheMove(refusal));
     this.name = "BoundPlatformAddressError";
   }
 }
@@ -495,19 +503,37 @@ export class BoundPlatformUnavailableError extends Error {
  * Nothing named a platform, so egma used its own, and its own is no use today.
  *
  * One refusal for every way that address can fail, because the developer never
- * typed it, does not run what is at it, and cannot fix any of them. Handing on
- * the underlying sentence would send them to check an address they did not
- * choose, or to reconfigure a deployment that is not theirs. So this says the
- * two moves that are theirs — wait, or name a platform of their own — and keeps
- * the real fault as the cause for anybody who goes looking.
+ * typed it, does not run what is at it, and cannot fix any of them. What is
+ * suppressed is the advice — "check the address", "look at the proxy in front
+ * of it", "set EGMA_BASE_URL on the platform" — every word of which is
+ * addressed to somebody who is not reading. **What happened is not suppressed.**
+ * A redirect told as "it did not answer" is wrong about the fact and wrong
+ * about the remedy, and it is the one shape the spec relies on egma reporting.
+ *
+ * So the shape travels with the refusal. Something that answered wrongly and
+ * will answer wrongly again is `refused`: it is stated plainly, and nobody is
+ * invited into a retry loop over it. Nobody answering, a connection that stalls
+ * and a platform having a bad minute are `unreachable`, and those do say to try
+ * again. The real fault stays on as the cause for whoever goes looking.
  */
 export class DefaultPlatformUnusableError extends Error {
+  /** Which of egma's two refusal shapes this is, decided by what answered. */
+  readonly refusal: "refused" | "unreachable";
+
   constructor(url: string, cause: unknown) {
+    const answered = whatAnswered(cause);
     super(
-      `This repository names no Egma platform, so egma used its own at ${url}, and it did not answer. Try again in a moment, or point egma at another platform with --url <address> or EGMA_URL. Nothing was sent.`,
+      [
+        `This repository names no Egma platform, so egma used its own at ${url}, and ${answered.said}`,
+        answered.worthRetrying
+          ? "Try again in a moment, or point egma at another platform with --url <address> or EGMA_URL."
+          : "That is egma's to fix and not yours, and waiting will not change it. To carry on now, point egma at another platform with --url <address> or EGMA_URL.",
+        "Nothing was sent.",
+      ].join(" "),
       { cause },
     );
     this.name = "DefaultPlatformUnusableError";
+    this.refusal = answered.worthRetrying ? "unreachable" : "refused";
   }
 }
 
@@ -568,7 +594,14 @@ export async function choosePlatform(choice: {
 
   // Refused before anybody is asked anything: a bound repository is reached at
   // the address it recorded, and at no other.
-  if (binding !== null && selected.url !== binding.origin) {
+  //
+  // The binding cannot disagree with itself. An address that came *from* the
+  // binding is the bound address by definition — the committed origin is read
+  // in the one shape origins are compared in, so a trailing slash or an
+  // upper-case host in the file is the same platform and not a different one.
+  // Only the two places above it can raise this, which is also the only way
+  // this refusal can be about a move somebody is really making.
+  if (binding !== null && selected.source !== "binding" && selected.url !== binding.origin) {
     throw new BoundPlatformAddressError(binding, selected.source, selected.url);
   }
 

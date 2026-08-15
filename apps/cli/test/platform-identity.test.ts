@@ -1,6 +1,12 @@
+import { rm } from "node:fs/promises";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createEgmaFolder } from "../src/folder/egma-folder.ts";
+import {
+  bindRepositoryPlatform,
+  createEgmaFolder,
+  folderPathsIn,
+} from "../src/folder/egma-folder.ts";
 import {
   BoundPlatformAddressError,
   BoundPlatformUnavailableError,
@@ -41,9 +47,15 @@ async function refusalFrom(work: Promise<unknown>): Promise<Error> {
  */
 function expectTheWholeMove(said: string): void {
   expect(said).toContain(
-    "To move this repository to another platform, delete these and run egma again:",
+    "To move this repository to another platform, delete these in this order and run egma again:",
   );
-  expect(said.split("\n").filter((line) => line.startsWith("  - "))).toHaveLength(5);
+  const deletions = said.split("\n").filter((line) => line.startsWith("  - "));
+  expect(deletions).toHaveLength(5);
+  // And the platform block last, wherever this refusal is raised from. It is
+  // the line that unbinds the repository, and an unbound repository falls back
+  // to egma's own platform — so a list that named it first would send every
+  // other identifier in the folder to hosted egma on the very next command.
+  expect(deletions.at(-1)).toContain("the whole platform: block");
   expect(said).toContain("Your tests move with you");
   expect(said).toContain("stay on the platform that ran them");
   // The refusal teaches the move. Nothing offers to perform it.
@@ -99,6 +111,53 @@ describe("verifying an Egma platform", () => {
     });
   });
 
+  /**
+   * A binding cannot disagree with itself.
+   *
+   * The origin is a line in a file a person edits, and a person writes a
+   * trailing slash, or the host in capitals, or the default port spelled out.
+   * Every one of those is the same platform. Read as written, the repository is
+   * refused for moving nowhere — told that the binding names something other
+   * than the binding, told to drop something that is not there, and handed four
+   * deletions for a move it is not making. So the committed origin is read in
+   * the one shape origins are compared in, and this is a repository reached
+   * rather than refused.
+   */
+  it("reaches a bound platform whose committed origin is written another way", async () => {
+    await workspace.signIn(platform.url);
+    for (const written of [`${platform.url}/`, `  ${platform.url}  `]) {
+      await rm(folderPathsIn(workspace.dir).root, { recursive: true, force: true });
+      await createEgmaFolder({
+        repository: workspace.dir,
+        config: {
+          platform: { origin: written, instance: platform.instanceId },
+          agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
+          connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
+          suite: { name: "first-suite", id: "sui_01K3XQ7M4E8YB2FVN0H9TZQWET" },
+        },
+      });
+
+      const access = await resolvePlatformAccess({
+        env: workspace.env(),
+        flag: null,
+        cwd: workspace.dir,
+      });
+      expect(access, written).toMatchObject({
+        url: platform.url,
+        instanceId: platform.instanceId,
+      });
+
+      // And the binding is still what it always was: the same platform reached
+      // at the address it recorded, so nothing is rewritten for anybody.
+      expect(
+        (await bindRepositoryPlatform(workspace.dir, {
+          origin: platform.url,
+          instance: platform.instanceId,
+        })).platform,
+      ).toEqual({ origin: platform.url, instance: platform.instanceId });
+    }
+  });
+
   it("refuses a different explicit address before asking anybody anything", async () => {
     const other = await startPlatform();
     try {
@@ -124,10 +183,18 @@ describe("verifying an Egma platform", () => {
       // Naming another platform on the command line is how a developer says
       // they want to move, so this is the refusal that has to teach the move.
       expectTheWholeMove(refusal.message);
-      // And the one case that is not a move keeps its own sentence: the same
-      // platform at a new address needs an address edited, not four
-      // identifiers thrown away.
-      expect(refusal.message).toContain("only changed address");
+
+      // The two edits it offers contradict each other — change the platform
+      // origin, or delete the whole platform block — so the sentence says which
+      // situation each belongs to. Under ADR-0007 a refusal holding both
+      // without a condition is one a coding agent cannot act on.
+      expect(refusal.message).toContain("Drop --url to use the bound platform.");
+      expect(refusal.message).toContain(
+        `edit the platform origin in egma/config.yaml to ${other.url} and change nothing else`,
+      );
+      expect(refusal.message).toContain(
+        "the move below is for a different platform, not a new address for this one",
+      );
 
       // Neither platform was asked so much as who it is. The address a bound
       // repository uses is decided by the file, so an address that is not the
@@ -280,39 +347,97 @@ describe("verifying an Egma platform", () => {
 
   /**
    * Nobody typed egma's built-in address, nobody but egma runs what is at it,
-   * and nobody outside egma can fix it — so the refusal says the two moves that
-   * do belong to the developer, waiting and naming a platform of their own, and
-   * never hands on advice about checking an address they did not choose or
-   * reconfiguring a deployment that is not theirs.
+   * and nobody outside egma can fix it. So the **advice** is suppressed — go
+   * and look at that address, reconfigure that deployment — because every word
+   * of it is addressed to somebody who is not reading.
+   *
+   * **What happened is not suppressed.** A redirect, a 500 and a page that is
+   * not a platform are three different things, and a refusal that called all
+   * three "it did not answer" was wrong about the fact for two of them. The
+   * shape travels too: something that will answer the same way in a minute is
+   * `refused` and does not invite a retry, and only a bad moment says to wait.
    */
-  it("answers for its own built-in address rather than passing on its faults", async () => {
-    for (const answer of [
-      () => new Response(null, { status: 307, headers: { location: "/login" } }),
-      () => new Response("nope", { status: 502 }),
-      () => Response.json({ nothing: "useful" }),
-    ]) {
-      const refusal = await refusalFrom(
+  it("says what happened at its own built-in address, without passing on its advice", async () => {
+    const answers = [
+      {
+        what: "a redirect",
+        answer: () => new Response(null, { status: 307, headers: { location: "/login" } }),
+        says: "it redirected to /login instead.",
+        refusal: "refused" as const,
+      },
+      {
+        what: "a bad minute",
+        answer: () => new Response("nope", { status: 502 }),
+        says: "it answered 502 rather than its identity.",
+        refusal: "unreachable" as const,
+      },
+      {
+        what: "an address that is not egma",
+        answer: () => new Response("<html>somebody else</html>", { status: 404 }),
+        says: "it answered 404 rather than its identity.",
+        refusal: "refused" as const,
+      },
+      {
+        what: "a page that answers but says nothing egma knows",
+        answer: () => Response.json({ nothing: "useful" }),
+        says: "what came back carries no platform identity egma can use.",
+        refusal: "refused" as const,
+      },
+      {
+        what: "a platform naming an address nobody asked for",
+        answer: () =>
+          Response.json({
+            instance_id: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEA",
+            origin: "https://somewhere.else.example",
+          }),
+        says: "it answered that it lives at https://somewhere.else.example instead.",
+        refusal: "refused" as const,
+      },
+    ];
+
+    for (const shape of answers) {
+      const refusal = (await refusalFrom(
         resolvePlatformAccess({
           env: workspace.env({ EGMA_TEST_DEFAULT_URL: "https://built-in.example" }),
           flag: null,
           cwd: workspace.dir,
-          fetchImpl: async () => answer(),
+          fetchImpl: async () => shape.answer(),
         }),
-      );
+      )) as DefaultPlatformUnusableError;
 
-      expect(refusal).toBeInstanceOf(DefaultPlatformUnusableError);
+      expect(refusal, shape.what).toBeInstanceOf(DefaultPlatformUnusableError);
       // The address egma tried, so "hosted egma is down" can be told apart from
       // "I typed something wrong" — and there was nothing to type.
-      expect(refusal.message).toContain("https://built-in.example");
-      expect(refusal.message).toContain("--url <address>");
-      expect(refusal.message).toContain("EGMA_URL");
-      expect(refusal.message).toContain("Nothing was sent");
-      // Not the underlying complaint: none of it is the developer's to act on.
-      expect(refusal.message).not.toMatch(/sign-in page|proxy|this is where to look/u);
-      expect(refusal.message).not.toContain("Check the address");
-      expect(refusal.message).not.toContain("EGMA_BASE_URL");
+      expect(refusal.message, shape.what).toContain("https://built-in.example");
+      // What happened there, said rather than flattened into "it did not
+      // answer". The spec's own further notes rely on a developer being told
+      // about a redirect.
+      expect(refusal.message, shape.what).toContain(shape.says);
+      // The one move that is theirs is always offered.
+      expect(refusal.message, shape.what).toContain("--url <address>");
+      expect(refusal.message, shape.what).toContain("EGMA_URL");
+      expect(refusal.message, shape.what).toContain("Nothing was sent");
+
+      // Not the underlying advice: none of it is the developer's to act on.
+      expect(refusal.message, shape.what).not.toMatch(
+        /sign-in page|proxy|this is where to look/u,
+      );
+      expect(refusal.message, shape.what).not.toContain("Check the address");
+      expect(refusal.message, shape.what).not.toContain("EGMA_BASE_URL");
+
+      // And the shape, which is what decides whether anything is worth
+      // retrying. "Try again in a moment" over a permanent answer is a loop
+      // with no way out of it.
+      expect(refusal.refusal, shape.what).toBe(shape.refusal);
+      if (shape.refusal === "refused") {
+        expect(refusal.message, shape.what).not.toContain("Try again in a moment");
+        expect(refusal.message, shape.what).toContain("waiting will not change it");
+      } else {
+        expect(refusal.message, shape.what).toContain("Try again in a moment");
+      }
+
       // And the real fault is still there for whoever goes looking.
-      expect(refusal.cause).toBeInstanceOf(Error);
+      expect(refusal.cause, shape.what).toBeInstanceOf(Error);
     }
   });
 
@@ -333,7 +458,12 @@ describe("verifying an Egma platform", () => {
 
     expect(refusal).toBeInstanceOf(DefaultPlatformUnusableError);
     expect(refusal.message).toContain(NO_DEFAULT_PLATFORM);
+    expect(refusal.message).toContain("nothing answered there");
     expect(refusal.message).toContain("Nothing was sent");
+    // The one shape where waiting really can change the answer, and the only
+    // one that says so.
+    expect((refusal as DefaultPlatformUnusableError).refusal).toBe("unreachable");
+    expect(refusal.message).toContain("Try again in a moment");
   });
 
   it("keeps the address it was given, whatever the platform calls itself", async () => {
