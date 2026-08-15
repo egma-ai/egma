@@ -1,0 +1,73 @@
+/*
+ * The parts this page needs and no shared component has: the strip that keeps
+ * the four facts apart at the top, an identity and its pin on one line, and the
+ * expected behaviors as a numbered list.
+ *
+ * They live beside the page rather than in the shared system module, because
+ * they are this page's alone. Everything reusable is in `ui/evidence.tsx` with
+ * its own stylesheet. Every value is a token.
+ */
+
+/*
+ * The conversation's machinery, where its grading stands, what was decided, and
+ * how many checks — each labelled, because a label is what stops somebody
+ * reading one of these as an answer to another's question.
+ */
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fact > span {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: var(--text-md);
+}
+
+/* A name as it stands today, with the pin that never moves beside it. */
+.identity {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.identity code {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.behaviors {
+  margin: 0;
+  padding-left: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.behaviors li {
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
+.verdicts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}

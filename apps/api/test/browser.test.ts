@@ -1330,19 +1330,26 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       const who = await standingOf(instance.api, hers, "her recordings");
       const run = await aConductedRun(instance.api, who, { reference });
 
-      await page.goto(`${origin}/runs/${run.runId}`);
+      const inProject = `${origin}/projects/${who.auth.projectId ?? ""}/runs/${run.runId}`;
 
-      const heard = page.locator(`details[data-simulation="${run.heard}"]`);
-      const silent = page.locator(`details[data-simulation="${run.silent}"]`);
-      await heard.waitFor({ timeout: 30_000 });
+      /*
+       * The run first, and it mints nothing.
+       *
+       * **Opening one conversation is what asks for a link**, and that is now a
+       * property of where the player lives rather than of a disclosure being
+       * closed: the run lists its conversations and the evidence page is one
+       * conversation. A run of two hundred must never mint two hundred links to
+       * serve the one somebody wanted.
+       */
+      await page.goto(inProject);
+      await page.getByRole("link", { name: /Reschedules/u }).first().waitFor({
+        timeout: 30_000,
+      });
+      expect(await page.locator("audio").count()).toBe(0);
 
-      // Opening the conversation is what asks for the link. Nothing is fetched
-      // before that: a run of two hundred conversations must not mint two
-      // hundred links to serve the one somebody wanted.
-      expect(await heard.locator("audio").count()).toBe(0);
-      await heard.locator("summary").first().click();
+      await page.goto(`${inProject}/simulations/${run.heard}`);
 
-      const player = heard.locator("audio[data-recording]");
+      const player = page.locator("audio[data-recording]");
       await player.waitFor({ timeout: 30_000 });
 
       // The link points at the **store**, and never at egma. The bytes do not
@@ -1450,19 +1457,17 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       }
 
       // The other conversation of the same run never connected, so it wrote no
-      // recording — and it is offered no control at all. A disabled player
-      // there would read as a broken feature rather than an honest absence.
-      await silent.locator("summary").first().click();
-      await expect
-        .poll(() =>
-          silent.evaluate(
-            (element) => (element as unknown as { open: boolean }).open,
-          ),
-        )
-        .toBe(true);
-      await silent.locator("p").first().waitFor();
-      expect(await silent.locator("audio").count()).toBe(0);
-      expect(await page.locator("audio").count()).toBe(1);
+      // recording — and its own page offers no control at all. A disabled
+      // player there would read as a broken feature rather than an honest
+      // absence.
+      await page.goto(`${inProject}/simulations/${run.silent}`);
+      // **Waited for the read that would have supplied a player**: the
+      // transcript heading is drawn from the same answer, so by here the page
+      // has been told everything it knows and is offering nothing.
+      await page
+        .getByRole("heading", { name: "Transcript", exact: true })
+        .waitFor({ timeout: 30_000 });
+      expect(await page.locator("audio").count()).toBe(0);
     },
     SETTLE,
   );
@@ -1488,16 +1493,21 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
         label: "a folder of chats",
       });
 
-      await page.goto(`${origin}/runs/${run.runId}`);
-      const chat = page.locator(`details[data-simulation="${run.heard}"]`);
-      await chat.waitFor({ timeout: 30_000 });
-      await chat.locator("summary").first().click();
-      await chat.locator("p").first().waitFor();
+      await page.goto(
+        `${origin}/projects/${who.auth.projectId ?? ""}/runs/${run.runId}/simulations/${run.heard}`,
+      );
+      // The heading comes off the same answer a player would have, so waiting
+      // for it is waiting for the read that could contradict the absence below.
+      await page
+        .getByRole("heading", { name: "Transcript", exact: true })
+        .waitFor({ timeout: 30_000 });
 
       expect(await page.locator("audio").count()).toBe(0);
       // Not even the line that says a recording is being looked for, which is
       // the one thing on this path that could momentarily imply there is one.
-      expect(await chat.innerText()).not.toContain("Finding the recording");
+      expect(await page.locator("body").innerText()).not.toContain(
+        "Finding the recording",
+      );
     },
     SETTLE,
   );
