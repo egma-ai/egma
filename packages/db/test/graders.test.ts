@@ -67,7 +67,6 @@ describe("creating a grader", () => {
   it("returns a grd_ id and fetch round-trips every input", async () => {
     const created = await createGrader(actingAsAcme(), {
       ...empathy,
-      priority: "P1",
       scope: "both",
       productionSampleRate: 10,
       judgeModel: { provider: "openai", model: "gpt-4.1" },
@@ -83,7 +82,6 @@ describe("creating a grader", () => {
     expect(fetched?.type).toBe("llm_rubric");
     expect(fetched?.version).toBe(1);
     expect(fetched?.config).toEqual(empathy.config);
-    expect(fetched?.priority).toBe("P1");
     expect(fetched?.scope).toBe("both");
     expect(fetched?.productionSampleRate).toBe(10);
     expect(fetched?.judgeModel).toEqual({
@@ -93,13 +91,12 @@ describe("creating a grader", () => {
     expect(fetched?.projectId).toBe(acme.project);
   });
 
-  it("blocks, judges simulations and names no judge of its own by default", async () => {
+  it("judges simulations and names no judge of its own by default", async () => {
     const created = await createGrader(actingAsAcme(), empathy);
 
     const fetched = await getGrader(actingAsAcme(), created.id);
-    // Blocking by default, because a check somebody wrote is a check they
-    // expect to be believed; production is opt-in, because it costs money.
-    expect(fetched?.priority).toBe("P0");
+    // Simulations by default, because production grading costs money on traffic
+    // nobody triggered and that has to be a deliberate choice.
     expect(fetched?.scope).toBe("simulations");
     expect(fetched?.productionSampleRate).toBe(100);
     expect(fetched?.judgeModel).toBeNull();
@@ -132,8 +129,8 @@ describe("creating a grader", () => {
       await connection.sql("begin");
       await connection.sql(
         `insert into grader
-           (id, organization_id, project_id, name, type, priority, current_version_id)
-         values ($1, $2, $3, 'Halfway', 'llm_rubric', 'P0', $4)`,
+           (id, organization_id, project_id, name, type, current_version_id)
+         values ($1, $2, $3, 'Halfway', 'llm_rubric', $4)`,
         [orphan, acme.organization, acme.project, newId("grv")],
       );
 
@@ -426,10 +423,7 @@ describe("a grader whose config does not fit its type", () => {
 });
 
 describe("a grader whose settings are not settings", () => {
-  it("is refused for a priority, scope or sample rate egma does not know", async () => {
-    await expect(
-      createGrader(actingAsAcme(), { ...empathy, priority: "P3" as never }),
-    ).rejects.toThrow(/priority/);
+  it("is refused for a scope or sample rate egma does not know", async () => {
     await expect(
       createGrader(actingAsAcme(), { ...empathy, scope: "everywhere" as never }),
     ).rejects.toThrow(/scope/);
@@ -537,8 +531,8 @@ describe("tenancy", () => {
     await expect(
       database.sql(
         `insert into grader
-           (id, organization_id, project_id, name, type, priority, current_version_id)
-         values ($1, $2, $3, 'Smuggled', 'llm_rubric', 'P0', $4)`,
+           (id, organization_id, project_id, name, type, current_version_id)
+         values ($1, $2, $3, 'Smuggled', 'llm_rubric', $4)`,
         [newId("grd"), acme.organization, globex.project, newId("grv")],
       ),
     ).rejects.toSatisfy(

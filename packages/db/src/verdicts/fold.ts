@@ -131,20 +131,44 @@ function assertionKey(row: FoldableVerdict): string {
 }
 
 /**
+ * How seriously a word is taken when nothing else can tell two rows apart.
+ *
+ * Higher wins, and the order is the one that never hands out credit on a coin
+ * toss: a failure outranks a broken judge, which outranks a check that did not
+ * apply, which outranks a pass.
+ */
+const SERIOUSNESS: { readonly [Word in Verdict]: number } = {
+  failed: 3,
+  errored: 2,
+  skipped: 1,
+  passed: 0,
+};
+
+/**
  * Which of two rows is later, decided the same way whatever order they arrived
  * in.
  *
- * The clock first, then the grader version — two total orders in sequence, so
- * two rows are never "equally late" unless they are the same row. Without the
- * tiebreak the answer would depend on input order, and a fold whose answer
- * depends on the order rows came back in is one that changes its mind between
- * two reads of the same data.
+ * The clock first, then the grader version, then how serious the word is —
+ * three total orders in sequence, so two rows are never "equally late" unless
+ * they say the same thing. Without the tiebreaks the answer would depend on
+ * input order, and a fold whose answer depends on the order rows came back in is
+ * one that changes its mind between two reads of the same data.
+ *
+ * The last tiebreak is reached only by two rows the **store** cannot tell apart
+ * either: same identity, same clock, so the engine that keeps the later one is
+ * free to keep whichever it merged last. The fold cannot be more decided than
+ * the table underneath it, so what it can be is consistent — and it breaks the
+ * tie towards the more serious word, because the alternative is a green tick
+ * that arrived by luck.
  */
 function isLater(row: FoldableVerdict, than: FoldableVerdict): boolean {
   if (row.judgedAtMicroseconds !== than.judgedAtMicroseconds) {
     return row.judgedAtMicroseconds > than.judgedAtMicroseconds;
   }
-  return row.graderVersionId > than.graderVersionId;
+  if (row.graderVersionId !== than.graderVersionId) {
+    return row.graderVersionId > than.graderVersionId;
+  }
+  return SERIOUSNESS[row.verdict] > SERIOUSNESS[than.verdict];
 }
 
 /**

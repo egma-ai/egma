@@ -23,10 +23,10 @@ import {
  * Everything here runs against a real ClickHouse, because everything here is a
  * ClickHouse behaviour: whether a re-run of the same judgment collapses onto the
  * one it replaces, whether a re-grade at a new grader version lands beside the
- * old rather than over it, whether a person's disagreement sits next to the
- * machine's word instead of erasing it. A substitute would confirm the strings
- * egma sends and nothing about what they do — and what they do is the entire
- * point of the table's identity.
+ * old rather than over it, whether a second grader's word about the same
+ * assertion stands on its own. A substitute would confirm the strings egma sends
+ * and nothing about what they do — and what they do is the entire point of the
+ * table's identity.
  */
 
 let store: MigratedTraceStore;
@@ -72,14 +72,12 @@ function verdict(overrides: Partial<NewVerdict> = {}): NewVerdict {
     traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     graderId: GRADER,
     graderVersionId: VERSION_ONE,
-    dimension: "confirms the appointment time back to the caller",
+    assertion: "behavior_1",
     source: "simulation",
-    judgedBy: "engine",
     verdict: "passed",
     score: 1,
     rationale: "the agent repeated Tuesday at four before ending the call.",
     citedSpanIds: ["00f067aa0ba902b7"],
-    priority: "P0",
     runId: "run_01JQZ0000000000000000000AA",
     agentId: "agt_01JQZ0000000000000000000AA",
     agentVersionId: "agv_01JQZ0000000000000000000AA",
@@ -118,14 +116,12 @@ describe("a judgment written and read back", () => {
       traceId,
       graderId: GRADER,
       graderVersionId: VERSION_ONE,
-      dimension: "confirms the appointment time back to the caller",
+      assertion: "behavior_1",
       source: "simulation",
-      judgedBy: "engine",
       verdict: "passed",
       score: 0.75,
       rationale: "the agent repeated Tuesday at four before ending the call.",
       citedSpanIds: ["00f067aa0ba902b7", "00f067aa0ba902b8"],
-      priority: "P0",
       runId: "run_01JQZ0000000000000000000AA",
       agentId: "agt_01JQZ0000000000000000000AA",
       agentVersionId: "agv_01JQZ0000000000000000000AA",
@@ -249,7 +245,7 @@ describe("judging the same thing again", () => {
 
   /**
    * The same grader, at the same version, saying something about the same
-   * dimension again is a re-run after a transient error — not a second opinion.
+   * assertion again is a re-run after a transient error — not a second opinion.
    * The identity collapses it and the later `event_ts` wins, which is what makes
    * grading a simulation twice safe rather than something a caller has to
    * remember not to do.
@@ -324,7 +320,7 @@ describe("judging the same thing again", () => {
    * Re-grading at a tightened grader is the case the identity was designed
    * around. Both rows are kept, because "v1 said pass, v2 says fail" is exactly
    * the comparison that makes editing a grader meaningful — and the fold counts
-   * the dimension once, at the newer grading, so the old mistake does not go on
+   * the assertion once, at the newer grading, so the old mistake does not go on
    * failing the run forever.
    */
   it("adds beside the old row when the grader version changed", async () => {
@@ -350,7 +346,7 @@ describe("judging the same thing again", () => {
       [VERSION_ONE, VERSION_TWO].sort(),
     );
 
-    // And the dimension is counted once, at the newer one.
+    // And the assertion is counted once, at the newer one.
     expect(read.outcome).toEqual({
       verdict: "failed",
       score: 0,
@@ -362,16 +358,22 @@ describe("judging the same thing again", () => {
   });
 });
 
-describe("a person disagreeing with the machine", () => {
+describe("a second grader judging the same assertion key", () => {
   const traceId = "4444444444444444444444444444aaaa";
+  const otherGrader = newId("grd");
 
   /**
-   * The correction is a row of its own with the same identity except for who
-   * judged, so the store keeps both. That is the whole arrangement: the record
-   * shows the reviewer's judgment without erasing the machine's, and the pair is
-   * the ground truth a future measurement of judge accuracy is made of.
+   * The identity ends at `source` now, so what keeps two words apart is the
+   * grader that said them. This is the shape a human word will arrive in when
+   * corrections return as the reserved `human` type: its own grader id, its own
+   * rows, standing beside the machine's rather than on top of them — and needing
+   * no `judged_by` to do it.
+   *
+   * Two graders may perfectly well key their assertions the same way — a
+   * position is a position — so this is the case that would collapse if the
+   * grader id had been left out of the identity.
    */
-  it("writes a row beside the machine's rather than over it", async () => {
+  it("writes its own rows rather than replacing the first grader's", async () => {
     await appendVerdicts(at(acme), [
       verdict({
         traceId,
@@ -383,10 +385,10 @@ describe("a person disagreeing with the machine", () => {
     await appendVerdicts(at(acme), [
       verdict({
         traceId,
-        judgedBy: "human",
+        graderId: otherGrader,
         verdict: "passed",
         score: 1,
-        rationale: "the caller said it back and the agent agreed; the judge missed it.",
+        rationale: "the caller said it back and the agent agreed.",
         judgedAtMicroseconds: judgedAt("2026-08-07T11:00:00Z"),
       }),
     ]);
@@ -394,30 +396,34 @@ describe("a person disagreeing with the machine", () => {
     const read = await readVerdicts(at(acme), traceId);
 
     expect(read.verdicts).toHaveLength(2);
-    expect(read.verdicts.map((row) => row.judgedBy).sort()).toEqual([
-      "engine",
-      "human",
-    ]);
+    expect(read.verdicts.map((row) => row.graderId).sort()).toEqual(
+      [GRADER, otherGrader].sort(),
+    );
 
-    // Counted once, and the person's word is the one that counts.
+    // Both count, because they are two graders' assertions and not two words
+    // about one. Binary scoring then says the conversation failed: every
+    // assertion of every grader has to pass.
+    expect(speakingVerdicts(read.verdicts)).toHaveLength(2);
     expect(read.outcome).toEqual({
-      verdict: "passed",
-      score: 1,
-      counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
+      verdict: "failed",
+      score: 0.5,
+      counts: { passed: 1, failed: 1, skipped: 0, errored: 0, total: 2 },
     });
-    expect(speakingVerdicts(read.verdicts).map((row) => row.judgedBy)).toEqual([
-      "human",
-    ]);
   });
 
-  it("changes their mind by replacing their own row, never by stacking a third voice", async () => {
+  /**
+   * And the other half of the same rule: the second grader re-judging its own
+   * assertion at the same version replaces its own row and leaves the first
+   * grader's alone.
+   */
+  it("replaces its own row when it judges again, and only its own", async () => {
     await appendVerdicts(at(acme), [
       verdict({
         traceId,
-        judgedBy: "human",
+        graderId: otherGrader,
         verdict: "skipped",
         score: 0,
-        rationale: "on reflection this behavior does not apply over the phone.",
+        rationale: "this assertion does not apply over the phone.",
         judgedAtMicroseconds: judgedAt("2026-08-07T12:00:00Z"),
       }),
     ]);
@@ -426,12 +432,14 @@ describe("a person disagreeing with the machine", () => {
 
     expect(read.verdicts).toHaveLength(2);
     expect(
-      read.verdicts.filter((row) => row.judgedBy === "human"),
+      read.verdicts.filter((row) => row.graderId === otherGrader),
     ).toHaveLength(1);
     expect(read.outcome).toEqual({
-      verdict: "skipped",
-      score: undefined,
-      counts: { passed: 0, failed: 0, skipped: 1, errored: 0, total: 1 },
+      verdict: "failed",
+      // The skipped assertion leaves the denominator, and the first grader's
+      // failure is the whole of what is left.
+      score: 0,
+      counts: { passed: 0, failed: 1, skipped: 1, errored: 0, total: 2 },
     });
   });
 });
@@ -451,40 +459,37 @@ describe("a whole simulation's worth of judgments", () => {
       verdict({
         traceId,
         graderId: behaviors,
-        dimension: "greets the caller by name",
+        assertion: "behavior_1",
         verdict: "passed",
         score: 1,
       }),
       verdict({
         traceId,
         graderId: behaviors,
-        dimension: "offers the next available slot",
+        assertion: "behavior_2",
         verdict: "failed",
         score: 0,
       }),
       verdict({
         traceId,
         graderId: behaviors,
-        dimension: "reads the address back",
+        assertion: "behavior_3",
         verdict: "skipped",
         score: 0,
-        priority: "P2",
       }),
       verdict({
         traceId,
         graderId: behaviors,
-        dimension: "ends the call politely",
+        assertion: "behavior_4",
         verdict: "passed",
         score: 1,
       }),
       verdict({
         traceId,
         graderId: latency,
-        dimension: "p90 turn latency under 2000ms",
-        judgedBy: "engine",
+        assertion: "0",
         verdict: "passed",
         score: 1,
-        priority: "P1",
       }),
     ]);
 
@@ -493,7 +498,7 @@ describe("a whole simulation's worth of judgments", () => {
     expect(read.verdicts).toHaveLength(5);
     expect(read.outcome).toEqual({
       verdict: "failed",
-      // Three passed of the four that could be scored: the skipped dimension is
+      // Three passed of the four that could be scored: the skipped assertion is
       // out of the denominator rather than counted against anybody.
       score: 0.75,
       counts: { passed: 3, failed: 1, skipped: 1, errored: 0, total: 5 },
@@ -522,15 +527,16 @@ describe("a whole simulation's worth of judgments", () => {
   });
 
   /**
-   * Asking the same question of a smaller set of rows is how "did every P0
-   * pass" is answered, rather than by a second algebra living beside the first.
+   * Asking the same question of a smaller set of rows is how one grader's own
+   * answer is worked out, rather than by a second algebra living beside the
+   * first — and it is the same fold `byGrader` above uses.
    */
-  it("answers a priority question by folding the rows of that priority", async () => {
+  it("answers a per-grader question by folding that grader's rows", async () => {
     const { verdicts } = await readVerdicts(at(acme), traceId);
-    const blocking = verdicts.filter((row) => row.priority === "P0");
+    const itsOwn = verdicts.filter((row) => row.graderId === behaviors);
 
-    expect(blocking).toHaveLength(3);
-    expect(speakingVerdicts(blocking)).toHaveLength(3);
+    expect(itsOwn).toHaveLength(4);
+    expect(speakingVerdicts(itsOwn)).toHaveLength(4);
   });
 });
 
@@ -549,7 +555,7 @@ describe("a whole run's worth of judgments", () => {
   const elsewhere = "run_01JQZ0000000000000000000CC";
 
   const wentWell = "1111111111111111111111111111bbbb";
-  const disagreed = "2222222222222222222222222222bbbb";
+  const regraded = "2222222222222222222222222222bbbb";
   const brokeDown = "3333333333333333333333333333bbbb";
   const notScored = "4444444444444444444444444444bbbb";
   const anotherRun = "5555555555555555555555555555bbbb";
@@ -566,7 +572,7 @@ describe("a whole run's worth of judgments", () => {
         traceId: wentWell,
         runId,
         graderId: behaviors,
-        dimension: "confirms the new time back",
+        assertion: "behavior_1",
         verdict: "passed",
         score: 1,
       }),
@@ -574,30 +580,29 @@ describe("a whole run's worth of judgments", () => {
         traceId: wentWell,
         runId,
         graderId: latency,
-        dimension: "metric_threshold",
+        assertion: "0",
         verdict: "passed",
         score: 1,
-        priority: "P1",
       }),
-      // One the machine failed and a person disagreed with.
+      // One the grader failed at version 1 and passed when it was re-graded.
       verdict({
-        traceId: disagreed,
+        traceId: regraded,
         runId,
         graderId: behaviors,
-        dimension: "confirms the new time back",
+        assertion: "behavior_1",
         verdict: "failed",
         score: 0,
         rationale: "no confirmation of the time was found.",
       }),
       verdict({
-        traceId: disagreed,
+        traceId: regraded,
         runId,
         graderId: behaviors,
-        dimension: "confirms the new time back",
-        judgedBy: "human",
+        graderVersionId: VERSION_TWO,
+        assertion: "behavior_1",
         verdict: "passed",
         score: 1,
-        rationale: "the agent said it back at turn six; the judge missed it.",
+        rationale: "the agent said it back at turn six; the sharpened judge saw it.",
         judgedAtMicroseconds: judgedAt("2026-08-07T11:00:00Z"),
       }),
       // One egma could not judge — never `failed`, which is the distinction the
@@ -606,7 +611,7 @@ describe("a whole run's worth of judgments", () => {
         traceId: brokeDown,
         runId,
         graderId: behaviors,
-        dimension: "confirms the new time back",
+        assertion: "behavior_1",
         verdict: "errored",
         score: 0,
         rationale: "this simulation ended before the agent joined.",
@@ -616,10 +621,9 @@ describe("a whole run's worth of judgments", () => {
         traceId: notScored,
         runId,
         graderId: latency,
-        dimension: "metric_threshold",
+        assertion: "0",
         verdict: "skipped",
         score: 0,
-        priority: "P2",
         rationale: "a chat simulation records no audio latency.",
       }),
       // Two rows that must not reach it: another run of the same customer's…
@@ -659,9 +663,9 @@ describe("a whole run's worth of judgments", () => {
         },
       },
       {
-        // The person's word, not the machine's, and the machine's row is still
-        // on the table underneath it.
-        simulationId: disagreed,
+        // The newer grading's word, with version 1's row still on the table
+        // underneath it.
+        simulationId: regraded,
         outcome: {
           verdict: "passed",
           score: 1,
@@ -688,7 +692,7 @@ describe("a whole run's worth of judgments", () => {
       },
     ]);
 
-    // Nothing failed once the correction is counted, and one conversation egma
+    // Nothing failed once the re-grade is counted, and one conversation egma
     // could not judge — so the run errored rather than passed. A run that went
     // green because a simulation never ran is the exact false trust the words
     // `skipped` and `errored` exist to prevent.
@@ -715,7 +719,7 @@ describe("a whole run's worth of judgments", () => {
 
     // Folding the run whole and folding each conversation and adding up are the
     // same arithmetic, because supersession is decided inside one conversation's
-    // dimensions. That is what makes a run header and the rows on the page
+    // assertions. That is what makes a run header and the rows on the page
     // beneath it incapable of disagreeing.
     expect(summed).toEqual(read.outcome.counts);
   });
@@ -787,7 +791,7 @@ describe("a batch bigger than one insert", () => {
   it("is split rather than refused, with every row landing", async () => {
     const traceId = "6666666666666666666666666666aaaa";
     const many = Array.from({ length: 5_001 }, (_, index) =>
-      verdict({ traceId, dimension: `behavior ${index}` }),
+      verdict({ traceId, assertion: `behavior_${index}` }),
     );
 
     const written = await appendVerdicts(at(acme), many);

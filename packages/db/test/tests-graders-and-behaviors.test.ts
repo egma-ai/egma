@@ -17,7 +17,6 @@ import {
   acme,
   actingAsAcme,
   actingAsGlobex,
-  blocking,
   rescheduling,
   rowCounts,
   seedGrader,
@@ -25,14 +24,14 @@ import {
 } from "./support/test-factory.ts";
 
 /**
- * The two things a test version gained with the grader factory: the graders it
- * names, and a priority on each expected behavior. Both are content, so both
- * mint a version, and both round-trip in the order they were authored.
+ * Two things a test version holds as content: the graders it names, and its
+ * expected behaviors — an ordered list of plain sentences. Both mint a version
+ * when they change, and both round-trip in the order they were authored.
  *
  * The graders themselves arrive through their own factory, which has its own
  * tests: they are an input to this file, not what it is checking. Raw SQL
- * appears once, in the version somebody wrote before priorities existed, which
- * no seam can write.
+ * appears once, in the version somebody wrote while behaviors carried
+ * priorities, which no seam can write any more.
  */
 
 let database: MigratedDatabase;
@@ -297,44 +296,24 @@ describe("a test naming a grader it may not have", () => {
   });
 });
 
-describe("the priority on an expected behavior", () => {
-  it("is P0 when the behavior is written as a plain sentence", async () => {
+describe("a test's expected behaviors", () => {
+  it("round-trip as the plain sentences they were written as", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
     const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.expectedBehaviors).toEqual(
-      blocking(rescheduling.expectedBehaviors),
-    );
-  });
-
-  it("round-trips the priority the author chose", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      expectedBehaviors: [
-        "verifies who it is speaking to before discussing the booking",
-        { behavior: "offers at least one afternoon slot next week", priority: "P1" },
-        { behavior: "thanks the caller by name", priority: "P2" },
-      ],
-    });
-
-    const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.expectedBehaviors).toEqual([
-      {
-        behavior: "verifies who it is speaking to before discussing the booking",
-        priority: "P0",
-      },
-      {
-        behavior: "offers at least one afternoon slot next week",
-        priority: "P1",
-      },
-      { behavior: "thanks the caller by name", priority: "P2" },
-    ]);
+    expect(fetched?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
 
     const frozen = await getTestVersion(actingAsAcme(), created.versionId);
-    expect(frozen?.expectedBehaviors).toEqual(fetched?.expectedBehaviors);
+    expect(frozen?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
   });
 
-  it("is content, so demoting one mints a version", async () => {
+  /**
+   * Order is content, and it is load-bearing rather than tidy: a verdict row
+   * names its assertion by position in the pinned version, so moving a sentence
+   * moves what every row about it meant. Minting a version is what keeps the old
+   * rows readable.
+   */
+  it("mint a version when one is reworded, and nothing when the list is the same", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
       expectedBehaviors: ["verifies who it is speaking to", "thanks the caller"],
@@ -343,81 +322,106 @@ describe("the priority on an expected behavior", () => {
     const edited = await editTest(actingAsAcme(), created.id, {
       expectedBehaviors: [
         "verifies who it is speaking to",
-        { behavior: "thanks the caller", priority: "P2" },
+        "thanks the caller by name",
       ],
     });
 
     expect(edited?.version).toBe(2);
     expect(edited?.expectedBehaviors).toEqual([
-      { behavior: "verifies who it is speaking to", priority: "P0" },
-      { behavior: "thanks the caller", priority: "P2" },
+      "verifies who it is speaking to",
+      "thanks the caller by name",
     ]);
 
-    // The same list said the long way round is the same list, and mints nothing.
     const saved = await editTest(actingAsAcme(), created.id, {
       expectedBehaviors: [
-        { behavior: "verifies who it is speaking to", priority: "P0" },
-        { behavior: "thanks the caller", priority: "P2" },
+        "verifies who it is speaking to",
+        "thanks the caller by name",
       ],
     });
     expect(saved?.version).toBe(2);
   });
 
-  it("cannot all be demoted: a write leaving no P0 is refused", async () => {
-    const before = await rowCounts();
-
-    await expect(
-      createTest(actingAsAcme(), {
-        ...rescheduling,
-        expectedBehaviors: [
-          { behavior: "offers an afternoon slot", priority: "P1" },
-          { behavior: "thanks the caller", priority: "P2" },
-        ],
-      }),
-    ).rejects.toThrow(/P0/);
-
-    expect(await rowCounts()).toEqual(before);
-  });
-
-  it("cannot all be demoted by an edit either, and the edit versions nothing", async () => {
+  it("mint a version when two of them swap places", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      expectedBehaviors: ["verifies who it is speaking to"],
+      expectedBehaviors: ["verifies who it is speaking to", "thanks the caller"],
     });
+
+    const edited = await editTest(actingAsAcme(), created.id, {
+      expectedBehaviors: ["thanks the caller", "verifies who it is speaking to"],
+    });
+
+    expect(edited?.version).toBe(2);
+  });
+
+  /**
+   * The falsifiability rule, and now the whole of it: with priorities retired
+   * there is no way left to demote a test into never being able to fail, so
+   * non-empty is all this has to hold.
+   */
+  it("cannot be empty, on a create or on an edit, and the refusal writes nothing", async () => {
     const before = await rowCounts();
 
     await expect(
-      editTest(actingAsAcme(), created.id, {
-        expectedBehaviors: [
-          { behavior: "verifies who it is speaking to", priority: "P1" },
-        ],
-      }),
-    ).rejects.toThrow(/P0/);
+      createTest(actingAsAcme(), { ...rescheduling, expectedBehaviors: [] }),
+    ).rejects.toThrow(/at least one expected behavior/);
 
     expect(await rowCounts()).toEqual(before);
-    const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.version).toBe(1);
-    expect(fetched?.expectedBehaviors).toEqual(
-      blocking(["verifies who it is speaking to"]),
-    );
+
+    const created = await createTest(actingAsAcme(), rescheduling);
+    const written = await rowCounts();
+
+    await expect(
+      editTest(actingAsAcme(), created.id, { expectedBehaviors: [] }),
+    ).rejects.toThrow(/at least one expected behavior/);
+
+    expect(await rowCounts()).toEqual(written);
+    expect((await getTest(actingAsAcme(), created.id))?.version).toBe(1);
   });
 
-  it("is refused for a priority egma does not know", async () => {
+  it("cannot be a sentence that says nothing", async () => {
     await expect(
       createTest(actingAsAcme(), {
         ...rescheduling,
-        expectedBehaviors: [
-          { behavior: "verifies who it is speaking to", priority: "P3" as never },
-        ],
+        expectedBehaviors: ["   "],
       }),
-    ).rejects.toThrow(/priority/);
+    ).rejects.toThrow(/needs to say something/);
   });
 
-  it("reads a version written before priorities existed as all-blocking", async () => {
+  /**
+   * A version frozen while behaviors carried priorities still says what it said:
+   * the sentence. The priority is read past rather than migrated away, because a
+   * version a run can pin is never rewritten — which is the whole reason runs
+   * pin versions.
+   */
+  it("read a version stored with priorities as the sentences it holds", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
-    // Raw SQL on purpose: this is the shape every version held before the
-    // grading effort, and the guarantee is that it still says what it said.
+    // Raw SQL on purpose: this is the shape every version held between the
+    // grading effort and the redesign, and no seam can write it any more.
+    await database.sql(
+      `update test_version
+          set content = '{"scenario": "They want to move Thursday.", "expectedBehaviors": [{"behavior": "confirms the new time back", "priority": "P2"}]}'::jsonb
+        where id = $1`,
+      [created.versionId],
+    );
+
+    const fetched = await getTest(actingAsAcme(), created.id);
+    expect(fetched?.expectedBehaviors).toEqual(["confirms the new time back"]);
+
+    // And the next edit writes the shape egma writes now, without the caller
+    // having said anything about behaviors at all.
+    const edited = await editTest(actingAsAcme(), created.id, {
+      scenario: "They want to move Thursday afternoon.",
+    });
+    expect(edited?.version).toBe(2);
+    expect(edited?.expectedBehaviors).toEqual(["confirms the new time back"]);
+  });
+
+  /** And the pre-priority shape, which is the shape again, still reads. */
+  it("read a version stored as bare strings, which is the shape once more", async () => {
+    const created = await createTest(actingAsAcme(), rescheduling);
+
     await database.sql(
       `update test_version
           set content = '{"scenario": "They want to move Thursday.", "expectedBehaviors": ["confirms the new time back"]}'::jsonb
@@ -426,19 +430,7 @@ describe("the priority on an expected behavior", () => {
     );
 
     const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.expectedBehaviors).toEqual(
-      blocking(["confirms the new time back"]),
-    );
-
-    // And the next edit writes the shape egma writes now, without the caller
-    // having said anything about priorities.
-    const edited = await editTest(actingAsAcme(), created.id, {
-      scenario: "They want to move Thursday afternoon.",
-    });
-    expect(edited?.version).toBe(2);
-    expect(edited?.expectedBehaviors).toEqual(
-      blocking(["confirms the new time back"]),
-    );
+    expect(fetched?.expectedBehaviors).toEqual(["confirms the new time back"]);
   });
 });
 
@@ -446,10 +438,7 @@ describe("cloning a test that names graders", () => {
   it("copies the array in the same order into a fresh version 1", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      expectedBehaviors: [
-        "verifies who it is speaking to",
-        { behavior: "thanks the caller", priority: "P2" },
-      ],
+      expectedBehaviors: ["verifies who it is speaking to", "thanks the caller"],
       graderIds: [latency, disclosure],
     });
 
@@ -463,8 +452,8 @@ describe("cloning a test that names graders", () => {
       disclosure,
     ]);
     expect(clone?.expectedBehaviors).toEqual([
-      { behavior: "verifies who it is speaking to", priority: "P0" },
-      { behavior: "thanks the caller", priority: "P2" },
+      "verifies who it is speaking to",
+      "thanks the caller",
     ]);
   });
 });
