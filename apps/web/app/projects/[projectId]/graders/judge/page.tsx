@@ -491,9 +491,16 @@ function Credentials({
       cell: (credential) => (
         <Button
           disabled={!mayAdminister || busy}
-          onClick={() =>
-            setRotating(rotating === credential.id ? null : credential.id)
-          }
+          onClick={() => {
+            // Cleared whenever the open row changes, because one form under the
+            // table means one `replacement` for every row. Without this, a key
+            // typed for this credential stays in the field when somebody opens
+            // another, and Save sends it to whichever credential is open now —
+            // rotating the wrong one, to a key its owner never chose for it.
+            // Retyping is the small cost; the alternative is a silent mix-up.
+            setReplacement("");
+            setRotating(rotating === credential.id ? null : credential.id);
+          }}
         >
           Replace key
         </Button>

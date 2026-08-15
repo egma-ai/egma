@@ -1151,6 +1151,61 @@ describe("judge settings", () => {
   });
 
   /**
+   * One form under the table means one field for every row, so opening another
+   * credential has to empty it.
+   *
+   * A key typed for one credential and left in the field when somebody opens
+   * another is not a cosmetic carry-over: Save sends whatever the field holds
+   * to whichever credential is open, so the wrong one is rotated to a key its
+   * owner never chose for it, and the key its owner did choose is now on a
+   * credential they were not looking at. Nothing on the page would say so.
+   *
+   * Retyping is the cost, and it is the right one to pay.
+   */
+  it("empties the replacement field when a different credential is opened", async () => {
+    settings("admin", undefined as never, [
+      {
+        id: "jcr_1",
+        label: "Acme production",
+        provider: "openai",
+        hint: "1234",
+        revision: "rev_1",
+        created_at: "2026-08-01T10:00:00.000Z",
+        updated_at: "2026-08-01T10:00:00.000Z",
+      },
+      {
+        id: "jcr_2",
+        label: "Acme staging",
+        provider: "openai",
+        hint: "5678",
+        revision: "rev_2",
+        created_at: "2026-08-02T10:00:00.000Z",
+        updated_at: "2026-08-02T10:00:00.000Z",
+      },
+    ]);
+
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    const [openFirst, openSecond] = within(keys).getAllByRole("button", {
+      name: "Replace key",
+    });
+
+    fireEvent.click(openFirst as HTMLElement);
+    const forProduction = screen.getByLabelText("New key") as HTMLInputElement;
+    fireEvent.change(forProduction, { target: { value: "sk-meant-for-production" } });
+    expect(
+      (screen.getByLabelText("New key") as HTMLInputElement).value,
+    ).toBe("sk-meant-for-production");
+
+    fireEvent.click(openSecond as HTMLElement);
+
+    expect((screen.getByLabelText("New key") as HTMLInputElement).value).toBe("");
+    // And with nothing typed for this one, there is nothing to send.
+    expect(
+      screen.getByRole("button", { name: "Save new key" }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  /**
    * A failure has to report the thing that failed. Sending a credential failure
    * up to the judge section put "Egma did not save the judge" on screen when
    * adding a key had failed, beside a Try again that saved the judge — a
