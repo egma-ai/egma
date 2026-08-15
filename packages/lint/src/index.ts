@@ -486,9 +486,47 @@ function workspaceNameOf(specifier: string): string | undefined {
  * listed here. A list would be one more thing to keep, and what it would be
  * forgotten about is whether a package is safe to ship.
  */
+/**
+ * The directories the workspace keeps its packages in, read from
+ * `pnpm-workspace.yaml`.
+ *
+ * Read rather than listed, for the same reason the manifests are. The first
+ * version of this rule named `packages` and `apps` and missed `fixtures` and
+ * `sdks` — where two private packages live — so a rule written against a list
+ * was already wrong on the day it was written. The workspace file is the one
+ * place that decides, so it is the one place to ask.
+ *
+ * Only the leading directory of each entry is taken: `apps/*` and any deeper
+ * glob both mean "look under `apps`", and a manifest is either directly in
+ * there or it is not a workspace package this rule can judge.
+ */
+async function workspaceRootsIn(root: string): Promise<string[]> {
+  let file: string;
+  try {
+    file = await readFile(path.join(root, "pnpm-workspace.yaml"), "utf8");
+  } catch {
+    return [];
+  }
+  const roots = new Set<string>();
+  let inPackages = false;
+  for (const line of file.split("\n")) {
+    if (/^packages:/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages && /^\S/.test(line)) break;
+    const entry = /^\s+-\s*['"]?([^'"\s]+)/.exec(line);
+    if (inPackages && entry?.[1] !== undefined) {
+      const first = entry[1].split("/")[0];
+      if (first !== undefined && first !== "" && first !== ".") roots.add(first);
+    }
+  }
+  return [...roots];
+}
+
 async function privateWorkspacePackagesIn(root: string): Promise<Set<string>> {
   const held = new Set<string>();
-  for (const where of ["packages", "apps"]) {
+  for (const where of await workspaceRootsIn(root)) {
     let entries: string[];
     try {
       entries = await readdir(path.join(root, where));

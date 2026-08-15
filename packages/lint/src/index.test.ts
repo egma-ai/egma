@@ -501,6 +501,14 @@ describe("this repository", () => {
  */
 describe("a published package importing one that is never published", () => {
   async function workspace(): Promise<void> {
+    // The roots this repository actually declares. The rule reads them from
+    // here rather than holding a list of its own, which is the whole point:
+    // the first version named `packages` and `apps` and missed `fixtures` and
+    // `sdks`, where two private packages live.
+    await write(
+      "pnpm-workspace.yaml",
+      "packages:\n  - 'apps/*'\n  - 'fixtures/*'\n  - 'packages/*'\n  - 'sdks/*'\n",
+    );
     await write(
       "packages/ids/package.json",
       JSON.stringify({ name: "@egma/ids", private: true }),
@@ -508,6 +516,10 @@ describe("a published package importing one that is never published", () => {
     await write(
       "packages/wire/package.json",
       JSON.stringify({ name: "@egma/wire", version: "1.2.3" }),
+    );
+    await write(
+      "fixtures/dumb-agent/package.json",
+      JSON.stringify({ name: "@egma/dumb-agent", private: true }),
     );
   }
 
@@ -530,6 +542,18 @@ describe("a published package importing one that is never published", () => {
     await write(
       "apps/cli/src/a.ts",
       'import { newId } from "@egma/ids/mint.ts";\nexport { newId };\n',
+    );
+
+    expect(rules(await check(root))).toEqual([
+      "no-private-package-in-a-published-one",
+    ]);
+  });
+
+  it("finds a private package under a root the first version of this rule missed", async () => {
+    await workspace();
+    await write(
+      "apps/cli/src/a.ts",
+      'import { serve } from "@egma/dumb-agent";\nexport { serve };\n',
     );
 
     expect(rules(await check(root))).toEqual([
