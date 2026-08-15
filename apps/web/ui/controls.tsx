@@ -147,6 +147,125 @@ export function TextInput({
   );
 }
 
+/**
+ * Somewhere to write more than a line.
+ *
+ * A persona's manner and what they do under friction are sentences, and a
+ * single-line field for a sentence is a field that scrolls sideways while
+ * somebody is still deciding what to say. It grows with a `rows` count rather
+ * than auto-sizing, so the page's layout is decided by the page.
+ */
+export function TextArea({
+  id,
+  value,
+  rows = 3,
+  placeholder,
+  disabled = false,
+  onChange,
+}: {
+  readonly id: string;
+  readonly value: string;
+  readonly rows?: number;
+  readonly placeholder?: string;
+  readonly disabled?: boolean;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <textarea
+      className={styles.textarea}
+      id={id}
+      value={value}
+      rows={rows}
+      placeholder={placeholder}
+      disabled={disabled}
+      spellCheck
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
+
+/**
+ * A choice among things egma already knows about — a voice provider, a
+ * replacement persona.
+ *
+ * The options always come from the server. A hand-written copy of a list the
+ * server owns is a list that is wrong the day the server grows an entry, and
+ * silently: the form would keep offering yesterday's choices and refusing
+ * today's.
+ */
+export function Select({
+  id,
+  value,
+  options,
+  disabled = false,
+  label,
+  onChange,
+}: {
+  readonly id: string;
+  readonly value: string;
+  readonly options: readonly { readonly value: string; readonly label: string }[];
+  readonly disabled?: boolean;
+  /** When the control carries its own name rather than a visible label. */
+  readonly label?: string;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      className={styles.select}
+      id={id}
+      value={value}
+      disabled={disabled}
+      aria-label={label}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * Which of two lists a page is showing.
+ *
+ * **Two lists, chosen deliberately, never one list with a column saying which
+ * rows are archived.** A mixed list is a list somebody picks the wrong row out
+ * of. It is a radio group rather than a row of buttons because that is what it
+ * is: exactly one is chosen, and arrow keys move between them.
+ */
+export function Choice<Value extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  readonly label: string;
+  readonly value: Value;
+  readonly options: readonly { readonly value: Value; readonly label: string }[];
+  readonly onChange: (value: Value) => void;
+}) {
+  return (
+    <div className={styles.choice} role="radiogroup" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          className={`${styles.choiceItem} ${
+            option.value === value ? styles.choiceItemOn : ""
+          }`}
+          type="button"
+          role="radio"
+          aria-checked={option.value === value}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export type BadgeTone = "neutral" | "good" | "bad" | "warn";
 
 const TONE: Record<BadgeTone, string> = {
@@ -175,5 +294,54 @@ export function Badge({
     <span className={`${styles.badge} ${TONE[tone]}`} title={title}>
       {children}
     </span>
+  );
+}
+
+/**
+ * What a page says when a write was refused.
+ *
+ * **The refusal's own sentence, shown unchanged, above the form that was
+ * refused — and the form keeps everything typed into it.** A refusal that
+ * cleared the fields would make somebody retype an afternoon's work to find
+ * out whether the second attempt fails the same way, which is how a person
+ * learns to stop trying.
+ */
+export function Refused({
+  message,
+  action,
+}: {
+  readonly message: string;
+  readonly action?: ReactNode;
+}) {
+  return (
+    <div className={styles.refused} role="alert">
+      <p className={styles.refusedText}>{message}</p>
+      {action}
+    </div>
+  );
+}
+
+/**
+ * A labelled group of facts about one thing — what a detail page is mostly
+ * made of. A definition list because that is what it is, so a screen reader
+ * reads each fact with the name of the fact.
+ */
+export function Facts({
+  facts,
+}: {
+  readonly facts: readonly {
+    readonly label: string;
+    readonly value: ReactNode;
+  }[];
+}) {
+  return (
+    <dl className={styles.facts}>
+      {facts.map((fact) => (
+        <div className={styles.fact} key={fact.label}>
+          <dt>{fact.label}</dt>
+          <dd>{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

@@ -214,34 +214,46 @@ const COLUMNS = {
 /** Speech only stays intelligible so far from natural pace. */
 const SPEED_RANGE = { slowest: 0.5, fastest: 2 } as const;
 
+/**
+ * What the factory will not write, refused as the caller's mistake rather than
+ * as a fault.
+ *
+ * `UnprocessableInputError` rather than a plain `Error` because these
+ * sentences are written for whoever has to fix the input, and a layer above
+ * has to be able to tell them apart from something being broken. They were
+ * plain errors while nothing but a script called this; the browser's door is
+ * the caller that has to relay them.
+ */
 function validateName(name: string): void {
   if (name.trim() === "") {
-    throw new Error("a persona needs a name");
+    throw new UnprocessableInputError("a persona needs a name");
   }
 }
 
 function validateTraits(traits: PersonaTraits): void {
   if (traits.personality.trim() === "") {
-    throw new Error("a persona needs a personality");
+    throw new UnprocessableInputError("a persona needs a personality");
   }
   if (traits.language.trim() === "") {
-    throw new Error("a persona needs a language");
+    throw new UnprocessableInputError("a persona needs a language");
   }
   const { provider, voiceId, speed } = traits.voice;
   if (!VOICE_PROVIDERS.includes(provider)) {
-    throw new Error(
+    throw new UnprocessableInputError(
       `"${provider}" is not a voice provider egma knows; expected one of ${VOICE_PROVIDERS.join(", ")}`,
     );
   }
   if (voiceId.trim() === "") {
-    throw new Error("a persona needs a voice id from its provider");
+    throw new UnprocessableInputError(
+      "a persona needs a voice id from its provider",
+    );
   }
   if (
     !Number.isFinite(speed) ||
     speed < SPEED_RANGE.slowest ||
     speed > SPEED_RANGE.fastest
   ) {
-    throw new Error(
+    throw new UnprocessableInputError(
       `speaking speed must be between ${SPEED_RANGE.slowest} and ${SPEED_RANGE.fastest}`,
     );
   }

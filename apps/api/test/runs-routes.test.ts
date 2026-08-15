@@ -476,7 +476,7 @@ describe("starting a run", () => {
     expect(rows).toEqual([]);
   });
 
-  it("refuses a version whose persona has since been deleted, rather than conducting one fewer", async () => {
+  it("refuses a version whose persona has since been archived, rather than conducting one fewer", async () => {
     const { ada, key, connectionId } = await aCustomerReadyToRun("runs_gone");
     const auth = contextFor(ada, "member");
 
@@ -508,8 +508,8 @@ describe("starting a run", () => {
     expect(refused.body).toEqual({
       error: "unprocessable",
       message:
-        `persona ${leaving.id} is deleted, and a run cannot conduct a ` +
-        `simulation with a deleted persona. Edit the tests that name them, ` +
+        `persona ${leaving.id} is archived, and a run cannot conduct a ` +
+        `simulation with an archived persona. Edit the tests that name them, ` +
         `then pin the versions those edits mint.`,
     });
   });
