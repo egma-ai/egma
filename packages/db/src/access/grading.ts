@@ -1161,7 +1161,7 @@ type RegradeConversations =
  *
  * The grader is named **by identity**, never by version. Which version judges is
  * always the current one — that is the whole point of asking again — exactly as
- * a test's grader array names a grader and gets today's version of it.
+ * resolving what applies to a conversation gets today's version of every copy.
  *
  * **The expected-behaviors grader can be named like any other**, and that is
  * what stopped being a special case. It used to be implicit — never a row in

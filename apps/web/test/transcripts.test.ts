@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import * as copy from "../lib/transcript-copy.ts";
 import {
+  assertionHeading,
   everyStep,
   howFarIn,
   howLong,
@@ -20,6 +21,7 @@ import {
   windowChoiceOf,
   WINDOW_PARAMETER,
   type Facts,
+  type Judgment,
   type Step,
 } from "../lib/transcripts.ts";
 
@@ -289,6 +291,47 @@ describe("what a stored kind is called where somebody reads it", () => {
     expect(humanizeIdentifier("appointment_change_policy")).toBe(
       "Appointment change policy",
     );
+  });
+});
+
+/**
+ * What a judgment is headed with.
+ *
+ * A verdict row keeps a **key**, and the read resolves the words behind it from
+ * the version the conversation was executed against. So the heading is the
+ * sentence somebody wrote wherever there is one — and the key itself wherever
+ * there is not, because a key that could not be placed says exactly as much as
+ * egma knows, and a plausible wrong sentence would say more than it knows.
+ */
+describe("the heading a judgment carries", () => {
+  function judged(overrides: Partial<Judgment> = {}): Judgment {
+    return {
+      grader_id: "grd_01JQZ0000000000000000000AA",
+      assertion: "behavior_3",
+      verdict: "passed",
+      score: 1,
+      rationale: "the agent named the new time back.",
+      cited_turns: ["turn:5"],
+      judged_at: "2026-08-14T09:00:00.000000Z",
+      ...overrides,
+    };
+  }
+
+  it("is the sentence the read resolved, word for word", () => {
+    expect(
+      assertionHeading(
+        judged({ assertion_text: "confirms the new time back before finishing" }),
+      ),
+    ).toBe("confirms the new time back before finishing");
+  });
+
+  it("is the key itself where nothing could place it", () => {
+    expect(assertionHeading(judged({ assertion_text: null }))).toBe("Behavior 3");
+    // And on an answer that never carried the field at all, which is the same
+    // absence said a different way.
+    expect(assertionHeading(judged())).toBe("Behavior 3");
+    // A resolved sentence of nothing but spaces is nothing resolved.
+    expect(assertionHeading(judged({ assertion_text: "   " }))).toBe("Behavior 3");
   });
 });
 

@@ -276,7 +276,7 @@ describe("a re-grade that names one grader", () => {
         params: { metric: "turn_response_latency", bound: 5_000 },
       }),
     );
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
     conducted = await conductSimulation(world, {
       testId,
       spans: { measured: { turn_response_latency: [900, 1_100] } },

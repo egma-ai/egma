@@ -81,7 +81,7 @@ describe("a project that configured no judge", () => {
   it("says so on every behavior, and never quietly passes one", async () => {
     const judge = await service.judgingWith({});
 
-    const testId = await seedTest(world, [], [BEHAVIOR, "never quotes a price"]);
+    const testId = await seedTest(world, [BEHAVIOR, "never quotes a price"]);
     const { simulationId } = await conductSimulation(world, {
       testId,
       spans: aConversation(),
@@ -203,7 +203,7 @@ describe("the project's default judge", () => {
       }),
     );
 
-    const testId = await seedTest(world, [], [BEHAVIOR]);
+    const testId = await seedTest(world, [BEHAVIOR]);
     const { simulationId } = await conductSimulation(world, {
       testId,
       spans: aConversation(),

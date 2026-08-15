@@ -1,5 +1,6 @@
 import { PREDEFINED_GRADERS } from "../grader-library/catalog.ts";
 import type { AuthContext } from "./context.ts";
+import { getGraderLibraryEntry } from "./grader-library.ts";
 import { graderFacts } from "./graders.ts";
 import { getSimulationTestVersion } from "./runs.ts";
 
@@ -48,14 +49,15 @@ const NOTHING_TO_SAY: AssertionWords = { of: () => undefined };
 /**
  * The words behind this conversation's assertion keys.
  *
- * Two reads and no more: the version the simulation was executed against, and
- * the copies that wrote the rows. Both are asked once for the whole
- * conversation, so a page showing twenty judgments costs the same as one showing
- * two.
+ * A handful of reads and no more, each asked once for the whole conversation:
+ * the version the simulation was executed against, the copies that wrote the
+ * rows, and the entries those copies point at. A page showing twenty judgments
+ * therefore costs what one showing two costs.
  *
  * A production trace has no simulation and therefore no test, and a smoke
- * simulation started against no test has none either. Both come back with
- * nothing to say, which is the same answer for the same reason.
+ * simulation started against no test has none either. Neither has behaviors to
+ * look up; both still resolve the whole-grader keys below, because what those
+ * name is the shelf rather than the test.
  *
  * @param simulationId The conversation, as the verdict rows file it.
  * @param graderIds The copies that wrote them — the row's own `graderId`s.
@@ -67,25 +69,45 @@ export async function readAssertionWords(
 ): Promise<AssertionWords> {
   if (graderIds.length === 0) return NOTHING_TO_SAY;
 
+  const facts = await graderFacts(auth, graderIds);
+  if (facts.size === 0) return NOTHING_TO_SAY;
+
   // The pinned version, and nothing about the test as it now stands. It answers
   // `undefined` for a conversation that pinned none, and for one whose version
-  // this credential cannot reach — in both cases there is nothing to read.
+  // this credential cannot reach — in both cases there are no behaviors to read,
+  // which is not the same as having nothing at all to say.
   const version = await getSimulationTestVersion(auth, simulationId);
-  if (version === undefined) return NOTHING_TO_SAY;
+  const behaviors = version?.expectedBehaviors ?? [];
 
-  const behaviors = version.expectedBehaviors;
-  const facts = await graderFacts(auth, graderIds);
+  // The entries behind those copies, by their own ids — the same read the engine
+  // makes through the same pointer, so what a page calls a grader and what
+  // judged the conversation are one row.
+  const named = new Map(
+    await Promise.all(
+      [...new Set([...facts.values()].map((its) => its.libraryId))].map(
+        async (libraryId) =>
+          [libraryId, (await getGraderLibraryEntry(auth, libraryId))?.name] as const,
+      ),
+    ),
+  );
 
   return {
     of: (graderId, assertion) => {
       const its = facts.get(graderId);
       if (its === undefined) return undefined;
 
-      // One entry per predefined library entry whose keys mean something a
-      // person can read. `latency`'s key is the index of a config entry the copy
-      // itself holds, and what that reads as is the change that computes it from
-      // spans — so it is absent here rather than guessed at, and a reader sees
-      // the key exactly as it is written.
+      // **A whole-grader key is the entry's own identifier**, which is what a
+      // grader that makes exactly one assertion names it — fixed for the
+      // entry's life, precisely so that no catalog rename can rekey a verdict.
+      // The words for it are that entry's name, read here rather than written
+      // into the row for the same reason every other key is a key.
+      if (assertion === its.libraryId) return named.get(its.libraryId);
+
+      // Behaviors are the one key shape that means a sentence in a test, and it
+      // is the expected-behaviors entry that mints them. `latency`'s keys are
+      // its own config entries' and what those read as is the change that
+      // computes it from spans — absent here rather than guessed at, so a reader
+      // sees the key exactly as it is written.
       if (its.libraryId !== PREDEFINED_GRADERS.expectedBehaviors) {
         return undefined;
       }
