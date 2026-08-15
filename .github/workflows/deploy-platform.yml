@@ -128,17 +128,25 @@ jobs:
         # this deployment can make.
         run: |
           set -euo pipefail
-          # The steps run from a script on the box rather than from a document
-          # built here. It keeps this file free of a shell script nested inside
-          # JSON nested inside YAML — three levels of quoting, and every one of
-          # them a way to ship a deployment that fails on a stray character.
-          # It also means the same steps can be run by hand, on the box, when
-          # something has gone wrong and nobody wants to drive it through CI.
+          # The steps run from a script rather than from a document built here.
+          # It keeps this file free of a shell script nested inside JSON nested
+          # inside YAML — three levels of quoting, and every one of them a way
+          # to ship a deployment that fails on a stray character. It also means
+          # the same steps can be run by hand, on the box, when something has
+          # gone wrong and nobody wants to drive it through CI.
+          #
+          # The script is synced from object storage first, never resident: the
+          # box authors nothing and keeps nothing worth keeping. Whatever the
+          # deployment's own repository published last is what runs — so a
+          # config change is a merge there, not an edit anywhere else. The
+          # bucket is derived from the registry's account the same way the
+          # registry itself is derived, so no extra variable exists to set.
+          ACCOUNT="${REGISTRY%%.*}"
           command_id=$(aws ssm send-command \
             --instance-ids "$INSTANCE" \
             --document-name AWS-RunShellScript \
             --comment "deploy $GITHUB_SHA" \
-            --parameters commands="/opt/egma/deploy.sh $GITHUB_SHA" \
+            --parameters commands="aws s3 sync s3://egma-deploy-${ACCOUNT}/deployment /opt/egma/deployment --delete && bash /opt/egma/deployment/deploy.sh $GITHUB_SHA" \
             --query Command.CommandId --output text)
           echo "SSM command: $command_id"
           aws ssm wait command-executed \
