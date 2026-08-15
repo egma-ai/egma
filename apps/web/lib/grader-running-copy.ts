@@ -58,12 +58,18 @@ export const RUNNING_COLUMNS = {
  * Changing a running copy: every word the edit form says.
  *
  * **The one thing this copy has to make plain is that an edit is two acts.**
- * Changing a name or turning a blocker into a diagnostic changes nothing about
- * any judgment already made — it changes what the project lets a failure do,
- * from now on. Changing a filled-in value changes what the grader *is*, so it
- * starts the next version and the version behind it stays exactly as it was,
- * which is what keeps last week's result meaning what it meant. Somebody who
- * did not know that would read a tightened bound as a rewriting of history.
+ * Changing a filled-in value changes what the grader *is*, so it starts the
+ * next version and the version behind it stays exactly as it was, which is what
+ * keeps last week's result meaning what it meant. Somebody who did not know
+ * that would read a tightened bound as a rewriting of history.
+ *
+ * **And the one sentence it must not shorten is what `required` does.** Turning
+ * a blocker into a diagnostic rewrites no verdict — and it does change what
+ * those verdicts add up to, because whether a grader can fail a run is read
+ * fresh every time somebody opens the page. A run that failed on this grader
+ * alone reads as passed from the moment the flag turns. That is the flag's
+ * whole job, and "nothing already judged changes" is the tempting short version
+ * that says the opposite of what the person will see next.
  *
  * The labels and the help text for the filled-in values are **not** here: they
  * ride the library entry, and the form renders what it was handed. A list of
@@ -88,10 +94,19 @@ export const EDIT = {
   scope: "Applies to",
   scopeMeans: "Where this grader judges. Live traffic is sampled below.",
   required: "Can fail a run",
-  requiredOn: "A test cannot pass while this grader does not.",
+  /**
+   * Both positions carry the same warning, because turning the flag either way
+   * has the same reach: no verdict is rewritten, and every run already read is
+   * re-counted the next time somebody opens it.
+   */
+  requiredOn:
+    "A test cannot pass while this grader does not. Turning this off rewrites " +
+    "no verdict, and it does change what past ones add up to: a run that " +
+    "failed on this grader alone reads as passed from then on.",
   requiredOff:
     "A diagnostic: judged and shown with its fraction, and never able to fail " +
-    "anything.",
+    "anything. Turning this back on rewrites no verdict, and it does change " +
+    "what past ones add up to: a run this grader failed reads as failed again.",
   sampleRate: "Share of live traffic judged",
   sampleRateMeans:
     "A whole percentage from 0 to 100. It counts only where this grader " +
@@ -100,8 +115,15 @@ export const EDIT = {
   submit: "Save",
   submitting: "Saving…",
   cancel: "Cancel",
+  /**
+   * **Narrow on purpose.** It used to say "what has already been judged is
+   * unchanged", which is true of the verdicts and false of the runs they add
+   * up to — and it was shown at the exact moment somebody had turned `required`
+   * off, which is when it was most wrong. It now claims only what it can: no
+   * verdict was rewritten.
+   */
   saved: (name: string): string =>
-    `${name} is saved. It judges everything in its scope from here on, and what has already been judged is unchanged.`,
+    `${name} is saved. It judges everything in its scope from here on, and no verdict it has already written was rewritten.`,
   unreachable:
     "egma could not be reached, so nothing was saved. Is the API running?",
 } as const;
@@ -175,8 +197,8 @@ export const REQUIRED = {
  *
  * **An empty set of values is a complete grader, not a half-finished one**, and
  * this is the sentence that stops it reading as a gap: the expected-behaviors
- * grader checks whatever the test in front of it says, so there is nothing for
- * anybody to fill in and there never will be.
+ * grader judges whatever the test in front of it says it expects, so there is
+ * nothing for anybody to fill in and there never will be.
  */
 export const CONFIG = {
   fromTheTest: "Whatever the test says it expects",

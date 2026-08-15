@@ -56,6 +56,8 @@ type Listed = {
   readonly type: string;
   readonly required: boolean;
   readonly scope: string;
+  readonly version: number;
+  readonly version_id: string;
   readonly config: { readonly assertions: readonly unknown[] };
 };
 
@@ -423,7 +425,7 @@ describe("changing a running copy", () => {
       production_sample_rate: 25,
       // Version 1 still: nothing a verdict was decided by moved.
       version: 1,
-      version_id: (copy as unknown as { version_id: string }).version_id,
+      version_id: copy.version_id,
       config: { assertions: [{ metric: "turn_response_latency", bound: 2000 }] },
     });
 
@@ -456,9 +458,7 @@ describe("changing a running copy", () => {
       required: true,
       scope: "simulations",
     });
-    expect(edited.body.version_id).not.toBe(
-      (copy as unknown as { version_id: string }).version_id,
-    );
+    expect(edited.body.version_id).not.toBe(copy.version_id);
   });
 
   /**
@@ -495,6 +495,38 @@ describe("changing a running copy", () => {
     expect(itemsOf(after).find((one) => one.id === copy.id)?.config).toEqual({
       assertions: [{ metric: "turn_response_latency", bound: 2000 }],
     });
+  });
+
+  /**
+   * **An empty set of answers is not "no answers".** It passes every rule about
+   * keys — there is no key the entry never asked for, and no parameter left
+   * unanswered — and would store an assertion holding nothing on a grader whose
+   * assertions are the test's own sentences. Judging is unaffected, because the
+   * engine reads the test rather than the config; the Running tab is not, and
+   * would count "1 assertion" where the honest answer is that there is nothing
+   * to fill in. The web form never sends it and this door is the only way in.
+   */
+  it("refuses an empty set of values on an entry that asks nothing", async () => {
+    api = await createApi("graders_edit_empty_params");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const [seeded] = itemsOf(await request("GET", "/api/graders", key));
+    if (seeded === undefined) throw new Error("the project has no graders");
+
+    const edited = await request("PATCH", `/api/graders/${seeded.id}`, key, {
+      params: {},
+    });
+
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
+    expect(String(edited.body.message)).toContain("asks for nothing");
+
+    // Still holding nothing, which is what a correct copy of it holds forever.
+    const after = itemsOf(await request("GET", "/api/graders", key));
+    expect(after.find((one) => one.id === seeded.id)?.config).toEqual({
+      assertions: [],
+    });
+    expect(after.find((one) => one.id === seeded.id)?.version).toBe(1);
   });
 
   /** The measure rule is the same one door, said the same way, too. */
@@ -552,19 +584,39 @@ describe("changing a running copy", () => {
 
   /**
    * A grader this credential cannot see reads exactly as one that is not there,
-   * because to this caller those are the same thing.
+   * because to this caller those are the same thing — so the case needs both
+   * halves in front of it: an id nobody ever minted, and a real one belonging
+   * to somebody else. One refusal, one sentence, and nothing in either that
+   * says which of the two it was.
    */
-  it("answers a grader this project does not have as one that is not there", async () => {
+  it("answers another customer's grader exactly as one that never existed", async () => {
     api = await createApi("graders_edit_unknown");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const key = await projectKeyFor(api.app, ada);
+    const grace = await signUp(api.app, "grace@globex.example", "Globex");
+    const theirs = await projectKeyFor(api.app, ada);
+    const others = await projectKeyFor(api.app, grace);
 
-    const edited = await request("PATCH", `/api/graders/${NOBODY_HAS_THIS}`, key, {
+    const [only] = itemsOf(await request("GET", "/api/graders", theirs));
+    if (only === undefined) throw new Error("the project has no graders");
+
+    const madeUp = await request("PATCH", `/api/graders/${NOBODY_HAS_THIS}`, others, {
+      required: false,
+    });
+    const somebodyElses = await request("PATCH", `/api/graders/${only.id}`, others, {
       required: false,
     });
 
-    expect(edited.statusCode).toBe(404);
-    expect(String(edited.body.message)).toContain(NOBODY_HAS_THIS);
+    expect(madeUp.statusCode).toBe(404);
+    expect(somebodyElses.statusCode).toBe(404);
+    // The same sentence but for the id in it, so nothing about the answer says
+    // whether the row exists somewhere else.
+    expect(String(somebodyElses.body.message).replace(only.id, "")).toBe(
+      String(madeUp.body.message).replace(NOBODY_HAS_THIS, ""),
+    );
+
+    // And Acme's copy is untouched, which is the half a status code cannot say.
+    const untouched = itemsOf(await request("GET", "/api/graders", theirs));
+    expect(untouched.find((one) => one.id === only.id)?.required).toBe(true);
   });
 
   it("is refused to a viewer, per the permission table", async () => {

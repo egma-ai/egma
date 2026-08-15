@@ -160,14 +160,23 @@ describe("getting to the Library screen", () => {
  * door checks the catalog they were built from, and neither can drift.
  */
 describe("pressing Use", () => {
+  /**
+   * The `fetch` itself moved into `lib/write.ts` when a second and third form
+   * on this section needed the same four steps — post, read egma's own refusal
+   * off the body, fall back to a sentence of its own where the body carried
+   * none, and treat a thrown request as the platform being out of reach. What
+   * this case is about is unchanged: the address and the verb, which is what
+   * the rewrite rule beside it has to match.
+   */
   it("writes the copy at the path this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const form = await readFile(path.join(WEB, "app/graders/use-form.tsx"), "utf8");
 
     expect(rewrites).toContain("/api/graders");
-    expect(form).toContain('fetch("/api/graders"');
+    expect(form).toContain('url: "/api/graders"');
     expect(form).toContain('method: "POST"');
     expect(form).toContain("library_id");
+    expect(form).toContain('from "../../lib/write.ts"');
   });
 
   it("draws its controls from the entry's own declaration, and names no measure", async () => {

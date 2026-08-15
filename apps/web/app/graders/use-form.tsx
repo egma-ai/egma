@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { USE } from "../../lib/grader-library-copy.ts";
+import { wrote } from "../../lib/write.ts";
 import { Field, Notice, styles } from "../ui.tsx";
 
 /**
@@ -225,33 +226,23 @@ export function UseForm({
     setBusy(true);
     setRefusal(null);
 
-    try {
-      const answer = await fetch("/api/graders", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          library_id: entry.id,
-          required,
-          ...(params.length === 0
-            ? {}
-            : { params: asWritten(params, filled) }),
-        }),
-      });
+    const refused = await wrote({
+      url: "/api/graders",
+      method: "POST",
+      body: {
+        library_id: entry.id,
+        required,
+        ...(params.length === 0 ? {} : { params: asWritten(params, filled) }),
+      },
+      unreachable: USE.unreachable,
+    });
+    setBusy(false);
 
-      if (!answer.ok) {
-        const said = (await answer.json().catch(() => ({}))) as {
-          message?: string;
-        };
-        setRefusal(said.message ?? USE.unreachable);
-        return;
-      }
-
-      onStarted(entry.name);
-    } catch {
-      setRefusal(USE.unreachable);
-    } finally {
-      setBusy(false);
+    if (refused !== null) {
+      setRefusal(refused);
+      return;
     }
+    onStarted(entry.name);
   }
 
   return (

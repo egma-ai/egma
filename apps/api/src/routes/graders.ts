@@ -8,6 +8,7 @@ import {
   UnknownGraderLibraryEntryError,
   UnprocessableInputError,
   useLibraryEntry,
+  type FilledInForm,
   type Grader,
 } from "@egma/db";
 import { isId } from "@egma/ids";
@@ -40,15 +41,24 @@ import { given, text } from "../http/reading.ts";
  * first day.
  *
  * **An edit is two different acts wearing one verb, and the difference is
- * whether anything already judged is being re-interpreted.** A name, a
+ * whether a verdict already written is being rewritten.** A name, a
  * description, `required`, a scope and a sampling rate say where a copy applies
- * and how loudly, and none of them changes what any verdict already written
- * meant — so they are written in place and are true everywhere the moment they
- * return. The filled-in values are what a judgment is *made of*, so changing
- * one mints the next version and leaves the one behind it exactly where it was:
- * last week's verdict still names the values it was decided by. Both rules live
- * in the factory rather than here, and this door hands the whole body down in
- * one call so no client has to know which of them it just tripped.
+ * and how loudly, and none of them rewrites a row — so they are written in
+ * place and are true everywhere the moment they return. The filled-in values
+ * are what a judgment is *made of*, so changing one mints the next version and
+ * leaves the one behind it exactly where it was: last week's verdict still
+ * names the values it was decided by. Both rules live in the factory rather
+ * than here, and this door hands the whole body down in one call so no client
+ * has to know which of them it just tripped.
+ *
+ * **`required` is the one live setting that reaches a page about the past, and
+ * a client should say so.** It rewrites no verdict; it moves this copy's rows
+ * between the lane that decides a run and the lane that only reports, and the
+ * fold runs at read time — so a run that failed on this grader alone reads as
+ * passed from the moment the flag turns. That is what the flag is for. The
+ * honest sentence is "the verdicts are unchanged and what they add up to is
+ * not", and a surface that shortens it to "nothing already judged changes" is
+ * telling somebody the opposite of what they are about to see.
  *
  * **Deleting is switching off, and it is the only off switch there is.** There
  * is no enable flag and no `none` scope: a copy either exists and judges
@@ -184,7 +194,7 @@ function noSuchGrader(graderId: string): string {
 
 /** The filled-in values a body sent, or a refusal saying what shape they take. */
 type WrittenParams =
-  | { readonly params: Readonly<Record<string, unknown>> | undefined }
+  | { readonly params: FilledInForm | undefined }
   | { readonly refusal: string };
 
 function paramsIn(body: Body): WrittenParams {
@@ -200,7 +210,7 @@ function paramsIn(body: Body): WrittenParams {
         "the library entry to see what it asks for; some ask for nothing.",
     };
   }
-  return { params: params as Readonly<Record<string, unknown>> };
+  return { params: params as FilledInForm };
 }
 
 /** A flag a body sent, refused rather than coerced: `"false"` is not false. */
@@ -375,9 +385,13 @@ export async function graderRoutes(
    * values mints the next version, because they are what a verdict was decided
    * by and last week's has to keep meaning what it meant; sending a scope, a
    * rate, a name or the `required` flag writes in place, because none of them
-   * re-interprets a judgment already made. A client that had to know which was
+   * rewrites a verdict already written. A client that had to know which was
    * which would be holding a second copy of a rule it cannot enforce, so it
    * sends the body and reads the version number back.
+   *
+   * `required` still reaches the past through the fold rather than through the
+   * rows — see this group's header — so a client relaying "nothing changed" on
+   * the strength of a standing version number would be relaying the wrong half.
    *
    * **`params` is the entry's form filled in, exactly as Use takes it** — the
    * same key, the same shape, checked against the same entry by the same code.

@@ -59,10 +59,19 @@ import { inActingProject, within } from "./within.ts";
  * and the judge model are what a judgment is made of, so they live in immutable
  * versions and an edit mints the next one, leaving last week's run meaning
  * exactly what it meant. The `required` flag, the scope and the sampling rate
- * change nothing about any judgment already made, so they are written in place
- * and take effect everywhere at once. A developer tightening a bound and a
- * developer turning a blocker into a diagnostic are doing two different things,
- * and only one of them is rewriting history if it is versioned wrongly.
+ * rewrite no verdict already written, so they are written in place and take
+ * effect everywhere at once. A developer tightening a bound and a developer
+ * turning a blocker into a diagnostic are doing two different things, and only
+ * one of them is rewriting history if it is versioned wrongly.
+ *
+ * **`required` is the one that reaches an old page anyway, and on purpose.** It
+ * changes no row; it changes which lane a row is folded in, and the fold runs
+ * at read time — so a run that failed on this grader alone reads as passed from
+ * the moment the flag turns. That is the flag's whole job: nothing about the
+ * judgment changed, only what the project lets a failure do, and the answer has
+ * to be the one in force when somebody looks. Verdicts unchanged; what they add
+ * up to changed. The two are not the same sentence and this file does not
+ * pretend they are.
  */
 
 /**
@@ -107,9 +116,22 @@ export type GraderConfig = {
   readonly assertions: readonly GraderAssertion[];
 };
 
+/**
+ * The library entry's form filled in, before anything has checked it: the
+ * answers to whatever that entry declared, under the names it declared them.
+ *
+ * It is a name rather than a bare map because it is the shape both write doors
+ * take — **Use** creates a copy from one and an edit replaces a copy's values
+ * with one — and a primitive spelled out at each of them would be four places
+ * agreeing by coincidence. What may be in it is the entry's decision and
+ * nothing here can narrow it, which is why the values are `unknown` until
+ * `validValue` has held each against its declared parameter.
+ */
+export type FilledInForm = Readonly<Record<string, unknown>>;
+
 /** The config as a caller writes one; the same shape, before it is checked. */
 export type GraderConfigInput = {
-  readonly assertions: readonly Readonly<Record<string, unknown>>[];
+  readonly assertions: readonly FilledInForm[];
 };
 
 /**
@@ -137,7 +159,7 @@ type LiveSettings = {
  */
 export type UseLibraryEntry = LiveSettings & {
   readonly libraryId: string;
-  readonly params?: Readonly<Record<string, unknown>> | undefined;
+  readonly params?: FilledInForm | undefined;
   readonly judgeModel?: JudgeModel | undefined;
 };
 
@@ -189,7 +211,7 @@ export type GraderChanges = {
   readonly scope?: GraderScope;
   readonly productionSampleRate?: number;
   /** The entry's form filled in once, exactly as **Use** takes it. */
-  readonly params?: Readonly<Record<string, unknown>>;
+  readonly params?: FilledInForm;
   readonly config?: GraderConfigInput;
   readonly judgeModel?: JudgeModel | null;
 };
@@ -443,6 +465,22 @@ function validValue(
 }
 
 /**
+ * What an entry that asks nothing says when something arrives for it anyway.
+ *
+ * One sentence with two callers, because there are two ways to send a value to
+ * a grader that has no questions: a set carrying a key it never declared, and a
+ * set carrying no keys at all. The second reads as harmless and is not — an
+ * empty assertion is a row the Running graders screen counts, so a copy whose
+ * assertions are the test's own sentences would report holding one of its own.
+ */
+function asksNothing(definition: Definition, because: string): string {
+  return (
+    `the ${definition.name} grader asks for nothing, so ${because} — its ` +
+    `assertions are the test's own expected behaviors`
+  );
+}
+
+/**
  * One assertion's filled-in values, checked against what the entry asks for —
  * every parameter answered, and nothing answered that was never asked.
  *
@@ -464,7 +502,7 @@ function validAssertion(
   if (unexpected.length > 0) {
     throw new UnprocessableInputError(
       asked.length === 0
-        ? `the ${definition.name} grader asks for nothing, so "${unexpected.join('", "')}" has nowhere to go — its assertions are the test's own expected behaviors`
+        ? asksNothing(definition, `"${unexpected.join('", "')}" has nowhere to go`)
         : `the ${definition.name} grader does not ask for "${unexpected.join('", "')}"; it asks for "${asked.join('", "')}"`,
     );
   }
@@ -482,7 +520,11 @@ function validAssertion(
  * **An entry that asks for something needs at least one.** A latency copy with
  * no assertions reads nothing, judges nothing, and is a row on the Running
  * graders screen that says a project is checking something it is not. An entry
- * that asks nothing must have none, for the mirror-image reason.
+ * that asks nothing must have none, for the mirror-image reason: an empty set
+ * of answers passes every rule above it — there is no key that was never asked
+ * for and no parameter left unanswered — and stores an assertion holding
+ * nothing, which the screen counts and nothing ever judges. Both halves are
+ * enforced below; only the first one used to be.
  *
  * **And no measure twice, which is the rule that makes an assertion knowable.**
  * A verdict row is filed under the measure its check bounds, because a copy's
@@ -512,6 +554,15 @@ function validConfig(
       `the ${definition.name} grader needs at least one assertion — "${definition.params
         .map((parameter) => parameter.name)
         .join('", "')}" — because a copy that checks nothing can never fail`,
+    );
+  }
+
+  if (definition.params.length === 0 && assertions.length > 0) {
+    throw new UnprocessableInputError(
+      asksNothing(
+        definition,
+        "there is nothing to fill in and an empty set of answers would be stored as though there were",
+      ),
     );
   }
 
@@ -564,9 +615,7 @@ function measureNamedTwice(
  * what they were given against the entry through `validConfig` and neither
  * holds an opinion of its own about a bound.
  */
-function oneFilledInSet(
-  params: Readonly<Record<string, unknown>>,
-): GraderConfigInput {
+function oneFilledInSet(params: FilledInForm): GraderConfigInput {
   return { assertions: [params] };
 }
 
@@ -581,14 +630,23 @@ function oneFilledInSet(
 const NOTHING_TO_FILL_IN: GraderConfigInput = { assertions: [] };
 
 /**
- * The filled-in values an edit is asking for, or nothing where it is asking for
- * none — which means keep what is stored.
+ * The filled-in values an edit is asking for, and which of the two names it
+ * asked under — or nothing at all, which means keep what is stored.
  *
  * The two names are one thing said at two grains, so exactly one may be used.
  * Refusing rather than ranking them: a precedence rule would quietly decide
  * which of two lists somebody meant, and the only honest answer is to ask.
+ *
+ * Which name was used travels on, because it decides one more thing that cannot
+ * be settled until the stored config has been read — see `wouldLoseAssertions`.
  */
-function valuesIn(changes: GraderChanges): GraderConfigInput | undefined {
+type AskedValues = {
+  /** `params` is one filled-in set; `config` is the whole list. */
+  readonly under: "params" | "config";
+  readonly values: GraderConfigInput;
+};
+
+function valuesIn(changes: GraderChanges): AskedValues | undefined {
   if (changes.params !== undefined && changes.config !== undefined) {
     throw new UnprocessableInputError(
       `an edit says a grader's filled-in values once: "params" is the entry's ` +
@@ -596,8 +654,45 @@ function valuesIn(changes: GraderChanges): GraderConfigInput | undefined {
         `whichever fits and not both.`,
     );
   }
-  if (changes.params !== undefined) return oneFilledInSet(changes.params);
-  return changes.config;
+  if (changes.params !== undefined) {
+    return { under: "params", values: oneFilledInSet(changes.params) };
+  }
+  if (changes.config !== undefined) {
+    return { under: "config", values: changes.config };
+  }
+  return undefined;
+}
+
+/**
+ * Whether replacing a copy's values with **one filled-in set** would quietly
+ * drop assertions it is holding.
+ *
+ * `params` is the form asked once, so it can only ever say one assertion. On a
+ * copy that holds one — every copy the product can make today, because Use
+ * writes exactly one set or none — that is a complete replacement and nothing
+ * is lost. On a copy holding two it is a truncation, and a silent one twice
+ * over: the second bound stops being judged, *and* the edit mints a version
+ * recording the loss as though somebody had asked for it.
+ *
+ * Nothing in the product can build such a copy yet — only `config` can, and no
+ * door outside this module offers it. The refusal is here because that changes
+ * the moment either re-grade or custom authoring lands, and a screen filling
+ * one set into a two-assertion copy is exactly the shape that would then arrive.
+ * It names `config`, which is the way to say the whole list on purpose.
+ */
+function wouldLoseAssertions(
+  asked: AskedValues,
+  stored: GraderConfig,
+): string | undefined {
+  if (asked.under !== "params" || stored.assertions.length <= 1) {
+    return undefined;
+  }
+  return (
+    `this grader holds ${stored.assertions.length} assertions, and "params" ` +
+    `is the entry's form filled in once — sending it would replace all of ` +
+    `them with that one and mint a version saying the rest were never there. ` +
+    `Send "config" with every assertion this grader should keep.`
+  );
 }
 
 /**
@@ -911,7 +1006,7 @@ export async function editGrader(
   // Which of the two names carried the values is settled before anything is
   // read; what those values may hold is the entry's business and is checked
   // below, inside the transaction, by the code Use goes through.
-  const written = valuesIn(changes);
+  const asked = valuesIn(changes);
 
   return db().transaction(async (tx) => {
     const [locked] = await tx
@@ -948,12 +1043,21 @@ export async function editGrader(
       currentVersion.id,
     );
 
+    // The one refusal that needs the stored config in front of it: whether the
+    // grain this edit spoke in can say everything this copy is holding.
+    const losing =
+      asked === undefined ? undefined : wouldLoseAssertions(asked, stored);
+    if (losing !== undefined) throw new UnprocessableInputError(losing);
+
     // Omitted means unchanged, and what given values are checked against is the
     // entry this copy points at rather than anything the caller said.
     const config =
-      written === undefined
+      asked === undefined
         ? stored
-        : validConfig(await definitionOf(tx, auth, current.libraryId), written);
+        : validConfig(
+            await definitionOf(tx, auth, current.libraryId),
+            asked.values,
+          );
     const nextJudgeModel =
       judgeModel === undefined ? storedJudgeModel : judgeModel;
 

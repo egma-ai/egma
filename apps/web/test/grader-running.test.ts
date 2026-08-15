@@ -304,14 +304,41 @@ describe("changing a running copy and switching one off", () => {
    * verdict was decided by. Somebody who did not know that would read a
    * tightened bound as a rewriting of history.
    */
-  it("says that changing a value starts a version and changes nothing already judged", () => {
+  it("says that changing a value starts a version", () => {
     expect(copy.EDIT.lead.toLowerCase()).toContain("version");
-    expect(copy.EDIT.saved("Latency").toLowerCase()).toContain("unchanged");
+  });
+
+  /**
+   * **The claim after a save has to be the narrow one, and this is the case
+   * that keeps it narrow.**
+   *
+   * "What has already been judged is unchanged" is true of the verdict rows and
+   * false of the runs they add up to — and it was being shown at the exact
+   * moment somebody had turned `required` off, which is when it was most wrong.
+   * Whether a grader can fail a run is read fresh on every page, so a run that
+   * failed on this one alone reads as passed from that moment.
+   */
+  it("claims only that no verdict was rewritten, never that nothing changed", () => {
+    const saved = copy.EDIT.saved("Latency").toLowerCase();
+    expect(saved).toContain("verdict");
+    expect(saved).not.toContain("is unchanged");
+    expect(saved).not.toContain("nothing already judged");
   });
 
   it("says what required means, in both positions", () => {
     expect(copy.EDIT.requiredOn).toContain("cannot pass");
     expect(copy.EDIT.requiredOff.toLowerCase()).toContain("diagnostic");
+  });
+
+  /**
+   * And both positions warn about the one thing a live setting does reach: the
+   * verdicts stay put, and what they add up to does not.
+   */
+  it("says that turning the required flag round re-counts runs already read", () => {
+    for (const said of [copy.EDIT.requiredOn, copy.EDIT.requiredOff]) {
+      expect(said.toLowerCase()).toContain("rewrites no verdict");
+      expect(said.toLowerCase()).toContain("add up to");
+    }
   });
 
   /**

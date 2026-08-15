@@ -159,6 +159,12 @@ export default function RunningGradersPage() {
     void read();
   };
 
+  // Built once for the whole table rather than once per row. It was a module
+  // constant before the last column started pressing something, and the only
+  // thing that made it a function is a setter this component owns — which does
+  // not change while it renders.
+  const columns = columnsOf(setOpen);
+
   return (
     <AppShell active="graders">
       <ProductPage wide>
@@ -222,8 +228,8 @@ export default function RunningGradersPage() {
               </div>
               <div className={styles.tableWrap}>
                 <table className={styles.dataTable}>
-                  <thead><tr>{columnsOf(setOpen).map(([heading]) => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
-                  <tbody>{state.rows.map((row) => <tr key={row.id}>{columnsOf(setOpen).map(([heading, fill]) => <td key={heading}><span className={styles.tableCell}>{fill(row)}</span></td>)}</tr>)}</tbody>
+                  <thead><tr>{columns.map(([heading]) => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
+                  <tbody>{state.rows.map((row) => <tr key={row.id}>{columns.map(([heading, fill]) => <td key={heading}><span className={styles.tableCell}>{fill(row)}</span></td>)}</tr>)}</tbody>
                 </table>
               </div>
               <div className={styles.mobileRows}>

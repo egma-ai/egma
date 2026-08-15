@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { EDIT, SCOPES, SWITCH_OFF } from "../../../lib/grader-running-copy.ts";
+import { wrote } from "../../../lib/write.ts";
 import { Field, Notice, styles } from "../../ui.tsx";
 import {
   asWritten,
@@ -32,9 +33,17 @@ import {
  * **One request carries both kinds of change**, and the platform decides which
  * happened. Values are what a verdict was decided by, so changing one starts
  * the next version and leaves the one behind it alone; a name, a scope, a rate
- * and the `required` flag change nothing already judged, so they are written in
- * place. A browser page holding a copy of that rule would be a second opinion
- * about it, and the version number on the answer is how this one finds out.
+ * and the `required` flag rewrite no verdict, so they are written in place. A
+ * browser page holding a copy of that rule would be a second opinion about it,
+ * and the version number on the answer is how this one finds out.
+ *
+ * **`required` is the one that reaches a page about the past anyway**, and the
+ * form says so beside the control rather than in a tooltip. It rewrites nothing;
+ * it moves this grader's verdicts between the lane that decides a run and the
+ * lane that only reports, and that is worked out fresh every time somebody opens
+ * a result — so a run that failed on this grader alone reads as passed from the
+ * moment the box is unticked. Saying "nothing already judged changes" here would
+ * be the screen telling somebody the opposite of what they see next.
  */
 
 /** One running copy, as this screen reads one off the list. */
@@ -103,36 +112,28 @@ export function EditForm({
     setBusy(true);
     setRefusal(null);
 
-    try {
-      const answer = await fetch(`/api/graders/${copy.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name,
-          // Null rather than an empty string, because emptying a note is a
-          // thing somebody means to do and the platform reads null as it.
-          description: description.trim() === "" ? null : description,
-          scope,
-          required,
-          production_sample_rate: Number(sampleRate),
-          ...(params.length === 0 ? {} : { params: asWritten(params, filled) }),
-        }),
-      });
+    const refused = await wrote({
+      url: `/api/graders/${copy.id}`,
+      method: "PATCH",
+      body: {
+        name,
+        // Null rather than an empty string, because emptying a note is a thing
+        // somebody means to do and the platform reads null as it.
+        description: description.trim() === "" ? null : description,
+        scope,
+        required,
+        production_sample_rate: Number(sampleRate),
+        ...(params.length === 0 ? {} : { params: asWritten(params, filled) }),
+      },
+      unreachable: EDIT.unreachable,
+    });
+    setBusy(false);
 
-      if (!answer.ok) {
-        const said = (await answer.json().catch(() => ({}))) as {
-          message?: string;
-        };
-        setRefusal(said.message ?? EDIT.unreachable);
-        return;
-      }
-
-      onSaved(name);
-    } catch {
-      setRefusal(EDIT.unreachable);
-    } finally {
-      setBusy(false);
+    if (refused !== null) {
+      setRefusal(refused);
+      return;
     }
+    onSaved(name);
   }
 
   return (
@@ -265,25 +266,18 @@ export function SwitchOffPanel({
     setBusy(true);
     setRefusal(null);
 
-    try {
-      const answer = await fetch(`/api/graders/${copy.id}`, {
-        method: "DELETE",
-      });
+    const refused = await wrote({
+      url: `/api/graders/${copy.id}`,
+      method: "DELETE",
+      unreachable: SWITCH_OFF.unreachable,
+    });
+    setBusy(false);
 
-      if (!answer.ok) {
-        const said = (await answer.json().catch(() => ({}))) as {
-          message?: string;
-        };
-        setRefusal(said.message ?? SWITCH_OFF.unreachable);
-        return;
-      }
-
-      onSwitchedOff(copy.name);
-    } catch {
-      setRefusal(SWITCH_OFF.unreachable);
-    } finally {
-      setBusy(false);
+    if (refused !== null) {
+      setRefusal(refused);
+      return;
     }
+    onSwitchedOff(copy.name);
   }
 
   return (
