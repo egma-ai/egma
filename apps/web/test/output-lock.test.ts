@@ -84,6 +84,53 @@ describe("holding the web output directory", () => {
   });
 });
 
+describe("several processes racing for it at once", () => {
+  /**
+   * The one case the six above cannot make: contention.
+   *
+   * Every sequential test passes against a lock that excludes nobody, because
+   * a lock is only wrong in the moment two processes want it. So this starts
+   * real processes, on a path nothing has touched, and asks the only question
+   * that matters — was anybody ever inside it at the same time as somebody
+   * else. `support/race-for-the-lock.ts` is the child, and it witnesses with a
+   * marker file of its own rather than with the lock it is testing.
+   */
+  it("lets exactly one of them in at a time", async () => {
+    const lockPath = await aLockPath();
+    const marker = path.join(path.dirname(lockPath), "inside");
+    const RACERS = 4;
+    const ATTEMPTS = 40;
+
+    const raced = await Promise.all(
+      Array.from({ length: RACERS }, async () => {
+        const child = spawn(process.execPath, [
+          path.join(import.meta.dirname, "support/race-for-the-lock.ts"),
+          lockPath,
+          marker,
+          String(ATTEMPTS),
+        ]);
+        let said = "";
+        child.stdout.on("data", (chunk: Buffer) => {
+          said += chunk.toString("utf8");
+        });
+        const code = await new Promise((exited) => child.on("exit", exited));
+        expect(code, `a racer exited with ${code}`).toBe(0);
+        return JSON.parse(said) as {
+          acquired: number;
+          violations: readonly string[];
+        };
+      }),
+    );
+
+    expect(raced.flatMap((racer) => racer.violations)).toEqual([]);
+    // A lock nobody could ever take would also report no violations.
+    expect(
+      raced.reduce((total, racer) => total + racer.acquired, 0),
+    ).toBeGreaterThan(RACERS);
+    expect(existsSync(lockPath)).toBe(false);
+  }, 60_000);
+});
+
 describe("running a command under the lock", () => {
   const wrote = (marker: string): readonly string[] => [
     "-e",

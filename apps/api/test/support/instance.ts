@@ -212,17 +212,22 @@ export async function startInstance(
   }
   await app.listen({ host: "127.0.0.1", port: apiPort });
 
-  // The development server below compiles into `apps/web/.next`, which is the
-  // directory `next build` writes too. Taking the lock here is what makes "a
-  // production web build and the browser test never run at once in the same
-  // checkout" true rather than merely asked for — whoever is second is refused
-  // with a sentence naming the other, instead of both writing over each other.
-  const webOutput: WebOutputLock | undefined = withPages
-    ? holdWebOutputLock(THE_REAL_BROWSER_TEST)
-    : undefined;
+  let webOutput: WebOutputLock | undefined;
+  let web: ChildProcess | undefined;
 
-  const web: ChildProcess | undefined = withPages
-    ? (spawn(
+  try {
+    if (withPages) {
+      // The development server below compiles into `apps/web/.next`, which is
+      // the directory `next build` writes too. Taking the lock here is what
+      // makes "a production web build and the browser test never run at once
+      // in the same checkout" true rather than merely asked for — whoever is
+      // second is refused with a sentence naming the other, instead of both
+      // writing over each other. That refusal is inside the `try` because by
+      // now this instance has a Postgres, a ClickHouse and a listening API to
+      // its name, and every one of them has to go back.
+      webOutput = holdWebOutputLock(THE_REAL_BROWSER_TEST);
+
+      web = spawn(
         path.join(WEB, "node_modules/.bin/next"),
         ["dev", "--port", String(webPort), "--hostname", "127.0.0.1"],
         {
@@ -234,34 +239,42 @@ export async function startInstance(
           },
           stdio: "ignore",
         },
-      ) as ChildProcess)
-    : undefined;
+      ) as ChildProcess;
+    }
 
-  // Loudly and at once, rather than after two minutes of nothing answering.
-  let failedToStart: Error | undefined;
-  web?.on("error", (cause) => {
-    failedToStart = cause;
-  });
-  web?.on("exit", (code) => {
-    failedToStart ??= new Error(`the web application exited with ${code}`);
-  });
+    // Loudly and at once, rather than after two minutes of nothing answering.
+    let failedToStart: Error | undefined;
+    web?.on("error", (cause) => {
+      failedToStart = cause;
+    });
+    web?.on("exit", (code) => {
+      failedToStart ??= new Error(`the web application exited with ${code}`);
+    });
 
-  // The pages forward `/api/…` to the API, and the API's own health check is
-  // at `/health` — so which address is waited on depends on which of the two
-  // is answering at the origin.
-  try {
+    // The pages forward `/api/…` to the API, and the API's own health check
+    // is at `/health` — so which address is waited on depends on which of the
+    // two is answering at the origin.
     await answers(
       withPages ? `${origin}/api/health` : `${origin}/health`,
       SETTLE,
       () => failedToStart,
     );
   } catch (neverCameUp) {
-    // Nothing here will call `close`, so the output directory has to be handed
-    // back where it was taken. A lock left behind by a run that failed would
-    // refuse the next one for a reason that had already gone away.
+    // Nothing will call `close` on an instance that never came back, so this
+    // is the only chance to give back everything it took. The databases matter
+    // most: each one is created here and dropped there, and a run that failed
+    // halfway used to leave both behind — which is not merely untidy, because
+    // `create database` gets slower as the count climbs and the next run is
+    // then likelier to fail the same way. See
+    // `packages/db/test/support/sweep-stale-databases.ts`.
     web?.kill("SIGTERM");
     webOutput?.release();
-    await app.close();
+    await Promise.allSettled([
+      app.close(),
+      disconnect(),
+      disconnectClickHouse(),
+    ]);
+    await Promise.allSettled([database.drop(), traceStore.drop()]);
     throw neverCameUp;
   }
 

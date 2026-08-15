@@ -32,11 +32,20 @@ describe("choosing a lane", () => {
   });
 
   it("says which lane is running, by name and by what it proves", () => {
-    const said = announcement(laneNamed("fast"));
-
-    expect(said).toContain("fast");
-    expect(said).toContain(laneNamed("fast").proves);
-    expect(announcement(laneNamed("browser"))).toContain("browser");
+    // Written out rather than read back off the lane, which would be the same
+    // sentence compared with itself and could never disagree with anything.
+    expect(announcement(laneNamed("fast"))).toBe(
+      "egma test lane: fast — the unit, database, API, grader, CLI and web " +
+        "tests — no Chrome, no web application",
+    );
+    expect(announcement(laneNamed("browser"))).toBe(
+      "egma test lane: browser — the ordered real-browser journey, against a " +
+        "real Chrome, the web application, the API, PostgreSQL and ClickHouse",
+    );
+    expect(announcement(laneNamed("all"))).toBe(
+      "egma test lane: all — every fast test and the real-browser proof, in " +
+        "one run",
+    );
   });
 });
 
