@@ -1007,22 +1007,38 @@ async function runSetup(
     media_credential: media.generated ? "generated" : "existing",
   } as const;
 
-  if (platform === null || platform.setupState !== "ready" || !media.settled) {
+  // **Two things can be wrong at once, and the answer says both.** A single
+  // sentence chosen by whichever condition was tested first masks the other,
+  // and either masking is a bad trade: an operator told only about missing
+  // settings runs setup again and never learns their media containers hold a
+  // credential nothing recorded, and one told only about the media never learns
+  // the platform is still unconfigured.
+  //
+  // The media sentence goes first because it is the silent one. A missing
+  // setting is named by the readiness answer on every request and by every
+  // `self-host up`; a media pair that disagrees with the running containers is
+  // reported by nothing at all, and surfaces minutes later as an authentication
+  // refusal naming nothing about configuration.
+  const wrong = [
+    ...(media.settled ? [] : [MEDIA_DID_NOT_COME_BACK]),
+    ...(platform === null
+      ? [
+          `the settings were written but ${address} stopped answering, so egma cannot say whether this platform is configured`,
+        ]
+      : platform.setupState === "ready"
+        ? []
+        : [
+            `every answer was written and this platform still reports setup required. It is missing ${platform.setupMissing.join(
+              ", ",
+            )}. Run the same command again — it asks only for what is still absent.`,
+          ]),
+  ];
+
+  if (wrong.length > 0) {
     answer(
       options,
       mode,
-      {
-        ...done,
-        status: "incomplete",
-        reason:
-          platform === null
-            ? `the settings were written but ${address} stopped answering, so egma cannot say whether this platform is configured`
-            : platform.setupState !== "ready"
-              ? `every answer was written and this platform still reports setup required. It is missing ${platform.setupMissing.join(
-                  ", ",
-                )}. Run the same command again — it asks only for what is still absent.`
-              : MEDIA_DID_NOT_COME_BACK,
-      },
+      { ...done, status: "incomplete", reason: wrong.join(" ") },
       allSecrets,
     );
     return SELF_HOST_EXIT.refused;

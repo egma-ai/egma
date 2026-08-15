@@ -327,6 +327,36 @@ describe("egma self-host setup", () => {
     expect(run.stdout).toContain("Run egma self-host up");
   });
 
+  it("says both when the settings are short and the media containers are wrong", async () => {
+    // Two things wrong at once, and either one chosen alone masks the other.
+    // Told only about missing settings, an operator runs setup again and never
+    // learns their media containers hold a credential nothing recorded; told
+    // only about the media, they never learn the platform is unconfigured.
+    platform = await startPlatform();
+    await workspace.signIn(platform);
+    await writeFile(workspace.dockerShim, "#!/bin/sh\nexit 1\n");
+    await chmod(workspace.dockerShim, 0o755);
+
+    const run = await runSetup(["--apply", "--yes", "--json"], {
+      EGMA_PERSONA_MODEL_API_KEY: MODEL_KEY,
+      EGMA_PERSONA_STT_API_KEY: LISTENING_KEY,
+      EGMA_PERSONA_TTS_API_KEY: SPEAKING_KEY,
+    });
+
+    const answered = JSON.parse(run.stdout) as Record<string, unknown>;
+    expect(answered.status).toBe("incomplete");
+    expect(run.code).toBe(4);
+
+    const reason = String(answered.reason);
+    // The silent one first: a missing setting is named by readiness on every
+    // request, and a media pair that disagrees is reported by nothing at all.
+    expect(reason.indexOf("did not come back")).toBeLessThan(
+      reason.indexOf("still reports setup required"),
+    );
+    expect(reason).toContain("Run egma self-host up");
+    expect(reason).toContain("the carrier trunk");
+  });
+
   it("refuses, naming the address, when the platform cannot be reached", async () => {
     platform = await startPlatform();
     await workspace.signIn(platform);
