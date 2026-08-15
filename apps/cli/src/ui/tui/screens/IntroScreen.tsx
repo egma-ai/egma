@@ -5,6 +5,12 @@
  * developer's own coding agent will be driven and that every action it takes
  * will be shown. Consent is earned afterwards by showing everything, not by
  * asking again.
+ *
+ * It also names the egma this walk will use, and how to choose another. A bare
+ * command in a repository that names no platform reaches egma's own, so which
+ * egma this is stopped being something the developer chose and started being
+ * something they have to be told — and told here, on the screen that takes the
+ * keystroke, before that address has been asked anything at all.
  */
 
 import { Box, Text, useInput } from "ink";
@@ -12,6 +18,16 @@ import { Box, Text, useInput } from "ink";
 import { FACTS } from "../../../wizard/facts.ts";
 import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 import type { WizardState } from "../state.ts";
+
+/**
+ * How to use a different egma, in the two ways that really select one.
+ *
+ * `EGMA_TEST_DEFAULT_URL` is not among them and never will be: it is a test
+ * seam that stands in for the built-in address, not a way for a developer to
+ * choose a platform.
+ */
+export const ANOTHER_PLATFORM =
+  "For a different egma, quit and run it again with --url <address>, or set EGMA_URL.";
 
 export type IntroScreenProps = {
   readonly state: WizardState;
@@ -48,6 +64,13 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
       <Text>egma tells it to change nothing. Your code stays on this machine.</Text>
       <Box height={1} />
       <Text>Every action your coding agent takes appears below as it happens.</Text>
+      {state.platform === null ? null : (
+        <>
+          <Box height={1} />
+          <Text>{`This uses ${state.platform}. Nothing has been sent to it yet.`}</Text>
+          <Text dimColor>{ANOTHER_PLATFORM}</Text>
+        </>
+      )}
       <Box height={1} />
       <Text dimColor>{hintBar(bindings)}</Text>
     </Box>
