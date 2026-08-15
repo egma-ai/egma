@@ -20,8 +20,8 @@ const IDENTIFIER_SQL_TYPE = 'text COLLATE "C"';
  * with the factory.
  *
  * A table whose identity is somebody else's key pins that key's prefix, which
- * is why `organization_settings` pins `org_` and both junctions naming what a
- * test version points at pin `tstv_`.
+ * is why `organization_settings` pins `org_` and the junction naming who calls
+ * about a test version pins `tstv_`.
  */
 const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   user: "usr",
@@ -55,13 +55,12 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // The project's default judge, keyed by the project it is the judge for.
   judge_configuration: "prj",
   mock_tool: "mck",
-  // The scope's junction, pinning the mock tool it narrows — the shape both
-  // test junctions have, for the same reason.
+  // The scope's junction, pinning the mock tool it narrows — the shape the
+  // persona junction has, for the same reason.
   mock_tool_agent: "mck",
   test: "tst",
   test_version: "tstv",
   test_persona: "tstv",
-  test_grader: "tstv",
   run: "run",
   run_event: "run",
   simulation: "sim",

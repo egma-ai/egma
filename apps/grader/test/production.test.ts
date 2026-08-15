@@ -70,14 +70,10 @@ describe("a production trace whose root span closes", () => {
       world,
       aLatencyCopy({ name: "Simulations only", scope: "simulations" }),
     );
-    // Named by a test's grader array, which is a decision about one scenario. A
-    // real caller is in nobody's scenario, so naming it there must not reach
-    // production however loudly the array says so.
-    const attached = await seedGrader(
-      world,
-      aLatencyCopy({ name: "This scenario only", scope: "simulations" }),
-    );
-    await seedTest(world, [attached]);
+    // And a test on the project, which is now the whole of what a test can be
+    // to this side: a scenario nobody here is in. There is no array on it to
+    // drag a grader across, because a test names none at all.
+    await seedTest(world);
 
     const { traceId } = await conductProductionTrace(world);
     const verdicts = await verdictsOn(world, traceId, 2);
@@ -88,7 +84,6 @@ describe("a production trace whose root span closes", () => {
     // Not skipped, not errored — absent. A grader scoped to simulations was
     // never about this conversation, so there is no row for it at all.
     expect(judged.has(testingOnly)).toBe(false);
-    expect(judged.has(attached)).toBe(false);
     expect(judged.size).toBe(2);
   });
 
@@ -104,7 +99,7 @@ describe("a production trace whose root span closes", () => {
     // gives this: the copy every project is created with is scoped to
     // simulations, so a person can see the decision and change it, rather than
     // it living in a branch nobody can point at.
-    await seedTest(world, []);
+    await seedTest(world);
 
     const { traceId } = await conductProductionTrace(world);
     const verdicts = await verdictsOn(world, traceId);

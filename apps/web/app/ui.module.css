@@ -189,6 +189,11 @@
 .judgmentCard[data-verdict="failed"] .verdictChip, .judgmentCard[data-verdict="errored"] .verdictChip { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); color: var(--bad); }
 .judgmentCard > p { margin: 10px 0 8px; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
 .judgmentCard > small { color: var(--faint); font-family: var(--mono); font-size: 9px; }
+/* The lane, where a judgment is in the one that only reports. Deliberately
+   quiet and never coloured by the verdict: a diagnostic's failure is
+   information rather than a problem, and painting it red would say the
+   opposite of what the flag means. */
+.judgmentHeading > span.laneChip { margin-left: auto; flex: 0 0 auto; padding: 3px 7px; border: 1px dashed var(--border); border-radius: 999px; color: var(--faint); font-family: var(--mono); font-size: 9px; text-transform: uppercase; }
 
 .runFacts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--border); }
 .runFacts .contextFact { min-width: 0; padding: 19px 18px; border-right: 1px solid var(--border); }
@@ -213,6 +218,11 @@
 .graderCard small { color: var(--faint); font-family: var(--mono); font-size: 9px; }
 .graderCard[data-verdict="passed"] { border-color: color-mix(in srgb, var(--good) 32%, var(--border)); }
 .graderCard[data-verdict="failed"], .graderCard[data-verdict="errored"] { border-color: color-mix(in srgb, var(--bad) 36%, var(--border)); }
+/* A diagnostic grader keeps its verdict word and loses its colour, whatever it
+   said. Nothing in this lane can fail the run, so a red border here would be a
+   page shouting about something that changed no outcome. */
+.graderCard[data-lane="diagnostic"] { border-style: dashed; border-color: var(--border); }
+.graderCard[data-lane="diagnostic"] .verdictChip { border-color: var(--border); color: var(--muted); }
 .graderCard[data-verdict="passed"] .verdictChip { border-color: color-mix(in srgb, var(--good) 40%, var(--border)); color: var(--good); }
 .graderCard[data-verdict="failed"] .verdictChip, .graderCard[data-verdict="errored"] .verdictChip { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); color: var(--bad); }
 .runSimulations { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: clip; }

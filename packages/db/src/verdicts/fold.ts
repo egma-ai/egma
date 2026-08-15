@@ -36,6 +36,14 @@
  * **Who speaks.** One judged assertion may have several rows — an older grading
  * and a newer one — and exactly one of them counts. The rest stay in the record,
  * underneath, which is what makes them worth keeping at all.
+ *
+ * **Which rows decide.** A running copy carries `required`, and `false` makes it
+ * a **diagnostic**: it is judged exactly as a blocking copy is, writes exactly
+ * the same rows, and reports its own fraction — and it can never fail a test or
+ * a run. So the rows arrive in two lanes, split by `verdictLanes` before
+ * anything is folded, and the answer is the fold over the required lane alone.
+ * A diagnostic that could move the headline would not be a diagnostic; a
+ * diagnostic whose rows were never written would diagnose nothing.
  */
 
 /** What a grader can say about one assertion. */
@@ -107,8 +115,72 @@ export type FoldedOutcome = {
 
 export type GraderOutcome = {
   readonly graderId: string;
+  /**
+   * Whether this grader's rows can fail anything — the copy's `required` flag as
+   * it stands, not as it stood when the judgment was made.
+   *
+   * Live rather than pinned on purpose. Turning a blocker into a diagnostic
+   * changes nothing about any judgment already made; it changes what the project
+   * lets a failure do, and that answer has to be the one in force at the moment
+   * somebody reads the page. It is the same reason the flag lives on the copy
+   * rather than on its versions.
+   */
+  readonly required: boolean;
   readonly outcome: FoldedOutcome;
 };
+
+/* ------------------------------------------------------------------- *
+ * Which rows decide, and which only report.
+ * ------------------------------------------------------------------- */
+
+/**
+ * The running copies that only report, by id: every `required: false` one.
+ *
+ * **Named by exception, so the safe answer is the default.** A grader this set
+ * has never heard of is required, which is what an empty set means and what
+ * keeps `foldVerdicts` over a bare pile of rows meaning what it always meant. A
+ * set of the *blocking* ones would have the opposite failure mode: a grader
+ * missing from it — deleted since, unreadable, forgotten by a caller — would
+ * quietly stop being able to fail anything, and a check nobody can fail is the
+ * exact false trust this product exists to kill.
+ */
+export type Diagnostics = ReadonlySet<string>;
+
+/** Everything decides. What a caller that knows of no diagnostic copy passes. */
+const NOTHING_ONLY_REPORTS: Diagnostics = new Set<string>();
+
+/** The rows of one grain, in the two lanes they are folded in. */
+export type VerdictLanes<Row extends FoldableVerdict> = {
+  /** From copies that can fail a test. Folding these is the answer. */
+  readonly required: readonly Row[];
+  /** From copies that only report. Folding these decides nothing. */
+  readonly diagnostic: readonly Row[];
+};
+
+/**
+ * The rows split by whether the copy that wrote them can fail anything.
+ *
+ * **The split happens before the fold rather than inside it**, so that the one
+ * algebra stays one algebra: `foldVerdicts` answers about whatever pile it is
+ * handed and never asks whose rows they are, and every question about `required`
+ * is settled here, once, in the one place a reader has to look.
+ *
+ * Both lanes come back in the order they arrived, so what counted can be shown
+ * beside what exists without either being reordered.
+ */
+export function verdictLanes<Row extends FoldableVerdict>(
+  rows: readonly Row[],
+  diagnostics: Diagnostics = NOTHING_ONLY_REPORTS,
+): VerdictLanes<Row> {
+  const required: Row[] = [];
+  const diagnostic: Row[] = [];
+
+  for (const row of rows) {
+    (diagnostics.has(row.graderId) ? diagnostic : required).push(row);
+  }
+
+  return { required, diagnostic };
+}
 
 /* ------------------------------------------------------------------- *
  * Who speaks for a judged assertion.
@@ -272,12 +344,18 @@ export function foldVerdicts(rows: readonly FoldableVerdict[]): FoldedOutcome {
  * only that something did — and with which fraction of its assertions passed,
  * which is the diagnosis binary scoring would otherwise throw away.
  *
+ * **Every grader is here, diagnostics included.** A diagnostic's fraction is the
+ * whole reason somebody switched it on, so leaving it out of this list would
+ * make it a check that judges in silence. Each entry says which lane it is in
+ * instead, and a reader shows the two apart rather than adding them up.
+ *
  * Graders come back in id order, which is arbitrary and deterministic — the
  * order to show them in is the authored one, and that lives with the graders
  * rather than with their verdicts.
  */
 export function foldVerdictsByGrader(
   rows: readonly FoldableVerdict[],
+  diagnostics: Diagnostics = NOTHING_ONLY_REPORTS,
 ): readonly GraderOutcome[] {
   const byGrader = new Map<string, FoldableVerdict[]>();
   for (const row of rows) {
@@ -290,6 +368,7 @@ export function foldVerdictsByGrader(
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([graderId, graderRows]) => ({
       graderId,
+      required: !diagnostics.has(graderId),
       outcome: foldVerdicts(graderRows),
     }));
 }

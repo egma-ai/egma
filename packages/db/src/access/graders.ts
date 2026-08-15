@@ -5,7 +5,7 @@ import {
   MEASURE_CATALOG_DOCUMENT,
   MEASURE_CATALOG_VERSION,
 } from "@egma/simulation-contract";
-import { and, desc, eq, isNull, lt, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import {
@@ -26,7 +26,6 @@ import {
 } from "../schema/graders.ts";
 import type { AuthContext } from "./context.ts";
 import {
-  GraderNamedByTestsError,
   ProjectOutsideOrganizationError,
   UnknownGraderLibraryEntryError,
   UnprocessableInputError,
@@ -34,7 +33,6 @@ import {
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
-import { liveTestsNamingGrader } from "./tests.ts";
 import { inActingProject, within } from "./within.ts";
 
 /**
@@ -996,6 +994,70 @@ export async function listGraders(
 }
 
 /**
+ * What somebody reading a verdict row needs to know about the copy that wrote
+ * it, and nothing else about that copy.
+ */
+export type GraderFacts = {
+  /** The library entry it is a copy of — which says what its keys mean. */
+  readonly libraryId: string;
+  /** `false` makes it a diagnostic: judged, reported, never able to fail. */
+  readonly required: boolean;
+};
+
+/**
+ * These copies, by id, as a reader of their verdicts needs them.
+ *
+ * **Read live, and never off the verdict row.** `required` is a live setting on
+ * the copy rather than judged content on its versions, so a project that turns a
+ * blocker into a diagnostic this morning reads its whole history that way from
+ * this morning on. That is the decision the flag's placement already made:
+ * nothing about the judgment changed, only what the project lets a failure do.
+ * The pointer is read live for the opposite reason — it can never be edited at
+ * all, so there is no other value it could have.
+ *
+ * **Deliberately no deleted filter.** A deleted copy's verdicts are still shown
+ * — its versions outlive it so that they stay interpretable — and a diagnostic
+ * that somebody switched off must not start failing a run's headline the moment
+ * it goes. Whether the copy is still running is not what this question asks.
+ *
+ * **A copy this cannot see is simply absent**, and every caller reads that
+ * absence the safe way: a copy it cannot see is required, and an unresolvable
+ * key stays a key.
+ * Another customer's id, or one the credential's project narrowing hides, comes
+ * back with nothing rather than with a guess.
+ *
+ * Exported to the module, not from the package: this answers questions the
+ * verdict read and the assertion read have to ask, and the grader table has one
+ * owner, which is this file.
+ */
+export async function graderFacts(
+  auth: AuthContext,
+  graderIds: readonly string[],
+): Promise<ReadonlyMap<string, GraderFacts>> {
+  const asked = [...new Set(graderIds)];
+  if (asked.length === 0) return new Map();
+
+  const rows = await db()
+    .select({
+      id: grader.id,
+      libraryId: grader.libraryId,
+      required: grader.required,
+    })
+    .from(grader)
+    .where(
+      within(
+        auth,
+        grader,
+        and(inArray(grader.id, asked), inActingProject(auth, grader)),
+      ),
+    );
+
+  return new Map(
+    rows.map(({ id, ...facts }) => [id, facts] as const),
+  );
+}
+
+/**
  * Whether this grader judges the production trace in front of it — and the
  * accumulator moved on by one trace, whatever the answer.
  *
@@ -1068,12 +1130,14 @@ export type DeletedGrader = {
  * fetches at once; the version rows stay exactly where they are, because a
  * verdict that named one must stay interpretable for as long as it is kept.
  *
- * **Refused while the current version of a live test names it**, naming every
- * test standing in the way; `GraderNamedByTestsError` says why. Historical
- * versions never block, and neither does a deleted test — the persona's rule,
- * for the persona's reason: a live test would quietly stop checking something
- * somebody wrote down, and a suite going green because a check disappeared is
- * the exact false trust this product exists to kill.
+ * **Nothing refuses this, and that is the junction's departure showing.** It
+ * used to be refused while the current version of a live test named the copy,
+ * because letting it through would leave that test quietly checking one thing
+ * fewer than it says it checks. A test names no graders now — where a copy
+ * applies is its own scope — so switching one off is one decision about the
+ * project, taken in one place, with nothing to hunt through first. Deleting the
+ * copy is exactly how a project stops being judged by it, including the seeded
+ * expected-behaviors one.
  *
  * Like Use, this refuses a credential acting in no project. An edit lands on a
  * row that already names its own project; a delete decides the grader should
@@ -1092,40 +1156,16 @@ export async function deleteGrader(
   }
 
   const deletedAt = new Date();
-  return db().transaction(async (tx) => {
-    // Locked before the tests naming it are counted, and held until this
-    // transaction ends, so nothing can come to name it between the count and
-    // the write — which a count taken on this transaction's own snapshot could
-    // not promise. The other half is the shared lock a test being written takes
-    // on this same row, which `validateNamedGraders` in `tests.ts` explains.
-    const [locked] = await tx
-      .select({ id: grader.id })
-      .from(grader)
-      .where(theGrader(auth, id))
-      .limit(1)
-      .for("update");
+  const [row] = await db()
+    .update(grader)
+    .set({ deletedAt, updatedAt: deletedAt })
+    .where(theGrader(auth, id))
+    .returning({
+      id: grader.id,
+      projectId: grader.projectId,
+      name: grader.name,
+    });
 
-    if (locked === undefined) return undefined;
-
-    const blocking = await liveTestsNamingGrader(tx, locked.id);
-    if (blocking.length > 0) {
-      throw new GraderNamedByTestsError(locked.id, blocking);
-    }
-
-    // A bare `eq` on an id that just came off the tenancy-checked row locked
-    // above, in this same transaction, so it reaches no further than that check
-    // already did — the move `editGrader` makes, for the same reason.
-    const [row] = await tx
-      .update(grader)
-      .set({ deletedAt, updatedAt: deletedAt })
-      .where(eq(grader.id, locked.id))
-      .returning({
-        id: grader.id,
-        projectId: grader.projectId,
-        name: grader.name,
-      });
-
-    if (row === undefined) throw new Error("the grader was not written");
-    return { ...row, deletedAt };
-  });
+  if (row === undefined) return undefined;
+  return { ...row, deletedAt };
 }

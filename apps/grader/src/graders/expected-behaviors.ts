@@ -1,4 +1,8 @@
-import { getSimulationTestVersion, type LibraryEntry } from "@egma/db";
+import {
+  behaviorAssertionKey,
+  getSimulationTestVersion,
+  type LibraryEntry,
+} from "@egma/db";
 
 import {
   judgeInputOf,
@@ -52,6 +56,14 @@ import { judgmentOf } from "./judged.ts";
  * The assertion key is the behavior's **position**, one-based, in the order the
  * test's author wrote them — never the sentence itself, which is read back from
  * the pinned test version when somebody looks at the row.
+ *
+ * **Its spelling is not this file's.** `behaviorAssertionKey` comes from
+ * `@egma/db`, beside the function that parses it back — because writing the key
+ * and reading it are two halves of one round trip made in two different
+ * processes, and a format each half knew for itself would be a format one of
+ * them could improve alone. A verdict row is permanent, so that fork would not
+ * show up as a bug: it would show up as a page that quietly stopped resolving
+ * last month's rows.
  *
  * A position is stable exactly as far as it needs to be. A conversation is
  * judged against the frozen test version it was *executed* against, so a test
@@ -136,7 +148,7 @@ export async function executeExpectedBehaviors(
       // the ladder, so there is nothing beside the words to read.
       const question: JudgeQuestion = { prompt, criterion: behavior, evidence };
       try {
-        return judgmentOf(behaviorKey(at), await judge.ask(question), turns);
+        return judgmentOf(behaviorAssertionKey(at), await judge.ask(question), turns);
       } catch (error) {
         // One judge call falling over is one `errored` row. Every sibling's
         // answer still lands, and this one says out loud that egma could not
@@ -189,7 +201,7 @@ async function theBehaviors(
 export async function expectedBehaviorAssertions(
   execution: Execution,
 ): Promise<readonly string[]> {
-  return (await theBehaviors(execution)).map((_, at) => behaviorKey(at));
+  return (await theBehaviors(execution)).map((_, at) => behaviorAssertionKey(at));
 }
 
 /** The definition's own words, or nothing where the entry carries none. */
@@ -198,21 +210,10 @@ function judgePromptOf(definition: LibraryEntry): string | null {
   return prompt === null || prompt.trim() === "" ? null : prompt;
 }
 
-/**
- * What the behaviors' assertion key is: the position, one-based, in the order
- * they were authored.
- *
- * Written as a function rather than as a template at each site so the string
- * every verdict row files a behavior under is decided in one place.
- */
-function behaviorKey(at: number): string {
-  return `behavior_${at + 1}`;
-}
-
 /** egma could not judge this. Never `failed`: nothing is said about the agent. */
 function couldNotJudge(at: number, rationale: string): Judgment {
   return {
-    assertion: behaviorKey(at),
+    assertion: behaviorAssertionKey(at),
     verdict: "errored",
     score: 0,
     rationale,
