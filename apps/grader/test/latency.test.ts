@@ -248,7 +248,7 @@ describe("a conversation a measure cannot be computed for", () => {
         score: 0,
       });
       expect(only?.rationale).toBe(
-        `this conversation's spans carry no ${cataloged.measure}, so there was nothing to check against 2000.`,
+        `nothing in this conversation measured ${cataloged.measure}, so there was nothing to check against 2000.`,
       );
       expect(only?.citedSpanIds).toEqual([]);
     });

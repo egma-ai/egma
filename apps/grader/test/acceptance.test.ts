@@ -272,7 +272,7 @@ describe("a latency copy", () => {
     const mine = verdicts.find((verdict) => verdict.graderId === voiceOnly);
 
     expect(mine).toMatchObject({ assertion: "assertion_1", verdict: "skipped" });
-    expect(mine?.rationale).toContain("no time_to_first_word");
+    expect(mine?.rationale).toContain("nothing in this conversation measured time_to_first_word");
 
     const read = await readVerdicts(world.auth, simulationId);
     const its = read.byGrader.find((one) => one.graderId === voiceOnly);

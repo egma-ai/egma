@@ -1,3 +1,6 @@
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+
 import {
   appendSpans,
   connectClickHouse,
@@ -403,5 +406,95 @@ describe("a conversation a measure cannot be computed for", () => {
     for (const each of notFromSpans) {
       expect(measureFromSpans(trace, each.measure)).toBeUndefined();
     }
+  });
+});
+
+/**
+ * **One computation path, asserted rather than believed.**
+ *
+ * Everything above proves this module computes the right numbers. What it
+ * cannot prove is that nothing *else* computes them too — and a second reader
+ * is precisely the failure the module exists to prevent: two answers about one
+ * conversation, with no stored number to settle the disagreement, so a page and
+ * a verdict row can quietly come to disagree about how fast an agent answered.
+ *
+ * The whole vocabulary of a measurement is the span kind the ingest door files
+ * a timing span under. Two places in egma's source may name it, for two
+ * different reasons, and a third is a drift alarm rather than a style
+ * preference: whoever adds one has to come here and say why.
+ */
+describe("the only place a measure is computed", () => {
+  const REPOSITORY = path.resolve(import.meta.dirname, "..", "..", "..");
+
+  /**
+   * The two files allowed to name the timing kind.
+   *
+   * - The **ingest door** writes it: a span arriving under egma's own emitting
+   *   scope, named for a measure the catalog says comes off a span, is filed as
+   *   `timing`. That is the one place the word is produced.
+   * - This **module** reads it, and is the one place a measurement becomes a
+   *   number.
+   */
+  const MAY_NAME_THE_TIMING_KIND = [
+    "apps/api/src/otlp/normalise.ts",
+    "packages/db/src/measures/from-spans.ts",
+  ];
+
+  async function everySourceFile(): Promise<readonly string[]> {
+    const found: string[] = [];
+
+    const walk = async (directory: string): Promise<void> => {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (entry.name === "node_modules" || entry.name === "dist") continue;
+        const here = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          // Tests may say anything: what is being guarded is what egma runs.
+          if (entry.name === "test" || entry.name === "tests") continue;
+          await walk(here);
+          continue;
+        }
+        if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+          found.push(here);
+        }
+      }
+    };
+
+    for (const root of ["apps", "packages"]) {
+      await walk(path.join(REPOSITORY, root));
+    }
+    return found;
+  }
+
+  it("is the only source file that reads a timing span, and the door is the only one that writes one", async () => {
+    const naming: string[] = [];
+    for (const file of await everySourceFile()) {
+      const source = await readFile(file, "utf8");
+      if (!/(["'])timing\1/u.test(source)) continue;
+      naming.push(path.relative(REPOSITORY, file).replaceAll(path.sep, "/"));
+    }
+
+    // A guard on the reading itself: a scan finding nothing would make this
+    // assertion pass by looking in the wrong place.
+    expect(naming.length).toBeGreaterThan(0);
+    expect(naming.sort()).toEqual([...MAY_NAME_THE_TIMING_KIND].sort());
+  });
+
+  /**
+   * And the conversion itself lives here alone. Nanoseconds on the wire,
+   * milliseconds in the catalog: a second division somewhere else is a second
+   * opinion about what a measurement is, and the half-millisecond that a
+   * whole-number division floors away is exactly the kind of disagreement
+   * nobody notices until a bound is argued about.
+   */
+  it("holds the only nanosecond-to-millisecond conversion a measure goes through", async () => {
+    const source = await readFile(
+      path.join(REPOSITORY, "packages/db/src/measures/from-spans.ts"),
+      "utf8",
+    );
+    expect(source).toContain("NANOSECONDS_PER_MILLISECOND");
+    expect(
+      [...source.matchAll(/NANOSECONDS_PER_MILLISECOND/gu)],
+      "the conversion is declared once and used once",
+    ).toHaveLength(2);
   });
 });

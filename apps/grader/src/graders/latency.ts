@@ -116,7 +116,10 @@ export function executeLatency(execution: Execution): readonly Judgment[] {
         // its agent does not emit.
         verdict: "skipped",
         score: 0,
-        rationale: `this conversation's spans carry no ${asked.metric}, so there was nothing to check against ${asked.bound}.`,
+        // Said in the words a person reads a verdict in — a rationale lands on
+        // a page, so it names what was measured rather than where egma keeps
+        // the measurement.
+        rationale: `nothing in this conversation measured ${asked.metric}, so there was nothing to check against ${asked.bound}.`,
         citedSpanIds: [],
       };
     }
@@ -127,10 +130,11 @@ export function executeLatency(execution: Execution): readonly Judgment[] {
       verdict: held ? "passed" : "failed",
       score: held ? 1 : 0,
       rationale: rationaleFor(asked, measured, worst.value, held),
-      // The span the deciding measurement happened in, by its own id — which is
-      // what the verdict row's column is for, and what lets a reader open the
-      // one measurement this judgment is about.
-      citedSpanIds: [worst.spanId],
+      // Where the deciding measurement happened, by its own id — which is what
+      // the verdict row's column is for, and what lets a reader open the one
+      // measurement this judgment is about. Cited only where there is one to
+      // cite: an empty string in the list would be a reference to nothing.
+      citedSpanIds: worst.spanId === "" ? [] : [worst.spanId],
     };
   });
 }
