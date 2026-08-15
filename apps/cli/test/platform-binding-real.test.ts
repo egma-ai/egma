@@ -194,10 +194,14 @@ it("refuses a repository bound to another real local platform before sending its
 
     expect(result.code).toBe(4);
     expect(result.stdout).toContain("status: refused");
-    expect(result.stdout).toContain("No repository identifiers were sent");
+    expect(result.stdout).toContain("no repository identifiers were sent");
     expect(result.stderr).toContain(firstIdentity.instance_id);
     expect(result.stderr).toContain(secondIdentity.instance_id);
-    expect(result.stderr).toContain("No repository identifiers were sent");
+    expect(result.stderr).toContain("no repository identifiers were sent");
+    // The move this refusal teaches goes to the error stream whole. The output
+    // stream stays one fact per line, which is what `--help` promises of it.
+    expect(result.stderr).toContain("To move this repository to another platform");
+    expect(result.stdout.split("\n")).toHaveLength(3);
 
     const identifierBearing = observedBySecond.filter((request) => {
       const shown = JSON.stringify(request);
@@ -232,7 +236,10 @@ it("refuses a repository bound to another real local platform before sending its
     expect(elsewhere.stdout).toContain("status: refused");
     expect(elsewhere.stderr).toContain(firstIdentity.origin);
     expect(elsewhere.stderr).toContain(secondIdentity.origin);
-    expect(elsewhere.stderr).toContain("No repository identifiers were sent");
+    expect(elsewhere.stderr).toContain("no repository identifiers were sent");
+    // Naming another platform on the command line is a developer saying they
+    // want to move, so this refusal teaches the whole move too.
+    expect(elsewhere.stderr).toContain("To move this repository to another platform");
     expect(observedBySecond).toEqual([]);
   } finally {
     await first?.close();
@@ -245,10 +252,12 @@ it("refuses a repository bound to another real local platform before sending its
  * The other half of the safety rule, and the one a self-hoster meets by
  * accident: the platform this repository is bound to is simply not running.
  *
- * The tempting behaviour is to carry on with Egma Cloud, and it is the one
- * failure this ticket exists to make impossible — a repository full of
- * local-platform identifiers would start posting them at a platform that has
- * never seen them. So the command stops, names the platform it wanted, and says
+ * The tempting behaviour is to carry on with egma's own hosted platform — and
+ * now that there is one to carry on with, this is the failure that rule exists
+ * to make impossible — a repository full of local-platform identifiers would
+ * start posting them at a platform that has never seen them. There is a real
+ * fall-back step below the binding now, and a bound repository still never
+ * takes it. So the command stops, names the platform it wanted, and says
  * what to do. A second real platform is left running throughout, standing in
  * for every platform this machine could have wandered to, and it must see
  * nothing at all.
@@ -361,7 +370,7 @@ it("refuses when the bound real platform is down, and reaches no other platform"
     expect(result.stdout).toContain("status: unreachable");
     expect(result.stderr).toContain(boundIdentity.instance_id);
     expect(result.stderr).toContain(boundOrigin);
-    expect(result.stderr).toContain("Egma Cloud was not used");
+    expect(result.stderr).toContain("egma did not fall back to its own platform");
     expect(result.stderr).toContain("no repository identifiers were sent");
 
     // The platform that is up saw nothing: not a request carrying an

@@ -97,14 +97,25 @@ async function register(type = "retell"): Promise<Registered> {
   return { agentId: body.agent.id, connectionId: body.connection.id };
 }
 
-/** The folder, pointing at what was registered, as connect would have left it. */
+/**
+ * The folder, pointing at what was registered, as connect would have left it.
+ *
+ * With the binding, because that is what connect really writes: it binds the
+ * repository at the moment before it registers anything, so an id under `agent`
+ * or `connection` never exists in this file without the platform block above it
+ * naming who issued it. A folder holding one and not the other is the
+ * half-applied move, and egma refuses to resolve a platform from it.
+ */
 async function makeFolder(registered: Registered | null): Promise<void> {
   const made = await createEgmaFolder({ repository: workspace.dir });
   // Written rather than passed to the maker, because the maker deliberately
   // never rewrites a config that is already there — and a check that changes
   // what the folder points at is exactly the thing that rule protects against.
   await writeConfig(made.paths.config, {
-    platform: null,
+    platform:
+      registered === null
+        ? null
+        : { origin: platform.url, instance: platform.instanceId },
     agent: registered === null ? null : { name: "order-line", id: registered.agentId },
     connection: registered === null ? null : { name: "retell-1", id: registered.connectionId },
     suite: { name: "first-suite", id: null },

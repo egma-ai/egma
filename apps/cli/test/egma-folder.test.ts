@@ -390,13 +390,58 @@ describe("the egma folder", () => {
       }),
     ).rejects.toThrow("will not move a committed platform address");
 
-    // And another platform entirely is the refusal it always was.
-    await expect(
-      bindRepositoryPlatform(workspace.dir, {
-        origin: "https://old.example",
-        instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ",
-      }),
-    ).rejects.toThrow("Rebinding is not supported yet");
+    // And another platform entirely is the refusal it always was — which now
+    // teaches the whole move, because nothing performs it.
+    const moving = await bindRepositoryPlatform(workspace.dir, {
+      origin: "https://old.example",
+      instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ",
+    }).then(
+      () => null,
+      (refusal: Error) => refusal,
+    );
+
+    expect(moving).not.toBeNull();
+    const said = moving?.message ?? "";
+    expect(said).toContain("egma does not move a repository between platforms");
+    expect(said).toContain("nothing was sent");
+
+    // All four things a developer deletes, named at once. A refusal naming one
+    // at a time is a second failure after the first.
+    expect(said).toContain("the whole platform: block in egma/config.yaml");
+    expect(said).toContain("the id: line under agent: in egma/config.yaml");
+    expect(said).toContain("the id: line under connection: in egma/config.yaml");
+    expect(said).toContain("the id: line under suite: in egma/config.yaml");
+    expect(said).toContain("the version: line at the top of every file in egma/tests/");
+
+    // What moving costs, said plainly rather than found out afterwards.
+    expect(said).toContain("Your tests move with you");
+    expect(said).toContain("stay on the platform that ran them");
+
+    // One plain block of lines, so a coding agent can act on it without a
+    // person reading the message out to it.
+    const deletions = said
+      .split("\n")
+      .filter((line) => line.startsWith("  - "));
+    expect(deletions).toHaveLength(5);
+
+    // **And in that order.** Deleting the platform block is what unbinds the
+    // repository, and an unbound repository falls back to egma's own platform
+    // — so a list that named it first would have somebody working top-down
+    // arrive, one line in, at a repository still holding another platform's
+    // identifiers and nothing left to keep them there. Identifiers and pins
+    // come out first, the binding last, and the list says so out loud.
+    expect(deletions.map((line) => line.slice(4))).toEqual([
+      "the id: line under agent: in egma/config.yaml",
+      "the id: line under connection: in egma/config.yaml",
+      "the id: line under suite: in egma/config.yaml",
+      "the version: line at the top of every file in egma/tests/",
+      "last of all, the whole platform: block in egma/config.yaml",
+    ]);
+    expect(said).toContain("Delete the platform block last");
+
+    // And no command that does it: the refusal teaches the move and nothing
+    // offers to perform it.
+    expect(said).not.toMatch(/egma rebind|--rebind|egma move/u);
 
     expect(await readFile(paths.config, "utf8")).toBe(asCommitted);
   });
@@ -549,6 +594,41 @@ describe("the egma folder", () => {
     expect(config.agent).toEqual({ name: "receptionist", id: null });
     expect(config.connection).toBeNull();
     expect(config.suite).toEqual({ name: "first-suite", id: null });
+  });
+
+  /**
+   * A person edits this file, and a person does not spell an origin the way
+   * egma spells one.
+   *
+   * Every one of these names the same platform. Read as written, they name a
+   * platform that disagrees with itself — and the refusal a developer then
+   * meets says the binding does not match the binding, tells them to drop
+   * something that is not there, and ends with four deletions for a move they
+   * are not making. So the shape is settled here, once, where the file is read.
+   */
+  it("reads a committed origin somebody wrote their own way as the address it is", () => {
+    for (const written of [
+      "https://egma.acme.example/",
+      "https://EGMA.acme.example",
+      "https://egma.acme.example:443",
+      "  https://egma.acme.example  ",
+    ]) {
+      const config = parseConfig(
+        `platform:\n  origin: ${JSON.stringify(written)}\n  instance: pf_01K3XQ7M4E8YB2FVN0H9TZQWEP\n`,
+        "config.yaml",
+      );
+      expect(config.platform?.origin, written).toBe("https://egma.acme.example");
+    }
+
+    // And a line egma cannot make sense of is left exactly as it was written:
+    // it is refused by name at the edge that takes addresses, and rewriting it
+    // here would hide which line in the file is the wrong one.
+    expect(
+      parseConfig(
+        "platform:\n  origin: not-an-address\n  instance: pf_01K3XQ7M4E8YB2FVN0H9TZQWEP\n",
+        "config.yaml",
+      ).platform?.origin,
+    ).toBe("not-an-address");
   });
 
   it("reads what it writes, and steps over comments while it does", () => {

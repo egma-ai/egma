@@ -12,6 +12,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
+import type { GateId } from "../src/ui/wizard-ui.ts";
 import { buildExitLine } from "../src/wizard/exit-line.ts";
 import { walk } from "../src/wizard/walk.ts";
 import {
@@ -314,5 +315,63 @@ describe("one task, driven on a scripted agent", () => {
 
     // The agent started a process of its own; ending the agent ended that too.
     expect(await waitUntil(() => !isAlive(childPid as number))).toBe(true);
+  });
+
+  /**
+   * Which egma is said first, and asked second.
+   *
+   * A bare command reaches egma's own platform when nothing else names one, so
+   * where a repository's identifiers are about to go is the developer's to read
+   * before egma has said one word to that address. The gate is where the
+   * keystroke of consent is taken, so the gate is what the first request waits
+   * behind — and a developer who reads the address and closes the wizard has
+   * sent nothing anywhere.
+   */
+  it("names the platform before the gate, and asks it nothing until the gate opens", async () => {
+    const script = await workspace.script({
+      steps: [{ kind: "stop", reason: "end_turn" }],
+    });
+
+    let openTheGate = (): void => undefined;
+    const held = new Promise<void>((open) => {
+      openTheGate = open;
+    });
+    const lines: string[] = [];
+    const ui = new (class extends HeadlessUI {
+      override waitForGate(gate: GateId): Promise<void> {
+        void super.waitForGate(gate);
+        return gate === "begin" ? held : Promise.resolve();
+      }
+    })({ write: (line) => lines.push(line) });
+
+    let asked = 0;
+    const running = walk({
+      ui,
+      launch: workspace.launch(script),
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      platform: {
+        url: "http://named-before-it-is-asked.example",
+        verify: () => {
+          asked += 1;
+          return Promise.reject(new Error("this platform did not answer"));
+        },
+      },
+    });
+
+    expect(await waitUntil(() => ui.record.platform !== null)).toBe(true);
+    expect(ui.record.platform).toBe("http://named-before-it-is-asked.example");
+    // The same fact as one plain line, in the same place in the walk.
+    expect(lines).toContain("url: http://named-before-it-is-asked.example");
+    expect(asked).toBe(0);
+
+    openTheGate();
+
+    // And a refusal from that read leaves the walk rather than becoming an exit
+    // line: it is egma declining to talk to an address, which is answered in
+    // the same sentence and the same number every verb answers it with.
+    await expect(running).rejects.toThrow("this platform did not answer");
+    expect(asked).toBe(1);
+    expect(ui.record.exit).toBeNull();
   });
 });

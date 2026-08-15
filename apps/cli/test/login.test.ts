@@ -420,46 +420,74 @@ describe("reading a code out of whatever was pasted", () => {
 });
 
 describe("which egma a command talks to", () => {
-  it("takes the flag first, then the environment, then the repository binding", () => {
+  // The address egma falls back to, stood in for so that reading this test
+  // never says which address ships. That is asserted in one place, on its own.
+  const BUILT_IN = "http://built-in.example";
+
+  it("takes the flag, then the environment, then the binding, then egma's own", () => {
     expect(
       resolvePlatformUrl({
         flag: "http://flag.example/",
         env: "http://env.example",
         binding: "http://bound.example",
+        fallback: BUILT_IN,
       }),
     ).toBe("http://flag.example");
 
     expect(
-      resolvePlatformUrl({ flag: null, env: "http://env.example", binding: "http://bound.example" }),
+      resolvePlatformUrl({
+        flag: null,
+        env: "http://env.example",
+        binding: "http://bound.example",
+        fallback: BUILT_IN,
+      }),
     ).toBe("http://env.example");
 
     // The repository, not the latest login on the machine, is what makes the
     // selection stable after onboarding.
-    expect(resolvePlatformUrl({ flag: null, binding: "http://bound.example/" })).toBe(
-      "http://bound.example",
+    expect(
+      resolvePlatformUrl({ flag: null, binding: "http://bound.example/", fallback: BUILT_IN }),
+    ).toBe("http://bound.example");
+
+    // Nothing names a platform, so egma uses its own. This is the step ADR-0008
+    // always had and the tree could not have while there was no hosted egma to
+    // point at.
+    expect(resolvePlatformUrl({ flag: null, env: "", binding: null, fallback: BUILT_IN })).toBe(
+      BUILT_IN,
     );
 
-    // Nothing names a platform, and egma has no hosted one to fall back to, so
-    // this refuses rather than inventing an address to go and probe.
-    expect(() => resolvePlatformUrl({ flag: null, env: "", binding: null })).toThrow(
-      "names no Egma platform",
+    // And it really is last: each of the three deliberate places still wins
+    // over it on its own.
+    expect(resolvePlatformUrl({ flag: "http://flag.example", fallback: BUILT_IN })).toBe(
+      "http://flag.example",
     );
+    expect(
+      resolvePlatformUrl({ flag: null, env: "http://env.example", fallback: BUILT_IN }),
+    ).toBe("http://env.example");
   });
 
   it("refuses an address that is not one, and names where it came from", () => {
     // The next thing that happens to this address is that a browser is started
     // on it, so it is checked at the edge that takes it and not after.
     for (const given of ["javascript:alert(1)", "file:///etc/passwd", "not an address at all"]) {
-      expect(() => resolvePlatformUrl({ flag: given })).toThrow(UnusableUrlError);
-      expect(() => resolvePlatformUrl({ flag: null, env: given })).toThrow(UnusableUrlError);
+      expect(() =>
+        resolvePlatformUrl({ flag: given, fallback: BUILT_IN }),
+      ).toThrow(UnusableUrlError);
+      expect(() =>
+        resolvePlatformUrl({ flag: null, env: given, fallback: BUILT_IN }),
+      ).toThrow(UnusableUrlError);
     }
 
-    expect(() => resolvePlatformUrl({ flag: "ftp://egma.example" })).toThrow(/--url/u);
-    expect(() => resolvePlatformUrl({ flag: null, env: "ftp://egma.example" })).toThrow(/EGMA_URL/u);
-
-    // A committed binding is never stepped over in favour of Cloud.
     expect(() =>
-      resolvePlatformUrl({ flag: null, binding: "javascript:alert(1)" }),
+      resolvePlatformUrl({ flag: "ftp://egma.example", fallback: BUILT_IN }),
+    ).toThrow(/--url/u);
+    expect(() =>
+      resolvePlatformUrl({ flag: null, env: "ftp://egma.example", fallback: BUILT_IN }),
+    ).toThrow(/EGMA_URL/u);
+
+    // A committed binding is never stepped over in favour of egma's own.
+    expect(() =>
+      resolvePlatformUrl({ flag: null, binding: "javascript:alert(1)", fallback: BUILT_IN }),
     ).toThrow(/repository platform binding/u);
   });
 });

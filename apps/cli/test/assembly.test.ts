@@ -34,6 +34,7 @@ import { parseTestFile } from "../src/folder/test-file.ts";
 import { readCredentials } from "../src/platform/credentials.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitNotice, exitLines } from "../src/wizard/exit-line.ts";
+import { alreadyAsked } from "../src/wizard/login-step.ts";
 import { walk } from "../src/wizard/walk.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
@@ -213,15 +214,15 @@ describe("the whole walk, offline", () => {
         launch: { ...workspace.launch(script), id: "claude-acp" },
         cwd: workspace.dir,
         signal: new AbortController().signal,
-        platform: {
+        platform: alreadyAsked({
           url: platform.url,
           instanceId: platform.instanceId,
           credentialsFile: workspace.credentialsFile,
-          openBrowser: async (url) => {
+          openBrowser: async (url: string) => {
             const code = new URL(url).searchParams.get("user_code") ?? "";
             return platform.device.approve(code);
           },
-        },
+        }),
         retell: { url: retell.url },
         howManyTests: SUITE_SIZE,
         home,
