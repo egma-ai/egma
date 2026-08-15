@@ -428,6 +428,22 @@ export async function judgmentsOf(
     return [couldNotJudge(grader, nothingToJudge)];
   }
 
+  /**
+   * **A grader that cannot score this modality is `skipped`, and asked
+   * nothing.** The check is here rather than inside each executor for the
+   * reason the one above it is: no grader type, today's or tomorrow's, can get
+   * it wrong, and a judged type is never asked — so a rubric written about
+   * speech costs no model call on a chat conversation.
+   *
+   * `skipped` and never `failed`: "didn't interrupt the caller" is not a thing
+   * a chat agent did badly, it is a thing that was never about that
+   * conversation, and it leaves the score's denominator rather than reddening
+   * a run. It is not `errored` either — nothing went wrong, and egma did not
+   * fail to make a check it was able to make.
+   */
+  const unsupported = modalityUnsupported(grader, conversation);
+  if (unsupported !== null) return [unsupported];
+
   try {
     // The grader *is* its judgment plus its identity and its live settings — the
     // type and the config it shapes are one inseparable pair on the row already
@@ -446,6 +462,45 @@ export async function judgmentsOf(
       ),
     ];
   }
+}
+
+/**
+ * The stable reason a modality skip carries, so a reader can branch on it.
+ *
+ * A verdict row holds a verdict, a score and a rationale and has no column for
+ * a reason code — so the code opens the sentence, and the sentence carries on
+ * saying which modalities the grader scores and which one this conversation
+ * was. A page can therefore recognise the case exactly while a person still
+ * reads a line that explains itself.
+ */
+export const MODALITY_UNSUPPORTED = "modality_unsupported";
+
+/**
+ * Whether this grader can score this conversation, and the `skipped` judgment
+ * when it cannot.
+ *
+ * A conversation whose modality is unstated — every production trace — is
+ * scored by everything. Guessing which layer a real caller used would mean
+ * silently dropping checks on evidence egma does not have, and a check quietly
+ * not made is exactly the hole this product exists to close.
+ */
+function modalityUnsupported(
+  grader: Grader,
+  conversation: Conversation,
+): Judgment | null {
+  const { modality } = conversation;
+  if (modality === null || grader.modalities.includes(modality)) return null;
+
+  return {
+    dimension: theOneCheck(grader.type),
+    verdict: "skipped",
+    score: 0,
+    rationale:
+      `${MODALITY_UNSUPPORTED}: this grader scores ` +
+      `${grader.modalities.join(" and ")} conversations, and this one was ` +
+      `${modality}, so no judgment was made about the agent.`,
+    citedSpanIds: [],
+  };
 }
 
 /** egma could not judge this. Never `failed`: nothing is being said about the agent. */

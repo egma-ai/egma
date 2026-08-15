@@ -159,8 +159,14 @@ const CONTEXT_REQUIRING = [
   "correctVerdict",
   "createAgent",
   "createApiKey",
+  "cloneGrader",
   "createGrader",
   "createInvitation",
+  // An organization's judge credential: created and labelled, listed, read as
+  // a label and a hint, and relabelled or rotated whole. Five doors and none
+  // that answers with a key — the plaintext has one reader, the grading
+  // engine, and it reaches it through `resolveJudgeKey` alone.
+  "createJudgeCredential",
   "createMockTool",
   "createPersona",
   "createProject",
@@ -172,6 +178,7 @@ const CONTEXT_REQUIRING = [
   "deletePersona",
   "deleteTest",
   "editGrader",
+  "editJudgeCredential",
   "editMockTool",
   "editPersona",
   "editTest",
@@ -191,10 +198,12 @@ const CONTEXT_REQUIRING = [
   "getGradingJob",
   "getGradingJobForTrace",
   "getJudgeConfiguration",
+  "getJudgeCredential",
   "getPersona",
   "getPersonaVersion",
   "getRun",
   "getSimulation",
+  "getProjectJudge",
   "getSimulationTestVersion",
   "getTest",
   "getTestVersion",
@@ -238,6 +247,11 @@ const CONTEXT_REQUIRING = [
   "removeMember",
   // The second secret egma holds, on the first one's terms: the read answers a
   // reference and a hint, and this is the one door to the plaintext behind it.
+  "listGraderVersions",
+  "listJudgeCredentials",
+  "restoreGrader",
+  // The second secret egma holds, on the first one's terms: the read answers a
+  // reference and a hint, and this is the one door to the plaintext behind it.
   "resolveJudgeKey",
   // The same translation for a mock tool's scope: names off a reviewed file
   // turned into the agents it applies to. It reads agents and nothing else, and
@@ -261,10 +275,12 @@ const CONTEXT_REQUIRING = [
   "seedDefaultJudge",
   "seedPlatformSettings",
   "setJudgeConfiguration",
+  "setProjectJudge",
   "startRun",
   "startSimulation",
   "updateAgent",
   "updateConnection",
+  "testsNamingGrader",
   "updateOrganizationSettings",
   "writePlatformSettings",
 ];
@@ -300,6 +316,14 @@ const VALUES = [
   // The grader factory's one refusal, beside the persona factory's: a delete
   // that would leave a live test checking one thing fewer than it says it does.
   "GraderNamedByTestsError",
+  // The two halves of optimistic concurrency, refused apart because they move
+  // apart: a live edit written against a revision the row has left behind, and
+  // a versioned edit written against a version it has minted past.
+  "IdentityMovedOnError",
+  "VersionMovedOnError",
+  // A project's judge pointed at a credential issued by somebody else's
+  // provider. Its own class because the fix is specific and nameable.
+  "JudgeProviderMismatchError",
   "LastAdminError",
   // A second answer for a tool this project already answers for. Its own class
   // because nothing about the body is wrong and something is already there,
@@ -331,6 +355,18 @@ const VALUES = [
   "UnreadableTraceQueryError",
   "VIA",
   "VOICE_PROVIDERS",
+  // The settled vocabularies of a grader and of a project's judge, exported so
+  // that a form and a refusal read the same list the schema is checked against.
+  "GRADER_READS",
+  "GRADER_SCOPES",
+  "JUDGE_PROVIDERS",
+  "JUDGE_SOURCES",
+  "PLATFORM_JUDGE",
+  // What each grader type reads and can score before its author says anything,
+  // and the built-in that is never a row. One server registry, so a form
+  // cannot hold a second copy that disagrees with the engine.
+  "GRADER_TYPE_REGISTRY",
+  "EXPECTED_BEHAVIORS_GRADER",
   "schema",
 ];
 

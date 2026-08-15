@@ -25,7 +25,34 @@ export const CODES = {
   project_outside_organization: 404,
   conflict: 409,
   name_taken: 409,
+  /**
+   * A live edit written against a state the resource has left behind. Its own
+   * code beside `version_conflict` because the two halves of a versioned
+   * resource move apart: a rename must not make a rubric edit stale, and a
+   * client has to know which of the two to reread and resend.
+   */
+  identity_conflict: 409,
+  /** A versioned edit written against a version the resource has minted past. */
+  version_conflict: 409,
+  /**
+   * A grader an active test names directly, refused Archive. Its own code
+   * because the fix is specific — go and take it off those tests — and the
+   * refusal names them.
+   */
+  grader_in_use: 409,
   unprocessable: 422,
+  /**
+   * A product request that named no project. Its own code because there is one
+   * thing to do about it and a page can do it: the selector already knows every
+   * project this person may open.
+   */
+  project_required: 422,
+  /**
+   * A project's judge pointed at a credential issued by a different provider.
+   * Nothing about the request is malformed and nothing is missing — the two
+   * settings simply cannot both be true — so it is its own answer.
+   */
+  judge_credential_provider_mismatch: 422,
   unsignable_reference: 422,
   no_adapter: 422,
   phone_setup_required: 422,
@@ -73,6 +100,61 @@ export function projectOutsideOrganization(projectId: string): string {
     "Choose a project from the selector and try again."
   );
 }
+
+/**
+ * The exact sentences the product surface answers with, written once.
+ *
+ * **These are contract.** A page shows them word for word and a client branches
+ * on the code beside them, so the wording is filled in rather than composed:
+ * every placeholder is a value dropped into a fixed sentence, and the sentence
+ * around it never changes shape. Two copies of one of these is two things to
+ * keep in step, which is the whole reason they are here and not in each route.
+ */
+export const REFUSALS = {
+  projectRequired:
+    "This request did not name a project. Choose a project from the " +
+    "selector and try again.",
+
+  /**
+   * Missing and cross-organization data get the same sentence, because to this
+   * caller they are the same thing: following a stranger's link must never
+   * reveal whether the thing on the other end exists.
+   */
+  notFound: (resource: string, resourceId: string): string =>
+    `There is no ${resource} ${resourceId} available in this project. ` +
+    "Check the link, or choose it from the current project.",
+
+  notPermitted: (role: string, action: string): string =>
+    `Your ${role} role cannot ${action}. Ask an organization admin to change ` +
+    "your role, then try again.",
+
+  identityConflict: (resource: string, resourceId: string): string =>
+    `${resource} ${resourceId} changed after you opened it. Read it again, ` +
+    "keep or reapply your edits, and send the update with expected_revision " +
+    "set to its new revision.",
+
+  versionConflict: (
+    resource: string,
+    expected: string,
+    current: string,
+  ): string =>
+    `this ${resource} edit was written against version ${expected}, and it ` +
+    `has moved on to ${current}. Read the ${resource} again, keep or reapply ` +
+    `your edits, and send them with expected_version_id set to ${current}.`,
+
+  graderInUse: (graderId: string, tests: string): string =>
+    `Grader ${graderId} is added directly to active tests ${tests}. Remove ` +
+    "it from those tests, or archive the tests, then archive this grader.",
+
+  judgeCredentialProviderMismatch: (
+    credentialId: string,
+    credentialProvider: string,
+    judgeProvider: string,
+  ): string =>
+    `Judge credential ${credentialId} is for ${credentialProvider}, but this ` +
+    `project judge uses ${judgeProvider}. Choose a credential for ` +
+    `${judgeProvider} and save the judge setting again.`,
+} as const;
 
 /** The body could never be written, whatever is there. */
 export function invalid(reply: FastifyReply, message: string): FastifyReply {

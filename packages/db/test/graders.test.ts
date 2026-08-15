@@ -132,9 +132,10 @@ describe("creating a grader", () => {
       await connection.sql("begin");
       await connection.sql(
         `insert into grader
-           (id, organization_id, project_id, name, type, priority, current_version_id)
-         values ($1, $2, $3, 'Halfway', 'llm_rubric', 'P0', $4)`,
-        [orphan, acme.organization, acme.project, newId("grv")],
+           (id, organization_id, project_id, name, type, priority,
+            current_version_id, revision)
+         values ($1, $2, $3, 'Halfway', 'llm_rubric', 'P0', $4, $5)`,
+        [orphan, acme.organization, acme.project, newId("grv"), newId("rev")],
       );
 
       await expect(connection.sql("commit")).rejects.toSatisfy(
@@ -537,9 +538,16 @@ describe("tenancy", () => {
     await expect(
       database.sql(
         `insert into grader
-           (id, organization_id, project_id, name, type, priority, current_version_id)
-         values ($1, $2, $3, 'Smuggled', 'llm_rubric', 'P0', $4)`,
-        [newId("grd"), acme.organization, globex.project, newId("grv")],
+           (id, organization_id, project_id, name, type, priority,
+            current_version_id, revision)
+         values ($1, $2, $3, 'Smuggled', 'llm_rubric', 'P0', $4, $5)`,
+        [
+          newId("grd"),
+          acme.organization,
+          globex.project,
+          newId("grv"),
+          newId("rev"),
+        ],
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,

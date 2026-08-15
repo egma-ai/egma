@@ -29,6 +29,7 @@ function conversation(metrics: unknown): Conversation {
     events: [],
     metrics,
     runId: "run_01JQZ0000000000000000000AA",
+    modality: "voice",
     agentId: "agt_01JQZ0000000000000000000AA",
   };
 }

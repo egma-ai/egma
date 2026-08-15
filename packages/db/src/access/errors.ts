@@ -303,6 +303,111 @@ export class GraderNamedByTestsError extends Error {
 }
 
 /**
+ * An edit named the revision it was written against, and the identity has moved.
+ *
+ * **The live half of optimistic concurrency**, beside the version conflict
+ * below. Two people editing one grader's name from two tabs is ordinary, and
+ * last-write-wins would lose one of them silently — so a write says which state
+ * it was written against and a write that was written against a state which has
+ * moved is refused with nothing changed.
+ *
+ * It carries both revisions because the caller's next move is to read the thing
+ * again and reapply, and a refusal that only said "somebody got there first"
+ * would not say what to send next time.
+ *
+ * One class for every resource rather than one per table: the answer at every
+ * layer above is identical — a 409, the same sentence with the resource's own
+ * word in it — and a family of classes that are handled the same way is a
+ * family nobody keeps in step.
+ */
+export class IdentityMovedOnError extends Error {
+  /** The resource's own word, as a message names it: `grader`, `persona`. */
+  readonly resource: string;
+  readonly resourceId: string;
+  readonly expectedRevision: string;
+  readonly currentRevision: string;
+
+  constructor(
+    resource: string,
+    resourceId: string,
+    revisions: { readonly expected: string; readonly current: string },
+  ) {
+    super(
+      `${resource} ${resourceId} changed after you opened it: the edit was written against revision ${revisions.expected}, and it is on ${revisions.current} now`,
+    );
+    this.name = "IdentityMovedOnError";
+    this.resource = resource;
+    this.resourceId = resourceId;
+    this.expectedRevision = revisions.expected;
+    this.currentRevision = revisions.current;
+  }
+}
+
+/**
+ * A versioned edit named the version it was written against, and the resource
+ * has minted another since.
+ *
+ * The other half of the pair above, and separate from it for the reason the two
+ * fields are separate on the row: renaming a grader must not make a rubric edit
+ * somebody is still typing stale, and tightening a rubric must not make a
+ * rename stale. Two questions, two refusals, two things to reapply.
+ *
+ * `TestMovedOnError` says the same thing about a test and is left where it is:
+ * its sentence is contract in the repository-synchronization surface, quoted by
+ * the CLI's own tests, and rewriting it here would change a message somebody
+ * relies on to decide what to do next.
+ */
+export class VersionMovedOnError extends Error {
+  readonly resource: string;
+  readonly resourceId: string;
+  readonly expectedVersionId: string;
+  readonly currentVersionId: string;
+
+  constructor(
+    resource: string,
+    resourceId: string,
+    versions: { readonly expected: string; readonly current: string },
+  ) {
+    super(
+      `this ${resource} edit was written against version ${versions.expected}, and ${resourceId} has moved on to ${versions.current}`,
+    );
+    this.name = "VersionMovedOnError";
+    this.resource = resource;
+    this.resourceId = resourceId;
+    this.expectedVersionId = versions.expected;
+    this.currentVersionId = versions.current;
+  }
+}
+
+/**
+ * A project's judge named a credential belonging to another provider.
+ *
+ * Its own refusal rather than a general validation error because the fix is
+ * specific and can be named: a key issued by OpenAI cannot answer for a judge
+ * configured to ask somebody else, whatever either of them is called. It
+ * carries both providers so the sentence can say which is which.
+ */
+export class JudgeProviderMismatchError extends Error {
+  readonly credentialId: string;
+  readonly credentialProvider: string;
+  readonly judgeProvider: string;
+
+  constructor(
+    credentialId: string,
+    credentialProvider: string,
+    judgeProvider: string,
+  ) {
+    super(
+      `judge credential ${credentialId} is for ${credentialProvider}, and this project's judge uses ${judgeProvider}`,
+    );
+    this.name = "JudgeProviderMismatchError";
+    this.credentialId = credentialId;
+    this.credentialProvider = credentialProvider;
+    this.judgeProvider = judgeProvider;
+  }
+}
+
+/**
  * A mock tool was written for a tool this project already answers for.
  *
  * Matching is by tool name and strictly by it — no arguments are read — so two

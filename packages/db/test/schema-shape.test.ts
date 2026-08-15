@@ -49,6 +49,9 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   grader_version: "grv",
   // The project's default judge, keyed by the project it is the judge for.
   judge_configuration: "prj",
+  // The organization's judge credentials: the keys egma judges with, and the
+  // one place any of them is stored.
+  judge_credential: "jcr",
   mock_tool: "mck",
   // The scope's junction, pinning the mock tool it narrows — the shape both
   // test junctions have, for the same reason.
@@ -197,15 +200,40 @@ describe("every table", () => {
     }
   });
 
+  /**
+   * A prefixed column that is **not** the row's identity.
+   *
+   * An opaque live revision is minted in egma's own identifier format and
+   * pinned the same way, so a hand-written row cannot carry a revision nothing
+   * would ever have issued. It is named here rather than folded into
+   * `TABLE_PREFIX` because that map answers "what is this table's identity",
+   * and a revision is not one — it says which *state* was read, and a row goes
+   * through many.
+   */
+  const REVISION_COLUMNS: readonly string[] = ["grader", "judge_credential"];
+
   it("pins a prefix that is one of the ones egma mints", () => {
     const pinned = checks
       .map((check) => /\^([a-z]+)_\[0-9A-HJKMNP-TV-Z\]\{26\}\$/.exec(check.definition))
       .filter((match) => match !== null)
       .map((match) => match[1]);
 
-    expect(pinned.length).toBe(Object.keys(TABLE_PREFIX).length);
+    expect(pinned.length).toBe(
+      Object.keys(TABLE_PREFIX).length + REVISION_COLUMNS.length,
+    );
     for (const prefix of pinned) {
       expect(ID_PREFIXES).toContain(prefix);
+    }
+  });
+
+  it("pins the revision format wherever a row carries one", () => {
+    for (const table of REVISION_COLUMNS) {
+      const pinned = checks.filter(
+        (check) =>
+          check.table_name === table &&
+          check.definition.includes(idCheckPattern("rev")),
+      );
+      expect(pinned, `${table} pins rev_`).toHaveLength(1);
     }
   });
 });
@@ -313,6 +341,8 @@ describe("every enumerated value", () => {
       { table: "grader", column: "priority" },
       { table: "grader", column: "scope" },
       { table: "judge_configuration", column: "provider" },
+      { table: "judge_configuration", column: "source" },
+      { table: "judge_credential", column: "provider" },
       { table: "run", column: "status" },
       { table: "run", column: "triggered_via" },
       { table: "simulation", column: "status" },

@@ -1,4 +1,5 @@
 import type {
+  Modality,
   Simulation,
   TraceDetail,
   TraceSpan,
@@ -76,6 +77,21 @@ export type Conversation = {
   readonly events: unknown;
   /** What was measured. A metric measures; a grader judges. */
   readonly metrics: unknown;
+  /**
+   * Which layer this conversation exercised — and `null` when nothing says.
+   *
+   * A simulation always knows: the run chose a connection, and the connection's
+   * modality is stamped on the row. It decides whether a grader applies at all:
+   * "recovered from a mishearing" is meaningless on chat, so a grader that
+   * scores voice alone is **skipped** on a chat conversation rather than failed.
+   *
+   * A production trace does not know. Nothing on the wire says whether a real
+   * caller spoke or typed, and guessing would be worse than the absence — so
+   * `null` means "unstated" and every grader applies, which is the safe
+   * direction: a check that runs and says something is recoverable, and a check
+   * silently skipped on a guess is a hole nobody sees.
+   */
+  readonly modality: Modality | null;
   /** Where the verdict rows file the conversation, beside the conversation. */
   readonly runId: string;
   readonly agentId: string;
@@ -134,6 +150,7 @@ export function conversationOfSimulation(
     transcript: [],
     events: [],
     metrics: {},
+    modality: simulation.modality,
     runId: simulation.runId,
     agentId: simulation.agentId,
   };
@@ -233,6 +250,9 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
     endingReason: null,
     transcript: transcriptOf(trace),
     events: toolCallsIn(trace),
+    // Unstated, honestly: nothing in a production export says whether the
+    // person on the other end spoke or typed.
+    modality: null,
     metrics: measuresIn(),
     runId: trace.runId,
     agentId: trace.agentId,

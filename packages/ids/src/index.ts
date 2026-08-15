@@ -47,6 +47,21 @@ export const ID_PREFIXES = [
   "prsv",
   "grd",
   "grv",
+  /**
+   * An organization's judge credential: the label, the provider and the sealed
+   * key an LLM judge is asked with. Its own identity because one organization
+   * may hold several, and because a project's judge setting stores a
+   * *reference* to one rather than a second copy of the secret.
+   */
+  "jcr",
+  /**
+   * The opaque revision an editable identity carries, minted fresh on every
+   * write. It names no row of its own; it is a value a caller hands back to say
+   * which state their edit was written against, which is exactly why it is
+   * minted rather than derived — a revision computed from the row's own fields
+   * would repeat itself the moment somebody edited a name back.
+   */
+  "rev",
   "mck",
   "ste",
   "run",

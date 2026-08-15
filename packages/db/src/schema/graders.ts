@@ -11,6 +11,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
+import { MODALITIES } from "./agents.ts";
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
 import {
@@ -91,6 +92,28 @@ export const GRADER_SCOPES = ["simulations", "production", "both"] as const;
 export type GraderScope = (typeof GRADER_SCOPES)[number];
 
 /**
+ * What a grader is allowed to look at — its evidence boundary, declared rather
+ * than discovered.
+ *
+ * It is **versioned content**, beside the config and for the same reason:
+ * widening what a check reads changes what its verdict meant, and a verdict
+ * decided on the transcript alone must stay readable as exactly that after
+ * somebody points the same grader at the outcome as well.
+ *
+ * The three deterministic types have theirs fixed by the registry — a
+ * `metric_threshold` reads measures because that is what a threshold *is* — and
+ * only `llm_rubric` chooses, because only a rubric's author knows which
+ * evidence their criteria are written about.
+ */
+export const GRADER_READS = [
+  "transcript",
+  "outcome",
+  "tool_calls",
+  "measures",
+] as const;
+export type GraderRead = (typeof GRADER_READS)[number];
+
+/**
  * The judges egma can ask. It grows one provider at a time, behind one seam,
  * and the list is here beside the other closed vocabularies because two tables
  * hold it: the project's default judge below, and the per-grader override on a
@@ -154,6 +177,24 @@ export const grader = pgTable(
     currentVersionId: idText("current_version_id")
       .notNull()
       .references((): AnyPgColumn => graderVersion.id),
+    /**
+     * The opaque revision of everything on this row that is live rather than
+     * versioned — the name, the description, the priority, the scope, the
+     * sampling rate, and whether it is archived.
+     *
+     * **Minted fresh on every write, never derived.** A revision computed from
+     * the row's own fields would repeat itself the moment somebody renamed a
+     * grader back, and an edit written against the first spelling would then be
+     * accepted against the second. It is opaque so that nothing outside can do
+     * arithmetic on it or guess the next one.
+     *
+     * The version pointer beside it answers the other half of the same
+     * question: a live edit carries `expected_revision`, and a versioned edit
+     * carries the version it was written against as well. Two fields because
+     * they move independently — renaming a grader must not make a rubric edit
+     * somebody is still typing stale.
+     */
+    revision: idText("revision").notNull(),
     deletedAt: moment("deleted_at"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
@@ -163,6 +204,7 @@ export const grader = pgTable(
   },
   (table) => [
     prefixCheck("grader_id_prefix", table.id, "grd"),
+    prefixCheck("grader_revision_prefix", table.revision, "rev"),
     oneOf("grader_type_allowed", table.type, [...GRADER_TYPES]),
     oneOf("grader_priority_allowed", table.priority, [...PRIORITIES]),
     oneOf("grader_scope_allowed", table.scope, [...GRADER_SCOPES]),
@@ -190,6 +232,32 @@ export const grader = pgTable(
       .where(sql`${table.deletedAt} is null`),
   ],
 );
+
+/**
+ * Where a project's judge gets its key from. Two words, and the difference is
+ * whose account is spent.
+ *
+ * - `credential` — an organization judge credential the customer created and
+ *   can rotate. The row stores its `jcr_` id and no secret at all.
+ * - `platform` — the deployment's own judge, given to a project that had
+ *   configured none. It is **not customer-readable and has no rotating UI**:
+ *   the operator who configured the deployment owns it, and a project that
+ *   holds it holds a pointer at the deployment rather than at a key of its own.
+ *
+ * The deployment's sealed key stays on the row for a `platform` setting because
+ * that is where seeding has always put it, and seeding is the one path that
+ * must not be disturbed — it writes inside the transaction that creates a
+ * project and again in the boot backfill, both `onConflictDoNothing`, which is
+ * the whole of the promise that a project's chosen judge is never replaced.
+ * Nothing customer-facing reads it: the browser is told the source is the
+ * platform and is offered no hint and no rotation.
+ *
+ * A project with **no row at all** is `needs_setup`, which is a state rather
+ * than a fault: it says LLM grading is unavailable until an admin finishes
+ * setup, and the run door refuses to start work that would need a judge.
+ */
+export const JUDGE_SOURCES = ["credential", "platform"] as const;
+export type JudgeSource = (typeof JUDGE_SOURCES)[number];
 
 /**
  * The judge a project's judged graders run on, and the one key they speak with.
@@ -229,14 +297,28 @@ export const judgeConfiguration = pgTable(
     provider: text("provider").notNull(),
     /** The judge model's own name, as the provider spells it. */
     model: text("model").notNull(),
+    /** Where the key comes from. See `JUDGE_SOURCES`. */
+    source: text("source").notNull(),
     /**
-     * The sealed envelope, never the key. Never selected by any read; the one
-     * opener is the access layer's judge-key resolver, and the only caller of
-     * that is egma's own grading engine.
+     * The organization credential this project spends from, for a `credential`
+     * setting — a reference and never a second copy of the secret. Null for the
+     * deployment's own `platform` judge.
      */
-    credentials: text("credentials").notNull(),
-    /** The last characters of the key, kept so a person can tell two apart. */
-    credentialsHint: text("credentials_hint").notNull(),
+    credentialId: idText("credential_id").references(
+      (): AnyPgColumn => judgeCredential.id,
+    ),
+    /**
+     * The deployment's own sealed key, for a `platform` setting alone, written
+     * only by egma's seeding. Null for a `credential` setting, where the
+     * envelope lives on the credential and this row holds no secret at all.
+     */
+    credentials: text("credentials"),
+    /**
+     * The last characters of the deployment's key. Null for a `credential`
+     * setting: its hint belongs to the credential, and nothing customer-facing
+     * hints at the platform's key at all.
+     */
+    credentialsHint: text("credentials_hint"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -248,6 +330,20 @@ export const judgeConfiguration = pgTable(
     oneOf("judge_configuration_provider_allowed", table.provider, [
       ...JUDGE_PROVIDERS,
     ]),
+    oneOf("judge_configuration_source_allowed", table.source, [
+      ...JUDGE_SOURCES,
+    ]),
+    /**
+     * Exactly one place a key can come from, held by the database rather than
+     * by whoever writes the row. A `credential` setting that also carried an
+     * envelope would be two secrets with no rule saying which is spent, and a
+     * `platform` setting with no envelope would be a project that reads as
+     * judged and cannot judge.
+     */
+    check(
+      "judge_configuration_has_one_key_source",
+      sql`(${table.source} = 'credential' and ${table.credentialId} is not null and ${table.credentials} is null and ${table.credentialsHint} is null) or (${table.source} = 'platform' and ${table.credentialId} is null and ${table.credentials} is not null)`,
+    ),
     // The pairing, not each column on its own: a judge configuration cannot
     // name one organization and another organization's project.
     foreignKey({
@@ -281,6 +377,26 @@ export const graderVersion = pgTable(
      * a stronger one named here on the subtle rubric that needs it.
      */
     judgeModel: jsonb("judge_model"),
+    /**
+     * What this version of the grader is allowed to look at, from
+     * `GRADER_READS`. Nonempty, always: a grader that reads nothing can decide
+     * nothing, and storing the empty set would make "reads everything" and
+     * "reads nothing" one value.
+     */
+    reads: text("reads").array().notNull(),
+    /**
+     * Which modalities this version can score, from `MODALITIES`. Nonempty for
+     * the reason above, and defaulted to both at every write door — because a
+     * grader that named neither would be `skipped` on every conversation
+     * forever, which is a check somebody wrote and believes in that can never
+     * fire.
+     *
+     * A grader whose set excludes the conversation's modality is **`skipped`**,
+     * never failed. "Didn't interrupt the caller" is meaningless on chat, and
+     * scoring it as a failure would make a suite red for a check that was never
+     * about that conversation.
+     */
+    modalities: text("modalities").array().notNull(),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -292,5 +408,88 @@ export const graderVersion = pgTable(
       table.graderId,
       table.version,
     ),
+    // Nonempty, and drawn from the settled lists. Both halves are here rather
+    // than only at the write door because an old row is read back as a
+    // vocabulary the engine dispatches on, and a value nothing ever offered
+    // would be a grader silently skipping everything.
+    check(
+      "grader_version_reads_are_a_nonempty_known_set",
+      sql`array_length(${table.reads}, 1) >= 1 and ${table.reads} <@ ${sql.raw(`array[${GRADER_READS.map((read) => `'${read}'`).join(", ")}]::text[]`)}`,
+    ),
+    check(
+      "grader_version_modalities_are_a_nonempty_known_set",
+      sql`array_length(${table.modalities}, 1) >= 1 and ${table.modalities} <@ ${sql.raw(`array[${MODALITIES.map((modality) => `'${modality}'`).join(", ")}]::text[]`)}`,
+    ),
+  ],
+);
+
+/**
+ * An organization's judge credential: a label, a provider, and the sealed key
+ * egma replays to that provider every time it judges.
+ *
+ * **It belongs to the organization and not to a project**, which is the whole
+ * change this table makes. A key is a billing relationship with a model
+ * provider, and billing attaches to the customer — so one key can serve every
+ * project, and an organization that genuinely has two accounts holds two
+ * credentials and points each project at the one it should spend from. The
+ * project stores a *reference*; it never holds a second copy of the secret.
+ *
+ * **The secret is write-only and there is no read that returns it.** `COLUMNS`
+ * in the access module names every column an answer may carry and the envelope
+ * is not among them, so the field is absent from the read shape rather than
+ * blanked — leaking one through a serializer is not a thing anybody can forget.
+ * Rotation replaces the whole envelope: it is sealed over the whole value, so
+ * there is no shape in which one could be edited in place, and an admin
+ * replacing a key never has to read the one they are replacing.
+ *
+ * **What a person may see is the hint**, the last few characters, which exists
+ * for exactly one job: telling two keys apart when deciding which project
+ * should spend from which. It is not enough of the secret to be one.
+ *
+ * `archived_at` is here and is deliberately **not exposed by any route yet**.
+ * Archiving a credential has to be refused while an active project points at
+ * it, while a nonterminal simulation's frozen plan names it, and while a
+ * claimed grading job still needs it — and frozen grading plans arrive with the
+ * run-planning effort. A column with no safe door is honest; a door with no
+ * protection behind it would strand work mid-flight.
+ */
+export const judgeCredential = pgTable(
+  "judge_credential",
+  {
+    id: idText("id").primaryKey(),
+    organizationId: idText("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    /** What a person calls it — "Acme production key". Never unique. */
+    label: text("label").notNull(),
+    /**
+     * Immutable. The key belongs to one provider's account, so changing this
+     * would be a different credential wearing the old one's identity — and
+     * every project pointing at it would silently start spending somewhere
+     * else.
+     */
+    provider: text("provider").notNull(),
+    /** The sealed envelope, never the key. Named by no read. */
+    credentials: text("credentials").notNull(),
+    /** The last characters of the key, so two keys can be told apart. */
+    credentialsHint: text("credentials_hint").notNull(),
+    revision: idText("revision").notNull(),
+    /** Set by nothing yet; see this table's note. */
+    archivedAt: moment("archived_at"),
+    createdBy: idText("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    prefixCheck("judge_credential_id_prefix", table.id, "jcr"),
+    prefixCheck("judge_credential_revision_prefix", table.revision, "rev"),
+    oneOf("judge_credential_provider_allowed", table.provider, [
+      ...JUDGE_PROVIDERS,
+    ]),
+    index("judge_credential_organization_id_idx")
+      .on(table.organizationId)
+      .where(sql`${table.archivedAt} is null`),
   ],
 );

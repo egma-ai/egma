@@ -85,6 +85,45 @@ export function unreachable<T>(): Answer<T> {
   };
 }
 
+/**
+ * One write, with the project named in the body where the caller named one.
+ *
+ * The same four answers a read has, for the same reason: a page has to be able
+ * to tell a refusal it can show from a session that has expired, and inventing
+ * a second vocabulary for writes would give it two ways to get that wrong.
+ *
+ * **The project travels in the body rather than the query**, which is where
+ * every write route in this API looks for it — so a page cannot accidentally
+ * send a write that names no project and have it land somewhere plausible.
+ */
+export async function sendJson<T>(
+  path: string,
+  options: {
+    readonly method: "POST" | "PATCH" | "PUT";
+    readonly body: Record<string, unknown>;
+    readonly project?: string;
+    readonly signal?: AbortSignal;
+  },
+): Promise<Answer<T>> {
+  try {
+    const response = await fetch(path, {
+      method: options.method,
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        options.project === undefined
+          ? options.body
+          : { ...options.body, project: options.project },
+      ),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    const body = await response.json().catch(() => null);
+    return answerFor<T>(response.status, body);
+  } catch {
+    return unreachable<T>();
+  }
+}
+
 /** One read, with the project named in it where the caller named one. */
 export async function readJson<T>(
   path: string,
