@@ -91,10 +91,18 @@ const config: NextConfig = {
           source: "/api/grader-library",
           destination: `${api}/api/grader-library`,
         },
-        // The running copies beside the shelf. One rule and no `:path*`: the
-        // group answers a list and a Use at one address, and a second address
-        // under it would be a forwarding rule for a door that does not exist.
+        // The running copies beside the shelf: the list and Use at the group's
+        // own address, and one copy's own address beside it — where an edit
+        // changes what it judges by and a delete switches it off. Both rules,
+        // for the reason the traces pair below spells out: `:path*` is
+        // documented as matching zero segments and on the hosted deployment it
+        // did not, so the bare path is named outright rather than left to
+        // depend on how a host reads the wildcard.
         { source: "/api/graders", destination: `${api}/api/graders` },
+        {
+          source: "/api/graders/:path*",
+          destination: `${api}/api/graders/:path*`,
+        },
         { source: "/api/tests", destination: `${api}/api/tests` },
         { source: "/api/tests/:path*", destination: `${api}/api/tests/:path*` },
         {

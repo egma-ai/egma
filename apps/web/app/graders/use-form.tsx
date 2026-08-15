@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { USE } from "../../lib/grader-library-copy.ts";
+import { wrote } from "../../lib/write.ts";
 import { Field, Notice, styles } from "../ui.tsx";
 
 /**
@@ -56,7 +57,7 @@ export type UsableEntry = {
   readonly params?: readonly Parameter[];
 };
 
-type Filled = Readonly<Record<string, string>>;
+export type Filled = Readonly<Record<string, string>>;
 
 /**
  * What was typed, as the API takes it: text stays text, a number becomes one.
@@ -65,7 +66,7 @@ type Filled = Readonly<Record<string, string>>;
  * developer reads is the entry's own — "this grader needs a bound" — rather
  * than one about the empty string.
  */
-function asWritten(
+export function asWritten(
   params: readonly Parameter[],
   filled: Filled,
 ): Record<string, string | number> {
@@ -80,7 +81,7 @@ function asWritten(
 }
 
 /** The first option of a list, which is what a dropdown shows before a choice. */
-function firstChoices(params: readonly Parameter[]): Filled {
+export function firstChoices(params: readonly Parameter[]): Filled {
   const chosen: Record<string, string> = {};
   for (const parameter of params) {
     const first = parameter.options?.[0];
@@ -89,21 +90,38 @@ function firstChoices(params: readonly Parameter[]): Filled {
   return chosen;
 }
 
-export function UseForm({
-  entry,
-  onStarted,
-  onCancel,
+/**
+ * The entry's own questions, as controls — the block both forms on this section
+ * are built around.
+ *
+ * **It is one component because there is one form.** Switching a grader on and
+ * changing what it judges by ask exactly the same questions, in the same order,
+ * with the same meanings, because both are the entry's declaration rendered. A
+ * second copy of this for the edit screen would be a second reading of that
+ * declaration, and the day one of them learned a new kind of control the other
+ * would quietly go on drawing text boxes.
+ *
+ * `sentence` is the screen's own words for an entry that asks nothing, and it
+ * is a parameter rather than a constant here so each screen keeps its copy in
+ * its own file — which is what lets each screen's own test hold every word it
+ * says against the banned list.
+ *
+ * `named` prefixes the control identifiers, so two of these on one page — a
+ * form being filled in beside another — never label each other's inputs.
+ */
+export function EntryFields({
+  params,
+  filled,
+  onFilled,
+  named,
+  sentence,
 }: {
-  entry: UsableEntry;
-  onStarted: (name: string) => void;
-  onCancel: () => void;
+  params: readonly Parameter[];
+  filled: Filled;
+  onFilled: (name: string, value: string) => void;
+  named: string;
+  sentence: string;
 }) {
-  const params = entry.params ?? [];
-  const [filled, setFilled] = useState<Filled>(() => firstChoices(params));
-  const [required, setRequired] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [refusal, setRefusal] = useState<string | null>(null);
-
   /**
    * The unit a typed value is counted in: the unit of the option that was
    * chosen.
@@ -124,38 +142,107 @@ export function UseForm({
       ? undefined
       : only.options?.find((option) => option.value === filled[only.name])?.unit;
 
+  if (params.length === 0) return <Notice>{sentence}</Notice>;
+
+  return (
+    <>
+      {params.map((parameter) => {
+        const control = `${named}-${parameter.name}`;
+        const chosen = filled[parameter.name] ?? "";
+
+        return (
+          <Field
+            key={parameter.name}
+            label={parameter.label}
+            hint={parameter.means}
+            htmlFor={control}
+          >
+            {parameter.options === undefined ? (
+              <>
+                <input
+                  className={styles.input}
+                  id={control}
+                  // The kind decides the control exactly as it decides the
+                  // check behind it, so what a person can type and what a
+                  // write will take are one decision made in the entry.
+                  type={parameter.kind === "number" ? "number" : "text"}
+                  required
+                  value={chosen}
+                  onChange={(event) =>
+                    onFilled(parameter.name, event.target.value)
+                  }
+                />
+                {/*
+                  The unit, beside the control and not inside it. It used to
+                  be the placeholder, which meant it vanished the instant
+                  somebody typed — exactly when knowing whether the number
+                  is milliseconds or turns starts to matter. It changes with
+                  the choice above, because the unit belongs to the measure.
+                */}
+                {unit === undefined ? null : (
+                  <span className={styles.muted}>{unit}</span>
+                )}
+              </>
+            ) : (
+              <select
+                className={styles.select}
+                id={control}
+                value={chosen}
+                onChange={(event) =>
+                  onFilled(parameter.name, event.target.value)
+                }
+              >
+                {parameter.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        );
+      })}
+    </>
+  );
+}
+
+export function UseForm({
+  entry,
+  onStarted,
+  onCancel,
+}: {
+  entry: UsableEntry;
+  onStarted: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const params = entry.params ?? [];
+  const [filled, setFilled] = useState<Filled>(() => firstChoices(params));
+  const [required, setRequired] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
   async function start(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     setBusy(true);
     setRefusal(null);
 
-    try {
-      const answer = await fetch("/api/graders", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          library_id: entry.id,
-          required,
-          ...(params.length === 0
-            ? {}
-            : { params: asWritten(params, filled) }),
-        }),
-      });
+    const refused = await wrote({
+      url: "/api/graders",
+      method: "POST",
+      body: {
+        library_id: entry.id,
+        required,
+        ...(params.length === 0 ? {} : { params: asWritten(params, filled) }),
+      },
+      unreachable: USE.unreachable,
+    });
+    setBusy(false);
 
-      if (!answer.ok) {
-        const said = (await answer.json().catch(() => ({}))) as {
-          message?: string;
-        };
-        setRefusal(said.message ?? USE.unreachable);
-        return;
-      }
-
-      onStarted(entry.name);
-    } catch {
-      setRefusal(USE.unreachable);
-    } finally {
-      setBusy(false);
+    if (refused !== null) {
+      setRefusal(refused);
+      return;
     }
+    onStarted(entry.name);
   }
 
   return (
@@ -163,64 +250,15 @@ export function UseForm({
       <p className={styles.muted}>{USE.lead}</p>
       {refusal === null ? null : <Notice tone="error">{refusal}</Notice>}
 
-      {params.length === 0 ? (
-        <Notice>{USE.asksNothing}</Notice>
-      ) : (
-        params.map((parameter) => {
-          const control = `use-${parameter.name}`;
-          const chosen = filled[parameter.name] ?? "";
-          const write = (value: string): void =>
-            setFilled((was) => ({ ...was, [parameter.name]: value }));
-
-          return (
-            <Field
-              key={parameter.name}
-              label={parameter.label}
-              hint={parameter.means}
-              htmlFor={control}
-            >
-              {parameter.options === undefined ? (
-                <>
-                  <input
-                    className={styles.input}
-                    id={control}
-                    // The kind decides the control exactly as it decides the
-                    // check behind it, so what a person can type and what a
-                    // write will take are one decision made in the entry.
-                    type={parameter.kind === "number" ? "number" : "text"}
-                    required
-                    value={chosen}
-                    onChange={(event) => write(event.target.value)}
-                  />
-                  {/*
-                    The unit, beside the control and not inside it. It used to
-                    be the placeholder, which meant it vanished the instant
-                    somebody typed — exactly when knowing whether the number
-                    is milliseconds or turns starts to matter. It changes with
-                    the choice above, because the unit belongs to the measure.
-                  */}
-                  {unit === undefined ? null : (
-                    <span className={styles.muted}>{unit}</span>
-                  )}
-                </>
-              ) : (
-                <select
-                  className={styles.select}
-                  id={control}
-                  value={chosen}
-                  onChange={(event) => write(event.target.value)}
-                >
-                  {parameter.options.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </Field>
-          );
-        })
-      )}
+      <EntryFields
+        params={params}
+        filled={filled}
+        onFilled={(name, value) =>
+          setFilled((was) => ({ ...was, [name]: value }))
+        }
+        named="use"
+        sentence={USE.asksNothing}
+      />
 
       <Field
         label={USE.required}

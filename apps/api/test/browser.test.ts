@@ -1596,6 +1596,135 @@ describe("pressing Use on a second grader while the first one's form is open", (
   );
 });
 
+/**
+ * Changing a running copy and switching one off, in a real browser.
+ *
+ * **The one thing about this screen a source scan cannot prove**, and it is the
+ * same shape as the Use form's above: the edit form is drawn from the library
+ * entry and pre-filled from the copy, so what a person sees when they open it
+ * is state assembled from two answers that arrived separately. A source scan
+ * settles that the right components are wired together; only a running page
+ * settles that the values come back.
+ *
+ * It is also the only place the **forwarding rule** for a copy's own address is
+ * exercised. `/api/graders/:path*` is a rewrite this Next process resolves at
+ * build time; without it the edit would post into this app's own file routing
+ * and read Next's 404 page as though egma had refused it — and every other test
+ * in the repository would still pass, because they all speak to the API
+ * directly.
+ *
+ * It runs after the Use flow above and depends on it: that flow left a copy of
+ * `latency` running on Ada's project, which is the row this one changes and
+ * then switches off.
+ */
+describe("changing a running grader and switching it off", () => {
+  /** One running copy's button, from the table rather than the mobile list. */
+  function on(named: string, button: string) {
+    return page
+      .locator("table")
+      .getByRole("row")
+      .filter({ hasText: named })
+      .getByRole("button", { name: button });
+  }
+
+  /** Every row of the table, the heading row included. */
+  function rows() {
+    return page.locator("table").getByRole("row");
+  }
+
+  /**
+   * **Wait for the list to say it, never for the write to say it.**
+   *
+   * The screen shows what happened the moment the request comes back, and
+   * *then* reads the list again — two commits, not one. So the sentence
+   * confirming a write is not a signal that the table has caught up, and
+   * counting rows straight after it is a race that widens under load until it
+   * loses: this file counted three rows where two were expected the first time
+   * the whole suite ran beside it.
+   *
+   * `expect.poll` is how the rest of this file waits on a list settling, and it
+   * is the right shape here for the same reason — the assertion *is* the wait,
+   * so there is no gap left between them for the screen to change in.
+   */
+  function settlesAt(howMany: number) {
+    return expect.poll(() => rows().count(), { timeout: 30_000 }).toBe(howMany);
+  }
+
+  /**
+   * The bound, which is the entry's own question — named by what it is not,
+   * because what a grader asks for is the library entry's business and a test
+   * spelling the parameter would be the copy of egma's catalog this screen
+   * exists without.
+   */
+  const theEntrysNumber = 'form input[type="number"]:not(#edit-sample-rate)';
+
+  it(
+    "saves a new value and reads it back, and turns a blocker into a diagnostic",
+    async () => {
+      await page.goto(`${origin}/graders/running`);
+      // The table, settled: two graders on this project, and a heading row.
+      await settlesAt(3);
+      // Blocking, as anything switched on is unless somebody said otherwise.
+      await page.waitForSelector("text=Blocks");
+
+      await on("latency", "Edit").click();
+      await page.waitForSelector("text=Edit latency");
+
+      // Filled in from the copy, which is the half a source scan cannot see:
+      // this is what was typed when Use was pressed, come back round.
+      expect(await page.locator(theEntrysNumber).inputValue()).toBe("2000");
+
+      await page.locator(theEntrysNumber).fill("1500");
+      await page.locator("#edit-required").uncheck();
+      await page.getByRole("button", { name: "Save" }).click();
+
+      // What the write said, which is the sentence being asserted and **not**
+      // the moment the table is fresh.
+      await page.waitForSelector("text=is saved");
+      // And what the *list* says, which is: the row's own cell, from the read
+      // that happened after the write. This is the wait the next line depends
+      // on — the form closes with the notice, so "Diagnostic" can only be
+      // coming from the table by the time it matches.
+      await page.waitForSelector("text=Diagnostic");
+
+      // And opening it again shows the saved value rather than the old one —
+      // which is the whole round trip: the browser wrote it, the API versioned
+      // it, and the list handed it back.
+      await on("latency", "Edit").click();
+      await page.waitForSelector("text=Edit latency");
+      expect(await page.locator(theEntrysNumber).inputValue()).toBe("1500");
+    },
+    SETTLE,
+  );
+
+  it(
+    "says what a switched-off grader keeps before it switches one off",
+    async () => {
+      await page.goto(`${origin}/graders/running`);
+      await settlesAt(3);
+
+      await on("latency", "Switch off").click();
+
+      // The sentence that makes the button pressable: what stops is obvious,
+      // and what stays is the thing somebody is actually worried about.
+      await page.waitForSelector("text=already judged keeps exactly what it said");
+
+      await page.getByRole("button", { name: "Switch it off" }).click();
+      // What the write said — the sentence, asserted for its own sake.
+      await page.waitForSelector("text=is switched off");
+
+      // And then what the list says, waited for rather than read straight off
+      // the back of the sentence above: the row is gone, and the copy every
+      // project is created with is still there — only the one that was named
+      // stopped judging.
+      await settlesAt(2);
+      expect(await on("latency", "Switch off").count()).toBe(0);
+      await page.waitForSelector("text=expected_behaviors");
+    },
+    SETTLE,
+  );
+});
+
 describe("recovering when a page cannot load", () => {
   it(
     "shows a retry for People and for an invitation lookup",
