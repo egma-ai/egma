@@ -127,6 +127,7 @@ export {
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
   ProjectSlugTakenError,
+  RunRetryRefusedError,
   RunWriteRefusedError,
   TestAgentRefusedError,
   TestDependencyInactiveError,
@@ -141,6 +142,7 @@ export {
   type ArchivedDependency,
   type ConnectionRestoreRefusal,
   type JudgeCredentialUse,
+  type RetryBlocker,
   type RunWriteRefusal,
   type TestAgentRefusal,
   type TestNamingGrader,
@@ -568,6 +570,33 @@ export type {
   SimulationStatus,
   Verdict,
 } from "../schema/runs.ts";
+/**
+ * The four words a run's machinery can be in, exported because the door that
+ * filters a history by one has to refuse anything else by name — and a list
+ * written a second time at that door is a list that will one day disagree with
+ * the check on the table.
+ */
+export { RUN_STATUSES } from "../schema/runs.ts";
+
+/**
+ * A project's run history, and Retry.
+ *
+ * The history is where a run's machinery and its judgment are read together —
+ * two stores, one answer, and the fold below is what keeps the four facts apart
+ * inside it. Retry is here rather than beside `startRun` because it must never
+ * become a second way to start one: it derives everything from an earlier run
+ * and then goes through `startRun` like every other caller.
+ */
+export {
+  listRunHistory,
+  readRunFold,
+  retryRun,
+  type RetryRequest,
+  type RunHistoryEntry,
+  type RunHistoryPage,
+  type RunHistoryRequest,
+} from "./run-history.ts";
+export type { RunFilter } from "./runs.ts";
 
 /**
  * What a run would freeze, and what one already froze.

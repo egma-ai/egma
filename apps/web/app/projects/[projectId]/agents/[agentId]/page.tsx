@@ -42,6 +42,7 @@ import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import { RecentRuns } from "../../../../../ui/run-status.tsx";
 import {
   AppShell,
   PageBody,
@@ -355,6 +356,18 @@ function AgentDetailView({
         </Section>
 
         <ApplicableTests projectId={projectId} agentId={agentId} />
+
+        {/*
+          What has actually been run against this agent lately, machinery and
+          judgment kept apart. It is the same component the Tests page uses,
+          because it is the same question asked of a different subject.
+        */}
+        <RecentRuns
+          projectId={projectId}
+          title="Recent runs"
+          lead="The newest runs against this agent. Each row keeps the run's machinery and its verdict apart."
+          filters={{ agent: agentId }}
+        />
       </PageBody>
 
       {editing ? (

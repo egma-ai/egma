@@ -838,7 +838,13 @@ describe("reading one run", () => {
     // A read-only auditor reads everything, which is what read-only means.
     const read = await request("GET", `/api/runs/${runId}`, quentin.secret);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
-    expect(read.body).toEqual(started.body);
+    // Everything the start answered, unchanged — and the reading of one run
+    // carries three things a start cannot: what it froze to judge itself by,
+    // and the two identities it executed against, read as they now stand.
+    expect(read.body).toMatchObject(started.body as Record<string, unknown>);
+    expect(read.body.grading_plan).toMatchObject({ state: "run_start" });
+    expect(read.body.agent).toMatchObject({ archived: false });
+    expect(read.body.connection).toMatchObject({ archived: false });
   });
 
   it("shows another customer nothing, in the words nothing uses", async () => {

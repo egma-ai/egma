@@ -8,6 +8,7 @@ import {
   desc,
   eq,
   gt,
+  gte,
   inArray,
   isNull,
   isNotNull,
@@ -1588,9 +1589,38 @@ export type RunPage = {
   readonly nextCursor: string | undefined;
 };
 
+/**
+ * How a run history narrows — every one of these a fact the run table already
+ * holds, and each of them optional.
+ *
+ * **The verdict is deliberately not here.** A verdict is folded at read time
+ * from rows in another store, so narrowing by one is a question this query
+ * cannot answer; `listRunHistory` in `run-history.ts` does it, over what this
+ * one hands back.
+ *
+ * `testId` is the one filter that is not a column of the run header: a run does
+ * not record which tests it executed as identities, only as frozen version ids,
+ * so this asks whether any conversation of the run pinned that test. It is the
+ * question a test's own page asks — *what has this been run against* — and
+ * answering it off the pinned versions in the header would go wrong the moment a
+ * test gained a second version.
+ */
+export type RunFilter = {
+  readonly agentId?: string | undefined;
+  readonly connectionId?: string | undefined;
+  /** Runs holding at least one conversation that pinned this test. */
+  readonly testId?: string | undefined;
+  readonly status?: RunStatus | undefined;
+  /** Runs created at or after this moment. */
+  readonly since?: Date | undefined;
+  /** Runs created strictly before this moment. */
+  readonly until?: Date | undefined;
+};
+
 export async function listRuns(
   auth: AuthContext,
   page?: PageRequest,
+  filter?: RunFilter,
 ): Promise<RunPage> {
   authorize(auth, "read", here(auth));
 
@@ -1601,15 +1631,112 @@ export async function listRuns(
   });
   const olderThanCursor = cursor === undefined ? undefined : lt(run.id, cursor);
 
+  // A test is asked for by whether any conversation of the run pinned it, so
+  // the narrowing is a subquery on the simulations rather than a join — a join
+  // would return one row per matching conversation and quietly break the page
+  // size and the cursor with it.
+  const pinnedTheTest =
+    filter?.testId === undefined
+      ? undefined
+      : inArray(
+          run.id,
+          db()
+            .select({ runId: simulation.runId })
+            .from(simulation)
+            .where(
+              within(auth, simulation, eq(simulation.testId, filter.testId)),
+            ),
+        );
+
   const rows = await db()
     .select(RUN_COLUMNS)
     .from(run)
-    .where(within(auth, run, and(inActingProject(auth, run), olderThanCursor)))
+    .where(
+      within(
+        auth,
+        run,
+        and(
+          inActingProject(auth, run),
+          olderThanCursor,
+          filter?.agentId === undefined
+            ? undefined
+            : eq(run.agentId, filter.agentId),
+          filter?.connectionId === undefined
+            ? undefined
+            : eq(run.connectionId, filter.connectionId),
+          filter?.status === undefined
+            ? undefined
+            : eq(run.status, filter.status),
+          filter?.since === undefined
+            ? undefined
+            : gte(run.createdAt, filter.since),
+          filter?.until === undefined
+            ? undefined
+            : lt(run.createdAt, filter.until),
+          pinnedTheTest,
+        ),
+      ),
+    )
     .orderBy(desc(run.id))
     .limit(limit + 1);
 
   const { items, nextCursor } = pageOf(rows, limit);
   return { items: items.map(runFromRow), nextCursor };
+}
+
+/**
+ * Where every conversation of these runs stands, in one query.
+ *
+ * The run list needs each row's machinery counts and each row's verdict, and
+ * both are per conversation. Asking per run would be a query per row on the one
+ * surface somebody scrolls, so the page is asked for at once and grouped here.
+ *
+ * Ordered by run and then by position, so a caller can rely on the conversations
+ * of one run arriving in the order the run pinned them.
+ */
+export async function simulationStatusesOfRuns(
+  auth: AuthContext,
+  runIds: readonly string[],
+): Promise<
+  ReadonlyMap<
+    string,
+    readonly { readonly id: string; readonly status: SimulationStatus }[]
+  >
+> {
+  authorize(auth, "read", here(auth));
+
+  const byRun = new Map<
+    string,
+    { readonly id: string; readonly status: SimulationStatus }[]
+  >();
+  if (runIds.length === 0) return byRun;
+
+  const rows = await db()
+    .select({
+      runId: simulation.runId,
+      id: simulation.id,
+      status: simulation.status,
+    })
+    .from(simulation)
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          inArray(simulation.runId, [...runIds]),
+          inActingProject(auth, simulation),
+        ),
+      ),
+    )
+    .orderBy(asc(simulation.runId), asc(simulation.position));
+
+  for (const row of rows) {
+    const held = byRun.get(row.runId) ?? [];
+    byRun.set(row.runId, held);
+    held.push({ id: row.id, status: row.status as SimulationStatus });
+  }
+
+  return byRun;
 }
 
 /**

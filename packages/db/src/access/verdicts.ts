@@ -434,6 +434,95 @@ export async function readRunVerdicts(
 }
 
 /**
+ * What every conversation of several runs has been judged, folded per
+ * conversation — one query for a whole page of runs.
+ *
+ * **It exists so a run list can show a verdict per row without asking this store
+ * once per run.** A page of fifty runs read one at a time is fifty round trips
+ * to a columnar store, on the one surface somebody scrolls; the run ids are the
+ * second column of this table's sorting key, so naming all of them at once is
+ * one prune rather than fifty.
+ *
+ * The answer is deliberately per **conversation** rather than per run. A run's
+ * verdict is folded over its conversations' verdicts — one vote each — and
+ * folding a run's rows whole would let a test with forty expected behaviors
+ * outvote a test with two. `foldRun` in `verdicts/read-fold.ts` does that
+ * arithmetic, and it needs each conversation's own answer to do it.
+ *
+ * A run with nothing judged is absent from the outer map rather than present and
+ * empty: absence is what "nobody has looked" already means everywhere else here,
+ * and inventing an entry would be this module guessing at the run table's
+ * business.
+ */
+export async function readVerdictsAcrossRuns(
+  auth: AuthContext,
+  runIds: readonly string[],
+  options: ReadVerdictsOptions = {},
+): Promise<ReadonlyMap<string, ReadonlyMap<string, FoldedOutcome>>> {
+  authorize(auth, "read", here(auth));
+
+  const byRun = new Map<string, Map<string, RecordedVerdict[]>>();
+  if (runIds.length === 0) {
+    return new Map<string, ReadonlyMap<string, FoldedOutcome>>();
+  }
+
+  const named = (value: string | undefined): string | undefined =>
+    value === undefined || value === "" ? undefined : value;
+  const projectId = named(auth.projectId) ?? named(options.projectId);
+
+  const answered = await traceStore().query({
+    query: `select
+              trace_id,
+              grader_id,
+              grader_version_id,
+              dimension,
+              source,
+              judged_by,
+              verdict,
+              score,
+              rationale,
+              reason,
+              cited_span_ids,
+              priority,
+              run_id,
+              agent_id,
+              agent_version_id,
+              toString(toUnixTimestamp64Micro(event_ts)) as judged_at_micros
+            from ${VERDICTS_TABLE} final
+            where organization_id = {organization_id:String}
+              ${projectId === undefined ? "" : "and project_id = {project_id:String}"}
+              and run_id in {run_ids:Array(String)}
+            order by run_id, trace_id, grader_id, dimension, grader_version_id, judged_by`,
+    query_params: {
+      organization_id: auth.organizationId,
+      ...(projectId === undefined ? {} : { project_id: projectId }),
+      run_ids: [...runIds],
+    },
+    format: "JSONEachRow",
+  });
+
+  for (const row of (await answered.json<VerdictRow>()).map(verdictOf)) {
+    const conversations = byRun.get(row.runId) ?? new Map();
+    byRun.set(row.runId, conversations);
+    const held = conversations.get(row.traceId);
+    if (held === undefined) conversations.set(row.traceId, [row]);
+    else held.push(row);
+  }
+
+  return new Map(
+    [...byRun].map(([runId, conversations]) => [
+      runId,
+      new Map(
+        [...conversations].map(([simulationId, rows]) => [
+          simulationId,
+          foldVerdicts(rows),
+        ]),
+      ),
+    ]),
+  );
+}
+
+/**
  * The rows of one conversation, or of one run, read the one way this module
  * reads rows.
  *

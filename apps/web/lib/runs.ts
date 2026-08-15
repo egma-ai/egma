@@ -224,3 +224,366 @@ export function whyNotStartable(plan: RunPlan): string | null {
   }
   return null;
 }
+
+/* ------------------------------------------------------------------------ *
+ * Run history: reading runs, following one, and the two controls on it.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * The four verdict words. Four, and never three: `skipped` and `errored` are
+ * answers in their own right, and a page that folded either into `failed` would
+ * mark a suite red on the strength of egma's own outage.
+ */
+export type VerdictWord = "passed" | "failed" | "skipped" | "errored";
+
+export const VERDICT_WORDS: readonly VerdictWord[] = [
+  "passed",
+  "failed",
+  "skipped",
+  "errored",
+];
+
+/** A run's machinery, and never a judgement of what it found. */
+export type RunStatusWord = "pending" | "running" | "completed" | "canceled";
+
+export const RUN_STATUS_WORDS: readonly RunStatusWord[] = [
+  "pending",
+  "running",
+  "completed",
+  "canceled",
+];
+
+/** One conversation's machinery. `skipped` is born terminal and never claimed. */
+export type SimulationStatusWord =
+  | "queued"
+  | "claimed"
+  | "running"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "skipped";
+
+/**
+ * Where the judging of one conversation stands — never what it decided.
+ *
+ * `not_required` is the one worth reading twice: a conversation egma never
+ * conducted, or one somebody stopped, has no grading job and never will. Drawing
+ * it as `pending` would leave a progress line waiting forever on work nobody
+ * filed.
+ */
+export type GradingWord = "not_required" | "waiting" | "pending" | "graded";
+
+export type VerdictCounts = {
+  readonly passed: number;
+  readonly failed: number;
+  readonly skipped: number;
+  readonly errored: number;
+  readonly total: number;
+};
+
+/**
+ * One run as a list draws it — the four facts, each as itself.
+ *
+ * `verdict` is `null` until every conversation has one, which is *nobody has
+ * finished looking* and is not a verdict. `simulation_counts` is the machinery,
+ * counted by state, with `skipped` its own number for the reason it is its own
+ * column: egma declining to conduct a conversation says nothing about the agent.
+ */
+export type RunRow = {
+  readonly id: string;
+  readonly project_id: string;
+  readonly status: RunStatusWord;
+  readonly label: string | null;
+  readonly agent_id: string;
+  readonly connection_id: string;
+  readonly connection_type: string;
+  readonly modality: string;
+  readonly environment: string | null;
+  readonly retry_of_run_id: string | null;
+  readonly expected_simulation_count: number;
+  readonly completed_count: number | null;
+  readonly failed_count: number | null;
+  readonly canceled_count: number | null;
+  readonly skipped_count: number | null;
+  readonly simulation_counts: Readonly<Record<SimulationStatusWord, number>>;
+  readonly finished_count: number;
+  readonly gradable_count: number;
+  readonly graded_count: number;
+  readonly verdict: VerdictWord | null;
+  readonly score: number | null;
+  readonly verdict_counts: VerdictCounts;
+  readonly created_at: string;
+  readonly started_at: string | null;
+  readonly finished_at: string | null;
+};
+
+export type RunHistoryPage = {
+  readonly items: readonly RunRow[];
+  /**
+   * Where this page stopped, or null on the last one.
+   *
+   * **A verdict-filtered page can be short and still carry one**, and the
+   * promise is worth reading exactly: a cursor says there is more to look at,
+   * never that there is more to show. A verdict is folded at read time from
+   * another store, so the server sweeps and folds rather than filtering in the
+   * query, and a sweep that found two matches in fifty runs answers two.
+   */
+  readonly next_cursor: string | null;
+};
+
+/** One conversation of a run, as the run's own page draws it. */
+export type RunSimulation = {
+  readonly id: string;
+  readonly position: number;
+  readonly test_id: string | null;
+  readonly test_name: string | null;
+  readonly test_version_id: string | null;
+  readonly persona_id: string;
+  readonly persona_name: string;
+  /** Exactly who called, frozen. The name above reads as it stands today. */
+  readonly persona_version_id: string;
+  readonly status: SimulationStatusWord;
+  readonly grading: GradingWord;
+  readonly verdict: VerdictWord | null;
+  readonly score: number | null;
+  readonly counts: VerdictCounts | null;
+  readonly reason: string | null;
+  readonly skip_reason: string | null;
+  readonly skipped_capabilities: readonly string[] | null;
+  readonly modality: string | null;
+  readonly has_recording: boolean;
+};
+
+/** One judge choice a frozen plan holds. Never a key, and there is no field for one. */
+export type PlanJudgeChoice =
+  | { readonly tag: "not_required" }
+  | {
+      readonly tag: "configured";
+      readonly provider: string;
+      readonly model: string;
+      readonly source: string;
+    }
+  | { readonly tag: "unavailable_at_capture" };
+
+export type FrozenPlanItem =
+  | {
+      readonly kind: "built_in";
+      readonly grader_key: string;
+      readonly engine_version: string;
+      readonly reads: readonly string[];
+      readonly modalities: readonly string[];
+      readonly judge: PlanJudgeChoice;
+    }
+  | {
+      readonly kind: "authored";
+      readonly grader_id: string;
+      readonly grader_version_id: string;
+      readonly name: string;
+      readonly origin: "project_default" | "scenario_specific";
+      readonly priority: string;
+      readonly scope: string;
+      readonly reads: readonly string[];
+      readonly modalities: readonly string[];
+      readonly judge: PlanJudgeChoice;
+    };
+
+export type FrozenPlanGroup =
+  | {
+      readonly tag: "version";
+      readonly test_id: string;
+      readonly test_version_id: string;
+      readonly test_name: string;
+      readonly items: readonly FrozenPlanItem[];
+    }
+  | { readonly tag: "legacy_testless"; readonly items: readonly FrozenPlanItem[] };
+
+/**
+ * When a run's grading plan was decided, and whether one was decided at all.
+ *
+ * The state has to be shown, because it decides how much of the rest can be
+ * believed. `migration_snapshot` was captured during an upgrade rather than when
+ * the run began, and `not_recorded` has no plan at all — a page must say so
+ * rather than presenting today's graders as something that was pinned.
+ */
+export type FrozenPlan = {
+  readonly state: "run_start" | "migration_snapshot" | "not_recorded";
+  readonly captured_at: string | null;
+  readonly groups: readonly FrozenPlanGroup[];
+};
+
+export type ConnectionSnapshot = {
+  readonly type: string;
+  readonly modality: string;
+  readonly topology: string;
+  readonly environment: string | null;
+  readonly config: unknown;
+};
+
+/** One mocked answer a run froze, as the snapshot carries it. */
+export type FrozenMockTool = {
+  readonly tool_name: string;
+  readonly mock_tool_id?: string;
+};
+
+export type MockToolSnapshot = {
+  readonly defaults: readonly FrozenMockTool[];
+  readonly overrides: Readonly<Record<string, readonly FrozenMockTool[]>>;
+};
+
+/**
+ * One run, whole — what its own page reads.
+ *
+ * The agent and the connection come back **as they now stand, archived or not**.
+ * That is what keeps a run readable after somebody archives what it went over:
+ * archiving stops new work, and it must never make old evidence unnameable.
+ */
+export type RunDetail = {
+  readonly id: string;
+  readonly project_id: string;
+  readonly status: RunStatusWord;
+  readonly label: string | null;
+  readonly agent_id: string;
+  readonly connection_id: string;
+  readonly connection_type: string | null;
+  readonly modality: string | null;
+  readonly connection_snapshot: ConnectionSnapshot;
+  readonly retry_of_run_id: string | null;
+  readonly test_versions: readonly string[];
+  readonly mock_tools: MockToolSnapshot;
+  readonly expected_simulation_count: number;
+  readonly completed_count: number | null;
+  readonly failed_count: number | null;
+  readonly canceled_count: number | null;
+  readonly skipped_count: number | null;
+  readonly simulation_counts: Readonly<Record<SimulationStatusWord, number>>;
+  readonly finished_count: number;
+  readonly gradable_count: number;
+  readonly graded_count: number;
+  readonly verdict: VerdictWord | null;
+  readonly score: number | null;
+  readonly counts: VerdictCounts | null;
+  readonly created_at: string;
+  readonly finished_at: string | null;
+  readonly simulations: readonly RunSimulation[];
+  readonly grading_plan: FrozenPlan | null;
+  readonly agent: {
+    readonly id: string;
+    readonly name: string;
+    readonly archived: boolean;
+  } | null;
+  readonly connection: {
+    readonly id: string;
+    readonly name: string;
+    readonly type: string;
+    readonly archived: boolean;
+  } | null;
+};
+
+/** One numbered change, as the feed carries it. */
+export type RunEventRow = {
+  readonly seq: number;
+  readonly at: string;
+  readonly kind: "run" | "simulation";
+  readonly status: string;
+  readonly simulation_id?: string;
+  readonly test_name?: string | null;
+  readonly persona_name?: string | null;
+  readonly verdict?: VerdictWord | null;
+  readonly reason?: string | null;
+};
+
+export type RunEventFeed = {
+  readonly events: readonly RunEventRow[];
+  /** Hand back as `after` to continue; the same number again on an empty page. */
+  readonly next: number;
+  /** True once the run has finished, and only then. */
+  readonly done: boolean;
+};
+
+/** What narrows a run history. Every one of them optional, and none a default. */
+export type RunFilters = {
+  readonly agent?: string;
+  readonly connection?: string;
+  readonly test?: string;
+  readonly status?: RunStatusWord;
+  readonly verdict?: VerdictWord;
+  /** RFC 3339. Runs started at or after this moment. */
+  readonly since?: string;
+  readonly limit?: number;
+  readonly cursor?: string;
+};
+
+/** The address of one page of history. The whole question is in the address. */
+export function runsQuery(filters: RunFilters = {}): string {
+  const asked = new URLSearchParams();
+  for (const [name, value] of Object.entries(filters)) {
+    if (value === undefined || value === "") continue;
+    asked.set(name, String(value));
+  }
+  const query = asked.toString();
+  return query === "" ? RUNS_PATH : `${RUNS_PATH}?${query}`;
+}
+
+export function runPath(runId: string): string {
+  return `${RUNS_PATH}/${encodeURIComponent(runId)}`;
+}
+
+export function runEventsPath(runId: string): string {
+  return `${runPath(runId)}/events`;
+}
+
+export function runCancelPath(runId: string): string {
+  return `${runPath(runId)}/cancel`;
+}
+
+/**
+ * Where Retry is asked for — a verb on the earlier run, never a field on a
+ * create body. Everything the new run uses comes off the run in this address, so
+ * a run that says it retries another one really does execute what that one
+ * executed.
+ */
+export function runRetryPath(runId: string): string {
+  return `${runPath(runId)}/retry`;
+}
+
+/**
+ * The word this Retry attempt is remembered by.
+ *
+ * One key per run retried, so a lost answer becomes the run that already exists
+ * rather than a second conversation with a real agent. It is derived from the
+ * run rather than minted fresh on every click for exactly that reason: two
+ * clicks are one attempt.
+ */
+export function retryKeyFor(runId: string): string {
+  return `retry:${runId}`;
+}
+
+/**
+ * What a run's page says about the plan it froze, given the state.
+ *
+ * Three states and three different sentences, because the state decides how much
+ * of the plan can be believed. Nothing here reconstructs a plan from today's
+ * graders — an old run that recorded none says so.
+ */
+export function planExplanation(state: FrozenPlan["state"]): string {
+  if (state === "run_start") {
+    return "Frozen when this run started. These are the exact grader versions and judge choices it was judged against.";
+  }
+  if (state === "migration_snapshot") {
+    return "Captured while egma was upgraded, not when this run started. This run predates frozen plans and still had work outstanding, so the plan as it stood at the upgrade is what its grading used.";
+  }
+  return "This run predates frozen grading plans and had nothing outstanding when egma was upgraded, so no plan was recorded. Egma will not reconstruct one from today's graders.";
+}
+
+/**
+ * The sentence a run's page shows above Retry.
+ *
+ * **It is never described as a replay, and the wording is the reason.** Retry
+ * copies the earlier selection and then resolves everything else as it stands
+ * now — persona and grader versions, the project's default graders, the judge
+ * setting, the connection's configuration, and the mocked world. Somebody who
+ * read "run it again" and got different results would think egma was
+ * inconsistent, when what actually changed is what they changed.
+ */
+export const RETRY_IS_NOT_A_REPLAY =
+  "Retry starts a new run with this run's agent, connection and exact test versions. Everything else is resolved as it stands now — current persona and grader versions, the project's default graders, the judge setting, the connection, and Mock Tools. It is not an exact replay of the original conditions, and this run is not changed.";

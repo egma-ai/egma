@@ -1,0 +1,87 @@
+/*
+ * The layout the run surfaces need and no other page has: a labelled strip of
+ * the four facts, a bar for machinery progress, and the two tallies.
+ *
+ * They live here rather than in `system.module.css`, which the shared system
+ * holds closed. Every value is a token — density and colour are tuned once, in
+ * `tokens.css`, and nothing here decides either for itself.
+ */
+
+/*
+ * The four facts, side by side and labelled.
+ *
+ * They wrap rather than scroll, so a narrow screen stacks them into a column of
+ * labelled lines instead of hiding the fourth one off the edge. Hiding the
+ * verdict on a phone would be hiding the one fact somebody opened the page for.
+ */
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.factLabel {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.factValue {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--foreground);
+}
+
+/* Counts read straight when the digits line up. */
+.figure {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Machinery progress.
+ *
+ * One bar, and it measures conversations only. A bar over machinery and grading
+ * together would have to decide what a half-full bar meant, and the two settle
+ * at different moments.
+ */
+.progress {
+  position: relative;
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.progressFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+  transition: width 200ms ease-out;
+}
+
+.tally {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 40rem) {
+  .facts {
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+}
