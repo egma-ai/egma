@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { newId } from "@egma/ids";
 
 import {
   getRun,
@@ -130,6 +131,7 @@ describe("a test's own overrides", () => {
     api = await createApi("mock_world_test_content");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
+    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
 
     const pushed = await pushTest(key, {
       mock_tools: [{ ...EMPTY_CALENDAR, delay_ms: 400 }],
@@ -152,6 +154,7 @@ describe("a test's own overrides", () => {
     api = await createApi("mock_world_test_versions");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
+    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
     const pushed = await pushTest(key, { mock_tools: [EMPTY_CALENDAR] });
 
     const edited = await request("PATCH", `/api/tests/${pushed.testId}`, key, {
@@ -187,6 +190,7 @@ describe("a test's own overrides", () => {
     api = await createApi("mock_world_test_identical");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
+    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
     const pushed = await pushTest(key, { mock_tools: [EMPTY_CALENDAR] });
 
     const again = await request("PATCH", `/api/tests/${pushed.testId}`, key, {
@@ -203,6 +207,7 @@ describe("a test's own overrides", () => {
     api = await createApi("mock_world_test_kept");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
+    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
     const pushed = await pushTest(key, { mock_tools: [EMPTY_CALENDAR] });
 
     const elsewhere = await request(
@@ -230,6 +235,7 @@ describe("a test's own overrides", () => {
     api = await createApi("mock_world_test_gates");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
+    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
 
     const blank = await request("POST", "/api/tests", key, {
       ...RESCHEDULING,
@@ -283,6 +289,7 @@ async function aCustomerReadyToRun(label: string): Promise<{
   api = await createApi(label);
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
+  await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
   const { agentId, connectionId } = await registerAgent(key, "Front desk");
   return { ada, key, agentId, connectionId };
 }
@@ -512,6 +519,7 @@ describe("no version chain exists for a mock tool", () => {
     api = await createApi("mock_world_unversioned");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
+    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
     const mockToolId = await mockTool(key, EMPTY_CALENDAR);
 
     for (const slots of [["Tuesday"], ["Wednesday"], ["Thursday"]]) {

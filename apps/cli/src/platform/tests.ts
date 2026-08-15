@@ -25,7 +25,7 @@ import type { Fetch } from "./device-flow.ts";
 import { overrideFrom } from "./mock-tools.ts";
 import { PlatformRefusedError } from "./refused.ts";
 import type { SignedIn } from "./signed-in.ts";
-import { ask, saidBy, text, textList } from "./wire.ts";
+import { ask, saidBy, text } from "./wire.ts";
 
 /** A test as the platform currently has it. */
 export type PlatformTest = {
@@ -89,6 +89,27 @@ function personaNames(value: unknown): readonly string[] {
   });
 }
 
+/**
+ * The behaviors a version holds, as statements.
+ *
+ * The platform answers each with the priority it carries — P0 blocks, P1 warns,
+ * P2 informs — and this folder's file format has no way to write one down yet,
+ * so what a file round-trips is the statement. Reading both shapes is what lets
+ * an older platform and a newer one both be pulled from without the folder
+ * caring which it is talking to; writing the priority back is the file format's
+ * own change and is not this one.
+ */
+function behaviorStatements(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const written =
+      typeof entry === "object" && entry !== null
+        ? text((entry as Record<string, unknown>).behavior)
+        : text(entry);
+    return written === "" ? [] : [written];
+  });
+}
+
 function testFrom(body: Record<string, unknown>): PlatformTest {
   return {
     id: text(body.id),
@@ -96,7 +117,7 @@ function testFrom(body: Record<string, unknown>): PlatformTest {
     versionId: text(body.version_id),
     version: typeof body.version === "number" ? body.version : 0,
     scenario: text(body.scenario),
-    expectedBehaviors: textList(body.expected_behaviors),
+    expectedBehaviors: behaviorStatements(body.expected_behaviors),
     personas: personaNames(body.personas),
     mockTools: mockToolsIn(body.mock_tools),
   };
@@ -196,6 +217,25 @@ export type TestInput = {
   readonly mockTools: readonly MockToolEntry[];
 };
 
+/**
+ * What a create says beyond the test itself: the agent this repository is bound
+ * to.
+ *
+ * **A test always applies to at least one agent**, and the one a repository can
+ * honestly name is its own — `egma/config.yaml` binds the folder to exactly one.
+ * A create that named none would be answered with the platform's own refusal,
+ * which is the right answer for a folder bound to nothing.
+ *
+ * An edit never carries it. Which agents a test applies to is edited in the
+ * browser and has its own revision on the platform; a push that sent the bound
+ * agent on every edit would make one file the source of truth for a set it
+ * cannot see.
+ */
+export type CreateInput = TestInput & {
+  /** The `agt_` id in `egma/config.yaml`, when the folder is bound to one. */
+  readonly agentId: string | null;
+};
+
 function writeBody(input: TestInput): Record<string, unknown> {
   return {
     name: input.name,
@@ -226,14 +266,17 @@ function answerFor(
 
 export async function createTest(
   signedIn: SignedIn,
-  input: TestInput,
+  input: CreateInput,
   fetchImpl?: Fetch,
 ): Promise<WriteAnswer> {
   const { response, body } = await ask({
     signedIn,
     path: "/api/tests",
     method: "POST",
-    body: writeBody(input),
+    body: {
+      ...writeBody(input),
+      ...(input.agentId === null ? {} : { agents: [input.agentId] }),
+    },
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
   });
 

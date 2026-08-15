@@ -37,6 +37,7 @@ import {
   notFound,
   notPermitted,
   phoneSetupRequired,
+  sendRefusal,
   unprocessable,
 } from "../http/refusals.ts";
 import {
@@ -617,6 +618,8 @@ export async function runRoutes(
           return notFound(reply, error.message);
         case "no_adapter":
           return noAdapter(reply, error.message);
+        case "test_not_applicable":
+          return sendRefusal(reply, "test_not_applicable", error.message);
         case "already_finished":
           return conflict(reply, error.message);
         default:

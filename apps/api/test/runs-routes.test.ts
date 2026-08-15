@@ -100,6 +100,26 @@ async function registerAgentThrough(
   return { agentId: agent.id, connectionId: reached.id };
 }
 
+/**
+ * Which agents a pinned version's test applies to, set through the door that
+ * owns that relation — a run may only pair an agent with a test linked to it.
+ */
+async function applyTo(
+  key: string,
+  versionId: string,
+  agentIds: readonly string[],
+): Promise<void> {
+  const version = await request("GET", `/api/test-versions/${versionId}`, key);
+  expect(version.statusCode, JSON.stringify(version.body)).toBe(200);
+  const linked = await request(
+    "POST",
+    `/api/tests/${String(version.body.test_id)}/agents`,
+    key,
+    { agents: [...agentIds] },
+  );
+  expect(linked.statusCode, JSON.stringify(linked.body)).toBe(200);
+}
+
 const RETELL = {
   type: "retell",
   modality: "chat",
@@ -519,6 +539,9 @@ describe("starting a run", () => {
       phoneIsSetUp: true,
     });
     const dialled = await registerAgentThrough(key, "Front desk line", PHONE);
+    // Authored before this agent existed, so it has to be linked before a run
+    // may pair the two.
+    await applyTo(key, oneCaller, [dialled.agentId]);
 
     const started = await request("POST", "/api/runs", key, {
       connection: dialled.connectionId,
@@ -595,8 +618,8 @@ describe("starting a run", () => {
       name: "Impatient Rita",
       traits: NEUTRAL_TRAITS,
     });
-    const { versionId } = await pushTest(key, "Reschedules", ["Impatient Rita"]);
     const dialled = await registerAgentThrough(key, "Front desk line", PHONE);
+    const { versionId } = await pushTest(key, "Reschedules", ["Impatient Rita"]);
 
     const refused = await request("POST", "/api/runs", key, {
       connection: dialled.connectionId,
