@@ -107,6 +107,8 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
   }, [judge]);
 
   const choosable = credentialsFor(held, provider);
+  const platformJudge =
+    registry?.status === "ready" && registry.value.platform_judge_available;
   const complete = isChoiceComplete({ provider, model, source });
 
   async function saveChoice(): Promise<void> {
@@ -250,8 +252,16 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
                   {credentialLabel(credential)}
                 </option>
               ))}
-              {judge.value.state === "configured" &&
-              judge.value.source === PLATFORM_SOURCE ? (
+              {/*
+                * Offered when **the deployment has a judge**, and never when
+                * the project happens to be using one. Reading it off the
+                * project's current choice would make moving to a key of your
+                * own a one-way door — the option would vanish the moment you
+                * stopped using it, and the way back would be unreachable from
+                * the one page that exists to take it. The registry answers
+                * this because it is the deployment's fact to state.
+                */}
+              {platformJudge ? (
                 <option value={PLATFORM_SOURCE}>
                   This deployment&apos;s own judge
                 </option>

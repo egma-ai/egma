@@ -931,6 +931,7 @@ describe("judge settings", () => {
         body: {
           providers: [{ provider: "openai", model_is_free_text: true }],
           platform_sentinel: "platform",
+          platform_judge_available: false,
         },
       },
       "/api/judge-credentials": { status: 200, body: { items: credentials } },
@@ -995,6 +996,7 @@ describe("judge settings", () => {
         body: {
           providers: [{ provider: "openai", model_is_free_text: true }],
           platform_sentinel: "platform",
+          platform_judge_available: false,
         },
       },
       "/api/judge-credentials": [
@@ -1129,6 +1131,106 @@ describe("judge settings", () => {
     expect(sent.some((one) => one.method === "PUT")).toBe(false);
   });
 
+  /**
+   * The one-way door, in the page this time.
+   *
+   * Whether the deployment has a judge of its own is the deployment's fact, and
+   * the registry states it. Reading it off the project's current choice made
+   * moving to a key of your own irreversible from the browser: the option
+   * vanished the moment somebody stopped using it.
+   */
+  it("offers the deployment's own judge while the project is on a credential of its own", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/judge": {
+        status: 200,
+        body: {
+          state: "configured",
+          project_id: "prj_1",
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          source: "credential",
+          credential_id: "jcr_1",
+          hint: "1234",
+          updated_at: "2026-08-01T10:00:00.000Z",
+        },
+      },
+      "/api/judge/registry": {
+        status: 200,
+        body: {
+          providers: [{ provider: "openai", model_is_free_text: true }],
+          platform_sentinel: "platform",
+          platform_judge_available: true,
+        },
+      },
+      "/api/judge-credentials": {
+        status: 200,
+        body: {
+          items: [
+            {
+              id: "jcr_1",
+              label: "Acme production",
+              provider: "openai",
+              hint: "1234",
+              revision: "rev_1",
+              created_at: "2026-08-01T10:00:00.000Z",
+              updated_at: "2026-08-01T10:00:00.000Z",
+            },
+          ],
+        },
+      },
+    });
+    render(<JudgeSettingsPage />);
+
+    const key = (await screen.findByLabelText("Key")) as HTMLSelectElement;
+    const offered = within(key).getByRole("option", {
+      name: "This deployment's own judge",
+    }) as HTMLOptionElement;
+    expect(offered.value).toBe("platform");
+
+    // And choosing it is a request the server will accept.
+    fireEvent.change(key, { target: { value: "platform" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save judge" }));
+
+    await waitFor(() => {
+      expect(sent.some((one) => one.method === "PUT")).toBe(true);
+    });
+    expect(sent.find((one) => one.method === "PUT")?.body).toMatchObject({
+      source: "platform",
+      provider: "openai",
+    });
+  });
+
+  /**
+   * And the other half, which is what stops the option being a lie: a
+   * deployment that named no judge of its own offers nothing to choose.
+   */
+  it("offers nothing of the sort on a deployment that configured no judge", async () => {
+    settings("admin", undefined as never, [
+      {
+        id: "jcr_1",
+        label: "Acme production",
+        provider: "openai",
+        hint: "1234",
+        revision: "rev_1",
+        created_at: "2026-08-01T10:00:00.000Z",
+        updated_at: "2026-08-01T10:00:00.000Z",
+      },
+    ]);
+
+    const key = (await screen.findByLabelText("Key")) as HTMLSelectElement;
+    expect(
+      within(key).queryByRole("option", {
+        name: "This deployment's own judge",
+      }),
+    ).toBeNull();
+    // The credential is still there to choose, so this is an absence rather
+    // than an empty control.
+    expect(
+      within(key).getByRole("option", { name: /Acme production/ }),
+    ).toBeTruthy();
+  });
+
   it("says the deployment's own judge has nothing to rotate", async () => {
     settings("admin", {
       state: "configured",
@@ -1202,6 +1304,7 @@ describe("judge settings", () => {
         body: {
           providers: [{ provider: "openai", model_is_free_text: true }],
           platform_sentinel: "platform",
+          platform_judge_available: false,
         },
       },
       "/api/judge-credentials": {

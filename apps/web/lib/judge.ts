@@ -68,6 +68,17 @@ export type JudgeRegistry = {
     readonly model_is_free_text: boolean;
   }[];
   readonly platform_sentinel: string;
+  /**
+   * Whether this deployment configured a judge of its own, and therefore
+   * whether the sentinel may be chosen at all.
+   *
+   * **A fact about the deployment, never about the project's current choice.**
+   * Deciding it from the project — "show the option if the project is already
+   * on it" — makes moving to a key of your own a one-way door: the option
+   * disappears the moment you stop using it, and the way back is unreachable
+   * from the page that exists to take it.
+   */
+  readonly platform_judge_available: boolean;
 };
 
 export const JUDGE_PATH = "/api/judge";
