@@ -14,7 +14,7 @@ import {
 } from "./support/database.ts";
 
 /**
- * Judge keys moving from the project onto the organization (0024), applied over
+ * Judge keys moving from the project onto the organization (0026), applied over
  * rows the release before it wrote.
  *
  * **The claim: distinct secrets stay distinct.** Two projects of one
@@ -35,9 +35,9 @@ import {
  * are compared byte for byte here for exactly that reason.
  */
 
-describe("judge keys moving to the organization (0024)", () => {
+describe("judge keys moving to the organization (0026)", () => {
   let database: EmptyDatabase;
-  /** The migration files, up to 0024's predecessor, as that release shipped. */
+  /** The migration files, up to 0026's predecessor, as that release shipped. */
   let asItWas: string;
   let client: SingleConnection;
 
@@ -72,9 +72,9 @@ describe("judge keys moving to the organization (0024)", () => {
   it("gives every existing configuration its own credential, and merges no two keys", async () => {
     const migrations = await readMigrations();
     const subject = migrations.findIndex((migration) =>
-      migration.name.startsWith("0024_"),
+      migration.name.startsWith("0026_"),
     );
-    if (subject === -1) throw new Error("0024 is missing");
+    if (subject === -1) throw new Error("0026 is missing");
     const before = migrations.slice(0, subject);
 
     for (const migration of before) {

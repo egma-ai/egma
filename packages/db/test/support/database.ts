@@ -38,6 +38,18 @@ async function onMaintenanceConnection<T>(
   }
 }
 
+/**
+ * Drop a test database out from under whatever is still attached to it —
+ * deliberately, without closing anything first. This is what teardown does by
+ * accident when an order goes wrong; the test that proves the pools survive it
+ * needs to do it on purpose.
+ */
+export async function forceDrop(databaseName: string): Promise<void> {
+  await onMaintenanceConnection((client) =>
+    client.query(`drop database if exists "${databaseName}" with (force)`),
+  );
+}
+
 export type EmptyDatabase = {
   readonly name: string;
   readonly url: string;
@@ -77,6 +89,11 @@ export async function createMigratedDatabase(
   await runMigrations(database.url);
 
   const pool = new pg.Pool({ connectionString: database.url, max: 4 });
+  // Same reason as the pool in `src/client.ts`: teardown drops databases
+  // `with (force)`, which kills any backend still attached, and the killed
+  // connection's FATAL arrives as `error` on the pool. Unlistened, that is an
+  // uncaught exception that fails a run whose every test passed.
+  pool.on("error", () => undefined);
 
   return {
     ...database,

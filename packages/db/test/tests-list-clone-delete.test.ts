@@ -146,7 +146,7 @@ describe("listing tests", () => {
       blocking(rescheduling.expectedBehaviors),
     );
     expect(five?.personas).toEqual([
-      { id: olive, name: "Olive", deletedAt: null },
+      { id: olive, name: "Olive", archivedAt: null },
     ]);
 
     // The one row naming two, in the order it authored them and no other: a
@@ -154,8 +154,8 @@ describe("listing tests", () => {
     // with its own.
     const four = page.items.find((item) => item.name === "Four");
     expect(four?.personas).toEqual([
-      { id: oscar, name: "Oscar", deletedAt: null },
-      { id: olive, name: "Olive", deletedAt: null },
+      { id: oscar, name: "Oscar", archivedAt: null },
+      { id: olive, name: "Olive", archivedAt: null },
     ]);
   });
 
@@ -285,9 +285,9 @@ describe("cloning a test", () => {
     expect(clone.scenario).toBe(source.scenario);
     expect(clone.expectedBehaviors).toEqual(source.expectedBehaviors);
     expect(clone.personas).toEqual([
-      { id: omar, name: "Omar", deletedAt: null },
-      { id: rita, name: STARTER_PERSONA, deletedAt: null },
-      { id: nadia, name: "Nadia", deletedAt: null },
+      { id: omar, name: "Omar", archivedAt: null },
+      { id: rita, name: STARTER_PERSONA, archivedAt: null },
+      { id: nadia, name: "Nadia", archivedAt: null },
     ]);
 
     const fetched = await getTest(actingAsAcme(), clone.id);

@@ -308,6 +308,211 @@
   color: var(--faint);
 }
 
+.textarea {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+  resize: vertical;
+}
+
+.textarea::placeholder {
+  color: var(--faint);
+}
+
+.textarea:disabled,
+.input:disabled,
+.select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.select {
+  width: 100%;
+  height: var(--control-md);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--text-md);
+}
+
+/* One choice among a small closed set: two lists, never one mixed list. */
+.choice {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.choiceItem {
+  display: inline-flex;
+  height: calc(var(--control-md) - 6px);
+  align-items: center;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.choiceItem:hover {
+  color: var(--foreground);
+}
+
+.choiceItemOn {
+  background: var(--surface-soft);
+  color: var(--foreground);
+}
+
+/* The form layouts every editor is built from. */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 72ch;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.fieldHint {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+/* Why a control is not available, said where a keyboard can reach it. */
+.whyNot {
+  max-width: 56ch;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+.refused {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--bad);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.refusedText {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--bad);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
+/* A labelled group of facts about one thing. */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.fact dt {
+  margin-bottom: var(--space-1);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
+.fact dd {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
+/* A titled block of one page: traits, history, what uses this. */
+.section {
+  margin-top: var(--space-7);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 550;
+}
+
+.sectionLead {
+  max-width: 72ch;
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+/* A row's name, and whatever small state belongs beside it. */
+.rowName {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.rowName a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.rowName a:hover {
+  text-decoration: underline;
+}
+
+.statedTraits {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.plainList {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--foreground);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
 /* ---------------------------------------------------------------- status */
 
 .badge {
@@ -800,4 +1005,56 @@
   color: var(--muted);
   font-family: var(--mono);
   font-size: var(--text-xs);
+}
+
+/* ------------------------------------------------------------------ forms */
+
+.textarea {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+  resize: vertical;
+}
+
+.textarea::placeholder {
+  color: var(--faint);
+}
+
+.select {
+  height: var(--control-md);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--text-md);
+}
+
+.problem {
+  margin: 0;
+  color: var(--bad);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* --------------------------------------------------------- detail pages */
+
+.help {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
 }

@@ -18,6 +18,7 @@ import { invitationRoutes } from "./routes/invitations.ts";
 import { judgeRoutes } from "./routes/judge.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { personaRoutes } from "./routes/personas.ts";
 import { mockToolRoutes } from "./routes/mock-tools.ts";
 import { platformRoutes } from "./routes/platform.ts";
 import { platformSettingsRoutes } from "./routes/platform-settings.ts";
@@ -257,6 +258,11 @@ export function buildApi(options: ServerOptions): Api {
   // What a developer's folder syncs against. Its own scope, like every other
   // group here, so the credentialed hook and the routes it protects cannot come
   // apart and one group's error handler never answers another's refusals.
+  void app.register(personaRoutes, {
+    provider: identity.provider,
+    rateLimit,
+  });
+
   void app.register(testRoutes, { provider: identity.provider, rateLimit });
 
   // The mocked world a project's simulations run in: what egma answers with

@@ -3,7 +3,7 @@ import {
   editJudgeCredential,
   getJudgeCredential,
   getProjectJudge,
-  IdentityMovedOnError,
+  IdentityConflictError,
   JudgeProviderMismatchError,
   listJudgeCredentials,
   NotPermittedError,
@@ -370,7 +370,7 @@ export async function judgeRoutes(
       );
     }
 
-    if (error instanceof IdentityMovedOnError) {
+    if (error instanceof IdentityConflictError) {
       return sendRefusal(
         reply,
         "identity_conflict",

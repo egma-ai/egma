@@ -54,20 +54,19 @@ export const ID_PREFIXES = [
    * *reference* to one rather than a second copy of the secret.
    */
   "jcr",
-  /**
-   * The opaque revision an editable identity carries, minted fresh on every
-   * write. It names no row of its own; it is a value a caller hands back to say
-   * which state their edit was written against, which is exactly why it is
-   * minted rather than derived — a revision computed from the row's own fields
-   * would repeat itself the moment somebody edited a name back.
-   */
-  "rev",
   "mck",
   "ste",
   "run",
   "sim",
   "gjb",
   "del",
+  /**
+   * A live resource's revision: what an edit says it was written against, and
+   * a fresh one after every change that lands. It is an identifier rather than
+   * a counter so that nothing can guess the next one and so that it is opaque
+   * on its face — a caller who read `3` would sooner or later send `4`.
+   */
+  "rev",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

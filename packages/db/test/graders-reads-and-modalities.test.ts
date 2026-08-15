@@ -6,12 +6,12 @@ import {
   deleteGrader,
   editGrader,
   getGrader,
-  IdentityMovedOnError,
+  IdentityConflictError,
   listGraderVersions,
   listGraders,
   restoreGrader,
   UnprocessableInputError,
-  VersionMovedOnError,
+  VersionConflictError,
 } from "@egma/db";
 
 import type { MigratedDatabase } from "./support/database.ts";
@@ -189,7 +189,7 @@ describe("editing what a grader reads or scores", () => {
         { name: "Renamed" },
         { expectedRevision: written.revision },
       ),
-    ).rejects.toThrow(IdentityMovedOnError);
+    ).rejects.toThrow(IdentityConflictError);
 
     // And a content edit written against the version it read still lands.
     const versioned = await editGrader(
@@ -207,7 +207,7 @@ describe("editing what a grader reads or scores", () => {
         { config: { rubric: "A third thing." } },
         { expectedVersionId: written.versionId },
       ),
-    ).rejects.toThrow(VersionMovedOnError);
+    ).rejects.toThrow(VersionConflictError);
   });
 });
 
@@ -297,7 +297,7 @@ describe("archiving and restoring a grader", () => {
       deleteGrader(actingAsAcme(), written.id, {
         expectedRevision: written.revision,
       }),
-    ).rejects.toThrow(IdentityMovedOnError);
+    ).rejects.toThrow(IdentityConflictError);
 
     expect(await getGrader(actingAsAcme(), written.id)).toBeDefined();
   });

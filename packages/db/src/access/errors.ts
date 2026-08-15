@@ -181,14 +181,145 @@ function spelledOutAndCounted(
 }
 
 /**
- * A persona's delete was refused because live tests still name them.
+ * An edit named the revision it was written against, and the resource has
+ * moved since.
+ *
+ * **The counterpart to `TestMovedOnError`, one level up.** That one guards
+ * *content*: two people writing different versions of one test. This one
+ * guards *identity*: two people renaming, archiving or restoring one row. They
+ * are separate because they are separately recoverable — a rename that lost
+ * a race is retyped in a second, and a content edit that lost one may be an
+ * afternoon's work somebody has to be given the chance to reapply.
+ *
+ * It carries what a caller has to be told to recover: which resource, which
+ * one, and what the revision is now — because the next move is to read it
+ * again and send the edit naming the revision it names then.
+ */
+export class IdentityConflictError extends Error {
+  /** The kind of thing, as a refusal names it: "persona", "agent", "test". */
+  readonly resource: string;
+  readonly resourceId: string;
+  /** The revision the caller wrote against, and the one it is on now. */
+  readonly expected: string;
+  readonly current: string;
+
+  constructor(
+    resource: string,
+    resourceId: string,
+    revisions: { readonly expected: string; readonly current: string },
+  ) {
+    super(
+      `${resource} ${resourceId} changed after this edit was written against revision ${revisions.expected}, and is now on ${revisions.current}`,
+    );
+    this.name = "IdentityConflictError";
+    this.resource = resource;
+    this.resourceId = resourceId;
+    this.expected = revisions.expected;
+    this.current = revisions.current;
+  }
+}
+
+/**
+ * A versioned write named the content version it was written against, and the
+ * content has moved since.
+ *
+ * `TestMovedOnError` is this refusal for tests, and it stays where it is: it
+ * carries the test's name so a repository client can say which file in the
+ * folder to go and read. This one is the general shape for every other
+ * versioned resource, which is reached by identifier rather than by filename.
+ */
+export class VersionConflictError extends Error {
+  readonly resource: string;
+  readonly expected: string;
+  readonly current: string;
+
+  constructor(resource: string, expected: string, current: string) {
+    super(
+      `this ${resource} edit was written against version ${expected}, and it has moved on to ${current}`,
+    );
+    this.name = "VersionConflictError";
+    this.resource = resource;
+    this.expected = expected;
+    this.current = current;
+  }
+}
+
+/**
+ * Postgres rolled the write back rather than let it wait forever, and it can
+ * be sent again unchanged.
+ *
+ * **Its own class because it is the one refusal that is about nothing the
+ * caller did.** A deadlock or a serialization failure is the store noticing
+ * two correct transactions have got in each other's way; the request that
+ * loses was valid on the way in and will be valid on the way back. Letting the
+ * driver's error escape would answer it as an internal failure, which tells
+ * whoever pressed the control that egma is broken rather than that they should
+ * press it again.
+ *
+ * Nothing here promises this is rare. It is what a store is entitled to do,
+ * and a surface that only worked while it never happened would be a surface
+ * with a fault nobody could reproduce.
+ */
+export class WriteAbortedError extends Error {
+  /** What was being written, as a refusal names it: "persona", "test". */
+  readonly resource: string;
+
+  constructor(resource: string, options?: ErrorOptions) {
+    super(
+      `this ${resource} write got in the way of another one and was rolled back; nothing was changed, and sending it again is safe`,
+      options,
+    );
+    this.name = "WriteAbortedError";
+    this.resource = resource;
+  }
+}
+
+/**
+ * Archiving the project's default persona was refused, because no active
+ * replacement was named to take the pointer.
+ *
+ * **A project always has a default persona, and this is what keeps that
+ * true.** A test authored naming nobody is given the project's default; a
+ * project pointing at an archived persona, or at nobody, would refuse the
+ * commonest create there is — and it would refuse it later, to somebody who
+ * did nothing wrong, rather than now, to the person choosing to archive.
+ *
+ * So the replacement is part of the archive rather than a step after it. Doing
+ * it afterwards would leave a window in which every new test fails, and a
+ * window nobody would think to close is one that stays open.
+ */
+export class DefaultPersonaReplacementError extends Error {
+  readonly personaId: string;
+  /** Why the replacement was not accepted, when one was named at all. */
+  readonly reason: "none_named" | "not_available";
+
+  constructor(personaId: string, reason: "none_named" | "not_available") {
+    super(
+      reason === "none_named"
+        ? `persona ${personaId} is this project's default, so archiving them takes an active replacement in the same write; name one`
+        : `the replacement named for default persona ${personaId} is not an active persona of this project, so the project would be left pointing at nobody`,
+    );
+    this.name = "DefaultPersonaReplacementError";
+    this.personaId = personaId;
+    this.reason = reason;
+  }
+}
+
+/**
+ * A persona's Archive was refused because active tests still name them.
  *
  * A test names the people who call about its scenario, and executing it
- * produces one simulation per person named. Letting the delete through would
+ * produces one simulation per person named. Letting the Archive through would
  * leave each of those tests quietly running one simulation fewer than it says
  * it runs — a suite going green while the case somebody wrote it for never
- * ran. So the delete is refused, and the developer decides what those tests
+ * ran. So the Archive is refused, and the developer decides what those tests
  * should say instead.
+ *
+ * **Only a current version of an active test blocks.** A historical version
+ * is already frozen and a run that pinned it is already interpretable, so
+ * neither can lose anything; an archived test is not going to run. Blocking on
+ * either would make a persona unarchivable for the rest of the project's life
+ * on the strength of a test nobody uses.
  *
  * It carries every blocking test, because the fix is to go and edit each one
  * and a refusal that only said "something names them" would send somebody
@@ -198,14 +329,14 @@ function spelledOutAndCounted(
  */
 export class PersonaNamedByTestsError extends Error {
   readonly personaId: string;
-  /** Every live test whose current version names them, oldest first. */
+  /** Every active test whose current version names them, oldest first. */
   readonly tests: readonly TestNamingPersona[];
 
   constructor(personaId: string, tests: readonly TestNamingPersona[]) {
     super(
       `persona ${personaId} is named by ${tests.length} live ${
         tests.length === 1 ? "test" : "tests"
-      } (${spelledOutAndCounted(tests)}), and a test must never silently lose one of the people who call about it; name somebody else on those tests, or delete them, and then delete the persona`,
+      } (${spelledOutAndCounted(tests)}), and a test must never silently lose one of the people who call about it; name somebody else on those tests, or archive them, and then archive the persona`,
     );
     this.name = "PersonaNamedByTestsError";
     this.personaId = personaId;
@@ -299,83 +430,6 @@ export class GraderNamedByTestsError extends Error {
     this.name = "GraderNamedByTestsError";
     this.graderId = graderId;
     this.tests = tests;
-  }
-}
-
-/**
- * An edit named the revision it was written against, and the identity has moved.
- *
- * **The live half of optimistic concurrency**, beside the version conflict
- * below. Two people editing one grader's name from two tabs is ordinary, and
- * last-write-wins would lose one of them silently — so a write says which state
- * it was written against and a write that was written against a state which has
- * moved is refused with nothing changed.
- *
- * It carries both revisions because the caller's next move is to read the thing
- * again and reapply, and a refusal that only said "somebody got there first"
- * would not say what to send next time.
- *
- * One class for every resource rather than one per table: the answer at every
- * layer above is identical — a 409, the same sentence with the resource's own
- * word in it — and a family of classes that are handled the same way is a
- * family nobody keeps in step.
- */
-export class IdentityMovedOnError extends Error {
-  /** The resource's own word, as a message names it: `grader`, `persona`. */
-  readonly resource: string;
-  readonly resourceId: string;
-  readonly expectedRevision: string;
-  readonly currentRevision: string;
-
-  constructor(
-    resource: string,
-    resourceId: string,
-    revisions: { readonly expected: string; readonly current: string },
-  ) {
-    super(
-      `${resource} ${resourceId} changed after you opened it: the edit was written against revision ${revisions.expected}, and it is on ${revisions.current} now`,
-    );
-    this.name = "IdentityMovedOnError";
-    this.resource = resource;
-    this.resourceId = resourceId;
-    this.expectedRevision = revisions.expected;
-    this.currentRevision = revisions.current;
-  }
-}
-
-/**
- * A versioned edit named the version it was written against, and the resource
- * has minted another since.
- *
- * The other half of the pair above, and separate from it for the reason the two
- * fields are separate on the row: renaming a grader must not make a rubric edit
- * somebody is still typing stale, and tightening a rubric must not make a
- * rename stale. Two questions, two refusals, two things to reapply.
- *
- * `TestMovedOnError` says the same thing about a test and is left where it is:
- * its sentence is contract in the repository-synchronization surface, quoted by
- * the CLI's own tests, and rewriting it here would change a message somebody
- * relies on to decide what to do next.
- */
-export class VersionMovedOnError extends Error {
-  readonly resource: string;
-  readonly resourceId: string;
-  readonly expectedVersionId: string;
-  readonly currentVersionId: string;
-
-  constructor(
-    resource: string,
-    resourceId: string,
-    versions: { readonly expected: string; readonly current: string },
-  ) {
-    super(
-      `this ${resource} edit was written against version ${versions.expected}, and ${resourceId} has moved on to ${versions.current}`,
-    );
-    this.name = "VersionMovedOnError";
-    this.resource = resource;
-    this.resourceId = resourceId;
-    this.expectedVersionId = versions.expected;
-    this.currentVersionId = versions.current;
   }
 }
 
@@ -540,5 +594,84 @@ export class NotPermittedError extends Error {
     this.action = action;
     this.organizationId = scope.organizationId;
     this.projectId = scope.projectId;
+  }
+}
+
+/**
+ * A connection could not be brought back on the terms its own shape sets.
+ *
+ * Four rules refuse a Restore and they are four different answers to whoever
+ * asked — bring a credential, do not bring one, say which of the two you mean,
+ * and restore the agent first. The reason travels beside the sentence rather
+ * than inside it, as the agent factory's refusals do and for the same reason:
+ * an HTTP layer answers each of them with its own code, and reading the prose
+ * to tell them apart would make the prose load-bearing.
+ */
+export class ConnectionRestoreRefusedError extends Error {
+  readonly reason: ConnectionRestoreRefusal;
+  /** Whichever of the two the sentence named, for a layer that has to relay it. */
+  readonly connectionId: string | undefined;
+  readonly agentId: string | undefined;
+  readonly connectionType: string | undefined;
+
+  constructor(
+    reason: ConnectionRestoreRefusal,
+    message: string,
+    named: {
+      readonly connectionId?: string;
+      readonly agentId?: string;
+      readonly type?: string;
+    } = {},
+  ) {
+    super(message);
+    this.name = "ConnectionRestoreRefusedError";
+    this.reason = reason;
+    this.connectionId = named.connectionId;
+    this.agentId = named.agentId;
+    this.connectionType = named.type;
+  }
+}
+
+export type ConnectionRestoreRefusal =
+  | "credential_required"
+  | "credential_forbidden"
+  | "credential_choice_required"
+  | "parent_agent_archived";
+
+/**
+ * Egma was asked to measure a target and the adapter could not establish
+ * anything.
+ *
+ * Not a fault and not the caller's mistake: the request was fine and the target
+ * did not answer. It is its own class because the honest reply names the
+ * connection, says the capability state is unchanged, and points at Refresh
+ * again — and because the state genuinely stays as it was, so nothing above may
+ * treat this as having cleared a measurement.
+ */
+export class CapabilityCheckFailedError extends Error {
+  readonly connectionId: string;
+
+  constructor(connectionId: string, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "CapabilityCheckFailedError";
+    this.connectionId = connectionId;
+  }
+}
+
+/**
+ * Egma was asked to measure a type it ships nothing to measure.
+ *
+ * Its own class rather than the failure above, because the two have different
+ * next moves and a caller that could not tell them apart would retry forever.
+ * That one is *the target did not answer, try again*; this one is *there is
+ * nothing here to try*, and it will stay that way until an adapter ships.
+ */
+export class NoCapabilityAdapterError extends Error {
+  readonly connectionType: string;
+
+  constructor(connectionType: string, message: string) {
+    super(message);
+    this.name = "NoCapabilityAdapterError";
+    this.connectionType = connectionType;
   }
 }

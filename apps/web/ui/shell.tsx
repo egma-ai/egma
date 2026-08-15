@@ -421,3 +421,35 @@ export function ProductStatePage({
     </AppShell>
   );
 }
+
+/**
+ * A titled block of one page: the traits, the history, what uses this.
+ *
+ * A detail page is a stack of these rather than one long form, because the
+ * blocks answer different questions and are written at different times — and
+ * because a heading is what lets somebody land on the part they came for.
+ */
+export function Section({
+  title,
+  lead,
+  action,
+  children,
+}: {
+  readonly title: string;
+  readonly lead?: ReactNode;
+  readonly action?: ReactNode;
+  readonly children: ReactNode;
+}) {
+  return (
+    <section className={styles.section}>
+      <div className={styles.sectionHead}>
+        <div>
+          <h2 className={styles.sectionTitle}>{title}</h2>
+          {lead === undefined ? null : <p className={styles.sectionLead}>{lead}</p>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}

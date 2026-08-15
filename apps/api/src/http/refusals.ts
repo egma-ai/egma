@@ -25,15 +25,23 @@ export const CODES = {
   project_outside_organization: 404,
   conflict: 409,
   name_taken: 409,
-  /**
-   * A live edit written against a state the resource has left behind. Its own
-   * code beside `version_conflict` because the two halves of a versioned
-   * resource move apart: a rename must not make a rubric edit stale, and a
-   * client has to know which of the two to reread and resend.
-   */
+  // A stale write, told apart from a plain conflict by which of the two things
+  // moved: the resource's identity, or the content of its current version.
+  // The caller's next move differs — one is retyped, the other is reapplied —
+  // so a client that could not tell them apart could not offer either.
   identity_conflict: 409,
-  /** A versioned edit written against a version the resource has minted past. */
   version_conflict: 409,
+  parent_agent_archived: 409,
+  // A persona an active test still names, and the persona a project points at
+  // by default. Two rules that refuse one Archive, and two sentences, because
+  // the fix for each is somewhere else.
+  persona_in_use: 409,
+  default_persona_required: 409,
+  // The store rolled a write back because another one got in its way. Its own
+  // code because it is the one refusal that is about nothing the caller did:
+  // the request was valid on the way in, nothing was written, and sending it
+  // again is the whole of the fix — which a client can do by itself.
+  write_aborted: 409,
   /**
    * A grader an active test names directly, refused Archive. Its own code
    * because the fix is specific — go and take it off those tests — and the
@@ -41,12 +49,16 @@ export const CODES = {
    */
   grader_in_use: 409,
   unprocessable: 422,
-  /**
-   * A product request that named no project. Its own code because there is one
-   * thing to do about it and a page can do it: the selector already knows every
-   * project this person may open.
-   */
+  credential_required: 422,
+  credential_forbidden: 422,
+  credential_choice_required: 422,
+  no_capability_adapter: 422,
+  // A product request that named no project. Its own code because a browser
+  // reading this has a selector on screen, and the sentence names it.
   project_required: 422,
+  // A cursor this list never issued. Its own code so a client can drop it and
+  // start again rather than showing somebody a broken page forever.
+  invalid_cursor: 422,
   /**
    * A project's judge pointed at a credential issued by a different provider.
    * Nothing about the request is malformed and nothing is missing — the two
@@ -68,6 +80,7 @@ export const CODES = {
    * detail goes to the log.
    */
   unavailable: 500,
+  capability_check_failed: 502,
   no_object_store: 503,
 } as const;
 
@@ -113,6 +126,30 @@ export function projectOutsideOrganization(projectId: string): string {
 }
 
 /**
+ * An edit that named the revision it was written against, refused because the
+ * resource has moved since.
+ *
+ * **The sentence is composed here, by the layer that answers, rather than
+ * carried on the error.** Two route groups answer this refusal now — agents
+ * and connections in one, personas in the other — and each names its own
+ * resource word, lower case where the API spells the resource that way and
+ * capitalised where it does not. An error that baked one sentence in would
+ * make the other group either relay the wrong word or paraphrase, and the
+ * wording is contract: a coding agent reads it off a terminal.
+ *
+ * What the error carries is the data — which resource, which one, and the two
+ * revisions — which is what a caller needs to read the thing again and send
+ * the edit against the revision it names now.
+ */
+export function identityConflict(resource: string, resourceId: string): string {
+  return (
+    `${resource} ${resourceId} changed after you opened it. Read it again, ` +
+    `keep or reapply your edits, and send the update with expected_revision ` +
+    `set to its new revision.`
+  );
+}
+
+/**
  * The exact sentences the product surface answers with, written once.
  *
  * **These are contract.** A page shows them word for word and a client branches
@@ -139,10 +176,12 @@ export const REFUSALS = {
     `Your ${role} role cannot ${action}. Ask an organization admin to change ` +
     "your role, then try again.",
 
-  identityConflict: (resource: string, resourceId: string): string =>
-    `${resource} ${resourceId} changed after you opened it. Read it again, ` +
-    "keep or reapply your edits, and send the update with expected_revision " +
-    "set to its new revision.",
+  /**
+   * The same sentence the free function above composes, reached through this
+   * table so the route groups that read their wording off it do not carry a
+   * second copy of a sentence that is contract.
+   */
+  identityConflict,
 
   versionConflict: (
     resource: string,

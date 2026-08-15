@@ -13,6 +13,7 @@ import {
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
 import { createdAt, idText, moment, prefixCheck, updatedAt } from "./columns.ts";
+import { newRevision } from "../revisions.ts";
 
 /**
  * A persona is the person an agent gets tested against: synthetic, and
@@ -25,6 +26,11 @@ import { createdAt, idText, moment, prefixCheck, updatedAt } from "./columns.ts"
  * pins a version row — this persona, frozen exactly as they were when
  * the simulation happened, so editing today never rewrites what an old result
  * meant. Renames touch the identity row only; behavior lives in the version.
+ *
+ * **A persona is archived, never deleted.** Archive takes them out of the
+ * lists somebody authors from and leaves every row exactly where it was, so
+ * Restore is an ordinary write rather than a recovery. Permanent removal is a
+ * compliance workflow and is not this table's business.
  */
 
 export const persona = pgTable(
@@ -44,7 +50,14 @@ export const persona = pgTable(
     currentVersionId: idText("current_version_id")
       .notNull()
       .references((): AnyPgColumn => personaVersion.id),
-    deletedAt: moment("deleted_at"),
+    /**
+     * The opaque token an edit, an Archive or a Restore has to name to be
+     * allowed to land — see `revisions.ts`. Defaulted here rather than at each
+     * call site so that provisioning's hand-written starter row and the
+     * factory's own insert cannot come to disagree about filling it.
+     */
+    revision: text("revision").notNull().$defaultFn(newRevision),
+    archivedAt: moment("archived_at"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -66,7 +79,7 @@ export const persona = pgTable(
     unique("persona_id_project_id_unique").on(table.id, table.projectId),
     index("persona_organization_id_project_id_idx")
       .on(table.organizationId, table.projectId)
-      .where(sql`${table.deletedAt} is null`),
+      .where(sql`${table.archivedAt} is null`),
   ],
 );
 

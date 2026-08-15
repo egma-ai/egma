@@ -28,10 +28,10 @@ import {
 import type { AuthContext } from "./context.ts";
 import {
   GraderNamedByTestsError,
-  IdentityMovedOnError,
+  IdentityConflictError,
   ProjectOutsideOrganizationError,
   UnprocessableInputError,
-  VersionMovedOnError,
+  VersionConflictError,
   type TestNamingGrader,
 } from "./errors.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
@@ -1431,7 +1431,7 @@ export async function editGrader(
       expected.expectedRevision !== undefined &&
       expected.expectedRevision !== current.revision
     ) {
-      throw new IdentityMovedOnError("Grader", current.id, {
+      throw new IdentityConflictError("Grader", current.id, {
         expected: expected.expectedRevision,
         current: current.revision,
       });
@@ -1440,10 +1440,11 @@ export async function editGrader(
       expected.expectedVersionId !== undefined &&
       expected.expectedVersionId !== currentVersionId
     ) {
-      throw new VersionMovedOnError("grader", current.id, {
-        expected: expected.expectedVersionId,
-        current: currentVersionId,
-      });
+      throw new VersionConflictError(
+        "grader",
+        expected.expectedVersionId,
+        currentVersionId,
+      );
     }
 
     // This select and the update below are the two `where`s in this file that
@@ -1810,7 +1811,7 @@ export async function deleteGrader(
       expected.expectedRevision !== undefined &&
       expected.expectedRevision !== locked.revision
     ) {
-      throw new IdentityMovedOnError("Grader", locked.id, {
+      throw new IdentityConflictError("Grader", locked.id, {
         expected: expected.expectedRevision,
         current: locked.revision,
       });
@@ -1887,7 +1888,7 @@ export async function restoreGrader(
       expected.expectedRevision !== undefined &&
       expected.expectedRevision !== locked.revision
     ) {
-      throw new IdentityMovedOnError("Grader", locked.id, {
+      throw new IdentityConflictError("Grader", locked.id, {
         expected: expected.expectedRevision,
         current: locked.revision,
       });

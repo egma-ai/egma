@@ -9,7 +9,7 @@ import {
 } from "../schema/graders.ts";
 import { sealCredentials } from "../sealing.ts";
 import type { AuthContext } from "./context.ts";
-import { IdentityMovedOnError, UnprocessableInputError } from "./errors.ts";
+import { IdentityConflictError, UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
 
@@ -312,7 +312,7 @@ export async function editJudgeCredential(
       expected.expectedRevision !== undefined &&
       expected.expectedRevision !== locked.revision
     ) {
-      throw new IdentityMovedOnError("Judge credential", locked.id, {
+      throw new IdentityConflictError("Judge credential", locked.id, {
         expected: expected.expectedRevision,
         current: locked.revision,
       });

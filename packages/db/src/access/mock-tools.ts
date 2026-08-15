@@ -445,7 +445,7 @@ async function validateNamedAgents(
   const found = new Map(
     (
       await on
-        .select({ id: agent.id, deletedAt: agent.deletedAt })
+        .select({ id: agent.id, deletedAt: agent.archivedAt })
         .from(agent)
         .where(
           within(
@@ -503,7 +503,7 @@ export async function resolveMockToolAgents(
   if (wanted.length === 0) return [];
 
   const rows = await db()
-    .select({ id: agent.id, name: agent.name, deletedAt: agent.deletedAt })
+    .select({ id: agent.id, name: agent.name, deletedAt: agent.archivedAt })
     .from(agent)
     .where(
       within(
@@ -511,7 +511,7 @@ export async function resolveMockToolAgents(
         agent,
         and(
           eq(agent.projectId, projectId),
-          isNull(agent.deletedAt),
+          isNull(agent.archivedAt),
           or(inArray(agent.id, wanted), inArray(agent.name, wanted)),
         ),
       ),

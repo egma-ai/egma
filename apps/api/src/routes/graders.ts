@@ -6,7 +6,7 @@ import {
   editGrader,
   getGrader,
   GraderNamedByTestsError,
-  IdentityMovedOnError,
+  IdentityConflictError,
   listGraderVersions,
   listGraders,
   NotPermittedError,
@@ -14,7 +14,7 @@ import {
   restoreGrader,
   testsNamingGrader,
   UnprocessableInputError,
-  VersionMovedOnError,
+  VersionConflictError,
   EXPECTED_BEHAVIORS_GRADER,
   GRADER_READS,
   GRADER_SCOPES,
@@ -548,7 +548,7 @@ export async function graderRoutes(
    * reread the content and resend with a new version.
    */
   app.setErrorHandler(async (error, _request, reply) => {
-    if (error instanceof IdentityMovedOnError) {
+    if (error instanceof IdentityConflictError) {
       return sendRefusal(
         reply,
         "identity_conflict",
@@ -556,15 +556,11 @@ export async function graderRoutes(
       );
     }
 
-    if (error instanceof VersionMovedOnError) {
+    if (error instanceof VersionConflictError) {
       return sendRefusal(
         reply,
         "version_conflict",
-        REFUSALS.versionConflict(
-          error.resource,
-          error.expectedVersionId,
-          error.currentVersionId,
-        ),
+        REFUSALS.versionConflict(error.resource, error.expected, error.current),
       );
     }
 
