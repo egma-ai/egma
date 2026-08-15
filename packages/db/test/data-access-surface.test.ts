@@ -232,6 +232,7 @@ const CONTEXT_REQUIRING = [
   // The other half of a key-only verdict row: what a page shows a person, read
   // from the versions the conversation was pinned to rather than from the live
   // test.
+  "readAssertionShelf",
   "readAssertionWords",
   "readProject",
   "readRunVerdicts",
@@ -444,6 +445,12 @@ const THE_MOCKED_WORLD = [
  * against.
  */
 const THE_FOLD = [
+  // The two halves of one assertion key's round trip: the engine writes a
+  // verdict row with the first, a page reads the words back with the second.
+  // Here for the fold's own reason — they reach nothing — and together, because
+  // a format known in two packages is a format free to fork in one of them.
+  "behaviorAssertionAt",
+  "behaviorAssertionKey",
   "foldVerdicts",
   "foldVerdictsByGrader",
   "speakingVerdicts",

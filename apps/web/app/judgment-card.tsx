@@ -1,3 +1,4 @@
+import { GRADING } from "../lib/grading-copy.ts";
 import { DETAIL } from "../lib/transcript-copy.ts";
 import { assertionHeading, type Judgment } from "../lib/transcripts.ts";
 import styles from "./ui.module.css";
@@ -55,17 +56,3 @@ export function JudgmentCard({
     </article>
   );
 }
-
-/**
- * The two lanes, in the words every surface that shows them uses.
- *
- * Here rather than in `transcript-copy.ts` because both pages that draw a
- * judgment share this component, and a second copy of "Diagnostic" on the run
- * page would be a second chance to say it differently.
- */
-export const GRADING = {
-  diagnostic: "Diagnostic",
-  diagnosticMeans: "Reported only. This grader can never fail a test or a run.",
-  diagnosticLane: "Diagnostics",
-  diagnosticLaneLead: "Judged and reported. Nothing here can fail this run.",
-} as const;

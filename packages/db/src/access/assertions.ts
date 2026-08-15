@@ -1,3 +1,4 @@
+import { behaviorAssertionAt } from "../grader-library/assertion-keys.ts";
 import { PREDEFINED_GRADERS } from "../grader-library/catalog.ts";
 import type { AuthContext } from "./context.ts";
 import { getGraderLibraryEntry } from "./grader-library.ts";
@@ -47,37 +48,38 @@ export type AssertionWords = {
 const NOTHING_TO_SAY: AssertionWords = { of: () => undefined };
 
 /**
- * The words behind this conversation's assertion keys.
+ * What several conversations judged by the same copies share, read once.
  *
- * A handful of reads and no more, each asked once for the whole conversation:
- * the version the simulation was executed against, the copies that wrote the
- * rows, and the entries those copies point at. A page showing twenty judgments
- * therefore costs what one showing two costs.
+ * **Everything except the pinned version is a fact about the graders, not about
+ * the conversation.** Which entry a copy points at cannot be edited at all, and
+ * what that entry is called is one row on the shelf — so a run of two hundred
+ * conversations judged by two copies has two grader rows and one or two library
+ * rows behind the whole page, and reading them per conversation would be two
+ * hundred copies of one answer.
  *
- * A production trace has no simulation and therefore no test, and a smoke
- * simulation started against no test has none either. Neither has behaviors to
- * look up; both still resolve the whole-grader keys below, because what those
- * name is the shelf rather than the test.
- *
- * @param simulationId The conversation, as the verdict rows file it.
- * @param graderIds The copies that wrote them — the row's own `graderId`s.
+ * The version each conversation pinned is the one thing that genuinely varies,
+ * and it stays where it has to be: behind `forSimulation`, asked once per
+ * conversation.
  */
-export async function readAssertionWords(
+export type AssertionShelf = {
+  /** The words for one conversation, from the version that conversation pinned. */
+  readonly forSimulation: (simulationId: string) => Promise<AssertionWords>;
+};
+
+/**
+ * The shelf for a whole run: the grader facts and the entry names behind these
+ * copies, read once, ready to resolve any conversation they judged.
+ *
+ * @param graderIds Every copy that wrote a row anywhere in the run.
+ */
+export async function readAssertionShelf(
   auth: AuthContext,
-  simulationId: string,
   graderIds: readonly string[],
-): Promise<AssertionWords> {
-  if (graderIds.length === 0) return NOTHING_TO_SAY;
+): Promise<AssertionShelf> {
+  if (graderIds.length === 0) return NOTHING_FOR_ANYBODY;
 
   const facts = await graderFacts(auth, graderIds);
-  if (facts.size === 0) return NOTHING_TO_SAY;
-
-  // The pinned version, and nothing about the test as it now stands. It answers
-  // `undefined` for a conversation that pinned none, and for one whose version
-  // this credential cannot reach — in both cases there are no behaviors to read,
-  // which is not the same as having nothing at all to say.
-  const version = await getSimulationTestVersion(auth, simulationId);
-  const behaviors = version?.expectedBehaviors ?? [];
+  if (facts.size === 0) return NOTHING_FOR_ANYBODY;
 
   // The entries behind those copies, by their own ids — the same read the engine
   // makes through the same pointer, so what a page calls a grader and what
@@ -92,47 +94,62 @@ export async function readAssertionWords(
   );
 
   return {
-    of: (graderId, assertion) => {
-      const its = facts.get(graderId);
-      if (its === undefined) return undefined;
+    forSimulation: async (simulationId) => {
+      // The pinned version, and nothing about the test as it now stands. It
+      // answers `undefined` for a conversation that pinned none, and for one
+      // whose version this credential cannot reach — in both cases there are no
+      // behaviors to read, which is not the same as having nothing at all to
+      // say: a whole-grader key still resolves, because what it names is the
+      // shelf rather than the test.
+      const version = await getSimulationTestVersion(auth, simulationId);
+      const behaviors = version?.expectedBehaviors ?? [];
 
-      // **A whole-grader key is the entry's own identifier**, which is what a
-      // grader that makes exactly one assertion names it — fixed for the
-      // entry's life, precisely so that no catalog rename can rekey a verdict.
-      // The words for it are that entry's name, read here rather than written
-      // into the row for the same reason every other key is a key.
-      if (assertion === its.libraryId) return named.get(its.libraryId);
+      return {
+        of: (graderId, assertion) => {
+          const its = facts.get(graderId);
+          if (its === undefined) return undefined;
 
-      // Behaviors are the one key shape that means a sentence in a test, and it
-      // is the expected-behaviors entry that mints them. `latency`'s keys are
-      // its own config entries' and what those read as is the change that
-      // computes it from spans — absent here rather than guessed at, so a reader
-      // sees the key exactly as it is written.
-      if (its.libraryId !== PREDEFINED_GRADERS.expectedBehaviors) {
-        return undefined;
-      }
-      return behaviors[behaviorAt(assertion) ?? -1];
+          // **A whole-grader key is the entry's own identifier**, which is what
+          // a grader that makes exactly one assertion names it — fixed for the
+          // entry's life, precisely so that no catalog rename can rekey a
+          // verdict. The words for it are that entry's name, read here rather
+          // than written into the row for the same reason every other key is a
+          // key.
+          if (assertion === its.libraryId) return named.get(its.libraryId);
+
+          // Behaviors are the one key shape that means a sentence in a test, and
+          // it is the expected-behaviors entry that mints them. Any other
+          // entry's keys are its own business — absent here rather than guessed
+          // at, so a reader sees the key exactly as it is written.
+          if (its.libraryId !== PREDEFINED_GRADERS.expectedBehaviors) {
+            return undefined;
+          }
+          return behaviors[behaviorAssertionAt(assertion) ?? -1];
+        },
+      };
     },
   };
 }
 
-/**
- * Which behavior a key is about, counting from nought — or nothing at all where
- * the key is not one of this grader's.
- *
- * The inverse of the one place the engine mints these, written here rather than
- * pattern-matched at the call site so that the two spellings of `behavior_3`
- * live one function apart. A key in any other shape is a key this cannot read,
- * which is a fact to report rather than a case to be clever about.
- */
-function behaviorAt(assertion: string): number | undefined {
-  const digits = /^behavior_(\d+)$/u.exec(assertion)?.[1];
-  if (digits === undefined) return undefined;
+/** A shelf with nothing on it: every conversation resolves every key to itself. */
+const NOTHING_FOR_ANYBODY: AssertionShelf = {
+  forSimulation: async () => NOTHING_TO_SAY,
+};
 
-  const position = Number(digits);
-  // One-based on the wire, so position 1 is the first sentence. A nought or a
-  // number the parse could not hold is a key nothing wrote.
-  return Number.isSafeInteger(position) && position > 0
-    ? position - 1
-    : undefined;
+/**
+ * The words behind one conversation's assertion keys.
+ *
+ * The single-conversation door onto the shelf above, for the surface that shows
+ * one transcript and has no run to amortise anything over. A page reading many
+ * conversations builds the shelf itself and asks it once per conversation.
+ *
+ * @param simulationId The conversation, as the verdict rows file it.
+ * @param graderIds The copies that wrote them — the row's own `graderId`s.
+ */
+export async function readAssertionWords(
+  auth: AuthContext,
+  simulationId: string,
+  graderIds: readonly string[],
+): Promise<AssertionWords> {
+  return (await readAssertionShelf(auth, graderIds)).forSimulation(simulationId);
 }

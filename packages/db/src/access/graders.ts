@@ -1017,11 +1017,12 @@ export type GraderFacts = {
  *
  * **Deliberately no deleted filter.** A deleted copy's verdicts are still shown
  * — its versions outlive it so that they stay interpretable — and a diagnostic
- * that somebody switched off must not start gating a run's headline the moment
+ * that somebody switched off must not start failing a run's headline the moment
  * it goes. Whether the copy is still running is not what this question asks.
  *
  * **A copy this cannot see is simply absent**, and every caller reads that
- * absence the safe way: unknown gates, and an unresolvable key stays a key.
+ * absence the safe way: a copy it cannot see is required, and an unresolvable
+ * key stays a key.
  * Another customer's id, or one the credential's project narrowing hides, comes
  * back with nothing rather than with a guess.
  *

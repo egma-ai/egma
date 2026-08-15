@@ -338,12 +338,24 @@ export async function readVerdicts(
   return {
     verdicts,
     outcome: foldVerdicts(lanes.required),
-    diagnostics:
-      lanes.diagnostic.length === 0
-        ? undefined
-        : foldVerdicts(lanes.diagnostic),
+    diagnostics: reportedApart(lanes.diagnostic),
     byGrader: foldVerdictsByGrader(verdicts, diagnostics),
   };
+}
+
+/**
+ * The diagnostic lane's own answer, or **absent** where nothing diagnostic
+ * judged this grain.
+ *
+ * Absent rather than an empty outcome, and written once rather than at each of
+ * the three grains that answer it: a "0/0 diagnostics" line on every page would
+ * be furniture describing a feature nobody switched on, and three copies of the
+ * rule were three chances for one grain to start describing it anyway.
+ */
+function reportedApart(
+  rows: readonly FoldableVerdict[],
+): FoldedOutcome | undefined {
+  return rows.length === 0 ? undefined : foldVerdicts(rows);
 }
 
 /**
@@ -353,8 +365,19 @@ export async function readVerdicts(
  * rather than of the project — so a run judged by two copies costs one lookup of
  * two ids, whatever else the project has switched on.
  *
- * **A copy that came back with nothing gates**, which is the safe direction: a
- * row nobody could resolve must not quietly stop being able to fail anything.
+ * **A copy that came back with nothing is treated as required**, which is the
+ * safe direction: a row nobody could resolve must not quietly stop being able to
+ * fail anything.
+ *
+ * **`options.projectId` is deliberately not passed on**, and the asymmetry is
+ * safe in exactly one direction. That option only ever *narrows* the rows, and a
+ * credential naming its own project narrows them regardless; the copies are read
+ * under `auth`'s own narrowing. So the worst this can do is resolve a copy whose
+ * rows the caller then filtered out — an answer about a grader nobody asked
+ * about, which changes nothing. It cannot do the reverse and fail to resolve one
+ * whose rows *are* in the answer, because a row filed under a project is written
+ * by a copy of that project. Were the option ever to widen rather than narrow,
+ * this would have to take it.
  */
 async function onlyReporting(
   auth: AuthContext,
@@ -471,17 +494,11 @@ export async function readRunVerdicts(
         return {
           simulationId,
           outcome: foldVerdicts(apart.required),
-          diagnostics:
-            apart.diagnostic.length === 0
-              ? undefined
-              : foldVerdicts(apart.diagnostic),
+          diagnostics: reportedApart(apart.diagnostic),
         };
       }),
     outcome: foldVerdicts(lanes.required),
-    diagnostics:
-      lanes.diagnostic.length === 0
-        ? undefined
-        : foldVerdicts(lanes.diagnostic),
+    diagnostics: reportedApart(lanes.diagnostic),
     byGrader: foldVerdictsByGrader(verdicts, diagnostics),
   };
 }

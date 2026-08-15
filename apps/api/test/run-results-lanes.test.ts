@@ -1,11 +1,14 @@
 import {
+  appendSpans,
   appendVerdicts,
   createPersona,
   listGraders,
   PREDEFINED_GRADERS,
   useLibraryEntry,
   type AuthContext,
+  type NewSpan,
 } from "@egma/db";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -260,3 +263,116 @@ describe("a run's results", () => {
     ]);
   });
 });
+
+/**
+ * The same judgment, drawn on the other surface.
+ *
+ * One conversation is read at two addresses — a run's results and its own
+ * transcript — and one component draws the judgment on both. So the two answers
+ * have to carry the same fields, or the shared card reads two ways depending on
+ * where somebody opened it. The field that matters most is `required`: the
+ * outcome above it is folded over the required copies alone, so a diagnostic's
+ * failure sent without its lane would be an unmarked red card under a header
+ * that says `passed` — the headline disagreeing with the evidence beneath it,
+ * which is the one thing read-time folding exists to prevent.
+ */
+describe("the same conversation read as a transcript", () => {
+  it("marks the diagnostic and reports its lane, exactly as the run does", async () => {
+    const { key, auth, runId, simulationId, diagnostic } =
+      await aJudgedRun("run_lanes_transcript");
+
+    // The conversation's own spans, so there is a transcript to read at all.
+    // The verdict rows file under the simulation id and the spans under the 128
+    // bits that id carries — the same number written two ways, which is what
+    // lets one page show both with nothing having stored a mapping.
+    const traceId = traceIdOfSimulation(simulationId);
+    if (traceId === undefined) throw new Error("no trace id for this simulation");
+    const startedAt = BigInt(Date.now()) * 1000n - 60_000_000n;
+    await appendSpans(auth, [
+      aSpan(traceId, {
+        spanId: "1111111111111111",
+        name: "agent_session",
+        kind: "root",
+        startedAtMicroseconds: startedAt,
+        runId,
+      }),
+      aSpan(traceId, {
+        spanId: "2222222222222222",
+        parentSpanId: "1111111111111111",
+        name: "agent_turn",
+        kind: "turn:agent",
+        text: "Thursday at four works. Shall I move it?",
+        startedAtMicroseconds: startedAt + 1_000_000n,
+        runId,
+      }),
+    ]);
+
+    const window = {
+      from: new Date(Number(startedAt / 1000n) - 60_000).toISOString(),
+      to: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const read = await ask(
+      api.app,
+      "GET",
+      `/v1/traces/${traceId}?from=${window.from}&to=${window.to}`,
+      key,
+    );
+    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
+
+    // The outcome is the required lane, as everywhere.
+    expect(read.body.outcome).toMatchObject({
+      verdict: "passed",
+      counts: { passed: 2, failed: 0, total: 2 },
+    });
+    // And the lane that only reports is beside it rather than missing.
+    expect(read.body.diagnostics).toMatchObject({
+      verdict: "failed",
+      counts: { failed: 1, total: 1 },
+    });
+
+    const rows = read.body.verdicts as Record<string, unknown>[];
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row).toHaveProperty("required");
+      expect(row.required).toBe(row.grader_id !== diagnostic);
+    }
+    // The failed row is the diagnostic's, and it says so — which is the whole
+    // difference between a red card that means something and one that does not.
+    const failed = rows.find((row) => row.verdict === "failed");
+    expect(failed?.grader_id).toBe(diagnostic);
+    expect(failed?.required).toBe(false);
+  });
+});
+
+/** A span with every field stated, which is what the type requires. */
+function aSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
+  return {
+    traceId,
+    spanId: "",
+    parentSpanId: "",
+    source: "simulation",
+    emitter: "egma-runtime",
+    environment: "default",
+    startedAtMicroseconds: 0n,
+    durationNanoseconds: 1_000_000_000n,
+    name: "agent_turn",
+    kind: "turn:agent",
+    status: "unset",
+    text: "",
+    audioUrl: "",
+    toolName: "",
+    toolArguments: "",
+    toolResult: "",
+    providerCallId: "",
+    connectionType: "retell",
+    audioSampleRateHz: 0,
+    audioEncoding: "",
+    runId: "",
+    agentId: "",
+    agentVersionId: "",
+    testVersionId: "",
+    personaVersionId: "",
+    payload: "{}",
+    ...over,
+  };
+}

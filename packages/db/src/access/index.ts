@@ -280,7 +280,9 @@ export {
  * how a page turns one back into the words somebody wrote.
  */
 export {
+  readAssertionShelf,
   readAssertionWords,
+  type AssertionShelf,
   type AssertionWords,
 } from "./assertions.ts";
 

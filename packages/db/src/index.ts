@@ -49,6 +49,23 @@ export {
   type VerdictLanes,
   type VerdictSource,
 } from "./verdicts/fold.ts";
+
+/**
+ * The shape of an assertion key, on the fold's own terms and for the fold's own
+ * reason: it reaches nothing, so there is no tenancy to stamp and no
+ * `AuthContext` to take, and it is exported all the same because it is the
+ * **one** place the format is written down.
+ *
+ * The two halves are one round trip made in two processes — the engine writes a
+ * verdict row with the first, a page reads the words back with the second — and
+ * a format each half knew for itself would be a format one of them could
+ * improve alone. A verdict row is permanent, so that fork would show up not as a
+ * bug but as a page that quietly stopped resolving last month's rows.
+ */
+export {
+  behaviorAssertionAt,
+  behaviorAssertionKey,
+} from "./grader-library/assertion-keys.ts";
 /**
  * The mocked world a simulation runs in, worked out from what its run froze.
  * It is here beside the verdict fold and for the fold's reason: it reaches no

@@ -5,7 +5,8 @@ import { use, useEffect, useState } from "react";
 
 import { runProgress } from "../../../lib/run-progress.ts";
 import type { Judgment } from "../../../lib/transcripts.ts";
-import { GRADING, JudgmentCard } from "../../judgment-card.tsx";
+import { GRADING } from "../../../lib/grading-copy.ts";
+import { JudgmentCard } from "../../judgment-card.tsx";
 import {
   RecordingPlayer,
   type RecordingWords,
@@ -194,6 +195,10 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
   const progress = runProgress(run);
   const moving = progress.moving;
   const executionFailed = progress.failed > 0;
+  // The two lanes, split once. Each section shows its own, and each empty state
+  // is about its own list rather than about how many graders judged in total.
+  const deciding = run.by_grader.filter((grader) => grader.required);
+  const reporting = run.by_grader.filter((grader) => !grader.required);
 
   return (
     <AppShell active="transcripts">
@@ -238,15 +243,24 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
             <p>{tally(run.counts)}</p>
           </div>
 
-          {run.by_grader.length === 0 ? (
-            <p className={styles.muted}>No grader has finished yet.</p>
+          {/*
+            The empty state is about *this* list, not about grading in general.
+            A project whose copies are all diagnostics has judged the run
+            perfectly well and has nothing that could fail it — so the heading
+            above must not stand over an empty grid, and the sentence under it
+            has to say which of the two silences this is.
+          */}
+          {deciding.length === 0 ? (
+            <p className={styles.muted}>
+              {run.diagnostics === null
+                ? "No grader has finished yet."
+                : "Nothing judging this run can fail it. Every grader that ran is a diagnostic."}
+            </p>
           ) : (
             <div className={styles.graderGrid}>
-              {run.by_grader
-                .filter((grader) => grader.required)
-                .map((grader) => (
-                  <GraderResult key={grader.grader_id} grader={grader} />
-                ))}
+              {deciding.map((grader) => (
+                <GraderResult key={grader.grader_id} grader={grader} />
+              ))}
             </div>
           )}
         </section>
@@ -272,11 +286,9 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
             </div>
 
             <div className={styles.graderGrid}>
-              {run.by_grader
-                .filter((grader) => !grader.required)
-                .map((grader) => (
-                  <GraderResult key={grader.grader_id} grader={grader} />
-                ))}
+              {reporting.map((grader) => (
+                <GraderResult key={grader.grader_id} grader={grader} />
+              ))}
             </div>
           </section>
         )}

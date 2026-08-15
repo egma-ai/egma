@@ -20,6 +20,11 @@ import { simulationIdOfTrace } from "@egma/simulation-contract";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given } from "../http/reading.ts";
+import {
+  describedOutcome,
+  describedVerdict,
+  onlyReporting,
+} from "../http/verdicts.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 
 /**
@@ -379,6 +384,13 @@ export async function traceReadRoutes(
           ).catch(() => undefined)
         : undefined;
 
+    // Which of the copies that judged this conversation only report, off the
+    // same per-grader fold the outcome above was split by — so a row's marking
+    // and the header it sits under cannot disagree. This is the other half of
+    // that promise: the fold already left the diagnostics out of `outcome`, and
+    // without this the page would show their failures as if they had counted.
+    const diagnostic = onlyReporting(judged?.byGrader);
+
     return reply.send({
       ...describedDetail(detail),
       // The same derivation again, and this time as an answer rather than as a
@@ -402,29 +414,19 @@ export async function traceReadRoutes(
         detail.source === "simulation"
           ? simulationIdOfTrace(traceId) ?? null
           : null,
-      // `assertion` is the key the store keeps; `assertion_text` is what a
-      // person reads, fetched from the pinned version at display time and null
-      // wherever nothing can place the key.
-      verdicts: (judged?.verdicts ?? []).map((its) => ({
-        grader_id: its.graderId,
-        assertion: its.assertion,
-        assertion_text: words?.of(its.graderId, its.assertion) ?? null,
-        verdict: its.verdict,
-        score: its.score,
-        rationale: its.rationale,
-        cited_turns: [...its.citedSpanIds],
-        judged_at: its.judgedAt,
-      })),
+      // The one shape both surfaces that draw a judgment send, decided in
+      // `http/verdicts.ts` rather than here and again there — including
+      // `required`, without which a diagnostic's failure would render on this
+      // page as an unmarked red card under a header folded without it.
+      verdicts: (judged?.verdicts ?? []).map((its) =>
+        describedVerdict(its, words, diagnostic),
+      ),
       // The required lane, as everywhere: a diagnostic copy reports and never
       // decides.
-      outcome:
-        judged === undefined
-          ? null
-          : {
-              verdict: judged.outcome.verdict,
-              score: judged.outcome.score ?? null,
-              counts: judged.outcome.counts,
-            },
+      outcome: describedOutcome(judged?.outcome),
+      // And the lane that only reports, beside it rather than inside it. Null
+      // where nothing diagnostic judged this conversation.
+      diagnostics: describedOutcome(judged?.diagnostics),
     });
   });
 

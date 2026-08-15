@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import * as copy from "../lib/transcript-copy.ts";
+import * as gradingCopy from "../lib/grading-copy.ts";
 import {
   assertionHeading,
   everyStep,
@@ -431,10 +432,21 @@ function everySentence(said: unknown): string[] {
   return [];
 }
 
+/**
+ * Everything under the discipline: the transcript pages' own words, and the
+ * judgment card's.
+ *
+ * The card is drawn on this page and on a run's results, so its words live in a
+ * file of their own rather than in either page's — and they are held to the same
+ * list here, because the surface that renders them is this one.
+ */
+const EVERY_WORD = [copy, gradingCopy];
+
 describe("what the pages say out loud", () => {
   it("is gathered in one place, so it can be held against the list", () => {
     const said = everySentence(copy);
     expect(said.length).toBeGreaterThan(40);
+    expect(everySentence(gradingCopy).length).toBeGreaterThan(3);
   });
 
   /**
@@ -443,7 +455,7 @@ describe("what the pages say out loud", () => {
    * keeps the first out of the second.
    */
   it("uses no storage word and no banned one", () => {
-    for (const sentence of everySentence(copy)) {
+    for (const sentence of everySentence(EVERY_WORD)) {
       for (const banned of NEVER_SAID) {
         expect(
           new RegExp(`\\b${banned}`, "iu").test(sentence),
@@ -459,7 +471,7 @@ describe("what the pages say out loud", () => {
    * about either, so they say it about neither.
    */
   it("does not borrow `session` for an exchange", () => {
-    for (const sentence of everySentence(copy)) {
+    for (const sentence of everySentence(EVERY_WORD)) {
       expect(/\bsession/iu.test(sentence), sentence).toBe(false);
     }
   });
@@ -477,6 +489,11 @@ describe("what the pages say out loud", () => {
       const source = await readFile(path.join(WEB, page), "utf8");
       expect(source, page).toContain("transcript-copy.ts");
     }
+
+    // And the card those pages draw a judgment with, which carries words of its
+    // own and therefore a copy file of its own.
+    const card = await readFile(path.join(WEB, "app/judgment-card.tsx"), "utf8");
+    expect(card).toContain("grading-copy.ts");
   });
 });
 

@@ -137,8 +137,8 @@ export type GraderOutcome = {
  * The running copies that only report, by id: every `required: false` one.
  *
  * **Named by exception, so the safe answer is the default.** A grader this set
- * has never heard of gates, which is what an empty set means and what makes
- * `foldVerdicts` over a bare pile of rows go on meaning what it always meant. A
+ * has never heard of is required, which is what an empty set means and what
+ * keeps `foldVerdicts` over a bare pile of rows meaning what it always meant. A
  * set of the *blocking* ones would have the opposite failure mode: a grader
  * missing from it — deleted since, unreadable, forgotten by a caller — would
  * quietly stop being able to fail anything, and a check nobody can fail is the

@@ -266,7 +266,7 @@ export class TestMovedOnError extends Error {
   }
 }
 
-/**
+/*
  * **A grader's delete is refused by nothing, and there is no error here for it.**
  *
  * There was one — a grader was undeletable while a live test's current version

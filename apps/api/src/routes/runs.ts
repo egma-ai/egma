@@ -8,7 +8,7 @@ import {
   NotPermittedError,
   platformFacts,
   ProjectOutsideOrganizationError,
-  readAssertionWords,
+  readAssertionShelf,
   readRunVerdicts,
   readVerdicts,
   RunWriteRefusedError,
@@ -16,7 +16,6 @@ import {
   type AssertionWords,
   type AuthContext,
   type ConductedSimulation,
-  type FoldedOutcome,
   type MockToolCoverage,
   type MockToolSnapshot,
   type Run,
@@ -31,6 +30,11 @@ import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { describedMockTool } from "../http/mock-tools.ts";
+import {
+  describedOutcome,
+  describedVerdict,
+  onlyReporting,
+} from "../http/verdicts.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import {
@@ -227,29 +231,9 @@ function describedSimulation(
     // Every judged assertion, whole. The fold above says how many passed; this
     // says which ones and why, because "2 of 3 passed" without the rationale
     // sends somebody to read a transcript to work out what egma already knew.
-    //
-    // **`assertion` is the key the store keeps, and `assertion_text` is what a
-    // person reads.** The key is a behavior's position in the pinned test
-    // version, or a config entry's index; the words behind it are fetched from
-    // that pinned version here, at display time, because a row keyed by content
-    // would make an edited sentence a second assertion counted beside the first
-    // forever. Both are sent: the key is what a client filters and groups by,
-    // and the text is what it shows. A key nothing can place — a grader whose
-    // keys are its own business, a version somebody has since shortened —
-    // carries `null` and is shown as itself rather than as a guess.
-    verdicts: rows.map((its) => ({
-      grader_id: its.graderId,
-      assertion: its.assertion,
-      assertion_text: words?.of(its.graderId, its.assertion) ?? null,
-      // Which lane this row is in, said on the row so a reader can mark a
-      // diagnostic judgment without going and matching grader ids.
-      required: !diagnostic.has(its.graderId),
-      verdict: its.verdict,
-      score: its.score,
-      rationale: its.rationale,
-      cited_turns: [...its.citedSpanIds],
-      judged_at: its.judgedAt,
-    })),
+    // What each row carries is the one shape both surfaces that draw a judgment
+    // send, decided in `http/verdicts.ts` rather than here and again there.
+    verdicts: rows.map((its) => describedVerdict(its, words, diagnostic)),
     reason: one.endingReason,
     mock_tool_coverage: describedMockToolCoverage(one.mockToolCoverage),
     // What this conversation was: the row's own modality rather than the run's,
@@ -262,24 +246,6 @@ function describedSimulation(
     // player at all, which is the difference between an honest absence and a
     // disabled control that reads as a broken feature.
     has_recording: one.recordingReference !== null,
-  };
-}
-
-/**
- * One folded answer as the wire carries it, or null where there is none.
- *
- * Written once and used at both grains, so a run's diagnostic lane and a
- * conversation's are the same three keys — a reader that learned the shape on
- * one has learned it on the other.
- */
-function describedOutcome(
-  outcome: FoldedOutcome | undefined,
-): Record<string, unknown> | null {
-  if (outcome === undefined) return null;
-  return {
-    verdict: outcome.verdict,
-    score: outcome.score ?? null,
-    counts: outcome.counts,
   };
 }
 
@@ -354,13 +320,10 @@ function describedRun(
   );
   const gradedCount = simulations.filter((one) => bySimulation.has(one.id)).length;
   // Which graders only report, off the run's own per-grader fold rather than
-  // read a second time: one answer about `required`, computed where the lanes
-  // were split, so a row's marking and the header's arithmetic cannot disagree.
-  const diagnostic = new Set(
-    (judged?.byGrader ?? [])
-      .filter((its) => !its.required)
-      .map((its) => its.graderId),
-  );
+  // read a second time: one answer about `required`, taken where the lanes were
+  // split, so a row's marking and the header's arithmetic cannot disagree. A
+  // grader absent from it is required — see `onlyReporting`.
+  const diagnostic = onlyReporting(judged?.byGrader);
   return {
     id: one.id,
     status: one.status,
@@ -467,35 +430,48 @@ async function runAsItStands(
   // ungraded run has, and which the next read corrects on its own.
   const judged = await readRunVerdicts(auth, runId).catch(() => undefined);
 
+  // Everything about the graders that judged anywhere in this run, read once.
+  // Which entry a copy points at cannot be edited at all and what that entry is
+  // called is one row on the shelf, so these are facts about the run rather than
+  // about any conversation in it — and reading them per conversation would be
+  // two hundred copies of one answer. The run's own per-grader fold already
+  // names every copy that wrote a row, which is exactly the set.
+  const shelf = await readAssertionShelf(
+    auth,
+    (judged?.byGrader ?? []).map((its) => its.graderId),
+  ).catch(() => undefined);
+
   // The rows themselves, one conversation at a time. The run fold deliberately
   // does not carry them — a run of two hundred conversations would be a page
   // nobody asked for — so they are gathered only for the conversations this run
   // actually has, and only for the ones something has judged.
   //
-  // The words behind their assertion keys come with them, from the version each
-  // conversation was pinned to. It is the same trip: a conversation with rows is
-  // a conversation whose keys are about to be shown, and resolving them
-  // afterwards would be a second pass over the same list.
+  // The words behind their assertion keys come with them, off the shelf above
+  // plus the one thing that genuinely varies: the version each conversation was
+  // pinned to. It is the same trip, because a conversation with rows is a
+  // conversation whose keys are about to be shown.
+  //
+  // **A few at a time, never all at once.** A run holds as many conversations as
+  // somebody selected tests and callers, and firing a query per conversation the
+  // moment the page is asked for would put a burst the size of the run on a pool
+  // sized for a request. The work is the same either way; only how much of it is
+  // in flight changes.
   const rowsBySimulation = new Map<string, readonly RecordedVerdict[]>();
   const wordsBySimulation = new Map<string, AssertionWords>();
-  await Promise.all(
-    (judged?.simulations ?? []).map(async (its) => {
-      const read = await readVerdicts(auth, its.simulationId).catch(() => undefined);
-      if (read === undefined) return;
-      rowsBySimulation.set(its.simulationId, read.verdicts);
+  await aFewAtATime(judged?.simulations ?? [], async (its) => {
+    const read = await readVerdicts(auth, its.simulationId).catch(() => undefined);
+    if (read === undefined) return;
+    rowsBySimulation.set(its.simulationId, read.verdicts);
 
-      // The pinned version is in Postgres and the rows are in the verdict
-      // store, so this failing is a different outage from that one — and the
-      // page is still worth sending with the keys unresolved, which is exactly
-      // what a caller saw before anything resolved them at all.
-      const words = await readAssertionWords(
-        auth,
-        its.simulationId,
-        read.verdicts.map((row) => row.graderId),
-      ).catch(() => undefined);
-      if (words !== undefined) wordsBySimulation.set(its.simulationId, words);
-    }),
-  );
+    // The pinned version is in Postgres and the rows are in the verdict store,
+    // so this failing is a different outage from that one — and the page is
+    // still worth sending with the keys unresolved, which is exactly what a
+    // caller saw before anything resolved them at all.
+    const words = await shelf
+      ?.forSimulation(its.simulationId)
+      .catch(() => undefined);
+    if (words !== undefined) wordsBySimulation.set(its.simulationId, words);
+  });
 
   return describedRun(
     header,
@@ -505,6 +481,27 @@ async function runAsItStands(
     rowsBySimulation,
     wordsBySimulation,
   );
+}
+
+/**
+ * How many conversations of a run are read at once.
+ *
+ * Small enough that one request cannot exhaust a connection pool sized for
+ * many, large enough that a run of a dozen is still one round of waiting. It is
+ * a ceiling on concurrency rather than a budget on work: every conversation is
+ * read either way.
+ */
+const CONVERSATIONS_READ_AT_ONCE = 8;
+
+async function aFewAtATime<Item>(
+  items: readonly Item[],
+  read: (item: Item) => Promise<void>,
+): Promise<void> {
+  for (let at = 0; at < items.length; at += CONVERSATIONS_READ_AT_ONCE) {
+    await Promise.all(
+      items.slice(at, at + CONVERSATIONS_READ_AT_ONCE).map(read),
+    );
+  }
 }
 
 export async function runRoutes(

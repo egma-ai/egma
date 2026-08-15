@@ -1361,7 +1361,7 @@ export async function liveTestsNamingPersona(
     .orderBy(asc(test.id));
 }
 
-/**
+/*
  * **There is no companion asking which tests name a grader.** There was one, and
  * it refused a grader's delete while a live test's current version pointed at
  * it. A test names no graders now, so nothing here can stand in a delete's way:

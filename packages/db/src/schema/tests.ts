@@ -158,7 +158,7 @@ export const testPersona = pgTable(
   ],
 );
 
-/**
+/*
  * **A test names no graders, and there is no junction to name them through.**
  *
  * There was one — `test_grader`, the persona junction's shape verb for verb —
