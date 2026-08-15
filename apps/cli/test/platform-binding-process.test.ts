@@ -1,7 +1,7 @@
 /**
  * Every later headless command, as a real CLI process, follows the committed
- * repository binding with no flag or environment URL to help it — and the
- * refusal that keeps it there arrives whole in a real terminal.
+ * repository binding with no flag to help it — and the refusal that keeps it
+ * there arrives whole in a real terminal.
  */
 
 import { spawn } from "node:child_process";
@@ -116,8 +116,10 @@ describe("commands after a repository is bound", () => {
     extra: NodeJS.ProcessEnv = {},
   ): Promise<CommandResult> {
     const env = workspace.env({ EGMA_RETELL_URL: retell.url, ...extra });
+    // Nothing names a platform, which is what leaves the committed binding to
+    // choose one — asserted rather than assumed, because a flag here would make
+    // every claim below vacuous.
     expect(args).not.toContain("--url");
-    expect(env.EGMA_URL).toBeUndefined();
     return runEgma({ cwd: workspace.dir, env }, args);
   }
 
@@ -197,7 +199,7 @@ describe("commands after a repository is bound", () => {
     const grading = gradeEveryRun(bound);
     let wizard: CommandResult;
     try {
-      // No verb and no platform selector: this is the wizard, with headless
+      // No verb and no platform named: this is the wizard, with headless
       // consent only so a real terminal is not needed in CI.
       wizard = await command(
         ["--headless", "--", process.execPath, FAKE_AGENT, script],

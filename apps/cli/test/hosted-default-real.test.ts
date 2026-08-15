@@ -66,11 +66,9 @@ it("reaches a real local platform with nothing configured anywhere", async () =>
     // once it has got there.
     await workspace.signIn(platform.origin, customer.secret);
 
-    // Nothing names a platform: no `--url` in any command below, no `EGMA_URL`
-    // in the shell, and no egma folder in the repository yet. The environment
-    // is asserted rather than assumed, because it would make this vacuous.
+    // Nothing names a platform: no `--url` in any command below, which is the
+    // one way to name one, and no egma folder in the repository yet.
     const env = workspace.env({ EGMA_TEST_DEFAULT_URL: platform.origin });
-    expect(env.EGMA_URL).toBeUndefined();
     const paths = folderPathsIn(workspace.dir);
 
     // A test always applies to at least one active agent, so the project needs

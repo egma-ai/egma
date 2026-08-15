@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { GRADER_LIBRARY_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
+
 import { openaiJudge } from "../src/judge/openai.ts";
 import type { JudgeInput, JudgeQuestion } from "../src/judge/index.ts";
 
@@ -24,7 +26,24 @@ const EVIDENCE: JudgeInput = {
   measures: [],
 };
 
+/**
+ * The words a judge is told it is working under, off the library entry that
+ * carries them.
+ *
+ * **This adapter holds no prompt of its own**, and that is the property worth
+ * stating here: what a judge is told is the definition on the shelf, read
+ * through the running copy's pointer at judging time, so the Library screen and
+ * the request are one row. A prompt written into this file would be a second
+ * copy, and the day the two disagreed the screen would go on describing a
+ * judgment nobody was making.
+ */
+const THE_PROMPT =
+  GRADER_LIBRARY_CATALOG.find(
+    (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
+  )?.prompt ?? "";
+
 const QUESTION: JudgeQuestion = {
+  prompt: THE_PROMPT,
   criterion: "the agent confirms the new time",
   evidence: EVIDENCE,
 };
@@ -166,7 +185,7 @@ describe("a provider that does not answer", () => {
   /**
    * A rejected key and a model that does not exist are not transient. Asking
    * again would spend the same seconds to be told the same thing, and the
-   * dimension is `errored` either way with the provider's own words on it.
+   * assertion is `errored` either way with the provider's own words on it.
    */
   it("does not ask again about a refusal asking again cannot fix", async () => {
     const { calls, judge } = judgeWith(refusing(401, "invalid api key"));

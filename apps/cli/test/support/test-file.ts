@@ -19,19 +19,26 @@ export type PartialTestFile = Partial<TestFile> &
 
 export function aTestFile(said: PartialTestFile): TestFile {
   return {
-    format: 2,
+    format: 3,
     description: null,
     personas: [],
     version: null,
     identityRevision: null,
-    graders: [],
     requiredCapabilities: [],
     mockTools: [],
     ...said,
   };
 }
 
-/** One P0 statement, which is what a behavior with no marker has always meant. */
-export function blocking(...statements: readonly string[]): TestFile["expectedBehaviors"] {
-  return statements.map((behavior) => ({ behavior, priority: "P0" as const }));
+/**
+ * The statements, as the format now holds them: plain sentences.
+ *
+ * It used to wrap each one in `{behavior, priority: "P0"}`, and the name it
+ * kept is the point — every expected behavior blocks, so the whole list is
+ * "blocking" and there is no longer a second kind to tell it apart from.
+ */
+export function blocking(
+  ...statements: readonly string[]
+): TestFile["expectedBehaviors"] {
+  return [...statements];
 }

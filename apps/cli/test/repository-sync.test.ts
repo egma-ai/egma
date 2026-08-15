@@ -222,7 +222,7 @@ describe("one repository, one agent", () => {
 
     // The developer edits it anyway, and the push refuses in the words that
     // name both ways out of it.
-    await writeTest("ours.md", pulled.replace("1. [P0] b", "1. [P0] b, said better"));
+    await writeTest("ours.md", pulled.replace("1. b", "1. b, said better"));
     const refused = await egma(["push"]);
 
     expect(refused.code).toBe(5);
@@ -264,7 +264,7 @@ describe("one repository, one agent", () => {
     const pulled = await readTest("ours.md");
     platform.tests.archiveInDashboard("ours");
 
-    await writeTest("ours.md", pulled.replace("1. [P0] b", "1. [P0] b, said better"));
+    await writeTest("ours.md", pulled.replace("1. b", "1. b, said better"));
     const refused = await egma(["push"]);
 
     expect(refused.code).toBe(5);
@@ -277,7 +277,6 @@ describe("one repository, one agent", () => {
 describe("the file format a test is written in", () => {
   it("writes every field of a test, and a pull straight after changes zero bytes", async () => {
     const { agentId } = await boundRepository();
-    const grader = platform.tests.addGrader("says-the-price");
     const rita = platform.tests.addPersona("Impatient Rita");
     const seeded = platform.tests.add({
       name: "reschedules",
@@ -285,11 +284,10 @@ describe("the file format a test is written in", () => {
       scenario: "They want any afternoon next week.",
       expectedBehaviors: [
         "verifies who it is speaking to",
-        { behavior: "offers two slots", priority: "P1" },
-        { behavior: "mentions the cancellation policy", priority: "P2" },
+        "offers two slots",
+        "mentions the cancellation policy",
       ],
       personas: ["Impatient Rita"],
-      graders: [grader],
       requiredCapabilities: ["dtmf"],
       agents: [agentId],
     });
@@ -300,12 +298,11 @@ describe("the file format a test is written in", () => {
     expect(await readTest("reschedules.md")).toBe(
       [
         "---",
-        "format: 2",
+        "format: 3",
         "name: reschedules",
         "description: The caller missed Thursday.",
         `version: ${seeded.versionId}`,
         `identity_revision: ${seeded.revision}`,
-        `graders: [${grader}]`,
         "required_capabilities: [dtmf]",
         "personas:",
         `  - id: ${rita}`,
@@ -314,9 +311,9 @@ describe("the file format a test is written in", () => {
         "## Scenario",
         "They want any afternoon next week.",
         "## Expected behaviors",
-        "1. [P0] verifies who it is speaking to",
-        "2. [P1] offers two slots",
-        "3. [P2] mentions the cancellation policy",
+        "1. verifies who it is speaking to",
+        "2. offers two slots",
+        "3. mentions the cancellation policy",
         "",
       ].join("\n"),
     );
@@ -332,31 +329,13 @@ describe("the file format a test is written in", () => {
     expect(valuesOf(again.stdout, "unchanged")).toEqual(["reschedules"]);
   });
 
-  it("sends a priority somebody typed into the file, and mints one version for it", async () => {
-    const { agentId } = await boundRepository();
-    platform.tests.add({
-      name: "reschedules",
-      scenario: "s",
-      expectedBehaviors: ["verifies who it is speaking to", "offers two slots"],
-      agents: [agentId],
-    });
-    await egma(["pull"]);
-
-    const held = await readTest("reschedules.md");
-    await writeTest(
-      "reschedules.md",
-      held.replace("2. [P0] offers two slots", "2. [P1] offers two slots"),
-    );
-
-    const pushed = await egma(["push"]);
-
-    expect(pushed.code).toBe(0);
-    expect(valuesOf(pushed.stdout, "updated")).toEqual(["reschedules"]);
-    expect(platform.tests.versionsOf("reschedules")).toBe(2);
-    // And the file comes back saying the same thing, from the platform's own
-    // answer rather than from what was sent.
-    expect(await readTest("reschedules.md")).toContain("2. [P1] offers two slots");
-  });
+  /*
+   * **A proof about sending a priority somebody typed into a file used to
+   * stand here.** It changed `2. [P0]` to `2. [P1]`, pushed, and expected one
+   * new version. Format 3 has no markers: a `[P1]` still sitting in a format 2
+   * file is stripped on the way in, so it mints nothing and the push finds the
+   * file unchanged. `egma-folder.test.ts` proves that reading directly.
+   */
 
   /**
    * The identifier is what a push resolves and the name beside it is for the
@@ -391,14 +370,18 @@ describe("the file format a test is written in", () => {
   });
 
   /**
-   * Both lists are content and both are always sent, for the reason the mock
-   * tools are: a write that left the field out would keep what the file no
-   * longer says, so a grader taken out of the file would come back on the next
-   * pull and nobody would be able to say why.
+   * The list is content and is always sent, for the reason the mock tools are:
+   * a write that left the field out would keep what the file no longer says, so
+   * a capability taken out of the file would come back on the next pull and
+   * nobody would be able to say why.
+   *
+   * **The graders half of this proof is gone with the key.** A test names no
+   * graders; what judges a simulation is the project's running graders and
+   * their own scope, and a `graders:` key still sitting in a format 2 file is
+   * read past rather than sent.
    */
-  it("carries a grader and a required capability up as well as down", async () => {
+  it("carries a required capability up as well as down", async () => {
     const { agentId } = await boundRepository();
-    const grader = platform.tests.addGrader("says-the-price");
     platform.tests.add({
       name: "reschedules",
       scenario: "s",
@@ -413,7 +396,7 @@ describe("the file format a test is written in", () => {
       "reschedules.md",
       held.replace(
         "\n---\n## Scenario",
-        `\ngraders: [${grader}]\nrequired_capabilities: [dtmf, barge_in]\n---\n## Scenario`,
+        "\nrequired_capabilities: [dtmf, barge_in]\n---\n## Scenario",
       ),
     );
 
@@ -422,22 +405,21 @@ describe("the file format a test is written in", () => {
     expect(valuesOf(pushed.stdout, "updated")).toEqual(["reschedules"]);
 
     const after = parseTestFile(await readTest("reschedules.md"), "a.md", "x");
-    expect(after.graders).toEqual([grader]);
     expect(after.requiredCapabilities).toEqual(["dtmf", "barge_in"]);
 
-    // And taking them out again clears them, rather than leaving what the file
-    // no longer says.
+    // And taking it out again clears it, rather than leaving what the file no
+    // longer says.
     await writeTest(
       "reschedules.md",
-      (await readTest("reschedules.md"))
-        .replace(`graders: [${grader}]\n`, "")
-        .replace("required_capabilities: [dtmf, barge_in]\n", ""),
+      (await readTest("reschedules.md")).replace(
+        "required_capabilities: [dtmf, barge_in]\n",
+        "",
+      ),
     );
     const cleared = await egma(["push"]);
     expect(cleared.code).toBe(0);
     expect(valuesOf(cleared.stdout, "updated")).toEqual(["reschedules"]);
     const empty = parseTestFile(await readTest("reschedules.md"), "a.md", "x");
-    expect(empty.graders).toEqual([]);
     expect(empty.requiredCapabilities).toEqual([]);
   });
 
@@ -494,15 +476,14 @@ describe("a file written before the format grew", () => {
     expect(valuesOf(pushed.stdout, "created")).toEqual(["after-hours"]);
     expect(platform.tests.seeded("after-hours").agentIds).toEqual([agentId]);
 
-    // Written back in the current format, with a P0 for the line that carried
-    // no marker — which is what every behavior meant before priorities existed.
+    // Written back in the current format, and the statement is the sentence it
+    // always was.
     const after = parseTestFile(await readTest("after-hours.md"), "a.md", "x");
-    expect(after.format).toBe(2);
+    expect(after.format).toBe(3);
     expect(after.expectedBehaviors).toEqual([
-      { behavior: "The agent gives the emergency number.", priority: "P0" },
+      "The agent gives the emergency number.",
     ]);
     expect(after.identityRevision).not.toBeNull();
-    expect(after.graders).toEqual([]);
     expect(after.requiredCapabilities).toEqual([]);
   });
 
@@ -581,7 +562,7 @@ describe("a file written before the format grew", () => {
     expect(pulled.code).toBe(0);
     expect(valuesOf(pulled.stdout, "written")).toEqual(["after-hours"]);
     const after = parseTestFile(await readTest("after-hours.md"), "a.md", "x");
-    expect(after.format).toBe(2);
+    expect(after.format).toBe(3);
     expect(after.identityRevision).toBe(seeded.revision);
 
     // And now it can update, which is the whole point of migrating it.
@@ -633,93 +614,20 @@ describe("a file written before the format grew", () => {
     expect(await readTest("after-hours.md")).toBe(draft);
   });
 
-  /**
-   * The common case, and the one an unconditional priority comparison would
-   * have broken.
+  /*
+   * **Two proofs about priorities on an old file used to stand here.**
    *
-   * A version-1 file could not write a priority down, so every line in a
-   * pristine one reads as claiming nothing. The platform meanwhile holds a P1
-   * on one of them, set in the browser, which is not a difference the file is
-   * responsible for and not a draft anybody typed. Refusing to migrate here
-   * would refuse the folders this path exists for: every one written before
-   * priorities existed, against any project that has used one since.
-   */
-  it("still migrates when the platform holds a priority the old shape could not write", async () => {
-    const { agentId } = await boundRepository();
-    const seeded = platform.tests.add({
-      name: "after-hours",
-      scenario: "The caller has an emergency at 2am.",
-      expectedBehaviors: [
-        "The agent gives the emergency number.",
-        { behavior: "The agent says how long the wait is.", priority: "P1" },
-      ],
-      agents: [agentId],
-    });
-    await writeTest(
-      "after-hours.md",
-      [
-        "---",
-        "name: after-hours",
-        `version: ${seeded.versionId}`,
-        "personas: [default-persona]",
-        "---",
-        "## Scenario",
-        "The caller has an emergency at 2am.",
-        "## Expected behaviors",
-        "1. The agent gives the emergency number.",
-        "2. The agent says how long the wait is.",
-        "",
-      ].join("\n"),
-    );
-
-    const pulled = await egma(["pull"]);
-
-    expect(valuesOf(pulled.stdout, "written")).toEqual(["after-hours"]);
-    const after = parseTestFile(await readTest("after-hours.md"), "a.md", "x");
-    expect(after.expectedBehaviors.map((one) => one.priority)).toEqual(["P0", "P1"]);
-  });
-
-  /**
-   * The other half, and the hole the comparison above has to leave open.
+   * One held that a version-1 file whose lines claimed nothing still migrated
+   * when the platform held a P1 on one of them; the other held that a `[P1]`
+   * somebody had *typed* into such a file was a draft, and that the pull left
+   * the file alone with `a priority written into it is not the one egma holds`.
    *
-   * A marker somebody typed into an old file *is* a claim, and it is a draft:
-   * they wrote it, it disagrees with what egma holds, and rewriting the file
-   * would delete it with nothing said. That the file could never have pushed
-   * that marker — the preflight refuses a pinned version-1 file outright — is a
-   * reason to keep their edit safe until they can, not a reason to discard it.
+   * Both were about a claim a line could make, and a line can no longer make
+   * one: the marker is stripped on the way in and written by nothing. So a
+   * pinned old file whose sentences match the version is a faithful copy either
+   * way, and the pull migrates it — which is what the two tests above and below
+   * already hold. `egma-folder.test.ts` proves the stripping directly.
    */
-  it("is left alone when somebody typed a priority into it that egma does not hold", async () => {
-    const { agentId } = await boundRepository();
-    const seeded = platform.tests.add({
-      name: "after-hours",
-      scenario: "The caller has an emergency at 2am.",
-      expectedBehaviors: ["The agent gives the emergency number."],
-      agents: [agentId],
-    });
-    const draft = [
-      "---",
-      "name: after-hours",
-      `version: ${seeded.versionId}`,
-      "personas: [default-persona]",
-      "---",
-      "## Scenario",
-      "The caller has an emergency at 2am.",
-      "## Expected behaviors",
-      "1. [P1] The agent gives the emergency number.",
-      "",
-    ].join("\n");
-    await writeTest("after-hours.md", draft);
-
-    const pulled = await egma(["pull"]);
-
-    expect(pulled.code).toBe(0);
-    expect(valuesOf(pulled.stdout, "kept")).toEqual(["after-hours"]);
-    expect(factOf(pulled.stdout, "reason")).toContain(
-      "a priority written into it is not the one egma holds",
-    );
-    // Byte for byte: the marker they typed is still there to be reapplied.
-    expect(await readTest("after-hours.md")).toBe(draft);
-  });
 
   it("is left alone when the browser renamed the test under it", async () => {
     const { agentId } = await boundRepository();
@@ -792,7 +700,7 @@ describe("what makes a repository copy stale, and what does not", () => {
     // A rename mints no version, so the file's content pin is still current.
     // Only the live half moved, and only the second token can catch it.
     platform.tests.renameInDashboard("reschedules", { name: "reschedules a clean" });
-    await writeTest("reschedules.md", held.replace("1. [P0] b", "1. [P0] b, said better"));
+    await writeTest("reschedules.md", held.replace("1. b", "1. b, said better"));
 
     const refused = await egma(["push"]);
 
@@ -824,7 +732,7 @@ describe("what makes a repository copy stale, and what does not", () => {
     const otherId = ((await other.json()) as { agent: { id: string } }).agent.id;
     platform.tests.setAgents("reschedules", [agentId, otherId]);
 
-    await writeTest("reschedules.md", held.replace("1. [P0] b", "1. [P0] b, said better"));
+    await writeTest("reschedules.md", held.replace("1. b", "1. b, said better"));
     const pushed = await egma(["push"]);
 
     expect(pushed.code).toBe(0);
@@ -847,7 +755,7 @@ describe("what makes a repository copy stale, and what does not", () => {
 
     for (const name of ["first", "second"]) {
       const held = await readTest(`${name}.md`);
-      await writeTest(`${name}.md`, held.replace("1. [P0] b", "1. [P0] b, said better"));
+      await writeTest(`${name}.md`, held.replace("1. b", "1. b, said better"));
     }
     platform.tests.renameInDashboard("second", { description: "moved under them" });
 
@@ -890,7 +798,7 @@ describe("a link removed after the preflight", () => {
     await egma(["pull"]);
     for (const name of ["first", "second"]) {
       const held = await readTest(`${name}.md`);
-      await writeTest(`${name}.md`, held.replace("1. [P0] b", "1. [P0] b, said better"));
+      await writeTest(`${name}.md`, held.replace("1. b", "1. b, said better"));
     }
 
     // The link comes off the moment the first upload has landed — after the
@@ -959,7 +867,7 @@ describe("a link removed after the preflight", () => {
     await egma(["pull"]);
     for (const name of ["first", "second"]) {
       const held = await readTest(`${name}.md`);
-      await writeTest(`${name}.md`, held.replace("1. [P0] b", "1. [P0] b, said better"));
+      await writeTest(`${name}.md`, held.replace("1. b", "1. b, said better"));
     }
 
     let uploads = 0;
@@ -1044,7 +952,7 @@ describe("a link removed after the preflight", () => {
     // wrote it, so the push finds it already saying what egma holds.
     for (const name of ["b-edited", "c-refused"]) {
       const held = await readTest(`${name}.md`);
-      await writeTest(`${name}.md`, held.replace("1. [P0] b", "1. [P0] b, said better"));
+      await writeTest(`${name}.md`, held.replace("1. b", "1. b, said better"));
     }
 
     const reallyFetch = globalThis.fetch;

@@ -1,9 +1,10 @@
 import {
   appendVerdicts,
   claimGradingJobs,
-  createGrader,
   finishGradingJob,
   listGradingJobsForSimulation,
+  PREDEFINED_GRADERS,
+  useLibraryEntry,
   type AuthContext,
   type NewVerdict,
 } from "@egma/db";
@@ -30,10 +31,15 @@ import { colleagueOf, request as ask, signUp, type Answer } from "./support/trac
  * together — including the transcript, whose window this side works out from the
  * conversation's own stamps rather than asking a caller to guess it.
  *
- * The rest is the two ways a judgment is revisited, and who may. A `viewer` sees
- * every piece of evidence on the page and is refused both writes **by the
- * server**; the page offering no buttons is the page agreeing with this, never
- * the check itself.
+ * The rest is how a judgment is revisited, and who may. A `viewer` sees every
+ * piece of evidence on the page and is refused the re-grade **by the server**;
+ * the page offering no button is the page agreeing with this, never the check
+ * itself.
+ *
+ * **There is no correction here, and there was.** ADR-0009 takes a person's
+ * disagreement out of v0: it returns as the reserved `human` grader type,
+ * writing its own rows under its own grader id, which is why no verdict row
+ * carries who judged it any more.
  */
 
 let api: TestApi;
@@ -68,14 +74,12 @@ function machineVerdict(
     traceId: simulationId,
     graderId: GRADER,
     graderVersionId: GRADER_VERSION,
-    dimension: BEHAVIOR,
+    assertion: BEHAVIOR,
     source: "simulation",
-    judgedBy: "gpt-4o-mini",
     verdict: "failed",
     score: 0,
     rationale: "the agent never said the new time back.",
     citedSpanIds: [],
-    priority: "P0",
     runId: one.runId,
     agentId: "agt_01JQZ0000000000000000000AA",
     agentVersionId: "",
@@ -134,15 +138,10 @@ async function finishGrading(auth: AuthContext): Promise<void> {
  * grader nobody can reach" test names — and a narrowing test needs the opposite.
  */
 async function aGraderOf(auth: AuthContext, name: string): Promise<string> {
-  const created = await createGrader(auth, {
+  const created = await useLibraryEntry(auth, {
+    libraryId: PREDEFINED_GRADERS.latency,
     name,
-    type: "metric_threshold",
-    config: {
-      measure: "turn_response_latency",
-      aggregation: "p90",
-      comparator: "below",
-      threshold: 2_000,
-    },
+    params: { metric: "turn_response_latency", bound: 2_000 },
   });
   return created.id;
 }
@@ -184,9 +183,7 @@ describe("one conversation's evidence, in one read", () => {
     const test = read.body.test as Record<string, unknown>;
     expect(String(test.version_id)).toMatch(/^tstv_/u);
     expect(String(test.scenario)).toContain("cleaning is booked for Thursday");
-    expect(test.expected_behaviors).toEqual([
-      { behavior: BEHAVIOR, priority: "P0" },
-    ]);
+    expect(test.expected_behaviors).toEqual([BEHAVIOR]);
 
     const persona = read.body.persona as Record<string, unknown>;
     expect(String(persona.version_id)).toMatch(/^prsv_/u);
@@ -212,11 +209,12 @@ describe("one conversation's evidence, in one read", () => {
     expect(verdicts).toHaveLength(1);
     expect(verdicts[0]).toMatchObject({
       grader_id: GRADER,
-      grader_version_id: GRADER_VERSION,
-      dimension: BEHAVIOR,
+      assertion: BEHAVIOR,
       verdict: "failed",
-      priority: "P0",
-      judged_by: "gpt-4o-mini",
+      // A grader nothing on this project holds is required, which is the safe
+      // direction: a row nobody could resolve must not quietly stop being able
+      // to fail anything.
+      required: true,
     });
 
     // And what was said, read inside a window nobody had to name.
@@ -511,108 +509,15 @@ describe("judging one conversation again", () => {
   });
 });
 
-describe("disagreeing with one judgement", () => {
-  it("writes the person's word beside the machine's, and folds to theirs", async () => {
-    const { who, run } = await aCustomerWhoHasRun("evidence_correction");
-    await appendVerdicts(who.auth, [machineVerdict(run, run.heard)]);
-
-    const written = await request(
-      "POST",
-      `/api/simulations/${run.heard}/corrections`,
-      who.key,
-      {
-        grader_id: GRADER,
-        grader_version_id: GRADER_VERSION,
-        dimension: BEHAVIOR,
-        verdict: "passed",
-        rationale: "she said 'Tuesday at four' at 00:41; the judge missed it.",
-      },
-    );
-    expect(written.statusCode, JSON.stringify(written.body)).toBe(201);
-    expect(written.body.judged_by).toBe("human");
-
-    const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
-    const verdicts = read.body.verdicts as Record<string, unknown>[];
-
-    // Both rows, and the machine's is still saying exactly what it said.
-    expect(verdicts).toHaveLength(2);
-    expect(
-      verdicts.find((its) => its.judged_by === "gpt-4o-mini"),
-    ).toMatchObject({ verdict: "failed" });
-    expect(verdicts.find((its) => its.judged_by === "human")).toMatchObject({
-      verdict: "passed",
-    });
-
-    // And the read folds to the person's word.
-    expect(read.body.verdict).toBe("passed");
-  });
-
-  it("refuses a correction with no reason, because that is an assertion", async () => {
-    const { who, run } = await aCustomerWhoHasRun("evidence_correction_bare");
-    await appendVerdicts(who.auth, [machineVerdict(run, run.heard)]);
-
-    const written = await request(
-      "POST",
-      `/api/simulations/${run.heard}/corrections`,
-      who.key,
-      {
-        grader_id: GRADER,
-        grader_version_id: GRADER_VERSION,
-        dimension: BEHAVIOR,
-        verdict: "passed",
-        rationale: "   ",
-      },
-    );
-    expect(written.statusCode).toBe(400);
-    expect(String(written.body.message)).toContain("why you disagree");
-  });
-
-  it("refuses a correction of a judgement nobody ever made", async () => {
-    const { who, run } = await aCustomerWhoHasRun("evidence_correction_nothing");
-
-    const written = await request(
-      "POST",
-      `/api/simulations/${run.heard}/corrections`,
-      who.key,
-      {
-        grader_id: GRADER,
-        grader_version_id: GRADER_VERSION,
-        dimension: BEHAVIOR,
-        verdict: "passed",
-        rationale: "I disagree with a verdict that does not exist.",
-      },
-    );
-    expect(written.statusCode).toBe(422);
-    expect(String(written.body.message)).toContain("no verdict on");
-  });
-
-  it("refuses a viewer, and writes nothing", async () => {
-    const { who, ada, run } = await aCustomerWhoHasRun("evidence_correct_viewer");
-    await appendVerdicts(who.auth, [machineVerdict(run, run.heard)]);
-    const sam = await colleagueOf(api.app, ada, "sam@acme.example", "viewer");
-
-    const written = await request(
-      "POST",
-      `/api/simulations/${run.heard}/corrections`,
-      sam.secret,
-      {
-        grader_id: GRADER,
-        grader_version_id: GRADER_VERSION,
-        dimension: BEHAVIOR,
-        verdict: "passed",
-        rationale: "I think the agent did say it.",
-      },
-    );
-    expect(written.statusCode).toBe(403);
-
-    // Read back as somebody who may: the machine's row is alone and unchanged.
-    const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
-    const verdicts = read.body.verdicts as Record<string, unknown>[];
-    expect(verdicts).toHaveLength(1);
-    expect(verdicts[0]?.judged_by).toBe("gpt-4o-mini");
-    expect(read.body.verdict).toBe("failed");
-  });
-});
+/*
+ * **Four proofs about disagreeing with a judgement used to stand here**, and
+ * they go with the endpoint: a person's word written beside the machine's, a
+ * correction with no reason refused, a correction of a judgement nobody made
+ * refused, and a viewer refused the write. ADR-0009 takes corrections and their
+ * calibration data out of v0. The capability returns as the reserved `human`
+ * grader type — rows of its own under a grader id of its own — and its proofs
+ * belong with it when it does, not weakened into something smaller here.
+ */
 
 /**
  * The two identifiers a reader holds are the same 128 bits written two ways, and

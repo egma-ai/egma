@@ -596,6 +596,8 @@ async function withNobodyWatching(
         process.execPath,
         [
           CLI_ENTRY,
+          "--url",
+          platform.url,
           "--headless",
           "--cwd",
           workspace.dir,
@@ -608,7 +610,6 @@ async function withNobodyWatching(
         {
           cwd: workspace.dir,
           env: workspace.env({
-            EGMA_URL: platform.url,
             EGMA_RETELL_URL: retell.url,
             EGMA_RETELL_API_KEY: KEY,
             EGMA_REACH: "text",

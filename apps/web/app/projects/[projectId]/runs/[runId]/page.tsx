@@ -831,9 +831,7 @@ function PlanGroup({
 }
 
 function itemKey(item: FrozenPlanItem): string {
-  return item.kind === "built_in"
-    ? `built_in:${item.grader_key}`
-    : `authored:${item.grader_id}:${item.grader_version_id}`;
+  return `${item.grader_id}:${item.grader_version_id}`;
 }
 
 function PlanItemLine({ item }: { readonly item: FrozenPlanItem }) {
@@ -846,14 +844,15 @@ function PlanItemLine({ item }: { readonly item: FrozenPlanItem }) {
 
   return (
     <li className={styles.planItem}>
-      <span className={styles.planItemName}>
-        {item.kind === "built_in" ? "Expected behaviors" : item.name}
-      </span>
+      <span className={styles.planItemName}>{item.name}</span>
       <span className={styles.planItemNote}>
-        {item.kind === "built_in"
-          ? `built in · engine ${item.engine_version} · one verdict per behavior, each at its own priority`
-          : `${item.origin === "scenario_specific" ? "on this test" : "project default"} · ${item.priority} · ${item.grader_version_id}`}
-        {` · ${judge}`}
+        {/*
+          What it is and how loudly it speaks. `required: false` is a
+          diagnostic — judged and shown, and never able to fail this run — and
+          saying so here is what keeps a red line on this list from being read
+          as the reason the run failed.
+        */}
+        {`${item.required ? "blocks" : "reports only"} · ${item.grader_version_id} · ${judge}`}
       </span>
     </li>
   );

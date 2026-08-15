@@ -29,12 +29,7 @@
  */
 
 import type { MockToolEntry } from "../folder/mock-tools.ts";
-import {
-  DEFAULT_PRIORITY,
-  type BehaviorPriority,
-  type ExpectedBehavior,
-  type FilePersona,
-} from "../folder/test-file.ts";
+import type { ExpectedBehavior, FilePersona } from "../folder/test-file.ts";
 import type { Fetch } from "./device-flow.ts";
 import { overrideFrom } from "./mock-tools.ts";
 import { PlatformRefusedError } from "./refused.ts";
@@ -47,8 +42,6 @@ export type PlatformContent = {
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   /** By identity and display name, in the order they were authored. */
   readonly personas: readonly FilePersona[];
-  /** Scenario-specific graders, as stable `grd_` ids, in order. */
-  readonly graders: readonly string[];
   /** What a connection has to be able to do. */
   readonly requiredCapabilities: readonly string[];
   /**
@@ -124,32 +117,25 @@ function personasIn(value: unknown): readonly FilePersona[] {
   });
 }
 
-/** A priority off the wire, or the default for anything that is not one. */
-function priorityIn(value: unknown): BehaviorPriority {
-  const said = text(value).toUpperCase();
-  return said === "P1" || said === "P2" ? said : DEFAULT_PRIORITY;
-}
-
 /**
- * The behaviors a version holds, as statements carrying how much each matters.
+ * The behaviors a version holds: plain sentences, in the order authored.
  *
- * The platform answers each as an object with its priority — P0 blocks, P1
- * warns, P2 informs — and the folder's file format writes one down. A bare
- * string is read as a P0, which is what every behavior meant before priorities
- * existed and what a body may still send.
+ * **The retired object shape is still read, and only on the way in.** The
+ * platform answers sentences now, and a stored version frozen before the ladder
+ * retired still carries `{behavior, priority}` beside each one — a frozen
+ * version is read past rather than rewritten, which is the platform's own rule.
+ * So an object is unwrapped to the sentence inside it and the priority is
+ * dropped. Nothing writes the shape back: `writeBody` sends sentences, and
+ * egma's door refuses the object shape by name.
  */
 function behaviorsIn(value: unknown): readonly ExpectedBehavior[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
-    if (typeof entry !== "object" || entry === null) {
-      const written = text(entry);
-      return written === "" ? [] : [{ behavior: written, priority: DEFAULT_PRIORITY }];
-    }
-    const said = entry as Record<string, unknown>;
-    const written = text(said.behavior);
-    return written === ""
-      ? []
-      : [{ behavior: written, priority: priorityIn(said.priority) }];
+    const written =
+      typeof entry === "object" && entry !== null
+        ? text((entry as Record<string, unknown>).behavior)
+        : text(entry);
+    return written === "" ? [] : [written];
   });
 }
 
@@ -185,7 +171,6 @@ function contentFrom(body: Record<string, unknown>): PlatformContent {
     scenario: text(body.scenario),
     expectedBehaviors: behaviorsIn(body.expected_behaviors),
     personas: personasIn(body.personas),
-    graders: idsIn(body.graders),
     requiredCapabilities: textList(body.required_capabilities),
     mockTools: mockToolsIn(body.mock_tools),
   };
@@ -364,12 +349,8 @@ function writeBody(input: TestInput): Record<string, unknown> {
     name: input.name,
     description: input.description,
     scenario: input.scenario,
-    expected_behaviors: input.expectedBehaviors.map((one) => ({
-      behavior: one.behavior,
-      priority: one.priority,
-    })),
+    expected_behaviors: [...input.expectedBehaviors],
     personas: input.personas.map(personaFor),
-    graders: [...input.graders],
     required_capabilities: [...input.requiredCapabilities],
     // The heading names the tool and the block says the rest, so what goes up
     // is the block with the heading's name put back on it. Nothing here judges

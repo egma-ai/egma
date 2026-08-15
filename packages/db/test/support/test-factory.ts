@@ -1,10 +1,8 @@
 import { newId } from "@egma/ids";
 import {
   createAgent,
-  createGrader,
   createPersona,
   type AuthContext,
-  type ExpectedBehavior,
   type NewTest,
   type Role,
 } from "@egma/db";
@@ -94,17 +92,6 @@ export const rescheduling = {
   ],
 } as const satisfies NewTest;
 
-/**
- * The fixture's behaviors as a read hands them back. A behavior written as a
- * bare string is a P0, so this is the same list said the other way round —
- * which is what every file that authors strings and reads objects asserts.
- */
-export function blocking(
-  behaviors: readonly string[],
-): readonly ExpectedBehavior[] {
-  return behaviors.map((behavior) => ({ behavior, priority: "P0" }));
-}
-
 /** Somebody plain, because who the persona is is not under test here. */
 export const neutralTraits = {
   personality: "Speaks plainly, stays patient, asks one question at a time.",
@@ -119,23 +106,6 @@ export async function seedPersona(
   name: string,
 ): Promise<string> {
   const created = await createPersona(auth, { name, traits: neutralTraits });
-  return created.id;
-}
-
-/**
- * A grader for a test to name. Deterministic and cheap to state, because what
- * the grader judges by is the grader factory's business — here it is only
- * something a test's array can point at.
- */
-export async function seedGrader(
-  auth: AuthContext,
-  name: string,
-): Promise<string> {
-  const created = await createGrader(auth, {
-    name,
-    type: "phrase_match",
-    config: { banned: [{ text: "I promise" }] },
-  });
   return created.id;
 }
 
@@ -159,7 +129,6 @@ export async function rowCounts(): Promise<{
   tests: number;
   versions: number;
   named: number;
-  namedGraders: number;
   graders: number;
   graderVersions: number;
 }> {
@@ -173,7 +142,6 @@ export async function rowCounts(): Promise<{
     tests: await count("test"),
     versions: await count("test_version"),
     named: await count("test_persona"),
-    namedGraders: await count("test_grader"),
     graders: await count("grader"),
     graderVersions: await count("grader_version"),
   };

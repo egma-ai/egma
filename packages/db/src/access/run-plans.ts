@@ -7,19 +7,13 @@ import {
   grader,
   graderVersion,
   judgeConfiguration,
-  type GraderRead,
   type GraderScope,
-  type Priority,
+  type LibraryType,
 } from "../schema/graders.ts";
 import { persona } from "../schema/personas.ts";
 import { gradingPlan, type GradingPlanState } from "../schema/plans.ts";
 import type { SimulationSkipReason } from "../schema/runs.ts";
-import {
-  test,
-  testGrader,
-  testPersona,
-  testVersion,
-} from "../schema/tests.ts";
+import { test, testPersona, testVersion } from "../schema/tests.ts";
 import {
   capabilityStanding,
   CAPABILITIES_UNKNOWN,
@@ -31,10 +25,6 @@ import {
   RunWriteRefusedError,
   type RunWriteRefusal,
 } from "./errors.ts";
-import {
-  EXPECTED_BEHAVIORS_GRADER,
-  GRADER_TYPE_REGISTRY,
-} from "./graders.ts";
 import { PLATFORM_JUDGE } from "./judges.ts";
 import { archivedTests, testsApplyingToAgent } from "./tests.ts";
 import { within } from "./within.ts";
@@ -130,14 +120,16 @@ export type PinnedVersion = {
   readonly personaIds: readonly string[];
   /** What this version needs of a connection to be meaningful. */
   readonly requiredCapabilities: readonly string[];
-  /** The graders this version names directly, in the order authored. */
-  readonly graderIds: readonly string[];
 };
 
 /**
  * Every named version resolved to the test it belongs to, the personas it
- * names, what it requires of a connection, and the graders it names — before
- * anything at all is written.
+ * names, and what it requires of a connection — before anything at all is
+ * written.
+ *
+ * **It resolves no graders, and there are none on a version to resolve.** What
+ * judges a conversation is decided entirely by the project's running copies and
+ * their scope; a test names none.
  *
  * A version this egma never issued, or one belonging to another customer or
  * another project, is refused in the same words as one that never existed:
@@ -190,21 +182,6 @@ export async function resolvePinnedVersions(
     else held.push(entry.personaId);
   }
 
-  const scenarioGraders = new Map<string, string[]>();
-  for (const entry of await on
-    .select({
-      testVersionId: testGrader.testVersionId,
-      graderId: testGrader.graderId,
-      position: testGrader.position,
-    })
-    .from(testGrader)
-    .where(inArray(testGrader.testVersionId, [...found.keys()]))
-    .orderBy(asc(testGrader.position))) {
-    const held = scenarioGraders.get(entry.testVersionId);
-    if (held === undefined) scenarioGraders.set(entry.testVersionId, [entry.graderId]);
-    else held.push(entry.graderId);
-  }
-
   return ids.map((id) => {
     const row = found.get(id);
     if (row === undefined) {
@@ -229,7 +206,6 @@ export async function resolvePinnedVersions(
       testName: row.testName,
       personaIds,
       requiredCapabilities: requiredCapabilitiesOf(row.content),
-      graderIds: scenarioGraders.get(id) ?? [],
     };
   });
 }
@@ -503,53 +479,41 @@ export type JudgeChoice =
   | { readonly tag: "unavailable_at_capture" };
 
 /**
- * One authored grader, as the plan freezes it.
+ * One running copy, as the plan freezes it.
  *
- * Keyed by `(test reference, grader_id)` — so the same grader selected on two
- * test versions is deliberately two items, because a run's judgments are per
+ * Keyed by `(test reference, grader_id)` — so the same copy judging two test
+ * versions is deliberately two items, because a run's judgments are per
  * conversation and a shared item would make one test's grading depend on
- * another's. `origin` says how it got here, and it is worth keeping: a grader
- * added directly to a test is a scoping decision that overrides the grader's
- * own live scope for that test, and a page has to be able to say so.
+ * another's.
+ *
+ * **There is one kind of item now, and the collapse is the redesign.** There
+ * used to be two: an authored grader, and the expected-behaviors built-in as a
+ * rowless sentinel with a reserved key and an engine version instead of an
+ * identity. The built-in is a real running copy today — every project is seeded
+ * with one, pointing at the library's `expected_behaviors` entry — so it enters
+ * a plan through the same door as everything else and there is nothing left for
+ * a second arm to describe. `origin` went the same way with the junction: a
+ * test names no graders, so every item got here one way and a field that could
+ * only ever say `project_default` would be furniture.
+ *
+ * **`required` rides the item so a page can mark a diagnostic**, and it is the
+ * copy's flag as it stood when the plan froze. What a *verdict* is folded under
+ * is the flag as it stands at read time — see `GraderOutcome` — which is the
+ * same distinction the two hold everywhere: the plan says what was set up, the
+ * fold says what the project lets a failure do today.
  */
-export type AuthoredPlanItem = {
+export type PlanItem = {
   readonly kind: "authored";
   readonly graderId: string;
   readonly graderVersionId: string;
   readonly graderName: string;
-  readonly origin: "project_default" | "scenario_specific";
-  readonly priority: Priority;
+  /** The library entry this copy reads its definition through. */
+  readonly libraryId: string;
+  /** `false` makes it a diagnostic: judged, shown, never able to fail a test. */
+  readonly required: boolean;
   readonly scope: GraderScope;
-  readonly reads: readonly GraderRead[];
-  readonly modalities: readonly Modality[];
   readonly judge: JudgeChoice;
 };
-
-/**
- * The expected-behaviors built-in, as the plan freezes it.
- *
- * **It has no grader identity, no grader version, no scope and no item-level
- * priority**, and every one of those absences is deliberate. It is not a row —
- * applying it is part of what running a test means — so there is nothing to
- * point at. And it produces one verdict per expected behavior, each taking its
- * priority from the behavior it judged in the pinned test version, so an
- * item-wide priority would flatten exactly the distinction the behaviors carry.
- *
- * What it does store is the engine version, because a behavior change in the
- * built-in requires a new one: that is the only way an old run's judgments stay
- * interpretable after the engine learns something new.
- */
-export type BuiltInPlanItem = {
-  readonly kind: "built_in";
-  /** The reserved key. The first and, today, the only one. */
-  readonly graderKey: string;
-  readonly engineVersion: string;
-  readonly reads: readonly GraderRead[];
-  readonly modalities: readonly Modality[];
-  readonly judge: JudgeChoice;
-};
-
-export type PlanItem = AuthoredPlanItem | BuiltInPlanItem;
 
 /**
  * One group of plan items, under the test reference they judge.
@@ -581,29 +545,25 @@ export type GradingPlan = {
   readonly groups: readonly PlanGroup[];
 };
 
-/** The engine version the built-in judges at. A behavior change mints a new one. */
-export const EXPECTED_BEHAVIORS_ENGINE_VERSION = "1";
-
-/** One project-default or scenario grader, as the plan needs it. */
+/** One of the project's running copies, as the plan needs it. */
 type ApplicableGrader = {
   readonly id: string;
   readonly name: string;
   readonly currentVersionId: string;
-  readonly priority: Priority;
+  readonly libraryId: string;
+  readonly required: boolean;
   readonly scope: GraderScope;
-  readonly reads: readonly GraderRead[];
-  readonly modalities: readonly Modality[];
   readonly judged: boolean;
   readonly judgeModel: { readonly provider: string; readonly model: string } | null;
 };
 
 /**
- * Every active authored grader of the project, with its current version's
- * judged content — read once for the whole plan rather than per test version.
+ * Every live running copy of the project, with its current version's judged
+ * content — read once for the whole plan rather than per test version.
  *
- * Archived graders are left out entirely: Archive means "stop entering new
- * grading plans", and a run frozen before it stays on its own plan. The type
- * registry decides `judged` rather than the row, because whether a kind of
+ * Deleted copies are left out entirely: switching one off means "stop entering
+ * new grading plans", and a run frozen before it stays on its own plan. The
+ * library type decides `judged` rather than the row, because whether a kind of
  * judgment asks a model is a fact about the kind.
  */
 async function applicableGraders(
@@ -616,11 +576,10 @@ async function applicableGraders(
       id: grader.id,
       name: grader.name,
       type: grader.type,
-      priority: grader.priority,
+      libraryId: grader.libraryId,
+      required: grader.required,
       scope: grader.scope,
       currentVersionId: grader.currentVersionId,
-      reads: graderVersion.reads,
-      modalities: graderVersion.modalities,
       judgeModel: graderVersion.judgeModel,
     })
     .from(grader)
@@ -646,10 +605,9 @@ async function applicableGraders(
           id: row.id,
           name: row.name,
           currentVersionId: row.currentVersionId,
-          priority: row.priority as Priority,
+          libraryId: row.libraryId,
+          required: row.required,
           scope: row.scope as GraderScope,
-          reads: row.reads as readonly GraderRead[],
-          modalities: row.modalities as readonly Modality[],
           judged: judgedTypes.has(row.type),
           judgeModel:
             override === null ||
@@ -664,16 +622,16 @@ async function applicableGraders(
 }
 
 /**
- * Which grader types ask a model, taken from the type registry rather than
- * written again here — the registry is where "what a kind of judgment reads and
- * whether it needs a judge" is decided, and a second list beside it would be a
+ * Which library types ask a model, off the closed vocabulary the schema keeps
+ * rather than a second list here — `llm_as_judge` is executed by asking a
+ * model, `code` by egma's own engine, and a list written twice would be a
  * second opinion about whose account pays.
  */
-const judgedTypes: ReadonlySet<string> = new Set(
-  Object.entries(GRADER_TYPE_REGISTRY)
-    .filter(([, definition]) => definition.judged)
-    .map(([type]) => type),
-);
+const JUDGED_TYPES: ReadonlySet<LibraryType> = new Set<LibraryType>([
+  "llm_as_judge",
+]);
+
+const judgedTypes: ReadonlySet<string> = JUDGED_TYPES;
 
 /** The project's judge as a plan freezes it, or the refusal that stops a run. */
 export type PlanJudge =
@@ -763,130 +721,65 @@ function builtInJudge(judge: PlanJudge): JudgeChoice {
 /**
  * The plan one selection of pinned versions comes to.
  *
- * For each version: the built-in, then the active project-default graders whose
- * live scope is `simulations` or `both`, then every active grader the version
- * names directly — **whatever its live scope**, because a direct link is the
- * per-test scoping decision and overrides the grader's own.
+ * For each version: every live running copy of the project whose scope is
+ * `simulations` or `both`, in copy-id order. The list is the same for every
+ * version of a selection, and that is not a simplification of a rule that used
+ * to be per test — a test names no graders, so where a copy applies is the
+ * copy's own setting and nothing else.
  *
- * **Deduplication is within one version and never across.** A grader that is
- * both a project default and directly named by one test yields one item for
- * that test, and it is the `scenario_specific` one, because the direct link is
- * the decision somebody actually made. The same grader on two selected versions
- * stays two items: they judge two different conversations.
+ * The same copy on two selected versions stays two items: they judge two
+ * different conversations, and a shared item would make one test's grading
+ * depend on another's.
+ *
+ * **The seeded expected-behaviors copy is one of these**, which is what makes
+ * a first run judged with no setup at all. It is not special-cased here, and
+ * it used to be: switching it off is a project's decision like any other, and
+ * an item this function added regardless would be a check nobody could turn
+ * off appearing beside the ones they chose.
  */
 export function planGroupsFor(
   versions: readonly PinnedVersion[],
   graders: ReadonlyMap<string, ApplicableGrader>,
   judge: PlanJudge,
 ): readonly PlanGroup[] {
-  const defaults = [...graders.values()].filter(
+  const applying = [...graders.values()].filter(
     (one) => one.scope === "simulations" || one.scope === "both",
   );
 
-  return versions.map((version) => {
-    const items: PlanItem[] = [
-      {
-        kind: "built_in",
-        graderKey: EXPECTED_BEHAVIORS_GRADER.key,
-        engineVersion: EXPECTED_BEHAVIORS_ENGINE_VERSION,
-        reads: [...EXPECTED_BEHAVIORS_GRADER.reads],
-        modalities: [...EXPECTED_BEHAVIORS_GRADER.modalities],
-        judge: builtInJudge(judge),
-      },
-    ];
-
-    /** Where each authored grader landed, so a direct link can replace it. */
-    const placed = new Map<string, number>();
-
-    const add = (
-      one: ApplicableGrader,
-      origin: AuthoredPlanItem["origin"],
-    ): void => {
-      const item: AuthoredPlanItem = {
-        kind: "authored",
-        graderId: one.id,
-        graderVersionId: one.currentVersionId,
-        graderName: one.name,
-        origin,
-        priority: one.priority,
-        scope: one.scope,
-        reads: one.reads,
-        modalities: one.modalities,
-        judge: judgeFor(one, judge),
-      };
-      const already = placed.get(one.id);
-      if (already === undefined) {
-        placed.set(one.id, items.length);
-        items.push(item);
-        return;
-      }
-      // The direct link is the scoping decision, so it replaces the default in
-      // place rather than adding a second item for one grader.
-      items[already] = item;
-    };
-
-    for (const one of defaults) add(one, "project_default");
-    for (const graderId of version.graderIds) {
-      const one = graders.get(graderId);
-      // An archived grader named by an older version simply does not enter a
-      // new plan. Archive is what that means, and the run still starts.
-      if (one !== undefined) add(one, "scenario_specific");
-    }
-
-    return {
-      tag: "version",
-      testId: version.testId,
-      testVersionId: version.versionId,
-      testName: version.testName,
-      items,
-    };
-  });
+  return versions.map((version) => ({
+    tag: "version" as const,
+    testId: version.testId,
+    testVersionId: version.versionId,
+    testName: version.testName,
+    items: applying.map((one) => planItemFor(one, judge)),
+  }));
 }
 
-/**
- * The graders a selection names directly that the plan it just produced does
- * not carry, in the order the versions named them.
- *
- * Only one thing puts a grader in this answer: it was archived, so
- * `applicableGraders` did not see it and `planGroupsFor` left it out. For an
- * ordinary start that is exactly right — Archive means "stop entering new
- * grading plans", and the run still starts. For a **Retry** it is not: the new
- * run would be judged by fewer graders than the one it copies, and the two
- * results would then be compared as though they measured the same thing.
- *
- * It is asked of the plan rather than of the grader table, so the answer and
- * the plan about to be frozen come from one read. A grader archived after that
- * read is inside the plan and stays there, which is what a frozen plan means; a
- * grader archived before it is missing here, and the Retry is refused.
+/** One running copy frozen as a plan item, under a project judge. */
+function planItemFor(one: ApplicableGrader, judge: PlanJudge): PlanItem {
+  return {
+    kind: "authored",
+    graderId: one.id,
+    graderVersionId: one.currentVersionId,
+    graderName: one.name,
+    libraryId: one.libraryId,
+    required: one.required,
+    scope: one.scope,
+    judge: judgeFor(one, judge),
+  };
+}
+
+/*
+ * **There is no companion asking which graders a selection lost.** There was
+ * one — `scenarioGradersMissingFrom` — and it existed so a Retry could refuse
+ * rather than quietly produce a run judged by fewer graders than the one it
+ * copies. It could only ever answer about graders a test named *directly*, and
+ * a test names none now: what judges a run is the project's live copies, and a
+ * copy switched off between two runs is a decision about the project rather
+ * than something a Retry may overrule. A Retry of a run whose copies have
+ * changed is a Retry under today's conditions, which is what every other
+ * resource it rechecks already means.
  */
-export function scenarioGradersMissingFrom(
-  versions: readonly PinnedVersion[],
-  groups: readonly PlanGroup[],
-): readonly string[] {
-  const carried = new Map<string, ReadonlySet<string>>();
-  for (const group of groups) {
-    if (group.tag !== "version") continue;
-    carried.set(
-      group.testVersionId,
-      new Set(
-        group.items.flatMap((item) =>
-          item.kind === "authored" ? [item.graderId] : [],
-        ),
-      ),
-    );
-  }
-
-  const missing: string[] = [];
-  for (const version of versions) {
-    const held = carried.get(version.versionId);
-    for (const graderId of version.graderIds) {
-      if (held?.has(graderId) === true) continue;
-      if (missing.includes(graderId)) continue;
-      missing.push(graderId);
-    }
-  }
-  return missing;
-}
 
 /** Every `jcr_` credential a plan names, deduplicated, in the order first met. */
 export function judgeCredentialsIn(

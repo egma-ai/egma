@@ -100,7 +100,6 @@ export function fileFromPlatform(test: PlatformTest): TestFile {
     personas: test.personas,
     version: test.versionId,
     identityRevision: test.revision,
-    graders: test.graders,
     requiredCapabilities: test.requiredCapabilities,
     scenario: test.scenario,
     expectedBehaviors: test.expectedBehaviors,
@@ -134,13 +133,13 @@ function freeFileName(name: string, taken: Set<string>): string {
 /**
  * Whether the file's list says what the pinned version says.
  *
- * **The priority is compared only where the file wrote one down.** An unmarked
- * line makes no claim — it is the shape every version-1 file is in, and holding
- * it to the version's priority would declare a folder nobody has touched
- * unfaithful the moment anybody set a P1 in the browser, which would refuse to
- * migrate exactly the files this path exists to migrate. A line somebody typed
- * `[P1]` into is a different thing: it is a draft, and rewriting it would throw
- * away the edit safe-pull exists to protect.
+ * **There is no companion comparing priorities, and there was.** It refused a
+ * pull with *a priority written into it is not the one egma holds*, so that a
+ * `[P1]` somebody had typed into an old file was kept rather than overwritten.
+ * The ladder retired: a marker is stripped on the way in and written on the way
+ * out by nothing, so there is no claim left for a file to make and no edit left
+ * to protect. A format 2 file whose sentences match is a faithful copy, and the
+ * pull rewrites it into format 3 — which is what a format change looks like.
  */
 function sameStatements(
   file: readonly FileBehavior[],
@@ -148,17 +147,7 @@ function sameStatements(
 ): boolean {
   return (
     file.length === version.length &&
-    file.every((one, index) => one.behavior === version[index]?.behavior)
-  );
-}
-
-/** Whether every priority the file actually claimed is the one egma holds. */
-function samePriorities(
-  file: readonly FileBehavior[],
-  version: readonly ExpectedBehavior[],
-): boolean {
-  return file.every(
-    (one, index) => one.priority === null || one.priority === version[index]?.priority,
+    file.every((one, index) => one === version[index])
   );
 }
 
@@ -180,10 +169,9 @@ function sameNames(
  * cannot be a difference this file is responsible for and holding it to them
  * would refuse to migrate a folder nobody had touched. Everything the file
  * *did* say is compared exactly, order included, because that is where a local
- * draft would be — including a priority, on the lines that carry a marker.
- * Somebody hand-typing `[P1]` into an old file is drafting, and the fact that
- * such a file cannot push at all until it is migrated is the reason to keep
- * their edit rather than a reason to discard it.
+ * draft would be. A priority marker is not among the things compared: it is
+ * stripped on the way in and nothing writes one, so a file carrying markers and
+ * the right sentences is a faithful copy that this pull rewrites into format 3.
  *
  * Personas are compared by the display name, which is all an old file has. A
  * persona renamed in the browser therefore reads as a difference, and is the
@@ -194,9 +182,6 @@ function faithfulCopy(file: TestFile, pinned: PlatformContent): string | null {
   if (file.scenario !== pinned.scenario) return "its scenario has been edited since";
   if (!sameStatements(file.expectedBehaviors, pinned.expectedBehaviors)) {
     return "its expected behaviors have been edited since";
-  }
-  if (!samePriorities(file.expectedBehaviors, pinned.expectedBehaviors)) {
-    return "a priority written into it is not the one egma holds";
   }
   if (!sameNames(file.personas, pinned.personas)) {
     return "the personas it names have changed since";

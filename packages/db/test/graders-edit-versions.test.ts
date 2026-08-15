@@ -2,14 +2,15 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  createGrader,
   deleteGrader,
   editGrader,
   getGrader,
   getGraderVersion,
   listGraders,
   NotPermittedError,
-  type NewGrader,
+  PREDEFINED_GRADERS,
+  useLibraryEntry,
+  type UseLibraryEntry,
 } from "@egma/db";
 
 import { type MigratedDatabase } from "./support/database.ts";
@@ -26,10 +27,16 @@ import {
  * functions only, like the create and fetch tests before them.
  *
  * The line every test in this file draws is between what a verdict was decided
- * by and where the decision applies. Tightening a threshold changes what a
- * verdict means, so it mints a version and the old one stays exactly readable;
- * promoting a warning to a blocker changes nothing already judged, so it writes
- * in place and is true the moment it returns.
+ * by and where the decision applies. Tightening a bound changes what a verdict
+ * means, so it mints a version and the old one stays exactly readable; making a
+ * blocker into a diagnostic changes nothing already judged, so it writes in
+ * place and is true the moment it returns.
+ *
+ * **The filled-in values are all a copy holds, and they are checked against the
+ * entry it points at** — read live, on every edit, which is the same check Use
+ * made. A copy cannot edit its way into holding a value the form never asked
+ * for, and it cannot edit its way to a different definition either: the pointer
+ * and the type are set at Use time and are not on the change surface at all.
  */
 
 let database: MigratedDatabase;
@@ -42,57 +49,62 @@ afterAll(async () => {
   await database.drop();
 });
 
-/** A threshold, because a threshold is the thing teams actually tighten. */
+/**
+ * A copy of the `latency` entry, because a bound is the thing teams actually
+ * tighten — and the only entry v0 ships whose form asks for anything at all.
+ */
 const latency = {
+  libraryId: PREDEFINED_GRADERS.latency,
   name: "Answers within two seconds",
   description: "The number the support team argues about",
-  type: "metric_threshold",
-  config: {
-    measure: "turn_response_latency",
-    aggregation: "p90",
-    comparator: "below",
-    threshold: 2000,
-  },
-} as const satisfies NewGrader;
+  params: { metric: "turn_response_latency", bound: 2000 },
+} as const satisfies UseLibraryEntry;
+
+/** What that Use writes: one filled-in set, which is one assertion. */
+const latencyConfig = {
+  assertions: [{ metric: "turn_response_latency", bound: 2000 }],
+} as const;
+
+/** A bound somewhere else, for the edits that mean to change something. */
+function boundedAt(bound: number) {
+  return { assertions: [{ metric: "turn_response_latency", bound }] };
+}
 
 /** The same judgment, said in a way that reorders nothing and changes nothing. */
 const sameLatencyConfig = {
-  comparator: "below",
-  threshold: 2000,
-  measure: "turn_response_latency",
-  aggregation: "p90",
+  assertions: [{ bound: 2000, metric: "turn_response_latency" }],
 } as const;
 
 describe("editing what a grader judges by", () => {
   it("creates version 2, moves the pointer, and leaves version 1 exactly where it was", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
 
     const edited = await editGrader(actingAsAcme(), created.id, {
-      config: { ...latency.config, threshold: 1500 },
+      config: boundedAt(1500),
     });
 
     expect(edited?.version).toBe(2);
     expect(edited?.versionId).not.toBe(created.versionId);
-    expect(edited?.config).toEqual({ ...latency.config, threshold: 1500 });
+    expect(edited?.config).toEqual(boundedAt(1500));
 
     const fetched = await getGrader(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(2);
     expect(fetched?.versionId).toBe(edited?.versionId);
-    expect(fetched?.config).toEqual({ ...latency.config, threshold: 1500 });
+    expect(fetched?.config).toEqual(boundedAt(1500));
 
     // Version 1 is untouched, which is what makes last week's verdict still
     // mean what it meant when it was written.
     const frozen = await getGraderVersion(actingAsAcme(), created.versionId);
     expect(frozen?.version).toBe(1);
     expect(frozen?.graderId).toBe(created.id);
-    expect(frozen?.type).toBe("metric_threshold");
-    expect(frozen?.config).toEqual(latency.config);
+    expect(frozen?.type).toBe("code");
+    expect(frozen?.config).toEqual(latencyConfig);
     expect(frozen?.judgeModel).toBeNull();
     expect(frozen?.createdAt).toBeInstanceOf(Date);
   });
 
   it("does nothing for a byte-identical save, and returns the current version", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
     const before = await rowCounts();
 
     // The same judgment with the fields written in another order: jsonb decides
@@ -109,36 +121,55 @@ describe("editing what a grader judges by", () => {
     expect(fetched?.updatedAt.getTime()).toBe(created.updatedAt.getTime());
   });
 
-  it("counts an argument constraint as content, and a reordered one as the same content", async () => {
-    const created = await createGrader(actingAsAcme(), {
-      name: "Refunds through the refund tool",
-      type: "tool_calls",
-      config: {
-        required: [{ tool: "issue_refund", arguments: { currency: "USD", partial: false } }],
-      },
+  /**
+   * Assertions compare **in order and by position**, because position is what a
+   * verdict row keys an assertion by: swapping two bounds is a different grader
+   * from a reader's point of view even though the same two checks are made.
+   */
+  it("counts an added assertion as content, and a reordered pair as different content", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), {
+      ...latency,
+      name: "Two bounds at once",
     });
-    const before = await rowCounts();
 
-    const saved = await editGrader(actingAsAcme(), created.id, {
+    const grown = await editGrader(actingAsAcme(), created.id, {
       config: {
-        required: [
-          { tool: "issue_refund", arguments: { partial: false, currency: "USD" } },
+        assertions: [
+          { metric: "turn_response_latency", bound: 2000 },
+          { metric: "first_response_latency", bound: 900 },
         ],
       },
     });
-    expect(saved?.version).toBe(1);
-    expect(await rowCounts()).toEqual(before);
+    expect(grown?.version).toBe(2);
 
-    const tightened = await editGrader(actingAsAcme(), created.id, {
+    const before = await rowCounts();
+    const saved = await editGrader(actingAsAcme(), created.id, {
       config: {
-        required: [{ tool: "issue_refund", arguments: { currency: "EUR" } }],
+        // The same two checks, each written with its keys the other way round:
+        // jsonb decides key order on the way in, so the answer has to come from
+        // comparing values.
+        assertions: [
+          { bound: 2000, metric: "turn_response_latency" },
+          { bound: 900, metric: "first_response_latency" },
+        ],
       },
     });
-    expect(tightened?.version).toBe(2);
+    expect(saved?.version).toBe(2);
+    expect(await rowCounts()).toEqual(before);
+
+    const swapped = await editGrader(actingAsAcme(), created.id, {
+      config: {
+        assertions: [
+          { metric: "first_response_latency", bound: 900 },
+          { metric: "turn_response_latency", bound: 2000 },
+        ],
+      },
+    });
+    expect(swapped?.version).toBe(3);
   });
 
   it("versions on the judge model, and on clearing it again", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
 
     const overridden = await editGrader(actingAsAcme(), created.id, {
       judgeModel: { provider: "openai", model: "gpt-4.1-mini" },
@@ -164,12 +195,12 @@ describe("editing what a grader judges by", () => {
   });
 
   it("numbers each edit after the last, and keeps every version fetchable by its grv_ id", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
     const second = await editGrader(actingAsAcme(), created.id, {
-      config: { ...latency.config, threshold: 1500 },
+      config: boundedAt(1500),
     });
     const third = await editGrader(actingAsAcme(), created.id, {
-      config: { ...latency.config, threshold: 1200 },
+      config: boundedAt(1200),
     });
 
     expect(second?.version).toBe(2);
@@ -177,34 +208,59 @@ describe("editing what a grader judges by", () => {
     expect((await getGrader(actingAsAcme(), created.id))?.version).toBe(3);
 
     const first = await getGraderVersion(actingAsAcme(), created.versionId);
-    expect(first?.config).toEqual(latency.config);
+    expect(first?.config).toEqual(latencyConfig);
 
     if (second?.versionId === undefined) throw new Error("no second version");
     const middle = await getGraderVersion(actingAsAcme(), second.versionId);
     expect(middle?.version).toBe(2);
-    expect(middle?.config).toEqual({ ...latency.config, threshold: 1500 });
+    expect(middle?.config).toEqual(boundedAt(1500));
   });
 
-  it("holds an edited config to the type the grader already has", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+  /**
+   * An edit is checked against the entry this copy points at, read live — the
+   * same check Use made. So there is no way to edit a copy into holding values
+   * its form never asked for, which is what would otherwise turn a grader into
+   * one judging by less than somebody wrote down.
+   */
+  it("holds an edited config to what the entry this copy points at asks for", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), latency);
 
     await expect(
       editGrader(actingAsAcme(), created.id, {
-        config: { rubric: "was it fast enough" } as never,
+        config: { assertions: [{ rubric: "was it fast enough" }] } as never,
       }),
-    ).rejects.toThrow(/measure/);
+    ).rejects.toThrow(/does not ask for/);
 
     const fetched = await getGrader(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(1);
-    expect(fetched?.config).toEqual(latency.config);
+    expect(fetched?.config).toEqual(latencyConfig);
+  });
+
+  /**
+   * The pointer and the type are set at Use time and are not on the change
+   * surface at all: every version behind a copy holds values its type shapes, so
+   * a copy that could change either would be a different grader wearing the old
+   * one's history.
+   */
+  it("cannot be edited onto a different library entry", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), latency);
+
+    await editGrader(actingAsAcme(), created.id, {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
+      type: "llm_as_judge",
+    } as never);
+
+    const fetched = await getGrader(actingAsAcme(), created.id);
+    expect(fetched?.libraryId).toBe(PREDEFINED_GRADERS.latency);
+    expect(fetched?.type).toBe("code");
   });
 
   it("is refused to a viewer, per the permission table", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
 
     await expect(
       editGrader(actingAsAcme("viewer"), created.id, {
-        config: { ...latency.config, threshold: 1 },
+        config: boundedAt(1),
       }),
     ).rejects.toThrow(NotPermittedError);
   });
@@ -218,16 +274,19 @@ describe("editing what a grader judges by", () => {
 
 describe("changing where a grader applies and how loudly", () => {
   it("creates no version and reads back immediately", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
     const before = await rowCounts();
 
     const settled = await editGrader(actingAsAcme(), created.id, {
-      priority: "P2",
+      required: false,
       scope: "both",
       productionSampleRate: 5,
     });
 
-    expect(settled?.priority).toBe("P2");
+    // A blocker turned into a diagnostic: it still judges and is still shown,
+    // and it can no longer fail anything. Nothing already judged changes, which
+    // is why no version was minted.
+    expect(settled?.required).toBe(false);
     expect(settled?.scope).toBe("both");
     expect(settled?.productionSampleRate).toBe(5);
     expect(settled?.version).toBe(1);
@@ -235,21 +294,21 @@ describe("changing where a grader applies and how loudly", () => {
     expect(await rowCounts()).toEqual(before);
 
     const fetched = await getGrader(actingAsAcme(), created.id);
-    expect(fetched?.priority).toBe("P2");
+    expect(fetched?.required).toBe(false);
     expect(fetched?.scope).toBe("both");
     expect(fetched?.productionSampleRate).toBe(5);
     expect(fetched?.version).toBe(1);
-    expect(fetched?.config).toEqual(latency.config);
+    expect(fetched?.config).toEqual(latencyConfig);
 
     // And what was already judged is untouched: no version was minted, so
     // nothing a verdict points at moved.
     const frozen = await getGraderVersion(actingAsAcme(), created.versionId);
     expect(frozen?.version).toBe(1);
-    expect(frozen?.config).toEqual(latency.config);
+    expect(frozen?.config).toEqual(latencyConfig);
   });
 
   it("renames without versioning, and clears a description with null", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
     const before = await rowCounts();
 
     const renamed = await editGrader(actingAsAcme(), created.id, {
@@ -264,25 +323,25 @@ describe("changing where a grader applies and how loudly", () => {
   });
 
   it("renames and versions together when one edit carries both", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
 
     const edited = await editGrader(actingAsAcme(), created.id, {
       name: "Answers fast",
-      priority: "P1",
-      config: { ...latency.config, threshold: 1000 },
+      required: false,
+      config: boundedAt(1000),
     });
 
     expect(edited?.name).toBe("Answers fast");
-    expect(edited?.priority).toBe("P1");
+    expect(edited?.required).toBe(false);
     expect(edited?.version).toBe(2);
   });
 
   it("refuses a setting egma does not know, and changes nothing", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
 
     await expect(
-      editGrader(actingAsAcme(), created.id, { priority: "P9" as never }),
-    ).rejects.toThrow(/priority/);
+      editGrader(actingAsAcme(), created.id, { scope: "anywhere" as never }),
+    ).rejects.toThrow(/scope/);
     await expect(
       editGrader(actingAsAcme(), created.id, { productionSampleRate: -1 }),
     ).rejects.toThrow(/percentage/);
@@ -291,7 +350,7 @@ describe("changing where a grader applies and how loudly", () => {
     ).rejects.toThrow(/name/);
 
     const fetched = await getGrader(actingAsAcme(), created.id);
-    expect(fetched?.priority).toBe("P0");
+    expect(fetched?.scope).toBe("simulations");
     expect(fetched?.name).toBe(latency.name);
   });
 });
@@ -304,11 +363,11 @@ describe("listing graders", () => {
     const written = [];
     for (let nth = 1; nth <= 3; nth += 1) {
       written.push(
-        await createGrader(inOutbound, { ...latency, name: `Threshold ${nth}` }),
+        await useLibraryEntry(inOutbound, { ...latency, name: `Threshold ${nth}` }),
       );
     }
     await editGrader(inOutbound, written[0]!.id, {
-      config: { ...latency.config, threshold: 900 },
+      config: boundedAt(900),
     });
 
     const page = await listGraders(inOutbound);
@@ -321,7 +380,7 @@ describe("listing graders", () => {
 
     const first = page.items.find((item) => item.name === "Threshold 1");
     expect(first?.version).toBe(2);
-    expect(first?.config).toEqual({ ...latency.config, threshold: 900 });
+    expect(first?.config).toEqual(boundedAt(900));
   });
 
   it("pages by id, and refuses a cursor that is not a grader's", async () => {
@@ -340,7 +399,7 @@ describe("listing graders", () => {
 
 describe("deleting a grader nothing names", () => {
   it("vanishes from fetches and lists, and its versions stay readable", async () => {
-    const created = await createGrader(actingAsAcme(), {
+    const created = await useLibraryEntry(actingAsAcme(), {
       ...latency,
       name: "Retired threshold",
     });
@@ -357,11 +416,11 @@ describe("deleting a grader nothing names", () => {
     // The version outlives the delete, because a verdict that named it has to
     // stay interpretable.
     const frozen = await getGraderVersion(actingAsAcme(), created.versionId);
-    expect(frozen?.config).toEqual(latency.config);
+    expect(frozen?.config).toEqual(latencyConfig);
   });
 
   it("is refused to a credential acting in no project", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
 
     await expect(
       deleteGrader({ ...actingAsAcme(), projectId: undefined }, created.id),
@@ -375,17 +434,17 @@ describe("deleting a grader nothing names", () => {
 
 describe("tenancy", () => {
   it("edits nothing and returns nothing when another organization asks", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
 
     const stolen = await editGrader(actingAsGlobex("admin"), created.id, {
       name: "Globex's now",
-      priority: "P2",
+      required: false,
     });
     expect(stolen).toBeUndefined();
 
     const untouched = await getGrader(actingAsAcme(), created.id);
     expect(untouched?.name).toBe(latency.name);
-    expect(untouched?.priority).toBe("P0");
+    expect(untouched?.required).toBe(true);
 
     expect(
       await getGraderVersion(actingAsGlobex(), created.versionId),
@@ -394,11 +453,11 @@ describe("tenancy", () => {
   });
 
   it("edits what already exists for a credential acting in no project", async () => {
-    const created = await createGrader(actingAsAcme(), latency);
+    const created = await useLibraryEntry(actingAsAcme(), latency);
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
     const edited = await editGrader(wholeCustomer, created.id, {
-      config: { ...latency.config, threshold: 800 },
+      config: boundedAt(800),
     });
 
     expect(edited?.version).toBe(2);

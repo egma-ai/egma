@@ -77,15 +77,10 @@ const config: NextConfig = {
         // The shape of the persona editor, which the server owns so a field can
         // be added without shipping the browser again.
         { source: "/api/persona-form", destination: `${api}/api/persona-form` },
+        // The running copies: a list, and the one act that makes another —
+        // pressing Use on a library entry. One rule and no `:path*`, because
+        // the group answers both at one address.
         { source: "/api/graders", destination: `${api}/api/graders` },
-        {
-          source: "/api/graders/:path*",
-          destination: `${api}/api/graders/:path*`,
-        },
-        {
-          source: "/api/grader-registry",
-          destination: `${api}/api/grader-registry`,
-        },
         { source: "/api/keys", destination: `${api}/api/keys` },
         { source: "/api/keys/:path*", destination: `${api}/api/keys/:path*` },
         { source: "/api/members", destination: `${api}/api/members` },
@@ -130,6 +125,14 @@ const config: NextConfig = {
         {
           source: "/api/judge-credentials/:path*",
           destination: `${api}/api/judge-credentials/:path*`,
+        },
+        // The shelf of grader definitions the Library screen draws itself
+        // from. One rule and no `:path*` beside it, because the library is
+        // read and never authored: a second address under it would be a
+        // forwarding rule for a door that does not exist.
+        {
+          source: "/api/grader-library",
+          destination: `${api}/api/grader-library`,
         },
         { source: "/api/tests", destination: `${api}/api/tests` },
         { source: "/api/tests/:path*", destination: `${api}/api/tests/:path*` },

@@ -121,6 +121,8 @@ async function wizard(): Promise<TerminalRun> {
     command: process.execPath,
     args: [
       CLI_ENTRY,
+      "--url",
+      platform.url,
       "--cwd",
       workspace.dir,
       "--",
@@ -130,7 +132,6 @@ async function wizard(): Promise<TerminalRun> {
     ],
     cwd: workspace.dir,
     env: workspace.env({
-      EGMA_URL: platform.url,
       EGMA_RETELL_URL: retell?.url ?? NO_RETELL,
     }),
     cols: 100,

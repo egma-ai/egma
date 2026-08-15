@@ -2,9 +2,8 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import { agent, connection } from "../schema/agents.ts";
-import { grader } from "../schema/graders.ts";
 import { persona } from "../schema/personas.ts";
-import { test, testGrader, testPersona, testVersion } from "../schema/tests.ts";
+import { test, testPersona, testVersion } from "../schema/tests.ts";
 import type { Verdict } from "../verdicts/fold.ts";
 import {
   foldRun,
@@ -237,17 +236,17 @@ export type RetryRequest = {
  * **It rechecks and never substitutes.** Every resource the earlier run used is
  * checked as it stands now — the agent and the connection are active, each test
  * is active and still applies to that agent, each pinned version still exists,
- * every persona those versions name is active, and every scenario-specific
- * grader they name is active. One of those failing refuses the whole Retry and
- * says which; swapping in a live replacement would answer "we ran it again"
- * about a different run, and the two results would be compared as though they
- * were about the same thing.
+ * and every persona those versions name is active. One of those failing refuses
+ * the whole Retry and says which; swapping in a live replacement would answer
+ * "we ran it again" about a different run, and the two results would be
+ * compared as though they were about the same thing.
  *
- * **It is honestly not a replay.** Persona and grader versions, project-default
- * graders, the judge setting, the connection's current configuration and
+ * **It is honestly not a replay.** Persona versions, the project's running
+ * copies, the judge setting, the connection's current configuration and
  * credential, and the project's mock tools are all resolved fresh by `startRun`
  * — because those are what a run under current conditions means. The earlier run
- * is never reopened and never changed.
+ * is never reopened and never changed. A copy switched off since is therefore
+ * simply not in the new plan, which is what switching one off means.
  *
  * **The idempotency key is asked about before any of the rechecks.** The common
  * repeat is a client that never learned its first attempt succeeded, and by then
@@ -308,7 +307,6 @@ export async function retryRun(
   const versions = await demandLiveVersions(on, auth, runId, versionIds);
   await demandApplicableTests(on, auth, runId, earlier.agentId, versions);
   await demandActivePersonas(on, auth, runId, versionIds);
-  await demandActiveGraders(on, auth, runId, versionIds);
 
   return startRun(auth, start);
 }
@@ -448,40 +446,12 @@ async function demandActivePersonas(
   }
 }
 
-async function demandActiveGraders(
-  on: Queryable,
-  auth: AuthContext,
-  runId: string,
-  versionIds: readonly string[],
-): Promise<void> {
-  const named = await on
-    .select({ graderId: testGrader.graderId })
-    .from(testGrader)
-    .where(inArray(testGrader.testVersionId, [...versionIds]));
-
-  const graderIds = [...new Set(named.map((one) => one.graderId))];
-  if (graderIds.length === 0) return;
-
-  const alive = new Set(
-    (
-      await on
-        .select({ id: grader.id })
-        .from(grader)
-        .where(
-          within(
-            auth,
-            grader,
-            and(inArray(grader.id, graderIds), isNull(grader.deletedAt)),
-          ),
-        )
-    ).map((row) => row.id),
-  );
-
-  for (const graderId of graderIds) {
-    if (alive.has(graderId)) continue;
-    // Only the graders a test names *directly* stop a Retry. A project-default
-    // grader that has been archived is simply not in the new plan, which is
-    // exactly what archiving one means.
-    refuseRetry(runId, "grader", `grader ${graderId}`, graderId);
-  }
-}
+/*
+ * **There is no `demandActiveGraders`, and there was.** It refused a Retry
+ * while a grader a pinned version named *directly* had been deleted since. A
+ * test names no graders now — what judges a run is the project's live copies —
+ * so a copy switched off between two runs is a decision about the project and
+ * not something a Retry may overrule. `RetryBlocker` keeps its `grader` word:
+ * no path raises it today, and the word is what a stored refusal from before
+ * this change still reads as.
+ */

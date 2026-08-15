@@ -20,7 +20,7 @@ import {
 } from "../lib/return-to.ts";
 import {
   citedTurnPositions,
-  judgedDimensions,
+  judgedAssertions,
   type EvidenceStep,
   type EvidenceVerdict,
 } from "../lib/simulations.ts";
@@ -604,8 +604,63 @@ describe("the pages", () => {
     );
 
     expect(contract).toContain("readonly outcome: Outcome | null");
-    expect(transcript).toContain("<OutcomeSummary outcome={detail.outcome}");
+    expect(transcript).toContain("<OutcomeSummary");
+    expect(transcript).toContain("outcome={detail.outcome}");
     expect(transcript).toContain('aria-label="Grading outcome"');
+  });
+
+  /**
+   * The outcome above is folded over the graders that can fail something, so
+   * the lane it was folded *without* has to be on the same page — otherwise the
+   * failures on the cards below have nothing up here to belong to, and a reader
+   * is left to work out for themselves why a red judgment sits under a green
+   * verdict.
+   *
+   * It is carried on the model rather than reached for off a loose response,
+   * which is what stops the read sending a field the page quietly drops.
+   */
+  it("shows the diagnostic lane beside that outcome, from the model", async () => {
+    const transcript = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+    const contract = await readFile(
+      path.join(WEB, "lib/transcripts.ts"),
+      "utf8",
+    );
+
+    expect(contract).toContain("readonly diagnostics?: Outcome | null");
+    expect(transcript).toContain("diagnostics={detail.diagnostics");
+    expect(transcript).toContain("GRADING.diagnosticLane");
+    // Never coloured by what it says: `data-verdict` is what paints a fact red,
+    // and a red diagnostic would read as a reason the verdict beside it is red.
+    expect(transcript).not.toMatch(
+      /diagnostics\.verdict[^\n]*data-verdict/u,
+    );
+  });
+
+  /**
+   * **The fraction, which is the whole reason a diagnostic exists.** A grader
+   * carrying `required: false` is switched on to be read rather than to decide,
+   * and passed ÷ counted is what that reading produces. Its counts are a
+   * different statement — a skipped assertion leaves the fraction's denominator
+   * and stays in the counts — so showing only the counts would report something
+   * true and not the thing that was asked for.
+   *
+   * Both lanes go through one formatter, so the day the required score learns to
+   * round differently the diagnostic's cannot be left behind.
+   */
+  it("reports the diagnostic fraction, not only its counts", async () => {
+    const transcript = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(transcript).toContain("shownScore(diagnostics.score)");
+    expect(transcript).toContain("GRADING.diagnosticScore");
+    // One formatter, both lanes: a proportion of nothing is a dash in each.
+    expect(transcript).toContain("shownScore(outcome.score)");
+    expect(transcript).toMatch(/function shownScore\(/u);
   });
 
   it("reach the API for the device flow at paths this instance rewrites", async () => {
@@ -797,97 +852,71 @@ describe("a refusal of a recording", () => {
 });
 
 /**
- * Which judgement counts, once a grader has been re-run and a person has spoken.
+ * Which judgement counts, once a grader has judged the same assertion twice.
  *
- * The page shows the working — which rows count, which are superseded, and what
- * the machine wrote underneath a person's word — so the fold is a decision this
- * module makes rather than a shape the server hands over. The rule is the
- * store's: the newest grading speaks, and inside it the human's word wins.
+ * The page shows the working — which row counts and which are superseded — so
+ * the fold is a decision this module makes rather than a shape the server hands
+ * over. The rule is the store's: the newest judgement speaks and the earlier
+ * ones stay readable underneath it.
+ *
+ * **There were three proofs here about a person's correction outranking the
+ * machine's word, and they go with the endpoint.** ADR-0009 takes corrections
+ * out of v0; they return as the reserved `human` grader type, writing rows
+ * under a grader id of their own — at which point they are simply another
+ * grader's rows and nothing here has a second author to prefer.
  */
 describe("which verdict speaks", () => {
   function row(overrides: Partial<EvidenceVerdict> = {}): EvidenceVerdict {
     return {
       grader_id: "grd_1",
-      grader_version_id: "grv_1",
-      dimension: "confirms the new time back",
-      source: "simulation",
+      assertion: "behavior_1",
+      assertion_text: "confirms the new time back",
+      required: true,
       verdict: "failed",
       score: 0,
-      reason: "",
-      priority: "P0",
       rationale: "the agent never said it back",
       cited_turns: [],
-      judged_by: "gpt-4o-mini",
       judged_at: "2026-08-15T10:00:00.000000Z",
       ...overrides,
     };
   }
 
-  it("prefers a person's word and keeps the machine's underneath it", () => {
-    const [only] = judgedDimensions([
-      row(),
+  it("lets the newest judgement speak, with the older one kept as evidence", () => {
+    const [only] = judgedAssertions([
+      row({ verdict: "passed", score: 1 }),
       row({
-        judged_by: "human",
-        verdict: "passed",
-        score: 1,
-        judged_at: "2026-08-15T11:00:00.000000Z",
-      }),
-    ]);
-
-    expect(only?.corrected).toBe(true);
-    expect(only?.speaking.verdict).toBe("passed");
-    // The machine's row is still there, still saying what it said. That is the
-    // whole reason a correction is a second row rather than an edit.
-    expect(only?.machine?.verdict).toBe("failed");
-  });
-
-  it("lets the newest grading speak, with the older one kept as evidence", () => {
-    const [only] = judgedDimensions([
-      row({ grader_version_id: "grv_1", verdict: "passed", score: 1 }),
-      row({
-        grader_version_id: "grv_2",
         verdict: "failed",
+        rationale: "the tightened grader disagrees",
         judged_at: "2026-08-15T12:00:00.000000Z",
       }),
     ]);
 
-    expect(only?.speaking.grader_version_id).toBe("grv_2");
     expect(only?.speaking.verdict).toBe("failed");
-    expect(only?.superseded.map((its) => its.grader_version_id)).toEqual([
-      "grv_1",
-    ]);
+    expect(only?.superseded.map((its) => its.verdict)).toEqual(["passed"]);
   });
 
-  it("does not let a correction of an older grading outrank a newer one", () => {
-    // Somebody disagreed with what version one said. Version two has judged
-    // since, and they have not read it — so their word stands against the
-    // grading they read and not in front of the one they did not.
-    const [only] = judgedDimensions([
-      row({ grader_version_id: "grv_1" }),
-      row({
-        grader_version_id: "grv_1",
-        judged_by: "human",
-        verdict: "passed",
-        score: 1,
-        judged_at: "2026-08-15T11:00:00.000000Z",
-      }),
-      row({
-        grader_version_id: "grv_2",
-        verdict: "failed",
-        judged_at: "2026-08-15T12:00:00.000000Z",
-      }),
-    ]);
-
-    expect(only?.speaking.grader_version_id).toBe("grv_2");
-    expect(only?.corrected).toBe(false);
-  });
-
-  it("keeps two dimensions of one grader apart", () => {
-    const folded = judgedDimensions([
-      row({ dimension: "confirms the new time back" }),
-      row({ dimension: "does not interrupt the caller" }),
+  it("keeps two assertions of one grader apart", () => {
+    const folded = judgedAssertions([
+      row({ assertion: "behavior_1" }),
+      row({ assertion: "behavior_2" }),
     ]);
     expect(folded).toHaveLength(2);
+  });
+
+  /**
+   * A key nothing could place is shown as itself. A page that fell back to a
+   * plausible sentence would be unfalsifiable; `behavior_3` is merely terse.
+   */
+  it("carries the key through when nothing could resolve its words", () => {
+    const [only] = judgedAssertions([row({ assertion_text: null })]);
+    expect(only?.assertionText).toBeNull();
+    expect(only?.assertion).toBe("behavior_1");
+  });
+
+  /** A diagnostic copy's row says so, so a card can mark it. */
+  it("carries whether the copy that wrote it can fail anything", () => {
+    const [only] = judgedAssertions([row({ required: false })]);
+    expect(only?.required).toBe(false);
   });
 });
 

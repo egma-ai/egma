@@ -67,7 +67,6 @@ import {
   resolvePersonaVersions,
   resolvePinnedVersions,
   resolveRunPlan,
-  scenarioGradersMissingFrom,
   validPinnedVersions,
   writeGradingPlan,
 } from "./run-plans.ts";
@@ -1218,26 +1217,18 @@ export async function startRun(
        */
       const { groups } = await resolveRunPlan(tx, auth, projectId, versions);
 
-      /**
-       * A Retry's last recheck, made here because here is the only place it
-       * cannot be split from the freeze.
-       *
-       * `retryRun` checks the graders before it calls in, and every other
-       * resource it checks is re-read inside this transaction by the reads
-       * above — an archived agent or connection, an archived or unlinked test,
-       * an archived persona all refuse in here on their own. A directly named
-       * grader is the one that does not: archiving it simply removes it from
-       * the plan, which is right for an ordinary start and wrong for a Retry.
-       * So it is asked of the plan this transaction is about to freeze, and a
-       * grader archived in the gap refuses the whole creation instead of
-       * quietly producing a run judged by less than the one it copies.
+      /*
+       * **A Retry has no grader recheck here any more, and it had one.** It
+       * asked the plan about to be frozen whether a grader the selection named
+       * *directly* had been archived in the gap, and refused rather than
+       * produce a run judged by less than the one it copies. A test names no
+       * graders now: what judges a run is the project's live copies, so a copy
+       * switched off between two runs is a decision about the project and not
+       * something a Retry may overrule. Every other resource a Retry rechecks
+       * is still re-read inside this transaction by the reads above — an
+       * archived agent or connection, an archived or unlinked test, an
+       * archived persona all refuse in here on their own.
        */
-      if (retryOfRunId !== null) {
-        const [missing] = scenarioGradersMissingFrom(versions, groups);
-        if (missing !== undefined) {
-          refuseRetry(retryOfRunId, "grader", `grader ${missing}`, missing);
-        }
-      }
 
       /**
        * Which of these conversations egma can honestly have, decided once against

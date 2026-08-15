@@ -15,7 +15,7 @@ import type { Detection } from "../../wizard/detection.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
-import type { AskId, DrivenAgent } from "../wizard-ui.ts";
+import type { AskId, DrivenAgent, PlatformNotice } from "../wizard-ui.ts";
 
 export type WizardState = {
   readonly drivenAgent: DrivenAgent | null;
@@ -26,9 +26,10 @@ export type WizardState = {
    *
    * Set before the intro is dismissed, so the screen that takes the keystroke
    * of consent is the screen that says where this repository's identifiers are
-   * about to go.
+   * about to go — and, with it, the one thing that decides how a developer
+   * reading that screen would use a different egma.
    */
-  readonly platform: string | null;
+  readonly platform: PlatformNotice | null;
   /** What egma worked out about this machine for itself, or `null` before it has. */
   readonly detection: Detection | null;
   /** What has to be approved in a browser, while it still has to be. */

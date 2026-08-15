@@ -20,21 +20,20 @@
  * control asks it rather than remembering.
  */
 
-export type Priority = "P0" | "P1" | "P2";
-
-export const PRIORITIES: readonly Priority[] = ["P0", "P1", "P2"];
-
-/** What each priority means, in the words a page shows beside the control. */
-export const PRIORITY_MEANING: Readonly<Record<Priority, string>> = {
-  P0: "Blocks. A failure here stops the release.",
-  P1: "Warns. A failure here is reported and does not block.",
-  P2: "Informs. A failure here is recorded and nothing else.",
-};
-
-export type ExpectedBehavior = {
-  readonly behavior: string;
-  readonly priority: Priority;
-};
+/**
+ * One statement about what should happen — a plain sentence, and nothing else.
+ *
+ * **It carried a P0/P1/P2 priority and does not any more.** The ladder let a
+ * failing check be demoted until it stopped meaning anything, which is the
+ * false trust this product exists to kill: every behavior has to hold, so
+ * there was nothing left for a per-sentence priority to say. How loudly a
+ * *grader* speaks is now the running copy's own `required` flag — one place,
+ * one decision, and never per sentence.
+ *
+ * It is an alias rather than an object so that every control that draws a
+ * behavior draws a sentence, and the type says so.
+ */
+export type ExpectedBehavior = string;
 
 /** A persona a test names, or an agent it applies to: identity, and state. */
 export type Named = {
@@ -53,7 +52,6 @@ export type ListedTest = {
   readonly scenario: string;
   readonly expected_behaviors: readonly ExpectedBehavior[];
   readonly personas: readonly Named[];
-  readonly graders: readonly Named[];
   readonly required_capabilities: readonly string[];
   /**
    * How many tools this test answers for itself.
@@ -171,7 +169,6 @@ export const VERSIONED_FIELDS = [
   "scenario",
   "personas",
   "expected_behaviors",
-  "graders",
   "required_capabilities",
   "mock_tools",
 ] as const;
@@ -222,30 +219,23 @@ export function activeAgents(test: ListedTest): readonly Named[] {
 /**
  * Whether a set of behaviors may be saved.
  *
- * Two rules, and they are the same rule: a test has to be able to fail. One
- * with nothing to check can never be red, and one whose every statement has
- * been demoted is one nothing can hold back — which is how falsifiability gets
- * downgraded away one edit at a time.
+ * One rule now, and it is the one that was always doing the work: a test has to
+ * be able to fail, so it needs at least one statement to check. The second rule
+ * — at least one P0 — went with the ladder itself: every behavior has to hold,
+ * so there is no longer a way to demote one until a test can no longer be red.
  */
 export function behaviorsAreUsable(
   behaviors: readonly ExpectedBehavior[],
 ): boolean {
-  const written = behaviors.filter((one) => one.behavior.trim() !== "");
-  return (
-    written.length > 0 && written.some((one) => one.priority === "P0")
-  );
+  return behaviors.some((one) => one.trim() !== "");
 }
 
 /** Why a set of behaviors cannot be saved, in the words the page shows. */
 export function whyBehaviorsRefuse(
   behaviors: readonly ExpectedBehavior[],
 ): string | null {
-  const written = behaviors.filter((one) => one.behavior.trim() !== "");
-  if (written.length === 0) {
+  if (behaviors.every((one) => one.trim() === "")) {
     return "A test needs at least one expected behavior, because a test that cannot fail is not a test.";
-  }
-  if (!written.some((one) => one.priority === "P0")) {
-    return "A test needs at least one P0 behavior. Falsifiability cannot be downgraded away.";
   }
   return null;
 }

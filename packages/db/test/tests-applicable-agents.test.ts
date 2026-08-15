@@ -9,7 +9,6 @@ import {
   cloneTest,
   createAgent,
   createTest,
-  deleteGrader,
   editTest,
   getTest,
   IdentityConflictError,
@@ -30,7 +29,6 @@ import {
   globex,
   rescheduling,
   seedAgent,
-  seedGrader,
   seedPersona,
   seedTestFactory,
 } from "./support/test-factory.ts";
@@ -514,24 +512,15 @@ describe("archiving and restoring a test", () => {
     expect(held?.archivedAt).toBeInstanceOf(Date);
   });
 
-  it("refuses Restore while the current version names an archived scenario grader", async () => {
-    const judging = await seedGrader(actingAsAcme(), "Grader that leaves");
-    const subject = await aTest("Names a grader that leaves", {
-      graderIds: [judging],
-      agentIds: [frontDesk],
-    });
-
-    await archiveTest(actingAsAcme(), subject.id);
-    await deleteGrader(actingAsAcme(), judging);
-
-    await expect(restoreTest(actingAsAcme(), subject.id)).rejects.toSatisfy(
-      (error) =>
-        error instanceof TestDependencyInactiveError &&
-        error.resources.some(
-          (one) => one.kind === "grader" && one.id === judging,
-        ),
-    );
-  });
+  /*
+   * **There is no companion refusing Restore over an archived grader.** There
+   * was, and it was one of the two rules `TestDependencyInactiveError` carried:
+   * a test whose current version named a deleted grader could not come back,
+   * because it would have come back checking one thing fewer than it says it
+   * does. A test names no graders now — what judges a run is the project's
+   * running copies and their scope — so the only thing a version can still be
+   * short of is somebody to call about it, which is the rule above.
+   */
 
   it("restores a test whose linked agents are all archived, leaving it unavailable rather than unrestorable", async () => {
     const only = await seedAgent(actingAsAcme(), "The only desk");

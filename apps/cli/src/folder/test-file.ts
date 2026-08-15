@@ -3,19 +3,18 @@
  *
  * The format is the whole point of the folder: a test somebody reviews in a
  * pull request has to read like something a person wrote. So the frontmatter
- * carries only what a machine needs — what the test is called, who calls, which
- * graders judge it, what a connection has to be able to do, and the two tokens
- * this file was last synced at — and the body is the two things a test says,
- * under the two headings it says them under.
+ * carries only what a machine needs — what the test is called, who calls, what
+ * a connection has to be able to do, and the two tokens this file was last
+ * synced at — and the body is the two things a test says, under the two
+ * headings it says them under.
  *
  * ```markdown
  * ---
- * format: 2
+ * format: 3
  * name: missed-appointment-reschedule
  * description: The caller missed Thursday and wants any afternoon next week.
  * version: tstv_01K…
  * identity_revision: rev_01K…
- * graders: [grd_01K…]
  * required_capabilities: [dtmf]
  * personas:
  *   - id: prs_01K…
@@ -24,10 +23,25 @@
  * ## Scenario
  * …prose…
  * ## Expected behaviors
- * 1. [P0] …ordered statements, each with how much it matters…
+ * 1. …ordered statements, each one a plain sentence…
  * ## Mock tools
  * …the tools this test answers for itself…
  * ```
+ *
+ * **Format 3 is a format rather than an edit, because two things that *defined*
+ * format 2 are gone.** A statement carried a `[P0]`/`[P1]`/`[P2]` marker saying
+ * how much it mattered, and the frontmatter carried `graders:`, the stable ids
+ * of the graders that test added. The grader redesign retired both: every
+ * expected behavior has to hold, so a per-sentence priority says nothing, and a
+ * test names no graders at all — what judges a simulation is the project's
+ * running graders and their own scope.
+ *
+ * **A format 2 file is read, not refused.** Both retirements are *ignored* on
+ * read: a marker is stripped off the sentence it was written in front of, and
+ * `graders:` is passed over. That is safe whether or not format 2 ever reached
+ * a real repository, and it deliberately claims nothing about compatibility —
+ * what `egma pull` should do to markers already sitting in somebody's git
+ * history is a decision nobody has made yet.
  *
  * The third heading is there only when the test overrides one of the project's
  * mock tools. An override is test content — it versions with the test exactly
@@ -79,48 +93,25 @@ import {
  *
  * A number rather than a feature list, because the only readers are egma's own
  * two verbs and what they need to know is which shape the bytes are in. A file
- * that says nothing is format 1 — the shape that shipped before this one — and
- * a file that says a number egma has never heard of is read as generously as it
- * can be rather than refused, because refusing it would strand a folder that a
- * newer egma wrote and an older one is looking at.
+ * that says nothing is format 1 — the shape that shipped first — and a file
+ * that says a number egma has never heard of is read as generously as it can be
+ * rather than refused, because refusing it would strand a folder that a newer
+ * egma wrote and an older one is looking at. A format 2 file is read on exactly
+ * those terms: see this module's own note for what is ignored in it.
  */
-export const TEST_FILE_FORMAT = 2;
-
-/** How much one expected behavior matters: P0 blocks, P1 warns, P2 informs. */
-export type BehaviorPriority = "P0" | "P1" | "P2";
-
-/** The priority a statement with no marker carries. */
-export const DEFAULT_PRIORITY: BehaviorPriority = "P0";
-
-/** One statement about what should happen, and how much it matters. */
-export type ExpectedBehavior = {
-  readonly behavior: string;
-  readonly priority: BehaviorPriority;
-};
+export const TEST_FILE_FORMAT = 3;
 
 /**
- * One statement **as a file wrote it down** — which is not quite the same
- * thing, because a file may write down no priority at all.
+ * One statement about what should happen — a plain sentence, and nothing else.
  *
- * `priority` is `null` for a line with no marker on it, and that is a different
- * fact from a line marked `[P0]`. Both *mean* P0 everywhere a priority is
- * needed — that is what an unmarked line has always meant, and what every
- * version-1 file said. But only the marked one is a **claim**, and the
- * difference is load-bearing exactly once: when a pull is deciding whether an
- * old file is a faithful copy of the version it pins or a draft somebody is in
- * the middle of. A line that said nothing cannot disagree with the platform; a
- * line somebody typed `[P1]` into can, and overwriting it would be the pull
- * throwing away the edit it exists to protect.
- *
- * Everything egma writes carries a marker on every line, so a file egma has
- * written holds no nulls. A null only ever comes from a file written by hand or
- * by an older egma.
+ * It carried a priority in format 2 and it does not now. Every expected
+ * behavior has to hold, so there was nothing left for a per-sentence marker to
+ * say; how loudly a *grader* speaks is a setting on the grader.
  */
-export type FileBehavior = {
-  readonly behavior: string;
-  /** What the line claimed, or `null` where it claimed nothing. */
-  readonly priority: BehaviorPriority | null;
-};
+export type ExpectedBehavior = string;
+
+/** One statement as a file wrote it down, which is the same shape. */
+export type FileBehavior = string;
 
 /**
  * One persona a test names: who they are on the platform, and what a reviewer
@@ -147,8 +138,6 @@ export type TestFile = {
   readonly version: string | null;
   /** The live-half revision this file was last synced at, or `null`. */
   readonly identityRevision: string | null;
-  /** The scenario-specific graders this test adds, as stable `grd_` ids. */
-  readonly graders: readonly string[];
   /** What a connection has to be able to do for this test to mean anything. */
   readonly requiredCapabilities: readonly string[];
   /** The situation the agent is put in, as prose. */
@@ -172,7 +161,15 @@ const EXPECTED_BEHAVIORS_LINE = /^#{1,6}\s*expected\s+behaviou?rs\s*$/iu;
 /** `1. `, `1) `, `- ` or `* ` — the four ways a list gets typed. */
 const LIST_ITEM = /^(?:\d+[.)]|[-*])\s+(.*)$/u;
 
-/** `[P1]` at the head of a statement, in whatever case it was typed. */
+/**
+ * `[P1]` at the head of a statement, in whatever case it was typed.
+ *
+ * **Nothing writes one and this is the only thing that reads one.** It stays so
+ * that a format 2 file — one already in somebody's repository, or one an older
+ * egma wrote — is read rather than refused: the marker is stripped and the
+ * sentence behind it is kept. Refusing would strand a folder over a word the
+ * product has stopped having an opinion about.
+ */
 const PRIORITY_MARKER = /^\[\s*(p[012])\s*\]\s*(.*)$/iu;
 
 function frontmatterOf(document: string, where: string): {
@@ -251,13 +248,13 @@ function partsOf(body: string): {
  * egma's door, in egma's own words, and reading it here is what lets it get
  * there to be refused.
  *
- * The marker is read wherever it is written, on a file that says format 2 and
- * on one that says nothing at all. A version-1 file was never able to carry
- * one, so a line without a marker is a P0 — which is exactly what those tests
- * already meant, since every behavior blocked before priorities existed.
+ * **A `[P0]` marker is stripped and the sentence behind it kept.** Format 2
+ * wrote one on every line; nothing writes one now, and a file that still has
+ * them is a file somebody's repository already holds. Reading it as the
+ * sentence it always was is what lets that folder go on working.
  */
 function behaviorsIn(text: string): readonly FileBehavior[] {
-  const behaviors: { behavior: string; priority: BehaviorPriority | null }[] = [];
+  const behaviors: string[] = [];
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (line === "") continue;
@@ -265,24 +262,13 @@ function behaviorsIn(text: string): readonly FileBehavior[] {
     if (item !== null) {
       const said = (item[1] as string).trim();
       const marked = PRIORITY_MARKER.exec(said);
-      behaviors.push(
-        marked === null
-          // No marker is not a quiet P0: it is a line that said nothing about
-          // how much it matters. It *means* P0 wherever one is needed, and it
-          // is kept apart from an explicit `[P0]` so that a pull can tell a
-          // faithful old copy from a draft somebody has typed a priority into.
-          ? { behavior: said, priority: null }
-          : {
-              behavior: (marked[2] as string).trim(),
-              priority: (marked[1] as string).toUpperCase() as BehaviorPriority,
-            },
-      );
+      behaviors.push(marked === null ? said : (marked[2] as string).trim());
       continue;
     }
-    const last = behaviors[behaviors.length - 1];
-    if (last !== undefined) last.behavior = `${last.behavior} ${line}`;
+    const last = behaviors.length - 1;
+    if (last >= 0) behaviors[last] = `${behaviors[last] as string} ${line}`;
   }
-  return behaviors.filter((one) => one.behavior !== "");
+  return behaviors.filter((one) => one !== "");
 }
 
 /**
@@ -332,7 +318,10 @@ export function parseTestFile(
     personas: personasIn(mapping),
     version: textAt(mapping, "version"),
     identityRevision: textAt(mapping, "identity_revision"),
-    graders: listAt(mapping, "graders"),
+    // `graders:` is deliberately not read. It was format 2's stable ids of the
+    // graders a test added, and a test names none now — so a file that still
+    // carries the key is read past rather than refused, and pushing it names
+    // no graders because there are none to name.
     requiredCapabilities: listAt(mapping, "required_capabilities"),
     scenario,
     expectedBehaviors: behaviorsIn(behaviors),
@@ -367,9 +356,11 @@ function oneLine(behavior: string): string {
  * shape is written in the nearest shape that can, rather than written in a way
  * that would read as something else.
  *
- * **The priority is always written, including the default.** A marker only some
- * lines carry would read as a list where the unmarked ones were unconsidered,
- * and the whole point of the field is that somebody chose.
+ * **No priority marker is written, on any line.** Format 2 wrote one on every
+ * statement; the ladder retired, so there is nothing to write. A pull over a
+ * folder holding format 2 files therefore rewrites each of them once, dropping
+ * the markers and the `graders:` key — which is the ordinary shape of a format
+ * change, and is why the number in the frontmatter moves with it.
  */
 export function serializeTestFile(file: TestFile): string {
   const personas = file.personas.filter(
@@ -387,10 +378,6 @@ export function serializeTestFile(file: TestFile): string {
   }
   if (file.identityRevision !== null && file.identityRevision !== "") {
     frontmatter.push(`identity_revision: ${yamlScalar(file.identityRevision)}`);
-  }
-  const graders = file.graders.filter((grader) => grader.trim() !== "");
-  if (graders.length > 0) {
-    frontmatter.push(`graders: ${yamlFlowList(graders)}`);
   }
   const capabilities = file.requiredCapabilities.filter((one) => one.trim() !== "");
   if (capabilities.length > 0) {
@@ -417,15 +404,9 @@ export function serializeTestFile(file: TestFile): string {
 
   const scenario = file.scenario.trim();
   const behaviors = file.expectedBehaviors
-    .map((one) => ({ ...one, behavior: oneLine(one.behavior) }))
-    .filter((one) => one.behavior !== "")
-    // A line that claimed nothing is written as the P0 it has always meant,
-    // which is also what the platform holds for it. Writing it down is what
-    // turns the old shape into the new one.
-    .map(
-      (one, index) =>
-        `${index + 1}. [${one.priority ?? DEFAULT_PRIORITY}] ${one.behavior}`,
-    );
+    .map(oneLine)
+    .filter((one) => one !== "")
+    .map((one, index) => `${String(index + 1)}. ${one}`);
 
   return [
     "---",

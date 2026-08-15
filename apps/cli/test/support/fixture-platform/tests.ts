@@ -58,10 +58,8 @@ type Version = {
   readonly id: string;
   readonly version: number;
   readonly scenario: string;
-  /** Each with the priority somebody chose: P0 blocks, P1 warns, P2 informs. */
+  /** Plain sentences, in the order they were authored. */
   readonly expectedBehaviors: readonly StoredBehavior[];
-  /** Scenario-specific graders, by identity, in the order they were added. */
-  readonly graderIds: readonly string[];
   /** What a connection has to be able to do for this version to mean anything. */
   readonly requiredCapabilities: readonly string[];
   /** By identity, in the order they were authored. */
@@ -77,11 +75,8 @@ type Version = {
   readonly createdAt: Date;
 };
 
-/** One statement, and how much it matters. */
-type StoredBehavior = {
-  readonly behavior: string;
-  readonly priority: "P0" | "P1" | "P2";
-};
+/** One statement: a plain sentence, and nothing else. */
+type StoredBehavior = string;
 
 /** One override as this fixture holds it. No scope: it is the test's own. */
 type StoredOverride = {
@@ -113,12 +108,8 @@ type StoredTest = {
 
 type Persona = { readonly id: string; readonly name: string };
 
-/**
- * One expected behavior as a seed says it: bare text for a P0, or the pair.
- * Both, because both are shapes a body may send and a seeded test should be
- * able to be either.
- */
-export type SeedBehavior = string | { readonly behavior: string; readonly priority: "P0" | "P1" | "P2" };
+/** One expected behavior as a seed says it: the sentence. */
+export type SeedBehavior = string;
 
 /** What a test looks like when a test writes one, not when the CLI does. */
 export type SeedTest = {
@@ -127,8 +118,6 @@ export type SeedTest = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly SeedBehavior[];
   readonly personas?: readonly string[];
-  /** Scenario-specific graders, by identity. */
-  readonly graders?: readonly string[];
   readonly requiredCapabilities?: readonly string[];
   /** The agents it applies to. Empty is what a test authored before links had. */
   readonly agents?: readonly string[];
@@ -194,11 +183,6 @@ const NEEDS_A_SCENARIO = "a test needs a scenario: the situation the agent is pu
 const NEEDS_A_BEHAVIOR =
   "a test needs at least one expected behavior, because a test that cannot fail is not a test";
 const EMPTY_BEHAVIOR = "an expected behavior needs to say something";
-const NEEDS_A_P0 =
-  "a test needs at least one P0 expected behavior, because falsifiability cannot be downgraded away";
-
-/** Every priority egma knows, in the order the factory names them. */
-const PRIORITIES = ["P0", "P1", "P2"] as const;
 
 /** The wire's own refusals, word for word, from the route rather than the factory. */
 const PERSONAS_NOT_A_LIST =
@@ -255,68 +239,47 @@ const AN_OVERRIDE_IS_AN_OBJECT =
 /** The keys one entry of `mock_tools` holds, and no others. */
 const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
 
-/** The wire's own refusals for the two shapes an expected behavior arrives in. */
+/** The wire's own refusals about expected behaviors, word for word. */
 const BEHAVIORS_NOT_A_LIST =
-  "expected_behaviors is the list of statements about what should " +
-  'happen. Send it as a list, like ["confirms the new time"], or as ' +
-  'objects carrying a priority, like [{"behavior": "confirms the new ' +
-  'time", "priority": "P0"}].';
+  "expected_behaviors is what should happen, as a list of sentences, " +
+  'like ["confirms the new time back before finishing"].';
 
-const A_BEHAVIOR_IS_TEXT_OR_A_PAIR =
-  "each expected behavior is text, or an object naming the behavior " +
-  "and its priority. One entry in expected_behaviors is neither.";
+const THE_RETIRED_BEHAVIOR_SHAPE =
+  "an expected behavior is a plain sentence now; the " +
+  '{"behavior", "priority"} shape retired with the P0/P1/P2 ladder. ' +
+  "Send each sentence on its own.";
+
+/**
+ * The one retired key this door refuses by name, word for word from the route.
+ *
+ * A body still sending `graders: [...]` would otherwise be written with the
+ * key ignored and a `201` saying it went fine — see the route's own note.
+ */
+const THE_RETIRED_GRADERS_KEY =
+  "a test names no graders; the graders key retired with the test-grader " +
+  "junction. What judges a simulation is the project's running graders " +
+  "and their scope, set on the grader rather than on the test.";
 
 type WrittenBehaviors =
   | { readonly entries: readonly StoredBehavior[] }
   | { readonly refusal: string };
 
 /**
- * The behaviors a body sent, in either shape.
+ * The behaviors a body sent: sentences, in the order they were written.
  *
- * **Bare text is a P0**, which is what every behavior meant before priorities
- * existed and what a client that has never heard of one still sends. Reading
- * both is what lets an older client write to this platform at all; answering
- * both is what a newer one is never asked to do.
+ * The retired `{behavior, priority}` shape is refused by name rather than read
+ * as a blank, so a client built for the old contract is told what changed
+ * instead of being sent to look at its own words.
  */
 function behaviorEntries(value: unknown): WrittenBehaviors {
   if (!Array.isArray(value)) return { refusal: BEHAVIORS_NOT_A_LIST };
 
-  const entries: StoredBehavior[] = [];
   for (const entry of value) {
-    if (typeof entry === "string") {
-      entries.push({ behavior: entry, priority: "P0" });
-      continue;
+    if (typeof entry === "object" && entry !== null && "behavior" in entry) {
+      return { refusal: THE_RETIRED_BEHAVIOR_SHAPE };
     }
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      return { refusal: A_BEHAVIOR_IS_TEXT_OR_A_PAIR };
-    }
-    const written = entry as Record<string, unknown>;
-    // Spelled out rather than composed, because the route's own sentence says
-    // "behavior and priority" where every other unknown-key refusal in this
-    // fixture says a comma-separated list. The wording is the contract.
-    for (const key of Object.keys(written)) {
-      if (key === "behavior" || key === "priority") continue;
-      return {
-        refusal:
-          `an expected behavior has no key "${key}"; it holds behavior and ` +
-          "priority",
-      };
-    }
-    const priority = written.priority;
-    if (
-      priority !== undefined &&
-      !(PRIORITIES as readonly unknown[]).includes(priority)
-    ) {
-      return {
-        refusal: `"${String(priority)}" is not a priority egma knows; expected one of ${PRIORITIES.join(", ")}`,
-      };
-    }
-    entries.push({
-      behavior: text(written.behavior),
-      priority: (priority as StoredBehavior["priority"] | undefined) ?? "P0",
-    });
   }
-  return { entries };
+  return { entries: value.map((entry) => text(entry)) };
 }
 
 /**
@@ -568,14 +531,11 @@ export function testRoutes(options: {
     if (input.name.trim() === "") return { refusal: NEEDS_A_NAME };
     if (input.scenario.trim() === "") return { refusal: NEEDS_A_SCENARIO };
     if (input.expectedBehaviors.length === 0) return { refusal: NEEDS_A_BEHAVIOR };
-    if (input.expectedBehaviors.some((one) => one.behavior.trim() === "")) {
+    if (input.expectedBehaviors.some((one) => one.trim() === "")) {
       return { refusal: EMPTY_BEHAVIOR };
     }
-    // The rule that made the accidental protection real: a test that can only
-    // warn cannot stop anything, so falsifiability cannot be downgraded away.
-    if (!input.expectedBehaviors.some((one) => one.priority === "P0")) {
-      return { refusal: NEEDS_A_P0 };
-    }
+    // The "at least one P0" rule went with the ladder: every expected behavior
+    // has to hold, so a list that says anything at all can fail.
     return null;
   };
 
@@ -585,12 +545,7 @@ export function testRoutes(options: {
   const sameBehaviors = (
     a: readonly StoredBehavior[],
     b: readonly StoredBehavior[],
-  ): boolean =>
-    a.length === b.length &&
-    a.every(
-      (one, index) =>
-        one.behavior === b[index]?.behavior && one.priority === b[index]?.priority,
-    );
+  ): boolean => a.length === b.length && a.every((one, index) => one === b[index]);
 
   const write = (
     test: StoredTest,
@@ -598,7 +553,6 @@ export function testRoutes(options: {
       readonly scenario: string;
       readonly expectedBehaviors: readonly StoredBehavior[];
       readonly personaIds: readonly string[];
-      readonly graderIds: readonly string[];
       readonly requiredCapabilities: readonly string[];
       readonly mockOverrides: readonly StoredOverride[];
     },
@@ -608,7 +562,6 @@ export function testRoutes(options: {
       current.scenario === content.scenario &&
       sameBehaviors(current.expectedBehaviors, content.expectedBehaviors) &&
       sameList(current.personaIds, content.personaIds) &&
-      sameList(current.graderIds, content.graderIds) &&
       sameList(current.requiredCapabilities, content.requiredCapabilities) &&
       sameOverrides(current.mockOverrides, content.mockOverrides);
     if (same) return current;
@@ -619,7 +572,6 @@ export function testRoutes(options: {
       scenario: content.scenario,
       expectedBehaviors: content.expectedBehaviors,
       personaIds: content.personaIds,
-      graderIds: content.graderIds,
       requiredCapabilities: content.requiredCapabilities,
       mockOverrides: content.mockOverrides,
       createdAt: new Date(),
@@ -636,7 +588,6 @@ export function testRoutes(options: {
     readonly scenario: string;
     readonly expectedBehaviors: readonly StoredBehavior[];
     readonly personaIds: readonly string[];
-    readonly graderIds: readonly string[];
     readonly requiredCapabilities: readonly string[];
     readonly agentIds: readonly string[];
     readonly mockOverrides: readonly StoredOverride[];
@@ -645,12 +596,8 @@ export function testRoutes(options: {
       id: newId("tstv"),
       version: 1,
       scenario: input.scenario.trim(),
-      expectedBehaviors: input.expectedBehaviors.map((one) => ({
-        behavior: one.behavior.trim(),
-        priority: one.priority,
-      })),
+      expectedBehaviors: input.expectedBehaviors.map((one) => one.trim()),
       personaIds: input.personaIds,
-      graderIds: input.graderIds,
       requiredCapabilities: input.requiredCapabilities,
       mockOverrides: input.mockOverrides,
       createdAt: new Date(),
@@ -675,22 +622,13 @@ export function testRoutes(options: {
   /** The content half of a read, shared by a test and by one frozen version. */
   const describedContent = (version: Version): Record<string, unknown> => ({
     scenario: version.scenario,
-    // Objects, always. A priority travels in both directions now, and a body
-    // may still send bare text, which is read as a P0 — but nothing this
-    // platform answers is ever bare, because a client that reads only half of
-    // an object reads nothing at all and there is no shape that makes that safe.
-    expected_behaviors: version.expectedBehaviors.map((one) => ({
-      behavior: one.behavior,
-      priority: one.priority,
-    })),
+    // Sentences, always. The `{behavior, priority}` shape retired with the
+    // ladder and is refused by name on the way in.
+    expected_behaviors: [...version.expectedBehaviors],
     personas: namesOf(version.personaIds).map((persona) => ({
       id: persona.id,
       name: persona.name,
       archived_at: null,
-    })),
-    graders: version.graderIds.map((id) => ({
-      id,
-      name: graders.find((grader) => grader.id === id)?.name ?? id,
     })),
     required_capabilities: [...version.requiredCapabilities],
     mock_tools: version.mockOverrides.map(describedOverride),
@@ -835,6 +773,11 @@ export function testRoutes(options: {
       }
     | { readonly answer: FixtureAnswer } => {
     const said = body ?? {};
+
+    // The one retired key this door refuses by name, before anything is read.
+    if ("graders" in said) {
+      return { answer: refuse(422, "unprocessable", THE_RETIRED_GRADERS_KEY) };
+    }
 
     const who = personasFor(said);
     if ("answer" in who) return who;
@@ -1125,6 +1068,10 @@ export function testRoutes(options: {
               };
             }
 
+            if ("graders" in said) {
+              return refuse(422, "unprocessable", THE_RETIRED_GRADERS_KEY);
+            }
+
             // What the body leaves out, the test keeps. An empty persona list
             // is not the same as leaving the field out: it means what it means
             // on a create, which is that the project's default persona calls.
@@ -1157,10 +1104,6 @@ export function testRoutes(options: {
               scenario: content.scenario,
               expectedBehaviors: [...content.expectedBehaviors],
               personaIds: who.ids ?? current.personaIds,
-              graderIds:
-                "graders" in said
-                  ? textList(said.graders).filter((id) => id !== "")
-                  : current.graderIds,
               requiredCapabilities:
                 "required_capabilities" in said
                   ? textList(said.required_capabilities).filter((one) => one !== "")
@@ -1195,13 +1138,10 @@ export function testRoutes(options: {
     agentIds: [...test.agentIds],
   });
 
-  /** A seed's behaviors as they are stored: bare text is a P0. */
-  const seededBehaviors = (seeds: readonly SeedBehavior[]): readonly StoredBehavior[] =>
-    seeds.map((one) =>
-      typeof one === "string"
-        ? { behavior: one.trim(), priority: "P0" as const }
-        : { behavior: one.behavior.trim(), priority: one.priority },
-    );
+  /** A seed's behaviors as they are stored: the sentences, trimmed. */
+  const seededBehaviors = (
+    seeds: readonly SeedBehavior[],
+  ): readonly StoredBehavior[] => seeds.map((one) => one.trim());
 
   const mustFind = (name: string): StoredTest => {
     const test = byName(name);
@@ -1221,7 +1161,6 @@ export function testRoutes(options: {
           scenario: seed.scenario,
           expectedBehaviors: seededBehaviors(seed.expectedBehaviors),
           personaIds: ids.length === 0 ? [defaultPersonaId] : ids,
-          graderIds: seed.graders ?? [],
           requiredCapabilities: seed.requiredCapabilities ?? [],
           agentIds: seed.agents ?? [],
           mockOverrides: overrides.overrides,
@@ -1247,7 +1186,6 @@ export function testRoutes(options: {
             ? current.expectedBehaviors
             : seededBehaviors(changes.expectedBehaviors),
         personaIds,
-        graderIds: changes.graders ?? current.graderIds,
         requiredCapabilities:
           changes.requiredCapabilities ?? current.requiredCapabilities,
         mockOverrides: overrides.overrides,

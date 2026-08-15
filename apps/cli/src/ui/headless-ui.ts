@@ -30,7 +30,7 @@ import type { Detection } from "../wizard/detection.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
 import type { GenerationProgress } from "../wizard/test-generation.ts";
-import type { AskId, DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
+import type { AskId, DrivenAgent, GateId, PlatformNotice, WizardUI } from "./wizard-ui.ts";
 
 export type HeadlessRecord = {
   drivenAgent: DrivenAgent | null;
@@ -124,10 +124,10 @@ export class HeadlessUI implements WizardUI {
    * a screen for: whoever reads this output afterwards can see which egma this
    * repository's identifiers were about to go to, before any of them went.
    */
-  setPlatform(url: string | null): void {
-    if (url === null) return;
-    this.record.platform = url;
-    this.write(`url: ${url}`);
+  setPlatform(chosen: PlatformNotice | null): void {
+    if (chosen === null) return;
+    this.record.platform = chosen.url;
+    this.write(`url: ${chosen.url}`);
   }
 
   /**

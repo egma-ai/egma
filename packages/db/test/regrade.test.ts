@@ -6,7 +6,6 @@ import {
   claimSimulations,
   completeSimulation,
   createAgent,
-  createGrader,
   createPersona,
   createTest,
   deleteGrader,
@@ -16,8 +15,10 @@ import {
   NotPermittedError,
   regrade,
   reopenGradingJob,
+  PREDEFINED_GRADERS,
   startRun,
   startSimulation,
+  useLibraryEntry,
   watchGradingWork,
   type AuthContext,
   type GradingJob,
@@ -84,15 +85,10 @@ async function aGrader(
   who: AuthContext = auth,
   name = `Answers inside two seconds ${newId("grd").slice(-6)}`,
 ): Promise<string> {
-  const created = await createGrader(who, {
+  const created = await useLibraryEntry(who, {
+    libraryId: PREDEFINED_GRADERS.latency,
     name,
-    type: "metric_threshold",
-    config: {
-      measure: "turn_response_latency",
-      aggregation: "p90",
-      comparator: "below",
-      threshold: 2_000,
-    },
+    params: { metric: "turn_response_latency", bound: 2_000 },
   });
   return created.id;
 }

@@ -166,12 +166,6 @@ export type TestNamingPersona = {
   readonly name: string;
 };
 
-/** The same, for the refusal a grader's delete raises. */
-export type TestNamingGrader = {
-  readonly id: string;
-  readonly name: string;
-};
-
 /** How many blocking tests the message spells out before it starts counting. */
 const TESTS_NAMED_IN_MESSAGE = 5;
 
@@ -342,10 +336,9 @@ export type TestAgentRefusal =
  * archived.
  *
  * Restoring is a promise that the test can run, and it cannot: the personas a
- * version names are who calls about it, and the graders it names are checks it
- * says it makes. Bringing it back over an archived one would produce a test
- * that is active and refuses to start, which is worse than one that is plainly
- * archived.
+ * version names are who calls about it. Bringing it back over an archived one
+ * would produce a test that is active and refuses to start, which is worse
+ * than one that is plainly archived.
  *
  * It carries every blocking resource, because the fix is to restore each of
  * them and a refusal that only said "something is archived" would send somebody
@@ -360,7 +353,7 @@ export class TestDependencyInactiveError extends Error {
     super(
       `test ${testId} cannot be restored because its current version names ${resources
         .map((one) => `${one.kind} ${one.id} "${one.name}"`)
-        .join(", ")}, and an archived one cannot call about a test or judge it`,
+        .join(", ")}, and an archived one cannot call about a test`,
     );
     this.name = "TestDependencyInactiveError";
     this.testId = testId;
@@ -368,9 +361,15 @@ export class TestDependencyInactiveError extends Error {
   }
 }
 
-/** One archived thing a version still names, as a refusal has to name it. */
+/**
+ * One archived thing a version still names, as a refusal has to name it.
+ *
+ * **One word in the union, and it stays a union.** A version named graders too
+ * until the junction was dropped; the shape is kept so that the next kind of
+ * dependency is a word added here rather than a field invented at the refusal.
+ */
 export type ArchivedDependency = {
-  readonly kind: "persona" | "grader";
+  readonly kind: "persona";
   readonly id: string;
   readonly name: string;
 };
@@ -581,33 +580,113 @@ export class TestMovedOnError extends Error {
   }
 }
 
-/**
- * A grader's delete was refused because live tests still name it.
+/*
+ * **A grader's delete is refused by nothing, and there is no error here for it.**
  *
- * A test's grader array is what its scenario asks to be judged by on top of the
- * project's own graders. Letting the delete through would leave each of those
- * tests quietly checking one thing fewer than it says it checks — a suite going
- * green because a check disappeared, which is the same false trust the persona's
- * refusal exists to prevent and the reason it is spelled the same way here.
+ * There was one — a grader was undeletable while a live test's current version
+ * named it, because losing it would leave that test quietly checking one thing
+ * fewer than it says it checks. A test names no graders now: where a copy
+ * applies is the copy's own scope, so switching one off is a decision about the
+ * project rather than a hunt through the tests that would have lost a check.
  *
- * It carries every blocking test, because the fix is to go and edit each one and
- * a refusal that only said "something names it" would send somebody hunting. The
- * message spells out the first few and counts the rest.
+ * The persona's refusal above stands, because a persona is still test content
+ * and a test really would run one simulation fewer without them.
  */
-export class GraderNamedByTestsError extends Error {
-  readonly graderId: string;
-  /** Every live test whose current version names it, oldest first. */
-  readonly tests: readonly TestNamingGrader[];
 
-  constructor(graderId: string, tests: readonly TestNamingGrader[]) {
+/**
+ * A delete named a library entry egma owns, and egma's entries are undeletable.
+ *
+ * A predefined entry is not a row somebody wrote; it is a row an egma release
+ * writes, and it is written again on the next boot. Allowing the delete would
+ * make it come back — the seeding is deterministic and runs on every start — so
+ * what a developer would actually get is a grader that disappears from the
+ * shelf until the container restarts, and running copies pointing at nothing in
+ * between. Refusing says the true thing instead: this one is egma's, and the
+ * way to stop it judging is to stop running a copy of it.
+ *
+ * It carries the entry's name as well as its id, because the sentence a person
+ * reads should name the grader they just tried to remove rather than an
+ * identifier they then have to go and look up.
+ */
+export class PredefinedGraderError extends Error {
+  readonly libraryId: string;
+  readonly graderName: string;
+
+  constructor(libraryId: string, graderName: string) {
     super(
-      `grader ${graderId} is named by ${tests.length} live ${
-        tests.length === 1 ? "test" : "tests"
-      } (${spelledOutAndCounted(tests)}), and a test must never silently lose one of the checks it was written with; take it off those tests, or delete them, and then delete the grader`,
+      `"${graderName}" (${libraryId}) is one of egma's own graders, and those cannot be deleted: it is written by every release and would come back at the next start. Stop running a copy of it instead — a library entry judges nothing on its own.`,
     );
-    this.name = "GraderNamedByTestsError";
-    this.graderId = graderId;
-    this.tests = tests;
+    this.name = "PredefinedGraderError";
+    this.libraryId = libraryId;
+    this.graderName = graderName;
+  }
+}
+
+/**
+ * A delete named a library entry that graders still point at.
+ *
+ * **Refusal, and never `set null`.** A copy's `library_id` is the whole of what
+ * says what it judges by — the definition is read through it every time a
+ * conversation is judged, and never written down onto the copy — so an entry
+ * taken off the shelf underneath one would leave a grader that resolves to
+ * nothing and judges nothing while still appearing on the Running graders
+ * screen. That is a check somebody believes in that can never fire, which is the
+ * false trust this product exists to kill. The database says the same thing with
+ * `on delete restrict`; this is the half that can name what is in the way.
+ *
+ * **A copy somebody switched off still counts**, and that is not an oversight.
+ * Deleting a copy is a soft delete: the row stays and so do its versions, so
+ * that a verdict written under one is still interpretable — and that chain runs
+ * verdict → version → copy → entry. Taking the entry away would break it at the
+ * last link, leaving old verdicts naming a definition nobody can read.
+ *
+ * It carries the copies, because the fix is to deal with each of them and a
+ * refusal that only said "something uses it" would send somebody hunting.
+ */
+export class GraderLibraryEntryInUseError extends Error {
+  readonly libraryId: string;
+  /** Every copy pointing at it, oldest first, switched off ones included. */
+  readonly graders: readonly GraderUsingLibraryEntry[];
+
+  constructor(
+    libraryId: string,
+    graderName: string,
+    graders: readonly GraderUsingLibraryEntry[],
+  ) {
+    super(
+      `"${graderName}" (${libraryId}) is still pointed at by ${graders.length} ${
+        graders.length === 1 ? "grader" : "graders"
+      } (${spelledOutAndCounted(graders)}), and a grader reads its definition through that pointer every time it judges — including one that was switched off, whose past verdicts are still read through it; keep the entry, or delete those graders and the verdicts that name them, and then delete the entry`,
+    );
+    this.name = "GraderLibraryEntryInUseError";
+    this.libraryId = libraryId;
+    this.graders = graders;
+  }
+}
+
+/** One running copy standing in the way of its entry's delete. */
+export type GraderUsingLibraryEntry = {
+  readonly id: string;
+  readonly name: string;
+};
+
+/**
+ * A write named a library entry the caller cannot see, or none at all.
+ *
+ * The two are one refusal on purpose: an entry belonging to another customer
+ * and an entry that was never written are indistinguishable from outside, and
+ * they have to be — telling them apart would answer a question about somebody
+ * else's shelf.
+ */
+export class UnknownGraderLibraryEntryError extends Error {
+  readonly libraryId: string;
+
+  constructor(libraryId: string) {
+    super(
+      `${libraryId} is not a grader on this shelf, so there is nothing to make a copy of; read the library to see what egma ships`,
+    );
+    this.name = "UnknownGraderLibraryEntryError";
+    this.libraryId = libraryId;
   }
 }
 

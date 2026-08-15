@@ -3,9 +3,19 @@ import { projectPath, sectionIn } from "./project-context.ts";
 /**
  * The product areas, and which of them the navigation offers.
  *
- * **Primary navigation is the four things a team works on**: the agent under
- * test, the tests, the graders that judge them, and the runs that executed
- * them. Everything else earns its place separately:
+ * **Primary navigation is the three things a team works on today**: the agent
+ * under test, the tests, and the runs that executed them. Everything else earns
+ * its place separately:
+ *
+ * - **Graders has no item, and this is wave one's decision.** The grader
+ *   redesign shelved the authoring surface this effort built at
+ *   `/projects/:id/graders`, and the screens that replace it — the library and
+ *   the running copies — are organization-wide: their addresses carry no
+ *   project, and the shell reads the project out of the address. An item
+ *   pointing at them would show whichever project is first in the viewer's
+ *   list, and pressing **Use** would put a copy on a project nobody was
+ *   looking at. Wave two rebuilds them project-scoped and the item comes back
+ *   here.
  *
  * - **Personas has a direct path and not a primary slot.** A persona is
  *   authored on its own, reused across tests, and visited far less often than
@@ -21,12 +31,7 @@ import { projectPath, sectionIn } from "./project-context.ts";
  * no navigation to a page that is not in a project.
  */
 
-export type SectionId =
-  | "agents"
-  | "tests"
-  | "graders"
-  | "runs"
-  | "personas";
+export type SectionId = "agents" | "tests" | "runs" | "personas";
 
 export type NavigationItem = {
   readonly id: SectionId;
@@ -38,7 +43,6 @@ export type NavigationLink = NavigationItem & { readonly href: string };
 export const PRIMARY_NAVIGATION: readonly NavigationItem[] = [
   { id: "agents", label: "Agents" },
   { id: "tests", label: "Tests" },
-  { id: "graders", label: "Graders" },
   { id: "runs", label: "Runs" },
 ];
 

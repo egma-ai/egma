@@ -191,6 +191,9 @@ async function main(): Promise<void> {
   try {
     platform = await startPlatform();
     gate = await openGate();
+    // Said on every invocation below, because that is the only way to name an
+    // egma: one explicit address per command, and no shell that names one.
+    const platformUrl = platform.url;
 
     // A key this fixture accepts, written where a login would have put it. No
     // real egma is touched and the credentials of whoever runs this are not
@@ -204,7 +207,6 @@ async function main(): Promise<void> {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       EGMA_HOME: home,
-      EGMA_URL: platform.url,
       EGMA_RETELL_URL: gate.url,
       [KEY_VARIABLE]: key.trim(),
     };
@@ -226,7 +228,7 @@ async function main(): Promise<void> {
     // The reach is said, because egma will not choose between text and phone
     // on anybody's behalf. Text here: this check has no platform to dial from
     // and no business registering somebody's telephone number.
-    const first = await egma(["connect", "--reach", "text"], env, workdir);
+    const first = await egma(["connect", "--url", platformUrl, "--reach", "text"], env, workdir);
     const listed = agentIdsIn(first.stdout);
 
     let connected = first;
@@ -241,7 +243,7 @@ async function main(): Promise<void> {
       for (const id of listed.slice(0, MOST_AGENTS_TRIED)) {
         chosen += 1;
         connected = await egma(
-          ["connect", "--reach", "text", "--retell-agent", id],
+          ["connect", "--url", platformUrl, "--reach", "text", "--retell-agent", id],
           env,
           workdir,
         );
@@ -379,7 +381,15 @@ async function main(): Promise<void> {
     // starts and throws away, which is nowhere and nobody's, and it is the only
     // way the confirming read gets exercised at all.
     const numbered = await egma(
-      ["connect", "--reach", "phone", "--retell-agent", result.retell_agent_id ?? ""],
+      [
+        "connect",
+        "--url",
+        platformUrl,
+        "--reach",
+        "phone",
+        "--retell-agent",
+        result.retell_agent_id ?? "",
+      ],
       env,
       workdir,
     );

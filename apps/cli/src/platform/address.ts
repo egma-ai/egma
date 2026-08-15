@@ -2,10 +2,10 @@
  * Which addresses egma will act on, and which it will only ever print.
  *
  * Two addresses arrive from outside and neither can be believed. The one a
- * developer types (`--url`, `EGMA_URL`) decides what egma talks to. The one the
- * instance sends back (`verification_uri_complete`) is handed to a browser, and
- * handing a string to a browser opener is handing it to a program: on Windows
- * the opener is `cmd /c start`, and a command interpreter reads `&` and `|` as
+ * developer types (`--url`) decides what egma talks to. The one the instance
+ * sends back (`verification_uri_complete`) is handed to a browser, and handing
+ * a string to a browser opener is handing it to a program: on Windows the
+ * opener is `cmd /c start`, and a command interpreter reads `&` and `|` as
  * syntax rather than as characters in an address.
  *
  * So an address is checked before it reaches anything that starts a program.

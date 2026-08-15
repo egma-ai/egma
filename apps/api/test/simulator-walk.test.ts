@@ -7,12 +7,11 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  createGrader,
   createPersona,
+  listGraders,
   readVerdicts,
   setJudgeConfiguration,
   type AuthContext,
-  type NewGrader,
   type RecordedVerdict,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -185,10 +184,12 @@ class RetellCounterpart {
 const THE_BEHAVIOR = "confirms the new time back before finishing";
 
 /**
- * A phrase the agent has to have said — the deterministic grader, and the one
- * that cites the turn it found. Its words are the counterpart's scripted
- * answer, so a pass here can only have come from the transcript egma
- * assembled out of the spans the simulator streamed.
+ * A phrase the counterpart says back, and the turn the judge is scripted to
+ * cite. It is not a grader of its own any more — there is one grader on this
+ * project and it is the copy of `expected_behaviors` every project is created
+ * with — so what it proves now is where the cited turn came from: the judge was
+ * shown a transcript egma assembled out of the spans the simulator streamed,
+ * and the turn it pointed at is the turn holding these words.
  */
 const THE_PHRASE = "Wednesday afternoon";
 
@@ -319,6 +320,19 @@ async function storedSpans(traceId: string): Promise<StoredSpan[]> {
       where trace_id = '${traceId}'
       order by started_at, span_id`,
   );
+}
+
+/**
+ * The one grader this project judges with: the copy of `expected_behaviors`
+ * every project is created with, found rather than authored.
+ */
+async function theProjectsGrader(
+  auth: AuthContext,
+): Promise<{ readonly id: string; readonly versionId: string }> {
+  const page = await listGraders(auth);
+  const [only] = page.items;
+  if (only === undefined) throw new Error("the project has no graders");
+  return { id: only.id, versionId: only.versionId };
 }
 
 /** The verdicts on one conversation, once the grader has written them. */
@@ -503,15 +517,10 @@ describe("the shipped simulator against the real API", () => {
         name: "Impatient Rita",
         traits: NEUTRAL_TRAITS,
       });
-      const phraseGrader = await createGrader(auth, {
-        name: "Reads an afternoon back",
-        type: "phrase_match",
-        config: {
-          required: [{ text: THE_PHRASE, match: "contains" }],
-          banned: [],
-          speaker: "agent",
-        },
-      } as NewGrader);
+      // No grader is authored here, and that is the point of the change this
+      // walk now covers: the project was created with an active copy of egma's
+      // `expected_behaviors` grader, so a first run is judged with nothing set
+      // up at all. What is authored is the judge it speaks with.
       await setJudgeConfiguration(
         { ...auth, role: "admin" },
         {
@@ -738,19 +747,20 @@ describe("the shipped simulator against the real API", () => {
       expect(refusedRun.completed_count).toBe(0);
       expect(refusedRun.failed_count).toBe(1);
 
-      // And the verdict, which is what the whole walk was for. Two graders
-      // judged this conversation — the project's phrase match and the test's
-      // own expected behavior — and both were answered out of a transcript
-      // that exists only as the spans above.
-      const verdicts = await verdictsOn(auth, conducted.simulationId, 2, 30_000);
-      const phrase = verdicts.find(
-        (verdict) => verdict.graderId === phraseGrader.id,
-      );
-      const behavior = verdicts.find(
-        (verdict) => verdict.graderId === "expected_behaviors",
-      );
+      // And the verdict, which is what the whole walk was for. One grader
+      // judged this conversation — the copy of `expected_behaviors` the project
+      // was created with — and it answered out of a transcript that exists only
+      // as the spans above.
+      const verdicts = await verdictsOn(auth, conducted.simulationId, 1, 30_000);
+      const [behavior] = verdicts;
 
-      expect(phrase).toMatchObject({
+      // **It names a real grader**, which is the whole of what the seeded copy
+      // bought: a verdict row used to carry the word `expected_behaviors` where
+      // a grader id belongs, because the built-in was never a row anywhere.
+      const seeded = await theProjectsGrader(auth);
+      expect(behavior).toMatchObject({
+        graderId: seeded.id,
+        graderVersionId: seeded.versionId,
         verdict: "passed",
         traceId: conducted.simulationId,
         runId: conducted.runId,
@@ -759,14 +769,14 @@ describe("the shipped simulator against the real API", () => {
       // Cited at its position in the span-assembled transcript: the third
       // thing said, which is the agent turn carrying the phrase — the same
       // turn the store holds and the same one this test read back above.
-      expect(phrase?.citedSpanIds).toEqual(["turn:3"]);
+      expect(behavior?.citedSpanIds).toEqual(["turn:3"]);
       expect(
         spans.filter((span) => span.name.endsWith("_turn"))[2]?.text,
       ).toContain(THE_PHRASE);
 
-      // The dimension is the behavior's position in the test, which is how a
+      // The assertion is the behavior's position in the test, which is how a
       // page lines a run's checks up whatever each one says.
-      expect(behavior).toMatchObject({ verdict: "passed", dimension: "behavior_1" });
+      expect(behavior).toMatchObject({ verdict: "passed", assertion: "behavior_1" });
       // The judge was shown the conversation egma assembled, not a report:
       // four turns, the ending the row records, and no tool call, because the
       // counterpart made none.

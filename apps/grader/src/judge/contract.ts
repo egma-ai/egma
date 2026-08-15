@@ -14,7 +14,7 @@ import type { JudgeInput } from "./input.ts";
 /**
  * One judge call: one criterion, decided against one conversation's evidence.
  *
- * **One criterion, singular, and the type is the guarantee.** Per-dimension
+ * **One criterion, singular, and the type is the guarantee.** Per-assertion
  * isolation is the whole shape of the built-in grader — each expected behavior
  * gets its own independent call — and a request that could carry two criteria
  * is a request somebody would eventually put two in. The evidence is assembled
@@ -22,6 +22,18 @@ import type { JudgeInput } from "./input.ts";
  * different, and it is the only thing that does.
  */
 export type JudgeQuestion = {
+  /**
+   * The words the judge is told it is working under — **the library entry's
+   * own**, read through the running copy's `library_id` at judging time.
+   *
+   * It rides the question rather than being held in this package because there
+   * is exactly one place a judge prompt lives, and it is not here. The engine
+   * used to hold a copy beside the entry's, and two copies of one text is a
+   * drift waiting to happen — silent in the worst way, because the Library
+   * screen would go on showing words that had stopped being the words a judge
+   * was sent. Now the screen and the request read one row.
+   */
+  readonly prompt: string;
   /** The one thing this call decides, in the words it was written in. */
   readonly criterion: string;
   /** What the judge may read, declared. */
@@ -74,8 +86,8 @@ export type Judge = (question: JudgeQuestion) => Promise<JudgeAnswer>;
  * The key is here because a provider cannot speak to an account without one,
  * and it is here **and nowhere else**: it is held for the length of one
  * grading, handed to one `fetch`, and never written to a row, a log line or a
- * rationale. Nothing in this file or under it prints it, and `named` below is
- * what everything that wants to say which judge answered uses instead.
+ * rationale. Nothing in this file or under it prints it, and nothing outside
+ * this directory is ever handed one of these.
  */
 export type ResolvedJudge = {
   readonly provider: JudgeProvider;
@@ -89,16 +101,3 @@ export type ResolvedJudge = {
  * in the roster.
  */
 export type JudgeMaker = (judge: ResolvedJudge) => Judge;
-
-/**
- * How a verdict row says which judge answered — the provider and the model, and
- * never the key or the account.
- *
- * Both halves, because two providers may offer a model of the same name and
- * "which judge said this" has to stay answerable when they do. It goes in
- * `judged_by`, which is part of the verdict's identity, so a project that
- * changes its judge model gets rows beside the old ones rather than over them.
- */
-export function named(judge: ResolvedJudge): string {
-  return `${judge.provider}/${judge.model}`;
-}

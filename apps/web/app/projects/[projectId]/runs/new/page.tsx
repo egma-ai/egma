@@ -129,21 +129,20 @@ function connectionLabel(connection: ListedConnection): string {
   return `${connection.name} · ${connection.type} · ${connection.modality}${where}`;
 }
 
-/** One grader a run would freeze, said in a line. */
+/**
+ * One running copy a run would freeze, said in a line.
+ *
+ * **What it says is whether it can fail the run, and what will judge it.** The
+ * P0/P1/P2 the note used to carry retired with the ladder, and so did the
+ * origin beside it: a test names no graders, so every copy in this list got
+ * here the same way and a word saying so would be furniture. `reports only` is
+ * the one distinction left that a person has to be able to read here, because
+ * a diagnostic's red result is not a reason the run failed.
+ */
 function graderLine(grader: PlanGrader): {
   readonly name: string;
   readonly note: string;
 } {
-  if (grader.kind === "built_in") {
-    return {
-      name: "Expected behaviors",
-      note: `built in · engine ${grader.engine_version} · one verdict per behavior, each at its own priority`,
-    };
-  }
-  const origin =
-    grader.origin === "scenario_specific"
-      ? "on this test"
-      : "project default";
   const judge =
     grader.judge.tag === "configured"
       ? `${grader.judge.provider}/${grader.judge.model}`
@@ -152,7 +151,7 @@ function graderLine(grader: PlanGrader): {
         : "no judge recorded";
   return {
     name: grader.name,
-    note: `${origin} · ${grader.priority} · ${judge}`,
+    note: `${grader.required ? "blocks" : "reports only"} · ${judge}`,
   };
 }
 
@@ -737,11 +736,7 @@ function PlannedTestDetail({ planned }: { readonly planned: PlannedTest }) {
           return (
             <li
               className={styles.grader}
-              key={
-                grader.kind === "built_in"
-                  ? grader.grader_key
-                  : grader.grader_id
-              }
+              key={grader.grader_id}
             >
               <span className={styles.graderName}>{line.name}</span>
               <span className={styles.graderNote}>{line.note}</span>

@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 
 import { sendJson, type Refusal } from "../../../../../lib/api.ts";
 import { agentsQuery, type AgentPage } from "../../../../../lib/agents.ts";
-import { gradersPath, type GraderPage } from "../../../../../lib/graders.ts";
 import { asDay } from "../../../../../lib/instants.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { personasPath, type PersonaPage } from "../../../../../lib/personas.ts";
@@ -15,7 +14,6 @@ import {
   availability,
   behaviorsAreUsable,
   CAPABILITIES_PATH,
-  PRIORITY_MEANING,
   testAgentsPath,
   testPath,
   testVersionsPath,
@@ -94,7 +92,6 @@ type Draft = {
   readonly scenario: string;
   readonly behaviors: readonly ExpectedBehavior[];
   readonly personas: readonly string[];
-  readonly graders: readonly string[];
   readonly capabilities: readonly string[];
   readonly agents: readonly string[];
 };
@@ -122,7 +119,6 @@ function TestDetail({
     personasPath(false),
     projectId,
   );
-  const { answer: graders } = useProjectRead<GraderPage>(gradersPath({}), projectId);
   const { answer: catalog } = useProjectRead<CapabilityCatalog>(
     CAPABILITIES_PATH,
     projectId,
@@ -154,7 +150,6 @@ function TestDetail({
       scenario: test.scenario,
       behaviors: test.expected_behaviors,
       personas: test.personas.map((one) => one.id),
-      graders: test.graders.map((one) => one.id),
       capabilities: test.required_capabilities,
       agents: test.agents.map((one) => one.id),
     });
@@ -216,10 +211,9 @@ function TestDetail({
     const written = await write(testPath(testId), {
       scenario: editing.scenario.trim(),
       expected_behaviors: editing.behaviors
-        .filter((one) => one.behavior.trim() !== "")
-        .map((one) => ({ behavior: one.behavior.trim(), priority: one.priority })),
+        .map((one) => one.trim())
+        .filter((one) => one !== ""),
       personas: [...editing.personas],
-      graders: [...editing.graders],
       required_capabilities: [...editing.capabilities],
       // And the content half carries the version alone, for the mirror reason.
       // `mock_tools` is deliberately absent: this form does not edit the
@@ -323,10 +317,6 @@ function TestDetail({
   const activePersonas =
     personas?.status === "ready"
       ? personas.value.items.filter((one) => one.archived_at === null)
-      : [];
-  const activeGraders =
-    graders?.status === "ready"
-      ? graders.value.items.filter((one) => one.archived_at === null)
       : [];
 
   /**
@@ -458,7 +448,8 @@ function TestDetail({
           />
           {behaviorProblem === null ? null : <Problem>{behaviorProblem}</Problem>}
           <Help>
-            {PRIORITY_MEANING.P0} {PRIORITY_MEANING.P1} {PRIORITY_MEANING.P2}
+            Every one of these has to hold. A grader that reports rather than
+            blocks is a setting on the grader, not on a sentence.
           </Help>
 
           <h3>Who calls</h3>
@@ -480,28 +471,6 @@ function TestDetail({
               setDraft({ ...editing, personas: personaIds })
             }
           />
-
-          <h3>Judged by, on top of the project's own</h3>
-          <NamedChoices
-            legend="Scenario graders"
-            available={[
-              ...activeGraders.map((one) => ({
-                id: one.id,
-                name: one.name,
-                archived_at: one.archived_at,
-              })),
-              ...test.graders.filter(
-                (one) => !activeGraders.some((active) => active.id === one.id),
-              ),
-            ]}
-            chosen={editing.graders}
-            disabled={!mayAuthor}
-            onChange={(graderIds) => setDraft({ ...editing, graders: graderIds })}
-          />
-          <Help>
-            A grader added here judges this test whatever its own scope says,
-            because adding it directly is the scoping decision.
-          </Help>
 
           <h3>What a connection has to be able to do</h3>
           <CapabilityChoices

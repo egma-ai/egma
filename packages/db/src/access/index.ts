@@ -94,15 +94,14 @@
  * fills the run header's verdict counts at read time and keeps them incapable of
  * disagreeing with the page beneath.
  *
- * The two ways a judgment is ever revisited are exported beside them, and
- * neither is an edit: `regrade` reopens the queue so the engine judges a run or
- * a window again at each grader's current version — narrowed to one grader when
+ * The one way a judgment is ever revisited is exported beside them, and it is
+ * not an edit: `regrade` reopens the queue so the engine judges a run or a
+ * window again at each grader's current version — narrowed to one grader when
  * the ask names one, which is a decision about judge spend rather than about
- * what the rows come to say — and `correctVerdict` writes one person's
- * disagreement as a row of its own with the machine's still underneath it. Both
- * take the context like everything else, and both are the whole API for
- * revisiting a verdict today — there are no routes above them yet, and this
- * surface is the altitude the product is reachable at.
+ * what the rows come to say. A person's disagreement is not a door here at all:
+ * corrections leave v0 with the `judged_by` column that carried them, and return
+ * as the reserved `human` grader type, which writes ordinary verdict rows under
+ * a grader id of its own.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";
@@ -114,7 +113,7 @@ export {
   CapabilityCheckFailedError,
   ConnectionRestoreRefusedError,
   DefaultPersonaReplacementError,
-  GraderNamedByTestsError,
+  GraderLibraryEntryInUseError,
   IdempotencyConflictError,
   IdentityConflictError,
   JudgeCredentialInUseError,
@@ -126,6 +125,7 @@ export {
   NotPermittedError,
   PersonaNameAmbiguousError,
   PersonaNamedByTestsError,
+  PredefinedGraderError,
   ProjectOutsideOrganizationError,
   ProjectSlugTakenError,
   RunRetryRefusedError,
@@ -135,6 +135,7 @@ export {
   TestMovedOnError,
   TraceStoreRefusedError,
   UnknownCapabilityError,
+  UnknownGraderLibraryEntryError,
   UnprocessableInputError,
   UnreadableTraceQueryError,
   VersionConflictError,
@@ -142,11 +143,11 @@ export {
   type AgentWriteRefusal,
   type ArchivedDependency,
   type ConnectionRestoreRefusal,
+  type GraderUsingLibraryEntry,
   type JudgeCredentialUse,
   type RetryBlocker,
   type RunWriteRefusal,
   type TestAgentRefusal,
-  type TestNamingGrader,
   type TestNamingPersona,
 } from "./errors.ts";
 
@@ -289,7 +290,6 @@ export {
 
 export {
   appendVerdicts,
-  correctVerdict,
   readRunVerdicts,
   readVerdicts,
   type AppendedVerdicts,
@@ -299,8 +299,18 @@ export {
   type RunVerdicts,
   type SimulationVerdicts,
   type TraceVerdicts,
-  type VerdictCorrection,
 } from "./verdicts.ts";
+
+/**
+ * The other half of a verdict row: a key is what the store keeps, and this is
+ * how a page turns one back into the words somebody wrote.
+ */
+export {
+  readAssertionShelf,
+  readAssertionWords,
+  type AssertionShelf,
+  type AssertionWords,
+} from "./assertions.ts";
 
 export {
   addConnection,
@@ -408,7 +418,6 @@ export {
   type ApplicabilityChange,
   type ArchiveTestRequest,
   type ExpectedBehavior,
-  type ExpectedBehaviorInput,
   type MockOverride,
   type MockOverrideInput,
   type NewTest,
@@ -416,7 +425,6 @@ export {
   type Test,
   type TestAgent,
   type TestChanges,
-  type TestGrader,
   type TestListRequest,
   type TestPage,
   type TestPersona,
@@ -424,63 +432,91 @@ export {
   type TestVersionPage,
 } from "./tests.ts";
 
+/**
+ * The grader library: the shelf of definitions, one level above the running
+ * copies below.
+ *
+ * `seedGraderLibrary` is the third deployment-configuring export, on
+ * `seedPlatformSettings`' exact terms: it writes egma's own graders from egma's
+ * own catalog in the same breath as applying migrations, names no customer
+ * because a predefined entry belongs to none, and is an upsert — so a second
+ * boot writes nothing at all and a release that improved a judge prompt
+ * refreshes the row and bumps its version.
+ *
+ * The reads take the context like everything else and answer egma's entries
+ * beside the caller's own. **Owner is derived from tenancy** rather than stored,
+ * which is why null tenancy is a state this one table has at all.
+ */
+export {
+  deleteGraderLibraryEntry,
+  getGraderLibraryEntry,
+  listGraderLibrary,
+  seedGraderLibrary,
+  type DeletedLibraryEntry,
+  type LibraryEntry,
+  type LibraryOutputDefinition,
+  type LibraryOwner,
+  type LibraryPage,
+  type LibraryParameter,
+  type PredefinedGrader,
+  type SeededGrader,
+} from "./grader-library.ts";
+export {
+  GRADER_LIBRARY_CATALOG,
+  PREDEFINED_GRADERS,
+  type LibraryParameterKind,
+  type LibraryParameterOption,
+} from "../grader-library/catalog.ts";
+export type { LibraryType, ReservedLibraryType } from "../schema/graders.ts";
+export {
+  LARGEST_GRADER_SOURCE_CODE_BYTES,
+  LIBRARY_TYPES,
+  RESERVED_LIBRARY_TYPES,
+} from "../schema/graders.ts";
+
+/**
+ * The running copies. **`useLibraryEntry` is the only door that makes one** —
+ * there is no create taking a type and criteria, because a grader with no
+ * library entry behind it would be a check with no words behind it. The rest is
+ * the shape every other factory here has: read, edit, list, soft-delete.
+ *
+ * `seedRunningGraders` is the fourth deployment-configuring export, and it is
+ * the other half of the library seeding above: egma's `expected_behaviors`
+ * grader has to be *running* in a project for that project's tests to be judged
+ * at all, so a deployment that shipped the change writes the copy into every
+ * project that has never had one. It names no customer and takes no argument,
+ * and it asks whether a project ever had a copy rather than whether it has one
+ * now — so somebody who switched theirs off is not overruled at the next boot.
+ */
 export {
   advanceProductionSampling,
-  cloneGrader,
-  createGrader,
   deleteGrader,
   editGrader,
   getGrader,
   getGraderVersion,
-  listGraderVersions,
   listGraders,
-  restoreGrader,
-  testsNamingGrader,
-  EXPECTED_BEHAVIORS_GRADER,
-  GRADER_TYPE_REGISTRY,
+  useLibraryEntry,
   type DeletedGrader,
-  type ExpectedGraderState,
-  type GraderListing,
-  type GraderRead,
-  type GraderTypeDefinition,
   type Grader,
+  type GraderAssertion,
   type GraderChanges,
   type GraderConfig,
   type GraderConfigInput,
-  type GraderJudgment,
   type GraderPage,
   type GraderVersion,
   type JudgeModel,
-  type JudgeModelInput,
   type JudgeProvider,
-  type LlmRubricConfig,
-  type MeasureAggregation,
-  type MetricThresholdConfig,
-  type NewGrader,
-  type NewGraderJudgment,
-  type Phrase,
-  type PhraseInput,
-  type PhraseMatch,
-  type PhraseMatchConfig,
-  type PhraseMatchConfigInput,
-  type PhraseSpeaker,
-  type ThresholdComparator,
-  type ToolCallsConfig,
-  type ToolCallsConfigInput,
-  type ToolExpectation,
-  type ToolExpectationInput,
+  type UseLibraryEntry,
 } from "./graders.ts";
-export type {
-  GraderScope,
-  GraderType,
-  Priority,
-} from "../schema/graders.ts";
 export {
-  GRADER_READS,
+  seedRunningGraders,
+  type SeededGraderCopy,
+} from "./seeded-graders.ts";
+export type { GraderScope } from "../schema/graders.ts";
+export {
   GRADER_SCOPES,
   JUDGE_PROVIDERS,
   JUDGE_SOURCES,
-  PRIORITIES,
 } from "../schema/graders.ts";
 
 /**
@@ -610,9 +646,6 @@ export type { RunFilter } from "./runs.ts";
 export {
   getGradingPlan,
   planRun,
-  EXPECTED_BEHAVIORS_ENGINE_VERSION,
-  type AuthoredPlanItem,
-  type BuiltInPlanItem,
   type CapabilityDecision,
   type GradingPlan,
   type JudgeChoice,

@@ -23,6 +23,8 @@ import {
   listSimulations,
   markSimulationCanceled,
   NotPermittedError,
+  PREDEFINED_GRADERS,
+  readAssertionWords,
   recordSimulationHeartbeat,
   resolveSimulationStanding,
   setTestAgents,
@@ -30,6 +32,7 @@ import {
   startSimulation,
   sweepOrphanedSimulations,
   updateConnection,
+  useLibraryEntry,
   type AuthContext,
   type NewRun,
   type Role,
@@ -719,6 +722,199 @@ describe("resolving what a simulation was executed against", () => {
       simulationId,
     );
     expect(version?.testId).toBe(await testOf(oneCaller));
+  });
+
+  /**
+   * The other half of a key-only verdict row.
+   *
+   * A row files its assertion by key — the behavior's position in the pinned
+   * version — because a key derived from what a person typed would make an
+   * edited sentence a *second* assertion, counted beside the first forever. The
+   * words are therefore read back at display time, and this is that read: from
+   * the version the conversation was executed against, never from the test as
+   * it now stands.
+   */
+  describe("resolving an assertion key back into its sentence", () => {
+    /** A running copy of the entry whose keys are behavior positions. */
+    async function anExpectedBehaviorsCopy(name: string): Promise<string> {
+      const copy = await useLibraryEntry(actingAsAcme(), {
+        libraryId: PREDEFINED_GRADERS.expectedBehaviors,
+        name,
+      });
+      return copy.id;
+    }
+
+    /** A copy of the entry that makes exactly one assertion. */
+    async function aLatencyCopy(name: string): Promise<string> {
+      const copy = await useLibraryEntry(actingAsAcme(), {
+        libraryId: PREDEFINED_GRADERS.latency,
+        name,
+        params: { metric: "turn_response_latency", bound: 2_000 },
+      });
+      return copy.id;
+    }
+
+    it("answers the pinned version's sentence for each position", async () => {
+      const versionId = await seedTestVersion(actingAsAcme(), "Reads back", [
+        rita,
+      ]);
+      const pinned = await getTest(actingAsAcme(), await testOf(versionId));
+      const simulationId = await conducted(versionId);
+      const graderId = await anExpectedBehaviorsCopy("Reads back");
+
+      const words = await readAssertionWords(actingAsAcme(), simulationId, [
+        graderId,
+      ]);
+
+      expect(words.of(graderId, "behavior_1")).toBe(
+        pinned?.expectedBehaviors[0],
+      );
+      expect(words.of(graderId, "behavior_2")).toBe(
+        pinned?.expectedBehaviors[1],
+      );
+    });
+
+    /**
+     * The rule the whole join exists to keep. A test reworded this morning must
+     * not put this morning's words on last night's judgment — that is exactly
+     * the rewriting of history the pin exists to prevent, and a plausible wrong
+     * sentence is worse than a bare key because nobody can tell it is wrong.
+     */
+    it("answers the version's words, never the test's as it now stands", async () => {
+      const versionId = await seedTestVersion(actingAsAcme(), "Moves later", [
+        rita,
+      ]);
+      const testId = await testOf(versionId);
+      const before = await getTest(actingAsAcme(), testId);
+      const simulationId = await conducted(versionId);
+      const graderId = await anExpectedBehaviorsCopy("Moves later");
+
+      await editTest(actingAsAcme(), testId, {
+        expectedBehaviors: ["says something else entirely"],
+      });
+
+      const words = await readAssertionWords(actingAsAcme(), simulationId, [
+        graderId,
+      ]);
+      expect(words.of(graderId, "behavior_1")).toBe(
+        before?.expectedBehaviors[0],
+      );
+      expect(words.of(graderId, "behavior_1")).not.toBe(
+        "says something else entirely",
+      );
+    });
+
+    /**
+     * Every way a key cannot be placed comes back absent, and a reader shows
+     * the key. Inventing a sentence for any of these would be egma being
+     * confidently wrong about what it judged.
+     */
+    it("answers nothing rather than guessing, wherever it cannot say", async () => {
+      const versionId = await seedTestVersion(actingAsAcme(), "Cannot say", [
+        rita,
+      ]);
+      const simulationId = await conducted(versionId);
+      const graderId = await anExpectedBehaviorsCopy("Cannot say");
+      const words = await readAssertionWords(actingAsAcme(), simulationId, [
+        graderId,
+      ]);
+
+      // Past the end of a version holding two sentences.
+      expect(words.of(graderId, "behavior_9")).toBeUndefined();
+      // Nought, which no key ever is: positions count from one.
+      expect(words.of(graderId, "behavior_0")).toBeUndefined();
+      // A key in a shape this grader never mints.
+      expect(words.of(graderId, "turn_response_latency")).toBeUndefined();
+      // A grader nobody asked about, and one that is not this customer's.
+      expect(words.of(newId("grd"), "behavior_1")).toBeUndefined();
+    });
+
+    /**
+     * A copy that makes exactly one assertion names it by its entry's own
+     * identifier — fixed for the entry's life, so no catalog rename can rekey a
+     * verdict. What a person reads for it is that entry's name, resolved here
+     * for the same reason a behavior's sentence is.
+     */
+    it("answers a whole-grader key with the entry's name", async () => {
+      const versionId = await seedTestVersion(actingAsAcme(), "One check", [
+        rita,
+      ]);
+      const simulationId = await conducted(versionId);
+      const latency = await aLatencyCopy("Answers quickly");
+
+      const words = await readAssertionWords(actingAsAcme(), simulationId, [
+        latency,
+      ]);
+
+      expect(words.of(latency, PREDEFINED_GRADERS.latency)).toBe("latency");
+      // And a behavior key off that copy means nothing: a key means whatever
+      // the grader that wrote it says it means, and this one writes no such key.
+      expect(words.of(latency, "behavior_1")).toBeUndefined();
+    });
+
+    /**
+     * **What a latency copy actually writes, and why it needs nothing from
+     * here.**
+     *
+     * Its keys are the measures its checks bound — `turn_response_latency` — and
+     * not the whole-grader key above, which is what an entry egma cannot execute
+     * files under. A measure is already the name of the thing the judgment is
+     * about, so there is nothing to resolve and this answers absent, which a
+     * reader renders as the key itself: "Turn response latency".
+     *
+     * That is the honest answer rather than a gap. Resolving it to the *copy's*
+     * name would put "Answers quickly" on every one of its rows, and a copy
+     * bounding two measures would then have two rows reading identically.
+     */
+    it("leaves a latency key alone, because the measure is already its own name", async () => {
+      const versionId = await seedTestVersion(actingAsAcme(), "Two measures", [
+        rita,
+      ]);
+      const simulationId = await conducted(versionId);
+      const latency = await aLatencyCopy("Answers quickly enough");
+
+      const words = await readAssertionWords(actingAsAcme(), simulationId, [
+        latency,
+      ]);
+
+      expect(words.of(latency, "turn_response_latency")).toBeUndefined();
+      expect(words.of(latency, "first_response_latency")).toBeUndefined();
+      // And it is not accidentally caught by the whole-grader arm, which would
+      // put the entry's name on a row about one particular measure.
+      expect(words.of(latency, "turn_response_latency")).not.toBe("latency");
+    });
+
+    /**
+     * A conversation with no test still resolves what does not need one. There
+     * are no behaviors to look up, and that is not the same as having nothing
+     * at all to say.
+     */
+    it("still names a whole-grader key for a conversation that pinned no test", async () => {
+      const simulationId = await conducted(oneCaller, true);
+      const graderId = await anExpectedBehaviorsCopy("No test behind it");
+      const latency = await aLatencyCopy("Answers quickly, unpinned");
+
+      const words = await readAssertionWords(actingAsAcme(), simulationId, [
+        graderId,
+        latency,
+      ]);
+
+      expect(words.of(graderId, "behavior_1")).toBeUndefined();
+      expect(words.of(latency, PREDEFINED_GRADERS.latency)).toBe("latency");
+    });
+
+    it("answers another customer nothing, exactly as the version read does", async () => {
+      const versionId = await seedTestVersion(actingAsAcme(), "Not theirs", [
+        rita,
+      ]);
+      const simulationId = await conducted(versionId);
+      const graderId = await anExpectedBehaviorsCopy("Not theirs");
+
+      const words = await readAssertionWords(actingAsGlobex(), simulationId, [
+        graderId,
+      ]);
+      expect(words.of(graderId, "behavior_1")).toBeUndefined();
+    });
   });
 });
 

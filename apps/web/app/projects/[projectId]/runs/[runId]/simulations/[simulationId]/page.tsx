@@ -10,15 +10,12 @@ import { roleOf } from "../../../../../../../lib/me.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
 import {
-  A_CORRECTION_ADDS,
-  judgedDimensions,
+  judgedAssertions,
   planExplanation,
   REGRADE_IS_NOT_A_REPLAY,
-  simulationCorrectionsPath,
   simulationPath,
   simulationRegradePath,
   type EvidenceVerdict,
-  type JudgedDimension,
   type RegradeAsked,
   type SimulationEvidence,
 } from "../../../../../../../lib/simulations.ts";
@@ -41,7 +38,6 @@ import {
 } from "../../../../../../../ui/controls.tsx";
 import { Dialog } from "../../../../../../../ui/dialog.tsx";
 import {
-  CorrectionForm,
   ExecutionTimeline,
   GradingPending,
   Measures,
@@ -128,7 +124,7 @@ function EvidenceView({
 }) {
   const { me } = useShellSession();
   // Null until the session read answers. A page that guessed would offer a
-  // viewer Regrade and Disagree, which the server refuses, on every load.
+  // viewer Regrade, which the server refuses, on every load.
   const role = me === null ? null : roleOf(me);
   const mayRevisit = role !== null && canAuthor(role);
 
@@ -142,28 +138,6 @@ function EvidenceView({
   const [confirming, setConfirming] = useState(false);
   const [working, setWorking] = useState(false);
 
-  /**
-   * Which judgement a correction form is open under, and what has been typed
-   * into it.
-   *
-   * **Three pieces of state, and two of them belong to the open row.** The form
-   * is drawn once, under whichever judgement is open, so its fields are shared
-   * by every row — and a verdict chosen for one behaviour left standing when
-   * somebody opens another would file a word about a judgement they never read.
-   * So opening a different row clears both, in the effect below, and the refusal
-   * goes with them: a refusal left behind would sit under a judgement it was
-   * never about.
-   */
-  const [correcting, setCorrecting] = useState<string | null>(null);
-  const [saying, setSaying] = useState<VerdictWord>("passed");
-  const [because, setBecause] = useState("");
-
-  useEffect(() => {
-    setSaying("passed");
-    setBecause("");
-    setRefused(null);
-  }, [correcting]);
-
   // A different conversation in the same page: everything accumulated about the
   // last one goes, including an open control that would otherwise be answered
   // about a conversation nobody opened it for.
@@ -171,7 +145,6 @@ function EvidenceView({
     setRefused(null);
     setAsked(null);
     setConfirming(false);
-    setCorrecting(null);
   }, [simulationId, projectId]);
 
   useEffect(() => {
@@ -227,36 +200,11 @@ function EvidenceView({
     reload();
   }
 
-  async function correct(judged: JudgedDimension): Promise<void> {
-    if (!mayRevisit || working) return;
-    setRefused(null);
-    setWorking(true);
-    const answered = await writeJson<EvidenceVerdict>(
-      simulationCorrectionsPath(simulationId),
-      {
-        method: "POST",
-        project: projectId,
-        body: {
-          grader_id: judged.graderId,
-          grader_version_id: judged.graderVersionId,
-          dimension: judged.dimension,
-          verdict: saying,
-          rationale: because,
-        },
-      },
-    );
-    setWorking(false);
-    if (answered.status === "signed-out") {
-      window.location.replace("/sign-in");
-      return;
-    }
-    if (answered.status !== "ready") {
-      setRefused(answered.refusal);
-      return;
-    }
-    setCorrecting(null);
-    reload();
-  }
+  /*
+   * **There was a `correct` here, and it goes with the endpoint.** ADR-0009
+   * takes a person's disagreement out of v0; it returns as the reserved `human`
+   * grader type, writing rows of its own under a grader id of its own.
+   */
 
   if (answer === null || answer.status === "signed-out") {
     return (
@@ -299,7 +247,7 @@ function EvidenceView({
   }
 
   const read = answer.value;
-  const dimensions = judgedDimensions(read.verdicts);
+  const assertions = judgedAssertions(read.verdicts);
   const turns = read.transcript?.turns ?? [];
   const plan = read.grading_plan;
 
@@ -326,11 +274,10 @@ function EvidenceView({
               Back to the run
             </ButtonLink>
             {/*
-              **A viewer gets no Regrade and no Disagree at all**, rather than
-              disabled ones. Every piece of evidence on this page is theirs to
-              read, and neither of these is; a disabled control would be a
-              permanent reminder of something they cannot have on a page whose
-              whole subject they can.
+              **A viewer gets no Regrade at all**, rather than a disabled one.
+              Every piece of evidence on this page is theirs to read, and this
+              is not; a disabled control would be a permanent reminder of
+              something they cannot have on a page whose whole subject they can.
             */}
             {!mayRevisit ? null : (
               <Button
@@ -450,9 +397,7 @@ function EvidenceView({
                   ) : (
                     <ol className={styles.behaviors}>
                       {read.test.expected_behaviors.map((one) => (
-                        <li key={one.behavior}>
-                          {one.behavior} <Badge>{one.priority}</Badge>
-                        </li>
+                        <li key={one}>{one}</li>
                       ))}
                     </ol>
                   ),
@@ -630,13 +575,13 @@ function EvidenceView({
 
         <Section
           title="Verdicts"
-          lead="One per judged behaviour or check. A person's correction is the current interpretation and the machine's verdict stays underneath it."
+          lead="One per judged assertion. A regrade writes a new judgement beside the old one, and the earlier one stays readable underneath it. A grader marked reports only is judged the same way and can fail nothing."
         >
           {stillJudging ? (
             <GradingPending what="Grading is still running. Verdicts appear here as they land, and nothing below is a failure until a grader says so." />
           ) : null}
 
-          {dimensions.length === 0 ? (
+          {assertions.length === 0 ? (
             <Empty
               title={
                 read.grading === "not_required"
@@ -651,66 +596,12 @@ function EvidenceView({
             />
           ) : (
             <div className={styles.verdicts}>
-              {dimensions.map((judged) => (
+              {assertions.map((judged) => (
                 <VerdictEvidence
                   key={judged.key}
                   judged={judged}
                   turns={turns}
-                  action={
-                    !mayRevisit ? null : (
-                      <Button
-                        onClick={() =>
-                          setCorrecting(
-                            correcting === judged.key ? null : judged.key,
-                          )
-                        }
-                      >
-                        {correcting === judged.key ? "Cancel" : "Disagree"}
-                      </Button>
-                    )
-                  }
-                >
-                  {correcting !== judged.key ? null : (
-                    <CorrectionForm>
-                      <Help>{A_CORRECTION_ADDS}</Help>
-                      <Field
-                        label="What you say happened"
-                        htmlFor="correction-verdict"
-                      >
-                        <Select
-                          id="correction-verdict"
-                          value={saying}
-                          options={VERDICT_WORDS.map((word) => ({
-                            value: word,
-                            label: word,
-                          }))}
-                          onChange={setSaying}
-                        />
-                      </Field>
-                      <Field
-                        label="Why you disagree"
-                        htmlFor="correction-rationale"
-                        hint="One line a later reader can weigh against what the machine said. A correction with no reason is an assertion."
-                      >
-                        <TextArea
-                          id="correction-rationale"
-                          value={because}
-                          rows={3}
-                          onChange={setBecause}
-                        />
-                      </Field>
-                      <Actions>
-                        <Button
-                          weight="strong"
-                          disabled={working || because.trim() === ""}
-                          onClick={() => void correct(judged)}
-                        >
-                          {working ? "Saving…" : "Save correction"}
-                        </Button>
-                      </Actions>
-                    </CorrectionForm>
-                  )}
-                </VerdictEvidence>
+                />
               ))}
             </div>
           )}

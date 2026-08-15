@@ -672,9 +672,9 @@ describe("egma run, as the built command", () => {
     await makeFolder(registered);
     await seed(["quoted-a-price", "open-on-sunday"]);
 
-    const { stdout } = await run(process.execPath, [CLI_ENTRY, "run", "--no-follow"], {
+    const { stdout } = await run(process.execPath, [CLI_ENTRY, "run", "--url", platform.url, "--no-follow"], {
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url }),
+      env: workspace.env(),
     });
 
     const lines = stdout.trimEnd().split("\n");
@@ -696,9 +696,9 @@ describe("egma run, as the built command", () => {
     await makeFolder(registered);
     await seed(["quoted-a-price", "open-on-sunday"]);
 
-    const command = run(process.execPath, [CLI_ENTRY, "run"], {
+    const command = run(process.execPath, [CLI_ENTRY, "run", "--url", platform.url], {
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url }),
+      env: workspace.env(),
     });
 
     await scriptOnceStarted([

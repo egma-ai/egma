@@ -22,7 +22,6 @@ import {
   UnknownCapabilityError,
   UnprocessableInputError,
   type AuthContext,
-  type ExpectedBehaviorInput,
   type MockOverrideInput,
   type Test,
   type TestAgent,
@@ -140,72 +139,10 @@ function describedAgent(applies: TestAgent): Record<string, unknown> {
   };
 }
 
-/**
- * What the wire says about one expected behavior: the statement, and how much
- * it matters.
- *
- * The priority travels in both directions now, which it did not before. A test
- * always keeps at least one P0 — falsifiability cannot be downgraded away — and
- * the factory is what enforces that; this door's job is to carry what somebody
- * chose rather than to flatten it. An entry sent as bare text is a P0, which is
- * what every older client sends and what those tests already mean.
- */
-function describedBehaviors(
-  behaviors: readonly { readonly behavior: string; readonly priority: string }[],
-): readonly Record<string, unknown>[] {
-  return behaviors.map((one) => ({
-    behavior: one.behavior,
-    priority: one.priority,
-  }));
-}
-
-/** The behaviors a body sent, in either shape, or a sentence saying why not. */
+/** The behaviors a body carries, or the reason it carries none egma can read. */
 type WrittenBehaviors =
-  | { readonly entries: readonly ExpectedBehaviorInput[] }
+  | { readonly entries: readonly string[] }
   | { readonly refusal: string };
-
-function behaviorEntries(value: unknown): WrittenBehaviors {
-  if (!Array.isArray(value)) {
-    return {
-      refusal:
-        "expected_behaviors is the list of statements about what should " +
-        'happen. Send it as a list, like ["confirms the new time"], or as ' +
-        'objects carrying a priority, like [{"behavior": "confirms the new ' +
-        'time", "priority": "P0"}].',
-    };
-  }
-
-  const entries: ExpectedBehaviorInput[] = [];
-  for (const entry of value) {
-    if (typeof entry === "string") {
-      entries.push(entry);
-      continue;
-    }
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      return {
-        refusal:
-          "each expected behavior is text, or an object naming the behavior " +
-          "and its priority. One entry in expected_behaviors is neither.",
-      };
-    }
-    const written = entry as Record<string, unknown>;
-    for (const key of Object.keys(written)) {
-      if (key === "behavior" || key === "priority") continue;
-      return {
-        refusal:
-          `an expected behavior has no key "${key}"; it holds behavior and ` +
-          "priority",
-      };
-    }
-    entries.push({
-      behavior: text(written.behavior),
-      ...(written.priority === undefined
-        ? {}
-        : { priority: written.priority as never }),
-    });
-  }
-  return { entries };
-}
 
 /** The keys one entry of `mock_tools` holds, and no others. */
 const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
@@ -293,9 +230,8 @@ function described(test: Test): Record<string, unknown> {
     version: test.version,
     version_id: test.versionId,
     scenario: test.scenario,
-    expected_behaviors: describedBehaviors(test.expectedBehaviors),
+    expected_behaviors: [...test.expectedBehaviors],
     personas: test.personas.map(describedPersona),
-    graders: test.graders.map((named) => ({ id: named.id, name: named.name })),
     required_capabilities: test.requiredCapabilities,
     mock_tools: test.mockOverrides.map(describedMockTool),
     // What a browser shows instead of the overrides themselves: it does not
@@ -320,12 +256,8 @@ function describedVersion(version: TestVersion): Record<string, unknown> {
     version: version.version,
     current: version.current,
     scenario: version.scenario,
-    expected_behaviors: describedBehaviors(version.expectedBehaviors),
+    expected_behaviors: [...version.expectedBehaviors],
     personas: version.personas.map(describedPersona),
-    graders: version.graders.map((named) => ({
-      id: named.id,
-      name: named.name,
-    })),
     required_capabilities: version.requiredCapabilities,
     mock_tools: version.mockOverrides.map(describedMockTool),
     override_count: version.mockOverrides.length,
@@ -410,7 +342,6 @@ const VERSIONED_KEYS = [
   "scenario",
   "expected_behaviors",
   "personas",
-  "graders",
   "mock_tools",
   "required_capabilities",
 ] as const;
@@ -430,6 +361,64 @@ function refuseRole(
     "not_permitted",
     REFUSALS.notPermitted(auth.role, action),
   );
+}
+
+/**
+ * A key that retired with the test-grader junction, named rather than ignored.
+ *
+ * **This door reads a bare record and takes only the keys it knows**, which is
+ * what lets the shape grow without breaking older clients — and is exactly why
+ * a retired key has to be refused by name. A body still sending
+ * `graders: [...]` would otherwise be written successfully with the graders
+ * silently gone: a test somebody believes is judged by two checks they chose,
+ * judged by neither, with a `201` saying it went fine. The behavior shape has
+ * been named since the ladder retired; this is the other half of the same
+ * change, refused in the same voice.
+ *
+ * It is deliberately not a general unknown-key gate. Adding one here would
+ * refuse every client that sends a field this version has not learned yet,
+ * which is a different decision and not this one.
+ */
+function retiredKeyIn(body: Record<string, unknown>): string | undefined {
+  if (!("graders" in body)) return undefined;
+  return (
+    "a test names no graders; the graders key retired with the test-grader " +
+    "junction. What judges a simulation is the project's running graders " +
+    "and their scope, set on the grader rather than on the test."
+  );
+}
+
+/**
+ * The behaviors a body carries, as the factory takes them: plain sentences, in
+ * the order they were written.
+ *
+ * It exists to name one refusal rather than to add a rule. `textList` turns
+ * anything that is not text into an empty string, so a body still sending the
+ * retired `{"behavior", "priority"}` shape would otherwise arrive at the factory
+ * as a list of blanks and be refused for saying nothing — which sends a writer
+ * looking at their sentences for a problem that is in their envelope.
+ */
+function behaviorEntries(value: unknown): WrittenBehaviors {
+  if (!Array.isArray(value)) {
+    return {
+      refusal:
+        "expected_behaviors is what should happen, as a list of sentences, " +
+        'like ["confirms the new time back before finishing"].',
+    };
+  }
+
+  for (const entry of value) {
+    if (typeof entry === "object" && entry !== null && "behavior" in entry) {
+      return {
+        refusal:
+          "an expected behavior is a plain sentence now; the " +
+          '{"behavior", "priority"} shape retired with the P0/P1/P2 ladder. ' +
+          "Send each sentence on its own.",
+      };
+    }
+  }
+
+  return { entries: textList(value) };
 }
 
 export async function testRoutes(
@@ -577,6 +566,12 @@ export async function testRoutes(
       projectId: auth.projectId,
     });
 
+    // A retired key is refused before anything is read, so a body written
+    // against last month's contract is told what changed rather than written
+    // successfully with half of it dropped.
+    const retired = retiredKeyIn(body);
+    if (retired !== undefined) return unprocessable(reply, retired);
+
     const personas =
       "personas" in body ? personaEntries(body.personas) : { entries: [] };
     if ("refusal" in personas) return unprocessable(reply, personas.refusal);
@@ -618,7 +613,6 @@ export async function testRoutes(
       scenario: text(body.scenario),
       expectedBehaviors: behaviors.entries,
       personaIds,
-      ...("graders" in body ? { graderIds: gradersIn(body.graders) } : {}),
       mockOverrides: overrides.entries,
       requiredCapabilities: capabilities.entries,
       agentIds: agents.entries,
@@ -665,6 +659,9 @@ export async function testRoutes(
           "expected_applicability_revision.",
       );
     }
+
+    const retired = retiredKeyIn(body);
+    if (retired !== undefined) return unprocessable(reply, retired);
 
     const personas = "personas" in body ? personaEntries(body.personas) : undefined;
     if (personas !== undefined && "refusal" in personas) {
@@ -760,7 +757,6 @@ export async function testRoutes(
       ...("scenario" in body ? { scenario: text(body.scenario) } : {}),
       ...(behaviors === undefined ? {} : { expectedBehaviors: behaviors.entries }),
       ...(personaIds === undefined ? {} : { personaIds }),
-      ...("graders" in body ? { graderIds: gradersIn(body.graders) } : {}),
       ...(overrides === undefined ? {} : { mockOverrides: overrides.entries }),
       ...(capabilities === undefined
         ? {}
@@ -1012,13 +1008,6 @@ export async function testRoutes(
 
     throw error;
   });
-}
-
-/** The graders a body names, taken as written; the factory judges them. */
-function gradersIn(value: unknown): readonly string[] {
-  return Array.isArray(value)
-    ? value.map((entry) => (typeof entry === "string" ? entry.trim() : ""))
-    : [];
 }
 
 /**

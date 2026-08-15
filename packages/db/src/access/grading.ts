@@ -1055,7 +1055,7 @@ export async function reopenGradingJob(
   auth: AuthContext,
   id: string,
 ): Promise<GradingJob | undefined> {
-  authorize(auth, "revisit_verdicts", here(auth));
+  authorize(auth, "regrade", here(auth));
 
   const [only] = await db().transaction((tx) =>
     reopenJobs(tx, theJob(auth, id), null),
@@ -1187,13 +1187,15 @@ type RegradeConversations =
  *
  * The grader is named **by identity**, never by version. Which version judges is
  * always the current one — that is the whole point of asking again — exactly as
- * a test's grader array names a grader and gets today's version of it.
+ * resolving what applies to a conversation gets today's version of every copy.
  *
- * **The built-in `expected_behaviors` grader cannot be named**, and that is a
- * consequence of what it is rather than an omission here: it is never a row in
- * any table, so it has no identity to name. Re-judging a test's expected
- * behaviors alone is future work; today they are re-judged by asking for the
- * conversation.
+ * **The expected-behaviors grader can be named like any other**, and that is
+ * what stopped being a special case. It used to be implicit — never a row in
+ * any table, so it had no identity to name, and re-judging a test's own
+ * expectations alone was future work. Every project now runs a copy of the
+ * library entry, so it has an ordinary `grd_` id, it is what its verdict rows
+ * carry, and a re-grade narrowed to it costs one grader's worth of judging
+ * exactly as narrowing to any other does.
  */
 export type RegradeTarget = RegradeConversations & {
   /**
@@ -1265,7 +1267,7 @@ export type Regraded = {
  * What comes of it is rows **beside** the old ones rather than over them,
  * because the verdict's identity spans the grader version: the graders nobody
  * edited rewrite their own rows in place, the edited one writes a second row
- * against the same dimension, and the read prefers the newest grading with the
+ * against the same assertion, and the read prefers the newest grading with the
  * older still fetchable underneath. Nothing is deleted and nothing is edited,
  * here or anywhere.
  *
@@ -1295,7 +1297,7 @@ export async function regrade(
   auth: AuthContext,
   target: RegradeTarget,
 ): Promise<Regraded | undefined> {
-  authorize(auth, "revisit_verdicts", here(auth));
+  authorize(auth, "regrade", here(auth));
 
   const graderId = await theGraderNamed(auth, target.graderId);
   if (graderId === undefined) return undefined;

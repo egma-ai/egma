@@ -43,14 +43,13 @@ afterEach(async () => {
   await workspace.remove();
 });
 
-/** The format as it was written down, byte for byte. */
+/** The format as it is written down, byte for byte. */
 const GENERATED = `---
-format: 2
+format: 3
 name: missed-appointment-reschedule
 description: The caller missed Thursday and wants any afternoon next week.
 version: tstv_01K3XQ7M4E8YB2FVN0H9TZQWER
 identity_revision: rev_01K3XQ7M4E8YB2FVN0H9TZQWES
-graders: [grd_01K3XQ7M4E8YB2FVN0H9TZQWET]
 required_capabilities: [dtmf]
 personas:
   - id: prs_01K3XQ7M4E8YB2FVN0H9TZQWEU
@@ -60,9 +59,35 @@ personas:
 The caller missed yesterday's appointment and wants to
 reschedule this week. They are short on time and irritated.
 ## Expected behaviors
+1. The agent acknowledges the missed appointment without blame.
+2. The agent offers at least two concrete alternative slots.
+3. The agent confirms the new booking before ending the call.
+`;
+
+/**
+ * The shape before this one, byte for byte: markers on every statement and the
+ * graders a test named.
+ *
+ * Both are what *made* it format 2, and both retired with the grader redesign.
+ * A file in this shape is somebody's repository, so it is read rather than
+ * refused — the marker stripped off the sentence it was written in front of,
+ * the `graders:` key passed over.
+ */
+const VERSION_TWO = `---
+format: 2
+name: missed-appointment-reschedule
+version: tstv_01K3XQ7M4E8YB2FVN0H9TZQWER
+identity_revision: rev_01K3XQ7M4E8YB2FVN0H9TZQWES
+graders: [grd_01K3XQ7M4E8YB2FVN0H9TZQWET]
+personas:
+  - id: prs_01K3XQ7M4E8YB2FVN0H9TZQWEU
+    name: impatient-caller
+---
+## Scenario
+The caller missed yesterday's appointment.
+## Expected behaviors
 1. [P0] The agent acknowledges the missed appointment without blame.
 2. [P1] The agent offers at least two concrete alternative slots.
-3. [P0] The agent confirms the new booking before ending the call.
 `;
 
 /**
@@ -85,28 +110,18 @@ The caller missed yesterday's appointment.
 2. The agent offers at least two concrete alternative slots.
 `;
 
-/** A statement written with an explicit `[P0]` marker, as egma writes one. */
-function blocking(...statements: readonly string[]): TestFile["expectedBehaviors"] {
-  return statements.map((behavior) => ({ behavior, priority: "P0" as const }));
-}
-
-/**
- * A statement written with no marker at all, as every version-1 file wrote one.
- *
- * It *means* P0 wherever a priority is needed, and it is kept apart from an
- * explicit `[P0]` because only the explicit one is a claim — which is the whole
- * of what lets a pull tell a faithful old copy from a draft somebody has typed
- * a priority into.
- */
-function unmarked(...statements: readonly string[]): TestFile["expectedBehaviors"] {
-  return statements.map((behavior) => ({ behavior, priority: null }));
+/** The statements, as the format holds them: plain sentences, in order. */
+function statements(
+  ...said: readonly string[]
+): TestFile["expectedBehaviors"] {
+  return [...said];
 }
 
 describe("the test file format", () => {
   it("reads the file the format was written down as", () => {
     const test = parseTestFile(GENERATED, "missed-appointment-reschedule.md", "fallback");
 
-    expect(test.format).toBe(2);
+    expect(test.format).toBe(3);
     expect(test.name).toBe("missed-appointment-reschedule");
     expect(test.description).toBe(
       "The caller missed Thursday and wants any afternoon next week.",
@@ -116,35 +131,65 @@ describe("the test file format", () => {
     ]);
     expect(test.version).toBe("tstv_01K3XQ7M4E8YB2FVN0H9TZQWER");
     expect(test.identityRevision).toBe("rev_01K3XQ7M4E8YB2FVN0H9TZQWES");
-    expect(test.graders).toEqual(["grd_01K3XQ7M4E8YB2FVN0H9TZQWET"]);
     expect(test.requiredCapabilities).toEqual(["dtmf"]);
     expect(test.scenario).toBe(
       "The caller missed yesterday's appointment and wants to\nreschedule this week. They are short on time and irritated.",
     );
-    expect(test.expectedBehaviors).toEqual([
-      {
-        behavior: "The agent acknowledges the missed appointment without blame.",
-        priority: "P0",
-      },
-      {
-        behavior: "The agent offers at least two concrete alternative slots.",
-        priority: "P1",
-      },
-      {
-        behavior: "The agent confirms the new booking before ending the call.",
-        priority: "P0",
-      },
+    expect(test.expectedBehaviors).toEqual(
+      statements(
+        "The agent acknowledges the missed appointment without blame.",
+        "The agent offers at least two concrete alternative slots.",
+        "The agent confirms the new booking before ending the call.",
+      ),
+    );
+  });
+
+  /**
+   * The shape before this one, read as what it says rather than refused.
+   *
+   * Two things defined format 2 and both retired: the priority markers and the
+   * `graders:` key. A folder in somebody's repository still holds them, so both
+   * are ignored on the way in — the marker stripped, the key passed over — and
+   * the file is written back out as format 3 the next time egma writes it.
+   *
+   * **This is deliberately not a compatibility promise.** What `egma pull`
+   * should do to markers already committed to a real customer's git history is
+   * a decision nobody has made; ignoring them on read is safe either way, and
+   * claims nothing.
+   */
+  it("reads a version-2 file, ignoring its markers and its graders", () => {
+    const test = parseTestFile(VERSION_TWO, "missed-appointment-reschedule.md", "x");
+
+    expect(test.format).toBe(2);
+    expect(test.expectedBehaviors).toEqual(
+      statements(
+        "The agent acknowledges the missed appointment without blame.",
+        "The agent offers at least two concrete alternative slots.",
+      ),
+    );
+    // Everything the file did say that the format still has, kept.
+    expect(test.version).toBe("tstv_01K3XQ7M4E8YB2FVN0H9TZQWER");
+    expect(test.personas).toEqual([
+      { id: "prs_01K3XQ7M4E8YB2FVN0H9TZQWEU", name: "impatient-caller" },
     ]);
+
+    // And what egma writes back carries neither of the retired shapes.
+    const written = serializeTestFile(test);
+    expect(written).toContain("format: 3");
+    expect(written).toContain("1. The agent acknowledges");
+    expect(written).not.toContain("[P0]");
+    expect(written).not.toContain("graders:");
+    // A fixed point from there on, exactly as everything egma writes is.
+    expect(serializeTestFile(parseTestFile(written, "a.md", "x"))).toBe(written);
   });
 
   /**
    * The old shape, read exactly as generously as it was written.
    *
    * Every field the format has gained since is absent, and each has to read as
-   * the thing that shape already meant: no priority marker is a P0, because
-   * every behavior blocked before priorities existed; a persona is a name with
-   * no identity, because names were all there were; and the live half has no
-   * token, which is the fact that decides whether this file may update a test.
+   * the thing that shape already meant: a persona is a name with no identity,
+   * because names were all there were, and the live half has no token, which is
+   * the fact that decides whether this file may update a test.
    */
   it("reads a version-1 file as what that shape already meant", () => {
     const test = parseTestFile(VERSION_ONE, "missed-appointment-reschedule.md", "x");
@@ -152,21 +197,24 @@ describe("the test file format", () => {
     expect(test.format).toBe(1);
     expect(test.identityRevision).toBeNull();
     expect(test.description).toBeNull();
-    expect(test.graders).toEqual([]);
     expect(test.requiredCapabilities).toEqual([]);
     expect(test.personas).toEqual([{ id: "", name: "impatient-caller" }]);
-    // Null rather than P0: the lines claimed nothing, which is a different fact
-    // from claiming P0 and the one a safe pull turns on.
-    expect(test.expectedBehaviors.map((one) => one.priority)).toEqual([null, null]);
+    expect(test.expectedBehaviors).toEqual(
+      statements(
+        "The agent acknowledges the missed appointment without blame.",
+        "The agent offers at least two concrete alternative slots.",
+      ),
+    );
   });
 
   /**
    * Reading is forgiving in both directions.
    *
    * A file a person edited by hand may carry a priority marker without ever
-   * saying `format: 2`, and may name a persona as a bare item in the block
-   * sequence egma writes. Neither is a shape egma produces, and both are shapes
-   * somebody types — so both are read rather than refused.
+   * saying which format it is in, and may name a persona as a bare item in the
+   * block sequence egma writes. Neither is a shape egma produces, and both are
+   * shapes somebody types — so both are read rather than refused, and the
+   * marker is dropped with the sentence behind it kept.
    */
   it("reads a marker and a bare persona in a file that claims no format", () => {
     const typed = [
@@ -189,10 +237,9 @@ describe("the test file format", () => {
       { id: "", name: "impatient-caller" },
       { id: "prs_01K3XQ7M4E8YB2FVN0H9TZQWEU", name: "" },
     ]);
-    expect(test.expectedBehaviors).toEqual([
-      { behavior: "worth knowing", priority: "P2" },
-      { behavior: "must happen", priority: null },
-    ]);
+    expect(test.expectedBehaviors).toEqual(
+      statements("worth knowing", "must happen"),
+    );
   });
 
   it("writes back exactly what it read, byte for byte", () => {
@@ -202,16 +249,15 @@ describe("the test file format", () => {
 
   it("leaves out what a fresh file leaves out", () => {
     const fresh: TestFile = {
-      format: 2,
+      format: 3,
       name: "after-hours-emergency",
       description: null,
       personas: [],
       version: null,
       identityRevision: null,
-      graders: [],
       requiredCapabilities: [],
       scenario: "The caller has an emergency at 2am.",
-      expectedBehaviors: blocking("The agent gives the emergency number."),
+      expectedBehaviors: statements("The agent gives the emergency number."),
       mockTools: [],
     };
 
@@ -219,13 +265,13 @@ describe("the test file format", () => {
     expect(document).toBe(
       [
         "---",
-        "format: 2",
+        "format: 3",
         "name: after-hours-emergency",
         "---",
         "## Scenario",
         "The caller has an emergency at 2am.",
         "## Expected behaviors",
-        "1. [P0] The agent gives the emergency number.",
+        "1. The agent gives the emergency number.",
         "",
       ].join("\n"),
     );
@@ -245,42 +291,22 @@ describe("the test file format", () => {
     // The format is the one thing always written, including on a file nothing
     // has ever synced: it is what an older egma reads to know it is looking at
     // bytes it does not fully understand.
-    expect(document).toContain("format: 2");
+    expect(document).toContain("format: 3");
     expect(parseTestFile(document, "a.md", "x")).toEqual(fresh);
-  });
-
-  /**
-   * The one shape reading and writing deliberately do not round-trip.
-   *
-   * A line that claimed nothing is written as the `[P0]` it has always meant,
-   * and reading that back gives a line that claims P0 — because it now does.
-   * That is the migration, and it is a fixed point from the second write on.
-   */
-  it("turns a line that claimed nothing into one that claims P0, once", () => {
-    const typed = ["## Expected behaviors", "1. must happen", ""].join("\n");
-    const read = parseTestFile(typed, "a.md", "x");
-    expect(read.expectedBehaviors).toEqual([{ behavior: "must happen", priority: null }]);
-
-    const written = serializeTestFile(read);
-    expect(written).toContain("1. [P0] must happen");
-    expect(parseTestFile(written, "a.md", "x").expectedBehaviors).toEqual([
-      { behavior: "must happen", priority: "P0" },
-    ]);
-    expect(serializeTestFile(parseTestFile(written, "a.md", "x"))).toBe(written);
   });
 
   /**
    * The one thing writing an old file does: it becomes a new one.
    *
-   * Nothing is invented on the way through — a version-1 file names no graders
-   * and no capabilities, and it comes out naming none — but the shape it comes
-   * out in is the shape everything egma writes is in.
+   * Nothing is invented on the way through — a version-1 file names no
+   * capabilities and comes out naming none — but the shape it comes out in is
+   * the shape everything egma writes is in.
    */
-  it("writes a version-1 file back out as a version-2 file", () => {
+  it("writes a version-1 file back out as a version-3 file", () => {
     const document = serializeTestFile(parseTestFile(VERSION_ONE, "a.md", "x"));
 
-    expect(document).toContain("format: 2");
-    expect(document).toContain("1. [P0] The agent acknowledges");
+    expect(document).toContain("format: 3");
+    expect(document).toContain("1. The agent acknowledges");
     expect(document).toContain("  - name: impatient-caller");
     expect(document).not.toContain("personas: [");
     // And the second time round it is a fixed point, exactly as everything
@@ -317,7 +343,7 @@ describe("the test file format", () => {
     expect(test.version).toBeNull();
     expect(test.scenario).toBe("The caller wants a refund.");
     expect(test.expectedBehaviors).toEqual(
-      unmarked(
+      statements(
         "The agent checks the order number before saying anything about money.",
         "The agent never promises a date.",
       ),
@@ -341,16 +367,15 @@ describe("the test file format", () => {
 
   it("quotes a name that would not read back as itself", () => {
     const awkward: TestFile = {
-      format: 2,
+      format: 3,
       name: "caller: refuses to give a name",
       description: null,
       personas: [{ id: "", name: "persona #2" }],
       version: null,
       identityRevision: null,
-      graders: [],
       requiredCapabilities: [],
       scenario: "s",
-      expectedBehaviors: blocking("b"),
+      expectedBehaviors: statements("b"),
       mockTools: [],
     };
 
@@ -380,16 +405,15 @@ describe("the test file format", () => {
    */
   describe("content that is awkward and entirely allowed", () => {
     const plain: TestFile = {
-      format: 2,
+      format: 3,
       name: "a-test",
       description: null,
       personas: [],
       version: null,
       identityRevision: null,
-      graders: [],
       requiredCapabilities: [],
       scenario: "The situation.",
-      expectedBehaviors: blocking("The agent does a thing."),
+      expectedBehaviors: statements("The agent does a thing."),
       mockTools: [],
     };
 
@@ -433,12 +457,12 @@ describe("the test file format", () => {
       ["prose that looks like frontmatter", { ...plain, scenario: "name: not-frontmatter" }],
       ["prose with a bullet in it", { ...plain, scenario: "- a bullet\n- another" }],
       ["prose in another script", { ...plain, scenario: "予約を逃した — 🎧" }],
-      ["a statement with a colon", { ...plain, expectedBehaviors: blocking("The agent says: hello.") }],
-      ["a statement that looks like frontmatter", { ...plain, expectedBehaviors: blocking("name: value") }],
-      ["a statement opening with a dash", { ...plain, expectedBehaviors: blocking("- a dash first") }],
-      ["a statement already numbered", { ...plain, expectedBehaviors: blocking("1. already numbered") }],
-      ["a statement that is a heading", { ...plain, expectedBehaviors: blocking("## Expected behaviors") }],
-      ["a statement in another script", { ...plain, expectedBehaviors: blocking("予約 🎧 — done") }],
+      ["a statement with a colon", { ...plain, expectedBehaviors: statements("The agent says: hello.") }],
+      ["a statement that looks like frontmatter", { ...plain, expectedBehaviors: statements("name: value") }],
+      ["a statement opening with a dash", { ...plain, expectedBehaviors: statements("- a dash first") }],
+      ["a statement already numbered", { ...plain, expectedBehaviors: statements("1. already numbered") }],
+      ["a statement that is a heading", { ...plain, expectedBehaviors: statements("## Expected behaviors") }],
+      ["a statement in another script", { ...plain, expectedBehaviors: statements("予約 🎧 — done") }],
       ["nothing to check at all", { ...plain, expectedBehaviors: [] }],
       ["a pinned version", { ...plain, version: "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER" }],
       [
@@ -516,13 +540,13 @@ describe("the test file format", () => {
       ],
       [
         "a statement with a line break in it",
-        { ...plain, expectedBehaviors: blocking("The agent checks the number\nbefore saying anything.") },
-        { ...plain, expectedBehaviors: blocking("The agent checks the number before saying anything.") },
+        { ...plain, expectedBehaviors: statements("The agent checks the number\nbefore saying anything.") },
+        { ...plain, expectedBehaviors: statements("The agent checks the number before saying anything.") },
       ],
       [
         "space wrapped around a statement",
-        { ...plain, expectedBehaviors: blocking("  The agent does a thing.  ") },
-        { ...plain, expectedBehaviors: blocking("The agent does a thing.") },
+        { ...plain, expectedBehaviors: statements("  The agent does a thing.  ") },
+        { ...plain, expectedBehaviors: statements("The agent does a thing.") },
       ],
       [
         "a persona with nothing in it",

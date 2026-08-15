@@ -39,7 +39,6 @@ import path from "node:path";
 
 import { sameMockTools } from "../folder/mock-tools.ts";
 import {
-  DEFAULT_PRIORITY,
   type ExpectedBehavior,
   type FileBehavior,
   type FilePersona,
@@ -196,15 +195,8 @@ function inputFrom(test: TestFile): TestInput {
     name: test.name,
     description: test.description ?? "",
     scenario: test.scenario,
-    // A line that wrote no priority down is sent as the P0 it has always
-    // meant. The distinction the file keeps is about what somebody *claimed*,
-    // and a write has to say something either way.
-    expectedBehaviors: test.expectedBehaviors.map((one) => ({
-      behavior: one.behavior,
-      priority: one.priority ?? DEFAULT_PRIORITY,
-    })),
+    expectedBehaviors: [...test.expectedBehaviors],
     personas: test.personas,
-    graders: test.graders,
     requiredCapabilities: test.requiredCapabilities,
     mockTools: test.mockTools,
   };
@@ -217,24 +209,16 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
 /**
  * Whether the file's list is the list the platform holds.
  *
- * A line that wrote no priority down means P0, so it is compared as one: this
- * is the question "would uploading this file mint a version", and a write turns
- * an unmarked line into a P0 whatever it claimed. That is a different question
- * from the pull's, which is about what somebody wrote rather than what a write
- * would do with it.
+ * Sentences, compared in order, and nothing else. It used to compare priorities
+ * too — mapping an unmarked line onto the P0 a write would have turned it into
+ * — and the ladder retired, so a marker still sitting in a format 2 file is
+ * stripped before it ever reaches here and cannot mint a version on its own.
  */
 function sameBehaviors(
   a: readonly FileBehavior[],
   b: readonly ExpectedBehavior[],
 ): boolean {
-  return (
-    a.length === b.length &&
-    a.every(
-      (one, index) =>
-        one.behavior === b[index]?.behavior &&
-        (one.priority ?? DEFAULT_PRIORITY) === b[index]?.priority,
-    )
-  );
+  return a.length === b.length && a.every((one, index) => one === b[index]);
 }
 
 /**
@@ -266,10 +250,9 @@ function samePersonas(
 /**
  * Whether the file says exactly what the platform already holds. Order is
  * content in every list: an expected behaviors list is one a reader goes down,
- * personas are named in the order they were authored, graders in the order they
- * were added, and the platform compares a test's mock tools in the order they
- * were written — so a folder that thought order was nothing would mint a
- * version saying nothing.
+ * personas are named in the order they were authored, and the platform compares
+ * a test's mock tools in the order they were written — so a folder that thought
+ * order was nothing would mint a version saying nothing.
  */
 export function sameAsPlatform(file: TestFile, test: PlatformTest): boolean {
   return (
@@ -278,7 +261,6 @@ export function sameAsPlatform(file: TestFile, test: PlatformTest): boolean {
     file.scenario === test.scenario &&
     sameBehaviors(file.expectedBehaviors, test.expectedBehaviors) &&
     samePersonas(file.personas, test.personas) &&
-    sameList(file.graders, test.graders) &&
     sameList(file.requiredCapabilities, test.requiredCapabilities) &&
     sameMockTools(file.mockTools, test.mockTools)
   );

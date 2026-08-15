@@ -1,5 +1,4 @@
 import {
-  correctVerdict,
   foldSimulation,
   getAgent,
   getConnection,
@@ -12,16 +11,16 @@ import {
   listGradingJobsForSimulation,
   NotPermittedError,
   readTrace,
+  readAssertionShelf,
   readVerdicts,
   regrade,
-  VERDICTS,
+  type AssertionWords,
   type GradingPlan,
   type MockToolCoverage,
   type RecordedVerdict,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
-  type Verdict,
 } from "@egma/db";
 import { isId } from "@egma/ids";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -33,6 +32,11 @@ import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { describedMockTool } from "../http/mock-tools.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
+import {
+  describedOutcome,
+  describedVerdict,
+  onlyReporting,
+} from "../http/verdicts.ts";
 import {
   invalid,
   narrowerGradingInFlight,
@@ -92,10 +96,12 @@ import {
  *   be asked for alone — asking for the conversation is how its behaviors are
  *   judged again. Run and window re-grades stay where they were, on their own
  *   surfaces, because a conversation is not the only grain anybody re-scores.
- * - `POST /api/simulations/:id/corrections` writes a person's disagreement as a
- *   whole verdict row beside the machine's. Nothing is edited and nothing is
- *   deleted; the read below prefers the person's word and still carries the
- *   machine's underneath it, which is the entire reason it is a second row.
+ * **There is no corrections endpoint, and there was one.** It wrote a person's
+ * disagreement as a whole verdict row beside the machine's. ADR-0009 takes
+ * corrections and their calibration data out of v0: the capability returns as
+ * the reserved `human` grader type, which writes its own rows under its own
+ * grader id and therefore needs no `judged_by` column and no second author on
+ * one judgment. Nothing here is a smaller version of it.
  */
 
 export type SimulationRoutesOptions = {
@@ -105,8 +111,6 @@ export type SimulationRoutesOptions = {
 
 export const SIMULATION_PATH = "/api/simulations/:simulationId";
 export const SIMULATION_REGRADE_PATH = "/api/simulations/:simulationId/regrade";
-export const SIMULATION_CORRECTIONS_PATH =
-  "/api/simulations/:simulationId/corrections";
 
 /**
  * Which project a request acts in, wherever the caller put it.
@@ -219,34 +223,6 @@ function describedTranscript(
   };
 }
 
-/**
- * One judgment on the wire.
- *
- * Every field a reviewer needs to argue with it: which grader and at which
- * version, what inside that grader was judged, the priority in force **when it
- * was judged** rather than today's, what it decided and why, the turns it is
- * about, and who said it — a judge model, `engine`, or `human`.
- */
-function describedVerdict(its: RecordedVerdict): Record<string, unknown> {
-  return {
-    grader_id: its.graderId,
-    grader_version_id: its.graderVersionId,
-    dimension: its.dimension,
-    source: its.source,
-    verdict: its.verdict,
-    score: its.score,
-    // The machine's stable word, separate from the prose. A page branches on
-    // this and shows the prose; branching on the prose would break the first
-    // time somebody improved a sentence.
-    reason: its.reason,
-    priority: its.priority,
-    rationale: its.rationale,
-    cited_turns: [...its.citedSpanIds],
-    judged_by: its.judgedBy,
-    judged_at: its.judgedAt,
-  };
-}
-
 /** The coverage stamp, key by key, or null where nothing was ever claimed. */
 function describedMockToolCoverage(
   coverage: MockToolCoverage | null,
@@ -291,27 +267,16 @@ function describedPlanForThisConversation(
     captured_at: plan.capturedAt?.toISOString() ?? null,
     items: mine.flatMap((group) =>
       group.items.map((item) =>
-        item.kind === "built_in"
-          ? {
-              kind: "built_in",
-              grader_key: item.graderKey,
-              engine_version: item.engineVersion,
-              reads: [...item.reads],
-              modalities: [...item.modalities],
-              judge: describedJudgeChoice(item.judge),
-            }
-          : {
-              kind: "authored",
-              grader_id: item.graderId,
-              grader_version_id: item.graderVersionId,
-              name: item.graderName,
-              origin: item.origin,
-              priority: item.priority,
-              scope: item.scope,
-              reads: [...item.reads],
-              modalities: [...item.modalities],
-              judge: describedJudgeChoice(item.judge),
-            },
+        ({
+          kind: "authored",
+          grader_id: item.graderId,
+          grader_version_id: item.graderVersionId,
+          name: item.graderName,
+          library_id: item.libraryId,
+          required: item.required,
+          scope: item.scope,
+          judge: describedJudgeChoice(item.judge),
+        }),
       ),
     ),
   };
@@ -450,6 +415,21 @@ export async function simulationRoutes(
         : judged.outcome;
     const fold = foldSimulation(one.status, outcome);
 
+    // Which of the copies that judged this conversation only report, off the
+    // read's own per-grader fold rather than asked a second time — so a card's
+    // marking and the outcome above it cannot disagree.
+    const diagnostic = onlyReporting(judged?.byGrader);
+
+    // The words behind the assertion keys these rows carry, resolved from the
+    // version this conversation was pinned to. A key nothing can place is sent
+    // as itself; a page shows the key rather than a guess.
+    const words: AssertionWords | undefined = await readAssertionShelf(
+      who,
+      (judged?.byGrader ?? []).map((its) => its.graderId),
+    )
+      .then((shelf) => shelf.forSimulation(one.id))
+      .catch(() => undefined);
+
     return reply.send({
       id: one.id,
       project_id: one.projectId,
@@ -490,12 +470,7 @@ export async function simulationRoutes(
         // rather than an unnamed one.
         scenario: testVersion?.scenario ?? null,
         expected_behaviors:
-          testVersion === undefined
-            ? null
-            : testVersion.expectedBehaviors.map((its) => ({
-                behavior: its.behavior,
-                priority: its.priority,
-              })),
+          testVersion === undefined ? null : [...testVersion.expectedBehaviors],
         required_capabilities:
           testVersion === undefined
             ? null
@@ -566,12 +541,21 @@ export async function simulationRoutes(
         last_error: job.lastError,
         finished_at: job.finishedAt?.toISOString() ?? null,
       })),
-      // Every row, superseded ones included and in a stable order. A person's
-      // correction sits beside the machine's word rather than over it, and the
-      // reader folds — which is the whole reason the machine's row survives.
-      verdicts: (judged?.verdicts ?? []).map(describedVerdict),
+      // Every row, superseded ones included and in a stable order: an older
+      // grading stays underneath the one that replaced it, and the reader
+      // folds — which is the whole reason the earlier row survives.
+      verdicts: (judged?.verdicts ?? []).map((its) =>
+        describedVerdict(its, words, diagnostic),
+      ),
+      // The conversation's own answer, over the required copies alone, with the
+      // diagnostic lane beside it and never in it.
+      outcome: describedOutcome(judged?.outcome),
+      diagnostics: describedOutcome(judged?.diagnostics),
       by_grader: (judged?.byGrader ?? []).map((its) => ({
         grader_id: its.graderId,
+        // `false` marks a diagnostic: judged, shown, never able to fail
+        // anything. Without it a red card would read the same either way.
+        required: its.required,
         verdict: its.outcome.verdict,
         score: its.outcome.score ?? null,
         counts: its.outcome.counts,
@@ -680,113 +664,11 @@ export async function simulationRoutes(
     });
   });
 
-  /**
-   * A person disagreeing with one judgment, and what they say instead.
-   *
-   * **A whole verdict row, never an edit.** The machine's row stays exactly
-   * where it is and is still returned by the read above; the fold prefers the
-   * person's word from the next read on. Accumulated, those pairs are the ground
-   * truth any future measurement of judge accuracy is made of, and an edit would
-   * have thrown away one half of every pair.
-   *
-   * What the body names is the *judged thing* — the grader, the exact version
-   * that decided it, the dimension and the source — and never who judged it,
-   * because there is exactly one human row per judged thing and this is it.
-   * Correcting a correction is therefore the same act as making one.
+  /*
+   * **There is no corrections endpoint here, and there was one.** See this
+   * module's own note: corrections leave v0 with ADR-0009 and return as the
+   * reserved `human` grader type, writing rows under a grader id of its own.
    */
-  app.post(SIMULATION_CORRECTIONS_PATH, async (request, reply) => {
-    const { auth } = requesterOf(request);
-    const body = (request.body ?? {}) as Record<string, unknown>;
-    const query = (request.query ?? {}) as Record<string, unknown>;
-    const { simulationId } = request.params as { simulationId: string };
-
-    const acting = await actingIn(auth, projectNamed(query, body));
-    if ("refusal" in acting) return refuseActing(reply, acting);
-    const who = acting.auth;
-
-    const missing = [
-      "grader_id",
-      "grader_version_id",
-      "dimension",
-      "verdict",
-    ].filter((name) => given(text(body[name])) === undefined);
-    if (missing.length > 0) {
-      return invalid(
-        reply,
-        `a correction names the judgment it disagrees with, and this one has ` +
-          `no ${missing.join(" and no ")}. Take all four off the verdict row ` +
-          `you are correcting: grader_id, grader_version_id, dimension and ` +
-          `the verdict you say it should be.`,
-      );
-    }
-
-    const said = text(body.verdict);
-    if (!(VERDICTS as readonly string[]).includes(said)) {
-      return invalid(
-        reply,
-        `"${said}" is not a verdict. Send one of ${VERDICTS.join(", ")}. ` +
-          `skipped and errored are answers in their own right and are never ` +
-          `folded into failed.`,
-      );
-    }
-
-    const rationale = text(body.rationale).trim();
-    if (rationale === "") {
-      return invalid(
-        reply,
-        "a correction says why you disagree. Send rationale with one line a " +
-          "later reader can weigh against what the machine said; a correction " +
-          "with no reason is an assertion.",
-      );
-    }
-
-    // The conversation is resolved before anything is written, so a correction
-    // filed against somebody else's conversation is not there rather than
-    // refused — and so the sentence below can name what is missing without ever
-    // confirming that the conversation exists.
-    const one = await getSimulation(who, simulationId);
-    if (one === undefined) return notFound(reply, NO_SUCH_SIMULATION);
-
-    const scored = body.score;
-    if (scored !== undefined && scored !== null && typeof scored !== "number") {
-      return invalid(
-        reply,
-        "score is a number between 0 and 1, or left out. Left out it follows " +
-          "the verdict — 1 for passed and 0 for anything else — which is what " +
-          "a reader who has a word and not a number is actually saying.",
-      );
-    }
-
-    let written;
-    try {
-      written = await correctVerdict(who, {
-        traceId: one.id,
-        graderId: text(body.grader_id),
-        graderVersionId: text(body.grader_version_id),
-        dimension: text(body.dimension),
-        // Every verdict on a conversation egma conducted is filed as a
-        // simulation's, and this route only ever reaches one — so the source is
-        // written here rather than taken from the body. A field a caller could
-        // set would be a field a caller could set wrong, and a correction filed
-        // against `production` would name a judgment that is not on this page.
-        source: "simulation",
-        verdict: said as Verdict,
-        rationale,
-        ...(typeof scored === "number" ? { score: scored } : {}),
-        ...(Array.isArray(body.cited_turns)
-          ? { citedSpanIds: body.cited_turns.map((its) => text(its)) }
-          : {}),
-      });
-    } catch (why) {
-      if (why instanceof NotPermittedError) throw why;
-      // The one refusal this write has of its own: there is nothing to disagree
-      // with. Authoring a verdict by hand is a different act with none of this
-      // one's reasoning behind it, and it is refused out loud.
-      return unprocessable(reply, (why as Error).message);
-    }
-
-    return reply.code(201).send(describedVerdict(written));
-  });
 
   app.setErrorHandler(async (error, _request, reply) => {
     if (error instanceof NotPermittedError) {

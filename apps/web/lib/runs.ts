@@ -57,30 +57,30 @@ export type JudgeChoice =
     }
   | { readonly tag: "unavailable_at_capture" };
 
-/** One grader a run would freeze, in whichever of its two shapes it has. */
-export type PlanGrader =
-  | {
-      readonly kind: "built_in";
-      /** The reserved key. `expected_behaviors_v1` is the first and only one. */
-      readonly grader_key: string;
-      readonly engine_version: string;
-      readonly reads: readonly string[];
-      readonly modalities: readonly string[];
-      readonly judge: JudgeChoice;
-    }
-  | {
-      readonly kind: "authored";
-      readonly grader_id: string;
-      readonly grader_version_id: string;
-      readonly name: string;
-      /** How it got here. A direct link is the per-test scoping decision. */
-      readonly origin: "project_default" | "scenario_specific";
-      readonly priority: string;
-      readonly scope: string;
-      readonly reads: readonly string[];
-      readonly modalities: readonly string[];
-      readonly judge: JudgeChoice;
-    };
+/**
+ * One running copy a run would freeze, or has frozen.
+ *
+ * **One shape, where there used to be two.** The second was the
+ * expected-behaviors built-in — a rowless sentinel with a reserved key and an
+ * engine version instead of an identity. It is an ordinary running copy now,
+ * seeded into every project, so it arrives here like everything else and there
+ * is nothing left for a second arm to describe. `kind` stays on the wire
+ * because that is what a reader already switches on.
+ *
+ * `required` is `false` for a diagnostic: judged and shown exactly like any
+ * other, and never able to fail the run.
+ */
+export type PlanGrader = {
+  readonly kind: "authored";
+  readonly grader_id: string;
+  readonly grader_version_id: string;
+  readonly name: string;
+  /** The library entry this copy reads its definition through. */
+  readonly library_id: string;
+  readonly required: boolean;
+  readonly scope: string;
+  readonly judge: JudgeChoice;
+};
 
 /**
  * Why egma would not conduct a test's conversations at all.
@@ -365,27 +365,17 @@ export type PlanJudgeChoice =
     }
   | { readonly tag: "unavailable_at_capture" };
 
-export type FrozenPlanItem =
-  | {
-      readonly kind: "built_in";
-      readonly grader_key: string;
-      readonly engine_version: string;
-      readonly reads: readonly string[];
-      readonly modalities: readonly string[];
-      readonly judge: PlanJudgeChoice;
-    }
-  | {
-      readonly kind: "authored";
-      readonly grader_id: string;
-      readonly grader_version_id: string;
-      readonly name: string;
-      readonly origin: "project_default" | "scenario_specific";
-      readonly priority: string;
-      readonly scope: string;
-      readonly reads: readonly string[];
-      readonly modalities: readonly string[];
-      readonly judge: PlanJudgeChoice;
-    };
+/** One item of a frozen plan. See `PlanGrader` for why there is one shape. */
+export type FrozenPlanItem = {
+  readonly kind: "authored";
+  readonly grader_id: string;
+  readonly grader_version_id: string;
+  readonly name: string;
+  readonly library_id: string;
+  readonly required: boolean;
+  readonly scope: string;
+  readonly judge: PlanJudgeChoice;
+};
 
 export type FrozenPlanGroup =
   | {

@@ -50,8 +50,17 @@ export const PLATFORM_IDENTITY_PATH = "/api/platform";
  * their display name, a test carries a description, graders, required
  * capabilities and an identity revision, and a repository write names both the
  * version and the revision it was written against.
+ *
+ * 3 — the grader redesign, on the wire. An expected behavior is a plain
+ * sentence again and the `{behavior, priority}` shape is refused by name; a
+ * test names no graders and the `graders` key is refused too. Both are
+ * *refusals* rather than fields quietly dropped, which is what makes this
+ * number worth having: a client built for 2 sends objects, would be turned away
+ * one test at a time with a sentence about a shape it has never heard of, and
+ * is told here instead — before it writes anything — that it is the version
+ * that is behind.
  */
-export const REPOSITORY_CONTRACT = 2;
+export const REPOSITORY_CONTRACT = 3;
 
 /** Public platform facts used before device login and repository binding. */
 export const platformRoutes: FastifyPluginAsync<PlatformRouteOptions> = async (

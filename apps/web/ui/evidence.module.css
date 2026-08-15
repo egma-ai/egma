@@ -317,50 +317,12 @@
   color: var(--muted);
 }
 
-/* ------------------------------------------------------------------ *
- * The frozen plan, and the correction form.
- * ------------------------------------------------------------------ */
-
-.plan {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.planItem {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  align-items: baseline;
-  font-size: var(--text-sm);
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.planItem:last-child {
-  border-bottom: none;
-}
-
-.planNote {
-  font-size: var(--text-xs);
-  color: var(--muted);
-  font-family: var(--mono);
-}
-
-.correctionForm {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  margin-top: var(--space-3);
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface-soft);
-}
-
+/*
+ * **There was a `.correctionForm` here.** It framed the form a page opened
+ * under one judgement to disagree with it. ADR-0009 takes corrections out of
+ * v0 and they return as the reserved `human` grader type, which writes rows
+ * rather than opening a form.
+ */
 .mono {
   font-family: var(--mono);
   font-size: var(--text-xs);

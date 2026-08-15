@@ -85,9 +85,19 @@ afterEach(async () => {
 function startWizard(script: string) {
   return runInTerminal({
     command: process.execPath,
-    args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+    args: [
+      CLI_ENTRY,
+      "--url",
+      platform.url,
+      "--cwd",
+      workspace.dir,
+      "--",
+      process.execPath,
+      FAKE_AGENT,
+      script,
+    ],
     cwd: workspace.dir,
-    env: workspace.env({ EGMA_URL: platform.url, EGMA_RETELL_URL: retell.url }),
+    env: workspace.env({ EGMA_RETELL_URL: retell.url }),
     cols: 100,
   });
 }
@@ -311,9 +321,19 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
     // line as two would be checking the terminal's width and not egma's.
     const terminal = runInTerminal({
       command: process.execPath,
-      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      args: [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url, EGMA_RETELL_URL: retell.url }),
+      env: workspace.env({ EGMA_RETELL_URL: retell.url }),
       cols: 200,
     });
 

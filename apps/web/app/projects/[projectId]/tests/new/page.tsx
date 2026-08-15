@@ -5,10 +5,6 @@ import { useEffect, useState } from "react";
 
 import { sendJson, type Refusal } from "../../../../../lib/api.ts";
 import { agentsQuery, type AgentPage } from "../../../../../lib/agents.ts";
-import {
-  gradersPath,
-  type GraderPage,
-} from "../../../../../lib/graders.ts";
 import { personasPath, type PersonaPage } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { roleOf } from "../../../../../lib/me.ts";
@@ -83,10 +79,6 @@ function NewTest({ projectId }: { readonly projectId: string }) {
     personasPath(false),
     projectId,
   );
-  const { answer: graders } = useProjectRead<GraderPage>(
-    gradersPath({}),
-    projectId,
-  );
   const { answer: catalog } = useProjectRead<CapabilityCatalog>(
     CAPABILITIES_PATH,
     projectId,
@@ -95,12 +87,9 @@ function NewTest({ projectId }: { readonly projectId: string }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [scenario, setScenario] = useState("");
-  const [behaviors, setBehaviors] = useState<readonly ExpectedBehavior[]>([
-    { behavior: "", priority: "P0" },
-  ]);
+  const [behaviors, setBehaviors] = useState<readonly ExpectedBehavior[]>([""]);
   const [chosenAgents, setChosenAgents] = useState<readonly string[]>([]);
   const [chosenPersonas, setChosenPersonas] = useState<readonly string[]>([]);
-  const [chosenGraders, setChosenGraders] = useState<readonly string[]>([]);
   const [capabilities, setCapabilities] = useState<readonly string[]>([]);
 
   const [saving, setSaving] = useState(false);
@@ -115,10 +104,9 @@ function NewTest({ projectId }: { readonly projectId: string }) {
     setName("");
     setDescription("");
     setScenario("");
-    setBehaviors([{ behavior: "", priority: "P0" }]);
+    setBehaviors([""]);
     setChosenAgents([]);
     setChosenPersonas([]);
-    setChosenGraders([]);
     setCapabilities([]);
     setRefused(null);
   }, [projectId]);
@@ -130,10 +118,6 @@ function NewTest({ projectId }: { readonly projectId: string }) {
   const activePersonas =
     personas?.status === "ready"
       ? personas.value.items.filter((one) => one.archived_at === null)
-      : [];
-  const activeGraders =
-    graders?.status === "ready"
-      ? graders.value.items.filter((one) => one.archived_at === null)
       : [];
 
   const behaviorProblem = whyBehaviorsRefuse(behaviors);
@@ -154,10 +138,9 @@ function NewTest({ projectId }: { readonly projectId: string }) {
         ...(description.trim() === "" ? {} : { description: description.trim() }),
         scenario: scenario.trim(),
         expected_behaviors: behaviors
-          .filter((one) => one.behavior.trim() !== "")
-          .map((one) => ({ behavior: one.behavior.trim(), priority: one.priority })),
+          .map((one) => one.trim())
+          .filter((one) => one !== ""),
         personas: [...chosenPersonas],
-        graders: [...chosenGraders],
         required_capabilities: [...capabilities],
         agents: [...chosenAgents],
       },
@@ -298,23 +281,6 @@ function NewTest({ projectId }: { readonly projectId: string }) {
               chosen={chosenPersonas}
               disabled={!mayAuthor}
               onChange={setChosenPersonas}
-            />
-          </Section>
-
-          <Section
-            title="Judged by, on top of the project's own"
-            lead="Every active grader in this project already judges this test. These are the scenario-specific additions."
-          >
-            <NamedChoices
-              legend="Scenario graders"
-              available={activeGraders.map((one) => ({
-                id: one.id,
-                name: one.name,
-                archived_at: one.archived_at,
-              }))}
-              chosen={chosenGraders}
-              disabled={!mayAuthor}
-              onChange={setChosenGraders}
             />
           </Section>
 

@@ -3,20 +3,20 @@
  * does over it that are decisions rather than rendering.
  *
  * A **simulation** is one test executed once inside a run: one conversation,
- * start to finish. It produces a transcript, an outcome and measures, and
- * **graders** judge it into **verdicts**. A person may disagree with any of
- * those, and their word supersedes the machine's at read time while the
- * machine's stays exactly where it was.
+ * start to finish. It produces a transcript, an outcome and measures, and the
+ * project's **graders** judge it into **verdicts** — one per **assertion**, the
+ * 0-or-1 checks inside a grader.
  *
  * The field names are the API's own. Renaming them on the way in would put a
  * second vocabulary between the contract and the page, and the two would drift
  * the first time the API grew a field.
  *
  * **The browser decides almost nothing here.** Which versions were pinned, which
- * graders judged, which verdict the conversation folds to and whether it has
- * been judged at all are all answered by `GET /api/simulations/{id}`. The two
- * things this module works out are the two the *page* is about: which rows count
- * once a person has spoken, and which turns a judgment is pointing at.
+ * graders judged, which verdict the conversation folds to, which of them only
+ * report, and whether it has been judged at all are all answered by
+ * `GET /api/simulations/{id}`. The two things this module works out are the two
+ * the *page* is about: which of several gradings of one assertion counts, and
+ * which turns a judgment is pointing at.
  */
 
 import type {
@@ -26,34 +26,28 @@ import type {
   VerdictWord,
 } from "./runs.ts";
 
-/** What a grader's priority was **when it judged**, never what it is today. */
-export type PriorityWord = "P0" | "P1" | "P2";
-
-/** The word `judged_by` carries when a person, rather than a model, spoke. */
-export const JUDGED_BY_HUMAN = "human";
-
 /** One judgment as the evidence read carries it. */
 export type EvidenceVerdict = {
   readonly grader_id: string;
-  /** Part of the row's identity: a re-grade at a new version adds beside this. */
-  readonly grader_version_id: string;
-  /** What inside the grader was judged — one expected behavior, or its one check. */
-  readonly dimension: string;
-  readonly source: string;
+  /**
+   * Which 0-or-1 check inside the grader this answers, as its **key** — a
+   * behavior's position in the pinned test version, a measure's own name.
+   * Opaque here: it is what a page groups and filters by.
+   */
+  readonly assertion: string;
+  /**
+   * The words behind that key, resolved from the version this conversation was
+   * pinned to — or null where nothing could place it, in which case a page
+   * shows the key rather than a guess.
+   */
+  readonly assertion_text: string | null;
+  /** `false` for a diagnostic copy's row: shown, and never able to fail this. */
+  readonly required: boolean;
   readonly verdict: VerdictWord;
   readonly score: number;
-  /**
-   * The machine's own stable word for why, or empty. Branch on this and show
-   * the rationale; branching on the rationale breaks the first time somebody
-   * improves a sentence.
-   */
-  readonly reason: string;
-  readonly priority: PriorityWord;
   readonly rationale: string;
   /** The spans this judgment is about, by their own ids. */
   readonly cited_turns: readonly string[];
-  /** A judge model, `engine`, or `human`. */
-  readonly judged_by: string;
   readonly judged_at: string;
 };
 
@@ -92,28 +86,23 @@ export type EvidenceTranscript = {
   readonly spans_truncated: boolean;
 };
 
-/** One grader as the run's frozen plan named it for this conversation. */
-export type EvidencePlanItem =
-  | {
-      readonly kind: "built_in";
-      readonly grader_key: string;
-      readonly engine_version: string;
-      readonly reads: readonly string[];
-      readonly modalities: readonly string[];
-      readonly judge: EvidenceJudge;
-    }
-  | {
-      readonly kind: "authored";
-      readonly grader_id: string;
-      readonly grader_version_id: string;
-      readonly name: string;
-      readonly origin: "project_default" | "scenario_specific";
-      readonly priority: PriorityWord;
-      readonly scope: string;
-      readonly reads: readonly string[];
-      readonly modalities: readonly string[];
-      readonly judge: EvidenceJudge;
-    };
+/**
+ * One running copy as the run's frozen plan named it for this conversation.
+ *
+ * One shape, where there used to be two: the expected-behaviors built-in is an
+ * ordinary running copy now and arrives here like everything else.
+ */
+export type EvidencePlanItem = {
+  readonly kind: "authored";
+  readonly grader_id: string;
+  readonly grader_version_id: string;
+  readonly name: string;
+  readonly library_id: string;
+  /** `false` makes it a diagnostic: judged, shown, never able to fail a test. */
+  readonly required: boolean;
+  readonly scope: string;
+  readonly judge: EvidenceJudge;
+};
 
 export type EvidenceJudge =
   | { readonly tag: "not_required" }
@@ -168,6 +157,13 @@ export type EvidenceCoverage = {
   readonly uncovered: readonly string[];
 };
 
+/** One folded answer, at whichever grain answers it. */
+export type EvidenceOutcome = {
+  readonly verdict: VerdictWord;
+  readonly score: number | null;
+  readonly counts: VerdictCounts;
+};
+
 /** One conversation, whole — everything one page load reads. */
 export type SimulationEvidence = {
   readonly id: string;
@@ -200,9 +196,8 @@ export type SimulationEvidence = {
     readonly version_id: string | null;
     readonly name: string | null;
     readonly scenario: string | null;
-    readonly expected_behaviors:
-      | readonly { readonly behavior: string; readonly priority: PriorityWord }[]
-      | null;
+    /** Plain sentences, in the order they were written. */
+    readonly expected_behaviors: readonly string[] | null;
     readonly required_capabilities: readonly string[] | null;
   };
   readonly persona: {
@@ -236,8 +231,13 @@ export type SimulationEvidence = {
   readonly grading_plan: EvidencePlan | null;
   readonly grading_jobs: readonly EvidenceGradingJob[];
   readonly verdicts: readonly EvidenceVerdict[];
+  /** The required lane's answer for this conversation, and the other lane. */
+  readonly outcome: EvidenceOutcome | null;
+  readonly diagnostics: EvidenceOutcome | null;
   readonly by_grader: readonly {
     readonly grader_id: string;
+    /** `false` marks a diagnostic: judged, shown, never able to fail. */
+    readonly required: boolean;
     readonly verdict: VerdictWord;
     readonly score: number | null;
     readonly counts: VerdictCounts;
@@ -271,10 +271,6 @@ export function simulationRegradePath(simulationId: string): string {
   return `${simulationPath(simulationId)}/regrade`;
 }
 
-export function simulationCorrectionsPath(simulationId: string): string {
-  return `${simulationPath(simulationId)}/corrections`;
-}
-
 /** Where one conversation's evidence lives inside its run, inside its project. */
 export function simulationSection(runId: string): readonly string[] {
   return ["runs", runId, "simulations"];
@@ -285,32 +281,38 @@ export function simulationSection(runId: string): readonly string[] {
  * ------------------------------------------------------------------------ */
 
 /**
- * One judged dimension, with the row that counts and the rows beneath it.
+ * One judged assertion, with the judgment that counts and the ones beneath it.
  *
- * **The machine's word is kept and shown, never replaced.** That is the whole
- * reason a correction is stored as a second row: accumulated, those pairs are
- * the ground truth any future measurement of judge accuracy is made of, and a
- * page that hid the machine's row would be an edit with extra steps.
+ * **An earlier judgment is kept and shown, never replaced.** A re-grade writes a
+ * new row rather than over the old one, and a page that hid the earlier one
+ * would make "this grader was tightened and now disagrees" invisible.
  */
-export type JudgedDimension = {
+export type JudgedAssertion = {
   readonly key: string;
   readonly graderId: string;
-  readonly graderVersionId: string;
-  readonly dimension: string;
-  readonly source: string;
-  /** What counts now: the person's word where there is one, the machine's else. */
+  /** The stored key, which is what this is filed under. */
+  readonly assertion: string;
+  /** The words behind it, or null where nothing could place the key. */
+  readonly assertionText: string | null;
+  /** `false` for a diagnostic copy's row: shown, never able to fail this. */
+  readonly required: boolean;
+  /** The judgment that counts: the newest one. */
   readonly speaking: EvidenceVerdict;
-  /** The machine's row for the grading that speaks, where there is one. */
-  readonly machine: EvidenceVerdict | null;
-  /** True where a person's word is what counts. */
-  readonly corrected: boolean;
-  /** Earlier gradings of the same dimension, newest first. Evidence, not noise. */
+  /** Earlier judgments of the same assertion, newest first. Evidence, not noise. */
   readonly superseded: readonly EvidenceVerdict[];
 };
 
-/** A dimension's identity: everything except which grading of it this is. */
-function dimensionKey(row: EvidenceVerdict): string {
-  return `${row.grader_id} ${row.dimension} ${row.source}`;
+/**
+ * An assertion's identity: the grader, and what inside it was judged.
+ *
+ * `JSON.stringify` of the tuple rather than a joined string, for the reason the
+ * store's own key uses it: a grader names its own assertions, and any separator
+ * chosen here would be one an assertion key is one day allowed to contain. The
+ * previous version of this line joined on a raw NUL byte, which made this
+ * source file binary to git and to grep.
+ */
+function assertionKey(row: EvidenceVerdict): string {
+  return JSON.stringify([row.grader_id, row.assertion]);
 }
 
 function whenJudged(row: EvidenceVerdict): number {
@@ -319,72 +321,50 @@ function whenJudged(row: EvidenceVerdict): number {
 }
 
 /**
- * Every judged dimension of this conversation, folded the way the store folds
- * it: **the newest grading speaks, and inside it the person's word wins.**
+ * Every judged assertion of this conversation, folded the way the store folds
+ * it: **the newest judgment speaks, and the ones under it stay readable.**
  *
- * The newest grading is decided by the clock on the machine's rows, because a
- * grading is something the engine did and a re-grade happens after the grading
- * it supersedes — so nothing here has to understand version identifiers to know
- * which came second. A grading with no machine row at all falls back to its own
- * rows' clock, because this has to be total: it is handed whatever rows exist.
- *
- * A person correcting an *older* grading therefore does not pull it back in
- * front of a newer one. Their word stands against the grading they read, which
- * is the only one they can have read.
+ * Decided by the clock on the rows and by nothing else. The grader version each
+ * row was written at is deliberately not on this wire — a copy's definition is
+ * read through its library pointer at judging time and a version identifier is
+ * not something a reader can act on — so "which grading" is answered by when,
+ * which is the same order a re-grade actually happened in.
  *
  * This is the browser's copy of an algebra the server also performs, and that is
  * deliberate rather than accidental duplication: the server folds it into one
  * verdict for the header, and the page has to show the working — which rows
- * count, which are superseded, and which the machine wrote underneath a person's
- * word. Neither can produce the other's answer from the other's output.
+ * count and which are superseded. Neither can produce the other's answer from
+ * the other's output.
  */
-export function judgedDimensions(
+export function judgedAssertions(
   rows: readonly EvidenceVerdict[],
-): readonly JudgedDimension[] {
-  const byDimension = new Map<string, EvidenceVerdict[]>();
+): readonly JudgedAssertion[] {
+  const byAssertion = new Map<string, EvidenceVerdict[]>();
   for (const row of rows) {
-    const key = dimensionKey(row);
-    const held = byDimension.get(key);
-    if (held === undefined) byDimension.set(key, [row]);
+    const key = assertionKey(row);
+    const held = byAssertion.get(key);
+    if (held === undefined) byAssertion.set(key, [row]);
     else held.push(row);
   }
 
-  return [...byDimension.entries()].map(([key, its]) => {
-    const gradings = new Map<string, EvidenceVerdict[]>();
-    for (const row of its) {
-      const held = gradings.get(row.grader_version_id);
-      if (held === undefined) gradings.set(row.grader_version_id, [row]);
-      else held.push(row);
-    }
-
-    const clockOf = (grading: readonly EvidenceVerdict[]): number => {
-      const machine = grading.filter((row) => row.judged_by !== JUDGED_BY_HUMAN);
-      const read = machine.length > 0 ? machine : grading;
-      return Math.max(...read.map(whenJudged));
-    };
-
-    const ordered = [...gradings.values()].sort(
-      (left, right) => clockOf(right) - clockOf(left),
+  return [...byAssertion.entries()].map(([key, its]) => {
+    const ordered = [...its].sort(
+      (left, right) => whenJudged(right) - whenJudged(left),
     );
-    const [newest = [], ...older] = ordered;
-
-    const machine =
-      newest.find((row) => row.judged_by !== JUDGED_BY_HUMAN) ?? null;
-    const said = newest.find((row) => row.judged_by === JUDGED_BY_HUMAN) ?? null;
-    // `newest` is never empty: a grading only exists here because a row is in
-    // it. The fallback keeps the type honest without inventing a row.
-    const speaking = said ?? machine ?? (newest[0] as EvidenceVerdict);
+    // Never empty: the entry exists because a row went into it.
+    const [speaking, ...superseded] = ordered as [
+      EvidenceVerdict,
+      ...EvidenceVerdict[],
+    ];
 
     return {
       key,
       graderId: speaking.grader_id,
-      graderVersionId: speaking.grader_version_id,
-      dimension: speaking.dimension,
-      source: speaking.source,
+      assertion: speaking.assertion,
+      assertionText: speaking.assertion_text,
+      required: speaking.required,
       speaking,
-      machine,
-      corrected: said !== null,
-      superseded: older.flat(),
+      superseded,
     };
   });
 }
@@ -450,11 +430,9 @@ export function planExplanation(state: EvidencePlan["state"]): string {
 export const REGRADE_IS_NOT_A_REPLAY =
   "A regrade judges this conversation again at today's grader versions. The conversation itself is not conducted again — nothing is dialed, nothing is said, and the transcript below does not change. A grader that has been edited since will write a new row beside the old one rather than over it, and both stay readable.";
 
-/**
- * The sentence a page shows above a correction.
- *
- * The whole point is that it adds rather than replaces, and somebody about to
- * disagree with a judge should know that before they do it rather than after.
+/*
+ * **There was a sentence here about disagreeing with a judge, and it goes with
+ * the endpoint.** ADR-0009 takes corrections out of v0; they return as the
+ * reserved `human` grader type, writing rows of their own under a grader id of
+ * their own, and the words for that belong with it when it arrives.
  */
-export const A_CORRECTION_ADDS =
-  "Your word is written as a verdict of its own, beside the machine's. The machine's verdict stays exactly where it is and stays readable; yours is what counts from the next read on.";

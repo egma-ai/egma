@@ -1,13 +1,16 @@
 import {
-  foldVerdicts,
   foldVerdictsByGrader,
-  JUDGED_BY_HUMAN,
   speakingVerdicts,
+  verdictLanes,
   VERDICTS,
   type FoldableVerdict,
   type Verdict,
   type VerdictSource,
 } from "@egma/db";
+// `foldVerdicts` is deliberately not on the package's surface — see the note
+// beside its neighbours in `src/index.ts`. This file is the algebra's own unit
+// test and lives in the same package, so it reaches the module directly.
+import { foldVerdicts } from "../src/verdicts/fold.ts";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -20,7 +23,7 @@ import { describe, expect, it } from "vitest";
  * including the ones nobody thought of.
  *
  * Two halves. Small sets are asserted **exhaustively**: every arrangement of the
- * four words over one, two and three dimensions, which is 84 cases and covers
+ * four words over one, two and three assertions, which is 84 cases and covers
  * every interaction of the precedence rule with the denominator rule. Larger
  * ones are swept **randomly from a fixed seed**, so a sweep is a thousand shapes
  * a person would not have written down and is still the same thousand on every
@@ -32,17 +35,16 @@ import { describe, expect, it } from "vitest";
  * A row, and a seeded source of them.
  * ------------------------------------------------------------------- */
 
-let nextDimension = 0;
+let nextAssertion = 0;
 
 function row(overrides: Partial<FoldableVerdict> = {}): FoldableVerdict {
-  nextDimension += 1;
+  nextAssertion += 1;
   return {
     traceId: "trace-1",
     graderId: "grader-1",
     graderVersionId: "version-1",
-    dimension: `behavior ${nextDimension}`,
+    assertion: `behavior_${nextAssertion}`,
     source: "simulation",
-    judgedBy: "engine",
     verdict: "passed",
     judgedAtMicroseconds: 1_785_693_880_000_000n,
     ...overrides,
@@ -73,14 +75,13 @@ function pick<Item>(draw: () => number, from: readonly Item[]): Item {
 const TRACES = ["trace-1", "trace-2", "trace-3"];
 const GRADERS = ["grader-1", "grader-2"];
 const VERSIONS = ["version-1", "version-2", "version-3"];
-const DIMENSIONS = ["greeting", "slot offered", "address read back", "goodbye"];
+const ASSERTIONS = ["behavior_1", "behavior_2", "behavior_3", "behavior_4"];
 const SOURCES: readonly VerdictSource[] = ["simulation", "production"];
-const JUDGES = ["engine", "openai/gpt-judge", JUDGED_BY_HUMAN];
 
 /**
  * A pile of rows with everything in it that a real table accumulates: several
- * conversations, several graders, dimensions judged at more than one grader
- * version, corrections written by people, and outright repeats.
+ * conversations, several graders, assertions judged at more than one grader
+ * version, and outright repeats.
  */
 function someRows(draw: () => number, howMany: number): FoldableVerdict[] {
   return Array.from({ length: howMany }, () =>
@@ -88,9 +89,8 @@ function someRows(draw: () => number, howMany: number): FoldableVerdict[] {
       traceId: pick(draw, TRACES),
       graderId: pick(draw, GRADERS),
       graderVersionId: pick(draw, VERSIONS),
-      dimension: pick(draw, DIMENSIONS),
+      assertion: pick(draw, ASSERTIONS),
       source: pick(draw, SOURCES),
-      judgedBy: pick(draw, JUDGES),
       verdict: pick(draw, VERDICTS),
       // A day's worth of minutes, so ties happen often enough to matter.
       judgedAtMicroseconds:
@@ -180,11 +180,11 @@ describe("the score", () => {
   });
 
   /**
-   * The rule taken whole: a dimension nobody could score is out of the
+   * The rule taken whole: an assertion nobody could score is out of the
    * denominator rather than counted against anybody, so adding one to a set
    * never moves the number.
    */
-  it("does not move when a skipped dimension is added to it", () => {
+  it("does not move when a skipped assertion is added to it", () => {
     const draw = randomly(0x5c1d);
     for (let sweep = 0; sweep < 200; sweep += 1) {
       const rows = someRows(draw, 1 + Math.floor(draw() * 12));
@@ -193,7 +193,7 @@ describe("the score", () => {
         ...rows,
         row({
           traceId: "trace-untouched",
-          dimension: "one nobody could score",
+          assertion: "one_nobody_could_score",
           verdict: "skipped",
         }),
       ]);
@@ -210,7 +210,7 @@ describe("the score", () => {
    * fell over on half the behaviors does not quietly read as full marks on the
    * other half.
    */
-  it("counts an errored dimension in the denominator, unlike a skipped one", () => {
+  it("counts an errored assertion in the denominator, unlike a skipped one", () => {
     const passedAndErrored = foldVerdicts([
       row({ verdict: "passed" }),
       row({ verdict: "errored" }),
@@ -244,24 +244,24 @@ describe("the score", () => {
 });
 
 /* ------------------------------------------------------------------- *
- * Who speaks for a dimension.
+ * Who speaks for an assertion.
  * ------------------------------------------------------------------- */
 
-describe("a dimension judged more than once", () => {
-  const dimension = { traceId: "trace-1", dimension: "greeting" };
+describe("an assertion judged more than once", () => {
+  const assertion = { traceId: "trace-1", assertion: "behavior_1" };
 
   it("is counted once however many rows have piled up against it", () => {
     const draw = randomly(0xf01d);
     for (let sweep = 0; sweep < 500; sweep += 1) {
       const rows = someRows(draw, 1 + Math.floor(draw() * 20));
-      const dimensions = new Set(
+      const assertions = new Set(
         rows.map((one) =>
-          [one.traceId, one.graderId, one.dimension, one.source].join("\0"),
+          [one.traceId, one.graderId, one.assertion, one.source].join("\0"),
         ),
       );
 
-      expect(foldVerdicts(rows).counts.total).toBe(dimensions.size);
-      expect(speakingVerdicts(rows)).toHaveLength(dimensions.size);
+      expect(foldVerdicts(rows).counts.total).toBe(assertions.size);
+      expect(speakingVerdicts(rows)).toHaveLength(assertions.size);
     }
   });
 
@@ -274,13 +274,13 @@ describe("a dimension judged more than once", () => {
   it("speaks with its newest grading, not with the one it replaced", () => {
     const rows = [
       row({
-        ...dimension,
+        ...assertion,
         graderVersionId: "version-1",
         verdict: "failed",
         judgedAtMicroseconds: 1_000n,
       }),
       row({
-        ...dimension,
+        ...assertion,
         graderVersionId: "version-2",
         verdict: "passed",
         judgedAtMicroseconds: 2_000n,
@@ -298,134 +298,109 @@ describe("a dimension judged more than once", () => {
   });
 
   /**
-   * The correction supersedes at read time and the machine's row stays beneath
-   * it, which is the difference between disagreeing with a judgment and erasing
-   * one. Never counted twice: a set with a correction in it has exactly as many
-   * counted dimensions as the same set without.
+   * A second grader's word about an assertion keyed the same way is a second
+   * assertion, never a second opinion — which is what lets human corrections
+   * come back as the reserved `human` type with no `judged_by` to arbitrate.
+   * Both count, and binary scoring then needs both to pass.
    */
-  it("speaks with the person who disagreed, and still counts once", () => {
+  it("keeps another grader's word apart rather than superseding with it", () => {
     const machine = row({
-      ...dimension,
+      ...assertion,
       verdict: "failed",
       judgedAtMicroseconds: 1_000n,
     });
     const person = row({
-      ...dimension,
-      judgedBy: JUDGED_BY_HUMAN,
+      ...assertion,
+      graderId: "grader-human",
       verdict: "passed",
       judgedAtMicroseconds: 2_000n,
     });
 
-    expect(foldVerdicts([machine])).toEqual({
-      verdict: "failed",
-      score: 0,
-      counts: { passed: 0, failed: 1, skipped: 0, errored: 0, total: 1 },
-    });
     expect(foldVerdicts([machine, person])).toEqual({
-      verdict: "passed",
-      score: 1,
-      counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
-    });
-    expect(speakingVerdicts([machine, person])).toEqual([person]);
-  });
-
-  /**
-   * And they win whichever order the rows arrive in, and whether their
-   * correction was written before or after the machine's row — a correction is
-   * always later in fact, but a fold that leaned on the clock for this would be
-   * one clock skew away from ignoring a person.
-   */
-  it("prefers the person over the machine whatever the clock says", () => {
-    const machine = row({
-      ...dimension,
       verdict: "failed",
-      judgedAtMicroseconds: 9_000n,
+      score: 0.5,
+      counts: { passed: 1, failed: 1, skipped: 0, errored: 0, total: 2 },
     });
-    const person = row({
-      ...dimension,
-      judgedBy: JUDGED_BY_HUMAN,
-      verdict: "passed",
-      judgedAtMicroseconds: 1_000n,
-    });
-
-    expect(speakingVerdicts([machine, person])).toEqual([person]);
-    expect(speakingVerdicts([person, machine])).toEqual([person]);
+    expect(speakingVerdicts([machine, person])).toEqual([machine, person]);
   });
 
   /**
-   * A person's word stands against the grading they read, which is the only one
-   * they can have read. Correcting version 1 after version 2 has been graded
-   * therefore does not drag version 1 back in front — their correction stays
-   * beneath, as calibration data, exactly like the machine row it answers.
+   * A judge model changing under an unchanged grader — which is what changing a
+   * project's default produces — writes a second row on one identity, and the
+   * store keeps the later of the two. Nothing on the row says which model
+   * answered any more, so the later word simply speaks and the assertion counts
+   * once.
    */
-  it("is not dragged back to an older grading by a correction of that grading", () => {
+  it("speaks with the later grading when the model changed under an unchanged grader", () => {
     const rows = [
-      row({
-        ...dimension,
-        graderVersionId: "version-1",
-        verdict: "failed",
-        judgedAtMicroseconds: 1_000n,
-      }),
-      row({
-        ...dimension,
-        graderVersionId: "version-2",
-        verdict: "passed",
-        judgedAtMicroseconds: 2_000n,
-      }),
-      row({
-        ...dimension,
-        graderVersionId: "version-1",
-        judgedBy: JUDGED_BY_HUMAN,
-        verdict: "skipped",
-        judgedAtMicroseconds: 3_000n,
-      }),
+      row({ ...assertion, verdict: "failed", judgedAtMicroseconds: 1_000n }),
+      row({ ...assertion, verdict: "passed", judgedAtMicroseconds: 2_000n }),
     ];
 
-    expect(speakingVerdicts(rows).map((one) => one.graderVersionId)).toEqual([
-      "version-2",
-    ]);
-    expect(foldVerdicts(rows).verdict).toBe("passed");
-  });
-
-  /**
-   * Two judge models on one grading — which is what changing a project's default
-   * judge without touching the grader produces — is the same question again, and
-   * the answer is the same: the later one speaks, and the dimension counts once.
-   */
-  it("speaks with the later judge when the model changed under an unchanged grader", () => {
-    const rows = [
-      row({
-        ...dimension,
-        judgedBy: "openai/small",
-        verdict: "failed",
-        judgedAtMicroseconds: 1_000n,
-      }),
-      row({
-        ...dimension,
-        judgedBy: "openai/large",
-        verdict: "passed",
-        judgedAtMicroseconds: 2_000n,
-      }),
-    ];
-
-    expect(speakingVerdicts(rows).map((one) => one.judgedBy)).toEqual([
-      "openai/large",
-    ]);
+    expect(speakingVerdicts(rows).map((one) => one.verdict)).toEqual(["passed"]);
     expect(foldVerdicts(rows).counts.total).toBe(1);
   });
 
-  it("keeps two dimensions apart even when everything else about them matches", () => {
+  /**
+   * Two rows the store itself cannot order — same identity, same instant — are
+   * the one case with no later row to prefer. The fold cannot be more decided
+   * than the table underneath it, so it is consistent instead, and it breaks the
+   * tie towards the more serious word: a green tick that arrived by luck is the
+   * one answer this product must never give.
+   */
+  it("breaks a dead heat towards the more serious word, whatever the order", () => {
+    const passed = row({
+      ...assertion,
+      verdict: "passed",
+      judgedAtMicroseconds: 1_000n,
+    });
+    const failed = row({
+      ...assertion,
+      verdict: "failed",
+      judgedAtMicroseconds: 1_000n,
+    });
+
+    expect(speakingVerdicts([passed, failed])).toEqual([failed]);
+    expect(speakingVerdicts([failed, passed])).toEqual([failed]);
+    expect(foldVerdicts([passed, failed]).verdict).toBe("failed");
+  });
+
+  /**
+   * And the pair the product is loudest about, decided the same way. `failed`
+   * and `errored` are kept apart everywhere else because a broken judge is not
+   * a broken agent — but that rule is about never calling an `errored` row a
+   * failure, not about letting one hide a failure. A dead heat resolves to the
+   * failure, which is what the same two rows fold to over any other set.
+   */
+  it("prefers a failure over a broken judge in a dead heat", () => {
+    const errored = row({
+      ...assertion,
+      verdict: "errored",
+      judgedAtMicroseconds: 1_000n,
+    });
+    const failed = row({
+      ...assertion,
+      verdict: "failed",
+      judgedAtMicroseconds: 1_000n,
+    });
+
+    expect(speakingVerdicts([errored, failed])).toEqual([failed]);
+    expect(speakingVerdicts([failed, errored])).toEqual([failed]);
+    expect(foldVerdicts([errored, failed]).verdict).toBe("failed");
+  });
+
+  it("keeps two assertions apart even when everything else about them matches", () => {
     const rows = [
-      row({ ...dimension, dimension: "greeting", verdict: "passed" }),
-      row({ ...dimension, dimension: "goodbye", verdict: "failed" }),
+      row({ ...assertion, assertion: "behavior_1", verdict: "passed" }),
+      row({ ...assertion, assertion: "behavior_2", verdict: "failed" }),
     ];
     expect(foldVerdicts(rows).counts.total).toBe(2);
   });
 
   it("keeps a simulation's judgment apart from a production conversation's", () => {
     const rows = [
-      row({ ...dimension, source: "simulation", verdict: "passed" }),
-      row({ ...dimension, source: "production", verdict: "failed" }),
+      row({ ...assertion, source: "simulation", verdict: "passed" }),
+      row({ ...assertion, source: "production", verdict: "failed" }),
     ];
     expect(foldVerdicts(rows).counts.total).toBe(2);
   });
@@ -498,12 +473,12 @@ describe("whatever pile of rows it is handed", () => {
   });
 
   /** The same, one grader at a time: the parts are exactly the whole. */
-  it("splits by grader without losing or inventing a dimension", () => {
+  it("splits by grader without losing or inventing an assertion", () => {
     const draw = randomly(0x9e2a);
     for (let sweep = 0; sweep < 300; sweep += 1) {
       const rows = someRows(draw, 1 + Math.floor(draw() * 30));
       const whole = foldVerdicts(rows);
-      const byGrader = foldVerdictsByGrader(rows);
+      const byGrader = foldVerdictsByGrader(rows, new Set<string>());
 
       expect(byGrader.map((one) => one.graderId)).toEqual(
         [...new Set(rows.map((one) => one.graderId))].sort(),
@@ -561,6 +536,185 @@ describe("whatever pile of rows it is handed", () => {
             : counts.errored > 0
               ? "errored"
               : "passed",
+        );
+      }
+    }
+  });
+});
+
+/* ------------------------------------------------------------------- *
+ * The two lanes: what decides, and what only reports.
+ * ------------------------------------------------------------------- */
+
+/**
+ * A `required: false` copy is a diagnostic. Its rows exist, its fraction is
+ * reported, and nothing it says can reach an outcome.
+ *
+ * The split is a function of its own rather than a branch inside the fold, so
+ * what is asserted here are properties of the split and of the fold over each
+ * half — which is exactly how the read path uses them.
+ */
+describe("the lane a verdict is in", () => {
+  const REQUIRED = "grader-1";
+  const DIAGNOSTIC = "grader-2";
+  const onlyReports = new Set([DIAGNOSTIC]);
+  /**
+   * A caller that genuinely knows of no diagnostic copy, said out loud.
+   *
+   * It was the default value of the argument and is a named constant here
+   * instead, because the answer it gives — *everything gates* — is the one a
+   * caller must never receive for having forgotten to ask.
+   */
+  const NOTHING_ONLY_REPORTS: ReadonlySet<string> = new Set<string>();
+
+  /** Everything decides when nothing was named a diagnostic. */
+  it("is required for every grader when no diagnostic is named", () => {
+    const draw = randomly(0x5b11);
+    for (let sweep = 0; sweep < 200; sweep += 1) {
+      const rows = someRows(draw, 1 + Math.floor(draw() * 20));
+      const lanes = verdictLanes(rows, NOTHING_ONLY_REPORTS);
+
+      expect(lanes.required).toEqual(rows);
+      expect(lanes.diagnostic).toEqual([]);
+      // And an empty set keeps `foldVerdicts` meaning exactly what it meant.
+      expect(foldVerdicts(lanes.required)).toEqual(foldVerdicts(rows));
+    }
+  });
+
+  /** Every row lands in exactly one lane, and neither lane is reordered. */
+  it("puts every row in exactly one lane, in the order it arrived", () => {
+    const draw = randomly(0x2f7c);
+    for (let sweep = 0; sweep < 200; sweep += 1) {
+      const rows = someRows(draw, 1 + Math.floor(draw() * 20));
+      const lanes = verdictLanes(rows, onlyReports);
+
+      expect(lanes.required.length + lanes.diagnostic.length).toBe(rows.length);
+      expect(lanes.required).toEqual(
+        rows.filter((one) => one.graderId !== DIAGNOSTIC),
+      );
+      expect(lanes.diagnostic).toEqual(
+        rows.filter((one) => one.graderId === DIAGNOSTIC),
+      );
+    }
+  });
+
+  /**
+   * The rule the whole flag exists for. A diagnostic failing every assertion it
+   * has cannot move the answer by one word or one digit.
+   */
+  it("lets nothing a diagnostic said reach the outcome", () => {
+    const decided = [
+      row({ graderId: REQUIRED, assertion: "behavior_1", verdict: "passed" }),
+      row({ graderId: REQUIRED, assertion: "behavior_2", verdict: "passed" }),
+    ];
+    const reported = [
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_1", verdict: "failed" }),
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_2", verdict: "errored" }),
+    ];
+
+    const alone = foldVerdicts(decided);
+    const beside = foldVerdicts(
+      verdictLanes([...decided, ...reported], onlyReports).required,
+    );
+
+    expect(beside).toEqual(alone);
+    expect(beside.verdict).toBe("passed");
+
+    // And folded together — which is what would happen if the lane were
+    // forgotten — the same rows say the opposite.
+    expect(foldVerdicts([...decided, ...reported]).verdict).toBe("failed");
+  });
+
+  /** The other way round: a required failure is not softened by a green diagnostic. */
+  it("lets a required failure fail, whatever the diagnostics say", () => {
+    const rows = [
+      row({ graderId: REQUIRED, assertion: "behavior_1", verdict: "failed" }),
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_1", verdict: "passed" }),
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_2", verdict: "passed" }),
+    ];
+
+    const lanes = verdictLanes(rows, onlyReports);
+    expect(foldVerdicts(lanes.required).verdict).toBe("failed");
+    expect(foldVerdicts(lanes.diagnostic).verdict).toBe("passed");
+  });
+
+  /**
+   * A conversation judged by diagnostics alone has earned no green tick: there
+   * was nothing that decides, so the required lane is empty and `skipped` is
+   * precisely what happened.
+   */
+  it("answers skipped where only diagnostics judged", () => {
+    const rows = [
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_1", verdict: "passed" }),
+    ];
+    const lanes = verdictLanes(rows, onlyReports);
+
+    expect(foldVerdicts(lanes.required).verdict).toBe("skipped");
+    expect(foldVerdicts(lanes.required).score).toBeUndefined();
+    expect(foldVerdicts(lanes.diagnostic).score).toBe(1);
+  });
+
+  /**
+   * The per-grader fold keeps every grader, both lanes, and says which lane each
+   * is in — because a diagnostic's fraction is the whole reason it was switched
+   * on, and a list that dropped it would make it judge in silence.
+   */
+  it("reports every grader's fraction, marking which of them only report", () => {
+    const rows = [
+      row({ graderId: REQUIRED, assertion: "behavior_1", verdict: "passed" }),
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_1", verdict: "failed" }),
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_2", verdict: "passed" }),
+    ];
+
+    expect(foldVerdictsByGrader(rows, onlyReports)).toEqual([
+      {
+        graderId: REQUIRED,
+        required: true,
+        outcome: foldVerdicts([rows[0] as FoldableVerdict]),
+      },
+      {
+        graderId: DIAGNOSTIC,
+        required: false,
+        outcome: foldVerdicts(rows.slice(1)),
+      },
+    ]);
+  });
+
+  /** A grader nobody named a diagnostic decides — the safe direction. */
+  it("treats a grader it has never heard of as one that decides", () => {
+    const rows = [row({ graderId: "grader-nobody-knows", verdict: "failed" })];
+
+    expect(verdictLanes(rows, onlyReports).required).toEqual(rows);
+    expect(foldVerdicts(verdictLanes(rows, onlyReports).required).verdict).toBe(
+      "failed",
+    );
+    expect(foldVerdictsByGrader(rows, onlyReports)[0]?.required).toBe(true);
+  });
+
+  /**
+   * Splitting first and folding each half is the same arithmetic as folding the
+   * whole: the two lanes' counts add up to the counts over everything, on any
+   * pile the sweep produces. That is what makes a page's two headings incapable
+   * of disagreeing with the rows under them.
+   */
+  it("loses and invents nothing: the two lanes' counts are the whole", () => {
+    const draw = randomly(0x11ac);
+    for (let sweep = 0; sweep < 300; sweep += 1) {
+      const rows = someRows(draw, 1 + Math.floor(draw() * 30));
+      const lanes = verdictLanes(rows, onlyReports);
+      const whole = foldVerdicts(rows);
+      const decided = foldVerdicts(lanes.required);
+      const reported = foldVerdicts(lanes.diagnostic);
+
+      for (const word of [
+        "passed",
+        "failed",
+        "skipped",
+        "errored",
+        "total",
+      ] as const) {
+        expect(whole.counts[word]).toBe(
+          decided.counts[word] + reported.counts[word],
         );
       }
     }

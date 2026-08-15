@@ -1,6 +1,6 @@
 {
-  "id": "48313070-5a92-4b54-bc49-687d619ea9ca",
-  "prevId": "dd2273f5-aaa9-44a5-b272-d9fb2d46ddbe",
+  "id": "98ef7eac-de80-47ec-97aa-d723a9df3a34",
+  "prevId": "2f73d914-05ed-4378-87a0-d9c00ac12419",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1478,14 +1478,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "revision": {
-          "name": "revision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "archived_at": {
-          "name": "archived_at",
+        "deleted_at": {
+          "name": "deleted_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -1529,7 +1523,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"persona\".\"archived_at\" is null",
+          "where": "\"persona\".\"deleted_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1744,14 +1738,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "revision": {
-          "name": "revision",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "archived_at": {
-          "name": "archived_at",
+        "deleted_at": {
+          "name": "deleted_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -1795,7 +1783,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"agent\".\"archived_at\" is null",
+          "where": "\"agent\".\"deleted_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1817,7 +1805,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"agent\".\"archived_at\" is null",
+          "where": "\"agent\".\"deleted_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1938,12 +1926,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "variant_id": {
-          "name": "variant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "environment": {
           "name": "environment",
           "type": "text",
@@ -1968,45 +1950,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "capability_state": {
-          "name": "capability_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'unknown'"
-        },
-        "capabilities_measured": {
-          "name": "capabilities_measured",
+        "capabilities": {
+          "name": "capabilities",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
-        "capabilities_supported": {
-          "name": "capabilities_supported",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "capabilities_checked_at": {
-          "name": "capabilities_checked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "capability_source": {
-          "name": "capability_source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "archived_at": {
-          "name": "archived_at",
+        "deleted_at": {
+          "name": "deleted_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -2050,7 +2001,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"connection\".\"archived_at\" is null",
+          "where": "\"connection\".\"deleted_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2066,7 +2017,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"connection\".\"archived_at\" is null",
+          "where": "\"connection\".\"deleted_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2172,21 +2123,9 @@
           "name": "connection_topology_allowed",
           "value": "\"connection\".\"topology\" in ('agent-dials-out', 'hosted-broker', 'egma-dials-in')"
         },
-        "connection_capability_state_allowed": {
-          "name": "connection_capability_state_allowed",
-          "value": "\"connection\".\"capability_state\" in ('unknown', 'known')"
-        },
         "connection_credentials_hint_agrees": {
           "name": "connection_credentials_hint_agrees",
           "value": "(\"connection\".\"credentials\" is null) = (\"connection\".\"credentials_hint\" is null)"
-        },
-        "connection_capability_evidence_agrees": {
-          "name": "connection_capability_evidence_agrees",
-          "value": "(\"connection\".\"capability_state\" = 'known') = (\"connection\".\"capabilities_measured\" is not null and \"connection\".\"capabilities_supported\" is not null and \"connection\".\"capabilities_checked_at\" is not null and \"connection\".\"capability_source\" is not null)"
-        },
-        "connection_capabilities_supported_were_measured": {
-          "name": "connection_capabilities_supported_were_measured",
-          "value": "\"connection\".\"capabilities_supported\" is null or \"connection\".\"capabilities_supported\" <@ \"connection\".\"capabilities_measured\""
         }
       },
       "isRLSEnabled": false
@@ -2213,6 +2152,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "library_id": {
+          "name": "library_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
         "name": {
           "name": "name",
           "type": "text",
@@ -2231,11 +2176,12 @@
           "primaryKey": false,
           "notNull": true
         },
-        "priority": {
-          "name": "priority",
-          "type": "text",
+        "required": {
+          "name": "required",
+          "type": "boolean",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": true
         },
         "scope": {
           "name": "scope",
@@ -2260,12 +2206,6 @@
         },
         "current_version_id": {
           "name": "current_version_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revision": {
-          "name": "revision",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
@@ -2319,6 +2259,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "grader_library_id_idx": {
+          "name": "grader_library_id_idx",
+          "columns": [
+            {
+              "expression": "library_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2333,6 +2288,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "grader_library_id_grader_library_id_fk": {
+          "name": "grader_library_id_grader_library_id_fk",
+          "tableFrom": "grader",
+          "tableTo": "grader_library",
+          "columnsFrom": [
+            "library_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "grader_current_version_id_grader_version_id_fk": {
@@ -2385,17 +2353,9 @@
           "name": "grader_id_prefix",
           "value": "\"grader\".\"id\" ~ '^grd_[0-9A-HJKMNP-TV-Z]{26}$'"
         },
-        "grader_revision_prefix": {
-          "name": "grader_revision_prefix",
-          "value": "\"grader\".\"revision\" ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
         "grader_type_allowed": {
           "name": "grader_type_allowed",
-          "value": "\"grader\".\"type\" in ('llm_rubric', 'metric_threshold', 'tool_calls', 'phrase_match')"
-        },
-        "grader_priority_allowed": {
-          "name": "grader_priority_allowed",
-          "value": "\"grader\".\"priority\" in ('P0', 'P1', 'P2')"
+          "value": "\"grader\".\"type\" in ('llm_as_judge', 'code')"
         },
         "grader_scope_allowed": {
           "name": "grader_scope_allowed",
@@ -2408,6 +2368,194 @@
         "grader_production_sample_accumulator_is_a_remainder": {
           "name": "grader_production_sample_accumulator_is_a_remainder",
           "value": "\"grader\".\"production_sample_accumulator\" between 0 and 99"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.grader_library": {
+      "name": "grader_library",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "prompt": {
+          "name": "prompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "params": {
+          "name": "params",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "output_definition": {
+          "name": "output_definition",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_code": {
+          "name": "source_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_code_language": {
+          "name": "source_code_language",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "grader_library_predefined_name_unique": {
+          "name": "grader_library_predefined_name_unique",
+          "columns": [
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"grader_library\".\"organization_id\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "grader_library_organization_id_project_id_idx": {
+          "name": "grader_library_organization_id_project_id_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "grader_library_organization_id_organization_id_fk": {
+          "name": "grader_library_organization_id_organization_id_fk",
+          "tableFrom": "grader_library",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "grader_library_project_organization_fk": {
+          "name": "grader_library_project_organization_fk",
+          "tableFrom": "grader_library",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "grader_library_id_prefix": {
+          "name": "grader_library_id_prefix",
+          "value": "\"grader_library\".\"id\" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "grader_library_type_allowed": {
+          "name": "grader_library_type_allowed",
+          "value": "\"grader_library\".\"type\" in ('llm_as_judge', 'code')"
+        },
+        "grader_library_tenancy_is_whole_or_egmas": {
+          "name": "grader_library_tenancy_is_whole_or_egmas",
+          "value": "(\"grader_library\".\"organization_id\" is null) = (\"grader_library\".\"project_id\" is null)"
+        },
+        "grader_library_source_code_within_budget": {
+          "name": "grader_library_source_code_within_budget",
+          "value": "\"grader_library\".\"source_code\" is null or octet_length(\"grader_library\".\"source_code\") <= 262144"
+        },
+        "grader_library_source_code_columns_agree": {
+          "name": "grader_library_source_code_columns_agree",
+          "value": "(\"grader_library\".\"source_code\" is null) = (\"grader_library\".\"source_code_language\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -2445,18 +2593,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
-        },
-        "reads": {
-          "name": "reads",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "modalities": {
-          "name": "modalities",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true
         },
         "created_by": {
           "name": "created_by",
@@ -2517,14 +2653,6 @@
         "grader_version_id_prefix": {
           "name": "grader_version_id_prefix",
           "value": "\"grader_version\".\"id\" ~ '^grv_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "grader_version_reads_are_a_nonempty_known_set": {
-          "name": "grader_version_reads_are_a_nonempty_known_set",
-          "value": "array_length(\"grader_version\".\"reads\", 1) >= 1 and \"grader_version\".\"reads\" <@ array['transcript', 'outcome', 'tool_calls', 'measures']::text[]"
-        },
-        "grader_version_modalities_are_a_nonempty_known_set": {
-          "name": "grader_version_modalities_are_a_nonempty_known_set",
-          "value": "array_length(\"grader_version\".\"modalities\", 1) >= 1 and \"grader_version\".\"modalities\" <@ array['voice', 'chat']::text[]"
         }
       },
       "isRLSEnabled": false
@@ -2557,29 +2685,17 @@
           "primaryKey": false,
           "notNull": true
         },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_id": {
-          "name": "credential_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
         "credentials": {
           "name": "credentials",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "credentials_hint": {
           "name": "credentials_hint",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "created_by": {
           "name": "created_by",
@@ -2615,19 +2731,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "judge_configuration_credential_id_judge_credential_id_fk": {
-          "name": "judge_configuration_credential_id_judge_credential_id_fk",
-          "tableFrom": "judge_configuration",
-          "tableTo": "judge_credential",
-          "columnsFrom": [
-            "credential_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
           "onUpdate": "no action"
         },
         "judge_configuration_created_by_user_id_fk": {
@@ -2670,152 +2773,6 @@
         "judge_configuration_provider_allowed": {
           "name": "judge_configuration_provider_allowed",
           "value": "\"judge_configuration\".\"provider\" in ('openai')"
-        },
-        "judge_configuration_source_allowed": {
-          "name": "judge_configuration_source_allowed",
-          "value": "\"judge_configuration\".\"source\" in ('credential', 'platform')"
-        },
-        "judge_configuration_has_one_key_source": {
-          "name": "judge_configuration_has_one_key_source",
-          "value": "(\"judge_configuration\".\"source\" = 'credential' and \"judge_configuration\".\"credential_id\" is not null and \"judge_configuration\".\"credentials\" is null and \"judge_configuration\".\"credentials_hint\" is null) or (\"judge_configuration\".\"source\" = 'platform' and \"judge_configuration\".\"credential_id\" is null and \"judge_configuration\".\"credentials\" is not null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.judge_credential": {
-      "name": "judge_credential",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credentials": {
-          "name": "credentials",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credentials_hint": {
-          "name": "credentials_hint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revision": {
-          "name": "revision",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "judge_credential_organization_id_idx": {
-          "name": "judge_credential_organization_id_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"judge_credential\".\"archived_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "judge_credential_organization_id_organization_id_fk": {
-          "name": "judge_credential_organization_id_organization_id_fk",
-          "tableFrom": "judge_credential",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "judge_credential_created_by_user_id_fk": {
-          "name": "judge_credential_created_by_user_id_fk",
-          "tableFrom": "judge_credential",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "judge_credential_id_prefix": {
-          "name": "judge_credential_id_prefix",
-          "value": "\"judge_credential\".\"id\" ~ '^jcr_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "judge_credential_revision_prefix": {
-          "name": "judge_credential_revision_prefix",
-          "value": "\"judge_credential\".\"revision\" ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "judge_credential_provider_allowed": {
-          "name": "judge_credential_provider_allowed",
-          "value": "\"judge_credential\".\"provider\" in ('openai')"
         }
       },
       "isRLSEnabled": false

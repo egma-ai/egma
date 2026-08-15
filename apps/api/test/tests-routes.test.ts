@@ -370,6 +370,72 @@ describe("creating a test", () => {
       error: "unprocessable",
       message: "an expected behavior needs to say something",
     });
+
+    // The shape that retired with the P0/P1/P2 ladder, named rather than
+    // reported as a sentence that says nothing: somebody sending last month's
+    // body is told what changed instead of being sent to look at their own
+    // words for a problem that is in the envelope.
+    const retired = await createTestThrough(key, {
+      ...RESCHEDULING,
+      expected_behaviors: [
+        { behavior: "confirms the new time back", priority: "P0" },
+      ],
+    });
+    expect(retired.body).toEqual({
+      error: "unprocessable",
+      message:
+        'an expected behavior is a plain sentence now; the {"behavior", ' +
+        '"priority"} shape retired with the P0/P1/P2 ladder. Send each ' +
+        "sentence on its own.",
+    });
+  });
+
+  /**
+   * The other half of the same retirement, refused in the same voice.
+   *
+   * **A key this door does not know is silence, and silence is the danger
+   * here.** The body is read as a bare record and only the keys the route knows
+   * are taken, so a caller still sending `graders: [...]` — last month's client,
+   * a repository pushed from a branch that predates the change — would get a
+   * `201` and a test judged by nothing it asked for, with nothing anywhere
+   * saying so. The behavior shape beside it is already named; this one has to
+   * be too, or the two halves of one retirement fail in two different ways.
+   */
+  it("refuses a body that still names graders on a test", async () => {
+    api = await createApi("tests_refuse_graders");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
+    const key = await projectKeyFor(api.app, ada);
+
+    const named = await createTestThrough(key, {
+      ...RESCHEDULING,
+      graders: ["grd_01JQZ0000000000000000000AA"],
+    });
+    expect(named.statusCode, JSON.stringify(named.body)).toBe(422);
+    expect(named.body).toEqual({
+      error: "unprocessable",
+      message:
+        "a test names no graders; the graders key retired with the test-grader " +
+        "junction. What judges a simulation is the project's running graders " +
+        "and their scope, set on the grader rather than on the test.",
+    });
+
+    // And the same on an edit, where the quiet acceptance would be worse: the
+    // test already exists, so a silent write would look like a successful save.
+    const created = await createTestThrough(key, RESCHEDULING);
+    expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
+
+    const edited = await request(
+      "PATCH",
+      `/api/tests/${String(created.body.id)}`,
+      key,
+      {
+        graders: [],
+        expected_version_id: String(created.body.version_id),
+      },
+    );
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
+    expect(String(edited.body.message)).toContain("a test names no graders");
   });
 });
 

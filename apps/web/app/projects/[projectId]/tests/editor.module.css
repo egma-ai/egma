@@ -45,23 +45,21 @@
 }
 
 /*
- * A statement and how much it matters, side by side on a wide screen and
- * stacked on a narrow one. The priority sits with the statement rather than in
- * a column of its own, because it is a fact about that sentence and a column
- * would put the two an eye-movement apart.
+ * One statement, and nothing beside it.
+ *
+ * It was two columns — the sentence and a P0/P1/P2 select — and the ladder
+ * retired: every expected behavior has to hold, so there is nothing left for a
+ * per-sentence priority to say, and how loudly a grader speaks is a setting on
+ * the running copy instead.
  */
 .behavior {
   display: grid;
-  grid-template-columns: 1fr minmax(0, 140px);
+  grid-template-columns: 1fr;
   gap: var(--space-3);
   align-items: start;
 }
 
 @media (max-width: 640px) {
-  .behavior {
-    grid-template-columns: 1fr;
-  }
-
   .entry {
     grid-template-columns: var(--control-md) 1fr;
   }

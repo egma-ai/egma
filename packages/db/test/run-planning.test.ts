@@ -6,7 +6,6 @@ import {
   claimSimulations,
   completeSimulation,
   createAgent,
-  createGrader,
   createJudgeCredential,
   createPersona,
   createTest,
@@ -19,13 +18,14 @@ import {
   listSimulations,
   NotPermittedError,
   planRun,
+  PREDEFINED_GRADERS,
+  seedGraderLibrary,
+  useLibraryEntry,
   refreshConnectionCapabilities,
   setProjectJudge,
   startRun,
   startSimulation,
   type AuthContext,
-  type AuthoredPlanItem,
-  type BuiltInPlanItem,
   type PlanItem,
   type Role,
 } from "@egma/db";
@@ -50,10 +50,10 @@ import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
  * can be read as a pass.
  *
  * **What will judge a run is written down at the moment it starts.** One group
- * per pinned test version, the expected-behaviors built-in in every one of
- * them, the project's default graders, and the graders each version names
- * directly — with a judge choice on each that carries a credential *reference*
- * and never a key.
+ * per pinned test version, holding every live running copy of the project whose
+ * scope reaches simulations — the seeded expected-behaviors copy among them —
+ * with a judge choice on each that carries a credential *reference* and never a
+ * key.
  *
  * **Starting is idempotent under a key the client chose.** The same key and the
  * same selection answers the run that already exists; the same key and a
@@ -106,7 +106,7 @@ async function seedTestVersion(
       "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
     expectedBehaviors: [
       "verifies who it is speaking to before discussing the booking",
-      { behavior: "offers at least one afternoon slot next week", priority: "P1" },
+      "offers at least one afternoon slot next week",
     ],
     personaIds: [rita],
     requiredCapabilities: [...requiredCapabilities],
@@ -122,12 +122,18 @@ function itemsFor(
   return groups[at]?.items ?? [];
 }
 
-function authored(items: readonly PlanItem[]): readonly AuthoredPlanItem[] {
-  return items.filter((one): one is AuthoredPlanItem => one.kind === "authored");
-}
-
-function builtIn(items: readonly PlanItem[]): BuiltInPlanItem | undefined {
-  return items.find((one): one is BuiltInPlanItem => one.kind === "built_in");
+/**
+ * The seeded expected-behaviors copy's item, found by the entry it points at
+ * rather than by a name somebody could rename.
+ *
+ * It is an ordinary item now — one kind of item is all there is — and finding
+ * it through `library_id` is the same pointer the engine resolves a definition
+ * through, so a renamed copy is still this one.
+ */
+function behaviorsItem(items: readonly PlanItem[]): PlanItem | undefined {
+  return items.find(
+    (one) => one.libraryId === PREDEFINED_GRADERS.expectedBehaviors,
+  );
 }
 
 beforeAll(async () => {
@@ -389,18 +395,18 @@ describe("the grading plan a run freezes", () => {
     ]);
 
     for (const group of plan?.groups ?? []) {
-      const item = builtIn(group.items);
-      expect(item?.graderKey).toBe("expected_behaviors_v1");
-      // No grader identity, no version, no scope, no item-wide priority: each
-      // verdict takes its priority from the behavior it judged.
-      expect(item).not.toHaveProperty("graderId");
-      expect(item).not.toHaveProperty("priority");
-      expect(item?.reads).toEqual([
-        "transcript",
-        "outcome",
-        "tool_calls",
-        "measures",
-      ]);
+      // The seeded copy every project is born with, in every group: a first run
+      // is judged with no setup at all because this row exists.
+      const item = behaviorsItem(group.items);
+      expect(item?.libraryId).toBe(PREDEFINED_GRADERS.expectedBehaviors);
+      // It is an ordinary running copy and it has an identity, which is the
+      // whole of the redesign at this level: a rowless sentinel could not be
+      // switched off, renamed, or made a diagnostic.
+      expect(item?.graderId).toMatch(/^grd_/u);
+      expect(item?.graderVersionId).toMatch(/^grv_/u);
+      expect(item?.required).toBe(true);
+      // It asks a model, so the plan names the project's judge for it.
+      expect(item?.judge.tag).toBe("configured");
     }
   });
 
@@ -418,16 +424,11 @@ describe("the grading plan a run freezes", () => {
     expect(plan?.groups).toHaveLength(1);
   });
 
-  it("carries the project's default graders, at the versions they stand at", async () => {
-    const grader = await createGrader(actingAsAcme(), {
-      name: "Never quotes a price",
-      type: "phrase_match",
-      priority: "P1",
-      config: {
-        required: [],
-        banned: [{ text: "guaranteed", match: "contains" }],
-        speaker: "agent",
-      },
+  it("carries the project's running copies, at the versions they stand at", async () => {
+    const copy = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      name: "Answers inside two seconds",
+      params: { metric: "turn_response_latency", bound: 2_000 },
     });
 
     const started = await startRun(actingAsAcme(), {
@@ -437,56 +438,47 @@ describe("the grading plan a run freezes", () => {
       idempotencyKey: newId("run"),
     });
     const plan = await getGradingPlan(actingAsAcme(), started.id);
-    const item = authored(itemsFor(plan?.groups ?? [], 0)).find(
-      (one) => one.graderId === grader.id,
+    const item = itemsFor(plan?.groups ?? [], 0).find(
+      (one) => one.graderId === copy.id,
     );
 
-    expect(item?.origin).toBe("project_default");
-    expect(item?.graderVersionId).toBe(grader.versionId);
-    expect(item?.priority).toBe("P1");
-    // A deterministic grader asks no model, so naming one would be a bill
-    // nobody incurs.
+    expect(item?.graderVersionId).toBe(copy.versionId);
+    expect(item?.libraryId).toBe(PREDEFINED_GRADERS.latency);
+    expect(item?.required).toBe(true);
+    // A copy of the entry egma's own engine executes asks no model, so naming
+    // one would be a bill nobody incurs.
     expect(item?.judge).toEqual({ tag: "not_required" });
   });
 
-  it("keeps one item where a grader is both a default and named by the test, and it is the direct one", async () => {
-    const grader = await createGrader(actingAsAcme(), {
-      name: "Says the disclosure",
-      type: "phrase_match",
-      config: {
-        required: [{ text: "recorded", match: "contains" }],
-        banned: [],
-        speaker: "agent",
-      },
+  /**
+   * A diagnostic copy is planned exactly like a blocking one, and the plan says
+   * which it is.
+   *
+   * The flag has to ride the item because a page draws the plan before a single
+   * verdict exists — so "this one reports and cannot fail the run" has to be
+   * readable from what was frozen, not worked out from rows nobody has written.
+   */
+  it("marks a diagnostic copy as one, and plans it like any other", async () => {
+    const copy = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      name: "Reports how fast it answered",
+      required: false,
+      params: { metric: "turn_response_latency", bound: 1_000 },
     });
-
-    const created = await createTest(actingAsAcme(), {
-      name: "A test that names it directly",
-      scenario: "Their cleaning has to move to any afternoon next week.",
-      expectedBehaviors: ["confirms the new time back before finishing"],
-      personaIds: [rita],
-      graderIds: [grader.id],
-    });
-    await database.sql(
-      "insert into test_agent (test_id, agent_id, project_id) values ($1, $2, $3) on conflict do nothing",
-      [created.id, agentId, acme.project],
-    );
 
     const started = await startRun(actingAsAcme(), {
       agentId,
       connectionId: measured,
-      testVersionIds: [created.versionId],
+      testVersionIds: [plain],
       idempotencyKey: newId("run"),
     });
     const plan = await getGradingPlan(actingAsAcme(), started.id);
-    const named = authored(itemsFor(plan?.groups ?? [], 0)).filter(
-      (one) => one.graderId === grader.id,
+    const item = itemsFor(plan?.groups ?? [], 0).find(
+      (one) => one.graderId === copy.id,
     );
 
-    expect(named).toHaveLength(1);
-    // The direct link is the scoping decision, so it is the origin that
-    // survives — a page has to be able to say why this grader is here.
-    expect(named[0]?.origin).toBe("scenario_specific");
+    expect(item).toBeDefined();
+    expect(item?.required).toBe(false);
   });
 
   it("keeps two items for one grader across two selected versions", async () => {
@@ -498,23 +490,19 @@ describe("the grading plan a run freezes", () => {
     });
     const plan = await getGradingPlan(actingAsAcme(), started.id);
 
-    const first = authored(itemsFor(plan?.groups ?? [], 0));
-    const second = authored(itemsFor(plan?.groups ?? [], 1));
+    const first = itemsFor(plan?.groups ?? [], 0);
+    const second = itemsFor(plan?.groups ?? [], 1);
     expect(first.length).toBeGreaterThan(0);
     expect(second.map((one) => one.graderId).sort()).toEqual(
       first.map((one) => one.graderId).sort(),
     );
   });
 
-  it("leaves an archived grader out of a new plan, and starts the run anyway", async () => {
-    const grader = await createGrader(actingAsAcme(), {
+  it("leaves a switched-off copy out of a new plan, and starts the run anyway", async () => {
+    const grader = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
       name: "Taken out of use",
-      type: "phrase_match",
-      config: {
-        required: [{ text: "goodbye", match: "contains" }],
-        banned: [],
-        speaker: "agent",
-      },
+      params: { metric: "turn_response_latency", bound: 3_000 },
     });
     await deleteGrader(actingAsAcme(), grader.id);
 
@@ -527,7 +515,7 @@ describe("the grading plan a run freezes", () => {
     const plan = await getGradingPlan(actingAsAcme(), started.id);
 
     expect(
-      authored(itemsFor(plan?.groups ?? [], 0)).map((one) => one.graderId),
+      itemsFor(plan?.groups ?? [], 0).map((one) => one.graderId),
     ).not.toContain(grader.id);
     expect(started.status).toBe("pending");
   });
@@ -551,7 +539,7 @@ describe("the grading plan a run freezes", () => {
       idempotencyKey: newId("run"),
     });
     const plan = await getGradingPlan(actingAsAcme(), started.id);
-    const item = builtIn(itemsFor(plan?.groups ?? [], 0));
+    const item = behaviorsItem(itemsFor(plan?.groups ?? [], 0));
 
     expect(item?.judge).toEqual({
       tag: "configured",

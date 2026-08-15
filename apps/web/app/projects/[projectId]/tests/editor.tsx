@@ -4,14 +4,12 @@ import { useId, type ReactNode } from "react";
 
 import { asDay } from "../../../../lib/instants.ts";
 import {
-  PRIORITIES,
   type Capability,
   type ExpectedBehavior,
   type Named,
-  type Priority,
   type TestVersionRow,
 } from "../../../../lib/tests.ts";
-import { Badge, Button, Select, TextArea } from "../../../../ui/controls.tsx";
+import { Badge, Button, TextArea } from "../../../../ui/controls.tsx";
 import styles from "./editor.module.css";
 
 /**
@@ -136,11 +134,9 @@ export function Behaviors({
 }) {
   const field = useId();
 
-  const at = (index: number, next: Partial<ExpectedBehavior>) =>
+  const at = (index: number, behavior: ExpectedBehavior) =>
     onChange(
-      behaviors.map((one, position) =>
-        position === index ? { ...one, ...next } : one,
-      ),
+      behaviors.map((one, position) => (position === index ? behavior : one)),
     );
 
   return (
@@ -149,7 +145,7 @@ export function Behaviors({
       count={behaviors.length}
       disabled={disabled}
       addLabel="Add an expected behavior"
-      onAdd={() => onChange([...behaviors, { behavior: "", priority: "P0" }])}
+      onAdd={() => onChange([...behaviors, ""])}
       onMove={(from, to) => onChange(moved(behaviors, from, to))}
       onRemove={(index) =>
         onChange(behaviors.filter((_one, position) => position !== index))
@@ -157,25 +153,21 @@ export function Behaviors({
     >
       {behaviors.map((one, index) => (
         <div className={styles.behavior} key={`${field}-${String(index)}`}>
+          {/*
+            One control per behavior, because a behavior is one sentence. The
+            P0/P1/P2 select that used to sit beside it went with the ladder
+            itself: every behavior has to hold, so there was nothing left for a
+            per-sentence priority to say. How loudly a grader speaks is the
+            running copy's own `required` flag now.
+          */}
           <TextArea
             id={`${field}-behavior-${String(index)}`}
-            value={one.behavior}
+            value={one}
             rows={2}
             label={`Expected behavior ${String(index + 1)}`}
             placeholder="verifies who it is speaking to before discussing the booking"
             disabled={disabled}
-            onChange={(behavior) => at(index, { behavior })}
-          />
-          <Select<Priority>
-            id={`${field}-priority-${String(index)}`}
-            value={one.priority}
-            label={`Priority of expected behavior ${String(index + 1)}`}
-            disabled={disabled}
-            options={PRIORITIES.map((priority) => ({
-              value: priority,
-              label: priority,
-            }))}
-            onChange={(priority) => at(index, { priority })}
+            onChange={(behavior) => at(index, behavior)}
           />
         </div>
       ))}
@@ -385,15 +377,11 @@ export function VersionHistory({
             {reading.expected_behaviors.map((one, at) => (
               // No identity of their own, and this list is read-only.
               // eslint-disable-next-line react/no-array-index-key
-              <li key={at}>
-                [{one.priority}] {one.behavior}
-              </li>
+              <li key={at}>{one}</li>
             ))}
           </ol>
           <p className={styles.readingBody}>
             Personas: {reading.personas.map((one) => one.name).join(", ") || "none"}
-            {". "}
-            Graders: {reading.graders.map((one) => one.name).join(", ") || "none"}
             {". "}
             Requires:{" "}
             {reading.required_capabilities.join(", ") || "nothing in particular"}

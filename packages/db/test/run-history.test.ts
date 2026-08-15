@@ -13,7 +13,6 @@ import {
   completeSimulation,
   connectClickHouse,
   createAgent,
-  createGrader,
   createPersona,
   createTest,
   deleteGrader,
@@ -148,21 +147,19 @@ async function claimOwn(runId: string): Promise<readonly SimulationClaim[]> {
 function verdictOn(input: {
   readonly simulationId: string;
   readonly runId: string;
-  readonly dimension: string;
+  readonly assertion: string;
   readonly verdict: NewVerdict["verdict"];
 }): NewVerdict {
   return {
     traceId: input.simulationId,
     graderId: newId("grd"),
     graderVersionId: newId("grv"),
-    dimension: input.dimension,
+    assertion: input.assertion,
     source: "simulation",
-    judgedBy: "gpt-4.1-mini",
     verdict: input.verdict,
     score: input.verdict === "passed" ? 1 : 0,
     rationale: "because that is what happened",
     citedSpanIds: [],
-    priority: "P0",
     runId: input.runId,
     agentId,
     // The agent version this judgment was about. These fixtures never mint one
@@ -361,13 +358,13 @@ describe("a run conducted to a mixed ending", () => {
       verdictOn({
         simulationId: first.id,
         runId,
-        dimension: "offers at least one afternoon slot next week",
+        assertion: "offers at least one afternoon slot next week",
         verdict: "failed",
       }),
       verdictOn({
         simulationId: second.id,
         runId,
-        dimension: "verifies who it is speaking to before discussing the booking",
+        assertion: "verifies who it is speaking to before discussing the booking",
         verdict: "passed",
       }),
       // Egma's own failure, written as `errored` by the engine that judged it.
@@ -377,7 +374,7 @@ describe("a run conducted to a mixed ending", () => {
       verdictOn({
         simulationId: third.id,
         runId,
-        dimension: "verifies who it is speaking to before discussing the booking",
+        assertion: "verifies who it is speaking to before discussing the booking",
         verdict: "errored",
       }),
     ]);
@@ -890,109 +887,17 @@ describe("retrying a run", () => {
     expect(refused.message).toContain(`persona ${spare}`);
   });
 
-  it("refuses rather than substituting when a grader the test names is archived", async () => {
-    const grader = await createGrader(auth, {
-      name: `Never promises a price ${newId("grd")}`,
-      type: "llm_rubric",
-      priority: "P1",
-      scope: "simulations",
-      config: { rubric: "The agent never quotes a price." },
-    });
-    const named = await createTest(auth, {
-      name: `Names one grader directly ${newId("tst")}`,
-      scenario: "Anything, so long as this grader judges it.",
-      expectedBehaviors: ["answers"],
-      personaIds: [rita],
-      graderIds: [grader.id],
-    });
-    const earlier = await startRun(auth, {
-      agentId,
-      connectionId,
-      testVersionIds: [named.versionId],
-      idempotencyKey: newId("run"),
-    });
-
-    // The test drops the grader so the archive is allowed; the frozen version
-    // this run pinned still names it.
-    await editTest(auth, named.id, {
-      graderIds: [],
-      expectedVersionId: named.versionId,
-    });
-    await deleteGrader(auth, grader.id);
-
-    const refused = await refusalFrom(
-      retryRun(auth, earlier.id, { idempotencyKey: newId("run") }),
-    );
-    expect(refused.resourceKind).toBe("grader");
-    expect(refused.message).toContain(`grader ${grader.id}`);
-  });
-
-  /**
-   * The same refusal, from inside the transaction that freezes the plan.
-   *
-   * A grader archived *after* the recheck above and *before* the plan is
-   * resolved used to be dropped rather than refused: the plan simply did not
-   * carry it, the retry ran with one grader fewer than the run it copies, and
-   * the two results were then compared as though they measured the same thing.
-   * Every other resource a Retry rechecks is re-read inside that transaction
-   * already; the grader was the one that was not.
-   *
-   * The window is a moment wide and cannot be held open from a test, so what is
-   * driven here is exactly what is left of the retry once the window has passed
-   * — the same call `retryRun` makes, with the same input, against a grader that
-   * is already archived. The refusal it must produce is the Retry's own
-   * sentence, and no run may exist afterwards.
+  /*
+   * **Two refusals over an archived grader used to live here, and both go.**
+   * One rechecked before the Retry called in and one rechecked inside the
+   * transaction that freezes the plan, and both were about a grader a pinned
+   * test version named *directly*. A test names no graders now: what judges a
+   * run is the project's live running copies and their scope, so a copy
+   * switched off between two runs is a decision about the project rather than
+   * something a Retry may overrule. Every other resource a Retry rechecks — the
+   * agent, the connection, the tests, their applicability, the personas — is
+   * still proved above and below.
    */
-  it("refuses a grader archived between the recheck and the freeze", async () => {
-    const grader = await createGrader(auth, {
-      name: `Archived mid-flight ${newId("grd")}`,
-      type: "llm_rubric",
-      priority: "P1",
-      scope: "simulations",
-      config: { rubric: "The agent never promises a refund." },
-    });
-    const named = await createTest(auth, {
-      name: `Names the mid-flight grader ${newId("tst")}`,
-      scenario: "Anything, so long as this grader judges it.",
-      expectedBehaviors: ["answers"],
-      personaIds: [rita],
-      graderIds: [grader.id],
-    });
-    const earlier = await startRun(auth, {
-      agentId,
-      connectionId,
-      testVersionIds: [named.versionId],
-      idempotencyKey: newId("run"),
-    });
-
-    await editTest(auth, named.id, {
-      graderIds: [],
-      expectedVersionId: named.versionId,
-    });
-    await deleteGrader(auth, grader.id);
-
-    const refused = await refusalFrom(
-      startRun(auth, {
-        agentId,
-        connectionId,
-        testVersionIds: [named.versionId],
-        retryOfRunId: earlier.id,
-        idempotencyKey: newId("run"),
-      }),
-    );
-    expect(refused.resourceKind).toBe("grader");
-    expect(refused.resourceId).toBe(grader.id);
-    expect(refused.message).toBe(
-      `Run ${earlier.id} cannot be retried because grader ${grader.id} is ` +
-        `not active or no longer applies. Open the run builder and choose ` +
-        `active resources; the original run was not changed.`,
-    );
-
-    // And the whole creation rolled back: this test has exactly the one run it
-    // started with, and nothing retrying it.
-    const history = await listRunHistory(auth, { testId: named.id });
-    expect(history.items.map((entry) => entry.run.id)).toEqual([earlier.id]);
-  });
 });
 
 /* ------------------------------------------------------------------------ *

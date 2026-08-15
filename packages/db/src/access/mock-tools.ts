@@ -20,7 +20,7 @@ import { lostToConstraint } from "./agents.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
-import { within } from "./within.ts";
+import { inActingProject, within } from "./within.ts";
 
 /**
  * Reading and writing mock tools — what they are is the schema file's story
@@ -358,19 +358,12 @@ export function answerFromRow(
   return { answer: held.answer };
 }
 
-/** Acting in a project narrows to it; acting in none reaches the customer. */
-function inActingProject(auth: AuthContext): SQL | undefined {
-  return auth.projectId === undefined
-    ? undefined
-    : eq(mockTool.projectId, auth.projectId);
-}
-
 /** The named mock tool, alive, within the caller's tenancy and scope. */
 function theMockTool(auth: AuthContext, id: string): SQL {
   return within(
     auth,
     mockTool,
-    and(eq(mockTool.id, id), notDeleted, inActingProject(auth)),
+    and(eq(mockTool.id, id), notDeleted, inActingProject(auth, mockTool)),
   );
 }
 
@@ -815,7 +808,7 @@ export async function listMockTools(
       within(
         auth,
         mockTool,
-        and(notDeleted, inActingProject(auth), olderThanCursor),
+        and(notDeleted, inActingProject(auth, mockTool), olderThanCursor),
       ),
     )
     .orderBy(desc(mockTool.id))

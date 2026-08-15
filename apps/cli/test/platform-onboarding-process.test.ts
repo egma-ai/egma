@@ -85,7 +85,6 @@ it("verifies an explicitly selected platform and commits its identity on first o
       EGMA_RETELL_API_KEY: PROVIDER_KEY,
       EGMA_REACH: "text",
     });
-    expect(env.EGMA_URL).toBeUndefined();
 
     const grading = gradeEveryRun(platform);
     let stdout = "";

@@ -4,14 +4,12 @@ import type { CSSProperties, ReactNode } from "react";
 
 import {
   citedTurnPositions,
-  JUDGED_BY_HUMAN,
   type EvidenceCoverage,
   type EvidenceMockTool,
   type EvidencePlanItem,
   type EvidenceStep,
   type EvidenceTranscript,
-  type EvidenceVerdict,
-  type JudgedDimension,
+  type JudgedAssertion,
 } from "../lib/simulations.ts";
 import { howFarIn, howLong, milliseconds } from "../lib/transcripts.ts";
 import { Badge, Help } from "./controls.tsx";
@@ -415,30 +413,24 @@ export function MockToolEvidence({
 }
 
 /* ------------------------------------------------------------------------ *
- * What egma made of it, and what a person said about that.
+ * What egma made of it.
  * ------------------------------------------------------------------------ */
 
-function whoJudged(row: EvidenceVerdict): string {
-  return row.judged_by === JUDGED_BY_HUMAN
-    ? "a person"
-    : row.judged_by === "engine"
-      ? "the engine"
-      : row.judged_by;
-}
-
 /**
- * One judged dimension: what counts now, why, and the machine's word underneath
- * it where a person has disagreed.
+ * One judged assertion: what counts now, why, and the judgments underneath it.
  *
- * **The machine's verdict is preserved and shown, never replaced.** That is the
- * whole reason a correction is a second row: accumulated, those pairs are the
- * ground truth any future measurement of judge accuracy is made of, and a page
- * that hid one half would make the pair worthless.
+ * **An earlier judgment is preserved and shown, never replaced.** A re-grade
+ * writes a new row beside the old one, and a page that hid the old one would
+ * make "this grader was tightened and now disagrees" invisible.
  *
- * `action` is where a page puts whatever it offers about this judgement — a
- * *Disagree* control, or nothing at all for somebody who may not. This component
- * never decides that: what a role may do is the server's answer and the page's
- * to relay.
+ * **A diagnostic says so on the card.** A `required: false` copy is judged
+ * exactly like any other and can fail nothing, so a red badge with no marking
+ * beside it would read as a reason the run failed. That marking is what keeps
+ * the header and the evidence beneath it from disagreeing.
+ *
+ * `action` is where a page puts whatever it offers about this judgement, or
+ * nothing at all for somebody who may not. This component never decides that:
+ * what a role may do is the server's answer and the page's to relay.
  */
 export function VerdictEvidence({
   judged,
@@ -446,42 +438,37 @@ export function VerdictEvidence({
   action,
   children,
 }: {
-  readonly judged: JudgedDimension;
+  readonly judged: JudgedAssertion;
   /** The transcript's turns, so cited spans can be named by position. */
   readonly turns: readonly EvidenceStep[];
   readonly action?: ReactNode;
-  /** Whatever the page opens under this row — a correction form, usually. */
+  /** Whatever the page opens under this row. */
   readonly children?: ReactNode;
 }) {
-  const { speaking, machine } = judged;
+  const { speaking } = judged;
   const cited = citedTurnPositions(speaking.cited_turns, turns);
 
   return (
-    <article className={styles.verdict} data-dimension={judged.dimension}>
+    <article className={styles.verdict} data-assertion={judged.assertion}>
       <header className={styles.verdictHead}>
         <span className={styles.verdictWhat}>
-          <strong>{judged.dimension}</strong>
-          <span className={styles.verdictWho}>
-            {judged.graderId} · {judged.graderVersionId} · judged by{" "}
-            {whoJudged(speaking)}
-          </span>
+          {/*
+            The words where they could be resolved, and the bare key where they
+            could not. A guessed sentence would be unfalsifiable; a key is
+            merely terse.
+          */}
+          <strong>{judged.assertionText ?? judged.assertion}</strong>
+          <span className={styles.verdictWho}>{judged.graderId}</span>
         </span>
-        <Badge
-          title={
-            speaking.priority === "P0"
-              ? "P0 blocks: a failure here fails the run."
-              : speaking.priority === "P1"
-                ? "P1 warns: a failure here is reported, not blocking."
-                : "P2 informs only."
-          }
-        >
-          {speaking.priority}
-        </Badge>
+        {judged.required ? null : (
+          <Badge title="A diagnostic: judged and reported, and never able to fail this conversation.">
+            Reports only
+          </Badge>
+        )}
         <VerdictBadge verdict={speaking.verdict} />
         <span className={styles.mono}>
           {speaking.score.toFixed(2)}
         </span>
-        {judged.corrected ? <Badge tone="warn">Corrected</Badge> : null}
         {action}
       </header>
 
@@ -492,29 +479,15 @@ export function VerdictEvidence({
         </p>
       )}
 
-      {judged.corrected && machine !== null ? (
-        <details className={styles.beneath}>
-          <summary>
-            What egma&rsquo;s judge said, which this correction supersedes
-          </summary>
-          <p className={styles.rationale}>
-            <VerdictBadge verdict={machine.verdict} /> {machine.rationale}
-          </p>
-          <p className={styles.cited}>
-            {whoJudged(machine)} · {machine.judged_at}
-          </p>
-        </details>
-      ) : null}
-
       {judged.superseded.length === 0 ? null : (
         <details className={styles.beneath}>
           <summary>
             {judged.superseded.length} earlier judgement
-            {judged.superseded.length === 1 ? "" : "s"} of this behaviour
+            {judged.superseded.length === 1 ? "" : "s"} of this assertion
           </summary>
           {judged.superseded.map((row) => (
-            <p className={styles.cited} key={`${row.grader_version_id}:${row.judged_by}:${row.judged_at}`}>
-              <span className={styles.mono}>{row.grader_version_id}</span>{" "}
+            <p className={styles.cited} key={row.judged_at}>
+              <span className={styles.mono}>{row.judged_at}</span>{" "}
               {row.verdict} — {row.rationale}
             </p>
           ))}
@@ -552,19 +525,11 @@ export function PlanItems({
       {items.map((item) => (
         <li
           className={styles.planItem}
-          key={
-            item.kind === "built_in"
-              ? `built_in:${item.grader_key}`
-              : `authored:${item.grader_id}:${item.grader_version_id}`
-          }
+          key={`${item.grader_id}:${item.grader_version_id}`}
         >
-          <strong>
-            {item.kind === "built_in" ? "Expected behaviors" : item.name}
-          </strong>
+          <strong>{item.name}</strong>
           <span className={styles.planNote}>
-            {item.kind === "built_in"
-              ? `built in · engine ${item.engine_version} · one verdict per behavior, each at its own priority`
-              : `${item.origin === "scenario_specific" ? "on this test" : "project default"} · ${item.priority} · ${item.grader_version_id}`}
+            {`${item.required ? "blocks" : "reports only"} · ${item.grader_version_id}`}
             {" · "}
             {item.judge.tag === "configured"
               ? `${item.judge.provider}/${item.judge.model} · ${item.judge.source === "platform" ? "platform key" : `credential ${item.judge.source}`}`
@@ -583,7 +548,9 @@ export function GradingPending({ what }: { readonly what: string }) {
   return <p className={styles.pending}>{what}</p>;
 }
 
-/** Where a page puts the form it opens under one judgement. */
-export function CorrectionForm({ children }: { readonly children: ReactNode }) {
-  return <div className={styles.correctionForm}>{children}</div>;
-}
+/*
+ * **There was a `CorrectionForm` here.** It was where a page put the form it
+ * opened under one judgement, and it goes with the endpoint behind it:
+ * ADR-0009 takes corrections out of v0, and they return as the reserved
+ * `human` grader type writing rows of its own.
+ */

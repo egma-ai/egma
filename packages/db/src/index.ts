@@ -33,22 +33,47 @@ export {
  * A second implementation anywhere — in a query, in a page, in the grading
  * service — is a second answer that can disagree with this one, and no row is
  * ever written that a disagreement could be settled against.
+ *
+ * **`foldVerdicts` itself is deliberately not on this list.** It answers about
+ * whatever pile of rows it is handed and never asks whose they are, which is
+ * exactly right inside `verdicts/` and a loaded gun outside it: a caller that
+ * hands it every row of a run has folded a diagnostic's failure into the
+ * headline, and nothing about the call says so. What crosses this boundary is
+ * `verdictLanes`, which cannot be called without answering which copies only
+ * report, and `foldVerdictsByGrader`, which takes the same answer. Everything
+ * beyond the package folds a lane it was given by the read that produced it.
  */
 export {
-  foldVerdicts,
   foldVerdictsByGrader,
   speakingVerdicts,
-  JUDGED_BY_HUMAN,
-  PRIORITIES,
+  verdictLanes,
   VERDICTS,
+  type Diagnostics,
   type FoldableVerdict,
   type FoldedOutcome,
   type GraderOutcome,
-  type Priority,
   type Verdict,
   type VerdictCounts,
+  type VerdictLanes,
   type VerdictSource,
 } from "./verdicts/fold.ts";
+
+/**
+ * The shape of an assertion key, on the fold's own terms and for the fold's own
+ * reason: it reaches nothing, so there is no tenancy to stamp and no
+ * `AuthContext` to take, and it is exported all the same because it is the
+ * **one** place the format is written down.
+ *
+ * The two halves are one round trip made in two processes — the engine writes a
+ * verdict row with the first, a page reads the words back with the second — and
+ * a format each half knew for itself would be a format one of them could
+ * improve alone. A verdict row is permanent, so that fork would show up not as a
+ * bug but as a page that quietly stopped resolving last month's rows.
+ */
+export {
+  behaviorAssertionAt,
+  behaviorAssertionKey,
+} from "./grader-library/assertion-keys.ts";
 /**
  * The fold one grain up, where execution meets judgment — and where the two are
  * kept apart.
@@ -88,6 +113,27 @@ export {
   type SnapshotDefault,
   type SnapshotEntry,
 } from "./mock-tools/resolve.ts";
+/**
+ * The shared measure module: the catalog's numbers, computed from a
+ * conversation's spans.
+ *
+ * Here for the fold's reason and on the fold's terms — it reaches nothing, takes
+ * no context, and is handed spans a caller already read. Exported because it is
+ * the **one** place a measure is worked out: the metrics display reads through
+ * it and so does the grader that bounds one, for a simulation and a production
+ * trace alike, so the number on a page and the number a verdict was decided by
+ * are the same arithmetic. A second implementation in a query, in a page or in
+ * the grading service would be a second answer about one conversation with
+ * nothing stored to settle it against.
+ */
+export {
+  everySpanIn,
+  measuresFromSpans,
+  worstSampleOf,
+  type MeasuredFromSpans,
+  type Sample,
+  type SpannedConversation,
+} from "./measures/from-spans.ts";
 
 /**
  * The two catalogs a form is drawn from, and the readers that hold a key to

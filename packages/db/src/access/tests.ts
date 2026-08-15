@@ -14,16 +14,9 @@ import {
 
 import { db, type Queryable } from "../client.ts";
 import { agent } from "../schema/agents.ts";
-import { grader, PRIORITIES, type Priority } from "../schema/graders.ts";
 import { persona } from "../schema/personas.ts";
 import { project } from "../schema/tenancy.ts";
-import {
-  test,
-  testAgent,
-  testGrader,
-  testPersona,
-  testVersion,
-} from "../schema/tests.ts";
+import { test, testAgent, testPersona, testVersion } from "../schema/tests.ts";
 import type { MockToolAnswer } from "../mock-tools/resolve.ts";
 import { admittedCapabilities } from "./capabilities.ts";
 import type { AuthContext } from "./context.ts";
@@ -36,7 +29,6 @@ import {
   TestMovedOnError,
   UnprocessableInputError,
   type ArchivedDependency,
-  type TestNamingGrader,
   type TestNamingPersona,
 } from "./errors.ts";
 import {
@@ -66,30 +58,28 @@ import { theProject, within } from "./within.ts";
  * non-empty at write time, and judging a simulation against them is part of
  * what running a test means, so there is no window in which a stored test could
  * pass without ever having been able to fail.
+ *
+ * **A test names no graders.** What judges a simulation is the project's
+ * running copies and their scope, decided grader-side and never through test
+ * content — so a version's content is the scenario, the behaviors and the mock
+ * overrides, and there is nothing else in here for a writer to name.
  */
 
 /**
- * One statement about what should happen, and how much it matters. P0 blocks,
- * P1 warns, P2 informs — the same three words a grader carries, because "how
- * much does this matter" is one question whether it is asked of authored logic
- * or of a sentence somebody wrote down.
+ * One statement about what should happen: **a plain sentence, and nothing
+ * else.**
+ *
+ * Per-behavior priorities retired with the P0/P1/P2 ladder. Under binary scoring
+ * every behavior has to hold, so a priority had nothing left to say — and the
+ * rule it was propping up, that a test always keeps one blocking behavior,
+ * collapses back into the plain non-empty rule the falsifiability decision
+ * placed on the list.
+ *
+ * Each sentence is one **assertion** of the expected-behaviors grader, judged in
+ * isolation and written one verdict row each, keyed by its position in this
+ * list.
  */
-export type ExpectedBehavior = {
-  readonly behavior: string;
-  readonly priority: Priority;
-};
-
-/**
- * A behavior as it is written down. A bare string is the common case and means
- * a P0: what a developer types when they are stating what the agent must do,
- * which is nearly always the thing that must not ship broken.
- */
-export type ExpectedBehaviorInput =
-  | string
-  | {
-      readonly behavior: string;
-      readonly priority?: Priority | undefined;
-    };
+export type ExpectedBehavior = string;
 
 /**
  * One tool this test answers for itself, instead of however the project
@@ -157,7 +147,7 @@ export type NewTest = {
   readonly name: string;
   readonly description?: string | undefined;
   readonly scenario: string;
-  readonly expectedBehaviors: readonly ExpectedBehaviorInput[];
+  readonly expectedBehaviors: readonly ExpectedBehavior[];
   /**
    * Which agents this test applies to — the targets a run may execute it
    * against. Every one has to be an active agent of the same project.
@@ -186,13 +176,6 @@ export type NewTest = {
    */
   readonly personaIds?: readonly string[] | undefined;
   /**
-   * The graders this scenario asks for on top of the project's own, in the
-   * order they were authored. Naming none is the ordinary case and means
-   * exactly that: every grader in the project already judges this test, and its
-   * expected behaviors are judged whatever else happens.
-   */
-  readonly graderIds?: readonly string[] | undefined;
-  /**
    * The tools this scenario answers for itself, on top of however the project
    * answers for them. Naming none is the ordinary case: the project's mock
    * tools are the world, and a test overrides one only when the branch it is
@@ -211,20 +194,6 @@ export type TestPersona = {
   readonly name: string;
   /** Set once they are archived; the test goes on naming them either way. */
   readonly archivedAt: Date | null;
-};
-
-/**
- * A grader as a test names it: by identity, with its current name, and saying
- * plainly whether it has since been deleted — the persona's shape, for the
- * persona's reason. A live test can never reach this state, because a grader's
- * delete is refused while one names it; a frozen version can, and a reader of
- * one has to be told.
- */
-export type TestGrader = {
-  readonly id: string;
-  readonly name: string;
-  /** Set once it is deleted; the version goes on naming it either way. */
-  readonly deletedAt: Date | null;
 };
 
 /**
@@ -256,8 +225,6 @@ export type Test = {
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   /** In the order they were authored. */
   readonly personas: readonly TestPersona[];
-  /** In the order they were authored. */
-  readonly graders: readonly TestGrader[];
   /** The tools this scenario answers for itself; usually none. */
   readonly mockOverrides: readonly MockOverride[];
   /** What a connection has to be able to do; usually nothing. */
@@ -291,7 +258,7 @@ export type TestChanges = {
   readonly name?: string;
   readonly description?: string | null;
   readonly scenario?: string;
-  readonly expectedBehaviors?: readonly ExpectedBehaviorInput[];
+  readonly expectedBehaviors?: readonly ExpectedBehavior[];
   /**
    * Who calls about the scenario, as the next version should name them.
    *
@@ -303,15 +270,6 @@ export type TestChanges = {
    * could never run. Leaving the set alone is what leaving the field out does.
    */
   readonly personaIds?: readonly string[];
-  /**
-   * The graders the next version should name, in the order it should name them.
-   *
-   * An empty list means here what it means on a create — name none — because
-   * naming none is a state a test can be in and stay falsifiable: the project's
-   * graders and its own expected behaviors judge it either way. So `[]` clears
-   * the array, and leaving the field out keeps it.
-   */
-  readonly graderIds?: readonly string[];
   /**
    * The tools the next version should answer for itself.
    *
@@ -388,8 +346,6 @@ export type TestVersion = {
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   /** By identity, in the order they were authored. */
   readonly personas: readonly TestPersona[];
-  /** By identity, in the order they were authored. */
-  readonly graders: readonly TestGrader[];
   /** The tools this version answers for itself, as it was frozen. */
   readonly mockOverrides: readonly MockOverride[];
   /** What this version required of a connection, as it was frozen. */
@@ -414,13 +370,6 @@ const COLUMNS = {
 } as const;
 
 /**
- * What a behavior is worth when its author said nothing about it. Blocking, so
- * that stating what the agent must do is enough to make a test able to stop a
- * release — nobody has to learn about priorities to write a falsifiable test.
- */
-const DEFAULT_BEHAVIOR_PRIORITY: Priority = "P0";
-
-/**
  * The name as it will be stored: trimmed, so a test somebody has to recognise
  * in a list is not named by invisible characters.
  */
@@ -435,18 +384,14 @@ function validName(name: string): string {
  *
  * An empty behaviors list is refused rather than accepted, because a test with
  * nothing to check is a test that can never be red — and a suite of tests that
- * could never be red is the false confidence this product exists to kill.
- *
- * **A test always keeps at least one P0.** Priorities let a nice-to-have
- * behavior stop blocking a release, which is what they are for; a test whose
- * every behavior has been demoted is one nothing can hold back, and it got there
- * one edit at a time without anybody deciding to make it unfalsifiable. So the
- * rule that refuses an empty list refuses an all-demoted one on the same
- * grounds: falsifiability cannot be downgraded away.
+ * could never be red is the false confidence this product exists to kill. That
+ * is the whole of the falsifiability rule now: with priorities retired there is
+ * no way left to demote a test into never being able to fail, so non-empty is
+ * the only thing this has to hold.
  */
 function validContent(input: {
   readonly scenario: string;
-  readonly expectedBehaviors: readonly ExpectedBehaviorInput[];
+  readonly expectedBehaviors: readonly ExpectedBehavior[];
   readonly mockOverrides: readonly MockOverrideInput[];
   readonly requiredCapabilities: readonly string[];
 }): TestContent {
@@ -462,29 +407,24 @@ function validContent(input: {
       "a test needs at least one expected behavior, because a test that cannot fail is not a test",
     );
   }
-  const expectedBehaviors = input.expectedBehaviors.map((entry) => {
-    const written = typeof entry === "string" ? entry : entry.behavior;
-    const behavior = typeof written === "string" ? written.trim() : "";
+  const expectedBehaviors = input.expectedBehaviors.map((entry: unknown) => {
+    // The shape that retired with the P0/P1/P2 ladder, named rather than
+    // reported as an empty sentence: a writer sending last month's body should
+    // be told what changed, not told their behavior says nothing.
+    if (typeof entry === "object" && entry !== null && "behavior" in entry) {
+      throw new UnprocessableInputError(
+        'an expected behavior is a plain sentence now; the {"behavior", "priority"} ' +
+          "shape retired with the P0/P1/P2 ladder. Send the sentence on its own.",
+      );
+    }
+    const behavior = typeof entry === "string" ? entry.trim() : "";
     if (behavior === "") {
       throw new UnprocessableInputError(
         "an expected behavior needs to say something",
       );
     }
-    const priority =
-      typeof entry === "string" ? undefined : entry.priority;
-    if (priority !== undefined && !PRIORITIES.includes(priority)) {
-      throw new UnprocessableInputError(
-        `"${priority}" is not a priority egma knows; expected one of ${PRIORITIES.join(", ")}`,
-      );
-    }
-    return { behavior, priority: priority ?? DEFAULT_BEHAVIOR_PRIORITY };
+    return behavior;
   });
-
-  if (!expectedBehaviors.some((behavior) => behavior.priority === "P0")) {
-    throw new UnprocessableInputError(
-      "a test needs at least one P0 expected behavior, because falsifiability cannot be downgraded away",
-    );
-  }
 
   return {
     scenario,
@@ -564,35 +504,19 @@ function validatePersonaIds(ids: readonly string[]): void {
 }
 
 /**
- * The same, for the graders a version names: every one is a grader's
- * identifier, and each one is named once. Naming the same grader twice would
- * ask for the same judgment twice, which produces one verdict either way, so
- * the second naming says nothing and is refused rather than silently collapsed.
- */
-function validateGraderIds(ids: readonly string[]): void {
-  const seen = new Set<string>();
-  for (const id of ids) {
-    if (!isId("grd", id)) {
-      throw new Error(`"${id}" is not a grader id`);
-    }
-    if (seen.has(id)) {
-      throw new Error(`grader ${id} is named twice on one test`);
-    }
-    seen.add(id);
-  }
-}
-
-/**
  * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
  * somebody hand-edited must fail here, loudly and naming itself, rather than
  * leak into a caller as a `TestContent` that isn't one. Shape only,
  * deliberately: an old version must stay readable exactly as it was written.
  *
- * **A behavior stored as a bare string is a P0.** Every version written before
- * priorities existed holds one, and each says what the whole list used to say —
- * this must fail, and everything on it blocks. Reading them as P0 is therefore
- * not a default applied to old rows but the meaning they already had, which is
- * what lets priorities arrive as an additive change with no rewrite.
+ * **A behavior stored as `{behavior, priority}` is read as its sentence.** The
+ * versions written while priorities existed hold that shape, and every one of
+ * them said the same thing the sentence says now — a priority never changed what
+ * the behavior asked of the agent, only how loudly a failure spoke, and nothing
+ * speaks loudly or quietly any more. So the priority is dropped on the way out
+ * rather than migrated away: a version row is frozen the moment a run can pin
+ * it, and rewriting one to tidy a retired field would be exactly the edit the
+ * whole versioning exists to make impossible.
  */
 function contentFromRow(value: unknown, versionId: string): TestContent {
   const malformed = () =>
@@ -656,49 +580,42 @@ function contentFromRow(value: unknown, versionId: string): TestContent {
     expectedBehaviors: expectedBehaviors.map((entry): ExpectedBehavior => {
       if (typeof entry === "string") {
         if (entry.trim() === "") throw malformed();
-        return { behavior: entry, priority: DEFAULT_BEHAVIOR_PRIORITY };
+        return entry;
       }
       if (typeof entry !== "object" || entry === null) throw malformed();
-      const { behavior, priority } = entry as Record<string, unknown>;
+      const { behavior } = entry as Record<string, unknown>;
       if (typeof behavior !== "string" || behavior.trim() === "") {
         throw malformed();
       }
-      // The word itself is taken on trust once it is a string, exactly as a
-      // persona's voice provider is: the roster may grow, and an old version
-      // has to stay readable however it grows.
-      if (typeof priority !== "string" || priority === "") throw malformed();
-      return { behavior, priority: priority as Priority };
+      return behavior;
     }),
   };
 }
 
 /**
  * Two ordered lists of strings, compared as written. Order is content
- * everywhere this is asked: the personas and the graders are named in the order
- * they were authored, so a version that reorders either says something the
- * version before it did not.
+ * everywhere this is asked: the personas are named in the order they were
+ * authored, so a version that reorders them says something the version before
+ * it did not.
  */
 function sameOrderedList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((entry, index) => entry === b[index]);
 }
 
 /**
- * The behaviors, compared as written: the same statements, in the same order,
- * each at the same priority. Demoting one from P0 to P1 changes what the test
- * can hold back, so it is an edit and mints a version like any other.
+ * The behaviors, compared as written: the same statements, in the same order.
+ *
+ * The comparison a persona list gets, because a behavior is a plain sentence
+ * now and there is nothing else on it to compare — but named separately,
+ * because the reason order matters here is its own: a verdict row is keyed by a
+ * behavior's **position**, so moving a sentence rekeys every row about it, and
+ * minting a version is what keeps the old rows readable.
  */
 function sameBehaviors(
   a: readonly ExpectedBehavior[],
   b: readonly ExpectedBehavior[],
 ): boolean {
-  return (
-    a.length === b.length &&
-    a.every(
-      (entry, index) =>
-        entry.behavior === b[index]?.behavior &&
-        entry.priority === b[index]?.priority,
-    )
-  );
+  return sameOrderedList(a, b);
 }
 
 /**
@@ -712,10 +629,10 @@ function sameBehaviors(
  * versions identical, and an edit would vanish without a version — the one loss
  * the whole versioning exists to rule out.
  *
- * The jsonb content is all this table covers. The personas and the graders a
- * version names are content too and version on exactly the same terms, but they
- * are rows rather than fields, so they are compared beside this rather than
- * inside it — `editTest` asks all three questions and mints on any answer.
+ * The jsonb content is all this table covers. The personas a version names are
+ * content too and version on exactly the same terms, but they are rows rather
+ * than fields, so they are compared beside this rather than inside it —
+ * `editTest` asks both questions and mints on either answer.
  */
 const sameContentField: {
   readonly [K in keyof TestContent]: (a: TestContent, b: TestContent) => boolean;
@@ -1053,60 +970,6 @@ async function validateNamedPersonas(
 }
 
 /**
- * Whether the ids a write names are graders this project can use: each one
- * exists, is alive, and is this project's.
- *
- * The persona check's shape, for the persona check's reasons — one read for the
- * whole set, one refusal per id that did not come back whole, and a grader of
- * another customer or another project refused in the same words as one that
- * never existed, because confirming that somebody else's row exists is itself a
- * leak.
- *
- * **The read takes a shared lock on every row it finds**, and this write's
- * transaction holds it until it commits, which is the other half of the delete's
- * exclusive lock in `graders.ts`: the two modes conflict, so a delete and a
- * write naming the same grader cannot walk past each other. Without it both
- * could pass their own check and a live test would end up naming a deleted
- * grader — a test quietly checking one thing fewer than it says it checks, which
- * is the one state this rule exists to make impossible.
- */
-async function validateNamedGraders(
-  on: Queryable,
-  auth: AuthContext,
-  projectId: string,
-  ids: readonly string[],
-): Promise<void> {
-  if (ids.length === 0) return;
-
-  const found = new Map(
-    (
-      await on
-        .select({ id: grader.id, deletedAt: grader.deletedAt })
-        .from(grader)
-        .where(
-          within(
-            auth,
-            grader,
-            and(inArray(grader.id, [...ids]), eq(grader.projectId, projectId)),
-          ),
-        )
-        .for("share")
-    ).map((row) => [row.id, row.deletedAt] as const),
-  );
-
-  for (const id of ids) {
-    if (!found.has(id)) {
-      throw new Error(`there is no grader ${id} in this project`);
-    }
-    if (found.get(id) !== null) {
-      throw new Error(
-        `grader ${id} is deleted, and a test cannot name a deleted grader`,
-      );
-    }
-  }
-}
-
-/**
  * The one persona the project points at, for a write that named none.
  *
  * The pointer can be wrong in two different ways and they need different words,
@@ -1226,32 +1089,11 @@ async function namePersonasOn(
 }
 
 /**
- * The same for the graders — and unlike the personas, this list is allowed to
- * be empty, so a version that names none writes no rows rather than an insert
- * with nothing in it.
- */
-async function nameGradersOn(
-  on: Queryable,
-  versionId: string,
-  graderIds: readonly string[],
-): Promise<void> {
-  if (graderIds.length === 0) return;
-
-  await on.insert(testGrader).values(
-    graderIds.map((graderId, index) => ({
-      testVersionId: versionId,
-      graderId,
-      position: index + 1,
-    })),
-  );
-}
-
-/**
- * The test, its first version, the version's personas and graders, and its
- * applicable agents — or none of them. The identity row goes in first naming a
- * version that does not exist yet — its pointer's constraint is deferred, so
- * Postgres checks it at commit — and anything that fails on the way out takes
- * the whole write with it.
+ * The test, its first version, the version's personas and its applicable
+ * agents — or none of them. The identity row goes in first naming a version
+ * that does not exist yet — its pointer's constraint is deferred, so Postgres
+ * checks it at commit — and anything that fails on the way out takes the whole
+ * write with it.
  *
  * Every set is resolved inside the transaction, so what was checked is what the
  * rows name.
@@ -1284,8 +1126,6 @@ export async function createTest(
   });
   const named = input.personaIds ?? [];
   validatePersonaIds(named);
-  const namedGraders = input.graderIds ?? [];
-  validateGraderIds(namedGraders);
   const namedAgents = input.agentIds ?? [];
   validateAgentIds(namedAgents);
 
@@ -1298,7 +1138,6 @@ export async function createTest(
 
   const written = await db().transaction(async (tx) => {
     const personaIds = await personaIdsFor(tx, auth, projectId, named);
-    await validateNamedGraders(tx, auth, projectId, namedGraders);
     const agentIds = await agentIdsFor(tx, auth, projectId, namedAgents);
 
     const [identity] = await tx
@@ -1327,7 +1166,6 @@ export async function createTest(
     });
 
     await namePersonasOn(tx, versionId, personaIds);
-    await nameGradersOn(tx, versionId, namedGraders);
     await linkAgentsTo(tx, auth, id, projectId, agentIds);
 
     // Read back inside the transaction, so what the create answers with is what
@@ -1336,7 +1174,6 @@ export async function createTest(
     return {
       ...identity,
       personas: await personasOf(tx, versionId),
-      graders: await gradersOf(tx, versionId),
       agents: await agentsOf(tx, id),
     };
   });
@@ -1395,46 +1232,6 @@ async function personasOf(
 }
 
 /**
- * The graders of several versions at once, on exactly the terms the personas
- * are read on: keyed by version, each list in the order it was authored, one
- * read for a whole page.
- */
-async function gradersOfVersions(
-  on: Queryable,
-  versionIds: readonly string[],
-): Promise<Map<string, TestGrader[]>> {
-  const byVersion = new Map<string, TestGrader[]>();
-  if (versionIds.length === 0) return byVersion;
-
-  const rows = await on
-    .select({
-      versionId: testGrader.testVersionId,
-      id: grader.id,
-      name: grader.name,
-      deletedAt: grader.deletedAt,
-    })
-    .from(testGrader)
-    .innerJoin(grader, eq(testGrader.graderId, grader.id))
-    .where(inArray(testGrader.testVersionId, [...versionIds]))
-    .orderBy(asc(testGrader.testVersionId), asc(testGrader.position));
-
-  for (const { versionId, ...named } of rows) {
-    const already = byVersion.get(versionId);
-    if (already === undefined) byVersion.set(versionId, [named]);
-    else already.push(named);
-  }
-  return byVersion;
-}
-
-/** The one version's graders, in the order they were authored. */
-async function gradersOf(
-  on: Queryable,
-  versionId: string,
-): Promise<readonly TestGrader[]> {
-  return (await gradersOfVersions(on, [versionId])).get(versionId) ?? [];
-}
-
-/**
  * The identity row joined to its current version — the shape every read of a
  * whole test answers with, written once so two readers can never drift.
  */
@@ -1452,9 +1249,8 @@ function selectWithCurrentVersion(on: Queryable = db()) {
 
 /**
  * One test with what it currently checks: its name and description, its
- * scenario, its expected behaviors and their priorities, the personas who call
- * about it, and the graders it names — both in the order they were authored,
- * deleted ones included and marked.
+ * scenario, its expected behaviors, and the personas who call about it — in the
+ * order they were authored, deleted ones included and marked.
  */
 export async function getTest(
   auth: AuthContext,
@@ -1490,7 +1286,6 @@ async function readTestOn(
     ...rest,
     ...contentFromRow(content, row.versionId),
     personas: await personasOf(on, row.versionId),
-    graders: await gradersOf(on, row.versionId),
     agents: await agentsOf(on, row.id),
   };
 }
@@ -1498,23 +1293,22 @@ async function readTestOn(
 /**
  * One door for every change, so no caller needs the version rules to pick a
  * function — the rules live here. Name and description write in place and
- * version nothing. The scenario, the expected behaviors, the personas and the
- * graders are what the test checks: any of them differing from the current
- * version inserts the next version, with its own join rows, and moves the
- * pointer — all in one transaction with the identity row locked, so two
- * concurrent edits number one after the other rather than fighting over the same
- * version number. The rows of the version being left behind are never touched,
- * because a run that pinned it must still say what it executed. Content
- * byte-identical to the current version is not an edit at all: nothing is
- * written, not even `updated_at`, and the current version comes back.
+ * version nothing. The scenario, the expected behaviors and the personas are
+ * what the test checks: any of them differing from the current version inserts
+ * the next version, with its own join rows, and moves the pointer — all in one
+ * transaction with the identity row locked, so two concurrent edits number one
+ * after the other rather than fighting over the same version number. The rows of
+ * the version being left behind are never touched, because a run that pinned it
+ * must still say what it executed. Content byte-identical to the current version
+ * is not an edit at all: nothing is written, not even `updated_at`, and the
+ * current version comes back.
  *
  * What an edit leaves out, it keeps. A field absent from the changes is read
  * off the current version and carried into the next one, which is what lets an
  * edit to the scenario alone stay an edit to the scenario alone. Carried
- * forward is not a way past validation, though: the personas and the graders a
- * version is about to name are checked whether the edit typed them or inherited
- * them, so no version can come to name one that is missing, deleted, or another
- * project's.
+ * forward is not a way past validation, though: the personas a version is about
+ * to name are checked whether the edit typed them or inherited them, so no
+ * version can come to name one that is missing, deleted, or another project's.
  *
  * **`expectedVersionId` is compared inside that same transaction, on the row
  * this edit has already locked**, and a mismatch refuses the whole edit with
@@ -1538,8 +1332,6 @@ export async function editTest(
   const name = changes.name === undefined ? undefined : validName(changes.name);
   const named = changes.personaIds;
   if (named !== undefined) validatePersonaIds(named);
-  const namedGraders = changes.graderIds;
-  if (namedGraders !== undefined) validateGraderIds(namedGraders);
 
   return db().transaction(async (tx) => {
     const [locked] = await tx
@@ -1610,8 +1402,6 @@ export async function editTest(
     const storedContent = contentFromRow(currentVersion.content, currentVersion.id);
     const storedPersonas = await personasOf(tx, currentVersion.id);
     const storedIds = storedPersonas.map((named) => named.id);
-    const storedGraders = await gradersOf(tx, currentVersion.id);
-    const storedGraderIds = storedGraders.map((named) => named.id);
 
     // Omitted means unchanged: what the edit did not mention is read off the
     // current version, and the whole is then held to what a create is held to.
@@ -1637,13 +1427,9 @@ export async function editTest(
       current.projectId,
       named ?? storedIds,
     );
-    const graderIds = namedGraders ?? storedGraderIds;
-    await validateNamedGraders(tx, auth, current.projectId, graderIds);
-
     const mintsVersion =
       !sameContent(storedContent, content) ||
-      !sameOrderedList(storedIds, personaIds) ||
-      !sameOrderedList(storedGraderIds, graderIds);
+      !sameOrderedList(storedIds, personaIds);
     const identityChanged =
       changes.name !== undefined || changes.description !== undefined;
 
@@ -1654,7 +1440,6 @@ export async function editTest(
         versionId: currentVersion.id,
         ...storedContent,
         personas: storedPersonas,
-        graders: storedGraders,
         agents: await agentsOf(tx, current.id),
       };
     }
@@ -1662,7 +1447,6 @@ export async function editTest(
     let versionId = currentVersion.id;
     let version = currentVersion.version;
     let personas = storedPersonas;
-    let graders = storedGraders;
     if (mintsVersion) {
       versionId = newId("tstv");
       version = currentVersion.version + 1;
@@ -1674,11 +1458,9 @@ export async function editTest(
         createdBy: auth.userId,
       });
       await namePersonasOn(tx, versionId, personaIds);
-      await nameGradersOn(tx, versionId, graderIds);
       // Read back inside the transaction, for the reason create reads back
       // inside it: the answer is what this transaction wrote and checked.
       personas = await personasOf(tx, versionId);
-      graders = await gradersOf(tx, versionId);
     }
 
     const [updated] = await tx
@@ -1709,7 +1491,6 @@ export async function editTest(
       versionId,
       ...content,
       personas,
-      graders,
       agents: await agentsOf(tx, current.id),
     };
   });
@@ -1729,11 +1510,15 @@ function expectRevision(
 
 /**
  * One frozen version, by its own `tstv_` id — the read a run uses to stay
- * interpretable after the test moves on, and the read grading resolves what to
- * judge from: the scenario and expected behaviors as they were, and the personas
- * and graders the version named, by identity and in the order they were
- * authored. Which version of each of them a simulation met is the run's to pin,
- * never this row's.
+ * interpretable after the test moves on, and the read a verdict row's assertion
+ * key is resolved back into words through: the scenario and expected behaviors
+ * as they were, and the personas the version named, by identity and in the order
+ * they were authored. Which version of each of them a simulation met is the
+ * run's to pin, never this row's.
+ *
+ * **Which graders judged is not here and never was a version's business again.**
+ * A running copy's scope decides where it applies, so what judged a conversation
+ * is answered from the copies rather than from the frozen content of a test.
  *
  * It also answers the two things about the test itself that whoever holds only a
  * version id cannot get anywhere else: what the test is called, and whether it
@@ -1781,7 +1566,6 @@ export async function getTestVersion(
     current: currentVersionId === row.id,
     ...contentFromRow(content, row.id),
     personas: await personasOf(db(), row.id),
-    graders: await gradersOf(db(), row.id),
   };
 }
 
@@ -1878,13 +1662,13 @@ export async function listTests(
     .orderBy(desc(test.id))
     .limit(limit + 1);
 
-  // A page's personas, graders and agents come back in one read each, not one
-  // per row: a page of two hundred tests is four queries, the same as a page of
-  // one.
+  // A page's personas and agents come back in one read each, not one per row: a
+  // page of two hundred tests is three queries, the same as a page of one.
   const { items: wanted, nextCursor } = pageOf(rows, limit);
-  const versionIds = wanted.map((row) => row.versionId);
-  const personasByVersion = await personasOfVersions(db(), versionIds);
-  const gradersByVersion = await gradersOfVersions(db(), versionIds);
+  const personasByVersion = await personasOfVersions(
+    db(),
+    wanted.map((row) => row.versionId),
+  );
   const agentsByTest = await agentsOfTests(
     db(),
     wanted.map((row) => row.id),
@@ -1895,7 +1679,6 @@ export async function listTests(
       ...rest,
       ...contentFromRow(content, rest.versionId),
       personas: personasByVersion.get(rest.versionId) ?? [],
-      graders: gradersByVersion.get(rest.versionId) ?? [],
       agents: agentsByTest.get(rest.id) ?? [],
     })),
     nextCursor,
@@ -1904,10 +1687,9 @@ export async function listTests(
 
 /**
  * A new test whose version 1 carries the source's current content: the same
- * scenario, the same expected behaviors at the same priorities, the same
- * personas and the same graders in the same order, under the same name — there
- * is no per-project name uniqueness, so the name copies verbatim exactly as the
- * persona factory copies it.
+ * scenario, the same expected behaviors and the same personas in the same
+ * order, under the same name — there is no per-project name uniqueness, so the
+ * name copies verbatim exactly as the persona factory copies it.
  *
  * A clone is a create with the retyping saved: fresh `tst_` and `tstv_` ids,
  * version numbering starting over at 1, and no link back — the source's history
@@ -1915,16 +1697,15 @@ export async function listTests(
  * the same seam as `getTest`, so a clone can only be taken of what the caller
  * could have fetched: same customer, same acting project, not deleted.
  *
- * The personas and the graders are handed on exactly as the source names them,
- * and `createTest` is the only thing that judges them — one rule about what a
- * version may name, in one place. So a source whose current version names a
- * deleted one of either is refused by that same validation, rather than quietly
- * cloned without it or quietly given the project's default; neither silence
- * would be a copy, and a clone that checked something the source does not is
- * worse than no clone. That refusal is out of reach in practice: both deletes
- * are refused while a live test's current version names the row, and a test that
- * cannot be fetched cannot be cloned, so no clonable source can name a deleted
- * persona or a deleted grader.
+ * The personas are handed on exactly as the source names them, and `createTest`
+ * is the only thing that judges them — one rule about what a version may name,
+ * in one place. So a source whose current version names a deleted persona is
+ * refused by that same validation, rather than quietly cloned without them or
+ * quietly given the project's default; neither silence would be a copy, and a
+ * clone that checked something the source does not is worse than no clone. That
+ * refusal is out of reach in practice: a persona's delete is refused while a
+ * live test's current version names them, and a test that cannot be fetched
+ * cannot be cloned.
  *
  * Authorization is layered on purpose, not by accident of delegation. The
  * leading check refuses a viewer before anything is read, and a credential
@@ -1968,7 +1749,6 @@ export async function cloneTest(
     scenario: source.scenario,
     expectedBehaviors: source.expectedBehaviors,
     personaIds: source.personas.map((named) => named.id),
-    graderIds: source.graders.map((named) => named.id),
     // Copied whole, including the overrides no browser form shows. A clone that
     // dropped them would hand somebody a test that looks identical and runs in
     // a different world.
@@ -2228,10 +2008,9 @@ export async function archiveTest(
  * **Two rules refuse it, and both are about whether the test could actually
  * run.** Restoring is a promise that it can.
  *
- * - Its current version names an archived persona or an archived scenario
- *   grader. Bringing it back would produce a test that is active and refuses
- *   every run — restore those first, or edit the test, and the refusal names
- *   each of them.
+ * - Its current version names an archived persona. Bringing it back would
+ *   produce a test that is active and refuses every run — restore those first,
+ *   or edit the test, and the refusal names each of them.
  * - It has no applicable agent at all, which only an upgrade can produce. The
  *   Restore takes at least one active agent and links it in the same
  *   transaction.
@@ -2318,9 +2097,9 @@ export async function restoreTest(
  * What one version names that has since been archived — the set that refuses
  * the test's Restore, and the set that refusal names.
  *
- * Both junctions in one answer because both are the same fact about the same
- * version: somebody it needs is not available. Personas first, then graders,
- * each by id, so two runs of the same refusal read the same way.
+ * Personas and nothing else, since a test names no graders: the one thing a
+ * version can still be short of is somebody to call about it. Ordered by id,
+ * so two runs of the same refusal read the same way.
  */
 async function archivedDependenciesOf(
   on: Queryable,
@@ -2338,19 +2117,7 @@ async function archivedDependenciesOf(
     )
     .orderBy(asc(persona.id));
 
-  const graders = await on
-    .select({ id: grader.id, name: grader.name })
-    .from(testGrader)
-    .innerJoin(grader, eq(testGrader.graderId, grader.id))
-    .where(
-      and(eq(testGrader.testVersionId, versionId), isNotNull(grader.deletedAt)),
-    )
-    .orderBy(asc(grader.id));
-
-  return [
-    ...personas.map((one) => ({ kind: "persona" as const, ...one })),
-    ...graders.map((one) => ({ kind: "grader" as const, ...one })),
-  ];
+  return personas.map((one) => ({ kind: "persona" as const, ...one }));
 }
 
 /**
@@ -2407,7 +2174,6 @@ export async function listTestVersions(
   const { items, nextCursor } = pageOf(rows, limit);
   const versionIds = items.map((row) => row.id);
   const personasByVersion = await personasOfVersions(db(), versionIds);
-  const gradersByVersion = await gradersOfVersions(db(), versionIds);
 
   return {
     items: items.map(({ content, ...row }) => ({
@@ -2416,7 +2182,6 @@ export async function listTestVersions(
       current: row.id === found.currentVersionId,
       ...contentFromRow(content, row.id),
       personas: personasByVersion.get(row.id) ?? [],
-      graders: gradersByVersion.get(row.id) ?? [],
     })),
     nextCursor,
   };
@@ -2528,31 +2293,14 @@ export async function liveTestsNamingPersona(
     .orderBy(asc(test.id));
 }
 
-/**
- * The live tests whose current version names this grader — the set that refuses
- * the grader's own delete, and the set that refusal names.
+/*
+ * **There is no companion asking which tests name a grader.** There was one, and
+ * it refused a grader's delete while a live test's current version pointed at
+ * it. A test names no graders now, so nothing here can stand in a delete's way:
+ * switching a running copy off is a decision about the project, made once,
+ * without hunting for the tests that would quietly stop checking something.
  *
- * The persona question, asked of the other junction and answered on identical
- * terms: current versions of live tests and nothing else, walked from the join
- * table where `grader_id` is indexed for exactly this, and with no tenancy
- * predicate because whether the delete is refused is a fact about the grader
- * rather than about who is asking. The grader's own delete has checked its
- * tenancy on that row before asking this, and a version may only ever name a
- * grader of its own project, so every row this can return is a test of that same
- * project.
- *
- * Exported to the module, not from the package: this answers a question the
- * grader factory has to ask before it deletes, and the test tables have one
- * owner, which is this file.
+ * The persona question above stands untouched, because a persona is still named
+ * by test content and losing one really would empty a test of somebody who calls
+ * about it.
  */
-export async function liveTestsNamingGrader(
-  on: Queryable,
-  graderId: string,
-): Promise<readonly TestNamingGrader[]> {
-  return on
-    .select({ id: test.id, name: test.name })
-    .from(testGrader)
-    .innerJoin(test, eq(test.currentVersionId, testGrader.testVersionId))
-    .where(and(eq(testGrader.graderId, graderId), notArchived))
-    .orderBy(asc(test.id));
-}

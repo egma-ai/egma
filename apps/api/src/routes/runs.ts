@@ -17,6 +17,7 @@ import {
   NotPermittedError,
   platformFacts,
   ProjectOutsideOrganizationError,
+  readAssertionShelf,
   readRunVerdicts,
   readVerdicts,
   retryRun,
@@ -25,6 +26,7 @@ import {
   RunWriteRefusedError,
   startRun,
   VERDICTS,
+  type AssertionWords,
   type AuthContext,
   type ConductedSimulation,
   type GradingPlan,
@@ -51,6 +53,11 @@ import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { describedMockTool } from "../http/mock-tools.ts";
+import {
+  describedOutcome,
+  describedVerdict,
+  onlyReporting,
+} from "../http/verdicts.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import {
@@ -236,6 +243,14 @@ const NO_SUCH_RUN =
  * that has not finished. Both used to read `pending`, which left a page waiting
  * forever on work nobody filed.
  *
+ * **The verdict is folded over the required lane alone**, which is what the read
+ * hands over: a copy somebody made `required: false` is judged exactly like any
+ * other and writes exactly the same rows — its fraction is the whole reason it
+ * was switched on — and it can never fail this conversation. `diagnostics` is
+ * that other lane, reported apart and never added in. Folding the two together
+ * would make a diagnostic a blocker; leaving the second lane out would make it
+ * judge in silence.
+ *
  * Execution and grading are separate facts and are reported separately. A
  * conversation can be `completed` and ungraded, and a reader that collapsed the
  * two would call a run finished while its judgment was still being written.
@@ -252,6 +267,8 @@ function describedSimulation(
   one: ConductedSimulation,
   judged: SimulationVerdicts | undefined,
   rows: readonly RecordedVerdict[],
+  words: AssertionWords | undefined,
+  diagnostic: ReadonlySet<string>,
 ): Record<string, unknown> {
   const fold = foldSimulation(one.status, judged?.outcome);
   return {
@@ -274,22 +291,16 @@ function describedSimulation(
     // failing agent, and a summary that hid either would say the opposite of
     // what happened.
     counts: fold.counts,
-    // Every judged behaviour, whole. The fold above says how many passed; this
+    // What only reported, beside what decided. Null where nothing diagnostic
+    // judged this conversation — an empty lane described anyway would be
+    // furniture about a feature nobody switched on.
+    diagnostics: describedOutcome(judged?.diagnostics),
+    // Every judged assertion, whole. The fold above says how many passed; this
     // says which ones and why, because "2 of 3 passed" without the rationale
     // sends somebody to read a transcript to work out what egma already knew.
-    // The judge is named on every row: a verdict nobody can attribute is a
-    // verdict nobody can argue with.
-    verdicts: rows.map((its) => ({
-      grader_id: its.graderId,
-      dimension: its.dimension,
-      verdict: its.verdict,
-      score: its.score,
-      priority: its.priority,
-      rationale: its.rationale,
-      cited_turns: [...its.citedSpanIds],
-      judged_by: its.judgedBy,
-      judged_at: its.judgedAt,
-    })),
+    // What each row carries is the one shape both surfaces that draw a judgment
+    // send, decided in `http/verdicts.ts` rather than here and again there.
+    verdicts: rows.map((its) => describedVerdict(its, words, diagnostic)),
     reason: one.endingReason,
     // Why egma never conducted this conversation, and which capabilities
     // decided it. Null on every conversation that actually happened — the two
@@ -430,29 +441,7 @@ function describedPlan(plan: RunPlan): Record<string, unknown> {
             reason: group.capability.reason,
             capabilities: [...group.capability.capabilities],
           },
-      graders: group.items.map((item) =>
-        item.kind === "built_in"
-          ? {
-              kind: "built_in",
-              grader_key: item.graderKey,
-              engine_version: item.engineVersion,
-              reads: [...item.reads],
-              modalities: [...item.modalities],
-              judge: describedJudgeChoice(item.judge),
-            }
-          : {
-              kind: "authored",
-              grader_id: item.graderId,
-              grader_version_id: item.graderVersionId,
-              name: item.graderName,
-              origin: item.origin,
-              priority: item.priority,
-              scope: item.scope,
-              reads: [...item.reads],
-              modalities: [...item.modalities],
-              judge: describedJudgeChoice(item.judge),
-            },
-      ),
+      graders: group.items.map(describedPlanItem),
     })),
   };
 }
@@ -485,11 +474,15 @@ function describedRun(
   baseUrl: string,
   judged?: RunVerdicts,
   rowsBySimulation?: ReadonlyMap<string, readonly RecordedVerdict[]>,
+  wordsBySimulation?: ReadonlyMap<string, AssertionWords>,
 ): Record<string, unknown> {
   const bySimulation = new Map(
     (judged?.simulations ?? []).map((its) => [its.simulationId, its] as const),
   );
   const gradedCount = simulations.filter((one) => bySimulation.has(one.id)).length;
+  // Every conversation's own answer is the required lane's — `readRunVerdicts`
+  // split the lanes before it folded — so this run-level fold votes once per
+  // conversation over decisions that could actually fail one.
   const fold = foldRun(
     one.status,
     one.expectedSimulationCount,
@@ -497,6 +490,11 @@ function describedRun(
       foldSimulation(its.status, bySimulation.get(its.id)?.outcome),
     ),
   );
+  // Which graders only report, off the run's own per-grader fold rather than
+  // read a second time: one answer about `required`, taken where the lanes were
+  // split, so a row's marking and the header's arithmetic cannot disagree. A
+  // grader absent from it is required — see `onlyReporting`.
+  const diagnostic = onlyReporting(judged?.byGrader);
   return {
     id: one.id,
     // Which project this run happened in. A run is reached by an address with no
@@ -561,7 +559,10 @@ function describedRun(
     /*
      * The run's verdict, folded over its conversations' verdicts — one vote
      * each, so a test with forty expected behaviors cannot outvote a test with
-     * two.
+     * two. Over the required copies alone, since that is what each
+     * conversation's own answer was folded from: a run fails when a grader that
+     * can fail one did, and what a diagnostic said is beside it and never in
+     * it.
      *
      * **Null means nobody has finished looking**, and it stays null until every
      * conversation has a verdict. The two available alternatives are both lies:
@@ -578,8 +579,14 @@ function describedRun(
     // breaks down — they are deliberately not the simulation-level counts above.
     score: judged?.outcome.score ?? null,
     counts: judged?.outcome.counts ?? null,
+    diagnostics: describedOutcome(judged?.diagnostics),
+    // Every grader that judged, both lanes, each saying which it is in. A
+    // diagnostic's fraction is exactly what somebody switched it on to read, so
+    // leaving it off this list would make it judge in silence — and folding it
+    // into the headline above would make it a blocker.
     by_grader: (judged?.byGrader ?? []).map((its) => ({
       grader_id: its.graderId,
+      required: its.required,
       verdict: its.outcome.verdict,
       score: its.outcome.score ?? null,
       counts: its.outcome.counts,
@@ -589,6 +596,8 @@ function describedRun(
         its,
         bySimulation.get(its.id),
         rowsBySimulation?.get(its.id) ?? [],
+        wordsBySimulation?.get(its.id),
+        diagnostic,
       ),
     ),
   };
@@ -629,30 +638,28 @@ function describedGradingPlan(plan: GradingPlan): Record<string, unknown> {
   };
 }
 
+/**
+ * One plan item, as every read of a plan describes it — the review step's
+ * answer and a frozen plan's, through one function so the two cannot drift.
+ *
+ * `kind` stays on the wire and stays `authored`, though there is only one kind
+ * left: the field is what a client already switches on, and taking it away to
+ * save a word would break every reader for no gain. `required` is here so a
+ * page can mark a diagnostic apart from the checks that can fail the run.
+ */
 function describedPlanItem(
   item: GradingPlan["groups"][number]["items"][number],
 ): Record<string, unknown> {
-  return item.kind === "built_in"
-    ? {
-        kind: "built_in",
-        grader_key: item.graderKey,
-        engine_version: item.engineVersion,
-        reads: [...item.reads],
-        modalities: [...item.modalities],
-        judge: describedJudgeChoice(item.judge),
-      }
-    : {
-        kind: "authored",
-        grader_id: item.graderId,
-        grader_version_id: item.graderVersionId,
-        name: item.graderName,
-        origin: item.origin,
-        priority: item.priority,
-        scope: item.scope,
-        reads: [...item.reads],
-        modalities: [...item.modalities],
-        judge: describedJudgeChoice(item.judge),
-      };
+  return {
+      kind: "authored",
+      grader_id: item.graderId,
+      grader_version_id: item.graderVersionId,
+      name: item.graderName,
+      library_id: item.libraryId,
+      required: item.required,
+      scope: item.scope,
+      judge: describedJudgeChoice(item.judge),
+  };
 }
 
 /**
@@ -841,19 +848,78 @@ async function runAsItStands(
   // ungraded run has, and which the next read corrects on its own.
   const judged = await readRunVerdicts(auth, runId).catch(() => undefined);
 
+  // Everything about the graders that judged anywhere in this run, read once.
+  // Which entry a copy points at cannot be edited at all and what that entry is
+  // called is one row on the shelf, so these are facts about the run rather than
+  // about any conversation in it — and reading them per conversation would be
+  // two hundred copies of one answer. The run's own per-grader fold already
+  // names every copy that wrote a row, which is exactly the set.
+  const shelf = await readAssertionShelf(
+    auth,
+    (judged?.byGrader ?? []).map((its) => its.graderId),
+  ).catch(() => undefined);
+
   // The rows themselves, one conversation at a time. The run fold deliberately
   // does not carry them — a run of two hundred conversations would be a page
   // nobody asked for — so they are gathered only for the conversations this run
   // actually has, and only for the ones something has judged.
+  //
+  // The words behind their assertion keys come with them, off the shelf above
+  // plus the one thing that genuinely varies: the version each conversation was
+  // pinned to. It is the same trip, because a conversation with rows is a
+  // conversation whose keys are about to be shown.
+  //
+  // **A few at a time, never all at once.** A run holds as many conversations as
+  // somebody selected tests and callers, and firing a query per conversation the
+  // moment the page is asked for would put a burst the size of the run on a pool
+  // sized for a request. The work is the same either way; only how much of it is
+  // in flight changes.
   const rowsBySimulation = new Map<string, readonly RecordedVerdict[]>();
-  await Promise.all(
-    (judged?.simulations ?? []).map(async (its) => {
-      const read = await readVerdicts(auth, its.simulationId).catch(() => undefined);
-      if (read !== undefined) rowsBySimulation.set(its.simulationId, read.verdicts);
-    }),
-  );
+  const wordsBySimulation = new Map<string, AssertionWords>();
+  await aFewAtATime(judged?.simulations ?? [], async (its) => {
+    const read = await readVerdicts(auth, its.simulationId).catch(() => undefined);
+    if (read === undefined) return;
+    rowsBySimulation.set(its.simulationId, read.verdicts);
 
-  return describedRun(header, simulations, baseUrl, judged, rowsBySimulation);
+    // The pinned version is in Postgres and the rows are in the verdict store,
+    // so this failing is a different outage from that one — and the page is
+    // still worth sending with the keys unresolved, which is exactly what a
+    // caller saw before anything resolved them at all.
+    const words = await shelf
+      ?.forSimulation(its.simulationId)
+      .catch(() => undefined);
+    if (words !== undefined) wordsBySimulation.set(its.simulationId, words);
+  });
+
+  return describedRun(
+    header,
+    simulations,
+    baseUrl,
+    judged,
+    rowsBySimulation,
+    wordsBySimulation,
+  );
+}
+
+/**
+ * How many conversations of a run are read at once.
+ *
+ * Small enough that one request cannot exhaust a connection pool sized for
+ * many, large enough that a run of a dozen is still one round of waiting. It is
+ * a ceiling on concurrency rather than a budget on work: every conversation is
+ * read either way.
+ */
+const CONVERSATIONS_READ_AT_ONCE = 8;
+
+async function aFewAtATime<Item>(
+  items: readonly Item[],
+  read: (item: Item) => Promise<void>,
+): Promise<void> {
+  for (let at = 0; at < items.length; at += CONVERSATIONS_READ_AT_ONCE) {
+    await Promise.all(
+      items.slice(at, at + CONVERSATIONS_READ_AT_ONCE).map(read),
+    );
+  }
 }
 
 export async function runRoutes(

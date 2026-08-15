@@ -143,10 +143,19 @@ async function toTheGate(
 
   const run = runInTerminal({
     command: process.execPath,
-    args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+    args: [
+      CLI_ENTRY,
+      "--url",
+      platform.url,
+      "--cwd",
+      workspace.dir,
+      "--",
+      process.execPath,
+      FAKE_AGENT,
+      script,
+    ],
     cwd: workspace.dir,
     env: workspace.env({
-      EGMA_URL: platform.url,
       EGMA_RETELL_URL: retell?.url ?? "",
       EGMA_RETELL_API_KEY: KEY,
       // Whatever the person running the suite edits with is not what this
@@ -273,10 +282,19 @@ describe("the files arriving", () => {
 
     const run = runInTerminal({
       command: process.execPath,
-      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      args: [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
       cwd: workspace.dir,
       env: workspace.env({
-        EGMA_URL: platform.url,
         EGMA_RETELL_URL: retell?.url ?? "",
         EGMA_RETELL_API_KEY: KEY,
         VISUAL: "",

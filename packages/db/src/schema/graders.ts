@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -8,10 +9,10 @@ import {
   pgTable,
   text,
   unique,
+  uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
-import { MODALITIES } from "./agents.ts";
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
 import {
@@ -24,60 +25,28 @@ import {
 } from "./columns.ts";
 
 /**
- * A grader is authored logic that produces a verdict. A metric measures and a
- * grader judges: nobody decided that a call took four minutes, but somebody had
- * to decide that verifying identity before disclosing a balance matters and
- * write the criteria down. These tables hold that decision.
+ * A grader is a **running copy** of a library entry: the row that judges, and
+ * the thing a verdict row names. A metric measures and a grader judges — nobody
+ * decided that a call took four minutes, but somebody had to decide that
+ * verifying identity before disclosing a balance matters and write the criteria
+ * down. The criteria live on the shelf below; these tables hold the decision to
+ * run them here.
  *
- * Graders belong to a project and apply to every one of its tests by default,
- * and to production conversations when their scope says so. A test's own grader
- * array adds scenario-specific ones on top; there is no second kind of grader
- * and none of this is ever attached to a suite, so a test's verdict can never
- * depend on which suite it was run from.
+ * Graders belong to a project and apply to every one of its tests inside their
+ * scope, and to production conversations when their scope says so. There is no
+ * per-test attachment and none of this is ever attached to a suite, so a test's
+ * verdict can never depend on which suite it was run from.
  *
  * Two tables, the persona's and the test's shape exactly, so that two different
  * things can be pointed at — and here the split carries more weight than
  * anywhere else in the schema. **What a grader judges by is versioned; where and
- * how loudly it applies is not.** Tightening a threshold changes what a verdict
+ * how loudly it applies is not.** Tightening a bound changes what a verdict
  * means, so it mints an immutable version and takes effect from now on, leaving
- * last week's run saying exactly what it said. Promoting a grader from P1 to P0,
+ * last week's run saying exactly what it said. Making a grader a diagnostic,
  * pointing it at production, or sampling it differently changes nothing about
  * any judgment already made, so those live on the identity row and take effect
  * everywhere the moment they are written.
  */
-
-/**
- * What kind of judgment this is. Anthropic's nomenclature, at the dev's
- * direction, and flat rather than nested: one word decides what the config
- * holds and how the engine executes it.
- *
- * `expected_behaviors` is deliberately absent. The built-in that judges a test
- * against its own expected behaviors is implicit and always-on — applying it is
- * part of what running a test means — so it is never attached, never detached,
- * and never a row here (ADR-0004). Reserved and named for later: `state_check`,
- * which verifies the end state through a customer's own hooks, and `code`, which
- * runs a customer's own logic.
- */
-export const GRADER_TYPES = [
-  "llm_rubric",
-  "metric_threshold",
-  "tool_calls",
-  "phrase_match",
-] as const;
-export type GraderType = (typeof GRADER_TYPES)[number];
-
-/**
- * How loudly a judgment speaks: P0 blocks, P1 warns, P2 informs. A run's
- * headline reads "all P0 passed, two P1 warnings" rather than one
- * undifferentiated failure.
- *
- * The same three words carry the priority a test's expected behaviors each
- * carry, which is why they live here beside the grader rather than inside it —
- * one vocabulary for "how much does this matter", asked of authored logic and
- * of a written-down expectation alike.
- */
-export const PRIORITIES = ["P0", "P1", "P2"] as const;
-export type Priority = (typeof PRIORITIES)[number];
 
 /**
  * Which conversations a grader judges. The same grader judges simulations and
@@ -92,26 +61,216 @@ export const GRADER_SCOPES = ["simulations", "production", "both"] as const;
 export type GraderScope = (typeof GRADER_SCOPES)[number];
 
 /**
- * What a grader is allowed to look at — its evidence boundary, declared rather
- * than discovered.
+ * What a **library entry** is, and what the running copy that was made from it
+ * is too — one word, copied down at Use time and frozen there, deciding what
+ * the entry's definition holds and which engine executes it.
  *
- * It is **versioned content**, beside the config and for the same reason:
- * widening what a check reads changes what its verdict meant, and a verdict
- * decided on the transcript alone must stay readable as exactly that after
- * somebody points the same grader at the outcome as well.
+ * Two words in v0. `llm_as_judge` carries a `prompt` and an `output_definition`
+ * and is executed by asking a model; `code` carries parameters a person fills
+ * in at **Use** time and is executed by egma's own engine.
  *
- * The three deterministic types have theirs fixed by the registry — a
- * `metric_threshold` reads measures because that is what a threshold *is* — and
- * only `llm_rubric` chooses, because only a rubric's author knows which
- * evidence their criteria are written about.
+ * Three more are **reserved and refused by the constraint below**, so a row can
+ * never quietly hold one before the machinery that executes it exists — a
+ * grader that nothing can run is a check somebody believes in that can never
+ * fire, which is the false trust this product exists to kill. `human` is the
+ * return path for corrections, writing verdict rows under its own grader id;
+ * `ml_model` is unspecified; `external` is egma calling a customer's endpoint
+ * and storing no code. Each is named here so the day one arrives is the day
+ * this list grows by one word, rather than the day somebody invents a spelling.
  */
-export const GRADER_READS = [
-  "transcript",
-  "outcome",
-  "tool_calls",
-  "measures",
-] as const;
-export type GraderRead = (typeof GRADER_READS)[number];
+export const LIBRARY_TYPES = ["llm_as_judge", "code"] as const;
+export type LibraryType = (typeof LIBRARY_TYPES)[number];
+
+/**
+ * The words the constraint turns away, written down beside the ones it takes.
+ *
+ * They are here rather than only in prose because a refusal has to be able to
+ * say *this word is spoken for, and this is what it will mean* — which is a
+ * different sentence from "egma has never heard of that".
+ */
+export const RESERVED_LIBRARY_TYPES = ["human", "ml_model", "external"] as const;
+export type ReservedLibraryType = (typeof RESERVED_LIBRARY_TYPES)[number];
+
+/**
+ * How much source a custom `code` entry may carry, in bytes.
+ *
+ * Null in v0 — nothing writes it and no dispatcher exists to run it — and the
+ * cap is written down now for the reason the mock tool's answer cap is: a limit
+ * discovered at execution time is a limit somebody meets after they have
+ * written the thing. A quarter of a mebibyte is the reference implementation's
+ * (Langfuse stores customer eval code in a text column of this size), and code
+ * that needs more than this is a service rather than a grader.
+ */
+export const LARGEST_GRADER_SOURCE_CODE_BYTES = 256 * 1024;
+
+/**
+ * The shelf: every grader definition, egma's own and — when custom authoring
+ * arrives — a team's, in one table.
+ *
+ * **This is the one table whose tenancy is nullable and *means* it, and the
+ * exception is the whole point.** Everywhere a customer's data lives, an
+ * `organization_id` is `not null`, because a row belonging to nobody is a row
+ * no permission can describe. Here, *belonging to nobody* is a real and
+ * permanent state: **null tenancy means egma owns the entry**, which is what a
+ * predefined grader is, and it is where the Owner label on the Library screen
+ * is derived from rather than from a flag somebody could set the other way. The
+ * alternative — a `predefined` boolean beside a tenancy pointing at some house
+ * organization — would need a house organization on every deployment and would
+ * let the two disagree.
+ *
+ * (`device_code` also leaves the pair null and means the opposite thing by it:
+ * a terminal nobody has aimed yet, filled in at approval. Null as *not yet* and
+ * null as *never* are two different decisions, which is why the schema's shape
+ * suite names both tables and refuses a third.)
+ *
+ * The two columns move together, held by a check — the device code's own
+ * arrangement, borrowed whole: an entry belongs to a project inside an
+ * organization, or to egma. There is no third state, because a definition owned
+ * by an organization and by no project would be a grader nothing could scope —
+ * graders belong to a project, as tests and personas do.
+ *
+ * **Predefined entries are seeded by a deterministic upsert from a catalog in
+ * egma's code** (`grader-library/catalog.ts`), so an egma release that improves
+ * a judge prompt upgrades every project. That places predefined definitions
+ * deliberately outside run pinning: they are product behaviour, release-tracked
+ * exactly as the engine code executing beside them, and which definition judged
+ * a given verdict is reconstructable from the catalog's git history plus this
+ * row's `version`. Run pinning protects customer-authored meaning — test
+ * versions and the running copy's filled-in config, both pinned — and custom
+ * entries version and pin when authoring arrives.
+ *
+ * **The table name is plural-ish on purpose and is a recorded exception** to
+ * the schema's singular naming: it names the shelf rather than one thing on it,
+ * exactly as the reference implementation's `eval_templates` does.
+ *
+ * The definition is never copied down onto a running copy. A copy points here
+ * by `library_id` and the definition is read through that pointer at judging
+ * time — a copied definition drifts from the one on screen, which is the
+ * documented failure this two-level shape exists to make unreachable.
+ */
+export const graderLibrary = pgTable(
+  "grader_library",
+  {
+    id: idText("id").primaryKey(),
+    /**
+     * Null for an entry egma owns. See the table's own note: this is the
+     * schema's one deliberate exception to hard-required tenancy, and the
+     * Owner label is derived from it.
+     */
+    organizationId: idText("organization_id").references(
+      () => organization.id,
+      { onDelete: "cascade" },
+    ),
+    /** Null for an entry egma owns, and never null on its own. */
+    projectId: idText("project_id"),
+    /** What a person calls it: `expected_behaviors`, `latency`. */
+    name: text("name").notNull(),
+    description: text("description"),
+    /** `llm_as_judge` or `code`; the reserved three are refused below. */
+    type: text("type").notNull(),
+    /**
+     * How many times this definition has been written.
+     *
+     * **Bumped by the catalog upsert, and only when something actually
+     * changed.** It is what makes "which prompt judged this verdict" answerable
+     * against the catalog's history: the release that changed the words is the
+     * release that moved this number. A run does not pin it, deliberately — see
+     * the table's note.
+     */
+    version: integer("version").notNull().default(1),
+    /**
+     * The judge prompt, with its variable slots, for an `llm_as_judge` entry.
+     * Null for a `code` entry, which is executed rather than asked.
+     *
+     * It lives on the row rather than only in the engine so that the Library
+     * screen can show a developer the words their conversations are judged by.
+     */
+    prompt: text("prompt"),
+    /**
+     * The schema of what **Use** asks for, as an ordered list of parameter
+     * declarations — latency declares a measure from the catalog and a bound;
+     * expected_behaviors declares nothing, because its assertions are the
+     * test's own sentences and wire themselves at judging time.
+     *
+     * jsonb rather than columns for the reason a persona's traits are: two
+     * entries shape it two ways today and a third will shape it a third way,
+     * and a field promoted to a column later is a cheap migration.
+     */
+    params: jsonb("params").notNull(),
+    /**
+     * The shape an `llm_as_judge` entry's judge must **reply** in — the
+     * decision, its one-sentence reason, and the turns it rests on — so that
+     * what the prompt above commands, what the engine parses, and what the
+     * Library screen promises are one statement. Null for a `code` entry.
+     *
+     * It describes the *judge's answer*, not the verdict row written from it:
+     * a row carries a verdict and a score, exists for assertions no judge was
+     * ever asked about, and turns `cannot_determine` into `skipped`. Two
+     * documents, and this column is the first one.
+     */
+    outputDefinition: jsonb("output_definition"),
+    /**
+     * A custom `code` entry's own source, and the language it is written in.
+     *
+     * **Both null in v0**, and reserved rather than speculative: `code` today
+     * means egma's own engine executing a parameterised definition with no
+     * stored source, and customer code arrives with a dispatcher seam to run it
+     * safely. The columns are here so that arriving is an insert rather than a
+     * migration, and the cap beside them is the reference implementation's.
+     */
+    sourceCode: text("source_code"),
+    sourceCodeLanguage: text("source_code_language"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    prefixCheck("grader_library_id_prefix", table.id, "grl"),
+    // Two words, and the reserved three refused by name: a row holding a type
+    // no engine executes is a grader that can never fire.
+    oneOf("grader_library_type_allowed", table.type, [...LIBRARY_TYPES]),
+    // The nullable-tenancy exception, bounded: an entry belongs to a project
+    // inside an organization, or it belongs to egma. Written as a check rather
+    // than left to convention, because "owned by nobody" is a real state here
+    // and only the database can keep it from becoming three states.
+    check(
+      "grader_library_tenancy_is_whole_or_egmas",
+      sql`(${table.organizationId} is null) = (${table.projectId} is null)`,
+    ),
+    // The cap on a custom entry's source, held where a hand-written insert
+    // meets it too.
+    check(
+      "grader_library_source_code_within_budget",
+      sql`${table.sourceCode} is null or octet_length(${table.sourceCode}) <= ${sql.raw(
+        String(LARGEST_GRADER_SOURCE_CODE_BYTES),
+      )}`,
+    ),
+    // A language names source, and source names a language: a row carrying one
+    // without the other is half a definition.
+    check(
+      "grader_library_source_code_columns_agree",
+      sql`(${table.sourceCode} is null) = (${table.sourceCodeLanguage} is null)`,
+    ),
+    // The pairing, not each column on its own: an entry cannot name one
+    // organization and another organization's project. Both null skips it,
+    // which is exactly the egma-owned row.
+    foreignKey({
+      name: "grader_library_project_organization_fk",
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    // One predefined entry per name, held by the database rather than by the
+    // catalog's author: two egma-owned entries called `latency` would be two
+    // shelves' worth of one thing, and the second would be seeded by an id
+    // somebody duplicated.
+    uniqueIndex("grader_library_predefined_name_unique")
+      .on(table.name)
+      .where(sql`${table.organizationId} is null`),
+    index("grader_library_organization_id_project_id_idx").on(
+      table.organizationId,
+      table.projectId,
+    ),
+  ],
+);
 
 /**
  * The judges egma can ask. It grows one provider at a time, behind one seam,
@@ -122,6 +281,21 @@ export type GraderRead = (typeof GRADER_READS)[number];
 export const JUDGE_PROVIDERS = ["openai"] as const;
 export type JudgeProvider = (typeof JUDGE_PROVIDERS)[number];
 
+/**
+ * The running copies: one row per grader a project actually judges with.
+ *
+ * A copy is made by pressing **Use** on a library entry, or seeded at project
+ * creation. It carries the *deployment* — where it applies, how loudly, how
+ * often — and its **filled-in values** in immutable versions. It does not carry
+ * the definition, and that is the shape's whole reason for existing: the judge
+ * prompt and the code are read through `library_id` at judging time, so what
+ * the Library screen shows and what a judge is sent can never be two different
+ * strings. A definition copied down drifts from the one on screen, which is the
+ * documented failure this arrangement makes unreachable.
+ *
+ * **Dormant is no row at all.** There is no enable switch and no `none` scope:
+ * pressing Use is the enabling, and deleting the copy is the switching off.
+ */
 export const grader = pgTable(
   "grader",
   {
@@ -130,16 +304,46 @@ export const grader = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
+    /**
+     * The entry this is a copy of — **the connecting tissue, and never null**.
+     *
+     * A grader with no entry would be a row with no definition to read at
+     * judging time, which is not a grader at all. `restrict` rather than
+     * `set null` for the same reason: an entry somebody deleted while a project
+     * was judging with it must be refused, not quietly orphaned, because the
+     * copy would go on being resolved and would find nothing to judge by. The
+     * refusal is written in the access layer too, where it can name the copies
+     * standing in the way; this is the backstop that makes the rule true of the
+     * database rather than only of the code above it.
+     */
+    libraryId: idText("library_id")
+      .notNull()
+      .references(() => graderLibrary.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     description: text("description"),
     /**
-     * Set at creation and never edited. The config in every version is shaped
-     * by this word, so changing it would leave the versions behind it holding
-     * parameters for a kind of judgment this grader no longer makes — which is
-     * a different grader wearing the old one's history.
+     * Copied from the entry at Use time and never edited. The config in every
+     * version is shaped by this word, so changing it would leave the versions
+     * behind it holding parameters for a kind of judgment this grader no longer
+     * makes — which is a different grader wearing the old one's history.
      */
     type: text("type").notNull(),
-    priority: text("priority").notNull(),
+    /**
+     * Whether a test can pass while this copy does not.
+     *
+     * `true` — the default, and what a copy somebody switched on is for: the
+     * test cannot pass unless this grader fully passes. `false` makes it a
+     * **diagnostic**: judged, displayed with its fraction, and unable to fail
+     * anything. Those are the two roles v0 has, and they are what is left where
+     * the P0/P1/P2 ladder was — a boolean rather than three words, because
+     * binary scoring leaves a middle rung nothing to say.
+     *
+     * A live setting rather than versioned content, on the scope's exact terms:
+     * making a blocker into a diagnostic changes nothing about any judgment
+     * already made, so it is written in place and takes effect everywhere at
+     * once. What the row said last week still says it.
+     */
+    required: boolean("required").notNull().default(true),
     scope: text("scope").notNull().default("simulations"),
     /** Per cent of production conversations judged; simulations are all judged. */
     productionSampleRate: integer("production_sample_rate")
@@ -177,24 +381,6 @@ export const grader = pgTable(
     currentVersionId: idText("current_version_id")
       .notNull()
       .references((): AnyPgColumn => graderVersion.id),
-    /**
-     * The opaque revision of everything on this row that is live rather than
-     * versioned — the name, the description, the priority, the scope, the
-     * sampling rate, and whether it is archived.
-     *
-     * **Minted fresh on every write, never derived.** A revision computed from
-     * the row's own fields would repeat itself the moment somebody renamed a
-     * grader back, and an edit written against the first spelling would then be
-     * accepted against the second. It is opaque so that nothing outside can do
-     * arithmetic on it or guess the next one.
-     *
-     * The version pointer beside it answers the other half of the same
-     * question: a live edit carries `expected_revision`, and a versioned edit
-     * carries the version it was written against as well. Two fields because
-     * they move independently — renaming a grader must not make a rubric edit
-     * somebody is still typing stale.
-     */
-    revision: idText("revision").notNull(),
     deletedAt: moment("deleted_at"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
@@ -204,9 +390,10 @@ export const grader = pgTable(
   },
   (table) => [
     prefixCheck("grader_id_prefix", table.id, "grd"),
-    prefixCheck("grader_revision_prefix", table.revision, "rev"),
-    oneOf("grader_type_allowed", table.type, [...GRADER_TYPES]),
-    oneOf("grader_priority_allowed", table.priority, [...PRIORITIES]),
+    // The entry's own two words, and the reserved three refused by name here
+    // exactly as they are on the shelf: a copy is only ever made by copying a
+    // type down, so the two lists are one list and the database says so.
+    oneOf("grader_type_allowed", table.type, [...LIBRARY_TYPES]),
     oneOf("grader_scope_allowed", table.scope, [...GRADER_SCOPES]),
     // A sampling rate is a percentage of the traffic that arrives, so the two
     // ends are "none of it" and "all of it" and there is nothing outside them.
@@ -230,6 +417,10 @@ export const grader = pgTable(
     index("grader_organization_id_project_id_idx")
       .on(table.organizationId, table.projectId)
       .where(sql`${table.deletedAt} is null`),
+    // Which copies point at an entry, asked every time somebody tries to take
+    // that entry off the shelf, and asked again by the backfill that gives a
+    // project the one copy it must have.
+    index("grader_library_id_idx").on(table.libraryId),
   ],
 );
 
@@ -363,11 +554,20 @@ export const graderVersion = pgTable(
       .references(() => grader.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
     /**
-     * Everything the judgment is made by: the rubric text for an `llm_rubric`,
-     * the parameters for a deterministic type. Deliberately jsonb, for the
-     * reason a persona's traits and a test's content are: four types shape it
-     * four ways today and reserved types will shape it more, and a field
-     * promoted to a column later is a cheap migration.
+     * The copy's **filled-in values** — one set per assertion, each answering
+     * the parameters its library entry declares. Latency's are a measure and a
+     * bound; expected_behaviors' are empty, because its assertions are the
+     * test's own sentences and arrive at judging time.
+     *
+     * **The definition is never in here.** No prompt, no code, no criteria: the
+     * entry holds those and is read through `library_id` when a conversation is
+     * judged. What a version freezes is what somebody typed, which is exactly
+     * what a run pins and what a verdict has to stay readable against.
+     *
+     * Deliberately jsonb, for the reason a persona's traits and a test's
+     * content are: what an entry asks for is the entry's own decision and grows
+     * with the shelf, and a field promoted to a column later is a cheap
+     * migration.
      */
     config: jsonb("config").notNull(),
     /**
@@ -377,26 +577,6 @@ export const graderVersion = pgTable(
      * a stronger one named here on the subtle rubric that needs it.
      */
     judgeModel: jsonb("judge_model"),
-    /**
-     * What this version of the grader is allowed to look at, from
-     * `GRADER_READS`. Nonempty, always: a grader that reads nothing can decide
-     * nothing, and storing the empty set would make "reads everything" and
-     * "reads nothing" one value.
-     */
-    reads: text("reads").array().notNull(),
-    /**
-     * Which modalities this version can score, from `MODALITIES`. Nonempty for
-     * the reason above, and defaulted to both at every write door — because a
-     * grader that named neither would be `skipped` on every conversation
-     * forever, which is a check somebody wrote and believes in that can never
-     * fire.
-     *
-     * A grader whose set excludes the conversation's modality is **`skipped`**,
-     * never failed. "Didn't interrupt the caller" is meaningless on chat, and
-     * scoring it as a failure would make a suite red for a check that was never
-     * about that conversation.
-     */
-    modalities: text("modalities").array().notNull(),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -407,18 +587,6 @@ export const graderVersion = pgTable(
     unique("grader_version_grader_id_version_unique").on(
       table.graderId,
       table.version,
-    ),
-    // Nonempty, and drawn from the settled lists. Both halves are here rather
-    // than only at the write door because an old row is read back as a
-    // vocabulary the engine dispatches on, and a value nothing ever offered
-    // would be a grader silently skipping everything.
-    check(
-      "grader_version_reads_are_a_nonempty_known_set",
-      sql`array_length(${table.reads}, 1) >= 1 and ${table.reads} <@ ${sql.raw(`array[${GRADER_READS.map((read) => `'${read}'`).join(", ")}]::text[]`)}`,
-    ),
-    check(
-      "grader_version_modalities_are_a_nonempty_known_set",
-      sql`array_length(${table.modalities}, 1) >= 1 and ${table.modalities} <@ ${sql.raw(`array[${MODALITIES.map((modality) => `'${modality}'`).join(", ")}]::text[]`)}`,
     ),
   ],
 );

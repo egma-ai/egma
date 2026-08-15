@@ -19,7 +19,6 @@ import {
   acme,
   actingAsAcme,
   actingAsGlobex,
-  blocking,
   rescheduling,
   rowCounts,
   seedPersona,
@@ -146,7 +145,7 @@ describe("listing tests", () => {
     ).toBe(true);
     const five = page.items[0];
     expect(five?.expectedBehaviors).toEqual(
-      blocking(rescheduling.expectedBehaviors),
+      rescheduling.expectedBehaviors,
     );
     expect(five?.personas).toEqual([
       { id: olive, name: "Olive", archivedAt: null },

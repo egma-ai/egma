@@ -26,7 +26,7 @@ import type { Detection } from "../../wizard/detection.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
-import type { AskId, DrivenAgent, GateId } from "../wizard-ui.ts";
+import type { AskId, DrivenAgent, GateId, PlatformNotice } from "../wizard-ui.ts";
 
 /** The screens of the walk, in order. */
 export const WALK_SCREENS: Sequence = [
@@ -176,7 +176,7 @@ export class WizardStore {
     this.change({ drivenAgentLog });
   }
 
-  setPlatform(platform: string | null): void {
+  setPlatform(platform: PlatformNotice | null): void {
     this.change({ platform });
   }
 

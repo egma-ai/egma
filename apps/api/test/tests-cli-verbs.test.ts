@@ -110,20 +110,16 @@ const STATEMENTS = [
 ] as const;
 
 const FILE: TestFile = {
-  format: 2,
+  format: 3,
   name: "Reschedules a booked appointment",
   description: null,
   personas: [],
   version: null,
   identityRevision: null,
-  graders: [],
   requiredCapabilities: [],
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expectedBehaviors: STATEMENTS.map((behavior) => ({
-    behavior,
-    priority: "P0" as const,
-  })),
+  expectedBehaviors: [...STATEMENTS],
   mockTools: [],
 };
 
@@ -366,14 +362,8 @@ describe("push, against a real instance", () => {
         name: FILE.name,
         description: "",
         scenario: "The file's own words.",
-        // A write always says a priority; the file's `null` — a line that
-        // claimed none — means the P0 it has always meant.
-        expectedBehaviors: FILE.expectedBehaviors.map((one) => ({
-          behavior: one.behavior,
-          priority: one.priority ?? ("P0" as const),
-        })),
+        expectedBehaviors: [...FILE.expectedBehaviors],
         personas: [],
-        graders: [],
         requiredCapabilities: [],
         mockTools: [],
       },

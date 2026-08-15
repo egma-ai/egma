@@ -6,6 +6,7 @@ import { judgeConfiguration } from "../schema/graders.ts";
 import { persona, personaVersion } from "../schema/personas.ts";
 import { organization, project } from "../schema/tenancy.ts";
 import { platformJudgeRow } from "./judges.ts";
+import { insertSeededGrader } from "./seeded-graders.ts";
 import type { PersonaTraits } from "./personas.ts";
 import type { Membership } from "./memberships.ts";
 import { insertMembership } from "./memberships.ts";
@@ -17,10 +18,11 @@ import { insertMembership } from "./memberships.ts";
  * and the only rows it can touch are the ones it just made.
  *
  * Signup either fully succeeds or fully fails. An account with an organization
- * but no project is a developer with no way forward, and a project with no
- * persona in it is a first test waiting on one, so the organization, its first
- * project, that project's starter persona and the owner's membership are one
- * transaction.
+ * but no project is a developer with no way forward, a project with no persona
+ * in it is a first test waiting on one, and a project with no grader in it is a
+ * first run nobody judges — so the organization, its first project, that
+ * project's starter persona, its copy of egma's expected-behaviors grader and
+ * the owner's membership are one transaction.
  */
 
 /**
@@ -161,6 +163,19 @@ export async function insertProject(
     .update(project)
     .set({ defaultPersonaId: starterId })
     .where(eq(project.id, input.projectId));
+
+  // The project's mandatory grading, in the same transaction as everything
+  // else: an active, required copy of egma's `expected_behaviors` grader,
+  // scoped to simulations and holding nothing of its own. It is what makes a
+  // first run judged with no setup at all — the behaviors somebody wrote on
+  // their first test are checked because this row exists, and a project born
+  // without it would be a project whose suite goes green having judged
+  // nothing.
+  await insertSeededGrader(on, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    createdBy: input.createdBy ?? null,
+  });
 
   // The platform's own judge, where it has one, in the same transaction as
   // everything else this project needs to be usable. `onConflictDoNothing` for
