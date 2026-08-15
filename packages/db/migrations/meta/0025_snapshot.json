@@ -1,6 +1,6 @@
 {
-  "id": "8c72b53c-50bc-497b-be07-4ab9f4d65814",
-  "prevId": "831abe2d-7970-4ad5-94eb-032b2019c330",
+  "id": "2f73d914-05ed-4378-87a0-d9c00ac12419",
+  "prevId": "8c72b53c-50bc-497b-be07-4ab9f4d65814",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2170,12 +2170,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "priority": {
-          "name": "priority",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "scope": {
           "name": "scope",
           "type": "text",
@@ -2321,10 +2315,6 @@
         "grader_type_allowed": {
           "name": "grader_type_allowed",
           "value": "\"grader\".\"type\" in ('llm_rubric', 'metric_threshold', 'tool_calls', 'phrase_match')"
-        },
-        "grader_priority_allowed": {
-          "name": "grader_priority_allowed",
-          "value": "\"grader\".\"priority\" in ('P0', 'P1', 'P2')"
         },
         "grader_scope_allowed": {
           "name": "grader_scope_allowed",

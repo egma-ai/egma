@@ -35,6 +35,7 @@ describe("the product navigation", () => {
   it("names only pages that exist", () => {
     expect(PRODUCT_NAVIGATION).toEqual([
       { id: "transcripts", label: "Transcripts", href: "/traces" },
+      { id: "graders", label: "Graders", href: "/graders" },
     ]);
   });
 });

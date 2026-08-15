@@ -303,6 +303,35 @@ export class GraderNamedByTestsError extends Error {
 }
 
 /**
+ * A delete named a library entry egma owns, and egma's entries are undeletable.
+ *
+ * A predefined entry is not a row somebody wrote; it is a row an egma release
+ * writes, and it is written again on the next boot. Allowing the delete would
+ * make it come back — the seeding is deterministic and runs on every start — so
+ * what a developer would actually get is a grader that disappears from the
+ * shelf until the container restarts, and running copies pointing at nothing in
+ * between. Refusing says the true thing instead: this one is egma's, and the
+ * way to stop it judging is to stop running a copy of it.
+ *
+ * It carries the entry's name as well as its id, because the sentence a person
+ * reads should name the grader they just tried to remove rather than an
+ * identifier they then have to go and look up.
+ */
+export class PredefinedGraderError extends Error {
+  readonly libraryId: string;
+  readonly graderName: string;
+
+  constructor(libraryId: string, graderName: string) {
+    super(
+      `"${graderName}" (${libraryId}) is one of egma's own graders, and those cannot be deleted: it is written by every release and would come back at the next start. Stop running a copy of it instead — a library entry judges nothing on its own.`,
+    );
+    this.name = "PredefinedGraderError";
+    this.libraryId = libraryId;
+    this.graderName = graderName;
+  }
+}
+
+/**
  * A mock tool was written for a tool this project already answers for.
  *
  * Matching is by tool name and strictly by it — no arguments are read — so two

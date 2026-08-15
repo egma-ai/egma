@@ -12,6 +12,7 @@ import { agentRoutes } from "./routes/agents.ts";
 import { apiKeyRoutes } from "./routes/api-keys.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
+import { graderLibraryRoutes } from "./routes/grader-library.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
@@ -256,6 +257,16 @@ export function buildApi(options: ServerOptions): Api {
   // group here, so the credentialed hook and the routes it protects cannot come
   // apart and one group's error handler never answers another's refusals.
   void app.register(testRoutes, { provider: identity.provider, rateLimit });
+
+  // The shelf of grader definitions a developer picks from — egma's own two,
+  // and a team's when custom authoring arrives. Its own scope like every other
+  // group, and one verb inside it: the library is read, never authored, which
+  // is the whole shape of shipping a small set of predefined graders rather
+  // than an authoring surface.
+  void app.register(graderLibraryRoutes, {
+    provider: identity.provider,
+    rateLimit,
+  });
 
   // The mocked world a project's simulations run in: what egma answers with
   // when the agent calls one of its tools, so a test never books a real

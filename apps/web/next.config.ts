@@ -71,6 +71,14 @@ const config: NextConfig = {
           source: "/api/invitations/:path*",
           destination: `${api}/api/invitations/:path*`,
         },
+        // The shelf of grader definitions the Library screen draws itself
+        // from. One rule and no `:path*` beside it, because the library is
+        // read and never authored: a second address under it would be a
+        // forwarding rule for a door that does not exist.
+        {
+          source: "/api/grader-library",
+          destination: `${api}/api/grader-library`,
+        },
         { source: "/api/tests", destination: `${api}/api/tests` },
         { source: "/api/tests/:path*", destination: `${api}/api/tests/:path*` },
         {
