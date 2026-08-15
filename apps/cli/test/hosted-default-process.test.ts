@@ -258,9 +258,20 @@ describe("a repository that names no platform", () => {
       expect(connected.stdout).toContain("status: connected");
       expect(connected.stdout).toContain(`url: ${own.url}`);
 
-      // `connect` binds, so the platform block goes back out to leave `run`
-      // where every other command here was: naming nothing.
-      await updateConfig(paths.config, { platform: null });
+      // `run` is the one verb that cannot be asked this question with nothing
+      // in the folder: it needs the agent and connection ids, and those are
+      // only ever written by `connect`, which binds before it writes them. So
+      // an unbound repository that `run` could run in is not a state egma can
+      // produce — taking the platform block back out here would leave the
+      // half-moved folder, which is refused on purpose by the check below.
+      //
+      // What is proven instead is the same claim from the other side: `connect`
+      // reached the built-in address with nothing naming one, and bound this
+      // repository to what answered there, so `run` goes to that same egma.
+      expect((await readConfig(paths.config)).platform).toEqual({
+        origin: own.url,
+        instance: own.instanceId,
+      });
       const ran = await egma(workspace, ["run", "--no-follow"], seam);
       expect(ran.code, ran.stderr).toBe(0);
       expect(ran.stdout).toContain("status: started");
@@ -483,6 +494,73 @@ describe("a repository that names no platform", () => {
           expect(reached, line).toEqual([]);
         }
       }
+    } finally {
+      await workspace.remove();
+    }
+  });
+
+  /**
+   * The half-applied move, refused rather than acted on.
+   *
+   * Deleting the platform block is one edit; deleting the identifiers it was
+   * keeping in place is four more. In between, the repository names no platform
+   * and still holds every identifier the old one issued — and the step below
+   * "names nothing" is now egma's own platform. Without this refusal the next
+   * command carries somebody else's identifiers to hosted egma, which is the
+   * one thing ADR-0008 exists to stop.
+   *
+   * It is refused on what is already on this machine, so the address egma would
+   * have used is not asked so much as who it is.
+   */
+  it("refuses a folder holding identifiers from a platform it no longer names", async () => {
+    const workspace = await makeWorkspace();
+    try {
+      await workspace.signIn(own.url, PLATFORM_KEY);
+      const paths = folderPathsIn(workspace.dir);
+      await createEgmaFolder({
+        repository: workspace.dir,
+        config: {
+          platform: { origin: elsewhere.url, instance: elsewhere.instanceId },
+          agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
+          connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
+          suite: { name: "first-suite", id: "sui_01K3XQ7M4E8YB2FVN0H9TZQWET" },
+        },
+      });
+      // The one edit that unbinds it, and nothing else — a developer starting
+      // the move at the wrong end of the list.
+      await updateConfig(paths.config, { platform: null });
+
+      const before = own.records.length;
+      const elsewhereBefore = elsewhere.records.length;
+      const refused = await egma(workspace, ["pull"], { EGMA_TEST_DEFAULT_URL: own.url });
+
+      expect(refused.code).toBe(4);
+      expect(refused.stdout).toContain("status: refused");
+      expect(refused.stderr).toContain("This repository names no Egma platform");
+      expect(refused.stderr).toContain("agent, connection, suite");
+      expect(refused.stderr).toContain("Nothing was sent");
+      // The rest of the list, so the developer can finish what they started
+      // rather than meet a second refusal for the next line.
+      expect(refused.stderr).toContain(
+        "To move this repository to another platform, delete these in this order and run egma again:",
+      );
+
+      // Nothing reached the address egma would have fallen back to, and nothing
+      // reached the platform the identifiers came from either.
+      expect(own.records.slice(before)).toEqual([]);
+      expect(elsewhere.records.slice(elsewhereBefore)).toEqual([]);
+
+      // And the folder egma writes for a repository that has connected nothing
+      // is untouched by this: a bare platform: line with no identifiers under
+      // it is what `egma init` leaves behind, and it still resolves.
+      await updateConfig(paths.config, {
+        agent: { name: "receptionist", id: null },
+        connection: { name: "retell-1", id: null },
+        suite: { name: "first-suite", id: null },
+      });
+      const pulled = await egma(workspace, ["pull"], { EGMA_TEST_DEFAULT_URL: own.url });
+      expect(pulled.code, pulled.stderr).toBe(0);
+      expect(pulled.stdout).toContain(`url: ${own.url}`);
     } finally {
       await workspace.remove();
     }

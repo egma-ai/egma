@@ -46,6 +46,7 @@ import {
   KeysUnusableError,
   PlatformBindingMismatchError,
   RepositoryPlatformConfigError,
+  UnboundPlatformIdentifiersError,
   UnusableUrlError,
   verifyPlatform,
   type ChosenPlatform,
@@ -471,7 +472,8 @@ function platformRefusal(error: unknown): "refused" | "unreachable" | null {
     error instanceof PlatformBindingMismatchError ||
     error instanceof BoundPlatformAddressError ||
     error instanceof PlatformOriginMismatchError ||
-    error instanceof RepositoryPlatformConfigError
+    error instanceof RepositoryPlatformConfigError ||
+    error instanceof UnboundPlatformIdentifiersError
   ) {
     return "refused";
   }

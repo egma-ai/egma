@@ -18,8 +18,10 @@ import process from "node:process";
 
 import {
   folderPathsIn,
+  platformOwnedIds,
   readConfig,
   teachingTheMove,
+  type FolderConfig,
   type PlatformBinding,
 } from "../folder/egma-folder.ts";
 import {
@@ -537,6 +539,31 @@ export class DefaultPlatformUnusableError extends Error {
   }
 }
 
+/**
+ * The folder holds identifiers from a platform it no longer names.
+ *
+ * The half-applied move, refused rather than acted on. Deleting the platform
+ * block is one edit; deleting the identifiers it was keeping in place is four
+ * more. Between those two moments the repository names nothing and still holds
+ * everything — and the step below "names nothing" is now egma's own platform,
+ * so without this the next command carries another platform's identifiers to
+ * hosted egma. ADR-0008's rule is that they cannot silently cross that line.
+ *
+ * It ends with the same block every other refusal about moving ends with,
+ * because the developer is in the middle of exactly that list: what they need
+ * next is the rest of it, not a new set of words for the same five lines.
+ */
+export class UnboundPlatformIdentifiersError extends Error {
+  constructor(held: readonly string[]) {
+    super(
+      teachingTheMove(
+        `This repository names no Egma platform, and it still holds identifiers that only the platform which issued them can resolve — under ${held.join(", ")} in egma/config.yaml. egma will not send those to its own platform. Put the platform: block back to use the platform they came from, or finish the move below by deleting them. Nothing was sent.`,
+      ),
+    );
+    this.name = "UnboundPlatformIdentifiersError";
+  }
+}
+
 /** The committed config could not safely take part in platform resolution. */
 export class RepositoryPlatformConfigError extends Error {
   constructor(cause: unknown) {
@@ -548,9 +575,17 @@ export class RepositoryPlatformConfigError extends Error {
   }
 }
 
-async function bindingIn(repository: string): Promise<PlatformBinding | null> {
+/**
+ * The committed folder config, or `null` when this repository has none.
+ *
+ * The whole config rather than only its binding, because resolution needs two
+ * things out of this file and reading it twice would be two answers to one
+ * question: which platform it names, and — when it names none — whether it is
+ * still holding identifiers that belong to one.
+ */
+async function committedIn(repository: string): Promise<FolderConfig | null> {
   try {
-    return (await readConfig(folderPathsIn(repository).config)).platform;
+    return await readConfig(folderPathsIn(repository).config);
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw new RepositoryPlatformConfigError(cause);
@@ -584,7 +619,8 @@ export async function choosePlatform(choice: {
   readonly cwd: string;
 }): Promise<ChosenPlatform> {
   const credentialsFile = credentialsFileIn(choice.env);
-  const binding = await bindingIn(choice.cwd);
+  const committed = await committedIn(choice.cwd);
+  const binding = committed?.platform ?? null;
   const selected = selectPlatform({
     flag: choice.flag,
     env: choice.env.EGMA_URL,
@@ -603,6 +639,21 @@ export async function choosePlatform(choice: {
   // this refusal can be about a move somebody is really making.
   if (binding !== null && selected.source !== "binding" && selected.url !== binding.origin) {
     throw new BoundPlatformAddressError(binding, selected.source, selected.url);
+  }
+
+  // And refused before anybody is asked anything for the other direction: a
+  // folder that names no platform and is still holding one platform's
+  // identifiers. Only against the built-in address, because that is the step
+  // nobody typed — an address a developer named on the command line or in their
+  // shell is a deliberate act, and it is how a self-hoster worked before there
+  // was any built-in address to fall back to.
+  //
+  // A folder with no identifiers at all is untouched by this, which is what
+  // keeps `egma init`'s own output — a bare `platform:` line and three names —
+  // working exactly as it did.
+  if (binding === null && selected.source === "default" && committed !== null) {
+    const held = platformOwnedIds(committed);
+    if (held.length > 0) throw new UnboundPlatformIdentifiersError(held);
   }
 
   return { ...selected, binding, credentialsFile };

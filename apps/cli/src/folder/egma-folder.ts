@@ -263,6 +263,30 @@ export async function updateConfig(
  * identifiers cannot silently cross platform boundaries holds at every step
  * rather than only at the end.
  */
+/**
+ * Which committed names carry an identifier only one platform can resolve.
+ *
+ * These three are written by exactly two places — the `connect` verb and the
+ * wizard's connect step — and **both of them bind the repository first**, at
+ * the moment before anything is registered. So a folder holding one of these
+ * and naming no platform is a shape egma never writes. It comes from a hand
+ * edit, which makes it the half-applied move: the binding gone, the identifiers
+ * still here, and the next command about to carry them to whichever platform
+ * answers the built-in address.
+ *
+ * A version pin in a test file is deliberately not among them, and the reason
+ * is that `push` writes pins and does not bind — so `egma init` followed by
+ * `egma push` in a repository that names nothing leaves pins with no binding as
+ * egma's own ordinary output. Refusing that shape would refuse the mainline it
+ * was just written by.
+ */
+export function platformOwnedIds(config: FolderConfig): readonly string[] {
+  return CONFIG_KEYS.filter((key) => {
+    const named = config[key];
+    return named !== null && named.id !== null && named.id !== "";
+  });
+}
+
 export const MOVE_TO_ANOTHER_PLATFORM: readonly string[] = [
   "To move this repository to another platform, delete these in this order and run egma again:",
   `  - the id: line under agent: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
