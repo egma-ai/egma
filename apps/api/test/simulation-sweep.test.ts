@@ -4,6 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   startOrphanSweep,
   SWEEP_INTERVAL_MILLISECONDS,
+  type OrphanSweepFailureLogDetails,
+  type OrphanSweepLog,
+  type SweptSimulationsLogDetails,
 } from "../src/simulation-sweep.ts";
 import { createApi, type TestApi, type TestApiOptions } from "./support/api.ts";
 import {
@@ -32,22 +35,20 @@ afterEach(async () => {
 });
 
 /** What one test's loop said, in order, without a real logger in the way. */
-function capturingLog(): {
-  infos: { details: Record<string, unknown>; message: string }[];
-  errors: { details: Record<string, unknown>; message: string }[];
-  info(details: object, message: string): void;
-  error(details: object, message: string): void;
+function capturingLog(): OrphanSweepLog & {
+  infos: { details: SweptSimulationsLogDetails; message: string }[];
+  errors: { details: OrphanSweepFailureLogDetails; message: string }[];
 } {
-  const infos: { details: Record<string, unknown>; message: string }[] = [];
-  const errors: { details: Record<string, unknown>; message: string }[] = [];
+  const infos: { details: SweptSimulationsLogDetails; message: string }[] = [];
+  const errors: { details: OrphanSweepFailureLogDetails; message: string }[] = [];
   return {
     infos,
     errors,
     info(details, message) {
-      infos.push({ details: details as Record<string, unknown>, message });
+      infos.push({ details, message });
     },
     error(details, message) {
-      errors.push({ details: details as Record<string, unknown>, message });
+      errors.push({ details, message });
     },
   };
 }

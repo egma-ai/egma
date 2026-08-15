@@ -37,14 +37,25 @@ import {
  */
 export const SWEEP_INTERVAL_MILLISECONDS = 30_000;
 
+/** The rows named when one sweep moves silent simulations to failed. */
+export type SweptSimulationsLogDetails = {
+  readonly simulationIds: readonly (SweptSimulation["id"])[];
+  readonly runIds: readonly (SweptSimulation["runId"])[];
+};
+
+/** The fault named when one sweep cannot reach its store. */
+export type OrphanSweepFailureLogDetails = {
+  readonly err: unknown;
+};
+
 /** The two things the loop ever says, shaped so a test can hand in its own. */
-type SweepLog = {
-  info(details: object, message: string): void;
-  error(details: object, message: string): void;
+export type OrphanSweepLog = {
+  info(details: SweptSimulationsLogDetails, message: string): void;
+  error(details: OrphanSweepFailureLogDetails, message: string): void;
 };
 
 export type OrphanSweepOptions = {
-  readonly log: SweepLog;
+  readonly log: OrphanSweepLog;
   /** The cadence, for a test that cannot watch a real clock. */
   readonly intervalMilliseconds?: number;
   /**

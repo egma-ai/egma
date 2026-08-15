@@ -2,12 +2,11 @@ import { readFileSync } from "node:fs";
 
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import ajvFormats from "ajv-formats";
-import type { FormatsPlugin } from "ajv-formats";
 
 // ajv-formats ships CommonJS whose module.exports is the plugin function
-// itself; under NodeNext TypeScript types the default import as a namespace,
-// so the callable gets its name here.
-const addFormats = ajvFormats as unknown as FormatsPlugin;
+// itself. Under NodeNext, the default import is typed as its namespace and
+// the namespace's default is that callable, with its declared type intact.
+const addFormats = ajvFormats.default;
 
 /**
  * The contract's documents, as TypeScript can check them.
