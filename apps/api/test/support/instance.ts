@@ -13,6 +13,11 @@ import type { FastifyInstance } from "fastify";
 import { loadConfig, type Config } from "../../src/config.ts";
 import { buildApi } from "../../src/server.ts";
 import {
+  holdWebOutputLock,
+  THE_REAL_BROWSER_TEST,
+  type WebOutputLock,
+} from "../../../web/tools/output-lock.ts";
+import {
   createMigratedDatabase,
   TEST_ENCRYPTION_KEY,
   type MigratedDatabase,
@@ -207,6 +212,15 @@ export async function startInstance(
   }
   await app.listen({ host: "127.0.0.1", port: apiPort });
 
+  // The development server below compiles into `apps/web/.next`, which is the
+  // directory `next build` writes too. Taking the lock here is what makes "a
+  // production web build and the browser test never run at once in the same
+  // checkout" true rather than merely asked for — whoever is second is refused
+  // with a sentence naming the other, instead of both writing over each other.
+  const webOutput: WebOutputLock | undefined = withPages
+    ? holdWebOutputLock(THE_REAL_BROWSER_TEST)
+    : undefined;
+
   const web: ChildProcess | undefined = withPages
     ? (spawn(
         path.join(WEB, "node_modules/.bin/next"),
@@ -235,11 +249,21 @@ export async function startInstance(
   // The pages forward `/api/…` to the API, and the API's own health check is
   // at `/health` — so which address is waited on depends on which of the two
   // is answering at the origin.
-  await answers(
-    withPages ? `${origin}/api/health` : `${origin}/health`,
-    SETTLE,
-    () => failedToStart,
-  );
+  try {
+    await answers(
+      withPages ? `${origin}/api/health` : `${origin}/health`,
+      SETTLE,
+      () => failedToStart,
+    );
+  } catch (neverCameUp) {
+    // Nothing here will call `close`, so the output directory has to be handed
+    // back where it was taken. A lock left behind by a run that failed would
+    // refuse the next one for a reason that had already gone away.
+    web?.kill("SIGTERM");
+    webOutput?.release();
+    await app.close();
+    throw neverCameUp;
+  }
 
   return {
     origin,
@@ -248,6 +272,7 @@ export async function startInstance(
     traceStore,
     async close() {
       web?.kill("SIGTERM");
+      webOutput?.release();
       await app.close();
       await disconnect();
       await disconnectClickHouse();
