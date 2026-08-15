@@ -3,7 +3,7 @@
  *
  * **This file exists because the gap it closes really happened.** Phone
  * readiness was written, documented in `.env.example`, and covered by tests —
- * and then a real `egma self-host phone setup` against a real Twilio account
+ * and then a real carrier setup against a real Twilio account
  * finished every carrier step correctly and reported `setup required` anyway,
  * because the compose entry for the API never passed the three variables
  * through. A variable absent from a service's `environment:` is not merely
@@ -112,9 +112,9 @@ describe("the API's deployment story", () => {
     ).toEqual([]);
   });
 
-  it("keeps the judge's key off the grader, and the carrier's secrets off the API", () => {
-    // The two halves of one decision, held here because each is one line away
-    // from being undone and neither would fail anything else.
+  it("keeps the judge's key off the grader, and every setting off the simulator", () => {
+    // Three halves of one decision, held here because each is one line away
+    // from being undone and none would fail anything else.
     //
     // A judge configured per container is a judge no project chose, spent on
     // conversations belonging to customers who agreed to neither — so the key
@@ -122,15 +122,36 @@ describe("the API's deployment story", () => {
     // never the grader, which opens that row.
     expect(serviceBlock("grader")).not.toContain("EGMA_JUDGE_API_KEY");
 
-    // And the API holds nothing it would dial or speak with. Its whole
-    // knowledge of the carrier is three non-secret facts.
+    // The API *does* hold the carrier's secrets now, and that is the effort's
+    // whole point: it seals them into the platform's own store, exactly as it
+    // already seals a judge's key and a connection's credentials, and it
+    // neither dials nor speaks with any of them. What it must still never
+    // hold is the one credential that opens the whole Twilio account.
     const api = serviceBlock("api");
-    for (const secret of [
-      "TWILIO_AUTH_TOKEN",
-      "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD",
-      "EGMA_SIMULATOR_OPENAI_API_KEY",
+    expect(api).not.toContain("TWILIO_AUTH_TOKEN");
+    expect(api).toContain("EGMA_PHONE_TRUNK_PASSWORD");
+
+    // And the variables the platform's settings are *seeded from* reach the
+    // API and no simulator. They are what the API seals into the store, and
+    // every simulator is then handed the values on the work order it claims;
+    // a compose entry for one of them on the simulator would be a second
+    // place the same setting is written down, and the two would disagree the
+    // first time somebody changed one. Which is this effort's own failure,
+    // arriving by a new route.
+    //
+    // The simulator's own `EGMA_SIMULATOR_*` provider variables are a
+    // different thing and stay: they are what a bare simulator falls back to
+    // when the platform holds nothing — the workbench story and every
+    // contributor's checkout — and a work-order value replaces each of them.
+    const simulator = serviceBlock("simulator");
+    for (const owned of [
+      "EGMA_PERSONA_MODEL_API_KEY",
+      "EGMA_PERSONA_STT_API_KEY",
+      "EGMA_PERSONA_TTS_API_KEY",
+      "EGMA_PHONE_TRUNK_PASSWORD",
+      "EGMA_MEDIA_BACKEND:",
     ]) {
-      expect(api).not.toContain(secret);
+      expect(simulator, `the simulator is handed ${owned}`).not.toContain(owned);
     }
   });
 
@@ -138,10 +159,15 @@ describe("the API's deployment story", () => {
     // The one port in this file whose default bind is a security decision.
     // What answers on it is the store's admin surface and its *root*
     // credential — which can list, replace and delete every recording a
-    // deployment holds — and the development default for that credential is
-    // written in this repository. Bound to 0.0.0.0, `docker compose up` on a
-    // shared network hands every customer's recording to the room, to read and
-    // to overwrite. This product calls a recording evidence.
+    // deployment holds. Bound to 0.0.0.0, `docker compose up` on a shared
+    // network offers every customer's recording to the room, to read and to
+    // overwrite. This product calls a recording evidence.
+    //
+    // That credential no longer has a default written in this repository, so
+    // the wide bind is no longer a hole anybody can walk through from reading
+    // the source. The loopback default stays, because the two are one pair: a
+    // password is one mistake away from a wide port, and closing the port by
+    // default is the half that costs nothing.
     //
     // Held as a test rather than as the comment beside it, because a comment
     // does not close a port. The publishing itself is required — a browser has

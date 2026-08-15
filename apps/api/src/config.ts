@@ -1,6 +1,7 @@
+import type { PlatformSettingValues } from "@egma/db";
+
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
-import type { PhoneSettings } from "./phone-readiness.ts";
 import type { BlobStore } from "./recordings/signed-link.ts";
 
 /** A judge the platform hands to projects that have configured none. */
@@ -74,21 +75,15 @@ export type Config = {
    * service will not start: the claim answers carry customers' live provider
    * credentials, port 3100 is published on the host, and a claim door that
    * quietly served whoever asked would hand those credentials to the LAN.
-   * The compose file has a development default on the `EGMA_AUTH_SECRET`
-   * pattern, so `docker compose up` still works with zero setup.
+   * The compose file has no default for it, on the `EGMA_AUTH_SECRET` pattern:
+   * a token written into a public repository is a token every reader of it
+   * holds, so a deployment that states none is refused at start by name rather
+   * than started with a claim door the world already has the key to.
    */
   readonly simulatorServiceToken: string;
   /**
-   * The non-secret facts `egma self-host phone setup` leaves behind, and the
-   * whole of what this process knows about the carrier. It never holds the
-   * Twilio Auth Token, the SIP password or the OpenAI key that the simulator
-   * dials and speaks with — the platform's phone authority lives in the
-   * container that uses it, and this side only says whether it exists.
-   */
-  readonly phone: PhoneSettings;
-  /**
    * The judge a project is given when it has configured none, from the one
-   * OpenAI key a self-hoster supplied at phone setup.
+   * model key a self-hoster supplied at setup.
    *
    * A judge still belongs to a project — this is written into each project's
    * own sealed configuration, exactly as a project that configured its own
@@ -100,6 +95,26 @@ export type Config = {
    * verdicts and says so, exactly as before.
    */
   readonly defaultJudge: DefaultJudge | undefined;
+  /**
+   * The settings this environment offers the platform on start, for anything
+   * the platform does not already hold.
+   *
+   * **This is the second of the two ways a setting gets in, and the operator
+   * chooses which.** One is an interview — `egma self-host setup` asks for each
+   * setting and writes it through the API. The other is this: an automated
+   * deployment answers no questions, so it puts the settings in its environment
+   * and the platform seeds itself from them at start. It is the behaviour the
+   * default judge already has, extended rather than reinvented.
+   *
+   * Empty is the ordinary case and is never an error. A setting absent here is
+   * one somebody supplies through the interface or the setup command, and the
+   * platform says so in its readiness answer until they do.
+   *
+   * Nothing here is ever *replaced* from the environment. See
+   * `seedPlatformSettings`: a redeploy carrying a script's copy of the old key
+   * must not undo a key the operator changed.
+   */
+  readonly platformSettings: PlatformSettingValues;
   /**
    * The object store voice simulations' recordings live in, or `undefined` on a
    * deployment that has named none.
@@ -325,14 +340,73 @@ export function loadConfig(
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,
     simulatorServiceToken,
-    phone: {
-      trunkAddress: environment.EGMA_PHONE_TRUNK_ADDRESS?.trim() || null,
-      sourceNumber: environment.EGMA_PHONE_SOURCE_NUMBER?.trim() || null,
-      speechProvider: environment.EGMA_PHONE_SPEECH_PROVIDER?.trim() || null,
-    },
     defaultJudge: defaultJudge(environment),
+    platformSettings: platformSettings(environment),
     blob: blobStore(environment, parsedBaseUrl),
   };
+}
+
+/**
+ * The settings this environment offers the platform, by the name the platform
+ * stores each one under.
+ *
+ * **The carrier is in here now, and that is the point of the whole effort.**
+ * This process used to hold three non-secret phone facts as its own
+ * configuration and hold nothing else about the deployment, so a platform
+ * started without them reported `setup required` with no way to fix it but a
+ * restart. They are settings like the rest now: seeded from here once, stored
+ * sealed, changed through the settings form, and read from the store on every
+ * answer that depends on them. This process therefore does hold the trunk
+ * password long enough to seal it — the same way it already holds a judge's key
+ * and a connection's credentials long enough to seal those — and it never
+ * dials, speaks or listens with any of them.
+ *
+ * **Each variable is read here, literally and by name, on purpose.** A loop
+ * over the settings catalog would be shorter and would defeat the check that
+ * every variable the API reads is passed to the api container and documented
+ * in `.env.example` — which is a check that exists because that exact gap
+ * happened once already: phone readiness was written, documented and tested,
+ * and then reported `setup required` against a real carrier because the compose
+ * entry never passed the variables through.
+ *
+ * **Unlike the judge's three, these are not all-or-nothing.** Half a judge is a
+ * judge that errors every verdict it is given, so half is refused at startup.
+ * Half of these is an ordinary platform mid-setup: a deployment that supplied
+ * the provider and the model from a script and means to type the key into the
+ * settings form is exactly the case the readiness answer is for, and refusing
+ * to start on it would make seeding an all-or-nothing act rather than a
+ * gap-filling one.
+ */
+function platformSettings(
+  environment: NodeJS.ProcessEnv,
+): PlatformSettingValues {
+  const offered = {
+    persona_model_provider: environment.EGMA_PERSONA_MODEL_PROVIDER?.trim(),
+    persona_model: environment.EGMA_PERSONA_MODEL?.trim(),
+    persona_model_key: environment.EGMA_PERSONA_MODEL_API_KEY?.trim(),
+    speech_to_text_provider: environment.EGMA_PERSONA_STT_PROVIDER?.trim(),
+    speech_to_text_key: environment.EGMA_PERSONA_STT_API_KEY?.trim(),
+    text_to_speech_provider: environment.EGMA_PERSONA_TTS_PROVIDER?.trim(),
+    text_to_speech_key: environment.EGMA_PERSONA_TTS_API_KEY?.trim(),
+    text_to_speech_model: environment.EGMA_PERSONA_TTS_MODEL?.trim(),
+    text_to_speech_voice: environment.EGMA_PERSONA_TTS_VOICE?.trim(),
+    voice_activity_provider: environment.EGMA_PERSONA_VAD_PROVIDER?.trim(),
+    media_backend: environment.EGMA_MEDIA_BACKEND?.trim(),
+    // The carrier keeps the variable names the old phone setup already wrote,
+    // so an operator upgrading meets the same words they were given before.
+    carrier_trunk_address: environment.EGMA_PHONE_TRUNK_ADDRESS?.trim(),
+    carrier_trunk_number: environment.EGMA_PHONE_SOURCE_NUMBER?.trim(),
+    carrier_trunk_username: environment.EGMA_PHONE_TRUNK_USERNAME?.trim(),
+    carrier_trunk_password: environment.EGMA_PHONE_TRUNK_PASSWORD?.trim(),
+  };
+
+  // Compose passes an unset optional through as an empty string rather than
+  // leaving it out, so "" and "never set" have to mean the same thing: a blank
+  // model name seeded as a model name would be a platform reporting itself
+  // configured with nothing to ask.
+  return Object.fromEntries(
+    Object.entries(offered).filter(([, value]) => (value ?? "") !== ""),
+  ) as PlatformSettingValues;
 }
 
 /**

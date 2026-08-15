@@ -12,7 +12,11 @@ import {
 } from "../src/auth/service-token.ts";
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
 import { fixedWindowRateLimit } from "../src/http/rate-limit.ts";
-import { createApi, type TestApi } from "./support/api.ts";
+import {
+  createApi,
+  type TestApi,
+  type TestApiOptions,
+} from "./support/api.ts";
 import {
   contextFor,
   NEUTRAL_TRAITS,
@@ -74,14 +78,17 @@ async function claim(
 }
 
 /** A customer with an agent, a persona, and a test — everything a run needs. */
-async function aCustomerReadyToRun(label: string): Promise<{
+async function aCustomerReadyToRun(
+  label: string,
+  options: TestApiOptions = {},
+): Promise<{
   ada: Customer;
   key: string;
   agentId: string;
   connectionId: string;
   versionId: string;
 }> {
-  api = await createApi(label);
+  api = await createApi(label, options);
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
@@ -215,6 +222,10 @@ describe("claiming work", () => {
     // An empty list would be a claim about tools where this project has
     // made none, and most projects have made none.
     expect("mock_tools" in spec).toBe(false);
+    // And so does a platform nobody has configured: no block at all, which
+    // is byte for byte the document this door produced before the settings
+    // existed. Every fixture written before today is still what it sends.
+    expect("platform" in spec).toBe(false);
 
     // The row carries the claim, and the run has started.
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
@@ -609,5 +620,160 @@ describe("a simulation the platform cannot hand over", () => {
     );
     expect(row?.status).toBe("failed");
     expect(row?.endingReason).toBe("dispatch_failed");
+  });
+});
+
+describe("the platform's own settings, on the work order", () => {
+  /**
+   * What a configured deployment holds, seeded the way an automated one
+   * seeds it — through the real door, sealed into the real table. Every
+   * value here is distinct and recognisable, so what comes back on the work
+   * order can be told from what any other setting holds.
+   */
+  const A_CONFIGURED_PLATFORM = {
+    persona_model_provider: "openai",
+    persona_model: "gpt-4o",
+    persona_model_key: "sk-the-persona-thinks-with-this-one",
+    speech_to_text_provider: "deepgram",
+    speech_to_text_key: "the-listening-leg-uses-this-one",
+    text_to_speech_provider: "elevenlabs",
+    text_to_speech_key: "the-speaking-leg-uses-this-one",
+    text_to_speech_model: "eleven_turbo_v2_5",
+    text_to_speech_voice: "brisk-tenor-7",
+    voice_activity_provider: "silero",
+    media_backend: "livekit",
+    carrier_trunk_address: "acme.pstn.twilio.com",
+    carrier_trunk_number: "+15550100",
+    carrier_trunk_username: "acme-trunk",
+    carrier_trunk_password: "the-carrier-issued-this-one",
+  } as const;
+
+  /** The one claimed spec of a run, whatever this platform holds. */
+  async function theWorkOrderFor(label: string, settings: object) {
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(label, {
+      platformSettings: settings,
+    });
+    await aQueuedRun(key, connectionId, versionId);
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 4,
+      wait_seconds: 0,
+    });
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+    const specs = answered.body.specs as Record<string, unknown>[];
+    const spec = specs[0];
+    if (spec === undefined) throw new Error("no spec came back");
+    return spec;
+  }
+
+  it("carries the unsealed values, grouped the way the simulator reads them", async () => {
+    const spec = await theWorkOrderFor(
+      "claims_platform_settings",
+      A_CONFIGURED_PLATFORM,
+    );
+
+    // Held to the contract on the way out, like everything else this door
+    // sends: what leaves here is what the simulator's own check accepts.
+    expect(specComplaints(spec)).toEqual([]);
+
+    expect(spec.platform).toEqual({
+      model: {
+        provider: "openai",
+        model: "gpt-4o",
+        key: "sk-the-persona-thinks-with-this-one",
+      },
+      speech: {
+        stt_provider: "deepgram",
+        stt_key: "the-listening-leg-uses-this-one",
+        tts_provider: "elevenlabs",
+        tts_key: "the-speaking-leg-uses-this-one",
+        tts_model: "eleven_turbo_v2_5",
+        tts_voice: "brisk-tenor-7",
+        vad_provider: "silero",
+      },
+      carrier: {
+        media_backend: "livekit",
+        trunk_address: "acme.pstn.twilio.com",
+        trunk_number: "+15550100",
+        trunk_username: "acme-trunk",
+        trunk_password: "the-carrier-issued-this-one",
+      },
+    });
+
+    // In the clear, and never the sealed envelope or the hint kept for
+    // display: a simulator handed either would speak to a provider with
+    // four characters of a key.
+    const stored = await api.database.sql<{ value: string; hint: string }>(
+      "select value, hint from platform_setting where name = 'persona_model_key'",
+    );
+    expect(stored.rows[0]?.value).not.toContain(
+      "sk-the-persona-thinks-with-this-one",
+    );
+    expect(stored.rows[0]?.hint).toBe("-one");
+  });
+
+  it("leaves out the half of the platform that has no carrier", async () => {
+    // Every deployment before somebody does the Twilio paperwork, which is
+    // most of them and all of them on a first morning. The block is absent
+    // rather than empty, because an empty one would be a claim that this
+    // deployment has a carrier made of nothing.
+    const spec = await theWorkOrderFor("claims_platform_no_carrier", {
+      persona_model_provider: "openai",
+      persona_model: "gpt-4o",
+      persona_model_key: "sk-the-persona-thinks-with-this-one",
+    });
+
+    expect(specComplaints(spec)).toEqual([]);
+    expect(spec.platform).toEqual({
+      model: {
+        provider: "openai",
+        model: "gpt-4o",
+        key: "sk-the-persona-thinks-with-this-one",
+      },
+    });
+  });
+
+  it("hands the next simulation a changed setting, with nothing restarted", async () => {
+    // The freshness promise, and the reason there is no cache here: the
+    // settings are read for each simulation, so replacing a spent key is
+    // a write and then the next conversation, rather than a write and a
+    // deploy.
+    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+      "claims_platform_settings_change",
+      { singleOrganization: true, platformSettings: A_CONFIGURED_PLATFORM },
+    );
+
+    await aQueuedRun(key, connectionId, versionId);
+    const before = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 4,
+      wait_seconds: 0,
+    });
+    const first = (before.body.specs as Record<string, unknown>[])[0];
+    expect((first?.platform as { model: { key: string } }).model.key).toBe(
+      "sk-the-persona-thinks-with-this-one",
+    );
+
+    // Written the way an owner writes one, through the API, on the running
+    // instance. No restart, no redeploy, no second process.
+    const changed = await api.app.inject({
+      method: "PATCH",
+      url: "/api/platform/settings",
+      headers: { authorization: `Bearer ${ada.secret}` },
+      payload: { persona_model_key: "sk-and-the-operator-replaced-it-WXYZ" },
+    });
+    expect(changed.statusCode, changed.body).toBe(200);
+
+    await aQueuedRun(key, connectionId, versionId);
+    const after = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 4,
+      wait_seconds: 0,
+    });
+    const second = (after.body.specs as Record<string, unknown>[])[0];
+    expect((second?.platform as { model: { key: string } }).model.key).toBe(
+      "sk-and-the-operator-replaced-it-WXYZ",
+    );
   });
 });

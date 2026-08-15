@@ -236,10 +236,12 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         from pathlib import Path
 
         # A deployment that dials through the scripted bridge — which is
-        # still a deployment that never wants LiveKit's library.
-        os.environ["EGMA_SIMULATOR_MEDIA_BACKEND"] = "scripted"
-
+        # still a deployment that never wants LiveKit's library. Named on
+        # the work order, the way a real one names it now, rather than in
+        # this process's environment.
         from egma_simulator.blob import FilesystemBlobStore
+        from egma_simulator.config import MediaSettings
+        from egma_simulator.spec import PlatformCarrier
         from egma_simulator.model import ScriptedModel
         from egma_simulator.persona import Persona
         from egma_simulator.pipeline import assemble
@@ -280,7 +282,13 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
 
         async def conduct(spec):
             with tempfile.TemporaryDirectory() as blobs:
-                assembled = assemble(spec, blobs=FilesystemBlobStore(Path(blobs)))
+                assembled = assemble(
+                    spec,
+                    blobs=FilesystemBlobStore(Path(blobs)),
+                    media=MediaSettings.for_simulation(
+                        None, PlatformCarrier(media_backend="scripted")
+                    ),
+                )
                 heard = []
                 if assembled.conductor is not None:
                     async def on_utterance(speaker, text, began, ended):

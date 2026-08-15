@@ -66,7 +66,15 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 
-from .config import DEFAULT_STT_MODEL, DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE
+from .config import (
+    DEFAULT_STT_MODEL,
+    DEFAULT_TTS_MODEL,
+    DEFAULT_TTS_VOICE,
+    STT_PROVIDERS,
+    TTS_PROVIDERS,
+    VAD_PROVIDERS,
+)
+from .spec import PlatformSpeech
 
 if TYPE_CHECKING:
     from .config import SimulatorConfig
@@ -426,28 +434,88 @@ class SpeechProviders:
     production detector, and it ships inside the pinned pipecat wheel, so
     choosing it downloads nothing."""
 
-    deepgram_api_key: str | None = field(default=None, repr=False)
-    elevenlabs_api_key: str | None = field(default=None, repr=False)
-    openai_api_key: str | None = field(default=None, repr=False)
-    """One key for both openai legs, because one account serves both."""
+    stt_key: str | None = field(default=None, repr=False)
+    tts_key: str | None = field(default=None, repr=False)
+    """A key per leg, not per provider.
+
+    The environment names its keys after providers, because one account
+    there really does serve both openai legs. The platform's own settings
+    name them after legs, because on a deployment that listens with one
+    company and speaks with another they are two accounts — and a shape
+    that could not say so would make the second key unreachable. So the
+    legs are what these are keyed by, and translating the environment's
+    provider-shaped names into them happens once, in
+    :meth:`for_simulation`.
+    """
 
     stt_model: str = DEFAULT_STT_MODEL
     tts_model: str = DEFAULT_TTS_MODEL
     tts_voice: str = DEFAULT_TTS_VOICE
 
     @classmethod
-    def from_config(cls, config: SimulatorConfig) -> SpeechProviders:
+    def for_simulation(
+        cls, config: SimulatorConfig, platform: PlatformSpeech | None = None
+    ) -> SpeechProviders:
+        """The pair one simulation is assembled with.
+
+        This container's own configuration, with the platform's settings
+        laid over it leg by leg — which is what makes a second simulator on
+        another machine need no speech variables at all, and what makes a
+        replaced key apply to the next simulation with no restart.
+
+        **A leg's key follows its leg's provider.** Naming a provider and
+        no key is a deployment saying "use this company, with the key you
+        already have", which is what a self-hoster who set one key for both
+        openai legs means. Naming a key and no provider is that key for
+        whichever leg the container already chose.
+        """
+        said = platform or PlatformSpeech()
+        stt = said.stt_provider or config.stt_provider
+        tts = said.tts_provider or config.tts_provider
         return cls(
-            stt=config.stt_provider,
-            tts=config.tts_provider,
-            vad=config.vad_provider,
-            deepgram_api_key=config.deepgram_api_key,
-            elevenlabs_api_key=config.elevenlabs_api_key,
-            openai_api_key=config.openai_api_key,
+            stt=stt,
+            tts=tts,
+            vad=said.vad_provider or config.vad_provider,
+            stt_key=said.stt_key or config.key_for(stt),
+            tts_key=said.tts_key or config.key_for(tts),
             stt_model=config.stt_model,
-            tts_model=config.tts_model,
-            tts_voice=config.tts_voice,
+            tts_model=said.tts_model or config.tts_model,
+            tts_voice=said.tts_voice or config.tts_voice,
         )
+
+
+    def checked(self) -> SpeechProviders:
+        """These legs, or the refusal an unrecognised provider earns.
+
+        **Refused rather than quietly downgraded to the stand-in.** Every
+        builder below falls through to the scripted leg for a provider it
+        does not implement, which is exactly right when the choice was
+        `scripted` and exactly wrong when the choice was `elevenlabss`: a
+        typo on a settings page would otherwise produce a completed, green
+        simulation conducted by a canned robot, which is worse than a
+        failure because a failure tells the truth about what happened.
+
+        This container's own three names are checked when it starts, so a
+        name that reaches here is one the platform holds — and the refusal
+        names the platform's setting, the value, and what this simulator
+        really has.
+
+        Called where the legs are *built*, not where they are resolved: a
+        chat simulation has no mouth and no ears, and must not fail over a
+        speech provider it was never going to use.
+        """
+        for setting, chosen, allowed in (
+            ("speech_to_text_provider", self.stt, STT_PROVIDERS),
+            ("text_to_speech_provider", self.tts, TTS_PROVIDERS),
+            ("voice_activity_provider", self.vad, VAD_PROVIDERS),
+        ):
+            if chosen not in allowed:
+                raise SpeechFault(
+                    f"the platform's {setting} is {chosen!r}, which is not a "
+                    "speech leg this simulator has; it speaks and listens "
+                    f"with {', '.join(allowed)}"
+                )
+        return self
 
 
 SCRIPTED_PAIR = SpeechProviders()
@@ -504,6 +572,7 @@ def build_legs(
     reaches the provider only once the exchange opens, so assembling a
     pipeline stays the validation step it has always been.
     """
+    providers = providers.checked()
     speaking, spoken_with, closers = _mouth(providers, voice, sample_rate_hz)
     listening_leg, listening = _ears(providers, sample_rate_hz)
     return SpeechLegs(
@@ -557,6 +626,7 @@ def build_vad(
     for by name because loading a model is a cost only a deployment that
     wants it should pay.
     """
+    providers = providers.checked()
     if providers.vad != "silero":
         return ScriptedVAD(
             sample_rate_hz=sample_rate_hz, window_samples=window_samples
@@ -586,7 +656,7 @@ def _mouth(
     from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
     from pipecat.services.tts_service import TextAggregationMode
 
-    if not providers.elevenlabs_api_key:
+    if not providers.tts_key:
         raise SpeechFault("the elevenlabs speaking leg was chosen without a key")
 
     spoken_with = _voice_from(
@@ -597,7 +667,7 @@ def _mouth(
         settings.speed = spoken_with.speed
     session = aiohttp.ClientSession()
     leg = ElevenLabsHttpTTSService(
-        api_key=providers.elevenlabs_api_key,
+        api_key=providers.tts_key,
         aiohttp_session=session,
         sample_rate=sample_rate_hz,
         settings=settings,
@@ -626,12 +696,10 @@ def _ears(
 
     from pipecat.services.deepgram.stt import DeepgramSTTService
 
-    if not providers.deepgram_api_key:
+    if not providers.stt_key:
         raise SpeechFault("the deepgram listening leg was chosen without a key")
 
-    leg = DeepgramSTTService(
-        api_key=providers.deepgram_api_key, sample_rate=sample_rate_hz
-    )
+    leg = DeepgramSTTService(api_key=providers.stt_key, sample_rate=sample_rate_hz)
 
     async def connected() -> None:
         # The service opens its websocket in a background task and drops
@@ -683,7 +751,7 @@ def _openai_mouth(
     """
     from pipecat.services.openai.tts import OpenAITTSService
 
-    if not providers.openai_api_key:
+    if not providers.tts_key:
         raise SpeechFault("the openai speaking leg was chosen without a key")
 
     spoken_with = _voice_from(
@@ -699,7 +767,7 @@ def _openai_mouth(
     leg = Pipeline(
         [
             OpenAITTSService(
-                api_key=providers.openai_api_key,
+                api_key=providers.tts_key,
                 # Built at the provider's own band. Handing it the line's
                 # band is what makes it mislabel, so it is never told one.
                 sample_rate=OPENAI_TTS_BAND_HZ,
@@ -725,11 +793,11 @@ def _openai_ears(
     """
     from pipecat.services.openai.stt import OpenAISTTService
 
-    if not providers.openai_api_key:
+    if not providers.stt_key:
         raise SpeechFault("the openai listening leg was chosen without a key")
 
     return OpenAISTTService(
-        api_key=providers.openai_api_key,
+        api_key=providers.stt_key,
         sample_rate=sample_rate_hz,
         settings=OpenAISTTService.Settings(model=providers.stt_model),
     )

@@ -370,7 +370,7 @@ export function platformJudgeRow(input: {
  *
  * **This is the backfill, not the whole mechanism.** It catches the projects
  * that existed before the platform was given a judge — a self-hoster who runs
- * `egma self-host phone setup` on a deployment they had already signed up on.
+ * `egma self-host setup` on a deployment they had already signed up on.
  * A project created *while* the platform is running is given its judge in the
  * transaction that creates it (see `provisionOrganization`), because a project
  * that had to wait for the next restart to become gradable would produce

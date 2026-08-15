@@ -63,11 +63,17 @@ const CONTEXT_ESTABLISHING = [
 
 /**
  * What answers a question about the deployment rather than about a customer.
- * Neither takes an argument. One returns whether signup is claimed; the other
- * returns the platform's own public, non-secret id. The build rule pins both
- * exact return types and refuses either function if it grows an argument.
+ * None takes an argument. One returns whether signup is claimed; one returns
+ * the platform's own public, non-secret id; and the third returns what this
+ * deployment has been configured with, with every secret in it reduced to
+ * `null`. The build rule pins all three exact return types and refuses any of
+ * them if it grows an argument.
  */
-const INSTANCE_SCOPED = ["instanceIsClaimed", "platformInstanceId"];
+const INSTANCE_SCOPED = [
+  "instanceIsClaimed",
+  "platformFacts",
+  "platformInstanceId",
+];
 
 /**
  * What hands egma's own services their work, and what keeps a dispatch honest
@@ -213,6 +219,10 @@ const CONTEXT_REQUIRING = [
   "markSimulationCanceled",
   "readOrganization",
   "readOrganizationSettings",
+  // The deployment's own settings, on the judge configuration's exact terms:
+  // an owner writes them, a read answers a hint and never a stored secret, and
+  // the environment seeds what the platform does not already hold.
+  "readPlatformSettings",
   "readProject",
   "readRunVerdicts",
   "readTrace",
@@ -236,6 +246,12 @@ const CONTEXT_REQUIRING = [
   // Names off a reviewed file turned into the identity a version names. It
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
+  // The dispatch path's door to the deployment's own settings in the clear —
+  // the third secret egma holds, and the same door the connection's
+  // credentials below come through. It takes the context like everything else
+  // and then refuses every one that did not come from a simulation claim,
+  // because conducting is the only thing egma does with these.
+  "resolvePlatformSettings",
   // The dispatch path's door to a connection's plaintext. It takes the context
   // like everything else — and then refuses every one that did not come from a
   // simulation claim, because conducting is the only thing egma does with a
@@ -243,12 +259,14 @@ const CONTEXT_REQUIRING = [
   "resolveSimulationConnection",
   "revokeApiKey",
   "seedDefaultJudge",
+  "seedPlatformSettings",
   "setJudgeConfiguration",
   "startRun",
   "startSimulation",
   "updateAgent",
   "updateConnection",
   "updateOrganizationSettings",
+  "writePlatformSettings",
 ];
 
 /**
@@ -263,6 +281,14 @@ const PERMISSION = [
   "permits",
   "permitsApiKeyMintedBy",
 ];
+
+/**
+ * Every setting this deployment can hold, and the words a person meets each one
+ * by. Exported because a readiness answer and a setup interview both have to
+ * name them, and a list written in two places is a list that will one day
+ * disagree with itself.
+ */
+const THE_PLATFORMS_SETTINGS = ["PLATFORM_SETTINGS"];
 
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
@@ -380,6 +406,7 @@ describe("the data-access module's surface", () => {
         ...READ_LIMITS,
         ...THE_FOLD,
         ...THE_MOCKED_WORLD,
+        ...THE_PLATFORMS_SETTINGS,
       ].sort(),
     );
   });

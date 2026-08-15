@@ -56,6 +56,14 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
     ),
     "spec/modality-unknown.json": ("/modality", "enum", None),
     "spec/unknown-field.json": ("", "additionalProperties", "agent_id"),
+    # The platform's own settings are a closed list on both sides — the
+    # catalog the control plane stores them under, and the block this
+    # process reads. A field nobody writes is a setting nobody reads.
+    "spec/platform-setting-unknown.json": (
+        "/platform/model",
+        "additionalProperties",
+        "base_url",
+    ),
     "spec/wrong-contract-version.json": ("/contract_version", "const", None),
     "report/completed-claiming-never-ran.json": (
         "/events/0/facts/ending",

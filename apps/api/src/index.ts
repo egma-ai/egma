@@ -6,6 +6,7 @@ import {
   runClickHouseMigrations,
   runMigrations,
   seedDefaultJudge,
+  seedPlatformSettings,
 } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
@@ -35,7 +36,21 @@ connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 const judged =
   config.defaultJudge === undefined ? [] : await seedDefaultJudge(config.defaultJudge);
 
+// The settings this environment offers, written for anything the platform does
+// not already hold. This is how an automated deployment configures itself with
+// no interview — and it never replaces a setting somebody has changed, so a
+// redeploy carrying a script's copy of an old key cannot undo a new one.
+const seeded = await seedPlatformSettings(config.platformSettings);
+
 const { app } = buildApi({ config });
+if (seeded.length > 0) {
+  // The names, never the values and never their hints: what is worth saying is
+  // that this platform just gained settings it did not have, and which ones.
+  app.log.info(
+    { settings: seeded },
+    "the environment supplied platform settings this deployment was missing",
+  );
+}
 if (judged.length > 0) {
   // The project ids, never the key and never its hint: what is worth saying is
   // that somebody's grading just started working, and which projects it is
