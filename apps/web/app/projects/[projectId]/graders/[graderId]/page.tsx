@@ -267,7 +267,23 @@ function GraderDetail({
     );
   }
 
-  const blocking = usage?.status === "ready" ? usage.value.direct_tests : [];
+  /**
+   * The tests that name this grader directly, and nothing at all when the
+   * answer is not a list.
+   *
+   * **Defensive on purpose, and only here.** A read whose shape is not what
+   * this page expects is a deployment mid-upgrade or a proxy answering for
+   * something else, and the cost of trusting it is not a wrong number — it is
+   * `undefined.length`, which takes the whole detail page down and with it the
+   * evidence somebody came to read. Usage is a footnote on this page; the
+   * version history and the editor are not, and neither should disappear
+   * because a footnote arrived in an older shape.
+   */
+  const blocking = Array.isArray(
+    usage?.status === "ready" ? usage.value.direct_tests : undefined,
+  )
+    ? (usage as { value: GraderUsage }).value.direct_tests
+    : [];
   const whyNot = mayAuthor
     ? undefined
     : `Your ${String(role ?? "")} role cannot change graders. Ask an organization admin to change your role.`;

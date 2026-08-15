@@ -57,6 +57,17 @@ export const CODES = {
   no_adapter: 422,
   phone_setup_required: 422,
   too_many_requests: 429,
+  /**
+   * A fault, answered without relaying whatever the fault said.
+   *
+   * Every other code here is a sentence somebody wrote to be read. This one is
+   * for what nobody wrote — a driver error, a constraint name, a query layer's
+   * wrapper — on the routes where the query that failed is one that selected a
+   * sealed envelope. Echoing such a message would put ciphertext and SQL into a
+   * browser response, so the caller gets a sentence this module chose and the
+   * detail goes to the log.
+   */
+  unavailable: 500,
   no_object_store: 503,
 } as const;
 

@@ -423,6 +423,25 @@ export async function judgmentsOf(
   conversation: Conversation,
   judging: Judging,
 ): Promise<readonly Judgment[]> {
+  /**
+   * **Nothing-to-judge wins over modality, and the order is a decision.**
+   *
+   * A voice simulation that never happened, judged by a grader that only scores
+   * chat, could honestly be called either: `errored`, because egma could not
+   * read a conversation it should have; or `skipped`, because this check was
+   * never about that conversation anyway. It answers `errored`.
+   *
+   * The reason is which fact a reader has to act on. A conversation egma could
+   * not read is an operational failure — a flush that never landed, a runtime
+   * that broke — and somebody has to go and look at it. A modality mismatch is
+   * a settled fact about a grader that needs nobody's attention at all. Letting
+   * the mismatch answer first would hide the failure behind it: the run would
+   * report a check that quietly did not apply, and the broken telemetry would
+   * be visible only on whichever graders happened to score voice. So the fault
+   * is reported wherever it is known, and a check that would not have applied
+   * says `errored` on a conversation that did not happen rather than the run
+   * losing the evidence that it did not happen.
+   */
   const nothingToJudge = conversation.nothingToJudgeBecause;
   if (nothingToJudge !== null) {
     return [couldNotJudge(grader, nothingToJudge)];
@@ -465,13 +484,15 @@ export async function judgmentsOf(
 }
 
 /**
- * The stable reason a modality skip carries, so a reader can branch on it.
+ * The stable reason a modality skip carries, in the verdict row's own `reason`
+ * column.
  *
- * A verdict row holds a verdict, a score and a rationale and has no column for
- * a reason code — so the code opens the sentence, and the sentence carries on
- * saying which modalities the grader scores and which one this conversation
- * was. A page can therefore recognise the case exactly while a person still
- * reads a line that explains itself.
+ * Two things are `skipped` and neither is a failure: a grader that cannot score
+ * this conversation's modality, and a threshold whose measure the conversation
+ * never produced. A results page has to tell them apart — "this check was never
+ * about this conversation" and "egma had nothing to measure" send a reader to
+ * two different places — and it cannot do that from prose without making the
+ * prose contract.
  */
 export const MODALITY_UNSUPPORTED = "modality_unsupported";
 
@@ -495,10 +516,13 @@ function modalityUnsupported(
     dimension: theOneCheck(grader.type),
     verdict: "skipped",
     score: 0,
+    // The word goes in the column beside the sentence, not inside it. A page
+    // recognises the case by the word and shows a person the sentence, and
+    // rewording the sentence breaks nothing.
+    reason: MODALITY_UNSUPPORTED,
     rationale:
-      `${MODALITY_UNSUPPORTED}: this grader scores ` +
-      `${grader.modalities.join(" and ")} conversations, and this one was ` +
-      `${modality}, so no judgment was made about the agent.`,
+      `This grader scores ${grader.modalities.join(" and ")} conversations, ` +
+      `and this one was ${modality}, so no judgment was made about the agent.`,
     citedSpanIds: [],
   };
 }
@@ -554,6 +578,7 @@ function verdictRow(
     verdict: judgment.verdict,
     score: judgment.score,
     rationale: judgment.rationale,
+    ...(judgment.reason === undefined ? {} : { reason: judgment.reason }),
     citedSpanIds: judgment.citedSpanIds,
     priority: by.priority,
     runId: conversation.runId,

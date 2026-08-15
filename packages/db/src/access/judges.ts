@@ -86,10 +86,17 @@ export type NewJudgeConfiguration = {
   readonly key: string;
 };
 
+/**
+ * The three write-door checks below refuse with `UnprocessableInputError`
+ * rather than a plain one, and the distinction is what the layer above needs:
+ * a sentence a caller can act on, told apart from a fault. Nothing else in this
+ * file changes shape — "the row was not written" stays a plain error, because
+ * it is egma being broken rather than anybody's request being wrong.
+ */
 function validProvider(provider: string): JudgeProvider {
   const known = JUDGE_PROVIDERS.find((candidate) => candidate === provider);
   if (known === undefined) {
-    throw new Error(
+    throw new UnprocessableInputError(
       `"${provider}" is not a judge provider egma knows; expected one of ${JUDGE_PROVIDERS.join(", ")}`,
     );
   }
@@ -99,7 +106,9 @@ function validProvider(provider: string): JudgeProvider {
 function validModel(model: string): string {
   const trimmed = model.trim();
   if (trimmed === "") {
-    throw new Error("a judge configuration needs a model to name");
+    throw new UnprocessableInputError(
+      "a judge configuration needs a model to name",
+    );
   }
   return trimmed;
 }
@@ -112,10 +121,12 @@ function validModel(model: string): string {
 function validKey(key: string): string {
   const trimmed = key.trim();
   if (trimmed === "") {
-    throw new Error("a judge configuration needs a key to speak with");
+    throw new UnprocessableInputError(
+      "a judge configuration needs a key to speak with",
+    );
   }
   if (trimmed.length < SHORTEST_KEY) {
-    throw new Error(
+    throw new UnprocessableInputError(
       `a judge key is at least ${SHORTEST_KEY} characters, and this one is shorter than any provider issues`,
     );
   }
@@ -373,6 +384,30 @@ export type ProjectJudgeChoice = {
   readonly model: string;
   /** A `jcr_` credential of this organization, or the `platform` sentinel. */
   readonly source: string;
+  /**
+   * The deployment's own judge, as this process was configured with it —
+   * absent on a deployment that named none.
+   *
+   * **Handed in rather than read off the project's row, and that is the whole
+   * of what makes the sentinel a choice rather than a one-way door.** A project
+   * that moves to a credential of its own stops holding the deployment's
+   * envelope, because a row may hold exactly one key source. If choosing
+   * `platform` again meant finding that envelope still on the row, then the
+   * first move away from it would be the last — and the refusal on the way back
+   * would say the deployment has no judge while the deployment plainly has one.
+   *
+   * So the deployment's judge comes from where it actually lives: the
+   * configuration this process started with. Re-selecting it seals it onto the
+   * row again, which also means a deployment that rotated its own key hands the
+   * current one to the next project that asks for it.
+   */
+  readonly platformJudge?:
+    | {
+        readonly provider: string;
+        readonly model: string;
+        readonly key: string;
+      }
+    | undefined;
 };
 
 /** The word a project uses to name the deployment's own judge. */
@@ -401,41 +436,59 @@ export async function setProjectJudge(
   const now = new Date();
 
   if (choice.source === PLATFORM_JUDGE) {
-    // The deployment's own key is on the row already, put there by seeding.
-    // There is nowhere else to get one from, so a project that never received
-    // it cannot choose it — and is told that rather than left holding a judge
-    // it cannot ask.
-    const [held] = await db()
-      .select({ credentials: judgeConfiguration.credentials })
-      .from(judgeConfiguration)
-      .where(
-        within(
-          auth,
-          judgeConfiguration,
-          and(
-            eq(judgeConfiguration.projectId, projectId),
-            eq(judgeConfiguration.source, PLATFORM_JUDGE),
-          ),
-        ),
-      )
-      .limit(1);
+    const { platformJudge } = choice;
 
-    if (held === undefined) {
+    // The one true reason the sentinel can be unavailable: this deployment
+    // never named a judge of its own. Nothing about the project's own history
+    // can produce this answer, which is what stops the sentence being a lie
+    // told to somebody whose deployment plainly has one.
+    if (platformJudge === undefined) {
       throw new UnprocessableInputError(
         "this deployment configured no judge of its own, so there is no platform judge to choose. Add an organization judge credential and select it instead.",
       );
     }
 
-    await db()
-      .update(judgeConfiguration)
-      .set({ provider, model, updatedAt: now })
-      .where(
-        within(
-          auth,
-          judgeConfiguration,
-          eq(judgeConfiguration.projectId, projectId),
-        ),
+    // The deployment's key belongs to one provider's account, so a judge
+    // configured to ask somebody else could never be answered by it. Refused
+    // here, naming both, rather than left to fail at the provider.
+    if (platformJudge.provider !== provider) {
+      throw new UnprocessableInputError(
+        `this deployment's own judge is for ${platformJudge.provider}, and this project's judge uses ${provider}. Choose ${platformJudge.provider}, or point the project at an organization credential for ${provider}.`,
       );
+    }
+
+    // Sealed onto the row again from the deployment's own configuration. A
+    // project moving back from a credential of its own holds no envelope at
+    // that moment, so this is a write rather than a read — and it is what makes
+    // moving away from the sentinel a reversible decision.
+    const sealed = platformJudgeRow({
+      projectId,
+      organizationId: auth.organizationId,
+      createdBy: auth.userId,
+      provider: platformJudge.provider,
+      model,
+      key: platformJudge.key,
+      now,
+    });
+
+    await db()
+      .insert(judgeConfiguration)
+      .values(sealed)
+      .onConflictDoUpdate({
+        target: judgeConfiguration.projectId,
+        set: {
+          provider: sealed.provider,
+          model: sealed.model,
+          source: PLATFORM_JUDGE,
+          // The credential this project used to spend from is released, not
+          // deleted: it stays in the organization for another project to point
+          // at, and the row's own check forbids holding both at once.
+          credentialId: null,
+          credentials: sealed.credentials,
+          credentialsHint: sealed.credentialsHint,
+          updatedAt: now,
+        },
+      });
 
     const configured = await getJudgeConfiguration(auth);
     if (configured === undefined) {

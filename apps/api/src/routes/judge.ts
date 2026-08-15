@@ -18,6 +18,7 @@ import {
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
+import type { Config } from "../config.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
@@ -60,6 +61,15 @@ import {
 export type JudgeRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
+  /**
+   * The judge this deployment was started with, if it was started with one.
+   *
+   * It is handed to the choice below rather than looked for on the project's
+   * row, because a project that moved to a credential of its own no longer
+   * holds the deployment's envelope — and the sentinel has to stay choosable
+   * after that, or moving away from it once would be moving away for good.
+   */
+  readonly defaultJudge?: Config["defaultJudge"];
 };
 
 export const JUDGE_CREDENTIALS_PATH = "/api/judge-credentials";
@@ -145,6 +155,10 @@ export async function judgeRoutes(
         model_is_free_text: true,
       })),
       platform_sentinel: PLATFORM_JUDGE,
+      // Whether the sentinel is offered at all. A deployment that named no
+      // judge of its own has none to give, and a form that offered it anyway
+      // would be offering a setting the server refuses.
+      platform_judge_available: options.defaultJudge !== undefined,
     });
   });
 
@@ -321,6 +335,9 @@ export async function judgeRoutes(
       provider: text(body.provider),
       model: text(body.model),
       source: text(body.source),
+      ...(options.defaultJudge === undefined
+        ? {}
+        : { platformJudge: options.defaultJudge }),
     });
 
     const judge = await getProjectJudge(acting.auth);
@@ -340,7 +357,7 @@ export async function judgeRoutes(
     });
   });
 
-  app.setErrorHandler(async (error, _request, reply) => {
+  app.setErrorHandler(async (error, request, reply) => {
     if (error instanceof JudgeProviderMismatchError) {
       return sendRefusal(
         reply,
@@ -373,11 +390,24 @@ export async function judgeRoutes(
       return notPermitted(reply, error.message);
     }
 
-    if (error instanceof Error && !("statusCode" in error)) {
-      return unprocessable(reply, error.message);
-    }
-
-    throw error;
+    /**
+     * Anything else is a fault, and **its message is never relayed.**
+     *
+     * Every refusal above carries a sentence somebody wrote to be read. What is
+     * left is what nobody wrote: a driver error, a constraint name, a query
+     * layer's wrapper — and on these routes the query that failed is one that
+     * selected a sealed envelope. Echoing it would put ciphertext and SQL into
+     * a browser response, and it would do so on exactly the surface that must
+     * never hand anything of a key back. So the caller is told what happened in
+     * words this file chose, and the detail goes where faults belong.
+     */
+    request.log.error({ err: error }, "the judge routes could not answer");
+    return sendRefusal(
+      reply,
+      "unavailable",
+      "Egma could not complete this judge request. Nothing was changed. " +
+        "Try again, and check the API logs if it keeps happening.",
+    );
   });
 }
 

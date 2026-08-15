@@ -278,7 +278,17 @@ export function buildApi(options: ServerOptions): Api {
   // group because the two answer to different roles: authoring a grader is a
   // member's act, and committing the organization's account to a provider is an
   // admin's.
-  void app.register(judgeRoutes, { provider: identity.provider, rateLimit });
+  void app.register(judgeRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    // The same judge the seeding path gives a project that has configured none.
+    // It is handed here so that a project which moved to a key of its own can
+    // move back: the deployment's judge lives in this process's configuration,
+    // and nowhere a project could have thrown away.
+    ...(config.defaultJudge === undefined
+      ? {}
+      : { defaultJudge: config.defaultJudge }),
+  });
 
   // What a terminal starts and then watches: a run over one connection,
   // pinning exact versions, and the numbered feed a follower resumes from.

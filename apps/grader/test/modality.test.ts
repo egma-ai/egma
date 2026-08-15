@@ -81,14 +81,16 @@ describe("a grader narrowed to one modality", () => {
       dimension: "metric_threshold",
       verdict: "skipped",
       score: 0,
+      // The word lives in its own field, so a page recognises the case without
+      // matching on prose that is free to be reworded.
+      reason: MODALITY_UNSUPPORTED,
       citedSpanIds: [],
     });
-    expect(only?.rationale).toContain(MODALITY_UNSUPPORTED);
-    // The sentence still explains itself to a person, and names both sides of
-    // the mismatch so that nobody has to go and read the grader to understand
-    // the row.
+    // And the sentence beside it still explains itself to a person, naming both
+    // sides of the mismatch so that nobody has to go and read the grader.
     expect(only?.rationale).toContain("voice");
     expect(only?.rationale).toContain("chat");
+    expect(only?.rationale).not.toContain(MODALITY_UNSUPPORTED);
   });
 
   it("is never failed and never errored, whichever way the mismatch runs", async () => {
@@ -107,6 +109,16 @@ describe("a grader narrowed to one modality", () => {
         expect(judgment.verdict).toBe("skipped");
       }
     }
+  });
+
+  it("says nothing in the reason column when a check really was made", async () => {
+    const [only] = await judgmentsOf(
+      grader({ modalities: ["voice", "chat"] }),
+      conversation({ modality: "chat" }),
+      noJudgeWanted(),
+    );
+
+    expect(only?.reason).toBeUndefined();
   });
 
   it("judges normally when the conversation is one it scores", async () => {

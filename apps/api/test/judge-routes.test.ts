@@ -1,7 +1,70 @@
+import { seedDefaultJudge } from "@egma/db";
+import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
 import { colleagueOf, signUp, type Customer } from "./support/traces.ts";
+
+/** One mounted address and the methods answering at it. */
+type MountedRoute = {
+  readonly path: string;
+  readonly methods: readonly string[];
+};
+
+/**
+ * Every route the server mounts, read off its own printed tree.
+ *
+ * Fastify prints a radix tree, so a node's own text is what its parent's text
+ * does *not* already spell — `/api/me` has a child `mbers`, and the two
+ * concatenate to `/api/members`. Walking it with a stack of prefixes is
+ * therefore the whole of the parse, and it is what makes this list the
+ * server's rather than a copy of it kept by hand.
+ */
+function routesOf(tree: string): readonly MountedRoute[] {
+  const found: MountedRoute[] = [];
+  const prefixes: string[] = [];
+
+  for (const line of tree.split("\n")) {
+    const marked = /^((?:[│ ]\s\s\s)*)(?:├──|└──)\s(.*)$/.exec(line);
+    if (marked === null) continue;
+
+    const depth = (marked[1] ?? "").length / 4;
+    const rest = marked[2] ?? "";
+    const spoken = /^(.*?)\s\(([^()]*)\)\s*$/.exec(rest);
+    const segment = (spoken === null ? rest : (spoken[1] ?? "")).trim();
+
+    prefixes.length = depth;
+    prefixes.push(segment);
+
+    if (spoken !== null) {
+      found.push({
+        path: prefixes.join(""),
+        methods: (spoken[2] ?? "")
+          .split(",")
+          .map((method) => method.trim())
+          .filter((method) => method !== ""),
+      });
+    }
+  }
+
+  return found;
+}
+
+/**
+ * The order the sweep asks in.
+ *
+ * Signing out is the one request that ends the ability to make requests, so it
+ * goes last — not excluded, which would be a hole, but asked when there is
+ * nothing after it to hollow out. Everything else keeps the server's own order.
+ */
+function sweepOrder(routes: readonly MountedRoute[]): readonly MountedRoute[] {
+  const endsTheSession = (route: MountedRoute): boolean =>
+    route.path === "/api/sign-out";
+  return [
+    ...routes.filter((route) => !endsTheSession(route)),
+    ...routes.filter(endsTheSession),
+  ];
+}
 
 /**
  * The judge routes, over real HTTP against real Postgres.
@@ -33,6 +96,8 @@ afterEach(async () => {
 /** A key long enough to be one, and unmistakable if it ever appears in a body. */
 const A_KEY = "sk-judge-NEVER-RETURNS-TO-A-BROWSER-1234";
 const ANOTHER_KEY = "sk-judge-ROTATED-AND-ALSO-SECRET-98765";
+/** The deployment's own, which is not a customer's to see either. */
+const THE_PLATFORMS_KEY = "sk-the-platforms-own-key-NEVER-SHOWN-WXYZ";
 
 type Answer = {
   readonly statusCode: number;
@@ -126,13 +191,26 @@ describe("an organization's judge credentials", () => {
    *
    * A leak does not arrive through the route that stores a secret — that one is
    * written by somebody thinking about secrets. It arrives through a
-   * neighbouring read whose serializer widened, so **every route a signed-in
-   * browser can reach with the credential in place is asked**, and none of them
-   * may answer with the key.
+   * neighbouring read whose serializer widened. So the routes are not listed
+   * here: they are **read off the server**, which means this covers what egma
+   * actually mounts today and whatever somebody mounts tomorrow. A list would
+   * have been a sample dressed as a proof, and the route added next month is
+   * exactly the one nobody would think to add to it.
    */
-  it("cannot be read back through any route a browser can reach", async () => {
-    api = await createApi("judge_secret_unreadable_anywhere");
+  it("cannot be read back through any route the server actually mounts", async () => {
+    api = await createApi("judge_secret_unreadable_anywhere", {
+      // A platform judge as well as a customer's, so both envelopes egma can
+      // hold are in the database while every route is asked.
+      defaultJudge: {
+        provider: "openai",
+        model: "gpt-4o",
+        key: THE_PLATFORMS_KEY,
+      },
+    });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    // A second admin, so the writing sweep below cannot end the session the
+    // reading sweep depends on.
+    const bob = await colleagueOf(api.app, ada, "bob@acme.example", "admin");
 
     const credential = await credentialFor(ada, "Acme production", A_KEY);
     const pointed = await asBrowser(ada, "PUT", "/api/judge", {
@@ -143,29 +221,64 @@ describe("an organization's judge credentials", () => {
     });
     expect(pointed.statusCode, pointed.raw).toBe(200);
 
-    const everywhere = [
-      "/api/me",
-      "/api/judge-credentials",
-      `/api/judge-credentials/${credential.id}`,
-      `/api/judge?project=${ada.projectId}`,
-      `/api/judge/registry`,
-      `/api/graders?project=${ada.projectId}`,
-      "/api/grader-registry",
-      `/api/agents?project=${ada.projectId}`,
-      "/api/keys",
-      "/api/members",
-    ];
+    const mounted = routesOf(api.app.printRoutes({ commonPrefix: false }));
+    // A tree that stopped parsing would make this test pass by asking nothing,
+    // which is the one way a sweep can lie.
+    expect(mounted.length).toBeGreaterThan(30);
+    expect(mounted.some((route) => route.path === "/api/judge-credentials")).toBe(
+      true,
+    );
 
-    for (const url of everywhere) {
-      const answer = await asBrowser(ada, "GET", url);
-      expect(answer.raw, `${url} answered with the stored judge key`).not.toContain(
-        A_KEY,
-      );
-      // Not even part of it: four characters is the hint, and anything longer
-      // is the secret leaking a piece at a time.
-      expect(answer.raw, `${url} answered with most of the stored judge key`)
-        .not.toContain(A_KEY.slice(0, 12));
+    const filled = (path: string): string =>
+      path
+        .replace(":credentialId", credential.id)
+        .replace(":graderId", newId("grd"))
+        .replace(":agentId", newId("agt"))
+        .replace(":mockToolId", newId("mck"))
+        .replace(":testId", newId("tst"))
+        .replace(":versionId", newId("tstv"))
+        .replace(":runId", newId("run"))
+        .replace(":simulationId", newId("sim"))
+        .replace(":apiKeyId", newId("key"))
+        .replace(":userId", ada.userId)
+        .replace(":traceId", "0123456789abcdef0123456789abcdef")
+        .replace("*", "session");
+
+    const asked: string[] = [];
+    for (const route of sweepOrder(mounted)) {
+      for (const method of route.methods) {
+        const url = filled(route.path);
+        const response = await api.app.inject({
+          method: method as "GET",
+          url,
+          // Reading with one admin and writing with the other: the one request
+          // that ends a session must not be able to hollow out the sweep.
+          headers: { cookie: method === "GET" || method === "HEAD" ? ada.cookie : bob.cookie },
+          ...(method === "GET" || method === "HEAD" ? {} : { payload: {} }),
+        });
+
+        asked.push(`${method} ${url}`);
+        const body = response.body;
+        for (const [name, secret] of [
+          ["the customer's key", A_KEY],
+          ["the deployment's key", THE_PLATFORMS_KEY],
+        ] as const) {
+          expect(body, `${method} ${url} answered with ${name}`).not.toContain(
+            secret,
+          );
+          // Not even most of it: four characters is the hint, and anything
+          // longer is the secret leaking a piece at a time.
+          expect(
+            body,
+            `${method} ${url} answered with most of ${name}`,
+          ).not.toContain(secret.slice(0, 12));
+        }
+      }
     }
+
+    // Every method of every mounted route, and the count said out loud so that
+    // a parser quietly dropping half the tree cannot pass unnoticed.
+    expect(asked.length).toBeGreaterThan(50);
   });
 
   /**
@@ -302,6 +415,37 @@ describe("an organization's judge credentials", () => {
     expect(listed.raw).not.toContain(A_KEY);
   });
 
+  /**
+   * A fault says so in words this API chose, and says nothing else.
+   *
+   * What reaches this branch is what nobody wrote to be read — a driver error,
+   * a constraint name, a query layer's wrapper — and on these routes the query
+   * that failed is one that selected a sealed envelope. Relaying its message
+   * would put ciphertext and SQL into a browser response, on exactly the
+   * surface that must never hand any of a key back.
+   */
+  it("answers a fault without relaying whatever the fault said", async () => {
+    api = await createApi("judge_fault_is_not_echoed");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    // A label longer than the column allows: nothing about the request is
+    // malformed, so no write-door check refuses it, and the database does — in
+    // its own words, naming its own internals.
+    const broken = await asBrowser(ada, "POST", "/api/judge-credentials", {
+      label: "x".repeat(2_000_000),
+      provider: "openai",
+      key: A_KEY,
+    });
+
+    expect(broken.statusCode).toBe(500);
+    expect(broken.body).toEqual({
+      error: "unavailable",
+      message:
+        "Egma could not complete this judge request. Nothing was changed. " +
+        "Try again, and check the API logs if it keeps happening.",
+    });
+  });
+
   it("is invisible to another organization, in the same words as one that never existed", async () => {
     api = await createApi("judge_credential_isolation");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -424,6 +568,70 @@ describe("a project's judge", () => {
     );
   });
 
+  /**
+   * Moving to a key of your own is not a one-way door.
+   *
+   * A project that chose a credential stops holding the deployment's envelope,
+   * because a row may hold exactly one key source. If choosing the sentinel
+   * again looked for that envelope on the row, the first move away from it
+   * would be the last — and the refusal on the way back would say this
+   * deployment has no judge while it plainly has one.
+   */
+  it("can be pointed back at the deployment's own judge after choosing a credential", async () => {
+    api = await createApi("judge_back_to_platform", {
+      defaultJudge: {
+        provider: "openai",
+        model: "gpt-4o",
+        key: "sk-the-platforms-own-key-WXYZ",
+      },
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const credential = await credentialFor(ada, "Acme production", A_KEY);
+
+    const mine = await asBrowser(ada, "PUT", "/api/judge", {
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      source: credential.id,
+      project: ada.projectId,
+    });
+    expect(mine.body).toMatchObject({ source: "credential" });
+
+    const back = await asBrowser(ada, "PUT", "/api/judge", {
+      provider: "openai",
+      model: "gpt-4o",
+      source: "platform",
+      project: ada.projectId,
+    });
+
+    expect(back.statusCode, back.raw).toBe(200);
+    expect(back.body).toMatchObject({
+      source: "platform",
+      credential_id: null,
+      hint: null,
+      model: "gpt-4o",
+    });
+    expect(back.raw).not.toContain("sk-the-platforms-own-key-WXYZ");
+
+    // And the credential it used to spend from is released rather than
+    // destroyed: another project may still point at it.
+    const held = await asBrowser(ada, "GET", "/api/judge-credentials");
+    expect((held.body.items as { id: string }[]).map((one) => one.id)).toEqual([
+      credential.id,
+    ]);
+
+    // And back again, so neither direction is the special one.
+    const mineAgain = await asBrowser(ada, "PUT", "/api/judge", {
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      source: credential.id,
+      project: ada.projectId,
+    });
+    expect(mineAgain.body).toMatchObject({
+      source: "credential",
+      credential_id: credential.id,
+    });
+  });
+
   it("refuses the platform sentinel on a deployment that configured no judge", async () => {
     api = await createApi("judge_no_platform_judge");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -479,11 +687,14 @@ describe("a project's judge", () => {
   });
 
   /**
-   * The rule the parent effort is most anxious about, asserted from the outside:
-   * a project that has chosen a judge keeps it. Seeding gives the deployment's
-   * judge to projects that have none and never replaces one somebody chose.
+   * The rule the parent effort is most anxious about, asserted by **running the
+   * seeding again** rather than by trusting that it would behave.
+   *
+   * `seedDefaultJudge` is what a restart runs, and it is the thing that could
+   * quietly replace a judge somebody chose. So the test does what a restart
+   * does: chooses a credential, runs the backfill, and reads the setting back.
    */
-  it("keeps a chosen credential when the deployment also has a judge of its own", async () => {
+  it("survives the boot backfill running again after a credential was chosen", async () => {
     api = await createApi("judge_choice_survives_seeding", {
       defaultJudge: {
         provider: "openai",
@@ -501,6 +712,16 @@ describe("a project's judge", () => {
       project: ada.projectId,
     });
 
+    // The restart. Exactly what `apps/api/src/index.ts` runs on boot, with the
+    // same configuration this instance was built with.
+    const seeded = await seedDefaultJudge({
+      provider: "openai",
+      model: "gpt-4o",
+      key: "sk-the-platforms-own-key-WXYZ",
+    });
+    // It found nothing to give, because this project already has a judge.
+    expect(seeded).toEqual([]);
+
     const judge = await asBrowser(
       ada,
       "GET",
@@ -512,6 +733,7 @@ describe("a project's judge", () => {
       credential_id: credential.id,
       model: "gpt-4.1-mini",
     });
+    expect(judge.body.hint).toBe("1234");
   });
 
   it("is an admin's to change, and everybody's to read", async () => {

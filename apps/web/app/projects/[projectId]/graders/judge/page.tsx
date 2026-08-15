@@ -286,7 +286,6 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
           projectId={projectId}
           mayAdminister={mayAdminister}
           onChanged={reloadCredentials}
-          onFailure={setRefused}
         />
       </PageBody>
     </ProductPage>
@@ -312,13 +311,11 @@ function Credentials({
   projectId,
   mayAdminister,
   onChanged,
-  onFailure,
 }: {
   readonly credentials: readonly JudgeCredential[];
   readonly projectId: string;
   readonly mayAdminister: boolean;
   readonly onChanged: () => void;
-  readonly onFailure: (refusal: Refusal) => void;
 }) {
   const [label, setLabel] = useState("");
   const [key, setKey] = useState("");
@@ -326,8 +323,24 @@ function Credentials({
   const [replacement, setReplacement] = useState("");
   const [busy, setBusy] = useState(false);
 
+  /**
+   * Why a key could not be saved, **and which action to try again.**
+   *
+   * Kept here rather than handed up to the judge section, because a failure has
+   * to report the thing that failed. Sending it up put "Egma did not save the
+   * judge" on screen when adding a key had failed, beside a Try again that
+   * saved the judge — a different action from the one somebody had just been
+   * refused, which is worse than no retry at all.
+   */
+  const [failed, setFailed] = useState<{
+    readonly what: string;
+    readonly refusal: Refusal;
+    readonly again: () => void;
+  } | null>(null);
+
   async function add(): Promise<void> {
     if (!mayAdminister || busy || label.trim() === "" || key.trim() === "") return;
+    setFailed(null);
     setBusy(true);
     const written = await sendJson<JudgeCredential>(JUDGE_CREDENTIALS_PATH, {
       method: "POST",
@@ -340,7 +353,11 @@ function Credentials({
       return;
     }
     if (written.status !== "ready") {
-      onFailure(written.refusal);
+      setFailed({
+        what: "Egma did not add this key.",
+        refusal: written.refusal,
+        again: () => void add(),
+      });
       return;
     }
     setLabel("");
@@ -352,6 +369,7 @@ function Credentials({
 
   async function rotate(credential: JudgeCredential): Promise<void> {
     if (!mayAdminister || busy || replacement.trim() === "") return;
+    setFailed(null);
     setBusy(true);
     const written = await sendJson<JudgeCredential>(
       judgeCredentialPath(credential.id),
@@ -370,7 +388,11 @@ function Credentials({
       return;
     }
     if (written.status !== "ready") {
-      onFailure(written.refusal);
+      setFailed({
+        what: `Egma did not replace the key for ${credential.label}.`,
+        refusal: written.refusal,
+        again: () => void rotate(credential),
+      });
       return;
     }
     setReplacement("");
@@ -386,6 +408,14 @@ function Credentials({
         every project. Egma shows the last four characters and never the key
         itself — not here, and not through any other page.
       </p>
+
+      {failed === null ? null : (
+        <Failure
+          title={failed.what}
+          message={failed.refusal.message}
+          onRetry={failed.again}
+        />
+      )}
 
       {credentials.length === 0 ? (
         <p>No judge credentials yet.</p>

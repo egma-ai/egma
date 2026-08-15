@@ -101,6 +101,38 @@ afterAll(async () => {
 describe("a judgment written and read back", () => {
   const traceId = "1111111111111111111111111111aaaa";
 
+  /**
+   * A `skipped` verdict says why in a word, beside the sentence saying it in
+   * prose.
+   *
+   * Two things are skipped and neither is a failure: a grader that cannot score
+   * this conversation's modality, and a threshold whose measure the
+   * conversation never produced. A page has to tell them apart, and it cannot
+   * do that from prose without making the prose contract — so the word has a
+   * column, and the sentence stays free to be reworded.
+   */
+  it("keeps a skipped verdict's stated reason beside its rationale", async () => {
+    await appendVerdicts(at(acme), [
+      verdict({
+        traceId,
+        verdict: "skipped",
+        score: 0,
+        reason: "modality_unsupported",
+        rationale:
+          "This grader scores voice conversations, and this one was chat.",
+      }),
+    ]);
+
+    const read = await readVerdicts(at(acme), traceId);
+
+    expect(read.verdicts[0]).toMatchObject({
+      verdict: "skipped",
+      reason: "modality_unsupported",
+      rationale:
+        "This grader scores voice conversations, and this one was chat.",
+    });
+  });
+
   it("round-trips every field it was given", async () => {
     const written = await appendVerdicts(at(acme), [
       verdict({
@@ -124,6 +156,11 @@ describe("a judgment written and read back", () => {
       verdict: "passed",
       score: 0.75,
       rationale: "the agent repeated Tuesday at four before ending the call.",
+      // Empty, and honestly so: a check that was actually made has nothing to
+      // say beyond its rationale. The word is for a `skipped` row, where the
+      // difference between "never about this conversation" and "nothing to
+      // measure" sends a reader to two different places.
+      reason: "",
       citedSpanIds: ["00f067aa0ba902b7", "00f067aa0ba902b8"],
       priority: "P0",
       runId: "run_01JQZ0000000000000000000AA",

@@ -108,6 +108,19 @@ function NewGrader({ projectId }: { readonly projectId: string }) {
     setReads(defaultReads(settledRegistry, next));
   }
 
+  /**
+   * A session that has ended goes where the rest of the application sends one.
+   *
+   * Without this the page would show "your session has ended" beside a Try
+   * again that can only ever be refused the same way — somebody pressing a
+   * button forever on a page that can no longer read anything. Every other
+   * product page does this; a page that only rendered the state would be the
+   * one place the application forgets where an expired session goes.
+   */
+  useEffect(() => {
+    if (registry?.status === "signed-out") window.location.replace("/sign-in");
+  }, [registry]);
+
   useEffect(() => {
     if (settledRegistry !== null) setReads(defaultReads(settledRegistry, type));
     // The type is the only thing that decides this, and it is set by the
