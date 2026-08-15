@@ -225,8 +225,8 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-egma}:${POSTGRES_PASSWORD:-egma}@postgres:5432/${POSTGRES_DB:-egma}
-      CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-egma}:${CLICKHOUSE_PASSWORD:-egma}@clickhouse:8123/${CLICKHOUSE_DB:-egma}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-egma}:${POSTGRES_PASSWORD:-egma}@postgres:5432/${POSTGRES_DB:-egma}}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://${CLICKHOUSE_USER:-egma}:${CLICKHOUSE_PASSWORD:-egma}@clickhouse:8123/${CLICKHOUSE_DB:-egma}}
       HOST: 0.0.0.0
       PORT: "3100"
       # Signs session cookies. The default is a development one and every
@@ -561,8 +561,8 @@ services:
       # graders come out of Postgres, verdicts go into ClickHouse. Both are
       # required, because a grader that started with nowhere to read from and
       # nowhere to write to would look healthy and judge nothing.
-      DATABASE_URL: postgres://${POSTGRES_USER:-egma}:${POSTGRES_PASSWORD:-egma}@postgres:5432/${POSTGRES_DB:-egma}
-      CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-egma}:${CLICKHOUSE_PASSWORD:-egma}@clickhouse:8123/${CLICKHOUSE_DB:-egma}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-egma}:${POSTGRES_PASSWORD:-egma}@postgres:5432/${POSTGRES_DB:-egma}}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://${CLICKHOUSE_USER:-egma}:${CLICKHOUSE_PASSWORD:-egma}@clickhouse:8123/${CLICKHOUSE_DB:-egma}}
       # The same key the API seals with, because a judged grader has to replay
       # the project's own judge key to the provider, and the process making the
       # call is this one. What it can open is held narrow on the other side: a
