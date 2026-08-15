@@ -1627,6 +1627,29 @@ describe("changing a running grader and switching it off", () => {
       .getByRole("button", { name: button });
   }
 
+  /** Every row of the table, the heading row included. */
+  function rows() {
+    return page.locator("table").getByRole("row");
+  }
+
+  /**
+   * **Wait for the list to say it, never for the write to say it.**
+   *
+   * The screen shows what happened the moment the request comes back, and
+   * *then* reads the list again — two commits, not one. So the sentence
+   * confirming a write is not a signal that the table has caught up, and
+   * counting rows straight after it is a race that widens under load until it
+   * loses: this file counted three rows where two were expected the first time
+   * the whole suite ran beside it.
+   *
+   * `expect.poll` is how the rest of this file waits on a list settling, and it
+   * is the right shape here for the same reason — the assertion *is* the wait,
+   * so there is no gap left between them for the screen to change in.
+   */
+  function settlesAt(howMany: number) {
+    return expect.poll(() => rows().count(), { timeout: 30_000 }).toBe(howMany);
+  }
+
   /**
    * The bound, which is the entry's own question — named by what it is not,
    * because what a grader asks for is the library entry's business and a test
@@ -1639,7 +1662,8 @@ describe("changing a running grader and switching it off", () => {
     "saves a new value and reads it back, and turns a blocker into a diagnostic",
     async () => {
       await page.goto(`${origin}/graders/running`);
-      await page.waitForSelector("text=latency");
+      // The table, settled: two graders on this project, and a heading row.
+      await settlesAt(3);
       // Blocking, as anything switched on is unless somebody said otherwise.
       await page.waitForSelector("text=Blocks");
 
@@ -1654,8 +1678,13 @@ describe("changing a running grader and switching it off", () => {
       await page.locator("#edit-required").uncheck();
       await page.getByRole("button", { name: "Save" }).click();
 
+      // What the write said, which is the sentence being asserted and **not**
+      // the moment the table is fresh.
       await page.waitForSelector("text=is saved");
-      // The list was read again, so the row says what the copy now says.
+      // And what the *list* says, which is: the row's own cell, from the read
+      // that happened after the write. This is the wait the next line depends
+      // on — the form closes with the notice, so "Diagnostic" can only be
+      // coming from the table by the time it matches.
       await page.waitForSelector("text=Diagnostic");
 
       // And opening it again shows the saved value rather than the old one —
@@ -1672,7 +1701,7 @@ describe("changing a running grader and switching it off", () => {
     "says what a switched-off grader keeps before it switches one off",
     async () => {
       await page.goto(`${origin}/graders/running`);
-      await page.waitForSelector("text=latency");
+      await settlesAt(3);
 
       await on("latency", "Switch off").click();
 
@@ -1681,11 +1710,15 @@ describe("changing a running grader and switching it off", () => {
       await page.waitForSelector("text=already judged keeps exactly what it said");
 
       await page.getByRole("button", { name: "Switch it off" }).click();
+      // What the write said — the sentence, asserted for its own sake.
       await page.waitForSelector("text=is switched off");
 
-      // Gone from the list, and the copy every project is created with is
-      // still there — only the one that was named stopped judging.
-      expect(await page.locator("table").getByRole("row").count()).toBe(2);
+      // And then what the list says, waited for rather than read straight off
+      // the back of the sentence above: the row is gone, and the copy every
+      // project is created with is still there — only the one that was named
+      // stopped judging.
+      await settlesAt(2);
+      expect(await on("latency", "Switch off").count()).toBe(0);
       await page.waitForSelector("text=expected_behaviors");
     },
     SETTLE,

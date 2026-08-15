@@ -13,7 +13,6 @@ import {
   makeWorld,
   oneServiceAtATime,
   seedGrader,
-  verdictsOn,
   type World,
 } from "./support/world.ts";
 
@@ -76,6 +75,21 @@ async function aCopyOnTheProject(grader: UseLibraryEntry): Promise<string> {
   return graderId;
 }
 
+/**
+ * One conversation, judged to the end.
+ *
+ * **The job reaching `graded` rather than a row appearing**, and the difference
+ * is the whole reliability of this file. A row appearing says *a* grader has
+ * spoken; every case here asks what a **particular** copy said, and one of them
+ * asks what a copy did **not** say — which no count of rows can ever confirm,
+ * because the row that is missing might simply not have been written yet. The
+ * job is finished only once every verdict is stored, so it is the one signal
+ * that means there is nothing more coming.
+ */
+async function judged(simulationId: string): Promise<void> {
+  await jobFor(world, { simulationId }, "graded", 30_000);
+}
+
 /** The rows one copy wrote about one conversation, in the order they came. */
 async function rowsFrom(conversationId: string, graderId: string) {
   const read = await readVerdicts(world.auth, conversationId);
@@ -101,7 +115,7 @@ describe("editing what a copy judges by", () => {
     );
 
     const { simulationId: before } = await conductSimulation(world);
-    await verdictsOn(world, before);
+    await judged(before);
     const [passed] = await rowsFrom(before, graderId);
     expect(passed?.verdict).toBe("passed");
 
@@ -113,7 +127,7 @@ describe("editing what a copy judges by", () => {
     expect(edited?.version).toBe(2);
 
     const { simulationId: after } = await conductSimulation(world);
-    await verdictsOn(world, after);
+    await judged(after);
     const [failed] = await rowsFrom(after, graderId);
 
     // Judged by what the copy holds now, and the row names the version that
@@ -155,9 +169,9 @@ describe("switching a copy off", () => {
       aLatencyCopy({ name: "On until it is not" }),
     );
 
-    const { simulationId: judged } = await conductSimulation(world);
-    await verdictsOn(world, judged);
-    const [wrote] = await rowsFrom(judged, graderId);
+    const { simulationId: itJudged } = await conductSimulation(world);
+    await judged(itJudged);
+    const [wrote] = await rowsFrom(itJudged, graderId);
     expect(wrote?.verdict).toBe("passed");
 
     const switchedOff = await deleteGrader(world.auth, graderId);
@@ -166,7 +180,7 @@ describe("switching a copy off", () => {
     // A whole conversation later: conducted, claimed, judged and finished —
     // and this copy said nothing about it, because it was never resolved.
     const { simulationId: afterwards } = await conductSimulation(world);
-    await jobFor(world, { simulationId: afterwards }, "graded", 30_000);
+    await judged(afterwards);
 
     expect(await rowsFrom(afterwards, graderId)).toHaveLength(0);
     // Nothing judged it at all, in fact: the conversation names no test, so the
@@ -176,10 +190,10 @@ describe("switching a copy off", () => {
     expect(nothing.outcome.verdict).toBe("skipped");
 
     // And the conversation it did judge reads exactly as it read before.
-    const [kept] = await rowsFrom(judged, graderId);
+    const [kept] = await rowsFrom(itJudged, graderId);
     expect(kept?.verdict).toBe("passed");
     expect(kept?.graderVersionId).toBe(wrote?.graderVersionId);
-    expect(await readVerdicts(world.auth, judged)).toMatchObject({
+    expect(await readVerdicts(world.auth, itJudged)).toMatchObject({
       outcome: { verdict: "passed" },
     });
   });
@@ -209,7 +223,7 @@ describe("switching a copy off", () => {
     );
 
     const { simulationId } = await conductSimulation(world);
-    await verdictsOn(world, simulationId);
+    await judged(simulationId);
 
     const before = await readVerdicts(world.auth, simulationId);
     expect(before.diagnostics?.verdict).toBe("failed");
