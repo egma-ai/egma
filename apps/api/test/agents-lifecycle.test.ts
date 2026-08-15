@@ -657,6 +657,135 @@ describe("restoring a connection", () => {
   });
 });
 
+describe("a connection Restore that collides on its name", () => {
+  it("names the colliding name, and takes a replacement", async () => {
+    api = await createApi("agents_browser_connection_restore_name");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const agent = await anAgent(ada, "Front desk");
+    const first = await aConnection(ada, agent.id, { name: "staging" });
+
+    const archived = await browser(
+      "POST",
+      `/api/agents/${agent.id}/connections/${first.id}/archive`,
+      ada,
+      { expected_revision: first.revision },
+    );
+    const revision = held<ConnectionBody>(archived, "connection").revision;
+
+    // Archiving released the name, and something took it.
+    await aConnection(ada, agent.id, { name: "staging" });
+
+    const credential = {
+      choice: "replace",
+      credentials: { apiKey: "retell-secret-NEW1NEW2ABCD" },
+    };
+
+    const refused = await browser(
+      "POST",
+      `/api/agents/${agent.id}/connections/${first.id}/restore`,
+      ada,
+      { expected_revision: revision, credential },
+    );
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe("name_taken");
+    // The name it collided on is the one the row still carries, and the
+    // sentence has to say which name to avoid rather than filling its own slot
+    // with a phrase.
+    expect(refused.body.message).toBe(
+      "The name staging is already used by an active connection. Choose a " +
+        "different name in Restore and try again.",
+    );
+
+    const renamed = await browser(
+      "POST",
+      `/api/agents/${agent.id}/connections/${first.id}/restore`,
+      ada,
+      { expected_revision: revision, name: "staging (original)", credential },
+    );
+    expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
+    const back = held<ConnectionBody>(renamed, "connection");
+    expect(back.name).toBe("staging (original)");
+    expect(back.archived).toBe(false);
+    expect(back.credentials_hint).toBe("ABCD");
+  });
+
+  it("names the colliding name for an agent Restore too", async () => {
+    api = await createApi("agents_browser_agent_restore_name_named");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const first = await anAgent(ada, "Front desk");
+    const archived = await browser(
+      "POST",
+      `/api/agents/${first.id}/archive`,
+      ada,
+      { expected_revision: first.revision },
+    );
+    await anAgent(ada, "Front desk");
+
+    const refused = await browser(
+      "POST",
+      `/api/agents/${first.id}/restore`,
+      ada,
+      { expected_revision: held<AgentBody>(archived, "agent").revision },
+    );
+    expect(refused.body.message).toBe(
+      "The name Front desk is already used by an active agent. Choose a " +
+        "different name in Restore and try again.",
+    );
+  });
+});
+
+describe("a key minted for the whole organization", () => {
+  it("is answered rather than faulted, on every write in this group", async () => {
+    api = await createApi("agents_org_wide_key");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const agent = await anAgent(ada, "Front desk");
+    const wiring = await aConnection(ada, agent.id);
+
+    // `ada.secret` is minted for the whole customer and names no project. The
+    // organization holds one project, so the API resolves it — the same rule
+    // the graders, personas and mock tools follow — and nothing in the group
+    // reaches the data layer's project guard as a fault.
+    const withKey = async (
+      method: "POST" | "PATCH",
+      url: string,
+      payload: Record<string, unknown>,
+    ) => {
+      const response = await api.app.inject({
+        method,
+        url,
+        headers: { authorization: `Bearer ${ada.secret}` },
+        payload,
+      });
+      return {
+        status: response.statusCode,
+        body: response.json() as Record<string, unknown>,
+      };
+    };
+
+    const archivedConnection = await withKey(
+      "POST",
+      `/api/agents/${agent.id}/connections/${wiring.id}/archive`,
+      {},
+    );
+    expect(archivedConnection.status).toBe(200);
+
+    const archived = await withKey("POST", `/api/agents/${agent.id}/archive`, {});
+    expect(archived.status, JSON.stringify(archived.body)).toBe(200);
+
+    const restored = await withKey("POST", `/api/agents/${agent.id}/restore`, {});
+    expect(restored.status, JSON.stringify(restored.body)).toBe(200);
+
+    // Archive and Restore answer the same key the same way, which they did not
+    // before: one returned 200 and the other a bare 500 from a plain throw.
+    for (const answer of [archivedConnection, archived, restored]) {
+      expect(answer.status).toBeLessThan(500);
+    }
+  });
+});
+
 describe("a connection's capability record", () => {
   it("starts unknown, which is not the same as unsupported", async () => {
     api = await createApi("agents_browser_capabilities_unknown");
@@ -672,6 +801,52 @@ describe("a connection's capability record", () => {
     expect(wiring.capabilities.checked_at).toBeNull();
   });
 
+  it("answers what egma's own transport settles: audio on voice, none on chat", async () => {
+    api = await createApi("agents_browser_capabilities_transport");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const agent = await anAgent(ada, "Front desk");
+    const spoken = await aConnection(ada, agent.id, {
+      name: "by-voice",
+      modality: "voice",
+    });
+    const typed = await aConnection(ada, agent.id, {
+      name: "by-chat",
+      modality: "chat",
+    });
+
+    const measure = async (connectionId: string) => {
+      const done = await browser(
+        "POST",
+        `/api/agents/${agent.id}/connections/${connectionId}/capabilities/refresh`,
+        ada,
+      );
+      expect(done.status, JSON.stringify(done.body)).toBe(200);
+      return held<ConnectionBody>(done, "connection").capabilities;
+    };
+
+    // A voice simulation holds PCM both ways, so there is audio for an audio
+    // grader to read. This is a fact about egma's own transport rather than
+    // about the provider's name, which is why an adapter is allowed to state
+    // it at all.
+    const voice = await measure(spoken.id);
+    expect(voice.state).toBe("known");
+    expect(voice.supported).toEqual(["raw_audio"]);
+
+    // A chat simulation is text end to end. Not "not yet" — none.
+    const chat = await measure(typed.id);
+    expect(chat.state).toBe("known");
+    expect(chat.supported).toEqual([]);
+
+    // And DTMF is absent from both, which under this record means measured and
+    // unsupported: nothing in the simulator can press a digit over any
+    // transport. Saying so is worth more than leaving it unknown, because a
+    // test that needs a phone menu is then skipped with a reason somebody can
+    // act on rather than because nobody has looked.
+    expect(voice.supported).not.toContain("dtmf");
+    expect(chat.supported).not.toContain("dtmf");
+  });
+
   it("is refused a Refresh for a type egma ships no adapter for", async () => {
     api = await createApi("agents_browser_capabilities_no_adapter");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -679,16 +854,24 @@ describe("a connection's capability record", () => {
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id);
 
-    const asked = await browser(
-      "POST",
-      `/api/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
-      ada,
-    );
-    expect(asked.status).toBe(422);
-    expect(asked.body.error).toBe("no_capability_adapter");
-    // The refusal says the state is unchanged, so nobody reads it as having
-    // cleared a measurement.
-    expect(String(asked.body.message)).toContain("stays unknown");
+    // Every shipped type carries the transport adapter, so this is the state a
+    // type added ahead of its adapter would be in — taken by removing the one
+    // that is there.
+    const before = registerCapabilityDiscovery("retell", undefined);
+    try {
+      const asked = await browser(
+        "POST",
+        `/api/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
+        ada,
+      );
+      expect(asked.status).toBe(422);
+      expect(asked.body.error).toBe("no_capability_adapter");
+      // The refusal says the state is unchanged, so nobody reads it as having
+      // cleared a measurement.
+      expect(String(asked.body.message)).toContain("stays unknown");
+    } finally {
+      registerCapabilityDiscovery("retell", before);
+    }
   });
 
   it("records what an adapter measured, and forgets it when the target moves", async () => {

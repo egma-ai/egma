@@ -835,6 +835,97 @@ describe("one connection's page", () => {
     expect(Object.keys(sent[0]?.body ?? {})).not.toContain("credential");
   });
 
+  it("says so when it could not describe the type, and offers a retry", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/connection-types": [
+        {
+          status: 500,
+          body: { error: "unreadable_answer", message: "Egma could not answer." },
+        },
+        { status: 200, body: TYPES },
+      ],
+      "/api/capabilities": { status: 200, body: CAPABILITIES },
+      "/api/agents/agt_1/connections/con_1": {
+        status: 200,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<ConnectionDetailPage />);
+
+    expect(
+      await screen.findByText("Egma could not describe this connection's type."),
+    ).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+  });
+
+  it("never leaves a control that opens nothing when the type is unknown", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/connection-types": {
+        status: 500,
+        body: { error: "unreadable_answer", message: "Egma could not answer." },
+      },
+      "/api/capabilities": { status: 200, body: CAPABILITIES },
+      "/api/agents/agt_1/connections/con_1": {
+        status: 200,
+        body: { connection: { ...CONNECTION, archived: true } },
+      },
+    });
+    render(<ConnectionDetailPage />);
+
+    // Edit and Restore are drawn from the shape, so without it they cannot be
+    // opened. Enabled-but-inert is the state this must never be in: a control
+    // that answers a click with nothing tells somebody the product is broken
+    // and gives them nothing to do about it.
+    const edit = (await screen.findByRole("button", {
+      name: "Edit",
+    })) as HTMLButtonElement;
+    const restore = screen.getByRole("button", {
+      name: "Restore",
+    }) as HTMLButtonElement;
+
+    expect(edit.disabled).toBe(true);
+    expect(restore.disabled).toBe(true);
+    for (const control of [edit, restore]) {
+      expect(control.getAttribute("title")).toContain("could not describe");
+    }
+
+    fireEvent.click(edit);
+    fireEvent.click(restore);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Rotate says why as well, rather than being greyed out in silence.
+    expect(
+      screen
+        .getByRole("button", { name: "Rotate credential" })
+        .getAttribute("title"),
+    ).toContain("could not describe");
+  });
+
+  it("sends an expired session to sign-in rather than showing a broken page", async () => {
+    const replace = vi.fn();
+    vi.stubGlobal("location", { replace, assign: vi.fn(), href: "" });
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/connection-types": { status: 401, body: {} },
+      "/api/capabilities": { status: 200, body: CAPABILITIES },
+      "/api/agents/agt_1/connections/con_1": {
+        status: 200,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<ConnectionDetailPage />);
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/sign-in"));
+  });
+
   it("shows egma's refusal when a Restore is turned away", async () => {
     answersWith(
       { ...CONNECTION, archived: true },

@@ -1,4 +1,4 @@
-import type { ConnectionType } from "../schema/agents.ts";
+import type { ConnectionType, Modality } from "../schema/agents.ts";
 import { UnprocessableInputError } from "./errors.ts";
 
 /**
@@ -83,7 +83,14 @@ export function unknownCapabilityMessage(key: string): string {
 
 /**
  * Every key checked against the catalog, answered in the order they arrived
- * with duplicates removed. The first unknown key refuses the whole set — a
+ * with duplicates removed.
+ *
+ * **Nothing calls this yet, and the caller is named so it is not mistaken for
+ * dead code.** Required capabilities are a field on a test version, so the test
+ * editor is what gates them — ticket 04, "Build Tests and repository
+ * synchronization". The rule and its sentence live here because the catalog
+ * does, and because a second copy written next to the test editor would be a
+ * second opinion about which keys exist. The first unknown key refuses the whole set — a
  * partial save would be egma quietly deciding which half of somebody's
  * requirement mattered.
  */
@@ -137,6 +144,13 @@ export const CAPABILITIES_UNKNOWN: ConnectionCapabilities = { state: "unknown" }
 export type DiscoveryTarget = {
   readonly type: ConnectionType;
   readonly variantId: string;
+  /**
+   * Which layer this connection puts under test — and the fact that settles
+   * most of what egma's own transport can do. Chat carries text and voice
+   * carries audio, so a question like "is there audio to grade" is answered by
+   * this and not by the provider's name.
+   */
+  readonly modality: Modality;
   readonly config: Readonly<Record<string, string>>;
 };
 
@@ -153,20 +167,48 @@ export type CapabilityDiscovery = (
 /**
  * Which types egma ships a discovery adapter for.
  *
- * **Empty today, and that is the honest answer.** Discovery has to reach a real
- * target and report what it found; none of the three shipped types has a check
- * egma can make without either inventing a provider fact or guessing from the
- * brand, and the rule above says it may do neither. So the seam is real, the
- * recording path behind it is complete, and an entry lands here in the same
- * commit as the adapter that earns it — the arrangement `simulatorAdapter`
- * already uses in the connection registry, for the same reason.
- *
  * It is a map rather than a flag on the descriptor because the descriptor is
  * *what a connection is* and this is *what egma can do about one*, and because
  * a test proving the recording path needs to stand an adapter up without
  * rewriting the registry.
  */
 const DISCOVERIES = new Map<ConnectionType, CapabilityDiscovery>();
+
+/**
+ * What egma's own transport settles, for every type it can reach at all.
+ *
+ * **This is not brand inference, and the distinction is the whole reason it is
+ * allowed to exist.** "Retell supports DTMF" is a sentence about a company and
+ * egma has no business asserting it. "Egma cannot press a digit over any
+ * transport it ships" is a sentence about egma's own code, checkable by reading
+ * it, and true of the target *as egma will reach it* — which is exactly what a
+ * capability is for: deciding whether a test can be meaningfully run.
+ *
+ * Two facts, from the simulator as it stands:
+ *
+ * - **`raw_audio` follows the modality.** A voice simulation holds PCM in both
+ *   directions, so there is audio for an audio grader to read and for a
+ *   recording to be made from. A chat simulation is text end to end and there
+ *   is none — not "not yet", none.
+ * - **`dtmf` is unsupported everywhere**, because nothing in the simulator can
+ *   send a digit over any transport. Saying so is worth far more than leaving
+ *   it unknown: a test that needs to walk a phone menu is skipped with a reason
+ *   somebody can act on, rather than skipped because nobody has looked.
+ *
+ * **`barge_in` is deliberately not answered here**, because it is not a fact
+ * about the transport: it asks whether *the customer's agent* stops speaking
+ * when interrupted, and only a probe of that agent can say. See the note on
+ * `measuredCapabilities` for what its absence currently means.
+ */
+export const transportCapabilities: CapabilityDiscovery = async (target) =>
+  target.modality === "voice" ? ["raw_audio"] : [];
+
+// Registered for every type, because the facts above hold for every transport
+// egma ships. A type added later without an adapter of its own is refused a
+// Refresh in its own words, which is what `noCapabilityAdapterMessage` is for.
+for (const type of ["retell", "phone", "livekit"] as const) {
+  DISCOVERIES.set(type, transportCapabilities);
+}
 
 export function capabilityDiscoveryFor(
   type: ConnectionType,
@@ -231,6 +273,15 @@ export function capabilityCheckFailedMessage(connectionId: string): string {
  * An adapter naming a key egma does not have is a bug in the adapter, and
  * storing it would put a capability on a connection that no test could ever
  * require. It is refused rather than dropped.
+ *
+ * **One state covers the whole connection, and that has a consequence worth
+ * naming.** A `known` record means the catalog keys in `supported` are
+ * supported and every other catalog key is not — so a capability no shipped
+ * adapter can speak to, `barge_in` today, reads as unsupported once anything
+ * measures the connection at all. That is a stronger claim than egma can make
+ * about it. Telling the two apart needs the record to say which keys were
+ * *measured* as well as which were found, which is a schema change and a
+ * decision for whoever ships the barge-in probe.
  */
 export function measuredCapabilities(
   found: readonly string[],

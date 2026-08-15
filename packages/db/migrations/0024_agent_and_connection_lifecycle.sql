@@ -18,6 +18,13 @@
 --    token-endpoint shape and every other livekit connection is the key-pair
 --    shape, which is exactly what re-deriving the shape answered the moment
 --    before this ran. No connection changes meaning.
+--  * Every still-active connection under an agent that was already archived is
+--    archived too. Under the old rule the parent's marker hid them, so a live
+--    child row was harmless; under the new one Restore brings the parent back
+--    and a child nobody archived would come back with it, live, carrying the
+--    provider credential it was sealed with. Archiving them here is what makes
+--    `restoreAgent`'s promise — that its connections stay archived — true of
+--    installed data as well as of new data.
 --  * The capability columns replace an unused `capabilities` blob with the
 --    record the product actually reads: a state, what was measured, when, and
 --    by which adapter. Every existing row becomes `unknown`, which is the
@@ -46,6 +53,14 @@ UPDATE "connection" SET "revision" = 'rev_' || upper(substr(replace(gen_random_u
 
 ALTER TABLE "agent" ALTER COLUMN "revision" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "connection" ALTER COLUMN "revision" SET NOT NULL;--> statement-breakpoint
+
+-- Data only, so nothing about the schema moves. It runs after the rename above,
+-- which is what gives both tables the `archived_at` this reads and writes.
+UPDATE "connection" SET "archived_at" = "agent"."archived_at"
+  FROM "agent"
+ WHERE "connection"."agent_id" = "agent"."id"
+   AND "agent"."archived_at" is not null
+   AND "connection"."archived_at" is null;--> statement-breakpoint
 
 ALTER TABLE "connection" ADD COLUMN "variant_id" text;--> statement-breakpoint
 

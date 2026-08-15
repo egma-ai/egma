@@ -1873,6 +1873,16 @@ describe("the agent and connection lifecycle over installed data (0024)", () => 
   const keyPairConnection = newId("con");
   const endpointConnection = newId("con");
   const phoneConnection = newId("con");
+  /**
+   * The sharp row, and the one the first version of this test could not have
+   * caught because every connection it wrote hung off the *live* agent: a
+   * connection still active under an agent the old release had already
+   * soft-deleted. Nothing was wrong with it then — the parent's marker hid it
+   * from every read — and everything is wrong with it after Restore exists,
+   * because restoring the parent would bring it back live, carrying the
+   * provider credential it was sealed with.
+   */
+  const orphanedChild = newId("con");
 
   beforeAll(async () => {
     database = await createEmptyDatabase("agent_lifecycle");
@@ -1915,12 +1925,13 @@ describe("the agent and connection lifecycle over installed data (0024)", () => 
       modality: string,
       topology: string,
       config: string,
+      owner: string = liveAgent,
     ) =>
       client.query(
         `insert into connection
            (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
-        [id, organizationId, projectId, liveAgent, name, type, modality, topology, config],
+        [id, organizationId, projectId, owner, name, type, modality, topology, config],
       );
 
     await connection(
@@ -1955,6 +1966,15 @@ describe("the agent and connection lifecycle over installed data (0024)", () => 
       "egma-dials-in",
       '{"phoneNumber":"+15551234567"}',
     );
+    await connection(
+      orphanedChild,
+      "retell-1",
+      "retell",
+      "chat",
+      "hosted-broker",
+      '{"retellAgentId":"agent_orphan"}',
+      goneAgent,
+    );
   });
 
   afterAll(async () => {
@@ -1984,6 +2004,55 @@ describe("the agent and connection lifecycle over installed data (0024)", () => 
     // The row is still there and still readable, which is the whole difference
     // between Archive and the deletion this replaced.
     expect(byId.get(goneAgent)).toBeInstanceOf(Date);
+  });
+
+  it("archives the live children of an agent that was already archived", async () => {
+    const { rows } = await client.query<{ archived_at: Date | null }>(
+      "select archived_at from connection where id = $1",
+      [orphanedChild],
+    );
+
+    // Under the old rule this row was harmless: the parent's marker hid it from
+    // every read. Under the new one, Restore brings the parent back — and a
+    // child nobody archived would come back live, carrying the provider
+    // credential it was sealed with. That is the one thing agent Restore
+    // promises cannot happen.
+    expect(rows[0]?.archived_at).toBeInstanceOf(Date);
+  });
+
+  it("leaves no active connection anywhere under an archived agent", async () => {
+    // The property rather than the row: whatever installed data holds, after
+    // this migration there is no way to reach an archived agent.
+    const { rows } = await client.query<{ id: string }>(
+      `select c.id from connection c
+         join agent a on a.id = c.agent_id
+        where a.archived_at is not null and c.archived_at is null`,
+    );
+    expect(rows.map((row) => row.id)).toEqual([]);
+  });
+
+  it("keeps that child archived when the agent is restored", async () => {
+    // Restore writes the agent row and only the agent row, so the child stays
+    // where the migration put it. This is the same promise the access-layer
+    // tests make for agents archived after the upgrade; asserting it here is
+    // what says it also holds for the ones archived before it.
+    await client.query(
+      "update agent set archived_at = null where id = $1",
+      [goneAgent],
+    );
+
+    const { rows } = await client.query<{ archived_at: Date | null }>(
+      "select archived_at from connection where id = $1",
+      [orphanedChild],
+    );
+    expect(rows[0]?.archived_at).toBeInstanceOf(Date);
+
+    // Put it back, so the assertions after this one still meet the world the
+    // migration left behind.
+    await client.query(
+      "update agent set archived_at = now() where id = $1",
+      [goneAgent],
+    );
   });
 
   it("gives every row already there a revision, so the first edit has one to name", async () => {

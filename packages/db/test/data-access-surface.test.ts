@@ -366,10 +366,16 @@ const VALUES = [
   "capabilityCheckFailedMessage",
   "noCapabilityAdapterMessage",
   // Whether egma ships something that can measure a type's targets, and the
-  // door a deployment installs one through. The seam is real and empty today:
-  // an adapter lands here in the same commit as the code that earns it.
+  // door a deployment installs one through.
   "hasCapabilityDiscovery",
   "registerCapabilityDiscovery",
+  // The one shipped adapter, registered for every type egma can reach. It
+  // answers only what egma's own transport settles — whether a simulation
+  // carries audio, and that nothing can send a digit over any of them — so it
+  // states no fact about a provider, which is the rule it had to be written
+  // against. Exported so a deployment can put it back after standing another
+  // one in its place.
+  "transportCapabilities",
   // The connection registry, as a browser may be told about it — labels, field
   // shapes, the credential rule, and the two adapter facts. Never a gate, a
   // hint function, a refusal sentence or a credential.

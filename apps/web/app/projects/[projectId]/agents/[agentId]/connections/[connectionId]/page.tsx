@@ -106,6 +106,18 @@ function ConnectionDetail({
 
   const [types, setTypes] = useState<ConnectionTypeCatalog | null>(null);
   const [capabilities, setCapabilities] = useState<CapabilityCatalog | null>(null);
+  /**
+   * Why the connection types could not be described, until somebody asks again.
+   *
+   * **The catalog is not decoration on this page, it is what the page can do.**
+   * The shape it names decides which fields an edit shows, which credential a
+   * Restore must ask for, and what the credential rule even is — so a read that
+   * failed and said nothing left Edit and Restore looking available and opening
+   * nothing at all, and Rotate disabled with no reason given. Silence is the
+   * worst of the three states this can be in.
+   */
+  const [typesRefused, setTypesRefused] = useState<Refusal | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [acted, setActed] = useState<Refusal | null>(null);
   const [dialog, setDialog] = useState<"edit" | "rotate" | "archive" | "restore" | null>(
@@ -114,16 +126,36 @@ function ConnectionDetail({
 
   useEffect(() => {
     let current = true;
+    setTypesRefused(null);
+
     void readJson<ConnectionTypeCatalog>(CONNECTION_TYPES_PATH).then((one) => {
-      if (current && one.status === "ready") setTypes(one.value);
+      if (!current) return;
+      if (one.status === "signed-out") {
+        window.location.replace("/sign-in");
+        return;
+      }
+      if (one.status !== "ready") {
+        setTypesRefused(one.refusal);
+        return;
+      }
+      setTypes(one.value);
     });
+
+    /**
+     * The capability catalog is the one read on this page that may fail
+     * quietly, and only because its whole job is to turn a stored key into a
+     * nicer word. Without it `capabilityLabel` answers the key itself, which is
+     * still true and still readable — so a failure costs a label, not a fact,
+     * and stopping the page for it would be worse than carrying on.
+     */
     void readJson<CapabilityCatalog>(CAPABILITIES_PATH).then((one) => {
       if (current && one.status === "ready") setCapabilities(one.value);
     });
+
     return () => {
       current = false;
     };
-  }, []);
+  }, [attempt]);
 
   useEffect(() => {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
@@ -179,6 +211,21 @@ function ConnectionDetail({
       ? undefined
       : `Your ${role} role cannot change connections. Ask an organization admin to change your role.`;
 
+  /**
+   * Whether this page knows the shape this connection is in.
+   *
+   * Edit and Restore are drawn from it — which fields to ask for, and which
+   * credential a Restore must demand — so without it neither can be opened.
+   * They stay on the page and become genuinely disabled with a reason, which is
+   * the house rule: a control that is present and inert is a dead end, and one
+   * that silently does nothing when pressed is worse.
+   */
+  const shapeKnown = variant !== undefined;
+  const whyNoShape =
+    typesRefused === null
+      ? "Egma is still describing this connection's type."
+      : "Egma could not describe this connection's type, so its fields and its credential rule are unknown.";
+
   /** One post, with the busy state, the refusal and the reload all handled once. */
   async function act(what: string, path: string, body: unknown): Promise<void> {
     if (busy !== null) return;
@@ -217,7 +264,8 @@ function ConnectionDetail({
           role === null ? undefined : (
             <Actions>
               <Button
-                disabled={!mayAuthor || one.archived}
+                disabled={!mayAuthor || one.archived || !shapeKnown}
+                why={shapeKnown ? whyNot : whyNoShape}
                 onClick={() => setDialog("edit")}
               >
                 Edit
@@ -225,13 +273,20 @@ function ConnectionDetail({
               {one.archived ? (
                 <Button
                   weight="strong"
-                  disabled={!mayAuthor}
+                  disabled={!mayAuthor || !shapeKnown}
+                  why={shapeKnown ? whyNot : whyNoShape}
                   onClick={() => setDialog("restore")}
                 >
                   Restore
                 </Button>
               ) : (
-                <Button disabled={!mayAuthor} onClick={() => setDialog("archive")}>
+                // Archive needs no shape: it stops the connection being used
+                // and asks nothing about what it is made of.
+                <Button
+                  disabled={!mayAuthor}
+                  why={whyNot}
+                  onClick={() => setDialog("archive")}
+                >
                   Archive
                 </Button>
               )}
@@ -250,6 +305,14 @@ function ConnectionDetail({
 
         {role !== null && !mayAuthor ? <Problem>{whyNot}</Problem> : null}
         {acted === null ? null : <Problem>{acted.message}</Problem>}
+
+        {typesRefused === null ? null : (
+          <Failure
+            title="Egma could not describe this connection's type."
+            message={typesRefused.message}
+            onRetry={() => setAttempt((one) => one + 1)}
+          />
+        )}
 
         <Facts label="What this connection is">
           <Fact name="Identifier" mono>
@@ -294,8 +357,15 @@ function ConnectionDetail({
                 disabled={
                   !mayAuthor ||
                   one.archived ||
-                  variant === undefined ||
+                  !shapeKnown ||
                   variant.credential_rule === "forbidden"
+                }
+                why={
+                  shapeKnown
+                    ? variant.credential_rule === "forbidden"
+                      ? "This connection takes no customer credential."
+                      : whyNot
+                    : whyNoShape
                 }
                 onClick={() => setDialog("rotate")}
               >

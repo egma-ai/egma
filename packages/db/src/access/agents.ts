@@ -1104,6 +1104,35 @@ async function refuseOrVanish(
 }
 
 /**
+ * The rule this family holds an organization-wide credential to, and where it
+ * is held.
+ *
+ * **Deciding whether an agent appears in a project is an act taken from inside
+ * that project**, and a credential minted for the whole customer is acting in
+ * none — the stance `createAgent` takes, and the one the grader, persona and
+ * mock-tool factories take for their own project-scoped writes. Archive and
+ * Restore are the two halves of that one decision, so both are held to it.
+ *
+ * A connection is deliberately not: it lands in the project its agent already
+ * names, so archiving one decides nothing about which project anything belongs
+ * to. That asymmetry is the rule rather than an oversight, and it matches
+ * `addConnection`, which has never asked either.
+ *
+ * **Nothing reaches this from HTTP.** The API resolves an acting project for
+ * every write in the group before it calls, exactly as it does for graders and
+ * personas, so this is the invariant stated where a direct caller — the CLI, a
+ * test, a script — will meet it.
+ */
+function guardProjectScoped(auth: AuthContext, what: string): void {
+  if (auth.projectId === undefined) {
+    throw new Error(
+      `${what} an agent happens inside its project, and this credential is ` +
+        `for the whole organization and acting in none`,
+    );
+  }
+}
+
+/**
  * Archive an agent, and every active way of reaching it, and every piece of
  * work that was going to use one.
  *
@@ -1130,15 +1159,7 @@ export async function archiveAgent(
 ): Promise<ArchivedAgent | undefined> {
   authorize(auth, "configure_agents", here(auth));
 
-  // The stance create and the old delete both take: an edit lands on a row that
-  // already names its project, but deciding an agent should stop appearing in
-  // one is an act taken from inside it, and a credential for the whole customer
-  // is acting in none.
-  if (auth.projectId === undefined) {
-    throw new Error(
-      "archiving an agent happens inside its project, and this credential is for the whole organization and acting in none",
-    );
-  }
+  guardProjectScoped(auth, "archiving");
 
   const now = new Date();
 
@@ -1220,9 +1241,25 @@ export async function restoreAgent(
 ): Promise<Agent | undefined> {
   authorize(auth, "configure_agents", here(auth));
 
+  // Restore is the same decision as Archive, taken the other way: it is about
+  // whether this agent appears in a project. It was missing this guard while
+  // Archive had it, which made the pair answer an organization-wide credential
+  // two different ways for one decision.
+  guardProjectScoped(auth, "restoring");
+
   const name =
     options.name === undefined ? undefined : validName(options.name, "an agent");
   const now = new Date();
+
+  // What this Restore is asking to be called: the replacement, or — when it
+  // brought none — the name the row already carries, which is the one the
+  // unique index will refuse it.
+  const [held] = await db()
+    .select({ name: agent.name })
+    .from(agent)
+    .where(theAgentEvenArchived(auth, id))
+    .limit(1);
+  const wanted = name ?? held?.name ?? "";
 
   const [restored] = await db()
     .update(agent)
@@ -1246,7 +1283,7 @@ export async function restoreAgent(
       if (lostToConstraint(error, "agent_project_id_name_unique")) {
         throw new AgentWriteRefusedError(
           "name_taken",
-          nameTakenMessage(name, "agent"),
+          nameTakenMessage(wanted, "agent"),
         );
       }
       throw error;
@@ -1269,17 +1306,20 @@ export async function restoreAgent(
 /**
  * The refusal a Restore gets when the name it wants is somebody else's now.
  *
- * The sentence names the resource rather than the row, because the row it
- * collides with may be one the reader is not entitled to see the name of, and
- * because the move is the same either way: pick another name in the Restore.
+ * **The name is always the one that collided**, which is the row's own whenever
+ * the Restore brought no replacement — a Restore that names nothing is asking
+ * for the name it had. Falling back to a phrase produced "The name this
+ * resource already has is already used by an active connection", a sentence
+ * that fills the template's slot without telling anybody which name to avoid.
+ *
+ * It names the resource rather than the row it collided with, because that row
+ * may be one the reader is not entitled to see, and because the move is the
+ * same either way: pick another name in the Restore.
  */
-function nameTakenMessage(
-  name: string | undefined,
-  resource: "agent" | "connection",
-): string {
+function nameTakenMessage(name: string, resource: "agent" | "connection"): string {
   return (
-    `The name ${name ?? "this resource already has"} is already used by an ` +
-    `active ${resource}. Choose a different name in Restore and try again.`
+    `The name ${name} is already used by an active ${resource}. ` +
+    `Choose a different name in Restore and try again.`
   );
 }
 
@@ -1687,6 +1727,7 @@ export async function restoreConnection(
   const [current] = await db()
     .select({
       id: connection.id,
+      name: connection.name,
       type: connection.type,
       variantId: connection.variantId,
       config: connection.config,
@@ -1779,7 +1820,9 @@ export async function restoreConnection(
       if (lostToConstraint(error, "connection_agent_id_name_unique")) {
         throw new AgentWriteRefusedError(
           "name_taken",
-          nameTakenMessage(name, "connection"),
+          // `current` was read above and carries the row's own name, which is
+          // what a Restore bringing no replacement is asking for.
+          nameTakenMessage(name ?? current.name, "connection"),
         );
       }
       throw error;
@@ -1824,6 +1867,9 @@ export async function refreshConnectionCapabilities(
       id: connection.id,
       type: connection.type,
       variantId: connection.variantId,
+      // What the transport carries, which is what most of what an adapter can
+      // establish turns on.
+      modality: connection.modality,
       config: connection.config,
       revision: connection.revision,
       archivedAt: connection.archivedAt,
@@ -1844,6 +1890,7 @@ export async function refreshConnectionCapabilities(
     found = await discovery({
       type,
       variantId: current.variantId,
+      modality: current.modality as Modality,
       config: configFromRow(current.config, current.id),
     });
   } catch (cause) {

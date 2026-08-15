@@ -105,6 +105,7 @@ export {
   isCapabilityKey,
   noCapabilityAdapterMessage,
   registerCapabilityDiscovery,
+  transportCapabilities,
   unknownCapabilityMessage,
   type CapabilityDiscovery,
   type CapabilityEntry,

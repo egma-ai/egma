@@ -7,6 +7,7 @@ import {
   hasCapabilityDiscovery,
   isCapabilityKey,
   registerCapabilityDiscovery,
+  transportCapabilities,
   variantById,
   variantIdOf,
 } from "@egma/db";
@@ -181,34 +182,76 @@ describe("the capability discovery seam", () => {
 
   afterEach(() => {
     for (const type of installed.splice(0)) {
-      registerCapabilityDiscovery(type as "retell", undefined);
+      registerCapabilityDiscovery(type as "retell", transportCapabilities);
     }
   });
 
-  it("ships empty, and says so rather than claiming an adapter it has not got", () => {
-    // Discovery has to reach a real target and report what it found. None of
-    // the three shipped types has a fact egma can establish without inferring
-    // one from the provider's brand, and inferring is the one thing this rule
-    // forbids — so the seam is real and empty, and an entry lands here in the
-    // same commit as the adapter that earns it.
+  it("carries an adapter for every type egma can reach", () => {
     for (const type of connectionTypeMetadata()) {
-      expect(type.capabilityDiscovery).toBe(false);
-      expect(hasCapabilityDiscovery(type.type)).toBe(false);
+      expect(type.capabilityDiscovery, type.type).toBe(true);
+      expect(hasCapabilityDiscovery(type.type), type.type).toBe(true);
     }
   });
 
-  it("shows up in what a browser is told the moment one is installed", () => {
-    registerCapabilityDiscovery("retell", async () => ["dtmf"]);
+  it("says whether there is audio, from egma's transport and never from a brand", () => {
+    // The distinction the no-brand-guessing rule is actually about. "Retell
+    // supports audio" is a sentence about a company. "A voice simulation holds
+    // PCM both ways and a chat simulation is text" is a sentence about egma's
+    // own code, and it is true of the target as egma will reach it — which is
+    // the only sense in which a capability decides whether a test can run.
+    const target = (type: "retell" | "phone" | "livekit", modality: "voice" | "chat") =>
+      ({ type, variantId: `${type}.x`, modality, config: {} }) as const;
+
+    return Promise.all([
+      transportCapabilities(target("retell", "chat")),
+      transportCapabilities(target("retell", "voice")),
+      transportCapabilities(target("phone", "voice")),
+      transportCapabilities(target("livekit", "voice")),
+    ]).then(([chat, spokenRetell, phone, livekit]) => {
+      expect(chat).toEqual([]);
+      // The same type answers differently by modality, which is the proof that
+      // the answer is not coming from the type's name.
+      expect(spokenRetell).toEqual(["raw_audio"]);
+      expect(phone).toEqual(["raw_audio"]);
+      expect(livekit).toEqual(["raw_audio"]);
+    });
+  });
+
+  it("never claims egma can press a digit, over any transport", async () => {
+    // There is no way to send DTMF anywhere in the simulator, so this is
+    // measured and unsupported rather than unknown — a test that needs a phone
+    // menu is skipped for a reason somebody can act on.
+    for (const type of ["retell", "phone", "livekit"] as const) {
+      for (const modality of ["voice", "chat"] as const) {
+        const found = await transportCapabilities({
+          type,
+          variantId: `${type}.x`,
+          modality,
+          config: {},
+        });
+        expect(found, `${type}/${modality}`).not.toContain("dtmf");
+      }
+    }
+  });
+
+  it("answers nothing for a type whose adapter has been taken away", () => {
+    registerCapabilityDiscovery("retell", undefined);
     installed.push("retell");
 
-    const described = connectionTypeMetadata().find(
-      (one) => one.type === "retell",
-    );
-    expect(described?.capabilityDiscovery).toBe(true);
+    // The state a type added ahead of its adapter is in. It is told plainly
+    // rather than handed a plausible answer.
+    expect(hasCapabilityDiscovery("retell")).toBe(false);
+    expect(
+      connectionTypeMetadata().find((one) => one.type === "retell")
+        ?.capabilityDiscovery,
+    ).toBe(false);
 
     // And the two facts stay separate: whether egma can conduct a run over a
     // type and whether it can measure one of its targets are different
     // questions with different answers.
-    expect(described?.simulatorAdapter).toBe(true);
+    expect(
+      connectionTypeMetadata().find((one) => one.type === "retell")
+        ?.simulatorAdapter,
+    ).toBe(true);
   });
 });

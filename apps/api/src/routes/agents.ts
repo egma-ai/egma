@@ -307,6 +307,43 @@ function revisionIn(body: Body, required: boolean): string | undefined | Refusal
   return given;
 }
 
+/**
+ * The project a request about one agent acts in.
+ *
+ * **Every route that names an agent or a connection goes through this, reads
+ * included.** The reason is the session's default: a browser's context is built
+ * with the organization's *first* project in it, because that is all the door
+ * knows before a request names one. A route that then used the context as it
+ * found it would scope every read and every write to that first project — so
+ * somebody working in a second project would open an agent and be told there is
+ * no such agent, and, worse, an archive aimed at one project would be evaluated
+ * against another.
+ *
+ * The spec is explicit that this must not happen: project middleware validates
+ * the URL's project and adds it to the request, and the first project must
+ * never become the fixed authorization scope. `readingIn` and `writingIn` below
+ * are that validation, and they narrow only — the organization still comes from
+ * the credential, so naming a project can only ever pick among what this
+ * membership already reaches.
+ *
+ * It is also what keeps a plain fault out of the handler. `archiveAgent` and
+ * `restoreAgent` refuse a credential acting in no project, exactly as the
+ * grader, persona and mock-tool factories refuse their own project-scoped
+ * writes — and, exactly as there, the API resolves a project before calling, so
+ * the refusal is documentation of an invariant rather than a 500 waiting for an
+ * organization-wide key to find it.
+ */
+async function actingProject(
+  auth: AuthContext,
+  request: { readonly query?: unknown },
+  verb: "writes into" | "reads",
+): Promise<AuthContext | Refusal> {
+  const query = (request.query ?? {}) as Record<string, string | undefined>;
+  const named = textWhenGiven(query.project, "a project");
+  if (isRefusal(named)) return named;
+  return verb === "reads" ? readingIn(auth, named) : writingIn(auth, named);
+}
+
 /** Whether the caller is a browser, which is what makes a revision compulsory. */
 function fromBrowser(auth: AuthContext): boolean {
   return auth.via === "session";
@@ -782,11 +819,14 @@ export async function agentRoutes(
     const archived = flagWhenGiven(query.archived, "archived");
     if (isRefusal(archived)) return refused(reply, archived);
 
-    const one = await getAgent(auth, agentId);
+    const acting = await actingProject(auth, request, "reads");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const one = await getAgent(acting, agentId);
     if (one === undefined) return refused(reply, NO_SUCH_AGENT);
 
     const connections =
-      (await listConnections(auth, agentId, {
+      (await listConnections(acting, agentId, {
         ...(archived === undefined ? {} : { archived }),
       })) ?? [];
     return reply.send({
@@ -807,7 +847,10 @@ export async function agentRoutes(
     const wanted = connectionIn(request.body ?? {});
     if (isRefusal(wanted)) return refused(reply, wanted);
 
-    const added = await addConnection(auth, agentId, wanted);
+    const acting = await actingProject(auth, request, "writes into");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const added = await addConnection(acting, agentId, wanted);
     if (added === undefined) return refused(reply, NO_SUCH_AGENT);
 
     return reply.code(201).send({ connection: describedConnection(added) });
@@ -841,7 +884,10 @@ export async function agentRoutes(
         : textWhenGiven(body.description, "an agent's description");
     if (isRefusal(description)) return refused(reply, description);
 
-    const updated = await updateAgent(auth, agentId, {
+    const acting = await actingProject(auth, request, "writes into");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const updated = await updateAgent(acting, agentId, {
       ...(name === undefined ? {} : { name }),
       // Absent keeps it; an explicit null clears it. The two are different
       // requests and are read as different requests.
@@ -867,7 +913,10 @@ export async function agentRoutes(
     const revision = revisionIn(body, fromBrowser(auth));
     if (isRefusal(revision)) return refused(reply, revision);
 
-    const archived = await archiveAgent(auth, agentId, {
+    const acting = await actingProject(auth, request, "writes into");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const archived = await archiveAgent(acting, agentId, {
       ...(revision === undefined ? {} : { expectedRevision: revision }),
     });
     if (archived === undefined) return refused(reply, NO_SUCH_AGENT);
@@ -897,7 +946,10 @@ export async function agentRoutes(
     const name = textWhenGiven(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
 
-    const restored = await restoreAgent(auth, agentId, {
+    const acting = await actingProject(auth, request, "writes into");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const restored = await restoreAgent(acting, agentId, {
       ...(revision === undefined ? {} : { expectedRevision: revision }),
       ...(name === undefined ? {} : { name }),
     });
@@ -913,7 +965,10 @@ export async function agentRoutes(
       connectionId: string;
     };
 
-    const one = await getConnection(auth, agentId, connectionId);
+    const acting = await actingProject(auth, request, "reads");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const one = await getConnection(acting, agentId, connectionId);
     if (one === undefined) return refused(reply, NO_SUCH_CONNECTION);
     return reply.send({ connection: describedConnection(one) });
   });
@@ -956,7 +1011,10 @@ export async function agentRoutes(
       const revision = revisionIn(body, fromBrowser(auth));
       if (isRefusal(revision)) return refused(reply, revision);
 
-      const updated = await updateConnection(auth, agentId, connectionId, {
+      const acting = await actingProject(auth, request, "writes into");
+      if (isRefusal(acting)) return refused(reply, acting);
+
+      const updated = await updateConnection(acting, agentId, connectionId, {
         ...(name === undefined ? {} : { name }),
         ...(body.environment === undefined ? {} : { environment }),
         ...(body.config === undefined
@@ -993,7 +1051,10 @@ export async function agentRoutes(
       const revision = revisionIn(body, fromBrowser(auth));
       if (isRefusal(revision)) return refused(reply, revision);
 
-      const archived = await archiveConnection(auth, agentId, connectionId, {
+      const acting = await actingProject(auth, request, "writes into");
+      if (isRefusal(acting)) return refused(reply, acting);
+
+      const archived = await archiveConnection(acting, agentId, connectionId, {
         ...(revision === undefined ? {} : { expectedRevision: revision }),
       });
       if (archived === undefined) return refused(reply, NO_SUCH_CONNECTION);
@@ -1033,7 +1094,10 @@ export async function agentRoutes(
       const credential = restoreCredentialIn(body.credential);
       if (isRefusal(credential)) return refused(reply, credential);
 
-      const restored = await restoreConnection(auth, agentId, connectionId, {
+      const acting = await actingProject(auth, request, "writes into");
+      if (isRefusal(acting)) return refused(reply, acting);
+
+      const restored = await restoreConnection(acting, agentId, connectionId, {
         ...(revision === undefined ? {} : { expectedRevision: revision }),
         ...(name === undefined ? {} : { name }),
         ...(credential === undefined ? {} : { credential }),
@@ -1053,8 +1117,11 @@ export async function agentRoutes(
         connectionId: string;
       };
 
+      const acting = await actingProject(auth, request, "writes into");
+      if (isRefusal(acting)) return refused(reply, acting);
+
       const refreshed = await refreshConnectionCapabilities(
-        auth,
+        acting,
         agentId,
         connectionId,
       );
