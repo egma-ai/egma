@@ -353,6 +353,156 @@ describe("archiving an agent", () => {
   });
 });
 
+/**
+ * The sentence a caller reads when the thing it opened has moved since.
+ *
+ * Written out here in full rather than imported from the product, because the
+ * wording is the contract: a coding agent reads it off a terminal and a browser
+ * shows it unchanged. Sharing the product's own composer would make this file
+ * agree with whatever the product says today, which is not the same as proving
+ * it says what was promised.
+ */
+function movedOn(resource: "agent" | "connection", id: string): string {
+  return (
+    `${resource} ${id} changed after you opened it. Read it again, keep or ` +
+    `reapply your edits, and send the update with expected_revision set to ` +
+    `its new revision.`
+  );
+}
+
+/**
+ * Archive and Restore are identity writes, and they are guarded exactly as an
+ * edit is.
+ *
+ * **Every other Archive and Restore in this file sends the revision it read a
+ * line earlier**, so a handler that took `expected_revision` and dropped it
+ * would leave all of them green. What that would let through is the race the
+ * guard exists for: one tab archives an agent while another, holding a page
+ * from before a rename, restores it — and neither person is ever told that
+ * they were looking at different things.
+ *
+ * These are the twins of "refuses an edit written against a revision the agent
+ * has moved past", and they are written so Agents read the way Personas
+ * already do.
+ */
+describe("the revision an Archive or a Restore is written against", () => {
+  it("guards Archive and Restore on the same terms, for an agent", async () => {
+    api = await createApi("agents_browser_archive_stale_revision");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const agent = await anAgent(ada, "Front desk");
+
+    // Two tabs on the same agent. The first renames it, which moves the
+    // revision the second is still holding.
+    const renamed = await browser("PATCH", `/api/agents/${agent.id}`, ada, {
+      name: "Front desk, renamed",
+      expected_revision: agent.revision,
+    });
+    expect(renamed.status).toBe(200);
+    const current = held<AgentBody>(renamed, "agent").revision;
+
+    const stale = await browser("POST", `/api/agents/${agent.id}/archive`, ada, {
+      expected_revision: agent.revision,
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toBe("identity_conflict");
+    expect(stale.body.message).toBe(movedOn("agent", agent.id));
+
+    // Refused means nothing written: the agent is still in new work.
+    const standing = await browser("GET", `/api/agents/${agent.id}`, ada);
+    expect(held<AgentBody>(standing, "agent").archived).toBe(false);
+
+    const archived = await browser(
+      "POST",
+      `/api/agents/${agent.id}/archive`,
+      ada,
+      { expected_revision: current },
+    );
+    expect(archived.status).toBe(200);
+    const afterArchive = held<AgentBody>(archived, "agent").revision;
+
+    // The revision the Archive replaced is exactly what a page opened before it
+    // is holding, and Restore refuses it for the same reason.
+    const staleRestore = await browser(
+      "POST",
+      `/api/agents/${agent.id}/restore`,
+      ada,
+      { expected_revision: current },
+    );
+    expect(staleRestore.status).toBe(409);
+    expect(staleRestore.body.error).toBe("identity_conflict");
+    expect(staleRestore.body.message).toBe(movedOn("agent", agent.id));
+
+    const filed = await browser("GET", `/api/agents/${agent.id}`, ada);
+    expect(held<AgentBody>(filed, "agent").archived).toBe(true);
+
+    const back = await browser("POST", `/api/agents/${agent.id}/restore`, ada, {
+      expected_revision: afterArchive,
+    });
+    expect(back.status).toBe(200);
+    expect(held<AgentBody>(back, "agent").archived).toBe(false);
+  });
+
+  it("guards Archive and Restore on the same terms, for a connection", async () => {
+    api = await createApi("agents_browser_connection_stale_revision");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const agent = await anAgent(ada, "Front desk");
+    const wiring = await aConnection(ada, agent.id, { name: "staging" });
+    const at = `/api/agents/${agent.id}/connections/${wiring.id}`;
+
+    const renamed = await browser("PATCH", at, ada, {
+      name: "staging, renamed",
+      expected_revision: wiring.revision,
+    });
+    expect(renamed.status).toBe(200);
+    const current = held<ConnectionBody>(renamed, "connection").revision;
+
+    const stale = await browser("POST", `${at}/archive`, ada, {
+      expected_revision: wiring.revision,
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toBe("identity_conflict");
+    expect(stale.body.message).toBe(movedOn("connection", wiring.id));
+
+    // Nothing written, so the target is still reachable — which matters more
+    // here than on the agent: an Archive that landed would have settled the
+    // work going over it.
+    const standing = await browser("GET", at, ada);
+    expect(held<ConnectionBody>(standing, "connection").archived).toBe(false);
+
+    const archived = await browser("POST", `${at}/archive`, ada, {
+      expected_revision: current,
+    });
+    expect(archived.status).toBe(200);
+    const afterArchive = held<ConnectionBody>(archived, "connection").revision;
+
+    // The Restore carries the credential `retell` requires, so the revision is
+    // the only thing left that can refuse it.
+    const credential = {
+      choice: "replace",
+      credentials: { apiKey: "retell-secret-NEW1NEW2ABCD" },
+    };
+    const staleRestore = await browser("POST", `${at}/restore`, ada, {
+      expected_revision: current,
+      credential,
+    });
+    expect(staleRestore.status).toBe(409);
+    expect(staleRestore.body.error).toBe("identity_conflict");
+    expect(staleRestore.body.message).toBe(movedOn("connection", wiring.id));
+
+    const filed = await browser("GET", at, ada);
+    expect(held<ConnectionBody>(filed, "connection").archived).toBe(true);
+
+    const back = await browser("POST", `${at}/restore`, ada, {
+      expected_revision: afterArchive,
+      credential,
+    });
+    expect(back.status).toBe(200);
+    expect(held<ConnectionBody>(back, "connection").archived).toBe(false);
+  });
+});
+
 describe("a connection's stored credential", () => {
   it("never comes back, and a read says only that one is there", async () => {
     api = await createApi("agents_browser_credential_secrecy");
