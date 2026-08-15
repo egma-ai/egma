@@ -35,6 +35,7 @@ import {
   fileNameFor,
   TEST_FILE_FORMAT,
   type ExpectedBehavior,
+  type FileBehavior,
   type FilePersona,
   type TestFile,
 } from "../folder/test-file.ts";
@@ -130,13 +131,34 @@ function freeFileName(name: string, taken: Set<string>): string {
   }
 }
 
+/**
+ * Whether the file's list says what the pinned version says.
+ *
+ * **The priority is compared only where the file wrote one down.** An unmarked
+ * line makes no claim — it is the shape every version-1 file is in, and holding
+ * it to the version's priority would declare a folder nobody has touched
+ * unfaithful the moment anybody set a P1 in the browser, which would refuse to
+ * migrate exactly the files this path exists to migrate. A line somebody typed
+ * `[P1]` into is a different thing: it is a draft, and rewriting it would throw
+ * away the edit safe-pull exists to protect.
+ */
 function sameStatements(
-  file: readonly ExpectedBehavior[],
+  file: readonly FileBehavior[],
   version: readonly ExpectedBehavior[],
 ): boolean {
   return (
     file.length === version.length &&
     file.every((one, index) => one.behavior === version[index]?.behavior)
+  );
+}
+
+/** Whether every priority the file actually claimed is the one egma holds. */
+function samePriorities(
+  file: readonly FileBehavior[],
+  version: readonly ExpectedBehavior[],
+): boolean {
+  return file.every(
+    (one, index) => one.priority === null || one.priority === version[index]?.priority,
   );
 }
 
@@ -153,12 +175,15 @@ function sameNames(
 /**
  * Whether an old file is a faithful copy of the version it pins, or a draft.
  *
- * **Only what format 1 was able to record is compared.** A version-1 file had
- * no way to write a priority, a grader, a required capability or a description
- * down, so those cannot be a difference this file is responsible for and
- * holding it to them would refuse to migrate a folder nobody had touched.
- * Everything the old format *could* say is compared exactly, order included,
- * because that is where a local draft would be.
+ * **Only what the file actually recorded is compared.** A version-1 file had no
+ * way to write a grader, a required capability or a description down, so those
+ * cannot be a difference this file is responsible for and holding it to them
+ * would refuse to migrate a folder nobody had touched. Everything the file
+ * *did* say is compared exactly, order included, because that is where a local
+ * draft would be — including a priority, on the lines that carry a marker.
+ * Somebody hand-typing `[P1]` into an old file is drafting, and the fact that
+ * such a file cannot push at all until it is migrated is the reason to keep
+ * their edit rather than a reason to discard it.
  *
  * Personas are compared by the display name, which is all an old file has. A
  * persona renamed in the browser therefore reads as a difference, and is the
@@ -169,6 +194,9 @@ function faithfulCopy(file: TestFile, pinned: PlatformContent): string | null {
   if (file.scenario !== pinned.scenario) return "its scenario has been edited since";
   if (!sameStatements(file.expectedBehaviors, pinned.expectedBehaviors)) {
     return "its expected behaviors have been edited since";
+  }
+  if (!samePriorities(file.expectedBehaviors, pinned.expectedBehaviors)) {
+    return "a priority written into it is not the one egma holds";
   }
   if (!sameNames(file.personas, pinned.personas)) {
     return "the personas it names have changed since";

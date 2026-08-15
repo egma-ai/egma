@@ -10,7 +10,7 @@
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
 import { pushMockTools, type PushMockToolsReport } from "../sync/mock-tools.ts";
-import { pushTests, type PushConflict } from "../sync/push.ts";
+import { pushTests, type PushConflict, type PushedTest } from "../sync/push.ts";
 import { FOLDER_EXIT, readyToSync, type FolderCommandOptions } from "./folder-verbs.ts";
 
 /**
@@ -22,6 +22,11 @@ import { FOLDER_EXIT, readyToSync, type FolderCommandOptions } from "./folder-ve
  * migrate a file, to relink a test in the browser, to restore one — and folding
  * those into "run egma pull" would be advice that does not work, given at the
  * one moment somebody most needs advice that does.
+ *
+ * It ends "Nothing was uploaded", which is the whole worth of the preflight and
+ * is why it is said out loud. It is therefore **only ever the preflight's
+ * sentence**: see `lateRefusal` for the race after it, where saying this would
+ * be telling somebody something untrue about what had just happened.
  */
 export function movedRefusal(conflicts: readonly PushConflict[]): string {
   const spoken = conflicts.filter((conflict) => conflict.said !== null);
@@ -38,6 +43,41 @@ export function movedRefusal(conflicts: readonly PushConflict[]): string {
       : `egma cannot match ${summarised.length === 1 ? "this test" : "these tests"} to what it holds: ${names}.`;
   const pull = `${opening} Run egma pull to bring ${summarised.length === 1 ? "it" : "them"} down, look at what changed, then push again. Nothing was uploaded.`;
   return [pull, ...spoken.map((conflict) => conflict.said)].join(" ");
+}
+
+/**
+ * The sentence for a refusal that arrived after some of the folder had landed.
+ *
+ * Nothing here spans several files in one transaction, so a test edited or
+ * unlinked between the preflight and one file's upload is refused at the
+ * platform's own door with earlier files already written. What somebody needs
+ * at that moment is the truth about the run: **which files landed, and which
+ * did not.** The preflight's sentence says the opposite of that — its last
+ * clause is that nothing was uploaded — and a recovery built on a false account
+ * of what happened is not a recovery.
+ *
+ * So this one counts. It names what went up, names what did not with the reason
+ * for each, and asks for the pull that makes the second push a real one. The
+ * count agrees with the `uploaded:` line the caller prints beside it, because
+ * both are read off the same report.
+ */
+export function lateRefusal(
+  pushed: readonly PushedTest[],
+  conflicts: readonly PushConflict[],
+): string {
+  const landed = pushed.map((test) => test.name).join(", ");
+  const refused = conflicts.map((conflict) => conflict.name).join(", ");
+  const spoken = conflicts.flatMap((conflict) =>
+    conflict.said === null ? [] : [conflict.said],
+  );
+
+  return [
+    pushed.length === 0
+      ? `egma took none of these: it refused ${conflicts.length === 1 ? "" : "each of "}${refused} after the check that said it would not.`
+      : `egma uploaded ${String(pushed.length)} of these and then refused ${refused}: somebody moved ${conflicts.length === 1 ? "it" : "them"} between the check and the write. What has landed has landed — ${landed} — and the rest has not.`,
+    ...spoken,
+    "Run egma pull to bring egma's answer down, look at what changed, then push again.",
+  ].join(" ");
 }
 
 export async function runPushCommand(options: FolderCommandOptions): Promise<number> {
@@ -106,7 +146,15 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
     }
     options.out(`uploaded: ${report.uploadedNothing ? "nothing" : String(report.tests.length)}`);
     options.out("status: refused");
-    options.fail(movedRefusal(report.conflicts));
+    // Two sentences, and which one is said is decided by what actually
+    // happened rather than by which check refused. "Nothing was uploaded" is
+    // the preflight's promise and it is true; said over a push that had
+    // already written four tests it would be a refusal lying about the run.
+    options.fail(
+      report.uploadedNothing
+        ? movedRefusal(report.conflicts)
+        : lateRefusal(report.tests, report.conflicts),
+    );
     return FOLDER_EXIT.moved;
   }
 

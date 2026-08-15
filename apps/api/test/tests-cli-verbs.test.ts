@@ -366,7 +366,12 @@ describe("push, against a real instance", () => {
         name: FILE.name,
         description: "",
         scenario: "The file's own words.",
-        expectedBehaviors: [...FILE.expectedBehaviors],
+        // A write always says a priority; the file's `null` — a line that
+        // claimed none — means the P0 it has always meant.
+        expectedBehaviors: FILE.expectedBehaviors.map((one) => ({
+          behavior: one.behavior,
+          priority: one.priority ?? ("P0" as const),
+        })),
         personas: [],
         graders: [],
         requiredCapabilities: [],

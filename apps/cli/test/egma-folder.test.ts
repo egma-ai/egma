@@ -85,9 +85,21 @@ The caller missed yesterday's appointment.
 2. The agent offers at least two concrete alternative slots.
 `;
 
-/** One P0 statement, which is what a line with no marker has always meant. */
+/** A statement written with an explicit `[P0]` marker, as egma writes one. */
 function blocking(...statements: readonly string[]): TestFile["expectedBehaviors"] {
   return statements.map((behavior) => ({ behavior, priority: "P0" as const }));
+}
+
+/**
+ * A statement written with no marker at all, as every version-1 file wrote one.
+ *
+ * It *means* P0 wherever a priority is needed, and it is kept apart from an
+ * explicit `[P0]` because only the explicit one is a claim — which is the whole
+ * of what lets a pull tell a faithful old copy from a draft somebody has typed
+ * a priority into.
+ */
+function unmarked(...statements: readonly string[]): TestFile["expectedBehaviors"] {
+  return statements.map((behavior) => ({ behavior, priority: null }));
 }
 
 describe("the test file format", () => {
@@ -143,7 +155,9 @@ describe("the test file format", () => {
     expect(test.graders).toEqual([]);
     expect(test.requiredCapabilities).toEqual([]);
     expect(test.personas).toEqual([{ id: "", name: "impatient-caller" }]);
-    expect(test.expectedBehaviors.map((one) => one.priority)).toEqual(["P0", "P0"]);
+    // Null rather than P0: the lines claimed nothing, which is a different fact
+    // from claiming P0 and the one a safe pull turns on.
+    expect(test.expectedBehaviors.map((one) => one.priority)).toEqual([null, null]);
   });
 
   /**
@@ -177,7 +191,7 @@ describe("the test file format", () => {
     ]);
     expect(test.expectedBehaviors).toEqual([
       { behavior: "worth knowing", priority: "P2" },
-      { behavior: "must happen", priority: "P0" },
+      { behavior: "must happen", priority: null },
     ]);
   });
 
@@ -236,6 +250,26 @@ describe("the test file format", () => {
   });
 
   /**
+   * The one shape reading and writing deliberately do not round-trip.
+   *
+   * A line that claimed nothing is written as the `[P0]` it has always meant,
+   * and reading that back gives a line that claims P0 — because it now does.
+   * That is the migration, and it is a fixed point from the second write on.
+   */
+  it("turns a line that claimed nothing into one that claims P0, once", () => {
+    const typed = ["## Expected behaviors", "1. must happen", ""].join("\n");
+    const read = parseTestFile(typed, "a.md", "x");
+    expect(read.expectedBehaviors).toEqual([{ behavior: "must happen", priority: null }]);
+
+    const written = serializeTestFile(read);
+    expect(written).toContain("1. [P0] must happen");
+    expect(parseTestFile(written, "a.md", "x").expectedBehaviors).toEqual([
+      { behavior: "must happen", priority: "P0" },
+    ]);
+    expect(serializeTestFile(parseTestFile(written, "a.md", "x"))).toBe(written);
+  });
+
+  /**
    * The one thing writing an old file does: it becomes a new one.
    *
    * Nothing is invented on the way through — a version-1 file names no graders
@@ -283,7 +317,7 @@ describe("the test file format", () => {
     expect(test.version).toBeNull();
     expect(test.scenario).toBe("The caller wants a refund.");
     expect(test.expectedBehaviors).toEqual(
-      blocking(
+      unmarked(
         "The agent checks the order number before saying anything about money.",
         "The agent never promises a date.",
       ),

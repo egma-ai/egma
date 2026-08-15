@@ -99,6 +99,30 @@ export type ExpectedBehavior = {
 };
 
 /**
+ * One statement **as a file wrote it down** — which is not quite the same
+ * thing, because a file may write down no priority at all.
+ *
+ * `priority` is `null` for a line with no marker on it, and that is a different
+ * fact from a line marked `[P0]`. Both *mean* P0 everywhere a priority is
+ * needed — that is what an unmarked line has always meant, and what every
+ * version-1 file said. But only the marked one is a **claim**, and the
+ * difference is load-bearing exactly once: when a pull is deciding whether an
+ * old file is a faithful copy of the version it pins or a draft somebody is in
+ * the middle of. A line that said nothing cannot disagree with the platform; a
+ * line somebody typed `[P1]` into can, and overwriting it would be the pull
+ * throwing away the edit it exists to protect.
+ *
+ * Everything egma writes carries a marker on every line, so a file egma has
+ * written holds no nulls. A null only ever comes from a file written by hand or
+ * by an older egma.
+ */
+export type FileBehavior = {
+  readonly behavior: string;
+  /** What the line claimed, or `null` where it claimed nothing. */
+  readonly priority: BehaviorPriority | null;
+};
+
+/**
  * One persona a test names: who they are on the platform, and what a reviewer
  * reads. The id is authoritative and the name is for the reader; a version-1
  * file carries only the name, and its id is empty until a pull writes one.
@@ -130,7 +154,7 @@ export type TestFile = {
   /** The situation the agent is put in, as prose. */
   readonly scenario: string;
   /** In the order they were authored. */
-  readonly expectedBehaviors: readonly ExpectedBehavior[];
+  readonly expectedBehaviors: readonly FileBehavior[];
   /**
    * The tools this test answers for itself, overriding the project's for the
    * length of this test. Empty leaves the project's mock tools the whole world.
@@ -232,8 +256,8 @@ function partsOf(body: string): {
  * one, so a line without a marker is a P0 — which is exactly what those tests
  * already meant, since every behavior blocked before priorities existed.
  */
-function behaviorsIn(text: string): readonly ExpectedBehavior[] {
-  const behaviors: { behavior: string; priority: BehaviorPriority }[] = [];
+function behaviorsIn(text: string): readonly FileBehavior[] {
+  const behaviors: { behavior: string; priority: BehaviorPriority | null }[] = [];
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (line === "") continue;
@@ -243,7 +267,11 @@ function behaviorsIn(text: string): readonly ExpectedBehavior[] {
       const marked = PRIORITY_MARKER.exec(said);
       behaviors.push(
         marked === null
-          ? { behavior: said, priority: DEFAULT_PRIORITY }
+          // No marker is not a quiet P0: it is a line that said nothing about
+          // how much it matters. It *means* P0 wherever one is needed, and it
+          // is kept apart from an explicit `[P0]` so that a pull can tell a
+          // faithful old copy from a draft somebody has typed a priority into.
+          ? { behavior: said, priority: null }
           : {
               behavior: (marked[2] as string).trim(),
               priority: (marked[1] as string).toUpperCase() as BehaviorPriority,
@@ -391,7 +419,13 @@ export function serializeTestFile(file: TestFile): string {
   const behaviors = file.expectedBehaviors
     .map((one) => ({ ...one, behavior: oneLine(one.behavior) }))
     .filter((one) => one.behavior !== "")
-    .map((one, index) => `${index + 1}. [${one.priority}] ${one.behavior}`);
+    // A line that claimed nothing is written as the P0 it has always meant,
+    // which is also what the platform holds for it. Writing it down is what
+    // turns the old shape into the new one.
+    .map(
+      (one, index) =>
+        `${index + 1}. [${one.priority ?? DEFAULT_PRIORITY}] ${one.behavior}`,
+    );
 
   return [
     "---",

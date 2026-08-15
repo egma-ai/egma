@@ -53,6 +53,28 @@ export function agentNotApplicable(testId: string, agentId: string): string {
 }
 
 /**
+ * The same fact, said by the client after other files have already landed.
+ *
+ * **The last clause of the sentence above is a claim about the whole push, and
+ * only the preflight can make it.** Once a file has been uploaded, "egma push
+ * changed neither side" is not true of this run — and a refusal that says
+ * something untrue about what just happened is worse than no refusal at all.
+ * So the late one states what is true of this file, and the aggregate sentence
+ * beside it says what landed. It names the **file** rather than the test id,
+ * because the reader is looking at a folder and the preflight's sentence — the
+ * one whose wording is contract with the platform's own — is the one that names
+ * the test.
+ */
+export function agentNotApplicableLate(file: string, agentId: string): string {
+  return (
+    `${file} names a test that no longer applies to the agent bound to this ` +
+    `repository — the link went away while this push was running, so this ` +
+    `file was not written. Link the test to agent ${agentId} in Egma, or ` +
+    "remove this local file."
+  );
+}
+
+/**
  * A file for a test somebody archived.
  *
  * Its own sentence rather than the one above, because the fact is different and

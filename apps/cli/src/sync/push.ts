@@ -38,7 +38,13 @@
 import path from "node:path";
 
 import { sameMockTools } from "../folder/mock-tools.ts";
-import type { ExpectedBehavior, FilePersona, TestFile } from "../folder/test-file.ts";
+import {
+  DEFAULT_PRIORITY,
+  type ExpectedBehavior,
+  type FileBehavior,
+  type FilePersona,
+  type TestFile,
+} from "../folder/test-file.ts";
 import {
   readConfig,
   readFolder,
@@ -58,7 +64,12 @@ import {
 } from "../platform/tests.ts";
 import { pinsAgainst } from "./pins.ts";
 import { fileFromPlatform } from "./pull.ts";
-import { agentNotApplicable, formatOutdated, testArchived } from "./refusals.ts";
+import {
+  agentNotApplicable,
+  agentNotApplicableLate,
+  formatOutdated,
+  testArchived,
+} from "./refusals.ts";
 
 /**
  * The one door rule egma can check without asking: a test with no expected
@@ -159,7 +170,13 @@ function inputFrom(test: TestFile): TestInput {
     name: test.name,
     description: test.description ?? "",
     scenario: test.scenario,
-    expectedBehaviors: test.expectedBehaviors,
+    // A line that wrote no priority down is sent as the P0 it has always
+    // meant. The distinction the file keeps is about what somebody *claimed*,
+    // and a write has to say something either way.
+    expectedBehaviors: test.expectedBehaviors.map((one) => ({
+      behavior: one.behavior,
+      priority: one.priority ?? DEFAULT_PRIORITY,
+    })),
     personas: test.personas,
     graders: test.graders,
     requiredCapabilities: test.requiredCapabilities,
@@ -171,15 +188,25 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((entry, index) => entry === b[index]);
 }
 
+/**
+ * Whether the file's list is the list the platform holds.
+ *
+ * A line that wrote no priority down means P0, so it is compared as one: this
+ * is the question "would uploading this file mint a version", and a write turns
+ * an unmarked line into a P0 whatever it claimed. That is a different question
+ * from the pull's, which is about what somebody wrote rather than what a write
+ * would do with it.
+ */
 function sameBehaviors(
-  a: readonly ExpectedBehavior[],
+  a: readonly FileBehavior[],
   b: readonly ExpectedBehavior[],
 ): boolean {
   return (
     a.length === b.length &&
     a.every(
       (one, index) =>
-        one.behavior === b[index]?.behavior && one.priority === b[index]?.priority,
+        one.behavior === b[index]?.behavior &&
+        (one.priority ?? DEFAULT_PRIORITY) === b[index]?.priority,
     )
   );
 }
@@ -475,14 +502,17 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
         });
         break;
       case "not-applicable":
-        // The link went away between the check and this write. The platform's
-        // own words, because they are the same words the check would have used
-        // and this one is the answer that actually happened.
+        // The link went away between the check and this write. **Not the
+        // platform's words**, which are written for a client that sent one
+        // request: they end by saying push changed neither side, and by now it
+        // may well have changed one. The fact and the fix are the same; the
+        // claim about the whole run is dropped, because the report is what
+        // carries that and it is what actually knows.
         lateConflicts.push({
           name: plan.file.test.name,
           shown: plan.file.shown,
           reason: "not-applicable",
-          said: answer.reason,
+          said: agentNotApplicableLate(plan.file.shown, boundAgentId ?? ""),
         });
         break;
       case "turned-away":

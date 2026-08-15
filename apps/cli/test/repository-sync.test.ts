@@ -38,6 +38,7 @@ import {
   updateConfig,
 } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
+import { runPushCommand } from "../src/commands/push.ts";
 import { pushTests } from "../src/sync/push.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
@@ -632,6 +633,94 @@ describe("a file written before the format grew", () => {
     expect(await readTest("after-hours.md")).toBe(draft);
   });
 
+  /**
+   * The common case, and the one an unconditional priority comparison would
+   * have broken.
+   *
+   * A version-1 file could not write a priority down, so every line in a
+   * pristine one reads as claiming nothing. The platform meanwhile holds a P1
+   * on one of them, set in the browser, which is not a difference the file is
+   * responsible for and not a draft anybody typed. Refusing to migrate here
+   * would refuse the folders this path exists for: every one written before
+   * priorities existed, against any project that has used one since.
+   */
+  it("still migrates when the platform holds a priority the old shape could not write", async () => {
+    const { agentId } = await boundRepository();
+    const seeded = platform.tests.add({
+      name: "after-hours",
+      scenario: "The caller has an emergency at 2am.",
+      expectedBehaviors: [
+        "The agent gives the emergency number.",
+        { behavior: "The agent says how long the wait is.", priority: "P1" },
+      ],
+      agents: [agentId],
+    });
+    await writeTest(
+      "after-hours.md",
+      [
+        "---",
+        "name: after-hours",
+        `version: ${seeded.versionId}`,
+        "personas: [default-persona]",
+        "---",
+        "## Scenario",
+        "The caller has an emergency at 2am.",
+        "## Expected behaviors",
+        "1. The agent gives the emergency number.",
+        "2. The agent says how long the wait is.",
+        "",
+      ].join("\n"),
+    );
+
+    const pulled = await egma(["pull"]);
+
+    expect(valuesOf(pulled.stdout, "written")).toEqual(["after-hours"]);
+    const after = parseTestFile(await readTest("after-hours.md"), "a.md", "x");
+    expect(after.expectedBehaviors.map((one) => one.priority)).toEqual(["P0", "P1"]);
+  });
+
+  /**
+   * The other half, and the hole the comparison above has to leave open.
+   *
+   * A marker somebody typed into an old file *is* a claim, and it is a draft:
+   * they wrote it, it disagrees with what egma holds, and rewriting the file
+   * would delete it with nothing said. That the file could never have pushed
+   * that marker — the preflight refuses a pinned version-1 file outright — is a
+   * reason to keep their edit safe until they can, not a reason to discard it.
+   */
+  it("is left alone when somebody typed a priority into it that egma does not hold", async () => {
+    const { agentId } = await boundRepository();
+    const seeded = platform.tests.add({
+      name: "after-hours",
+      scenario: "The caller has an emergency at 2am.",
+      expectedBehaviors: ["The agent gives the emergency number."],
+      agents: [agentId],
+    });
+    const draft = [
+      "---",
+      "name: after-hours",
+      `version: ${seeded.versionId}`,
+      "personas: [default-persona]",
+      "---",
+      "## Scenario",
+      "The caller has an emergency at 2am.",
+      "## Expected behaviors",
+      "1. [P1] The agent gives the emergency number.",
+      "",
+    ].join("\n");
+    await writeTest("after-hours.md", draft);
+
+    const pulled = await egma(["pull"]);
+
+    expect(pulled.code).toBe(0);
+    expect(valuesOf(pulled.stdout, "kept")).toEqual(["after-hours"]);
+    expect(factOf(pulled.stdout, "reason")).toContain(
+      "a priority written into it is not the one egma holds",
+    );
+    // Byte for byte: the marker they typed is still there to be reapplied.
+    expect(await readTest("after-hours.md")).toBe(draft);
+  });
+
   it("is left alone when the browser renamed the test under it", async () => {
     const { agentId } = await boundRepository();
     const seeded = platform.tests.add({
@@ -828,21 +917,104 @@ describe("a link removed after the preflight", () => {
     // One landed, and the report says which.
     expect(report.tests.map((test) => test.name)).toEqual(["first"]);
     expect(report.uploadedNothing).toBe(false);
-    // One did not, in the platform's own words — the same sentence the
-    // preflight would have used had it been a moment later.
+    // One did not — and in the client's own words rather than the platform's,
+    // because the platform's end by saying push changed neither side and by
+    // now it has changed one. Same fact, same fix, no claim about the run.
     expect(report.conflicts).toEqual([
       {
         name: "second",
         shown: "egma/tests/second.md",
         reason: "not-applicable",
         said:
-          `Test ${platform.tests.seeded("second").id} no longer applies to ` +
-          `the agent bound to this repository. Link it to agent ${agentId} ` +
-          `in Egma, or remove this local file; egma push changed neither side.`,
+          "egma/tests/second.md names a test that no longer applies to the " +
+          "agent bound to this repository — the link went away while this " +
+          "push was running, so this file was not written. Link the test to " +
+          `agent ${agentId} in Egma, or remove this local file.`,
       },
     ]);
     expect(platform.tests.versionsOf("first")).toBe(2);
     expect(platform.tests.versionsOf("second")).toBe(1);
+  });
+
+  /**
+   * The sentence beside the count, and it has to agree with it.
+   *
+   * The preflight's refusal ends "Nothing was uploaded", which is its whole
+   * worth. Said over a push that has already written a test, it is a refusal
+   * telling somebody something untrue about what just happened — and the
+   * recovery they build on it is the wrong one. So the late path counts what
+   * landed and says so, and neither it nor the per-file sentence beside it
+   * claims either side is untouched.
+   */
+  it("says what landed rather than claiming nothing was sent", async () => {
+    const { agentId, paths } = await boundRepository();
+    for (const name of ["first", "second"]) {
+      platform.tests.add({
+        name,
+        scenario: `${name} happens`,
+        expectedBehaviors: ["b"],
+        agents: [agentId],
+      });
+    }
+    await egma(["pull"]);
+    for (const name of ["first", "second"]) {
+      const held = await readTest(`${name}.md`);
+      await writeTest(`${name}.md`, held.replace("1. [P0] b", "1. [P0] b, said better"));
+    }
+
+    let uploads = 0;
+    // The real one, captured before the global is replaced, so the wrapper
+    // cannot call itself.
+    const reallyFetch = globalThis.fetch;
+    const racing: typeof fetch = async (input, init) => {
+      const address = new URL(typeof input === "string" ? input : String(input));
+      const write = init?.method === "PATCH" && address.pathname.startsWith("/api/tests/");
+      const answer = await reallyFetch(input, init);
+      if (write) {
+        uploads += 1;
+        if (uploads === 1) platform.tests.setAgents("second", []);
+      }
+      return answer;
+    };
+
+    // Through the verb itself, with the race set up around the global `fetch`
+    // the command really uses — because what is under test is which sentence
+    // the command *chooses*, and a check that composed the sentence itself
+    // would pass whichever one it picked.
+    const held = globalThis.fetch;
+    globalThis.fetch = racing as typeof fetch;
+    const out: string[] = [];
+    const failed: string[] = [];
+    let code: number;
+    try {
+      code = await runPushCommand({
+        access: { url: platform.url, credentialsFile: workspace.credentialsFile },
+        cwd: workspace.dir,
+        out: (line) => out.push(line),
+        fail: (line) => failed.push(line),
+      });
+    } finally {
+      globalThis.fetch = held;
+    }
+    const printed = out.join("\n");
+    const spoken = failed.join("\n");
+
+    expect(code).toBe(5);
+    expect(factOf(printed, "status")).toBe("refused");
+    expect(factOf(printed, "uploaded")).toBe("1");
+
+    // What actually happened, in the sentence beside that count: one went up,
+    // one did not, and the pull is the real next move.
+    expect(spoken).toContain("egma uploaded 1 of these and then refused second");
+    expect(spoken).toContain("What has landed has landed — first");
+    expect(spoken).toContain("Run egma pull");
+    // And nothing in it says the opposite of the count printed beside it.
+    expect(spoken).not.toContain("Nothing was uploaded");
+    expect(spoken).not.toContain("changed neither side");
+    expect(spoken).toContain(
+      "the link went away while this push was running, so this file was not written",
+    );
+    expect(platform.tests.versionsOf("first")).toBe(2);
   });
 });
 
