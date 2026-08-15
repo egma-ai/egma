@@ -999,6 +999,18 @@ describe("judge settings", () => {
           platform_judge_available: false,
         },
       },
+      /**
+       * Three answers, in the order the page actually asks for them: the list
+       * it opens with, the created credential, and **the list again**.
+       *
+       * The third entry is the fix for a real defect this test used to hide.
+       * With only two, the refetch after a successful add was served the
+       * create's own reply — a credential object, which has no `items` — and
+       * the page filtered `undefined`. Locally the test finished before that
+       * landed; on a slower runner it did not, and the whole component tree
+       * threw. Naming every answer the page asks for is what makes the
+       * ordering the test's rather than the machine's.
+       */
       "/api/judge-credentials": [
         { status: 200, body: { items: [] } },
         {
@@ -1013,6 +1025,22 @@ describe("judge settings", () => {
             updated_at: "2026-08-01T10:00:00.000Z",
           },
         },
+        {
+          status: 200,
+          body: {
+            items: [
+              {
+                id: "jcr_1",
+                label: "Acme production",
+                provider: "openai",
+                hint: "1234",
+                revision: "rev_1",
+                created_at: "2026-08-01T10:00:00.000Z",
+                updated_at: "2026-08-01T10:00:00.000Z",
+              },
+            ],
+          },
+        },
       ],
     });
     render(<JudgeSettingsPage />);
@@ -1024,11 +1052,20 @@ describe("judge settings", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Add key" }));
 
+    // Waited for the refetch to land and be drawn, not merely for the field to
+    // clear: ending the test between the two is what let the defect hide. The
+    // credential is named in the list and again in the key select, which is
+    // the page having drawn the refetched answer in both places.
     await waitFor(() => {
       expect(
-        (screen.getByLabelText("OpenAI key") as HTMLInputElement).value,
-      ).toBe("");
+        within(
+          screen.getByRole("region", { name: "Judge credentials" }),
+        ).getByText(/Acme production/),
+      ).toBeTruthy();
     });
+    expect(
+      (screen.getByLabelText("OpenAI key") as HTMLInputElement).value,
+    ).toBe("");
 
     const post = sent.find((request) => request.method === "POST");
     expect(post?.body).toMatchObject({
@@ -1038,6 +1075,52 @@ describe("judge settings", () => {
     });
     // Sent once, and nowhere on the page afterwards.
     expect(document.body.textContent).not.toContain("sk-typed-once");
+  });
+
+  /**
+   * The shape guard, from the outside.
+   *
+   * A read whose shape is not the expected one is a deployment mid-upgrade or a
+   * proxy answering for something else. The cost of trusting it is not a wrong
+   * list — it is `undefined.filter`, which takes the whole page down and with
+   * it the judge somebody came to change.
+   */
+  it("survives a credentials answer in a shape it does not expect", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/judge": {
+        status: 200,
+        body: {
+          state: "needs_setup",
+          provider: null,
+          model: null,
+          source: null,
+          credential_id: null,
+          hint: null,
+        },
+      },
+      "/api/judge/registry": {
+        status: 200,
+        body: {
+          providers: [{ provider: "openai", model_is_free_text: true }],
+          platform_sentinel: "platform",
+          platform_judge_available: false,
+        },
+      },
+      // A body with no list in it at all — a write's reply arriving where a
+      // list was asked for, which is exactly what a mis-ordered refetch does.
+      "/api/judge-credentials": { status: 200, body: { id: "jcr_1" } },
+    });
+    render(<JudgeSettingsPage />);
+
+    // The page is there, and says honestly that it has no key to offer.
+    expect(await screen.findByLabelText("Key")).toBeTruthy();
+    expect(
+      screen.getByText(/This organization holds no openai key yet/),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "Judge credentials" }).textContent,
+    ).toContain("No judge credentials yet.");
   });
 
   /**

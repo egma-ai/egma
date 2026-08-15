@@ -7,6 +7,7 @@ import { sendJson, type Refusal } from "../../../../../lib/api.ts";
 import {
   credentialLabel,
   credentialsFor,
+  credentialsIn,
   isChoiceComplete,
   JUDGE_CREDENTIALS_PATH,
   JUDGE_PATH,
@@ -80,7 +81,9 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
     projectId,
   );
 
-  const held = credentials?.status === "ready" ? credentials.value.items : [];
+  const held = credentialsIn(
+    credentials?.status === "ready" ? credentials.value : undefined,
+  );
   const settled = judge?.status === "ready" ? judge.value : null;
 
   const [provider, setProvider] = useState("openai");

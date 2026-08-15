@@ -90,17 +90,38 @@ export function judgeCredentialPath(credentialId: string): string {
 }
 
 /**
+ * The credentials an answer actually carried, and none at all when it carried
+ * something this page cannot read.
+ *
+ * **A read whose shape is not the expected one is a deployment mid-upgrade, a
+ * proxy answering for something else, or a write's own reply arriving where a
+ * list was asked for.** The cost of trusting it is not a wrong list — it is
+ * `undefined.filter`, which takes the whole settings page down and with it the
+ * judge somebody came to change. An empty list renders an honest state; a crash
+ * renders nothing at all, which is strictly worse than saying there is nothing.
+ */
+export function credentialsIn(page: JudgeCredentialPage | undefined): readonly JudgeCredential[] {
+  return Array.isArray(page?.items) ? page.items : [];
+}
+
+/**
  * Which credentials a judge of this provider may be pointed at.
  *
  * A key issued by one provider cannot answer for a judge configured to ask
  * another, so offering it would be offering a setting the server will refuse.
  * The server refuses it anyway — that is where the boundary is — and this only
  * keeps somebody from choosing it.
+ *
+ * It tolerates an absent list for the reason above: this is called on every
+ * render, from a value an in-flight read can leave in any shape, and a filter
+ * that assumed an array would be the one line that decides whether the page
+ * exists.
  */
 export function credentialsFor(
-  credentials: readonly JudgeCredential[],
+  credentials: readonly JudgeCredential[] | undefined,
   provider: string,
 ): readonly JudgeCredential[] {
+  if (!Array.isArray(credentials)) return [];
   return credentials.filter((credential) => credential.provider === provider);
 }
 
