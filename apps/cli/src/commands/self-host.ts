@@ -73,6 +73,7 @@ import {
   type Receipt,
 } from "../self-host/receipt.ts";
 import {
+  carrierAnswers,
   inputFor,
   NotSignedInError,
   PlatformRefusedError,
@@ -442,7 +443,12 @@ async function runUp(
   }
   if (started.code !== 0) {
     options.out("status: failed");
-    options.out("reason: docker compose could not bring the platform up, twice");
+    options.out(
+      "reason: docker compose could not bring the platform up, twice. What it printed " +
+        "above names the service that would not start; `docker compose logs` on that " +
+        "service in this workspace says why. Nothing here is half-done — this command " +
+        "is safe to run again once it is fixed.",
+    );
     return SELF_HOST_EXIT.refused;
   }
 
@@ -491,13 +497,25 @@ async function runUp(
 
   options.fail("");
   options.fail(`egma is running at ${address}`);
-  options.fail(
-    platform.setupState === "ready"
-      ? "It is configured, and it keeps that configuration through a restart, an upgrade and a move to another machine."
-      : `It still needs ${
-          platform.setupMissing.length === 0 ? "setting up" : platform.setupMissing.join(", ")
-        }. One more command here: egma self-host setup`,
-  );
+  if (platform.setupState === "ready") {
+    options.fail(
+      "It is configured, and it keeps that configuration through a restart, an upgrade and a move to another machine.",
+    );
+  } else {
+    // **The whole next step, not just its last command.** Setup writes every
+    // answer through the platform's own API, and that door opens for an
+    // organization owner — so an operator who typed only the last line of this
+    // would meet a refusal telling them to go and log in. A first run should
+    // not route somebody through a refusal to discover a step.
+    options.fail(
+      `It still needs ${
+        platform.setupMissing.length === 0 ? "setting up" : platform.setupMissing.join(", ")
+      }. Sign up at ${address} if you have not — the first person to sign up on a fresh`,
+    );
+    options.fail("egma becomes its owner — then, here:");
+    options.fail(`  npx @egma/cli login --url ${address}`);
+    options.fail("  npx @egma/cli self-host setup");
+  }
   options.fail("");
   options.fail("In your agent repository, once:");
   options.fail(`  npx @egma/cli --url ${address}`);
@@ -858,14 +876,13 @@ async function runSetup(
 
     applied = await applyCarrier(carrier, { number: sourceNumber, name: ARTIFACT_NAME });
     secrets.push(applied.sipPassword);
-    // The four the paperwork produced, under the names the platform stores
-    // them by. The SIP credential authenticates one trunk and can do nothing
-    // else on the account; that is the whole reason the Auth Token is a
-    // setup-time input rather than anybody's variable at all.
-    answers.carrier_trunk_address = applied.trunkAddress;
-    answers.carrier_trunk_number = applied.sourceNumber;
-    answers.carrier_trunk_username = applied.sipUsername;
-    answers.carrier_trunk_password = applied.sipPassword;
+    // Everything the paperwork produced, under the names the platform stores it
+    // by — read off `FROM_THE_CARRIER` rather than typed out here, so a carrier
+    // setting cannot be declared and then never written. The SIP credential
+    // authenticates one trunk and can do nothing else on the account; that is
+    // the whole reason the Auth Token is a setup-time input rather than
+    // anybody's variable at all.
+    Object.assign(answers, carrierAnswers(applied));
   }
 
   // -- the write --------------------------------------------------------------

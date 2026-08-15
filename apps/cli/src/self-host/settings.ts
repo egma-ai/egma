@@ -24,6 +24,7 @@
  */
 
 import { PlatformUnreachableError, type Fetch } from "../platform/device-flow.ts";
+import type { CarrierResult } from "./twilio.ts";
 
 /** Where the settings of a whole deployment are read and written. */
 export const PLATFORM_SETTINGS_PATH = "/api/platform/settings";
@@ -101,7 +102,10 @@ async function ask(
     throw new PlatformRefusedError(
       response.status,
       said === ""
-        ? `egma at ${access.url} answered ${response.status} and said nothing about it`
+        ? `egma at ${access.url} answered ${response.status} and said nothing about it, so ` +
+          "there is nothing here to act on. Look at what that platform logged — " +
+          "`docker compose logs api` in its workspace — and run setup again. Nothing was " +
+          "written."
         : said,
     );
   }
@@ -285,4 +289,40 @@ export function inputFor(name: string): SettingInput | null {
   return Object.hasOwn(SETUP_INPUTS, name)
     ? (SETUP_INPUTS[name as SetupSettingName] as SettingInput)
     : null;
+}
+
+/** Which of a finished carrier's facts are single values a setting can hold. */
+type CarrierFact = {
+  [K in keyof CarrierResult]: CarrierResult[K] extends string ? K : never;
+}[keyof CarrierResult];
+
+/**
+ * What the carrier paperwork produces, and which setting each result fills.
+ *
+ * **This exists so that a `carrier` setting cannot be declared and then never
+ * written.** The four assignments used to be typed out inside the setup command,
+ * which meant the catalog could grow a fifth carrier setting, the interview
+ * could agree that the carrier supplies it, every check could pass — and the
+ * platform would report `setup required` for ever, because nothing assigned it.
+ * The list is here instead, the command loops over it, and the catalog check
+ * holds the two lists against each other in both directions.
+ *
+ * The value is a field of the carrier's own result rather than a free string,
+ * so a field renamed in the carrier module stops the build here rather than
+ * writing `undefined` into somebody's platform.
+ */
+export const FROM_THE_CARRIER = {
+  carrier_trunk_address: "trunkAddress",
+  carrier_trunk_number: "sourceNumber",
+  carrier_trunk_username: "sipUsername",
+  carrier_trunk_password: "sipPassword",
+} as const satisfies Readonly<Record<string, CarrierFact>>;
+
+/** Every setting the carrier step fills, with the fact that fills it. */
+export function carrierAnswers(
+  applied: CarrierResult,
+): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    Object.entries(FROM_THE_CARRIER).map(([name, fact]) => [name, applied[fact]]),
+  );
 }
