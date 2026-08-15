@@ -1163,11 +1163,13 @@ type RegradeConversations =
  * always the current one — that is the whole point of asking again — exactly as
  * a test's grader array names a grader and gets today's version of it.
  *
- * **The built-in `expected_behaviors` grader cannot be named**, and that is a
- * consequence of what it is rather than an omission here: it is never a row in
- * any table, so it has no identity to name. Re-judging a test's expected
- * behaviors alone is future work; today they are re-judged by asking for the
- * conversation.
+ * **The expected-behaviors grader can be named like any other**, and that is
+ * what stopped being a special case. It used to be implicit — never a row in
+ * any table, so it had no identity to name, and re-judging a test's own
+ * expectations alone was future work. Every project now runs a copy of the
+ * library entry, so it has an ordinary `grd_` id, it is what its verdict rows
+ * carry, and a re-grade narrowed to it costs one grader's worth of judging
+ * exactly as narrowing to any other does.
  */
 export type RegradeTarget = RegradeConversations & {
   /**

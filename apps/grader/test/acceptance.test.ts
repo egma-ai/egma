@@ -1,6 +1,7 @@
 import {
   claimGradingJobs,
   getGradingJob,
+  PREDEFINED_GRADERS,
   readVerdicts,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -199,7 +200,9 @@ describe("a copy of an entry egma cannot execute yet", () => {
     const mine = verdicts.find((verdict) => verdict.graderId === waiting);
 
     expect(mine).toMatchObject({
-      assertion: "latency",
+      // The entry's identifier: stable for its whole life, where its name is
+      // ordinary text a release may improve.
+      assertion: PREDEFINED_GRADERS.latency,
       verdict: "errored",
       score: 0,
     });

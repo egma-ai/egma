@@ -365,7 +365,7 @@ export class GraderLibraryEntryInUseError extends Error {
     super(
       `"${graderName}" (${libraryId}) is still pointed at by ${graders.length} ${
         graders.length === 1 ? "grader" : "graders"
-      } (${spelledOutAndCounted(graders)}), and a grader reads its definition through that pointer every time it judges — including one that was switched off, whose past verdicts are still read through it; an entry can only leave the shelf once nothing points at it at all`,
+      } (${spelledOutAndCounted(graders)}), and a grader reads its definition through that pointer every time it judges — including one that was switched off, whose past verdicts are still read through it; keep the entry, or delete those graders and the verdicts that name them, and then delete the entry`,
     );
     this.name = "GraderLibraryEntryInUseError";
     this.libraryId = libraryId;

@@ -707,18 +707,19 @@ export async function useLibraryEntry(
       createdBy: auth.userId,
     });
 
-    return { identity, config, type: definition.type };
+    return { identity, config };
   });
 
-  return {
+  // Through the same shaper every other read goes through, so what Use hands
+  // back and what a fetch hands back can never come to differ in a field one of
+  // them forgot.
+  return answer({
     ...written.identity,
-    type: written.type,
-    scope,
     version: 1,
     versionId,
     config: written.config,
     judgeModel,
-  };
+  });
 }
 
 /**

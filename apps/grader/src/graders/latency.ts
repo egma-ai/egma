@@ -58,6 +58,26 @@ type Bounded = {
   readonly bound: number;
 };
 
+/**
+ * The keys this grader files its rows under, whether or not it manages to check
+ * anything — one per config entry, in the order they were filled in.
+ *
+ * **The engine asks for these when something threw**, so a conversation whose
+ * span read broke gets one `errored` row per assertion rather than a single row
+ * under a key nothing writes again. That is the difference between a transient
+ * failure a re-grade can clear and one that fails the test forever: the fold
+ * counts a verdict once per conversation, grader and key without regard to the
+ * grader version, so an orphan key is a row no later judging can supersede and
+ * `errored` outranks every `passed` beside it. `contract.ts` argues it out.
+ *
+ * It reads the copy's own frozen config and nothing else, so it cannot fail for
+ * the reasons `execute` can — which is the point: the path that says "egma could
+ * not check this" must not be the path that breaks.
+ */
+export function latencyAssertions(execution: Execution): readonly string[] {
+  return execution.config.assertions.map((_, at) => assertionKey(at));
+}
+
 export function executeLatency(execution: Execution): readonly Judgment[] {
   const entries = execution.config.assertions;
 

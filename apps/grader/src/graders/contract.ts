@@ -141,15 +141,51 @@ export type Executor = (
 ) => readonly Judgment[] | Promise<readonly Judgment[]>;
 
 /**
- * What a grader that makes exactly one check names it: the entry it is a copy
- * of.
+ * Which assertions this grader would write about this conversation, by their
+ * keys, in order — **asked when egma could not judge and has to say so.**
  *
- * Stable across every version of the copy, because a copy's pointer is set at
- * Use time and can never be edited — which is precisely the property the fold's
- * key needs, and the reason nothing from the config is allowed near it. A grader
- * that judges several things at once names each of them itself and never comes
- * here.
+ * It is a companion to `execute` rather than something the engine can work out,
+ * and it exists because of what the fold does with a key. A verdict is counted
+ * once per `[conversation, grader, assertion, source]`, and that identity does
+ * *not* span the grader version — so the newest grading of a key supersedes the
+ * older one, and a key nothing writes again is a row that speaks forever.
+ *
+ * An `errored` row filed under a key the executor never produces is therefore
+ * permanent: `errored` outranks `passed` in the fold, and a re-grade writes the
+ * real keys and cannot reach the orphan. The test could never pass again. So
+ * every grader answers its own keys, and a failure writes one row per assertion
+ * exactly as a successful judging does — which is also why a page shows the same
+ * list of checks whether egma managed to make them or not.
+ *
+ * It may throw, and a throw is meant: if egma cannot even say what a grader
+ * checks, it must write nothing about that grader rather than write a row it
+ * can never correct. `judgmentsOf` lets that out, and the job is retried.
+ */
+export type AssertionKeys = (
+  execution: Execution,
+) => readonly string[] | Promise<readonly string[]>;
+
+/** One library entry egma knows how to run: what it does, and what it names. */
+export type GraderExecutor = {
+  readonly execute: Executor;
+  readonly assertions: AssertionKeys;
+};
+
+/**
+ * What a grader that makes exactly one check names it: **the identifier of the
+ * entry it is a copy of**, and deliberately not that entry's name.
+ *
+ * Stable for the entry's whole life, because a predefined entry keeps one
+ * identifier across every upgrade while its name is ordinary text a release may
+ * improve — the catalog says so out loud. A key taken from the name would split
+ * every row written before a rename from every row written after it, with both
+ * halves speaking forever, which is precisely what the key rules above exist to
+ * prevent. Nothing a person wrote may appear here, and a name is something
+ * somebody wrote.
+ *
+ * A grader that judges several things at once names each of them itself and
+ * never comes here.
  */
 export function theOneCheck(definition: LibraryEntry): string {
-  return definition.name;
+  return definition.id;
 }
