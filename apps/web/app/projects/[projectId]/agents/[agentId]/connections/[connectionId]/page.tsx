@@ -8,6 +8,7 @@ import {
   connectionActionPath,
   connectionPath,
   NO_ENVIRONMENT,
+  standingIn,
   type ListedConnection,
 } from "../../../../../../../lib/agents.ts";
 import {
@@ -432,19 +433,63 @@ function ConnectionDetail({
                   {one.capabilities.source ?? "—"}
                 </Fact>
               </Facts>
-              {(one.capabilities.supported ?? []).length === 0 ? (
+
+              {/*
+                * Three groups, because the record has three answers and a
+                * reader has to be able to tell them apart. The last one is the
+                * whole reason this section was rebuilt: a capability no adapter
+                * looked at used to be drawn as absent, which reads as a fact
+                * about the target and is a fact about egma.
+                */}
+              <Facts label="What this target supports">
+                <Fact name="Supported">
+                  {standingIn(one.capabilities, "supported").length === 0 ? (
+                    "None"
+                  ) : (
+                    <Actions>
+                      {standingIn(one.capabilities, "supported").map((key) => (
+                        <Badge key={key} tone="good">
+                          {capabilityLabel(capabilities, key)}
+                        </Badge>
+                      ))}
+                    </Actions>
+                  )}
+                </Fact>
+                <Fact name="Not supported">
+                  {standingIn(one.capabilities, "unsupported").length === 0 ? (
+                    "None"
+                  ) : (
+                    <Actions>
+                      {standingIn(one.capabilities, "unsupported").map((key) => (
+                        <Badge key={key} tone="bad">
+                          {capabilityLabel(capabilities, key)}
+                        </Badge>
+                      ))}
+                    </Actions>
+                  )}
+                </Fact>
+                <Fact name="Not measured">
+                  {standingIn(one.capabilities, "not_measured").length === 0 ? (
+                    "None"
+                  ) : (
+                    <Actions>
+                      {standingIn(one.capabilities, "not_measured").map((key) => (
+                        <Badge key={key} tone="warn">
+                          {capabilityLabel(capabilities, key)}
+                        </Badge>
+                      ))}
+                    </Actions>
+                  )}
+                </Fact>
+              </Facts>
+
+              {standingIn(one.capabilities, "not_measured").length === 0 ? null : (
                 <Help>
-                  This target was checked and supports none of the capabilities
-                  in egma&rsquo;s catalog.
+                  Egma ships nothing that can check these on this connection, so
+                  it does not know either way. A test that requires one is
+                  skipped because egma cannot tell — not because the target
+                  cannot do it.
                 </Help>
-              ) : (
-                <Actions>
-                  {(one.capabilities.supported ?? []).map((key) => (
-                    <Badge key={key} tone="good">
-                      {capabilityLabel(capabilities, key)}
-                    </Badge>
-                  ))}
-                </Actions>
               )}
             </>
           ) : (

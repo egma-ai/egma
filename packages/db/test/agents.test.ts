@@ -329,9 +329,9 @@ describe("the database itself", () => {
       database.sql(
         `insert into connection
            (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision,
-            capability_state, capabilities_supported, capabilities_checked_at, capability_source)
+            capability_state, capabilities_measured, capabilities_supported, capabilities_checked_at, capability_source)
          values ($1, $2, $3, $4, $5, 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001',
-            $6, $7, $8, $9)`,
+            $6, $7, $7, $8, $9)`,
         [
           newId("con"),
           acme.organization,
@@ -368,5 +368,34 @@ describe("the database itself", () => {
         where conname = 'connection_id_agent_id_unique'`,
     );
     expect(rows[0]?.definition).toBe("UNIQUE (id, agent_id)");
+  });
+});
+
+/**
+ * A capability record that says a key is supported without saying it was
+ * looked at.
+ *
+ * The database refuses it, because the three answers this record gives are
+ * built from the pair: `unsupported` means measured and absent, and
+ * `not_measured` means nobody asked. A supported key outside the measured set
+ * is evidence with no observation under it, and it would make the two lists
+ * disagree about what actually happened.
+ */
+describe("a capability found without being measured", () => {
+  it("is refused by the database, not only by the access layer", async () => {
+    const held = await createAgent(actingAsAcme(), { name: "Half Measured" });
+
+    await expect(
+      database.sql(
+        `insert into connection
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision,
+            capability_state, capabilities_measured, capabilities_supported, capabilities_checked_at, capability_source)
+         values ($1, $2, $3, $4, 'impossible', 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001',
+            'known', '["raw_audio"]', '["dtmf"]', now(), 'confused adapter')`,
+        [newId("con"), acme.organization, acme.project, held.id],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
   });
 });

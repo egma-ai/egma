@@ -4,6 +4,7 @@ import {
   archiveAgent,
   archiveConnection,
   CAPABILITY_CATALOG,
+  capabilityStanding,
   CapabilityCheckFailedError,
   connectionTypeMetadata,
   ConnectionRestoreRefusedError,
@@ -498,14 +499,23 @@ function describedConnection(one: Connection): Record<string, unknown> {
  */
 function describedCapabilities(one: Connection): Record<string, unknown> {
   const held = one.capabilities;
-  return held.state === "known"
-    ? {
-        state: "known",
-        supported: held.supported,
-        checked_at: held.checkedAt.toISOString(),
-        source: held.source,
-      }
-    : { state: "unknown", supported: null, checked_at: null, source: null };
+  return {
+    state: held.state,
+    // What the adapter looked at, beside what it found. Both, because a reader
+    // holding only the second cannot tell a settled absence from an unasked
+    // question — and `standing` below is the answer built from the pair, so a
+    // client never has to work the rule out for itself.
+    measured: held.state === "known" ? held.measured : null,
+    supported: held.state === "known" ? held.supported : null,
+    checked_at: held.state === "known" ? held.checkedAt.toISOString() : null,
+    source: held.state === "known" ? held.source : null,
+    standing: Object.fromEntries(
+      CAPABILITY_CATALOG.map((entry) => [
+        entry.key,
+        capabilityStanding(held, entry.key),
+      ]),
+    ),
+  };
 }
 
 /**

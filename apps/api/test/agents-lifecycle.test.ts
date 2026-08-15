@@ -64,6 +64,11 @@ function held<T>(answer: Answer, key: string): T {
   return answer.body[key] as T;
 }
 
+/** The capability record of the connection an answer carries. */
+function held0(answer: Answer): ConnectionBody["capabilities"] {
+  return held<ConnectionBody>(answer, "connection").capabilities;
+}
+
 type AgentBody = {
   readonly id: string;
   readonly name: string;
@@ -84,9 +89,11 @@ type ConnectionBody = {
   readonly config: Record<string, string>;
   readonly capabilities: {
     readonly state: string;
+    readonly measured: readonly string[] | null;
     readonly supported: readonly string[] | null;
     readonly checked_at: string | null;
     readonly source: string | null;
+    readonly standing: Readonly<Record<string, string>>;
   };
 };
 
@@ -843,8 +850,91 @@ describe("a connection's capability record", () => {
     // transport. Saying so is worth more than leaving it unknown, because a
     // test that needs a phone menu is then skipped with a reason somebody can
     // act on rather than because nobody has looked.
-    expect(voice.supported).not.toContain("dtmf");
-    expect(chat.supported).not.toContain("dtmf");
+    // Measured either way, so its absence is a fact rather than a gap.
+    expect(voice.standing.dtmf).toBe("unsupported");
+    expect(chat.standing.dtmf).toBe("unsupported");
+    expect(chat.standing.raw_audio).toBe("unsupported");
+  });
+
+  it("answers each capability one of three ways, never two", async () => {
+    api = await createApi("agents_browser_capability_standing");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const agent = await anAgent(ada, "Front desk");
+    const spoken = await aConnection(ada, agent.id, {
+      name: "by-voice",
+      modality: "voice",
+    });
+
+    // Before anything looks, every key is unmeasured — including the two the
+    // adapter can speak to.
+    for (const key of ["raw_audio", "dtmf", "barge_in"]) {
+      expect(spoken.capabilities.standing[key], key).toBe("not_measured");
+    }
+
+    const done = await browser(
+      "POST",
+      `/api/agents/${agent.id}/connections/${spoken.id}/capabilities/refresh`,
+      ada,
+    );
+    expect(done.status, JSON.stringify(done.body)).toBe(200);
+    const held = held0(done);
+
+    // The three answers, one per capability, after one refresh.
+    expect(held.standing).toEqual({
+      // Measured and found: a voice simulation holds PCM both ways.
+      raw_audio: "supported",
+      // Measured and absent: nothing in the simulator can send a digit.
+      dtmf: "unsupported",
+      // Not measured: barge-in is a question about the customer's agent, and
+      // no shipped adapter asks it. This is the answer that used to be lost.
+      barge_in: "not_measured",
+    });
+
+    expect(held.measured).toEqual(["raw_audio", "dtmf"]);
+    expect(held.supported).toEqual(["raw_audio"]);
+  });
+
+  it("never reads a capability nobody measured as one the target lacks", async () => {
+    api = await createApi("agents_browser_capability_not_measured");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const agent = await anAgent(ada, "Front desk");
+    const wiring = await aConnection(ada, agent.id, { modality: "voice" });
+
+    /**
+     * The property, taken past the shipped adapter: whatever an adapter
+     * reports, a key it did not measure is never `unsupported`.
+     *
+     * This is the confusion the ticket exists to prevent. Run eligibility is
+     * built on this record, and a test needing barge-in must be skipped with
+     * `required_capability_unknown` — go and measure it — rather than
+     * `required_capability_unsupported`, which says the target cannot and sends
+     * somebody to rewrite a test that was fine.
+     */
+    const before = registerCapabilityDiscovery("retell", async () => ({
+      measured: ["raw_audio"],
+      supported: ["raw_audio"],
+    }));
+
+    try {
+      const done = await browser(
+        "POST",
+        `/api/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
+        ada,
+      );
+      expect(done.status).toBe(200);
+      const capabilities = held0(done);
+
+      expect(capabilities.state).toBe("known");
+      expect(capabilities.standing.raw_audio).toBe("supported");
+      // Both absent from `supported`, and neither is a claim about the target.
+      expect(capabilities.standing.dtmf).toBe("not_measured");
+      expect(capabilities.standing.barge_in).toBe("not_measured");
+      expect(Object.values(capabilities.standing)).not.toContain("unsupported");
+    } finally {
+      registerCapabilityDiscovery("retell", before);
+    }
   });
 
   it("is refused a Refresh for a type egma ships no adapter for", async () => {
@@ -881,7 +971,10 @@ describe("a connection's capability record", () => {
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id);
 
-    const found: CapabilityDiscovery = async () => ["dtmf", "raw_audio"];
+    const found: CapabilityDiscovery = async () => ({
+      measured: ["dtmf", "raw_audio"],
+      supported: ["dtmf", "raw_audio"],
+    });
     const before = registerCapabilityDiscovery("retell", found);
 
     try {
@@ -974,9 +1067,10 @@ describe("the capability catalog", () => {
     // capability nobody could ever require would be a fact nothing reads.
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id);
-    const before = registerCapabilityDiscovery("retell", async () => [
-      "telepathy",
-    ]);
+    const before = registerCapabilityDiscovery("retell", async () => ({
+      measured: ["telepathy"],
+      supported: ["telepathy"],
+    }));
     try {
       const asked = await browser(
         "POST",

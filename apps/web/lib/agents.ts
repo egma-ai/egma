@@ -51,12 +51,37 @@ export type AgentPage = {
  * the other is a settled fact about the target. A page must never collapse
  * them, which is why the state is its own field rather than an empty array.
  */
+export type CapabilityStanding = "supported" | "unsupported" | "not_measured";
+
 export type Capabilities = {
   readonly state: "unknown" | "known";
+  /** The catalog keys the adapter looked at, or null when none has. */
+  readonly measured: readonly string[] | null;
+  /** The measured keys it found. Always a subset of `measured`. */
   readonly supported: readonly string[] | null;
   readonly checked_at: string | null;
   readonly source: string | null;
+  /**
+   * What the record says about each catalog key, worked out by the server.
+   *
+   * The page shows this rather than deriving anything from `supported`, because
+   * the derivation is the thing that goes wrong: a key missing from `supported`
+   * is only an absence when the adapter looked for it, and treating it as one
+   * otherwise turns "nobody asked" into "the target cannot", which is the one
+   * confusion this record exists to prevent.
+   */
+  readonly standing: Readonly<Record<string, CapabilityStanding>>;
 };
+
+/** The keys this record settles one way or the other, in catalog order. */
+export function standingIn(
+  capabilities: Capabilities,
+  standing: CapabilityStanding,
+): readonly string[] {
+  return Object.entries(capabilities.standing)
+    .filter(([, held]) => held === standing)
+    .map(([key]) => key);
+}
 
 export type ListedConnection = {
   readonly id: string;

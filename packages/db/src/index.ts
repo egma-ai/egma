@@ -98,6 +98,9 @@ export {
 } from "./access/connection-registry.ts";
 export {
   admittedCapabilities,
+  capabilityStanding,
+  measuredCapabilities,
+  CAPABILITY_STANDINGS,
   capabilityCheckFailedMessage,
   CAPABILITY_CATALOG,
   CAPABILITY_KEYS,
@@ -109,7 +112,9 @@ export {
   unknownCapabilityMessage,
   type CapabilityDiscovery,
   type CapabilityEntry,
+  type CapabilityStanding,
   type ConnectionCapabilities,
+  type Discovered,
   type DiscoveryTarget,
 } from "./access/capabilities.ts";
 export * from "./access/index.ts";

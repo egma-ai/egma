@@ -136,9 +136,15 @@ const CONNECTION = {
   credentials_hint: "WXYZ",
   capabilities: {
     state: "unknown" as const,
+    measured: null,
     supported: null,
     checked_at: null,
     source: null,
+    standing: {
+      dtmf: "not_measured" as const,
+      barge_in: "not_measured" as const,
+      raw_audio: "not_measured" as const,
+    },
   },
   revision: "rev_con_one",
   archived: false,
@@ -217,6 +223,8 @@ const TYPES = {
 const CAPABILITIES = {
   items: [
     { key: "dtmf", label: "DTMF entry", description: "The caller can press digits." },
+    { key: "barge_in", label: "Barge-in", description: "The caller can interrupt." },
+    { key: "raw_audio", label: "Raw audio", description: "The audio is available." },
   ],
 };
 
@@ -528,9 +536,15 @@ describe("one agent's page", () => {
         name: "production",
         capabilities: {
           state: "known",
+          measured: ["dtmf"],
           supported: ["dtmf"],
           checked_at: "2026-08-15T09:00:00.000Z",
           source: "retell adapter",
+          standing: {
+            dtmf: "supported",
+            barge_in: "not_measured",
+            raw_audio: "not_measured",
+          },
         },
       },
     ]);
@@ -539,7 +553,7 @@ describe("one agent's page", () => {
     // Unknown is never drawn as "none": a target nobody has measured and one
     // measured and found bare lead somewhere different.
     expect(await screen.findAllByText("Unknown")).not.toHaveLength(0);
-    expect(screen.getAllByText("1 known")).not.toHaveLength(0);
+    expect(screen.getAllByText("1 supported")).not.toHaveLength(0);
   });
 });
 
@@ -733,9 +747,15 @@ describe("one connection's page", () => {
       ...CONNECTION,
       capabilities: {
         state: "known",
+        measured: ["dtmf"],
         supported: ["dtmf"],
         checked_at: "2026-08-15T09:00:00.000Z",
         source: "retell adapter",
+        standing: {
+          dtmf: "supported",
+          barge_in: "not_measured",
+          raw_audio: "not_measured",
+        },
       },
     });
     render(<ConnectionDetailPage />);
@@ -747,14 +767,56 @@ describe("one connection's page", () => {
     expect(screen.getByText("retell adapter")).toBeDefined();
   });
 
+  it("draws a capability nobody measured apart from one the target lacks", async () => {
+    answersWith({
+      ...CONNECTION,
+      capabilities: {
+        state: "known",
+        measured: ["raw_audio", "dtmf"],
+        supported: ["raw_audio"],
+        checked_at: "2026-08-15T09:00:00.000Z",
+        source: "retell adapter",
+        standing: {
+          raw_audio: "supported",
+          dtmf: "unsupported",
+          barge_in: "not_measured",
+        },
+      },
+    });
+    render(<ConnectionDetailPage />);
+
+    // Three groups, and the third is the one a single list could not draw: the
+    // page must never put a capability nobody checked beside one that was
+    // checked and found missing.
+    await screen.findByText("Not measured");
+
+    const groupOf = (name: string) =>
+      screen.getByText(name).parentElement?.textContent ?? "";
+
+    expect(groupOf("Supported")).toContain("Raw audio");
+    expect(groupOf("Not supported")).toContain("DTMF entry");
+    expect(groupOf("Not measured")).toContain("Barge-in");
+
+    // And it says why the third group exists, in the target's favour.
+    expect(
+      screen.getByText(/does not know either way/),
+    ).toBeDefined();
+  });
+
   it("warns that changing where a connection points forgets its measurements", async () => {
     answersWith({
       ...CONNECTION,
       capabilities: {
         state: "known",
+        measured: ["dtmf"],
         supported: ["dtmf"],
         checked_at: "2026-08-15T09:00:00.000Z",
         source: "retell adapter",
+        standing: {
+          dtmf: "supported",
+          barge_in: "not_measured",
+          raw_audio: "not_measured",
+        },
       },
     });
     render(<ConnectionDetailPage />);

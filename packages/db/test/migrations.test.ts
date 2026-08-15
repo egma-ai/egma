@@ -2091,17 +2091,20 @@ describe("the agent and connection lifecycle over installed data (0024)", () => 
   it("says of every installed connection that nobody has measured it", async () => {
     const { rows } = await client.query<{
       capability_state: string;
+      capabilities_measured: unknown;
       capabilities_supported: unknown;
       capabilities_checked_at: Date | null;
       capability_source: string | null;
     }>(
-      "select capability_state, capabilities_supported, capabilities_checked_at, capability_source from connection",
+      "select capability_state, capabilities_measured, capabilities_supported, capabilities_checked_at, capability_source from connection",
     );
 
     for (const row of rows) {
-      // The truth: nothing had ever measured any of them. An empty supported
-      // list would have claimed each was checked and found bare.
+      // The truth: nothing had ever measured any of them. An empty measured
+      // list would have claimed each was checked and every capability found
+      // absent, which is a fact about targets nobody has ever reached.
       expect(row.capability_state).toBe("unknown");
+      expect(row.capabilities_measured).toBeNull();
       expect(row.capabilities_supported).toBeNull();
       expect(row.capabilities_checked_at).toBeNull();
       expect(row.capability_source).toBeNull();

@@ -362,6 +362,13 @@ const VALUES = [
   "CAPABILITY_KEYS",
   "admittedCapabilities",
   "isCapabilityKey",
+  // The three answers a capability record gives, and the door an adapter's
+  // report goes through to become one. `unsupported` and `not_measured` are a
+  // settled fact and an unasked question; collapsing them puts a false skip
+  // reason on every simulation an adapter's blind spot touched.
+  "capabilityStanding",
+  "CAPABILITY_STANDINGS",
+  "measuredCapabilities",
   "unknownCapabilityMessage",
   "capabilityCheckFailedMessage",
   "noCapabilityAdapterMessage",

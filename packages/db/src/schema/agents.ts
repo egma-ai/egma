@@ -170,9 +170,23 @@ export const connection = pgTable(
     /** Whether anything has measured this target. Never null: see the type. */
     capabilityState: text("capability_state").notNull().default("unknown"),
     /**
-     * The capability keys the adapter found, and only for a `known` state. A
-     * catalog key absent from this array is unsupported; the array being null
-     * is the state above saying nobody has looked.
+     * The catalog keys the adapter actually looked at, and only for a `known`
+     * state.
+     *
+     * **This is what stops `unknown` collapsing into `unsupported`.** Without
+     * it there is one state for a whole connection, so the moment anything
+     * measures anything, every catalog key the adapter never examined reads as
+     * a settled absence — and a test requiring one is skipped for a reason that
+     * is false. The two skip reasons the product ships,
+     * `required_capability_unsupported` and `required_capability_unknown`, are
+     * different sentences with different fixes, and only this column can tell
+     * a reader which one is true.
+     */
+    capabilitiesMeasured: jsonb("capabilities_measured"),
+    /**
+     * The measured keys that were found present. Always a subset of the column
+     * above: a key here but not there would be a capability found without being
+     * looked for.
      */
     capabilitiesSupported: jsonb("capabilities_supported"),
     /** When the measurement was made, so a reader can see how old it is. */
@@ -209,7 +223,16 @@ export const connection = pgTable(
      */
     check(
       "connection_capability_evidence_agrees",
-      sql`(${table.capabilityState} = 'known') = (${table.capabilitiesSupported} is not null and ${table.capabilitiesCheckedAt} is not null and ${table.capabilitySource} is not null)`,
+      sql`(${table.capabilityState} = 'known') = (${table.capabilitiesMeasured} is not null and ${table.capabilitiesSupported} is not null and ${table.capabilitiesCheckedAt} is not null and ${table.capabilitySource} is not null)`,
+    ),
+    /**
+     * Found implies looked at. A supported key the adapter never measured would
+     * be evidence with no observation under it, and it would make the three
+     * answers this record exists to give unreadable.
+     */
+    check(
+      "connection_capabilities_supported_were_measured",
+      sql`${table.capabilitiesSupported} is null or ${table.capabilitiesSupported} <@ ${table.capabilitiesMeasured}`,
     ),
     foreignKey({
       name: "connection_project_organization_fk",

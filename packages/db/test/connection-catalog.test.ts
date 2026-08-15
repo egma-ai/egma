@@ -6,6 +6,8 @@ import {
   credentialRuleOf,
   hasCapabilityDiscovery,
   isCapabilityKey,
+  capabilityStanding,
+  measuredCapabilities,
   registerCapabilityDiscovery,
   transportCapabilities,
   variantById,
@@ -208,12 +210,12 @@ describe("the capability discovery seam", () => {
       transportCapabilities(target("phone", "voice")),
       transportCapabilities(target("livekit", "voice")),
     ]).then(([chat, spokenRetell, phone, livekit]) => {
-      expect(chat).toEqual([]);
+      expect(chat.supported).toEqual([]);
       // The same type answers differently by modality, which is the proof that
       // the answer is not coming from the type's name.
-      expect(spokenRetell).toEqual(["raw_audio"]);
-      expect(phone).toEqual(["raw_audio"]);
-      expect(livekit).toEqual(["raw_audio"]);
+      expect(spokenRetell.supported).toEqual(["raw_audio"]);
+      expect(phone.supported).toEqual(["raw_audio"]);
+      expect(livekit.supported).toEqual(["raw_audio"]);
     });
   });
 
@@ -229,7 +231,10 @@ describe("the capability discovery seam", () => {
           modality,
           config: {},
         });
-        expect(found, `${type}/${modality}`).not.toContain("dtmf");
+        expect(found.supported, `${type}/${modality}`).not.toContain("dtmf");
+        // Measured, so its absence is a fact about egma's transport rather than
+        // a question nobody asked.
+        expect(found.measured, `${type}/${modality}`).toContain("dtmf");
       }
     }
   });
@@ -253,5 +258,66 @@ describe("the capability discovery seam", () => {
       connectionTypeMetadata().find((one) => one.type === "retell")
         ?.simulatorAdapter,
     ).toBe(true);
+  });
+});
+
+describe("what a capability record says about one capability", () => {
+  const checkedAt = new Date("2026-08-15T09:00:00.000Z");
+
+  it("answers not-measured for every key while nothing has looked", () => {
+    for (const entry of CAPABILITY_CATALOG) {
+      expect(capabilityStanding({ state: "unknown" }, entry.key)).toBe(
+        "not_measured",
+      );
+    }
+  });
+
+  it("tells a measured absence from an unasked question", () => {
+    const held = measuredCapabilities(
+      { measured: ["raw_audio", "dtmf"], supported: ["raw_audio"] },
+      "transport",
+      checkedAt,
+    );
+
+    expect(capabilityStanding(held, "raw_audio")).toBe("supported");
+    // Looked at and not there.
+    expect(capabilityStanding(held, "dtmf")).toBe("unsupported");
+    // Never looked at — and this is the one a single list could not express,
+    // because both keys are simply absent from `supported`.
+    expect(capabilityStanding(held, "barge_in")).toBe("not_measured");
+  });
+
+  it("can never read an unmeasured capability as one the target lacks", () => {
+    // The property, over every catalog key and every subset an adapter could
+    // report: `unsupported` requires the key to have been measured, so a blind
+    // spot can never become a claim about the target.
+    for (const entry of CAPABILITY_CATALOG) {
+      const measured = CAPABILITY_CATALOG.map((one) => one.key).filter(
+        (key) => key !== entry.key,
+      );
+      const held = measuredCapabilities(
+        { measured, supported: [] },
+        "partial",
+        checkedAt,
+      );
+      expect(capabilityStanding(held, entry.key), entry.key).toBe(
+        "not_measured",
+      );
+      for (const other of measured) {
+        expect(capabilityStanding(held, other), other).toBe("unsupported");
+      }
+    }
+  });
+
+  it("refuses an answer claiming a capability it never looked for", () => {
+    // Evidence with no observation under it would make the two lists disagree
+    // about what happened, and the three answers unreadable.
+    expect(() =>
+      measuredCapabilities(
+        { measured: ["raw_audio"], supported: ["dtmf"] },
+        "confused",
+        checkedAt,
+      ),
+    ).toThrow(/without measuring it/);
   });
 });

@@ -10,6 +10,7 @@ import {
   agentDetailQuery,
   agentPath,
   NO_ENVIRONMENT,
+  standingIn,
   type AgentDetail,
   type ArchiveFilter,
   type ListedAgent,
@@ -131,8 +132,13 @@ function connectionColumns(
       width: "150px",
       cell: (one) =>
         one.capabilities.state === "known" ? (
-          <Badge tone="good" title={`Checked ${asDay(one.capabilities.checked_at ?? "")}`}>
-            {(one.capabilities.supported ?? []).length} known
+          <Badge
+            tone="good"
+            title={`Checked ${asDay(one.capabilities.checked_at ?? "")}. ${
+              standingIn(one.capabilities, "not_measured").length
+            } not measured.`}
+          >
+            {standingIn(one.capabilities, "supported").length} supported
           </Badge>
         ) : (
           // Never "none": nobody has looked, which is a different fact from a

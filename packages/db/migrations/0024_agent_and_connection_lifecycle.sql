@@ -26,9 +26,13 @@
 --    `restoreAgent`'s promise — that its connections stay archived — true of
 --    installed data as well as of new data.
 --  * The capability columns replace an unused `capabilities` blob with the
---    record the product actually reads: a state, what was measured, when, and
---    by which adapter. Every existing row becomes `unknown`, which is the
---    truth — nothing had ever measured any of them.
+--    record the product actually reads: a state, the catalog keys an adapter
+--    looked at, which of those it found, when, and by which adapter. Measured
+--    and found are two columns rather than one because a single list cannot
+--    say whether a key's absence is a settled fact or an unasked question, and
+--    those are different skip reasons with different fixes. Every existing row
+--    becomes `unknown`, which is the truth — nothing had ever measured any of
+--    them.
 
 ALTER TABLE "agent" RENAME COLUMN "deleted_at" TO "archived_at";--> statement-breakpoint
 ALTER TABLE "connection" RENAME COLUMN "deleted_at" TO "archived_at";--> statement-breakpoint
@@ -75,9 +79,11 @@ ALTER TABLE "connection" ALTER COLUMN "variant_id" SET NOT NULL;--> statement-br
 
 ALTER TABLE "connection" DROP COLUMN "capabilities";--> statement-breakpoint
 ALTER TABLE "connection" ADD COLUMN "capability_state" text DEFAULT 'unknown' NOT NULL;--> statement-breakpoint
+ALTER TABLE "connection" ADD COLUMN "capabilities_measured" jsonb;--> statement-breakpoint
 ALTER TABLE "connection" ADD COLUMN "capabilities_supported" jsonb;--> statement-breakpoint
 ALTER TABLE "connection" ADD COLUMN "capabilities_checked_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "connection" ADD COLUMN "capability_source" text;--> statement-breakpoint
 
 ALTER TABLE "connection" ADD CONSTRAINT "connection_capability_state_allowed" CHECK ("connection"."capability_state" in ('unknown', 'known'));--> statement-breakpoint
-ALTER TABLE "connection" ADD CONSTRAINT "connection_capability_evidence_agrees" CHECK (("connection"."capability_state" = 'known') = ("connection"."capabilities_supported" is not null and "connection"."capabilities_checked_at" is not null and "connection"."capability_source" is not null));
+ALTER TABLE "connection" ADD CONSTRAINT "connection_capability_evidence_agrees" CHECK (("connection"."capability_state" = 'known') = ("connection"."capabilities_measured" is not null and "connection"."capabilities_supported" is not null and "connection"."capabilities_checked_at" is not null and "connection"."capability_source" is not null));--> statement-breakpoint
+ALTER TABLE "connection" ADD CONSTRAINT "connection_capabilities_supported_were_measured" CHECK ("connection"."capabilities_supported" is null or "connection"."capabilities_supported" <@ "connection"."capabilities_measured");

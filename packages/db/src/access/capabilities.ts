@@ -121,12 +121,46 @@ export type ConnectionCapabilities =
   | { readonly state: "unknown" }
   | {
       readonly state: "known";
-      /** Catalog keys the adapter found. Anything absent is unsupported. */
+      /**
+       * The catalog keys the adapter looked at. A key outside this set was not
+       * examined, whatever else the record says.
+       */
+      readonly measured: readonly string[];
+      /** The measured keys it found. Always a subset of `measured`. */
       readonly supported: readonly string[];
       readonly checkedAt: Date;
       /** Which adapter measured it. Evidence travels with the answer. */
       readonly source: string;
     };
+
+/**
+ * What this record says about one capability. Three answers, never two.
+ *
+ * **`unsupported` and `not_measured` must never be collapsed**, and this
+ * function is where that is enforced for every reader. They are a settled fact
+ * about the target and an unasked question, they carry the product's two
+ * different skip reasons, and they have different fixes: one means write a
+ * different test, the other means measure the connection. An absent key
+ * defaulting to `unsupported` would put a false reason on every simulation an
+ * adapter's blind spot touched.
+ */
+export const CAPABILITY_STANDINGS = [
+  "supported",
+  "unsupported",
+  "not_measured",
+] as const;
+export type CapabilityStanding = (typeof CAPABILITY_STANDINGS)[number];
+
+export function capabilityStanding(
+  held: ConnectionCapabilities,
+  key: string,
+): CapabilityStanding {
+  if (held.state !== "known") return "not_measured";
+  if (held.supported.includes(key)) return "supported";
+  // The whole point: absent from `supported` is only an absence when the
+  // adapter looked. Otherwise nobody has asked.
+  return held.measured.includes(key) ? "unsupported" : "not_measured";
+}
 
 /** The state every connection starts in, and returns to when its config moves. */
 export const CAPABILITIES_UNKNOWN: ConnectionCapabilities = { state: "unknown" };
@@ -155,14 +189,29 @@ export type DiscoveryTarget = {
 };
 
 /**
- * A discovery answers the catalog keys it *found*. Throwing means it could not
- * establish anything, which leaves the connection's state exactly as it was —
- * unknown stays unknown, and a previous measurement is not overwritten with a
- * failure.
+ * What an adapter reports: the catalog keys it examined, and which of those it
+ * found.
+ *
+ * **Both halves, because one cannot be derived from the other.** An adapter
+ * that answered only what it found would leave every reader guessing whether a
+ * missing key was absent or unexamined — which is exactly the collapse this
+ * record exists to prevent. An adapter that can speak to a capability says so
+ * by naming it in `measured`, whichever way the answer came out.
+ */
+export type Discovered = {
+  readonly measured: readonly string[];
+  readonly supported: readonly string[];
+};
+
+/**
+ * A discovery answers what it examined and what it found. Throwing means it
+ * could not establish anything, which leaves the connection's state exactly as
+ * it was — unknown stays unknown, and a previous measurement is not overwritten
+ * with a failure.
  */
 export type CapabilityDiscovery = (
   target: DiscoveryTarget,
-) => Promise<readonly string[]>;
+) => Promise<Discovered>;
 
 /**
  * Which types egma ships a discovery adapter for.
@@ -200,8 +249,13 @@ const DISCOVERIES = new Map<ConnectionType, CapabilityDiscovery>();
  * when interrupted, and only a probe of that agent can say. See the note on
  * `measuredCapabilities` for what its absence currently means.
  */
-export const transportCapabilities: CapabilityDiscovery = async (target) =>
-  target.modality === "voice" ? ["raw_audio"] : [];
+export const transportCapabilities: CapabilityDiscovery = async (target) => ({
+  // The two it can speak to, named whichever way each answer comes out — and
+  // `barge_in` deliberately not among them, so a reader is told nobody asked
+  // rather than told it is missing.
+  measured: ["raw_audio", "dtmf"],
+  supported: target.modality === "voice" ? ["raw_audio"] : [],
+});
 
 // Registered for every type, because the facts above hold for every transport
 // egma ships. A type added later without an adapter of its own is refused a
@@ -268,35 +322,47 @@ export function capabilityCheckFailedMessage(connectionId: string): string {
 }
 
 /**
- * An adapter's answer, held to the catalog before it can be stored.
+ * An adapter's answer, held to the catalog and to itself before it can be
+ * stored.
  *
- * An adapter naming a key egma does not have is a bug in the adapter, and
- * storing it would put a capability on a connection that no test could ever
- * require. It is refused rather than dropped.
- *
- * **One state covers the whole connection, and that has a consequence worth
- * naming.** A `known` record means the catalog keys in `supported` are
- * supported and every other catalog key is not — so a capability no shipped
- * adapter can speak to, `barge_in` today, reads as unsupported once anything
- * measures the connection at all. That is a stronger claim than egma can make
- * about it. Telling the two apart needs the record to say which keys were
- * *measured* as well as which were found, which is a schema change and a
- * decision for whoever ships the barge-in probe.
+ * Two rules, and both are about keeping the three answers readable. A key egma
+ * does not have is a bug in the adapter and is refused rather than dropped: it
+ * would put a capability on a connection that no test could ever require. And a
+ * key reported found but not examined is refused too — evidence with no
+ * observation under it, which would make `supported` and `measured` disagree
+ * about what happened.
  */
 export function measuredCapabilities(
-  found: readonly string[],
+  found: Discovered,
   source: string,
   checkedAt: Date,
 ): ConnectionCapabilities {
-  const supported: string[] = [];
-  for (const key of found) {
-    if (!isCapabilityKey(key)) {
+  const admit = (keys: readonly string[], half: string): readonly string[] => {
+    const held: string[] = [];
+    for (const key of keys) {
+      if (!isCapabilityKey(key)) {
+        throw new Error(
+          `capability adapter ${source} answered "${key}" among the keys it ` +
+            `${half}, which is not in egma's capability catalog ` +
+            `(${CAPABILITY_KEYS.join(", ")})`,
+        );
+      }
+      if (!held.includes(key)) held.push(key);
+    }
+    return held;
+  };
+
+  const measured = admit(found.measured, "measured");
+  const supported = admit(found.supported, "found");
+
+  for (const key of supported) {
+    if (!measured.includes(key)) {
       throw new Error(
-        `capability adapter ${source} answered "${key}", which is not in ` +
-          `egma's capability catalog (${CAPABILITY_KEYS.join(", ")})`,
+        `capability adapter ${source} reported "${key}" as supported without ` +
+          `measuring it; a capability is found by looking for it`,
       );
     }
-    if (!supported.includes(key)) supported.push(key);
   }
-  return { state: "known", supported, checkedAt, source };
+
+  return { state: "known", measured, supported, checkedAt, source };
 }

@@ -29,6 +29,7 @@ import {
   measuredCapabilities,
   noCapabilityAdapterMessage,
   type ConnectionCapabilities,
+  type Discovered,
 } from "./capabilities.ts";
 import {
   credentialRuleOf,
@@ -249,6 +250,7 @@ const CONNECTION_COLUMNS = {
   config: connection.config,
   credentialsHint: connection.credentialsHint,
   capabilityState: connection.capabilityState,
+  capabilitiesMeasured: connection.capabilitiesMeasured,
   capabilitiesSupported: connection.capabilitiesSupported,
   capabilitiesCheckedAt: connection.capabilitiesCheckedAt,
   capabilitySource: connection.capabilitySource,
@@ -420,6 +422,7 @@ type ConnectionRow = {
   readonly config: unknown;
   readonly credentialsHint: string | null;
   readonly capabilityState: string;
+  readonly capabilitiesMeasured: unknown;
   readonly capabilitiesSupported: unknown;
   readonly capabilitiesCheckedAt: Date | null;
   readonly capabilitySource: string | null;
@@ -440,19 +443,21 @@ type ConnectionRow = {
 function capabilitiesFromRow(row: ConnectionRow): ConnectionCapabilities {
   if (
     row.capabilityState !== "known" ||
+    row.capabilitiesMeasured === null ||
     row.capabilitiesCheckedAt === null ||
     row.capabilitySource === null
   ) {
     return CAPABILITIES_UNKNOWN;
   }
-  const supported = Array.isArray(row.capabilitiesSupported)
-    ? row.capabilitiesSupported.filter(
-        (entry): entry is string => typeof entry === "string",
-      )
-    : [];
+  const keys = (held: unknown): readonly string[] =>
+    Array.isArray(held)
+      ? held.filter((entry): entry is string => typeof entry === "string")
+      : [];
+
   return {
     state: "known",
-    supported,
+    measured: keys(row.capabilitiesMeasured),
+    supported: keys(row.capabilitiesSupported),
     checkedAt: row.capabilitiesCheckedAt,
     source: row.capabilitySource,
   };
@@ -1587,6 +1592,7 @@ export async function updateConnection(
         ? {}
         : {
             capabilityState: "unknown",
+            capabilitiesMeasured: null,
             capabilitiesSupported: null,
             capabilitiesCheckedAt: null,
             capabilitySource: null,
@@ -1885,7 +1891,7 @@ export async function refreshConnectionCapabilities(
     throw new NoCapabilityAdapterError(type, noCapabilityAdapterMessage(type));
   }
 
-  let found: readonly string[];
+  let found: Discovered;
   try {
     found = await discovery({
       type,
@@ -1909,6 +1915,7 @@ export async function refreshConnectionCapabilities(
     .update(connection)
     .set({
       capabilityState: "known",
+      capabilitiesMeasured: measured.measured,
       capabilitiesSupported: measured.supported,
       capabilitiesCheckedAt: measured.checkedAt,
       capabilitySource: measured.source,

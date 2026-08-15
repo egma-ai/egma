@@ -1969,6 +1969,12 @@
           "notNull": true,
           "default": "'unknown'"
         },
+        "capabilities_measured": {
+          "name": "capabilities_measured",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "capabilities_supported": {
           "name": "capabilities_supported",
           "type": "jsonb",
@@ -2170,7 +2176,11 @@
         },
         "connection_capability_evidence_agrees": {
           "name": "connection_capability_evidence_agrees",
-          "value": "(\"connection\".\"capability_state\" = 'known') = (\"connection\".\"capabilities_supported\" is not null and \"connection\".\"capabilities_checked_at\" is not null and \"connection\".\"capability_source\" is not null)"
+          "value": "(\"connection\".\"capability_state\" = 'known') = (\"connection\".\"capabilities_measured\" is not null and \"connection\".\"capabilities_supported\" is not null and \"connection\".\"capabilities_checked_at\" is not null and \"connection\".\"capability_source\" is not null)"
+        },
+        "connection_capabilities_supported_were_measured": {
+          "name": "connection_capabilities_supported_were_measured",
+          "value": "\"connection\".\"capabilities_supported\" is null or \"connection\".\"capabilities_supported\" <@ \"connection\".\"capabilities_measured\""
         }
       },
       "isRLSEnabled": false
