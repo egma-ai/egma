@@ -425,6 +425,68 @@ describe("a browser working in a project that is not the first", () => {
   });
 
   /**
+   * **What an unnamed read still means, pinned rather than fixed.**
+   *
+   * `/runs/{runId}` is the address a terminal prints, it carries no project,
+   * and it forwards by reading the run's own `project_id` — a read rather than
+   * a guess, which is the right design. What the design needs and does not have
+   * is a read that spans the organization: a request naming no project acts in
+   * the session's own, which is the organization's first, and `getRun` narrows
+   * by it. So a `results_url` for a run in any other project is answered as an
+   * absence.
+   *
+   * It is pinned here rather than changed because widening it is a decision
+   * about what an unnamed read means for **every** caller of that route. An API
+   * key minted for one project must not gain a sibling by it — that asymmetry
+   * is this file's own first promise — and separating a session from a key on
+   * one route is a rule with reach. The developer's call; this test is here so
+   * that it is made deliberately, and it fails the moment somebody makes it.
+   */
+  it("answers an unnamed read from the session's own project, not the organization", async () => {
+    const { ada, outbound, keyForOutbound } = await twoProjects(
+      "browser_unnamed_run_read",
+    );
+
+    const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
+      name: "Outbound desk",
+      connection: {
+        type: "retell",
+        modality: "chat",
+        config: { retellAgentId: "agent_in_retell_unnamed" },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    });
+    const pushed = await ask(api.app, "POST", "/api/tests", keyForOutbound, {
+      name: "Reschedules a booked appointment",
+      scenario: "Their cleaning has to move to any afternoon next week.",
+      expected_behaviors: ["confirms the new time back before finishing"],
+    });
+    const started = await ask(api.app, "POST", "/api/runs", keyForOutbound, {
+      connection: (registered.body.connection as { id: string }).id,
+      test_versions: [String(pushed.body.version_id)],
+      idempotency_key: newId("run"),
+    });
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+    const runId = String(started.body.id);
+
+    const unnamed = await api.app.inject({
+      method: "GET",
+      url: `/api/runs/${runId}`,
+      headers: { cookie: ada.cookie },
+    });
+    expect(unnamed.statusCode).toBe(404);
+
+    // Named, the same session reads the same run perfectly well. The project is
+    // the whole of the difference.
+    const named = await api.app.inject({
+      method: "GET",
+      url: `/api/runs/${runId}?project=${outbound}`,
+      headers: { cookie: ada.cookie },
+    });
+    expect(named.statusCode, named.body).toBe(200);
+  });
+
+  /**
    * Retry, from the same page and in the same project.
    *
    * Its own case because it is the one write on that page with a body of its

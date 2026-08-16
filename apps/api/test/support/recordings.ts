@@ -254,32 +254,24 @@ export async function standingOf(
  * feed, which would prove that a page can render invented rows. What lands here
  * is what a real report lands, through the same data-access functions the
  * simulator calls.
+ *
+ * Answers the conversation it conducted, which is the address a caller then
+ * opens the evidence at.
  */
 export async function landOneConversationOf(
   auth: AuthContext,
   runId: string,
   options: { readonly reference?: string } = {},
-): Promise<{
-  /** The conversation that was conducted. */
-  readonly landed: string;
-  /** The ones still waiting, which is what the rest of a run looks like. */
-  readonly waiting: readonly string[];
-}> {
+): Promise<string> {
   const claimed = (
     await claimSimulations({ claimant: CLAIMANT, capacity: 50 })
   ).filter((claim) => claim.runId === runId);
-  expect(
-    claimed.length,
-    "this run wrote conversations to claim",
-  ).toBeGreaterThan(0);
+  const first = claimed[0];
+  expect(first, "this run wrote a conversation to claim").toBeDefined();
+  const conversation = first?.id ?? "";
 
-  const [first, ...rest] = claimed as [
-    (typeof claimed)[number],
-    ...(typeof claimed)[number][],
-  ];
-
-  await startSimulation(auth, first.id, CLAIMANT);
-  await completeSimulation(auth, first.id, CLAIMANT, {
+  await startSimulation(auth, conversation, CLAIMANT);
+  await completeSimulation(auth, conversation, CLAIMANT, {
     endingReason: "agent_ended",
     turnCount: 6,
     ...(options.reference === undefined
@@ -290,7 +282,7 @@ export async function landOneConversationOf(
         }),
   });
 
-  return { landed: first.id, waiting: rest.map((one) => one.id) };
+  return conversation;
 }
 
 export type ConductedRunOptions = {

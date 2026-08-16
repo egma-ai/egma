@@ -27,6 +27,17 @@ import { ProductStatePage } from "../../../ui/shell.tsx";
  * projects makes any default wrong. So the run is read, and the answer decides
  * the address.
  *
+ * **And the read is narrower than that design needs, which is written down here
+ * rather than changed.** This address names no project and cannot, so the read
+ * below names none — and a request naming none acts in the session's own
+ * project, which is the organization's *first*. `getRun` narrows by it. So a
+ * `results_url` for a run in any other project is answered as an absence, by
+ * the one address a terminal prints. Widening it is a decision about what an
+ * unnamed read means for **every** caller of that route, an API key included,
+ * and the asymmetry between a session and a key is deliberate — so it is the
+ * developer's to make. Held as it stands, with the reason, in
+ * `apps/api/test/project-context.test.ts`.
+ *
  * `replace` rather than `push`: this address is a redirect and not a place, and
  * leaving it in the history would put Back on a page whose only behaviour is to
  * come straight back here.
@@ -52,9 +63,9 @@ export default function RunResultsAddress({
   useEffect(() => {
     let current = true;
 
-    // No project is named, and none can be: this address carries none. The run
-    // read is scoped to the organization the session resolved to, which is the
-    // only boundary in the product, and it answers which project the run is in.
+    // No project is named, and none can be: this address carries none. What
+    // that means today is the paragraph above — the read acts in the session's
+    // own project rather than across the organization.
     void readJson<RunDetail>(runPath(runId)).then((answer) => {
       if (!current) return;
       if (answer.status === "signed-out") {

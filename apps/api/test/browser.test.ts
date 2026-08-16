@@ -1990,6 +1990,7 @@ describe("the complete product, walked in order in a second project", () => {
 
   /** What each step leaves for the next one. */
   let agentAddress = "";
+  let connectionAddress = "";
   let personaAddress = "";
   let testAddress = "";
   let runAddress = "";
@@ -2178,6 +2179,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.getByRole("button", { name: "Add connection" }).click();
 
       await walk.waitForURL(/\/connections\/con_[^/]+$/);
+      connectionAddress = walk.url();
       await saysWithin(walk, "Retell staging");
       // The secret is never handed back, and the page says which key it is
       // holding rather than pretending it has forgotten.
@@ -2391,16 +2393,16 @@ describe("the complete product, walked in order in a second project", () => {
           ? { reference: `${simulationIdOf(conversation)}/dual-channel.wav` }
           : {}),
       });
-      expect(landed.landed).toBe(simulationIdOf(conversation));
+      expect(landed).toBe(simulationIdOf(conversation));
       if (storage.available) {
         await (storage as Extract<ObjectStorage, { available: true }>).put(
-          `${landed.landed}/dual-channel.wav`,
+          `${landed}/dual-channel.wav`,
           aRecording(),
         );
       }
       await fileTranscriptOf(
         instance.api,
-        landed.landed,
+        landed,
         {
           human: "I need to move my cleaning to next week.",
           agent: "Of course — which afternoon suits you?",
@@ -2447,6 +2449,8 @@ describe("the complete product, walked in order in a second project", () => {
       { what: "Agents", address: at("agents") },
       { what: "Register an agent", address: at("agents", "new") },
       { what: "one agent", address: agentAddress },
+      { what: "Add a connection", address: `${agentAddress}/connections/new` },
+      { what: "one connection", address: connectionAddress },
       { what: "Tests", address: at("tests") },
       { what: "Write a test", address: at("tests", "new") },
       { what: "one test", address: testAddress },
@@ -2669,7 +2673,7 @@ describe("the complete product, walked in order in a second project", () => {
      * browser can, because only a browser resolves the cascade.
      */
     it(
-      "measures the same shell and the same row on every list in the product",
+      "measures the same shell and the same cell on every list in the product",
       async () => {
         const lists = [
           at("agents"),
@@ -2962,6 +2966,102 @@ describe("the complete product, walked in order in a second project", () => {
     );
   });
 
+  /**
+   * The states a working product does not show you.
+   *
+   * Empty, error and viewer are all met elsewhere in this file — an empty
+   * project at the top of this journey, a refused read and its retry in
+   * "recovering when a page cannot load", and Bob's view-only shell where a
+   * colleague is added. These three are the rest of the list, and each of them
+   * is a state somebody meets on a bad day, so each is made to happen rather
+   * than assumed. Its own section rather than the narrow screen's, because two
+   * of the three are checked at both widths.
+   */
+  describe("loading, an absence, and something archived", () => {
+    it(
+      "shows loading, an absence and an archived thing, on a phone and on a desktop",
+      async () => {
+        for (const width of [390, 1280]) {
+          await walk.setViewportSize({ width, height: 900 });
+
+          // **Loading**, made to last by holding the read open. The page says
+          // what it is waiting for rather than showing an empty frame that
+          // could equally mean an empty project.
+          let release = (): void => undefined;
+          const held = new Promise<void>((resume) => {
+            release = () => resume();
+          });
+          // Matched by predicate rather than by glob: the address carries a
+          // query, and which characters a glob treats as special is the
+          // library's business rather than something this test should depend
+          // on.
+          const theAgentsRead = (asked: URL) =>
+            asked.pathname === "/api/agents";
+          await walk.route(theAgentsRead, async (route) => {
+            await held;
+            return route.continue();
+          });
+          try {
+            await walk.goto(at("agents"));
+            await expect
+              .poll(() => walk.innerText("main"), { timeout: 30_000 })
+              .toContain("Loading");
+          } finally {
+            release();
+            await walk.unroute(theAgentsRead);
+          }
+          await saysWithin(walk, "The Support line");
+
+          // **An absence**, in egma's own words rather than in a page's
+          // paraphrase of them — a project this organization has not got is
+          // the same answer as a project that never existed, on purpose.
+          await walk.goto(`${origin}/projects/${newId("prj")}/agents`);
+          await saysWithin(walk, "Not available here");
+          expect(await walk.innerText("main")).toContain(
+            "Choose a project from the selector",
+          );
+          // The shell is still around it: a refusal is a page, not a dead end.
+          await expect
+            .poll(() => selectorOf(walk).count(), { timeout: 30_000 })
+            .toBeGreaterThan(0);
+        }
+
+        // **Archived**, which is the one state that has to be made and then
+        // unmade: the rest of this journey is about an agent that works.
+        await walk.setViewportSize({ width: 1280, height: 900 });
+        await walk.goto(agentAddress);
+        await saysWithin(walk, "The Support line");
+        await walk.getByRole("button", { name: "Archive", exact: true }).click();
+        await walk.getByRole("dialog").waitFor();
+        await walk.getByRole("button", { name: "Archive agent" }).click();
+
+        await expect
+          .poll(() => walk.innerText("main"), { timeout: 30_000 })
+          .toMatch(/archived/iu);
+        // Out of new work, and still perfectly readable — which is the whole
+        // difference between archiving and deleting. The way egma reaches it is
+        // still named on the page, because a run that went over it stays
+        // interpretable.
+        expect(await walk.innerText("main")).toContain("Retell staging");
+        await walk.goto(at("agents"));
+        await saysWithin(walk, "No agents in this project yet");
+
+        await walk.goto(agentAddress);
+        await walk.getByRole("button", { name: "Restore", exact: true }).click();
+        await walk.getByRole("dialog").waitFor();
+        await walk.getByRole("button", { name: "Restore agent" }).click();
+        await expect
+          .poll(
+            () =>
+              walk.getByRole("button", { name: "Archive", exact: true }).count(),
+            { timeout: 30_000 },
+          )
+          .toBe(1);
+      },
+      SETTLE,
+    );
+  });
+
   describe("no pointer at all", () => {
     it(
       "reaches the shell's controls in the order they are drawn in",
@@ -2979,16 +3079,17 @@ describe("the complete product, walked in order in a second project", () => {
                   | {
                       getAttribute(name: string): string | null;
                       readonly textContent: string | null;
-                      readonly tagName: string;
                     }
                   | null;
               }
             ).activeElement;
             if (active === null) return "";
+            // The name a control carries for a reader who cannot see it, and
+            // its own words where it carries none — which is how the
+            // navigation links name themselves.
             return (
               active.getAttribute("aria-label") ??
-              (active.textContent ?? "").trim() ??
-              active.tagName
+              (active.textContent ?? "").trim()
             );
           });
 
