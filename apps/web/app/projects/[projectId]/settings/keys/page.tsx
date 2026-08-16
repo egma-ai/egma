@@ -13,6 +13,7 @@ import {
   scopeOf,
   type ApiKey,
   type ApiKeyList,
+  type ListedApiKey,
   type MintedApiKey,
 } from "../../../../../lib/settings.ts";
 import {
@@ -194,7 +195,13 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
     reload();
   }
 
-  function columns(): readonly Column<ApiKey>[] {
+  function columns(showOwner = false): readonly Column<ListedApiKey>[] {
+    const owner: Column<ListedApiKey> = {
+      key: "owner",
+      header: "Owner",
+      cell: (key) => key.created_by_email?.trim() || "Owner unavailable",
+    };
+
     return [
       {
         key: "name",
@@ -202,6 +209,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
         primary: true,
         cell: (key) => key.name ?? "Unnamed key",
       },
+      ...(showOwner ? [owner] : []),
       { key: "looks_like", header: "Key", mono: true, cell: (key) => key.looks_like },
       { key: "scope", header: "Scope", cell: (key) => scopeOf(key, projects) },
       {
@@ -353,7 +361,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
                 >
                   <DataTable
                     label="Other people's API keys"
-                    columns={columns()}
+                    columns={columns(true)}
                     rows={others}
                     keyOf={(key) => key.id}
                   />

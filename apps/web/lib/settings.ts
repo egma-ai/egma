@@ -100,7 +100,12 @@ export type ApiKey = {
   readonly revoked_at: string | null;
 };
 
-export type ApiKeyList = { readonly keys: readonly ApiKey[] };
+/** A key returned by the list route, with a human owner label. */
+export type ListedApiKey = ApiKey & {
+  readonly created_by_email: string;
+};
+
+export type ApiKeyList = { readonly keys: readonly ListedApiKey[] };
 
 /** A minted key, and the one moment its secret exists outside the server. */
 export type MintedApiKey = ApiKey & { readonly secret: string };
@@ -166,12 +171,12 @@ export function rowsIn<T>(rows: readonly T[] | undefined): readonly T[] {
  * everybody else's, because responding to a leak must not depend on who created
  * the key — and the server is what enforces that, not this split.
  */
-export function keysOwnedBy(
-  keys: readonly ApiKey[],
+export function keysOwnedBy<Key extends ApiKey>(
+  keys: readonly Key[],
   userId: string | undefined,
-): { readonly mine: readonly ApiKey[]; readonly others: readonly ApiKey[] } {
-  const mine: ApiKey[] = [];
-  const others: ApiKey[] = [];
+): { readonly mine: readonly Key[]; readonly others: readonly Key[] } {
+  const mine: Key[] = [];
+  const others: Key[] = [];
   for (const key of rowsIn(keys)) {
     if (userId !== undefined && key.created_by_user_id === userId) mine.push(key);
     else others.push(key);

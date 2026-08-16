@@ -480,7 +480,7 @@ describe("the project a key acts in", () => {
 });
 
 describe("the list of keys", () => {
-  it("shows an admin every key in the organization", async () => {
+  it("shows an admin every key with the human owner in the organization", async () => {
     api = await createApi("keys_list_admin");
     const ada = await signUp("ada@acme.example", "Acme");
     const mia = await colleagueOf(ada, "mia@acme.example", "member");
@@ -493,10 +493,18 @@ describe("the list of keys", () => {
       headers: { cookie: ada.cookie },
     });
 
-    const keys = (listed.json() as { keys: { name: string }[] }).keys;
-    expect(keys.map((key) => key.name).sort()).toEqual([
-      "ada's terminal",
-      "mia's terminal",
+    const keys = (
+      listed.json() as {
+        keys: { name: string; created_by_email: string }[];
+      }
+    ).keys;
+    expect(
+      keys
+        .map((key) => ({ name: key.name, owner: key.created_by_email }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    ).toEqual([
+      { name: "ada's terminal", owner: "ada@acme.example" },
+      { name: "mia's terminal", owner: "mia@acme.example" },
     ]);
   });
 

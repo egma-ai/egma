@@ -253,6 +253,7 @@ export {
   revokeApiKey,
   resolveApiKey,
   type ApiKey,
+  type ListedApiKey,
   type NewApiKey,
   type ResolvedApiKey,
 } from "./api-keys.ts";

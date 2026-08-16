@@ -1864,6 +1864,7 @@ const MY_KEY = {
   project_id: null,
   looks_like: "egma_sk_ab…WXYZ",
   created_by_user_id: "usr_1",
+  created_by_email: "ada@acme.example",
   created_at: "2026-08-01T10:00:00.000Z",
   last_used_at: null,
   revoked_at: null,
@@ -1876,6 +1877,7 @@ const SOMEBODY_ELSES = {
   scope: "project",
   project_id: "prj_2",
   created_by_user_id: "usr_2",
+  created_by_email: "bob@acme.example",
 };
 
 describe("API keys", () => {
@@ -2076,23 +2078,35 @@ describe("API keys", () => {
     });
   });
 
-  /**
-   * Only an admin is answered with anybody else's key. The API has only an
-   * internal user identifier here, so the section states ownership and the row
-   * shows the useful scope without pretending that token is a person's name.
-   */
-  it("shows an admin other members' keys with their scope and no internal owner token", async () => {
+  /** Only an admin receives other members' keys, with a human owner label. */
+  it("shows an admin who owns each other member's key", async () => {
     open("admin", [MY_KEY, SOMEBODY_ELSES]);
 
     expect(await screen.findByText("Other members’ keys")).toBeTruthy();
+    const mine = screen.getByRole("table", { name: "Your API keys" });
     const others = await screen.findByRole("table", {
       name: "Other people's API keys",
     });
+    expect(within(mine).queryByRole("columnheader", { name: "Owner" })).toBeNull();
     expect(others.textContent).toContain("Bob's CI");
+    expect(others.textContent).toContain("bob@acme.example");
     expect(others.textContent).not.toContain("usr_2");
-    expect(within(others).queryByRole("columnheader", { name: "Owner" })).toBeNull();
+    expect(within(others).getByRole("columnheader", { name: "Owner" })).toBeTruthy();
     expect(others.textContent).toContain("Project · Outbound");
     expect(others.textContent).toContain("egma_sk_ab…WXYZ");
+  });
+
+  it("uses a safe owner label if an older list response has no email", async () => {
+    open("admin", [
+      MY_KEY,
+      { ...SOMEBODY_ELSES, created_by_email: undefined },
+    ]);
+
+    const others = await screen.findByRole("table", {
+      name: "Other people's API keys",
+    });
+    expect(others.textContent).toContain("Owner unavailable");
+    expect(others.textContent).not.toContain("usr_2");
   });
 
   /**
