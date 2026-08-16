@@ -82,7 +82,7 @@ describe("the egma command", () => {
     });
 
     expect(refused.code).toBe(1);
-    expect(refused.stderr).toContain("egma needs Node 22 or newer");
+    expect(refused.stderr).toContain("Egma needs Node 22 or newer");
     expect(refused.stderr).toContain("18.20.4");
     // The refusal came first: not even --help was answered.
     expect(refused.stderr).not.toContain("Usage:");
@@ -187,7 +187,7 @@ describe("the egma command", () => {
     expect(lines).toContain("Paste your Retell API key (Retell dashboard → Settings → API keys).");
     expect(result.code).toBe(1);
     expect(lines.at(-1)).toBe(
-      "egma could not finish: no Retell key was given, so there is nothing to test.",
+      "Egma could not finish: no Retell key was given, so there is nothing to test.",
     );
   });
 
@@ -242,7 +242,7 @@ describe("the egma command", () => {
 
     expect(result.code).toBe(1);
     expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(
-      "egma found no voice agent to test. Run egma again where your agent is defined.",
+      "Egma found no voice agent to test. Run egma again where your agent is defined.",
     );
   });
 

@@ -346,7 +346,7 @@ export function measuredCapabilities(
       if (!isCapabilityKey(key)) {
         throw new Error(
           `capability adapter ${source} answered "${key}" among the keys it ` +
-            `${half}, which is not in egma's capability catalog ` +
+            `${half}, which is not in Egma's capability catalog ` +
             `(${CAPABILITY_KEYS.join(", ")})`,
         );
       }

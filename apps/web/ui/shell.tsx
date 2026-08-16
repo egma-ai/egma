@@ -46,7 +46,16 @@ import { useTheme } from "./theme.tsx";
  * navigation and says **No project**, which is the honest answer.
  */
 
-const BRAND_MARK = "/brand/egma-logo.png";
+/*
+ * The approved wordmark, and the reason this constant is named rather than
+ * inlined: `main` replaced the PNG pair with SVGs at `a3ab932` and deleted
+ * `egma-logo.png` outright. This file did not conflict — it is this effort's
+ * own shell — so the merge left the sidebar of *every* page in the product
+ * pointing at a file that is no longer in `public/`. Nothing failed: jsdom
+ * fetches no images, and the browser walk reads the link's label rather than
+ * whether the image behind it arrived. `brand-assets.test.ts` holds it now.
+ */
+const BRAND_MARK = "/brand/egma-wordmark.svg";
 
 export type Session = {
   readonly me: Me | null;
@@ -101,7 +110,7 @@ export function useShellSession(): Session {
 
 function Mark() {
   return (
-    <Image className={styles.mark} src={BRAND_MARK} alt="egma" width={146} height={31} priority />
+    <Image className={styles.mark} src={BRAND_MARK} alt="Egma" width={151} height={41} priority />
   );
 }
 
@@ -322,7 +331,7 @@ export function AppShell({
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHead}>
-          <Link href={shown === null ? "/" : projectLanding(shown)} aria-label="egma">
+          <Link href={shown === null ? "/" : projectLanding(shown)} aria-label="Egma">
             <Mark />
           </Link>
         </div>

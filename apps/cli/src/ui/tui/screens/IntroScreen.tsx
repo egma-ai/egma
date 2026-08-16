@@ -27,7 +27,7 @@ import type { WizardState } from "../state.ts";
  * choose a platform.
  */
 export const ANOTHER_PLATFORM =
-  "For a different egma, quit and run it again with --url <address>.";
+  "For a different Egma instance, quit and run it again with --url <address>.";
 
 /**
  * The same offer for a repository that has already committed a platform, where
@@ -40,7 +40,7 @@ export const ANOTHER_PLATFORM =
  * wrong about what happens next.
  */
 export const BOUND_PLATFORM =
-  "This repository names that egma in egma/config.yaml. A different one is an edit to that file, not a flag on this command.";
+  "This repository names that Egma instance in egma/config.yaml. A different one is an edit to that file, not a flag on this command.";
 
 export type IntroScreenProps = {
   readonly state: WizardState;
@@ -62,9 +62,9 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
-      <Text>egma is about to find your voice agent.</Text>
+      <Text>Egma is about to find your voice agent.</Text>
       <Box height={1} />
       <Text>{`It reads this folder with ${drivenAgentName}, here on this machine, and reports:`}</Text>
       <Box height={1} />
@@ -74,7 +74,7 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
         <Text key={fact.name}> {fact.phrase}</Text>
       ))}
       <Box height={1} />
-      <Text>egma tells it to change nothing. Your code stays on this machine.</Text>
+      <Text>Egma tells it to change nothing. Your code stays on this machine.</Text>
       <Box height={1} />
       <Text>Every action your coding agent takes appears below as it happens.</Text>
       {state.platform === null ? null : (

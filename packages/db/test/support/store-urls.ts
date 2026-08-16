@@ -6,6 +6,15 @@
  * a module it reads these from must not pull in a package that has a `dist/`.
  */
 
+/*
+ * The passwords here are credentials rather than copy: `docker-compose.yml`
+ * defaults both stores to `egma`, lower case, and a store answers to the
+ * password it was created with and to nothing else. `main`'s identity sweep
+ * capitalized them at a3ab932, which made both stores refuse every test in the
+ * suite with an authentication failure that names no file. Restored here, and
+ * left lower case on purpose: the approved identity is what a person reads,
+ * never what a process authenticates with.
+ */
 export const MAINTENANCE_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgres://egma:egma@localhost:5433/egma";
 

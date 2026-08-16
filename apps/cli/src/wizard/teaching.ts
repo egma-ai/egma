@@ -108,7 +108,7 @@ export const LEARN_CARDS: readonly LearnCard[] = [
       "errored.",
       "",
       "A test that could not run is not",
-      "a test that failed, so egma",
+      "a test that failed, so Egma",
       "never counts skipped or errored",
       "as one.",
     ],

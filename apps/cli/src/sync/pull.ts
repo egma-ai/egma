@@ -253,7 +253,7 @@ export async function pullTests(options: PullOptions): Promise<PullReport> {
       const content = pinnedContent(pinned);
       const drifted =
         content === null
-          ? "egma no longer holds the version it pins"
+          ? "Egma no longer holds the version it pins"
           : (faithfulCopy(file.test, content) ??
             (file.test.name === mine.liveName
               ? null

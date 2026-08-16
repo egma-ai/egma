@@ -482,7 +482,7 @@ describe("the whole generate step", () => {
       howManyTests: 1,
     });
 
-    expect(ui.record.statuses.join("\n")).toContain("egma never reads .env files");
+    expect(ui.record.statuses.join("\n")).toContain("Egma never reads .env files");
     // The task that ran carried nothing of the file, and nothing was converted.
     const tasks = await tasksSent();
     expect(tasks.join("\n")).not.toContain("SECRET=shhh");
@@ -735,7 +735,7 @@ describe("the file a developer points at", () => {
     const refused = await readExistingTests(workspace.dir, ".env.local");
     expect(refused).toEqual({
       kind: "unusable",
-      reason: "egma never reads .env files, and never hands one on.",
+      reason: "Egma never reads .env files, and never hands one on.",
     });
   });
 
@@ -783,7 +783,7 @@ describe("the file a developer points at", () => {
       const fenced = await readExistingTests(workspace.dir, "harmless-cases.csv");
       expect(fenced).toEqual({
         kind: "unusable",
-        reason: "egma never reads .env files, and never hands one on.",
+        reason: "Egma never reads .env files, and never hands one on.",
       });
 
       // A link inside the folder pointing at a file inside the folder is an
@@ -978,7 +978,7 @@ describe("a file egma cannot read", () => {
     expect(ui.record.gate?.rows.map((row) => row.name)).toEqual(["price-question"]);
     expect(ui.record.gate?.heldBack).toHaveLength(1);
     expect(ui.record.gate?.heldBack[0]?.shown).toBe("egma/tests/half-written.md");
-    expect(ui.record.gate?.heldBack[0]?.reason).toContain("egma could not read it");
+    expect(ui.record.gate?.heldBack[0]?.reason).toContain("Egma could not read it");
     // The reader's own words, which say where in the file to look.
     expect(ui.record.gate?.heldBack[0]?.reason).toContain("half-written.md, line 2");
 
@@ -1003,8 +1003,8 @@ describe("a test the platform's own door turns away", () => {
   /** The persona nobody authored, which is what the door is refusing. */
   const UNHELD = "somebody-in-a-hurry";
   const REFUSAL =
-    `egma has no persona called "${UNHELD}" in this project. Name a persona ` +
-    `this project already has, or name none and egma takes the project's ` +
+    `Egma has no persona called "${UNHELD}" in this project. Name a persona ` +
+    `this project already has, or name none and Egma takes the project's ` +
     `default.`;
   const GOOD = ["price-question", "sunday-drop-off"];
   const NAMED = "asked-for-the-binder";
@@ -1053,7 +1053,7 @@ describe("a test the platform's own door turns away", () => {
 
     // Said in the platform's words while the push was happening, and named
     // again on the line a machine reads the list by.
-    expect(ui.record.statuses.join("\n")).toContain(`egma would not take egma/tests/${NAMED}.md`);
+    expect(ui.record.statuses.join("\n")).toContain(`Egma would not take egma/tests/${NAMED}.md`);
     expect(lines).toContain(`held-back: egma/tests/${NAMED}.md ${REFUSAL}`);
 
     // The run went on exactly what the second keystroke agreed to.
@@ -1117,7 +1117,7 @@ describe("a test the platform's own door turns away", () => {
     expect(result.code).toBe(0);
     for (const name of GOOD) expect(result.stdout).toContain(`test: ${name} default persona`);
     expect(result.stdout).toContain(`held-back: egma/tests/${NAMED}.md ${REFUSAL}`);
-    expect(result.stdout).toContain(`egma would not take egma/tests/${NAMED}.md: ${REFUSAL}`);
+    expect(result.stdout).toContain(`Egma would not take egma/tests/${NAMED}.md: ${REFUSAL}`);
 
     // The run happened, over what the platform took and nothing else.
     expect(result.stdout).toMatch(/^first-verdict: /mu);

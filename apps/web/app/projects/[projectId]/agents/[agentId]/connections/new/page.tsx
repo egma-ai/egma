@@ -219,7 +219,7 @@ function NewConnection({
     <PageHeader
       eyebrow="Connection"
       title="Add a connection"
-      lead="How egma reaches this agent. An agent can have several: a laptop today, a hosted assistant in staging, a phone number in production."
+      lead="How Egma reaches this agent. An agent can have several: a laptop today, a hosted assistant in staging, a phone number in production."
     />
   );
 
@@ -315,7 +315,7 @@ function NewConnection({
             <TextInput
               id="connection-name"
               value={name}
-              placeholder="Left empty, egma names it after the type"
+              placeholder="Left empty, Egma names it after the type"
               onChange={setName}
             />
           </Field>

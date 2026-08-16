@@ -90,5 +90,5 @@ export const NOT_AUTHENTICATED = {
   error: "not_authenticated",
   message:
     "this request carried no session and no usable API key. " +
-    "Sign in, or send Authorization: Bearer with an egma key.",
+    "Sign in, or send Authorization: Bearer with an Egma key.",
 } as const;

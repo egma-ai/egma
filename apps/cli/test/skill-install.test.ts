@@ -168,7 +168,7 @@ describe("installing it", () => {
 
     expect(second.replaced).toBe(true);
     expect(installedLine("project", second.file, places.name, second.replaced)).toBe(
-      `The egma skill in ${places.project} was replaced with this version's. Commit it, and everybody on this repository has it.`,
+      `The Egma skill in ${places.project} was replaced with this version's. Commit it, and everybody on this repository has it.`,
     );
 
     expect(await filesUnder(repository.dir)).toEqual(

@@ -162,7 +162,7 @@ describe("egma connect", () => {
     // The custody sentence is said before the key is asked for, on this
     // surface as much as on the wizard's.
     expect(result.stdout).toContain(
-      "note: It is sent to egma and stored encrypted. It never lands in a file here.",
+      "note: It is sent to Egma and stored encrypted. It never lands in a file here.",
     );
 
     expect(platform.registered.agents).toHaveLength(1);
@@ -197,7 +197,7 @@ describe("egma connect", () => {
     expect(facts(theirs.stdout).connection_registration).toBe("reused");
     expect(theirs.stdout).toContain(
       "note: This voice agent was already registered as order-line, and retell-1 was " +
-        "already the way egma reaches it. Nothing new was registered.",
+        "already the way Egma reaches it. Nothing new was registered.",
     );
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.connections).toHaveLength(1);
@@ -427,7 +427,7 @@ describe("which connection egma creates", () => {
     const result = await egma(["connect", "--reach", "carrier-pigeon"], { stdin: KEY });
 
     expect(result.code).toBe(CONNECT_EXIT.unchosen);
-    expect(result.stderr).toContain("is not a way egma reaches an agent");
+    expect(result.stderr).toContain("is not a way Egma reaches an agent");
     expect(retell.requests).toHaveLength(0);
   });
 

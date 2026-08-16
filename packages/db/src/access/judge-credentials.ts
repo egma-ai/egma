@@ -127,7 +127,7 @@ function validJudgeProvider(provider: string): JudgeProvider {
   const known = JUDGE_PROVIDERS.find((candidate) => candidate === provider);
   if (known === undefined) {
     throw new UnprocessableInputError(
-      `"${provider}" is not a judge provider egma knows; expected one of ${JUDGE_PROVIDERS.join(", ")}`,
+      `"${provider}" is not a judge provider Egma knows; expected one of ${JUDGE_PROVIDERS.join(", ")}`,
     );
   }
   return known;

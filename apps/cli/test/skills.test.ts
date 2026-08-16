@@ -105,7 +105,7 @@ describe("egma's skills", () => {
     const layout = [
       "egma/",
       "  config.yaml     what this folder points at — names and ids",
-      "  mock-tools.md   what egma answers for the agent's tools with",
+      "  mock-tools.md   what Egma answers for the agent's tools with",
       "  tests/          one markdown file per test",
     ].join("\n");
 
@@ -155,7 +155,7 @@ describe("egma's skills", () => {
       [
         "skills/egma/SKILL.md",
         installableSkill(),
-        "## Keeping the folder and egma in step",
+        "## Keeping the folder and Egma in step",
       ],
       ["skills/writing-tests.md", skill("writing-tests"), "## How to report: marker lines"],
       [
@@ -181,7 +181,7 @@ describe("egma's skills", () => {
     // The two halves behave differently, and a coding agent that did not know
     // which was which would author the wrong one.
     const unwrapped = driving.replace(/\s+/g, " ");
-    expect(unwrapped).toContain("the one authored thing egma does not version");
+    expect(unwrapped).toContain("the one authored thing Egma does not version");
     expect(unwrapped).toContain("That override belongs to the test and is versioned with it");
 
     // The skill that writes tests points at the test's own file and nowhere

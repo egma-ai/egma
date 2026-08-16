@@ -629,7 +629,7 @@ export async function simulationRoutes(
       return narrowerGradingInFlight(
         reply,
         `simulation ${simulationId} is being judged right now, for one grader ` +
-          `that does not cover what you asked for, and egma will not ` +
+          `that does not cover what you asked for, and Egma will not ` +
           `interrupt a judgment that is already running. Nothing was queued ` +
           `and no verdict for this ask is coming. Ask again once those ` +
           `verdicts land.`,

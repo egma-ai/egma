@@ -83,7 +83,7 @@ function targetIn(config: FolderConfig): { readonly agentId: string; readonly co
   const agentId = config.agent?.id ?? "";
   const connectionId = config.connection?.id ?? "";
   if (agentId === "" || connectionId === "") {
-    return "This folder does not say which voice agent to run against, or how egma reaches it. Run egma connect here first.";
+    return "This folder does not say which voice agent to run against, or how Egma reaches it. Run egma connect here first.";
   }
   return { agentId, connectionId };
 }

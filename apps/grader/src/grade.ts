@@ -440,7 +440,7 @@ export async function judgmentsOf(
         verdict: "errored",
         score: 0,
         rationale:
-          "this grader points at a library entry egma cannot read, so there was nothing to judge by.",
+          "this grader points at a library entry Egma cannot read, so there was nothing to judge by.",
         citedSpanIds: [],
       },
     ];

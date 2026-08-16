@@ -1,7 +1,7 @@
 [project]
 name = "egma-livekit-dumb-agent"
 version = "0.1.0"
-description = "A deliberately boring LiveKit agent for egma to simulate against"
+description = "A deliberately boring LiveKit agent for Egma to simulate against"
 requires-python = ">=3.11"
 # `egma` is the SDK a customer installs from PyPI. Here it is the copy in
 # this repository, so the fixture always exercises the seam as it stands

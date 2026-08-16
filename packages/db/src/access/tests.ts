@@ -521,7 +521,7 @@ function validatePersonaIds(ids: readonly string[]): void {
 function contentFromRow(value: unknown, versionId: string): TestContent {
   const malformed = () =>
     new Error(
-      `version ${versionId} holds content in a shape egma never writes; the row needs repairing before anybody can read it`,
+      `version ${versionId} holds content in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
 
   if (typeof value !== "object" || value === null) throw malformed();

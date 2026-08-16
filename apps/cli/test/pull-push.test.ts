@@ -380,7 +380,7 @@ describe("egma init", () => {
 
       expect(refused.code).toBe(4);
       expect(refused.stdout).toContain("status: refused");
-      expect(refused.stderr).toContain("egma does not move a repository between platforms");
+      expect(refused.stderr).toContain("Egma does not move a repository between platforms");
       expect(await readFile(configFile(), "utf8")).toBe(before);
       // Neither platform was asked so much as who it is: the file decided.
       expect(elsewhere.records).toEqual([]);
@@ -1326,10 +1326,10 @@ describe("both verbs, run with nobody watching", () => {
     expect(help.stdout).toContain("egma init");
     expect(help.stdout).toContain("egma pull");
     expect(help.stdout).toContain("egma push");
-    expect(help.stdout).toContain("5 push refused: egma has moved on, pull first");
-    expect(help.stdout).toContain("6 egma turned a test or a mock tool away at its door");
+    expect(help.stdout).toContain("5 push refused: Egma has moved on, pull first");
+    expect(help.stdout).toContain("6 Egma turned a test or a mock tool away at its door");
     expect(help.stdout).toContain(
-      "7 this egma and this platform read different shapes: upgrade one of them",
+      "7 this Egma instance and this platform read different shapes: upgrade one of them",
     );
   });
 

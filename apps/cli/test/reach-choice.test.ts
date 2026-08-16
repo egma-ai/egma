@@ -215,7 +215,7 @@ describe("choosing the phone", () => {
     const { ui } = await run({ reach: "phone" });
 
     expect(ui.record.asked).not.toContain("phone-number");
-    expect(ui.record.statuses).toContain(`◆ egma will dial ${DIALLED}.`);
+    expect(ui.record.statuses).toContain(`◆ Egma will dial ${DIALLED}.`);
   });
 
   it("reads the chosen number's own document before it registers it", async () => {
@@ -255,7 +255,7 @@ describe("choosing the phone", () => {
 
     expect(report).toEqual({
       kind: "failed",
-      reason: "nobody said which number egma should dial.",
+      reason: "nobody said which number Egma should dial.",
     });
     expect(platform.registered.agents).toHaveLength(0);
   });
@@ -302,7 +302,7 @@ describe("choosing neither", () => {
     expect(report).toEqual({
       kind: "failed",
       reason:
-        "nobody said whether egma should reach this agent by text or by phone, " +
+        "nobody said whether Egma should reach this agent by text or by phone, " +
         "so nothing was created.",
     });
     expect(platform.registered.agents).toHaveLength(0);

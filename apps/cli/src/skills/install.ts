@@ -1,5 +1,5 @@
 /**
- * Putting the egma skill where the developer's coding agent will find it.
+ * Putting the Egma skill where the developer's coding agent will find it.
  *
  * Every skill egma has until now is content it *sends* — read out of this
  * package at the moment a task is dispatched, never written anywhere. This is
@@ -182,8 +182,8 @@ export function installedLine(
   // Said first, because it is the only part of this line that is news about
   // something the developer had rather than about something egma did.
   const put = replaced
-    ? `The egma skill in ${file} was replaced with this version's.`
-    : `The egma skill is in ${file}.`;
+    ? `The Egma skill in ${file} was replaced with this version's.`
+    : `The Egma skill is in ${file}.`;
   return scope === "project"
     ? `${put} Commit it, and everybody on this repository has it.`
     : `${put} Every repository you open ${drivenAgentName} in has it.`;
@@ -191,5 +191,5 @@ export function installedLine(
 
 /** What the developer is told when they skip, so skipping is never silent. */
 export function skippedLine(drivenAgentName: string): string {
-  return `Nothing was installed. ${drivenAgentName} can still drive egma — tell it to run egma --help.`;
+  return `Nothing was installed. ${drivenAgentName} can still drive Egma — tell it to run egma --help.`;
 }

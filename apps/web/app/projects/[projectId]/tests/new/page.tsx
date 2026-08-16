@@ -270,7 +270,7 @@ function NewTest({ projectId }: { readonly projectId: string }) {
 
           <Section
             title="Who calls"
-            lead="Choose none and egma takes the project's default persona, so a first test never waits on authoring a caller."
+            lead="Choose none and Egma takes the project's default persona, so a first test never waits on authoring a caller."
           >
             <NamedChoices
               legend="Personas"

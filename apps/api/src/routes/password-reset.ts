@@ -152,7 +152,7 @@ export async function passwordResetRoutes(
 
     return reply.code(202).header("cache-control", "no-store").send({
       message:
-        "if that address has an egma account, a link to set a new password " +
+        "if that address has an Egma account, a link to set a new password " +
         "is on its way to it.",
     });
   });
@@ -279,7 +279,7 @@ function cannotTell(reply: FastifyReply): FastifyReply {
   return reply.code(409).send({
     error: "reset_link_no_longer_works",
     message:
-      "that link no longer works, and it is too old now for egma to say " +
+      "that link no longer works, and it is too old now for Egma to say " +
       "whether it was used before it ran out. If you set a password with it, " +
       "sign in with that one. If nothing happened, ask for another link.",
   });

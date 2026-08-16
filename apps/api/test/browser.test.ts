@@ -295,7 +295,7 @@ describe("adding a colleague, with no mail configured", () => {
 
       // It says what he is joining and at what, and asks for the one thing it
       // needs. The address is the invitation's, so there is nothing to mistype.
-      await bob.waitForSelector("text=Join Acme on egma");
+      await bob.waitForSelector("text=Join Acme on Egma");
       await expect
         .poll(() => bob.inputValue("#email"))
         .toBe("bob@acme.example");
@@ -1617,7 +1617,7 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
 
       // Said beside it, so nobody mistakes egma's own audio for the audio a
       // framework's telemetry attached to a step of this same exchange.
-      expect(await page.innerText("main")).toContain("egma's own audio");
+      expect(await page.innerText("main")).toContain("Egma's own audio");
       saysNothingBanned(await page.innerText("main"));
 
       /*
@@ -2543,7 +2543,7 @@ describe("the complete product, walked in order in a second project", () => {
         address: at("agents", "new"),
         // The refused shape of this page carries the other lead, so this
         // sentence is the form itself rather than the address of it.
-        says: "Its name and description in egma",
+        says: "Its name and description in Egma",
       },
       { what: "one agent", address: agentAddress, says: "The Support line" },
       {
@@ -2633,7 +2633,7 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Keys",
         address: at("settings", "keys"),
-        says: "What a terminal or a script authenticates to egma with",
+        says: "What a terminal or a script authenticates to Egma with",
       },
       {
         what: "Judge",
@@ -3513,7 +3513,7 @@ describe("the complete product, walked in order in a second project", () => {
         // the first Tab is the first focusable thing on the page. Clicking a
         // corner would make the answer depend on what is drawn there.
         await walk.keyboard.press("Tab");
-        expect(await focused()).toBe("egma");
+        expect(await focused()).toBe("Egma");
         await walk.keyboard.press("Tab");
         expect(await focused()).toMatch(/^Organization/u);
         await walk.keyboard.press("Tab");

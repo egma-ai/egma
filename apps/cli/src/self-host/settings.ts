@@ -69,7 +69,7 @@ export class PlatformRefusedError extends Error {
 export class NotSignedInError extends Error {
   constructor(url: string) {
     super(
-      `egma self-host setup writes every answer through this platform's own API, and this machine is not signed in to the egma at ${url}. ` +
+      `The egma self-host setup command writes every answer through this platform's own API, and this machine is not signed in to the Egma instance at ${url}. ` +
         `Run \`egma login --url ${url}\` first — an organization owner's key is what the settings door opens for — then run setup again. Nothing was asked and nothing was written.`,
     );
     this.name = "NotSignedInError";
@@ -102,7 +102,7 @@ async function ask(
     throw new PlatformRefusedError(
       response.status,
       said === ""
-        ? `egma at ${access.url} answered ${response.status} and said nothing about it, so ` +
+        ? `Egma at ${access.url} answered ${response.status} and said nothing about it, so ` +
           "there is nothing here to act on. Look at what that platform logged — " +
           "`docker compose logs api` in its workspace — and run setup again. Nothing was " +
           "written."

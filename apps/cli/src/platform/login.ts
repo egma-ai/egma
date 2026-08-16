@@ -154,7 +154,7 @@ async function waitForPace(wait: Wait): Promise<void> {
     if (typed !== null && typed.trim() !== "") {
       const code = codeFromPaste(typed);
       if (code === null) {
-        wait.say("That is not an egma code or an approval address. Paste the whole line.");
+        wait.say("That is not an Egma code or an approval address. Paste the whole line.");
       } else if (code !== wait.waitingFor) {
         wait.say(
           `That code is ${code}, and this terminal is waiting on ${wait.shownAs}. Approve the one on this screen.`,

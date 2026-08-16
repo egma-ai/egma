@@ -331,7 +331,7 @@ function decodeCursor(cursor: string): CursorPosition {
   const unreadable = (): never => {
     throw new UnreadableTraceQueryError(
       "cursor",
-      "this page token is not one egma issued, or not one this version of the " +
+      "this page token is not one Egma issued, or not one this version of the " +
         "list can still read. Ask for the first page again — a token is a " +
         "position in one ordering and means nothing outside it.",
     );

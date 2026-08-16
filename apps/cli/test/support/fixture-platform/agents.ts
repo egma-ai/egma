@@ -304,7 +304,7 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
           required: false,
           refusal:
             "a phone connection takes no credential: the customer supplies a public number, " +
-            "and egma dials it with its own telephony configuration",
+            "and Egma dials it with its own telephony configuration",
         },
       },
     ],
@@ -351,7 +351,7 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         mixedUp:
           "a livekit connection mints its own tokens, so it needs the " +
           "project's apiKey and apiSecret. Send the pair, or name a " +
-          "tokenEndpoint in the config and egma will ask that endpoint for a " +
+          "tokenEndpoint in the config and Egma will ask that endpoint for a " +
           "token instead — which is the shape where the project's secret " +
           "never leaves the customer.",
       },
@@ -371,7 +371,7 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
           "a livekit connection whose config names a tokenEndpoint asks that " +
           "endpoint for every token, so it holds no key pair of its own: its " +
           "credentials are the endpoint's auth headers, shaped { headers }. " +
-          "Send those, or drop the tokenEndpoint and egma will mint its own " +
+          "Send those, or drop the tokenEndpoint and Egma will mint its own " +
           "tokens from an apiKey and apiSecret.",
       },
     ],
@@ -459,10 +459,10 @@ function refuseUnknownKeyIn(
     if (held.includes(key)) continue;
     if (key === "pulled") {
       throw new Refusal(
-        `egma no longer keeps what was pulled from the provider, so ${what} ` +
+        `Egma no longer keeps what was pulled from the provider, so ${what} ` +
           'has no "pulled" key. Drop it and send ' +
           `${held.join(", ")}; the agent's content stays at the provider, ` +
-          "where egma reads it fresh rather than out of a copy that would go " +
+          "where Egma reads it fresh rather than out of a copy that would go " +
           "stale.",
       );
     }
@@ -475,7 +475,7 @@ function descriptorOf(type: unknown): Descriptor {
   const descriptor = REGISTRY[named];
   if (descriptor === undefined) {
     throw new Refusal(
-      `"${named}" is not a connection type egma knows; expected one of ${CONNECTION_TYPES.join(", ")}`,
+      `"${named}" is not a connection type Egma knows; expected one of ${CONNECTION_TYPES.join(", ")}`,
     );
   }
   return descriptor;

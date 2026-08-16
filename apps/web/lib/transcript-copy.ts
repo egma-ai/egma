@@ -28,9 +28,9 @@ export const LIST = {
   signedOut: "Sign in first",
   signedOutLead: "This page is about your project.",
   signIn: "Sign in",
-  setUp: "Set up egma",
+  setUp: "Set up Egma",
   back: "Back",
-  unreachable: "egma could not be reached. Is the API running?",
+  unreachable: "Egma could not be reached. Is the API running?",
   /**
    * The third sentence is the one that saves an afternoon.
    *
@@ -43,7 +43,7 @@ export const LIST = {
    */
   empty:
     "Nothing was recorded in this window. Point an agent's OpenTelemetry " +
-    "export at egma, or widen the window above. The key that export uses has " +
+    "export at Egma, or widen the window above. The key that export uses has " +
     "to name this project — a key minted for the whole organization files " +
     "its telemetry outside every project, and none of it appears here.",
   window: "Window",
@@ -215,7 +215,7 @@ export const MEASURES = {
   label: "What was measured",
   /** Nothing measured is an ordinary answer, and it says which two ways. */
   none:
-    "Nothing was measured here. egma's own simulations time their turns; an " +
+    "Nothing was measured here. Egma's own simulations time their turns; an " +
     "exchange your agent had carries whatever its telemetry emitted, which " +
     "for most frameworks is no timings at all.",
   /** One measurement is the number; several are the worst of them. */
@@ -231,7 +231,7 @@ export const MEASURES = {
    * count would be worse than useless here: it would say how many measurements
    * arrived, which is not how many there were.
    */
-  partialWorst: "worst of the part egma holds",
+  partialWorst: "worst of the part Egma holds",
 } as const;
 
 /**
@@ -255,9 +255,9 @@ export const MEASURES = {
  * the two speakers a transcript labels, and they are what this says.
  */
 export const RECORDING = {
-  label: "What egma heard",
+  label: "What Egma heard",
   caption:
-    "egma's own audio of this exchange. Left channel is the human side, " +
+    "Egma's own audio of this exchange. Left channel is the human side, " +
     "right channel is the agent.",
   /**
    * Two bands are two units — the narrow band a telephone carries strips what
@@ -269,14 +269,14 @@ export const RECORDING = {
    * every other line here: a reader whose browser refuses one of the two
    * audios on this page still has to know which one it refused.
    */
-  fallback: "Your browser cannot play egma's own audio.",
+  fallback: "Your browser cannot play Egma's own audio.",
   /**
    * Said only once a player has been on screen, and it names whose audio it is
    * for the same reason every other label here does — "this audio could not be
    * played" would leave a reader wondering which of the two failed.
    */
   unplayable:
-    "egma's own audio of this exchange could not be played. The store it " +
+    "Egma's own audio of this exchange could not be played. The store it " +
     "lives in may be unreachable.",
   /**
    * Reached only when egma itself is at fault. A transcript shows nothing for a
@@ -286,7 +286,7 @@ export const RECORDING = {
    */
   unreachable: LIST.unreachable,
   refused: (status: number) =>
-    `egma answered ${String(status)} for the audio it recorded here.`,
+    `Egma answered ${String(status)} for the audio it recorded here.`,
 } as const;
 
 /**

@@ -286,7 +286,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
           </Form>
         </Section>
 
-        <Section title="This project in egma">
+        <Section title="This project in Egma">
           <Facts
             facts={[
               { label: "Identifier", value: project.id },

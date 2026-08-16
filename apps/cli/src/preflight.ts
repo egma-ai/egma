@@ -23,7 +23,7 @@ export function nodeVersionRefusal(version: string): string | null {
   if (Number.isNaN(major) || major >= LOWEST_NODE_MAJOR) return null;
 
   return [
-    `egma needs Node ${LOWEST_NODE_MAJOR} or newer. This machine runs Node ${version}.`,
+    `Egma needs Node ${LOWEST_NODE_MAJOR} or newer. This machine runs Node ${version}.`,
     "",
     `Install Node ${LOWEST_NODE_MAJOR} or newer, then run egma again.`,
   ].join("\n");

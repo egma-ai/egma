@@ -261,7 +261,7 @@ describe("the whole walk, offline", () => {
 
     // And skipping is never silent.
     expect(buildExitNotice(report)).toBe(
-      "Nothing was installed. Claude Code can still drive egma — tell it to run egma --help.",
+      "Nothing was installed. Claude Code can still drive Egma — tell it to run egma --help.",
     );
 
     /* this machine is signed in, and to this egma */

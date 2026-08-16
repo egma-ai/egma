@@ -4,11 +4,11 @@
 
 Every measure a conversation produces, named once and defined once, so that a
 grader references a known measure instead of guessing a string — and so that the
-number egma shows and the number egma judges are the same arithmetic.
+number Egma shows and the number Egma judges are the same arithmetic.
 
 This is a contract document, not a table. Nothing writes a row to declare a
 measure and nothing queries for the list. It sits beside `schemas/` because it
-is the same kind of fact those two schemas are: what egma measures, agreed
+is the same kind of fact those two schemas are: what Egma measures, agreed
 between the control plane and the simulator, versioned so that neither side can
 change it quietly.
 
@@ -29,7 +29,7 @@ this catalog does not name.
 
 The same argument, one level down, is why each measure now carries its
 **span-level definition**. A name says what may be asked for; the definition
-beside it says what egma computes when asked. One shared measure module
+beside it says what Egma computes when asked. One shared measure module
 implements exactly the definitions below, the **Use** form offers exactly the
 measures that have one, and the write door accepts exactly the same list — so a
 developer cannot pick a measure nothing can answer, and the number on the metrics
@@ -56,7 +56,7 @@ or counted.
 | `turn_response_latency` | milliseconds | per turn | every simulation | timing span | How long the agent took to answer, measured once for every turn the persona took. |
 | `time_to_first_word` | milliseconds | per turn | voice simulations | timing span | The quiet before the agent's first word of an answer, measured out of the audio rather than off a clock. |
 | `agent_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long the agent spoke for, silence inside the answer excluded. |
-| `persona_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did. |
+| `persona_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long Egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did. |
 | `turn_count` | turns | once | every simulation | terminal fact | How many transcript turns the conversation reached, both speakers counted. |
 | `measured_audio_band_hertz` | hertz | once | voice simulations | terminal fact | The sample rate the simulator actually heard, negotiated or measured and never copied from configuration. |
 
@@ -153,8 +153,8 @@ a rule somebody has to remember.
   decides whether a number is good; a `latency` grader is somebody deciding that,
   written down, and it is the only thing that turns a measurement into a
   judgment.
-- **Measures a customer defines.** The catalog ships as egma's own contract. A
-  team that wants a number egma does not measure is asking for a feature, and
+- **Measures a customer defines.** The catalog ships as Egma's own contract. A
+  team that wants a number Egma does not measure is asking for a feature, and
   the honest answer today is that the list is this one.
 - **A provider's own latency attributes.** A real caller's telemetry arrives
   through the same OTLP door carrying the agent's own numbers — LiveKit puts an
@@ -162,7 +162,7 @@ a rule somebody has to remember.
   trace read deliberately does not return. Reading one is a decision for the
   ingest door, normalised once for every provider into a span this catalog
   already names; a measure module that parsed provider attributes would be a
-  second normaliser, disagreeing with the first for every framework egma ever
+  second normaliser, disagreeing with the first for every framework Egma ever
   supports. Until then a production trace carries exactly the measures its spans
   carry, which for an agent emitting no timing spans is none — and a grader
   asked for one answers `skipped`, which is the honest word.

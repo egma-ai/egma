@@ -97,7 +97,7 @@ function validProvider(provider: string): JudgeProvider {
   const known = JUDGE_PROVIDERS.find((candidate) => candidate === provider);
   if (known === undefined) {
     throw new UnprocessableInputError(
-      `"${provider}" is not a judge provider egma knows; expected one of ${JUDGE_PROVIDERS.join(", ")}`,
+      `"${provider}" is not a judge provider Egma knows; expected one of ${JUDGE_PROVIDERS.join(", ")}`,
     );
   }
   return known;
@@ -647,7 +647,7 @@ export async function resolveJudgeKey(
 
   if (auth.via !== "engine") {
     throw new Error(
-      "a judge key is resolved by egma's grading engine and by nothing else, because judging is the only thing egma does with one",
+      "a judge key is resolved by Egma's grading engine and by nothing else, because judging is the only thing Egma does with one",
     );
   }
 
@@ -699,7 +699,7 @@ export async function resolveJudgeKey(
 
   if (typeof key !== "string" || key === "") {
     throw new Error(
-      `the judge configuration for project ${row.projectId} holds a key in a shape egma never writes; the row needs repairing before anybody can judge with it`,
+      `the judge configuration for project ${row.projectId} holds a key in a shape Egma never writes; the row needs repairing before anybody can judge with it`,
     );
   }
   return key;

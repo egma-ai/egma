@@ -39,8 +39,8 @@ export function movedRefusal(conflicts: readonly PushConflict[]): string {
   const moved = summarised.filter((conflict) => conflict.reason === "moved").length;
   const opening =
     moved === summarised.length
-      ? `egma has a newer version of ${summarised.length === 1 ? "this test" : "these tests"}: ${names}.`
-      : `egma cannot match ${summarised.length === 1 ? "this test" : "these tests"} to what it holds: ${names}.`;
+      ? `Egma has a newer version of ${summarised.length === 1 ? "this test" : "these tests"}: ${names}.`
+      : `Egma cannot match ${summarised.length === 1 ? "this test" : "these tests"} to what it holds: ${names}.`;
   const pull = `${opening} Run egma pull to bring ${summarised.length === 1 ? "it" : "them"} down, look at what changed, then push again. Nothing was uploaded.`;
   return [pull, ...spoken.map((conflict) => conflict.said)].join(" ");
 }
@@ -77,10 +77,10 @@ export function lateRefusal(
 
   return [
     pushed.length === 0
-      ? `egma took none of these: it refused ${conflicts.length === 1 ? "" : "each of "}${refused} after the check that said it would not.`
-      : `egma uploaded ${String(pushed.length)} of these and then refused ${refused}: somebody moved ${conflicts.length === 1 ? "it" : "them"} between the check and the write. What has landed has landed — ${landed} — and the rest has not.`,
+      ? `Egma took none of these: it refused ${conflicts.length === 1 ? "" : "each of "}${refused} after the check that said it would not.`
+      : `Egma uploaded ${String(pushed.length)} of these and then refused ${refused}: somebody moved ${conflicts.length === 1 ? "it" : "them"} between the check and the write. What has landed has landed — ${landed} — and the rest has not.`,
     ...spoken,
-    "Run egma pull to bring egma's answer down, look at what changed, then push again.",
+    "Run egma pull to bring Egma's answer down, look at what changed, then push again.",
   ].join(" ");
 }
 
@@ -173,7 +173,7 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
   if (turnedAway.length > 0) {
     options.out("status: turned-away");
     options.fail(
-      `egma would not take ${turnedAway.length === 1 ? "one of these" : `${turnedAway.length} of these`}. The reason above is egma's own; fix the ${turnedAway.length === 1 ? "file" : "files"} and push again.`,
+      `Egma would not take ${turnedAway.length === 1 ? "one of these" : `${turnedAway.length} of these`}. The reason above is Egma's own; fix the ${turnedAway.length === 1 ? "file" : "files"} and push again.`,
     );
     return FOLDER_EXIT.turnedAway;
   }

@@ -1,0 +1,337 @@
+---
+title: "Start, Follow, and Cancel Agent Simulation Runs via API"
+sidebarTitle: "Runs"
+description: "Start test runs against a connection, stream live status events, retrieve full results with verdicts, and cancel runs in progress."
+---
+
+A run is an execution of one or more test versions against a specific agent connection. When you start a run, Egma pins the exact test versions you named, freezes the project's mock-tool world as it stands at that moment, and dispatches one simulation per test-version-and-persona combination. Each simulation proceeds through a defined lifecycle, and when all simulations finish, Egma folds their grader judgments into a single run-level verdict.
+
+Runs always execute against pinned **test version ids** — never "whatever is current". This means the test you edited after a run started never touches that run's results. If you name a version id Egma cannot find, or name the same id twice, the entire run creation is refused before a single row is written.
+
+You can follow a run in real time using the events feed, which operates as a numbered cursor: if your connection drops, request again from the last sequence number you applied and you will miss nothing.
+
+---
+
+## Start a run
+
+`POST /api/runs`
+
+Start a new run by specifying the test versions to execute and the connection to use. Returns `201 Created` with the full run object, including every simulation in `queued` state.
+
+The connection type must have a compatible adapter installed on this deployment. If you attempt a `phone` run on a deployment without a carrier configured, Egma returns `phone_setup_required` before writing anything.
+
+### Request body
+
+<ParamField body="test_versions" type="string[]" required>
+  The `tstv_…` version ids to execute. Each id must be unique in the list and must be a version your credential can read. An empty list starts nothing.
+</ParamField>
+
+<ParamField body="connection" type="string" required>
+  The connection id to run the simulations against. This determines which agent and provider handle the calls.
+</ParamField>
+
+<ParamField body="agent" type="string">
+  Optional agent id (`agt_…`). When supplied, Egma verifies the named connection belongs to this agent and refuses with a clear message if it does not. Useful when a client holds both ids and wants to catch mismatches explicitly.
+</ParamField>
+
+<ParamField body="label" type="string">
+  An optional human-readable label for this run, e.g. a branch name, deploy SHA, or release tag.
+</ParamField>
+
+<ParamField body="project" type="string">
+  Project context. Defaults to the project your API key belongs to.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="id" type="string">
+  Unique run identifier (`run_…`).
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current run status. Starts as `running` when simulations are dispatched.
+</ResponseField>
+
+<ResponseField name="agent_id" type="string">
+  The agent the run is executing against.
+</ResponseField>
+
+<ResponseField name="connection_id" type="string">
+  The connection used for this run.
+</ResponseField>
+
+<ResponseField name="connection_type" type="string">
+  Provider type, e.g. `retell` or `livekit`.
+</ResponseField>
+
+<ResponseField name="modality" type="string">
+  Always `voice` for current connection types.
+</ResponseField>
+
+<ResponseField name="label" type="string | null">
+  The label supplied at creation, or `null`.
+</ResponseField>
+
+<ResponseField name="test_versions" type="string[]">
+  The pinned version ids this run executes. These never change after creation.
+</ResponseField>
+
+<ResponseField name="mock_tools" type="object">
+  The mock-tool world frozen at the moment this run started.
+
+  <Expandable title="mock_tools fields">
+    <ResponseField name="defaults" type="object[]">
+      Project-level mock tools frozen for this run. Each entry has `tool`, `answer` or `error`, `delay_ms`, and `mock_tool_id` (the source row).
+    </ResponseField>
+    <ResponseField name="overrides" type="object">
+      Per-test-version overrides, keyed by `tstv_…` version id. Each value is an array of mock tool entries with the same `tool`/`answer`/`error`/`delay_ms` shape.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="expected_simulation_count" type="integer">
+  Total number of simulations this run will conduct.
+</ResponseField>
+
+<ResponseField name="completed_count" type="integer | null">
+  Number of simulations that completed successfully. `null` until the run finishes (all three counts arrive together).
+</ResponseField>
+
+<ResponseField name="failed_count" type="integer | null">
+  Number of simulations that were graded as failed. `null` until the run finishes.
+</ResponseField>
+
+<ResponseField name="canceled_count" type="integer | null">
+  Number of simulations that were canceled. `null` until the run finishes.
+</ResponseField>
+
+<ResponseField name="results_url" type="string">
+  A shareable URL to view the results in the Egma web UI. No token or query parameter — open it with any signed-in browser.
+</ResponseField>
+
+<ResponseField name="verdict" type="string | null">
+  The run-level verdict once grading is complete: `passed`, `failed`, `skipped`, or `errored`. `null` while grading is still in progress.
+</ResponseField>
+
+<ResponseField name="score" type="number | null">
+  Aggregate score across all required graders, or `null` while ungraded.
+</ResponseField>
+
+<ResponseField name="counts" type="object | null">
+  Grading counts (`passed`, `failed`, `skipped`, `errored`) at the run level, or `null` while ungraded.
+</ResponseField>
+
+<ResponseField name="diagnostics" type="object | null">
+  Folded outcome for diagnostic-only (non-required) graders. `null` if no diagnostic graders are configured. Contains `verdict`, `score`, and `counts`.
+</ResponseField>
+
+<ResponseField name="by_grader" type="object[]">
+  Per-grader verdict breakdown once grading is complete. Each entry includes `grader_id`, `required`, `verdict`, `score`, and `counts`.
+</ResponseField>
+
+<ResponseField name="graded_count" type="integer">
+  Number of simulations that have been graded so far. This settles independently of execution — a run can have all simulations `completed` but still show `graded_count` less than `expected_simulation_count`.
+</ResponseField>
+
+<ResponseField name="simulations" type="object[]">
+  Every simulation in this run.
+
+  <Expandable title="simulation fields">
+    <ResponseField name="id" type="string">Simulation identifier.</ResponseField>
+    <ResponseField name="position" type="integer">Order within the run.</ResponseField>
+    <ResponseField name="test_id" type="string">The test this simulation is for (go here to edit).</ResponseField>
+    <ResponseField name="test_name" type="string">The test's current display name.</ResponseField>
+    <ResponseField name="test_version_id" type="string">The exact version that was executed (immutable).</ResponseField>
+    <ResponseField name="persona_id" type="string | null">The persona used for this simulation.</ResponseField>
+    <ResponseField name="persona_name" type="string | null">The persona's display name.</ResponseField>
+    <ResponseField name="status" type="string">Simulation status: `queued`, `running`, `completed`, `failed`, `errored`, or `canceled`.</ResponseField>
+    <ResponseField name="grading" type="string">`pending` or `graded`.</ResponseField>
+    <ResponseField name="verdict" type="string | null">Simulation-level verdict: `passed`, `failed`, `skipped`, or `errored`. `null` while ungraded.</ResponseField>
+    <ResponseField name="score" type="number | null">Simulation-level score, or `null` while ungraded.</ResponseField>
+    <ResponseField name="counts" type="object | null">Per-verdict assertion counts at the simulation level, or `null` while ungraded.</ResponseField>
+    <ResponseField name="diagnostics" type="object | null">Folded diagnostic outcome for this simulation, or `null` if no diagnostic graders are configured.</ResponseField>
+    <ResponseField name="verdicts" type="object[]">Individual assertion judgments. Each entry has `grader_id`, `assertion`, `assertion_text`, `required`, `verdict`, `score`, `rationale`, `cited_turns`, and `judged_at`.</ResponseField>
+    <ResponseField name="reason" type="string | null">The reason the conversation ended (e.g. hangup signal or error message).</ResponseField>
+    <ResponseField name="mock_tool_coverage" type="object | null">Which tools were discovered, covered, and uncovered. `null` if the agent was never asked about its tools.</ResponseField>
+    <ResponseField name="modality" type="string">The modality of this specific conversation.</ResponseField>
+    <ResponseField name="has_recording" type="boolean">`true` if a recording exists. Use `GET /api/simulations/:simulationId/recording` to get a playback URL.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  ISO 8601 timestamp of when the run was started.
+</ResponseField>
+
+<ResponseField name="finished_at" type="string | null">
+  ISO 8601 timestamp of when the run finished, or `null` while still running.
+</ResponseField>
+
+### Example
+
+```bash
+curl -X POST https://your-egma-host/api/runs \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "test_versions": ["tstv_01abc", "tstv_01def"],
+    "connection": "con_01ghi",
+    "label": "release/v2.4.0"
+  }'
+```
+
+---
+
+## Get a run
+
+`GET /api/runs/:runId`
+
+Retrieve the full run object with all simulations, current statuses, and grading results. Use this to seed a follower that did not start the run, or to get a complete snapshot at any point.
+
+### Path parameters
+
+<ParamField path="runId" type="string" required>
+  The `run_…` identifier of the run.
+</ParamField>
+
+### Response fields
+
+Same shape as the start-run response.
+
+### Example
+
+```bash
+curl "https://your-egma-host/api/runs/run_01abc" \
+  -H "Authorization: Bearer <api-key>"
+```
+
+---
+
+## Stream run events
+
+`GET /api/runs/:runId/events`
+
+Poll for changes to a run since a given sequence number. This endpoint is a numbered cursor, not a WebSocket: call it repeatedly, advancing `after` with the `next` value each time. If your connection drops, restart from the last `next` value you applied — you will miss nothing and replay nothing.
+
+`done: true` in the response means the run has finished and no further events will be produced.
+
+### Path parameters
+
+<ParamField path="runId" type="string" required>
+  The `run_…` identifier of the run to follow.
+</ParamField>
+
+### Query parameters
+
+<ParamField query="after" type="integer">
+  The sequence number to start after. Omit (or use `0`) to read from the very first event. Must be a plain non-negative integer — hex, scientific notation, and decimals are rejected.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="events" type="object[]">
+  Events since the requested sequence number, in order.
+
+  <Expandable title="event fields">
+    <ResponseField name="seq" type="integer">Sequence number. Use this value as `after` on the next request.</ResponseField>
+    <ResponseField name="at" type="string">ISO 8601 timestamp.</ResponseField>
+    <ResponseField name="kind" type="string">`run` for run-level changes or `simulation` for simulation-level changes.</ResponseField>
+    <ResponseField name="status" type="string">New status value.</ResponseField>
+    <ResponseField name="simulation_id" type="string">Present on `simulation` events: the simulation that changed.</ResponseField>
+    <ResponseField name="test_name" type="string">Present on `simulation` events: the test being executed.</ResponseField>
+    <ResponseField name="persona_name" type="string">Present on `simulation` events: the persona conducting the call.</ResponseField>
+    <ResponseField name="verdict" type="string | null">Present on `simulation` events: the simulation's verdict once graded, or `null`.</ResponseField>
+    <ResponseField name="reason" type="string | null">Present on `simulation` events: the reason the conversation ended, or `null`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="next" type="integer | null">
+  Pass this as `?after` on your next request. `null` means there are no new events yet (poll again) unless `done` is also `true`.
+</ResponseField>
+
+<ResponseField name="done" type="boolean">
+  `true` when the run has finished and no more events will be produced.
+</ResponseField>
+
+### Example — initial poll
+
+```bash
+curl "https://your-egma-host/api/runs/run_01abc/events" \
+  -H "Authorization: Bearer <api-key>"
+```
+
+### Example — subsequent poll
+
+```bash
+curl "https://your-egma-host/api/runs/run_01abc/events?after=42" \
+  -H "Authorization: Bearer <api-key>"
+```
+
+---
+
+## Cancel a run
+
+`POST /api/runs/:runId/cancel`
+
+Stop a run. Simulations still in `queued` state are canceled immediately. Simulations already dispatched to a conductor receive a stop signal and land as `canceled` when they acknowledge it.
+
+Canceling a run that is already canceled is a no-op and returns the run as-is. Canceling a run that has already finished is refused with `409 Conflict`.
+
+The response is the full run object as it stands after the cancel, so you can read the final counts without a second request. The `completed_count`, `failed_count`, and `canceled_count` fields remain `null` until all three settle together at the finish.
+
+### Path parameters
+
+<ParamField path="runId" type="string" required>
+  The `run_…` identifier of the run to cancel.
+</ParamField>
+
+### Response fields
+
+Same shape as the start-run response: the full run object at its post-cancel state.
+
+### Example
+
+```bash
+curl -X POST "https://your-egma-host/api/runs/run_01abc/cancel" \
+  -H "Authorization: Bearer <api-key>"
+```
+
+---
+
+## Get a simulation recording
+
+`GET /api/simulations/:simulationId/recording`
+
+Retrieve a short-lived signed URL to play back the audio recording of a voice simulation. The URL points directly to the object store; Egma only decides whether you may hear it and then signs. Audio bytes are served directly from storage, so seeking is free.
+
+This endpoint is only meaningful for voice simulations that completed a call. Chat simulations have no recording. A simulation whose call never connected has no recording either.
+
+### Path parameters
+
+<ParamField path="simulationId" type="string" required>
+  The simulation identifier.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="simulation_id" type="string">
+  The simulation this recording belongs to.
+</ResponseField>
+
+<ResponseField name="url" type="string">
+  A short-lived signed URL. Pass directly to an audio player or `<audio>` element.
+</ResponseField>
+
+<ResponseField name="expires_at" type="string">
+  ISO 8601 timestamp of when the URL expires. If the URL has expired, request this endpoint again for a fresh one.
+</ResponseField>
+
+<ResponseField name="measured_audio_band_hertz" type="integer | null">
+  The audio bandwidth the recording was measured at (e.g. `8000` for narrow-band telephone audio, `16000` for wideband). `null` for recordings written before this measurement was introduced. Two simulations with different bands are different units: a narrow-band recording strips what an audio grader reads.
+</ResponseField>
+
+### Example
+
+```bash
+curl "https://your-egma-host/api/simulations/sim_01abc/recording" \
+  -H "Authorization: Bearer <api-key>"
+```

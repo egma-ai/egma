@@ -462,7 +462,7 @@ function Invitations({
     <>
       <Section
         title="Invite somebody"
-        lead="If no mail transport is configured, egma gives you a one-time link to send yourself."
+        lead="If no mail transport is configured, Egma gives you a one-time link to send yourself."
       >
         {note === null ? null : <Help>{note}</Help>}
         {link === null ? null : (

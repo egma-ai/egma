@@ -508,7 +508,7 @@ function RunDetailView({
           {simulations.length === 0 ? (
             <Empty
               title="No conversation has been written yet"
-              lead="This run's conversations appear here as egma writes them."
+              lead="This run's conversations appear here as Egma writes them."
             />
           ) : (
             <DataTable

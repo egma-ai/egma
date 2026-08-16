@@ -154,7 +154,7 @@ describe("the key screen", () => {
     const asking = await showing(
       run,
       "Paste your Retell API key",
-      "It is sent to egma and stored encrypted. It never lands in a file here.",
+      "It is sent to Egma and stored encrypted. It never lands in a file here.",
       ...KEY_HINTS,
     );
     // Nothing is on the line before anything is typed.
@@ -174,7 +174,7 @@ describe("the key screen", () => {
 
     // Text or phone, put to the person at the keyboard. Text is taken here;
     // the phone has a check of its own below.
-    await showing(run, "How should egma reach this agent?", "[enter] reach it this way");
+    await showing(run, "How should Egma reach this agent?", "[enter] reach it this way");
     run.write("\r");
 
     // The walk carries on to the one question the generate step asks. It is
@@ -215,7 +215,7 @@ describe("stopping at the key screen", () => {
     await showing(
       run,
       "Paste your Retell API key",
-      "It is sent to egma and stored encrypted. It never lands in a file here.",
+      "It is sent to Egma and stored encrypted. It never lands in a file here.",
       ...KEY_HINTS,
     );
     // Half a key typed, and then stopped: the characters exist only inside the
@@ -265,7 +265,7 @@ describe("the picker", () => {
     await showing(run, "\u203a after-hours");
     run.write("\r");
 
-    await showing(run, "How should egma reach this agent?");
+    await showing(run, "How should Egma reach this agent?");
     run.write("\r");
 
     // Past the one question the generate step asks, and past its gate.
@@ -296,10 +296,10 @@ describe("the choice between text and phone", () => {
 
     const offered = await showing(
       run,
-      "How should egma reach this agent?",
-      "Text — egma exchanges messages with the agent.",
-      "Phone — egma dials one of the agent's numbers",
-      "egma creates the one you choose, and only that one.",
+      "How should Egma reach this agent?",
+      "Text — Egma exchanges messages with the agent.",
+      "Phone — Egma dials one of the agent's numbers",
+      "Egma creates the one you choose, and only that one.",
     );
     // Nothing is chosen for the developer: the phone is the second row, and
     // reaching it takes a keystroke.
@@ -322,7 +322,7 @@ describe("the choice between text and phone", () => {
     // One number reaches this agent, so there was nothing to choose between —
     // and the number egma was about to dial was said all the same, because it
     // is the one fact in the walk that costs somebody money.
-    expect(run.raw()).toContain(`egma will dial ${DIALLED}.`);
+    expect(run.raw()).toContain(`Egma will dial ${DIALLED}.`);
 
     // The phone connection, and nothing else. No retell connection was made
     // alongside it, and the key never reached egma at all.
@@ -349,7 +349,7 @@ describe("the choice between text and phone", () => {
 
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\n`);
-    await showing(run, "How should egma reach this agent?");
+    await showing(run, "How should Egma reach this agent?");
     run.write("\u001B[B");
     await showing(run, "\u203a Phone");
     run.write("\r");
@@ -359,7 +359,7 @@ describe("the choice between text and phone", () => {
     // answers is never on this screen at all.
     const listed = await showing(
       run,
-      "Which number should egma dial?",
+      "Which number should Egma dial?",
       DIALLED,
       ALSO_DIALLED,
       "[enter] dial this one",
@@ -394,7 +394,7 @@ describe("the choice between text and phone", () => {
 
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\n`);
-    await showing(run, "How should egma reach this agent?", "[esc] neither");
+    await showing(run, "How should Egma reach this agent?", "[esc] neither");
     run.write("\u001B");
 
     expect(await run.exited).toBe(1);

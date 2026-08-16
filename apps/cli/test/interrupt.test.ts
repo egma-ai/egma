@@ -141,7 +141,7 @@ describe("Ctrl-C while the browser is being waited on", () => {
     const terminal = startWizard(script);
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
       // The login screen: a code to approve, an address it is already in, and
@@ -156,16 +156,16 @@ describe("Ctrl-C while the browser is being waited on", () => {
         terminal,
         "Code:",
         "Approve this code",
-        "While you were away, egma looked around:",
+        "While you were away, Egma looked around:",
         "Coding agent   node",
         "Git            not a repository",
-        "egma folder    none yet — egma will make one",
+        "egma folder    none yet — Egma will make one",
       );
 
       terminal.write(CTRL_C);
 
       expect(await terminal.exited).toBe(130);
-      expect(terminal.scrollback().trim()).toBe("egma stopped before the task finished.");
+      expect(terminal.scrollback().trim()).toBe("Egma stopped before the task finished.");
 
       // Nothing was driven, so nothing was written and nothing was registered.
       expect(await testsInFolder()).toEqual([]);
@@ -193,7 +193,7 @@ describe("Ctrl-C while the coding agent is working", () => {
     const terminal = startWizard(script);
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
       await showing(terminal, "Reading the repository");
 
@@ -208,7 +208,7 @@ describe("Ctrl-C while the coding agent is working", () => {
 
       expect(await terminal.exited).toBe(130);
       expect(terminal.scrollback().trim()).toBe(
-        "egma stopped before the task finished, and shut node down.",
+        "Egma stopped before the task finished, and shut node down.",
       );
 
       // The agent's own process is gone, and so is the one it started.
@@ -248,7 +248,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
     const terminal = startWizard(script);
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
       await showing(terminal, "Paste your Retell API key");
@@ -256,7 +256,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
 
       // Text or phone. Not this check's subject, and not skippable
       // either: egma never picks one of the two for a developer.
-      await showing(terminal, "How should egma reach this agent?");
+      await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 
       await showing(terminal, "Do you already have test cases");
@@ -272,7 +272,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
       // shut nothing down. It stopped, and the files are where they always were.
       expect(await terminal.exited).toBe(130);
       expect(terminal.scrollback().trim()).toBe(
-        "egma stopped. Your 3 tests are in egma/tests/ — read them, then run egma push.",
+        "Egma stopped. Your 3 tests are in egma/tests/ — read them, then run egma push.",
       );
 
       // The agent that wrote them, and the process it started, are both gone —
@@ -338,7 +338,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
     });
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
       await showing(terminal, "Paste your Retell API key");
@@ -346,7 +346,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
 
       // Text or phone. Not this check's subject, and not skippable
       // either: egma never picks one of the two for a developer.
-      await showing(terminal, "How should egma reach this agent?");
+      await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 
       await showing(terminal, "Do you already have test cases");

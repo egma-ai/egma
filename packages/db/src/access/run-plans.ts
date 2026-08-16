@@ -189,7 +189,7 @@ export async function resolvePinnedVersions(
     if (row === undefined) {
       refuseRun(
         "not_admitted",
-        `there is no test version ${id} on this egma. Push the test first, ` +
+        `there is no test version ${id} on this Egma instance. Push the test first, ` +
           `or read the test and pin the version_id it names now.`,
       );
     }
@@ -412,11 +412,11 @@ export function skipExplanation(
 ): string {
   const named = decision.capabilities.join(", ");
   return decision.reason === "required_capability_unsupported"
-    ? `This connection was measured and does not support ${named}, so egma ` +
+    ? `This connection was measured and does not support ${named}, so Egma ` +
         `did not conduct this simulation. Nothing is being said about the ` +
         `agent; choose a connection that supports it, or a test that does not ` +
         `require it.`
-    : `Nobody has measured whether this connection supports ${named}, so egma ` +
+    : `Nobody has measured whether this connection supports ${named}, so Egma ` +
         `did not conduct this simulation. Nothing is being said about the ` +
         `agent; refresh the connection's capabilities and start the run again.`;
 }
@@ -974,7 +974,7 @@ export async function planRun(
       "connection_not_on_agent",
       `connection ${request.connectionId} is not on agent ${request.agentId}. ` +
         `Name the agent that connection is on, or leave the agent out and ` +
-        `egma takes the connection's own.`,
+        `Egma takes the connection's own.`,
     );
   }
 

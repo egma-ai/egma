@@ -362,7 +362,7 @@ describe("a write that cannot be acted on", () => {
         // here rather than written and forgotten.
         { not_a_setting: "anything" } as unknown as PlatformSettingValues,
       ),
-    ).rejects.toThrow(/not a platform setting egma knows/u);
+    ).rejects.toThrow(/not a platform setting Egma knows/u);
   });
 
   it("refuses an empty value, because clearing a setting is not writing one", async () => {
@@ -513,7 +513,7 @@ describe("the one door to the plaintext", () => {
       { ...claimed(), via: "engine" } as AuthContext,
     ]) {
       await expect(resolvePlatformSettings(auth)).rejects.toThrow(
-        /egma's own simulator/u,
+        /Egma's own simulator/u,
       );
     }
   });

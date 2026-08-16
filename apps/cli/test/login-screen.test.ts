@@ -143,7 +143,7 @@ async function declineTheKey(terminal: TerminalRun): Promise<void> {
   terminal.write("");
   expect(await terminal.exited).toBe(1);
   expect(terminal.scrollback().trim()).toBe(
-    "egma could not finish: no Retell key was given, so there is nothing to test.",
+    "Egma could not finish: no Retell key was given, so there is nothing to test.",
   );
 }
 

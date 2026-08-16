@@ -226,7 +226,7 @@ describe("creating a test", () => {
     expect(refused.body).toEqual({
       error: "unprocessable",
       message:
-        'egma has no persona called "Impatient Rita" in this project. Name a persona this project already has, or name none and egma takes the project\'s default.',
+        'Egma has no persona called "Impatient Rita" in this project. Name a persona this project already has, or name none and Egma takes the project\'s default.',
     });
 
     const { rows } = await api.database.sql("select id from test");
@@ -311,7 +311,7 @@ describe("creating a test", () => {
       message:
         "personas is the list of people who call about this test, by name. " +
         'Send it as a list of text, like ["impatient-caller"], or leave it ' +
-        "out and egma takes the project's default persona.",
+        "out and Egma takes the project's default persona.",
     });
 
     const { rows } = await api.database.sql("select id from test");
@@ -644,7 +644,7 @@ describe("one frozen version", () => {
     expect(refused.statusCode).toBe(404);
     expect(refused.body).toEqual({
       error: "not_found",
-      message: `there is no test version ${missing} on this egma. List the tests to see the version each of them stands on now.`,
+      message: `there is no test version ${missing} on this Egma instance. List the tests to see the version each of them stands on now.`,
     });
   });
 
@@ -668,7 +668,7 @@ describe("one frozen version", () => {
     expect(refused.statusCode).toBe(404);
     expect(refused.body).toEqual({
       error: "not_found",
-      message: `there is no test version ${theirs} on this egma. List the tests to see the version each of them stands on now.`,
+      message: `there is no test version ${theirs} on this Egma instance. List the tests to see the version each of them stands on now.`,
     });
   });
 });
@@ -1001,7 +1001,7 @@ describe("who may do what", () => {
       error: "not_authenticated",
       message:
         "this request carried no session and no usable API key. " +
-        "Sign in, or send Authorization: Bearer with an egma key.",
+        "Sign in, or send Authorization: Bearer with an Egma key.",
     });
   });
 
@@ -1027,7 +1027,7 @@ describe("who may do what", () => {
       error: "not_authenticated",
       message:
         "this request carried no session and no usable API key. " +
-        "Sign in, or send Authorization: Bearer with an egma key.",
+        "Sign in, or send Authorization: Bearer with an Egma key.",
     });
   });
 });
@@ -1065,7 +1065,7 @@ describe("the project a write lands in", () => {
         error: "invalid_request",
         message:
           "this organization holds more than one project and this credential " +
-          "names none, so egma cannot tell which project this is about. Send " +
+          "names none, so Egma cannot tell which project this is about. Send " +
           "project with the one you mean, or use a key minted for that project.",
       });
     }

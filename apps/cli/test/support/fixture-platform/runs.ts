@@ -250,9 +250,9 @@ const NO_SUCH_RUN =
  */
 export function noAdapterMessage(type: string, conductable: readonly string[]): string {
   return (
-    `egma has no simulator adapter for a ${type} connection yet, ` +
+    `Egma has no simulator adapter for a ${type} connection yet, ` +
     `so it will not start a run it cannot conduct. Run these tests over a ` +
-    `connection egma conducts today: ${conductable.join(", ")}.`
+    `connection Egma conducts today: ${conductable.join(", ")}.`
   );
 }
 
@@ -261,7 +261,7 @@ const MOST_SIMULATIONS_PER_RUN = 200;
 
 /** What a caller does instead, when a run named the wrong agent. */
 const NAME_THE_RIGHT_AGENT =
-  "Name the agent that connection is on, or leave the agent out and egma " +
+  "Name the agent that connection is on, or leave the agent out and Egma " +
   "takes the connection's own.";
 
 export function runRoutes(options: {
@@ -480,7 +480,7 @@ export function runRoutes(options: {
         422,
         "unprocessable",
         "a run is conducted over a connection, and this request named none. " +
-          "Send connection with the con_ id of the way egma should reach the " +
+          "Send connection with the con_ id of the way Egma should reach the " +
           "agent — registering the agent answered with one.",
       );
     }
@@ -547,7 +547,7 @@ export function runRoutes(options: {
         return refuse(
           422,
           "unprocessable",
-          `there is no test version ${versionId} on this egma. Push the test ` +
+          `there is no test version ${versionId} on this Egma instance. Push the test ` +
             `first, or read the test and pin the version_id it names now.`,
         );
       }

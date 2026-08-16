@@ -1,0 +1,132 @@
+---
+title: "Egma CLI — Your Voice Agent Testing Command Center"
+sidebarTitle: "Overview"
+description: "Install and run @egma/cli to connect voice agents, generate test suites, and launch simulations — all from one interactive wizard or scriptable commands."
+---
+
+The Egma CLI is the official command-line interface for Egma. It connects your voice agent to the platform, generates a first suite of tests grounded in your actual code and prompts, and starts simulations — all in a single command. You can drive it interactively with the built-in wizard, or run every step as a plain scriptable command for CI and coding-agent workflows.
+
+## Requirements
+
+You need **Node 22 or newer**. You do not need to install the package globally — `npx` handles it on demand. You also need a coding agent installed: Claude Code and Codex both work out of the box, as does any agent listed in the Agent Client Protocol registry.
+
+## Running the CLI
+
+Run the CLI from the root of your voice-agent repository:
+
+```bash
+npx @egma/cli
+```
+
+No global install is needed. The command the package registers is `egma`, so if you do install it globally you call it the same way.
+
+<Note>
+  Run `npx @egma/cli` from the directory that holds your agent's code and
+  prompts. If your prompts live in a separate folder, the wizard asks once and
+  looks there.
+</Note>
+
+## The interactive wizard
+
+Running `npx @egma/cli` with no arguments opens the full interactive wizard. It walks you through every step in order, asks one question at a time, and requires a single keystroke to start — which is how you agree to let Egma drive your coding agent.
+
+<Steps>
+  <Step title="Sign in">
+    Egma shows a short device code and opens your browser to a page that already has it pre-filled. Approve it there (creating an account first if you are new). No secret is ever typed into the terminal — the key Egma receives is written to `~/.egma/credentials`, readable only by you.
+  </Step>
+  <Step title="Discover your agent">
+    Egma starts the coding agent you already have and hands it internal notes on voice-agent architecture. Your coding agent reads your repository and reports: which framework runs the agent, where its prompts live, where its tools are defined, how it reaches production, and where its identifier is stored. Every action appears on screen as it happens. Your code and prompts never leave your machine.
+  </Step>
+  <Step title="Connect your agent">
+    Egma asks for your Retell API key (entered as dots, never logged or written to a file) and lists the agents on the account. You pick one. Then you choose how Egma should reach it — **Text** (message-based, exercises prompt and tools) or **Phone** (dials a real number, exercises the full speech stack). Egma creates exactly that connection and nothing else.
+  </Step>
+  <Step title="Generate a test suite">
+    The wizard asks whether you already have test cases written down. Drop a path to a file inside your repository and your coding agent turns each entry into a test file first. Press `[n]` and Egma writes the whole suite itself. Tests arrive one file at a time in `egma/tests/`, each grounded in what your provider is actually running.
+  </Step>
+  <Step title="Review and run">
+    The wizard shows the full list of generated tests. Press `[e]` to open any file in your `$EDITOR`, `[q]` to quit with every file saved to your repository for later, or `[Enter]` to push the suite and start a run immediately.
+  </Step>
+  <Step title="First verdict">
+    The wizard follows the run and closes as soon as the first verdict lands — that is the point where you stop taking Egma's word for it. The rest of the suite keeps running on Egma; closing your terminal never stops a run.
+  </Step>
+</Steps>
+
+<Tip>
+  Over SSH or in a container without a browser? Press `[c]` during sign-in and
+  Egma copies the approval URL to your local clipboard. Approve it in a browser
+  on your local machine, then paste the URL or the code back into the terminal.
+</Tip>
+
+## Available commands
+
+Every step the wizard takes is also available as a standalone command that prints one fact per line and exits with a number you can branch on — perfect for CI pipelines and coding agents.
+
+| Command | What it does |
+|---|---|
+| `egma` | Opens the interactive wizard |
+| `egma login` | Signs this machine in, no questions asked |
+| `egma connect` | Registers your voice agent and a reach method |
+| `egma init` | Creates the `egma/` folder in your repository |
+| `egma pull` | Writes Egma's current test versions into your local files |
+| `egma push` | Uploads your local tests to Egma |
+| `egma run` | Runs this folder's tests against your connected agent |
+| `egma self-host up` | Starts a full local Egma instance |
+| `egma self-host setup` | Configures a running local instance |
+
+See [Commands](/cli/commands) for full reference documentation on flags, exit codes, and environment variables.
+
+## The `egma/` folder
+
+The wizard (or `egma init`) creates an `egma/` folder in your repository. Everything in it is committed to version control — nothing secret ever lands there, so there are no `.gitignore` lines to write.
+
+```
+egma/
+  config.yaml      names and IDs pointing at your Egma instance
+  mock-tools.md    mocked tool responses for simulations
+  tests/           one .md file per test case
+```
+
+Your tests are code. Your team reviews them in pull requests, edits them in the same editor, and keeps their history in the same git log. See [Test Files](/cli/test-files) for a full explanation of the file format.
+
+## How the CLI works with coding agents
+
+The CLI communicates with your coding agent over the [Agent Client Protocol](https://agentclientprotocol.com). Your coding agent runs as a subprocess and Egma acts as the client. The registry of available agents — and the command that starts each one — is mirrored inside the CLI package, so the first run needs no network lookup.
+
+Egma answers every permission request the agent raises and starts it in the most permissive mode available, so you are not interrupted mid-flow. Every action the agent takes is shown on screen as it happens.
+
+<Warning>
+  Any file whose name starts with `.env` is always refused when the agent
+  requests it through Egma. Secrets must not enter a model's context. Egma
+  refuses the file, tells the agent to work from your code instead, and asks
+  you for anything it still needs.
+</Warning>
+
+## The SKILL.md file
+
+At the end of the wizard, Egma asks whether you want to install a skill file that teaches Claude (or Codex) to drive Egma on its own:
+
+- **`[p]` Project** — writes `.claude/skills/egma/SKILL.md` inside your repository. Commit it and your whole team has it.
+- **`[g]` Global** — writes `~/.claude/skills/egma/SKILL.md`, active for every repository you open.
+- **`[s]` Skip** — writes nothing. `egma --help` is enough for any coding agent to drive the full product.
+
+Egma writes the file itself. Nothing is downloaded, nothing else on your machine is modified, and the exact path is shown on screen before you confirm.
+
+Codex uses the same skill convention under `.codex/` instead. A coding agent that has no known skill convention is not offered one.
+
+## Pointing at your own Egma instance
+
+If you run Egma self-hosted, pass `--url` to name your instance:
+
+```bash
+npx @egma/cli --url http://localhost:3101
+```
+
+To avoid repeating the URL, run `egma init --url http://localhost:3101` once. That command verifies the instance's identity and writes it into `egma/config.yaml`. Every subsequent command in that repository finds it there automatically.
+
+## Running headlessly in CI
+
+Pass `--headless` to skip the interactive terminal and receive plain lines instead. Combined with the right environment variables, the full sign-in and connect flow runs without any human in the loop:
+
+```bash
+EGMA_RETELL_API_KEY=your_key EGMA_REACH=text npx @egma/cli --headless
+```

@@ -1,0 +1,263 @@
+---
+title: "Self-Hosting Egma: Deploy on Your Own Infrastructure"
+sidebarTitle: "Self-Hosting"
+description: "Run Egma with Docker Compose — set required secrets, configure LLM and speech providers, enable phone simulation, and invite your team."
+---
+
+Egma is fully self-hostable. A single `npx @egma/cli self-host up` command starts the entire stack — API, web application, simulator, grader, databases, object store, and media server — on your own machine or server. This guide walks you through the prerequisites, required secrets, provider configuration, and day-two operations so you can run a production-ready instance without surprises.
+
+## Prerequisites
+
+Before you start, make sure you have:
+
+- **Node 22 or newer** — the Egma CLI requires it
+- **Docker with Compose** — the only runtime dependency for the platform itself
+- A clone of the Egma repository, or a dedicated workspace directory where you will store platform credentials and configuration
+
+<Note>
+  The platform workspace (where you run `self-host up`) is deliberately separate from your agent repository. Platform credentials belong to whoever operates the platform; an agent repository holds only tests and the address of the platform it points at. On one laptop both are often yours, and they are still two directories — one platform serves many agent repositories.
+</Note>
+
+## Step 1 — Copy and fill in the environment file
+
+Clone the Egma repository, then copy the example environment file:
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` in an editor. Most values have working defaults and you can leave them alone. **Ten variables have no default and the platform refuses to start without them.** They are marked `REQUIRED` in `.env.example`. The sections below explain each one and how to generate it.
+
+## Step 2 — Set the required secrets
+
+Seven of the ten required values are secrets you generate yourself. The remaining three — the LiveKit API key and secret, and `EGMA_BASE_URL` — are set automatically when you run `self-host up`.
+
+### `EGMA_ENCRYPTION_KEY`
+
+Seals every provider credential and platform setting stored in the database. Generate a 32-byte hex string:
+
+```bash
+openssl rand -hex 32
+```
+
+<Warning>
+  Back up this key alongside your database. The stored credentials and settings are unrecoverable without it. A database backup without the encryption key is half a backup.
+</Warning>
+
+### `EGMA_AUTH_SECRET`
+
+Signs session cookies. Any session minted without this secret will be invalid after a restart, so keep it stable.
+
+```bash
+openssl rand -base64 32
+```
+
+### `EGMA_SIMULATOR_SERVICE_TOKEN`
+
+The token the simulator shows the API to claim simulation work. The API checks it on every claim request because the answers carry your live provider credentials.
+
+```bash
+echo "egma_st_$(openssl rand -hex 32)"
+```
+
+The value must start with `egma_st_` so that secret scanners can recognise a leak. Set it in `.env` once and both the API container and the simulator container read it — they always match.
+
+### S3 credentials (four values)
+
+Egma ships with a MinIO object store for voice simulation recordings. You need two credential pairs: one with write access (for the simulator to upload recordings) and one that is read-only (for the API to sign playback links).
+
+```bash
+# Write pair — admin access to the object store
+EGMA_S3_ACCESS_KEY_ID=your-chosen-access-key-id
+EGMA_S3_SECRET_ACCESS_KEY=your-chosen-secret-key    # minimum 8 characters
+
+# Read-only pair — the API uses this to sign playback links
+EGMA_S3_READ_ACCESS_KEY_ID=your-chosen-read-key-id
+EGMA_S3_READ_SECRET_ACCESS_KEY=your-chosen-read-secret
+```
+
+Choose strong random values for all four. The write credential is the store's root credential and can list, replace, and delete every recording you hold — treat it accordingly.
+
+<Warning>
+  The object store port (`9000` by default) is bound to loopback by default. That is a security decision: what answers on that port is the store's admin surface. If you need browsers on other machines to play recordings, set `EGMA_S3_BIND=0.0.0.0` and update `EGMA_BLOB_PUBLIC_URL` to the address those browsers reach — but change `EGMA_S3_SECRET_ACCESS_KEY` first.
+</Warning>
+
+### Summary of all ten required variables
+
+| Variable | What it is | How to supply |
+|----------|-----------|---------------|
+| `EGMA_ENCRYPTION_KEY` | Seals stored credentials and settings | `openssl rand -hex 32` |
+| `EGMA_AUTH_SECRET` | Signs session cookies | `openssl rand -base64 32` |
+| `EGMA_SIMULATOR_SERVICE_TOKEN` | Authenticates the simulator to the API | `echo "egma_st_$(openssl rand -hex 32)"` |
+| `EGMA_S3_ACCESS_KEY_ID` | Object store root credential (write) | Choose a strong random string |
+| `EGMA_S3_SECRET_ACCESS_KEY` | Object store root secret (write, min 8 chars) | Choose a strong random string |
+| `EGMA_S3_READ_ACCESS_KEY_ID` | Object store read-only credential | Choose a strong random string |
+| `EGMA_S3_READ_SECRET_ACCESS_KEY` | Object store read-only secret | Choose a strong random string |
+| `EGMA_BASE_URL` | The address people reach this instance at | Set automatically by `egma self-host up` |
+| `EGMA_LIVEKIT_API_KEY` | Media server authentication key | Set automatically by `egma self-host up` |
+| `EGMA_LIVEKIT_API_SECRET` | Media server authentication secret | Set automatically by `egma self-host up` |
+
+## Step 3 — Start the platform
+
+Run the CLI's `self-host up` command from your platform workspace:
+
+```bash
+npx @egma/cli self-host up
+```
+
+This command:
+1. Generates the LiveKit API key and secret for your workspace, writes them to `.egma-platform/platform.env`, and sets `EGMA_BASE_URL` to the printed address
+2. Starts all containers and waits for the platform to answer
+3. Reports what the platform is **still missing** (provider configuration) and what is ready
+
+```
+platform: up
+url: http://localhost:3101
+setup: setup_required
+missing: persona_model, persona_tts, persona_stt
+phone: not_configured
+```
+
+A started platform is not yet a configured one. Open `http://localhost:3101`, sign up, and claim the instance. You become the organization admin. **The first person to sign up claims it — open signup closes behind them.** Everyone after that arrives by invitation.
+
+<Note>
+  `egma self-host up` is not the same as `docker compose up`. The CLI version generates the media server credentials, waits for the platform to be healthy, and handles first-boot initialization automatically. Use `egma self-host up` every time you start the platform.
+</Note>
+
+## Step 4 — Configure providers with `egma self-host setup`
+
+Log in as the organization owner, then run the interactive setup wizard:
+
+```bash
+npx @egma/cli login --url http://localhost:3101
+npx @egma/cli self-host setup
+```
+
+The wizard asks the platform what it is missing and then prompts you for exactly that — in a fixed order so you can gather one provider's credentials at a time:
+
+1. **LLM provider** — who the simulator persona thinks with (e.g. OpenAI GPT-4o)
+2. **TTS provider** — what the persona speaks with (e.g. ElevenLabs)
+3. **STT provider** — what the persona hears with (e.g. Deepgram)
+4. **Phone carrier** — a Twilio account and number for phone simulations (optional — press Enter to skip)
+
+Every answer is written through the platform's own API and sealed with `EGMA_ENCRYPTION_KEY`. Settings survive restarts, upgrades, and moves to another machine. A setting the platform already holds is never asked for again — running setup a second time after adding one new credential asks exactly one question.
+
+<Tip>
+  To see what the wizard would ask without writing anything, run:
+
+  ```bash
+  npx @egma/cli self-host setup --plan
+  ```
+
+  For automated deployments where no human is watching, every answer can come from the environment variable named for it in `.env.example`:
+
+  ```bash
+  npx @egma/cli self-host setup --apply --yes --json
+  ```
+</Tip>
+
+### Phone configuration (Twilio)
+
+For phone simulation, the setup wizard asks for your Twilio account SID, an Auth Token, and a voice number **already on your account** — Egma never buys, ports, or registers numbers.
+
+The wizard shows a plan of what it will create before writing anything to your Twilio account. On approval it creates the SIP trunk, attaches your number and a credential, and writes the trunk details into the platform's sealed store. The Auth Token is used once and kept nowhere afterward.
+
+<Note>
+  Phone simulation requires the SIP gateway to be reachable from your carrier. On a server with a public IP or 1:1 NAT, set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to your public address and open UDP port 5060 plus the RTP range (default `10000–10020`) to your carrier's IP ranges. On a laptop behind a home router, try it — Twilio supports symmetric RTP latching and many home routers work fine.
+</Note>
+
+## Service URLs
+
+After startup, the following services are available:
+
+| Service | Address | Notes |
+|---------|---------|-------|
+| Web application | `http://localhost:3101` | Sign in, view runs, manage the organization |
+| API | `http://localhost:3100` | REST API and OTLP ingest endpoint |
+| Object store | `http://localhost:9000` | Loopback only by default; browser playback address |
+| LiveKit server | `127.0.0.1:7880` | Local machine only |
+
+The simulator and grader publish no ports — they claim work outbound and need no inbound networking.
+
+### Receiving telemetry from your agent
+
+Point your agent's OTLP exporter at the API to stream production spans:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3100
+export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
+```
+
+Use your API's address (port 3100), not the web application (port 3101). Mint the exporter's API key against a specific project so spans appear in the dashboard.
+
+## Single-organization mode
+
+By default, Egma runs in single-organization mode:
+
+```bash
+EGMA_SINGLE_ORGANIZATION=true
+```
+
+The first person to sign up claims the organization and becomes its admin. After that, signup is closed and new users arrive by invitation only — admins send invitations from the `/members` page. If you are building a multi-tenant deployment, set this to `false`.
+
+## Adding a second user
+
+Open `/members` in the web application, enter an email address, select a role, and send. If no SMTP server is configured, the invitation link comes back to you directly in the response — paste it to your colleague however you like (Slack, email, a text message).
+
+To enable email delivery:
+
+```bash
+EGMA_SMTP_URL=smtp://user:password@smtp.example.com:587
+EGMA_MAIL_FROM='Egma <noreply@example.com>'
+```
+
+Setting `EGMA_SMTP_URL` automatically enables email verification on signup and password-reset emails. There is no second setting to keep in step.
+
+## Default judge model
+
+To give new projects a grading model without requiring them to configure one manually, set the three judge variables in `.env`:
+
+```bash
+EGMA_JUDGE_PROVIDER=openai
+EGMA_JUDGE_MODEL=gpt-4o
+EGMA_JUDGE_API_KEY=sk-...
+```
+
+These are written into each new project's sealed configuration on boot and never overwrite an existing project's choice.
+
+## Upgrading
+
+Run `egma self-host up` again from your platform workspace after pulling the latest code. The API applies database migrations on boot. No manual migration step is required.
+
+If you are upgrading from a release that used `egma self-host phone setup`, your old phone settings were stored in `.egma-platform/platform.env`. Nothing reads them there anymore — run `egma self-host setup` once to re-enter them. The file itself is kept because it also holds the LiveKit key and secret.
+
+## Troubleshooting
+
+<Accordion title="Platform refuses to start and names a missing variable">
+  Every required variable is named in `.env.example`. Make sure you have filled in all seven secrets listed in the table above. `EGMA_LIVEKIT_API_KEY`, `EGMA_LIVEKIT_API_SECRET`, and `EGMA_BASE_URL` are set automatically by `egma self-host up` — if they are missing, run `egma self-host up` instead of `docker compose up`.
+</Accordion>
+
+<Accordion title="Recordings play nothing or return SignatureDoesNotMatch">
+  This means `EGMA_BLOB_PUBLIC_URL` names a different host than the browser uses to reach the object store. Set it to the address a browser on your network actually reaches — for example, `http://192.168.1.10:9000` if that is your server's LAN address. Also verify that `EGMA_BASE_URL` and `EGMA_BLOB_PUBLIC_URL` both use the same scheme (`http:` or `https:`): a mixed-content mismatch silently blocks every recording.
+</Accordion>
+
+<Accordion title="Egma self-host up works but the run never starts">
+  Check that `egma self-host setup` has been run and that the platform reports no missing settings. A platform missing its persona model will accept runs but the simulator will error on every simulation. Run `npx @egma/cli self-host setup --plan` to see what is still unset.
+</Accordion>
+
+<Accordion title="ClickHouse logs 'Too many open files'">
+  ClickHouse requires a higher file descriptor limit than a login shell grants. Copy the override file and restart:
+
+  ```bash
+  cp docker-compose.override.yml.example docker-compose.override.yml
+  npx @egma/cli self-host up
+  ```
+</Accordion>
+
+<Accordion title="Simulator waits forever and never claims work">
+  Verify that `EGMA_SIMULATOR_SERVICE_TOKEN` is set to the same value in `.env` that the API reads. If the token is missing or mismatched, the API rejects every claim request. Also confirm that `EGMA_LIVEKIT_API_KEY` and `EGMA_LIVEKIT_API_SECRET` are set — an empty value is refused at startup.
+</Accordion>
+
+<Accordion title="Running the stack on a remote server (others need to reach it)">
+  Set `EGMA_BASE_URL` to the address people reach the web application at — for example, `http://192.168.1.10:3101`. Set `EGMA_BLOB_PUBLIC_URL` to the address browsers reach the object store at — for example, `http://192.168.1.10:9000`. Set `EGMA_S3_BIND=0.0.0.0` to publish the object store port. Both addresses must use the same scheme.
+</Accordion>

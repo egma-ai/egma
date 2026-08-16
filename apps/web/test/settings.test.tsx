@@ -788,7 +788,7 @@ describe("organization settings", () => {
     const field = screen.getByLabelText("New key") as HTMLInputElement;
     expect(field.value).toBe("");
     expect(field.type).toBe("password");
-    expect(screen.getByText(/egma will not show it to you/)).toBeTruthy();
+    expect(screen.getByText(/Egma will not show it to you/)).toBeTruthy();
   });
 
   /**

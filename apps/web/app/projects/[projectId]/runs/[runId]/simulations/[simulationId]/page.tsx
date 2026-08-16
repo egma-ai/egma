@@ -496,7 +496,7 @@ function EvidenceView({
         */}
         {read.has_recording ? (
           <Section
-            title="What egma heard"
+            title="What Egma heard"
             lead="Fetched with your own session when you ask for it, and never carried in this address — a recording link is signed and short-lived."
           >
             <RecordingPlayer
@@ -547,7 +547,7 @@ function EvidenceView({
 
         <Section
           title="Mock Tools"
-          lead="What egma answered for, and what ran for real and unobserved. A mocked conversation and an unmocked one are different units."
+          lead="What Egma answered for, and what ran for real and unobserved. A mocked conversation and an unmocked one are different units."
         >
           <MockToolEvidence
             coverage={read.mock_tool_coverage}
@@ -567,7 +567,7 @@ function EvidenceView({
           {plan !== null && plan.state !== "run_start" ? (
             <Problem>
               {plan.state === "migration_snapshot"
-                ? "This plan was captured while egma was upgraded rather than when the run started, so it is what the grading used and not what the run decided."
+                ? "This plan was captured while Egma was upgraded rather than when the run started, so it is what the grading used and not what the run decided."
                 : "No plan was recorded when this run started. Nothing below is a claim about which graders judged it."}
             </Problem>
           ) : null}

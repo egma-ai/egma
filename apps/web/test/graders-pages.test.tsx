@@ -230,7 +230,13 @@ describe("the grader library, in one project", () => {
     expect(screen.getAllByText("Model judged")).not.toHaveLength(0);
     expect(screen.getAllByText("Computed")).not.toHaveLength(0);
     expect(screen.queryByText("llm_as_judge")).toBeNull();
-    expect(screen.getAllByText("egma")).not.toHaveLength(0);
+
+    // The owner word is the approved identity, and the stored key is never what
+    // a person is shown. `grader-library.test.ts` held this against the copy
+    // module and was deleted with the organization-wide pages it read; the
+    // claim is stronger here, because a rendering is what a person meets.
+    expect(screen.getAllByText("Egma")).not.toHaveLength(0);
+    expect(screen.queryByText("egma")).toBeNull();
   });
 
   /**
@@ -336,7 +342,7 @@ describe("the grader library, in one project", () => {
         status: 422,
         body: {
           error: "unprocessable",
-          message: "egma does not compute a measure called that.",
+          message: "Egma does not compute a measure called that.",
         },
       },
     });
@@ -349,7 +355,7 @@ describe("the grader library, in one project", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start judging" }));
 
     expect(
-      await screen.findByText("egma does not compute a measure called that."),
+      await screen.findByText("Egma does not compute a measure called that."),
     ).toBeTruthy();
     expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
       "2000",
@@ -888,7 +894,7 @@ describe("changing a running copy", () => {
         status: 422,
         body: {
           error: "unprocessable",
-          message: "egma does not compute a measure called that.",
+          message: "Egma does not compute a measure called that.",
         },
       },
     });
@@ -901,7 +907,7 @@ describe("changing a running copy", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
-      await screen.findByText("egma does not compute a measure called that."),
+      await screen.findByText("Egma does not compute a measure called that."),
     ).toBeTruthy();
     expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
       "1200",

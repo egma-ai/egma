@@ -59,7 +59,7 @@ export default function RootPage() {
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductStatePage
-        title="Opening egma"
+        title="Opening Egma"
         lead="Checking your session."
       />
     );

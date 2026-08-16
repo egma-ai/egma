@@ -511,7 +511,7 @@ async function walkOnce(options: {
     }
 
     /* [human 3c] text or phone, and for the phone the number to dial */
-    await showing(terminal, "the choice of reach", BUDGET.reach, "How should egma reach this agent?");
+    await showing(terminal, "the choice of reach", BUDGET.reach, "How should Egma reach this agent?");
     if (reach === "phone") {
       terminal.write("\u001B[B");
       await showing(terminal, "the phone row", BUDGET.reach, "\u203a Phone");
@@ -522,7 +522,7 @@ async function walkOnce(options: {
       // The number screen appears only when Retell routes several to the agent.
       const picked = await terminal.waitFor(
         () =>
-          terminal.screen().includes("Which number should egma dial?") ||
+          terminal.screen().includes("Which number should Egma dial?") ||
           terminal.screen().includes("Do you already have test cases"),
         BUDGET.reach,
       );
@@ -531,7 +531,7 @@ async function walkOnce(options: {
           `the wizard never got past the choice of reach\n\nlast screen:\n${redact(terminal.screen())}`,
         );
       }
-      if (terminal.screen().includes("Which number should egma dial?")) {
+      if (terminal.screen().includes("Which number should Egma dial?")) {
         if (wantedNumber === "") throw new Error("several numbers reach that agent; name one");
         await walkTo(
           terminal,
@@ -861,7 +861,7 @@ async function assertWhatLanded(options: {
   // the first verdict and the first verdict is what waits. A line about it
   // here would mean the wizard had offered something this walk never reached.
   check(
-    !lines.some((line) => line.includes("egma skill")),
+    !lines.some((line) => line.includes("Egma skill")),
     "nothing was offered or installed: the walk closed before the offer",
   );
 

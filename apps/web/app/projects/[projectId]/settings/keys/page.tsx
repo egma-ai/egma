@@ -217,7 +217,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
       <PageHeader
         eyebrow="Settings"
         title="API keys"
-        lead="What a terminal or a script authenticates to egma with."
+        lead="What a terminal or a script authenticates to Egma with."
       />
       <PageBody>
         <SettingsNav projectId={projectId} current="keys" />

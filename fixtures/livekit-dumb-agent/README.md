@@ -2,10 +2,10 @@
 
 A deliberately boring LiveKit agent — a dental-office receptionist with
 two tools and one-sentence answers — so a simulation has something real on
-the other side of the room while the thing under test is egma.
+the other side of the room while the thing under test is Egma.
 
-It is a genuine worker on `livekit-agents` 1.6.7 (the pin `docs/livekit.md`
-uses): Silero VAD, OpenAI speech-to-text, `gpt-4o-mini`, OpenAI
+It is a genuine worker on `livekit-agents` 1.6.7: Silero VAD, OpenAI
+speech-to-text, `gpt-4o-mini`, OpenAI
 text-to-speech. One OpenAI key runs all three steps.
 
 ## One command: watch a mock tool answer
@@ -24,7 +24,7 @@ record: which mock tool answered, with what, and how long it took. Then it
 stops the worker.
 
 That is the whole promise, watched working: the agent hears "there is
-nothing free on Tuesday" from egma rather than from a calendar, and offers
+nothing free on Tuesday" from Egma rather than from a calendar, and offers
 the caller another day.
 
 If your LiveKit project and your speech providers live in different
@@ -51,15 +51,15 @@ Neither tool reads a clock, a network or a disk, so this worker can be
 left running against a real project without booking anything, and an
 unmocked run of it answers the same way every time.
 
-## The one line that lets egma answer
+## The one line that lets Egma answer
 
 ```python
 await mockable(agent, ctx, session)
 ```
 
 It sits in `entrypoint`, after the agent and the session exist and before
-`session.start`. In a room egma dispatched, it reports both tools by name
-and stands egma in front of whichever ones the simulation has answers for.
+`session.start`. In a room Egma dispatched, it reports both tools by name
+and stands Egma in front of whichever ones the simulation has answers for.
 **In every other room it does nothing at all** — that is the SDK's whole
 safety story, and `tests/test_outside_egma.py` holds this agent to it
 rather than taking the SDK's word for it.
@@ -77,15 +77,15 @@ uv run agent.py dev
 ```
 
 `dev` registers the worker with your LiveKit server and waits for rooms.
-Leave it running; egma's simulations dispatch it per room.
+Leave it running; Egma's simulations dispatch it per room.
 
 ## The two dispatch styles
 
 - `EGMA_DUMB_AGENT_NAME` blank → the worker registers **unnamed**:
   automatic dispatch, it joins every new room in the project. The
-  quickstart default, and egma's blank-`agentName` path.
+  quickstart default, and Egma's blank-`agentName` path.
 - `EGMA_DUMB_AGENT_NAME=front-desk` → the worker registers **named**:
-  it joins only rooms whose dispatch asks for `front-desk`. egma's
+  it joins only rooms whose dispatch asks for `front-desk`. Egma's
   named-`agentName` path.
 
 ## The suites that simulate against it
@@ -114,7 +114,7 @@ carries all six of:
 variable this worker registers under — so one value moves both halves and
 the two cannot disagree about which dispatch style is being exercised.
 
-The persona's three are egma's, not this agent's: it is a synthetic caller
+The persona's three are Egma's, not this agent's: it is a synthetic caller
 and needs its own speech and its own brain, billed to you by those
 providers. The OpenAI key is read by both, and by two different processes
 for two different jobs.
@@ -138,7 +138,7 @@ uv run ruff check . && uv run pytest
 
 What they hold this file to: both tools attached before `mockable` runs,
 the integration line in the right place, and the whole thing untouched in
-a room with no egma in it.
+a room with no Egma in it.
 
 ## Sanity check without a server
 

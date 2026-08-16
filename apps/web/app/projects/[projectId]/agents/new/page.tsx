@@ -143,7 +143,7 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
         <PageHeader
           eyebrow="Agents"
           title="Register an agent"
-          lead="Give egma the agent you want to test."
+          lead="Give Egma the agent you want to test."
         />
         <PageBody>
           <NotFound
@@ -160,7 +160,7 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
       <PageHeader
         eyebrow="Agents"
         title="Register an agent"
-        lead="Its name and description in egma. Its prompt, model and tools stay where you configure them."
+        lead="Its name and description in Egma. Its prompt, model and tools stay where you configure them."
       />
       <PageBody>
         <form

@@ -136,7 +136,7 @@ function definitionOf(name: string): PlatformSettingDefinition {
   );
   if (known === undefined) {
     throw new UnprocessableInputError(
-      `"${name}" is not a platform setting egma knows; it holds ${PLATFORM_SETTINGS.map(
+      `"${name}" is not a platform setting Egma knows; it holds ${PLATFORM_SETTINGS.map(
         (setting) => setting.name,
       ).join(", ")}`,
     );
@@ -162,7 +162,7 @@ function validValue(
   if (trimmed === "") {
     throw new UnprocessableInputError(
       `${definition.label} needs a value. Clearing a setting is not something ` +
-        "egma does here: a platform that held one and then held none would " +
+        "Egma does here: a platform that held one and then held none would " +
         "report itself as never having been set up.",
     );
   }
@@ -201,7 +201,7 @@ function rowsFor(values: PlatformSettingValues, now: Date) {
   const named = Object.keys(values) as PlatformSettingName[];
   if (named.length === 0) {
     throw new UnprocessableInputError(
-      `a write names at least one setting to change; egma holds ${PLATFORM_SETTINGS.map(
+      `a write names at least one setting to change; Egma holds ${PLATFORM_SETTINGS.map(
         (setting) => setting.name,
       ).join(", ")}`,
     );
@@ -412,7 +412,7 @@ export async function resolvePlatformSettings(
 
   if (auth.via !== "simulator") {
     throw new Error(
-      "the platform's settings are unsealed for egma's own simulator and for nothing else, because conducting is the only thing egma does with them",
+      "the platform's settings are unsealed for Egma's own simulator and for nothing else, because conducting is the only thing Egma does with them",
     );
   }
 
@@ -431,7 +431,7 @@ export async function resolvePlatformSettings(
     const opened = openCredentials(row.value);
     if (typeof opened !== "string" || opened === "") {
       throw new Error(
-        `the platform setting ${row.name} holds a value in a shape egma never writes; the row needs repairing before anybody can conduct with it`,
+        `the platform setting ${row.name} holds a value in a shape Egma never writes; the row needs repairing before anybody can conduct with it`,
       );
     }
     resolved[row.name as PlatformSettingName] = opened;

@@ -3,7 +3,7 @@
  *
  * Nothing about a repository tells egma where a voice agent is. A person would
  * read the code to work it out, so egma has a coding agent read it — the
- * developer's own, on the developer's own machine, with two egma skills at the
+ * developer's own, on the developer's own machine, with two Egma skills at the
  * top of the task saying what to look for and what to report. The repository
  * never leaves the machine and no skill is ever installed on it.
  *
@@ -272,7 +272,7 @@ async function lookIn(options: DiscoveryOptions): Promise<Discovered | null> {
     case "needs-login":
       return ending({
         kind: "failed",
-        reason: `${outcome.drivenAgentName} is not logged in, and egma could not hand you to its login. Log in to it, then run egma again.`,
+        reason: `${outcome.drivenAgentName} is not logged in, and Egma could not hand you to its login. Log in to it, then run egma again.`,
       });
   }
 }

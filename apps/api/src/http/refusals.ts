@@ -510,7 +510,7 @@ export function notAuthenticated(reply: FastifyReply): FastifyReply {
     reply,
     "not_authenticated",
     "this request carried no session and no usable API key. " +
-      "Sign in, or send Authorization: Bearer with an egma key.",
+      "Sign in, or send Authorization: Bearer with an Egma key.",
   );
 }
 
@@ -524,7 +524,7 @@ export function notTheService(reply: FastifyReply): FastifyReply {
   return refuse(
     reply,
     "not_authenticated",
-    "this route hands out simulation work and answers only to egma's own " +
+    "this route hands out simulation work and answers only to Egma's own " +
       "simulator. Send Authorization: Bearer with the deployment's " +
       "EGMA_SIMULATOR_SERVICE_TOKEN — the same value the api and simulator " +
       "containers were started with. A customer API key can never open it.",

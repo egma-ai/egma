@@ -9,7 +9,7 @@ conversation itself — every turn, tool call and measurement — as
 OpenTelemetry spans. It never touches the database and never imports
 monorepo code: the versioned JSON contract in
 `packages/simulation-contract` is its entire connection to the rest of
-egma, which is also what lets this one app be Python inside a TypeScript
+Egma, which is also what lets this one app be Python inside a TypeScript
 monorepo.
 
 Five seams shape the inside, and each exists to be swapped without
@@ -403,7 +403,7 @@ the fixtures already inside the image.
 The LiveKit server, its SIP gateway and their Redis are not an overlay:
 they are in the default compose file, so `docker compose up` starts them
 with everything else. The simulator publishes nothing whichever overlays
-are on — the gateway is the one container in egma a carrier talks to, and
+are on — the gateway is the one container in Egma a carrier talks to, and
 what that costs a self-hoster is the root README's story to tell.
 
 ## Tests

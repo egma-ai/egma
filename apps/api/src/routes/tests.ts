@@ -195,7 +195,7 @@ function overrideEntries(value: unknown): WrittenOverrides {
     if ("delay_ms" in written && typeof written.delay_ms !== "number") {
       return {
         refusal:
-          "delay_ms is how long egma holds an answer back, as a whole number " +
+        "delay_ms is how long Egma holds this answer back, as a whole number " +
           `of milliseconds, and one entry in mock_tools sent ${typeof written.delay_ms}.`,
       };
     }
@@ -286,7 +286,7 @@ function personaEntries(value: unknown): NamedPersonas {
       refusal:
         "personas is the list of people who call about this test, by name. " +
         'Send it as a list of text, like ["impatient-caller"], or leave it ' +
-        "out and egma takes the project's default persona.",
+        "out and Egma takes the project's default persona.",
     };
   }
 
@@ -502,7 +502,7 @@ export async function testRoutes(
     if (version === undefined) {
       return notFound(
         reply,
-        `there is no test version ${versionId} on this egma. List the tests ` +
+        `there is no test version ${versionId} on this Egma instance. List the tests ` +
           `to see the version each of them stands on now.`,
       );
     }

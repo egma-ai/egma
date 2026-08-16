@@ -171,7 +171,7 @@ export async function recordingRoutes(
     if (options.blob === undefined) {
       return noObjectStore(
         reply,
-        "this egma has no recording store configured, so a reference cannot " +
+        "this Egma instance has no recording store configured, so a reference cannot " +
           "be resolved into anything a browser can fetch. Set " +
           "EGMA_BLOB_PUBLIC_URL on the api container to the address a browser " +
           "reaches the store at — not the address this container reaches it " +
@@ -191,12 +191,12 @@ export async function recordingRoutes(
       if (!(why instanceof UnsignableReferenceError)) throw why;
       request.log.error(
         { simulationId: simulation.id },
-        `simulation ${simulation.id} carries a recording reference egma will ` +
+        `simulation ${simulation.id} carries a recording reference Egma will ` +
           `not sign; it did not come from a simulator`,
       );
       return unsignableReference(
         reply,
-        `simulation ${simulation.id} points at a recording egma will not ` +
+        `simulation ${simulation.id} points at a recording Egma will not ` +
           `resolve: ${why.message}`,
       );
     }

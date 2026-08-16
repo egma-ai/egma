@@ -7,8 +7,8 @@ dental-office receptionist with two tools, no memory, and one-sentence
 answers. It exists so a simulation has something on the other side of the
 room while the thing under test is egma, not the agent.
 
-All three model steps ride one OpenAI key, the same single-provider shape
-the docs recommend for local runs (`docs/livekit.md`).
+All three model steps ride one OpenAI key, the same single-provider shape used
+for local runs.
 
 ## The two tools, and why there are two
 

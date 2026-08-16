@@ -374,7 +374,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
       <PageHeader
         eyebrow="Runs"
         title="Plan a run"
-        lead="A run executes a selection of tests against one agent over one connection. Every simulation it produces is pinned to the exact test, persona and grader versions egma froze when it started."
+        lead="A run executes a selection of tests against one agent over one connection. Every simulation it produces is pinned to the exact test, persona and grader versions Egma froze when it started."
         action={
           <ButtonLink href={projectPath(projectId, "runs")}>Cancel</ButtonLink>
         }
@@ -417,7 +417,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
           <Step
             number={2}
             title="Connection"
-            lead="How egma reaches the agent. The modality, the environment and the transport are all this choice, and what it was measured to support decides which tests can run."
+            lead="How Egma reaches the agent. The modality, the environment and the transport are all this choice, and what it was measured to support decides which tests can run."
             done={connectionId !== ""}
           >
             {agentId === "" ? (
@@ -519,7 +519,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
           <Step
             number={4}
             title="Review"
-            lead="Exactly what egma would freeze, and what it would not conduct. Nothing here is decided by this page: it is the same resolution the start performs."
+            lead="Exactly what Egma would freeze, and what it would not conduct. Nothing here is decided by this page: it is the same resolution the start performs."
             done={planned !== null && blocked === null}
           >
             {!readyToPlan ? (

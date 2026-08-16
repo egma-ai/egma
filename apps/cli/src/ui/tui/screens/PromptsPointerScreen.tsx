@@ -51,13 +51,13 @@ export function PromptsPointerScreen({ onAnswer }: PromptsPointerScreenProps) {
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       <Text>Nothing in this folder looks like a voice agent.</Text>
       <Box height={1} />
       <Text>
         Teams often keep their prompts somewhere else. If yours are in another
-        folder, type the path to it and egma will look there.
+        folder, type the path to it and Egma will look there.
       </Text>
       <Box height={1} />
       <Text>{`  › ${typed}`}</Text>

@@ -185,7 +185,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
             <Field
               label="Name"
               htmlFor="organization-name"
-              hint="What egma calls your organization. Changing it breaks no link and no invitation."
+              hint="What Egma calls your organization. Changing it breaks no link and no invitation."
             >
               <TextInput
                 id="organization-name"
@@ -527,7 +527,7 @@ function Credentials({
               <Field
                 label="New key"
                 htmlFor={`rotate-${rotatingCredential.id}`}
-                hint="Replaces the stored key whole. You do not need the old one, and egma will not show it to you."
+                hint="Replaces the stored key whole. You do not need the old one, and Egma will not show it to you."
               >
                 <TextInput
                   id={`rotate-${rotatingCredential.id}`}

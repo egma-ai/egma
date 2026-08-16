@@ -303,7 +303,7 @@ function AgentDetailView({
 
         <Section
           title="Connections"
-          lead="How egma reaches this agent. The same agent can be reached several ways, and a simulation records which one it ran over."
+          lead="How Egma reaches this agent. The same agent can be reached several ways, and a simulation records which one it ran over."
           action={
             role === null ? undefined : (
               <ButtonLink
@@ -654,7 +654,7 @@ function ApplicableTests({
   return (
     <Section
       title="Applicable tests"
-      lead="What egma checks about this agent. A run may only use a test that applies to it."
+      lead="What Egma checks about this agent. A run may only use a test that applies to it."
       action={
         <ButtonLink href={projectPath(projectId, "tests")}>All tests</ButtonLink>
       }

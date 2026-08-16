@@ -130,7 +130,7 @@ describe("a name this project cannot answer", () => {
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Nobody At All"]),
     ).rejects.toThrow(
-      'egma has no persona called "Nobody At All" in this project. Name a persona this project already has, or name none and egma takes the project\'s default.',
+      'Egma has no persona called "Nobody At All" in this project. Name a persona this project already has, or name none and Egma takes the project\'s default.',
     );
   });
 
@@ -146,7 +146,7 @@ describe("a name this project cannot answer", () => {
 
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Outbound Only"]),
-    ).rejects.toThrow(/egma has no persona called "Outbound Only"/u);
+    ).rejects.toThrow(/Egma has no persona called "Outbound Only"/u);
   });
 
   it("is a name that belongs to another customer", async () => {
@@ -154,7 +154,7 @@ describe("a name this project cannot answer", () => {
 
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Careful Grace"]),
-    ).rejects.toThrow(/egma has no persona called "Careful Grace"/u);
+    ).rejects.toThrow(/Egma has no persona called "Careful Grace"/u);
   });
 
 });
@@ -184,7 +184,7 @@ describe("a name only an archived persona answers to", () => {
 
     await expect(
       resolvePersonaNames(actingAsGlobex(), ["Also Leaving"]),
-    ).rejects.toThrow(/egma has no persona called "Also Leaving"/u);
+    ).rejects.toThrow(/Egma has no persona called "Also Leaving"/u);
   });
 
   it("does not shadow a living persona of the same name", async () => {

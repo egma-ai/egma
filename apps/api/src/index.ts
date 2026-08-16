@@ -82,7 +82,7 @@ if (shelved.length > 0) {
   // that arrived while anything higher is one whose definition changed.
   app.log.info(
     { graders: shelved },
-    "egma's predefined graders were written to the library",
+    "Egma's predefined graders were written to the library",
   );
 }
 if (judging.length > 0) {
@@ -90,7 +90,7 @@ if (judging.length > 0) {
   // projects which had no mandatory grading now have it, and which ones.
   app.log.info(
     { projects: judging.map((copy) => copy.projectId) },
-    "egma's expected-behaviors grader was switched on in projects that had never had it",
+    "Egma's expected-behaviors grader was switched on in projects that had never had it",
   );
 }
 if (judged.length > 0) {

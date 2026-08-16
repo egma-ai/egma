@@ -266,7 +266,7 @@ export async function reportRoutes(
     if (standing === undefined) {
       return notFound(
         reply,
-        `there is no simulation ${simulationId} on this egma. Reports land ` +
+        `there is no simulation ${simulationId} on this Egma instance. Reports land ` +
           `on the simulation a claimed spec named in its simulation_id; ` +
           `nothing about this document can be retried.`,
       );
@@ -309,7 +309,7 @@ async function applyStatusEvent(
     // It answered moments ago and is gone: the run was deleted mid-request.
     return notFound(
       reply,
-      `simulation ${simulationId} is gone from this egma; there is nothing ` +
+        `simulation ${simulationId} is gone from this Egma instance; there is nothing ` +
         `left to report against.`,
     );
   }

@@ -176,7 +176,7 @@ async function toTheRun(cols = 100): Promise<TerminalRun> {
 
   // Text or phone. Not this check's subject, and not skippable
   // either: egma never picks one of the two for a developer.
-  await showing(run, "How should egma reach this agent?");
+  await showing(run, "How should Egma reach this agent?");
   run.write("\r");
 
   await showing(run, "Do you already have test cases", "[n] none");
@@ -231,7 +231,7 @@ describe("the run screen", () => {
     expect(landed).toContain("waiting 2");
     // The other two are still moving, and the screen says the suite is not
     // waiting on this terminal.
-    expect(landed).toContain("The suite keeps running on egma");
+    expect(landed).toContain("The suite keeps running on Egma");
   });
 
   /**
@@ -289,7 +289,7 @@ describe("the run screen", () => {
       verdict: "passed",
     });
 
-    await showing(run, "Install the egma skill into Claude Code", ...OFFER_HINTS);
+    await showing(run, "Install the Egma skill into Claude Code", ...OFFER_HINTS);
 
     // On the platform, the suite is exactly where it was: one judged, two not.
     const held = platform.running.simulationsOf();
@@ -319,7 +319,7 @@ describe("the skill offer and what is left behind", () => {
       verdict: "passed",
     });
 
-    await showing(run, "Install the egma skill into Claude Code", ...OFFER_HINTS);
+    await showing(run, "Install the Egma skill into Claude Code", ...OFFER_HINTS);
     return run;
   }
 

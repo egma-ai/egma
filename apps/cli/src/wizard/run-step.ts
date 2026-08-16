@@ -109,7 +109,7 @@ async function offerTheSkill(
 
   const installed = await installEgmaSkill({ places, scope });
   ui.pushStatus(
-    `${ACTION_MARK} ${installed.replaced ? "Replaced the egma skill in" : "The egma skill is in"} ${installed.file}`,
+    `${ACTION_MARK} ${installed.replaced ? "Replaced the Egma skill in" : "The Egma skill is in"} ${installed.file}`,
   );
   return {
     kind: "installed",
@@ -182,7 +182,7 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
       // and it is not news.
       if (!watching.signal.aborted) {
         ui.pushStatus(
-          `${FAILURE_MARK} egma stopped answering about this run: ${cause instanceof Error ? cause.message : String(cause)}`,
+          `${FAILURE_MARK} Egma stopped answering about this run: ${cause instanceof Error ? cause.message : String(cause)}`,
         );
       }
       return "interrupted" as const;

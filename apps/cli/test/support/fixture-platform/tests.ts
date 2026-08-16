@@ -188,7 +188,7 @@ const EMPTY_BEHAVIOR = "an expected behavior needs to say something";
 const PERSONAS_NOT_A_LIST =
   "personas is the list of people who call about this test, by name. " +
   'Send it as a list of text, like ["impatient-caller"], or leave it ' +
-  "out and egma takes the project's default persona.";
+  "out and Egma takes the project's default persona.";
 
 const A_PERSONA_IS_TEXT =
   "a test names each persona as text — their name, or their prs_ " +
@@ -306,7 +306,7 @@ function overrideEntries(value: unknown): WrittenOverrides {
     if ("delay_ms" in written && typeof written.delay_ms !== "number") {
       return {
         refusal:
-          "delay_ms is how long egma holds an answer back, as a whole number " +
+          "delay_ms is how long Egma holds an answer back, as a whole number " +
           `of milliseconds, and one entry in mock_tools sent ${typeof written.delay_ms}.`,
       };
     }
@@ -497,7 +497,7 @@ export function testRoutes(options: {
         return {
           refusal: isId("prs", wanted)
             ? `there is no persona ${wanted} in this project`
-            : `egma has no persona called "${wanted}" in this project. Name a persona this project already has, or name none and egma takes the project's default.`,
+            : `Egma has no persona called "${wanted}" in this project. Name a persona this project already has, or name none and Egma takes the project's default.`,
         };
       }
       // A name two living personas answer to has no right answer, and picking
@@ -640,8 +640,10 @@ export function testRoutes(options: {
     refuse(
       404,
       "not_found",
-      `there is no test ${testId} on this egma. List the tests to see what ` +
-        `this project holds, or create this one instead of editing it.`,
+      // The API answers this one through its shared not-found sentence, so the
+      // fixture restates that one rather than the route's older wording.
+      `There is no test ${testId} available in this project. ` +
+        `Check the link, or choose it from the current project.`,
     );
 
   const described = (test: StoredTest): Record<string, unknown> => {
@@ -919,7 +921,7 @@ export function testRoutes(options: {
               return refuse(
                 404,
                 "not_found",
-                `there is no test version ${wanted} on this egma. List the tests ` +
+                `there is no test version ${wanted} on this Egma instance. List the tests ` +
                   `to see the version each of them stands on now.`,
               );
             }

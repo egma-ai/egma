@@ -202,7 +202,7 @@ describe("a provider that is refusing what was typed", () => {
   });
 
   /**
-   * Egma's own refusals travel this same channel — the signup hooks throw them
+   * egma's own refusals travel this same channel — the signup hooks throw them
    * from inside the provider's call stack — already spelled egma's way. They
    * pass through untouched, which is what keeps `invitation_required` the word
    * the signup page reads.
@@ -212,7 +212,7 @@ describe("a provider that is refusing what was typed", () => {
       refusesWith(
         403,
         "invitation_required",
-        "this egma has been claimed. Ask an admin for an invitation.",
+        "this Egma instance has been claimed. Ask an admin for an invitation.",
       ),
     );
 

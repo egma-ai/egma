@@ -88,7 +88,7 @@ export const NUMBER_VARIABLE = "EGMA_PHONE_NUMBER";
 /** What a developer is told when what they said is not one of the two ways. */
 export function unknownReachRefusal(said: string): string {
   return (
-    `"${said}" is not a way egma reaches an agent. Say --reach text or ` +
+    `"${said}" is not a way Egma reaches an agent. Say --reach text or ` +
     `--reach phone, or set ${REACH_VARIABLE}.`
   );
 }
@@ -109,7 +109,7 @@ const REFUSED_ARGUMENTS = ["--key", "--api-key", "--retell-key", "--retell-api-k
 /** What a developer is told when they tried to pass the key as an argument. */
 export function argumentRefusal(argument: string): string {
   return [
-    `egma will not take a key in ${argument}. Command arguments are readable by every process on this machine and are kept in shell history.`,
+    `Egma will not take a key in ${argument}. Command arguments are readable by every process on this machine and are kept in shell history.`,
     "",
     "Send it on standard input instead:",
     "",
@@ -229,7 +229,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
   if (held === null) {
     options.out("status: not-signed-in");
     options.fail(
-      `This machine holds no egma key for ${options.access.url}. Run egma login, then try again.`,
+      `This machine holds no Egma key for ${options.access.url}. Run egma login, then try again.`,
     );
     return CONNECT_EXIT.notSignedIn;
   }
@@ -390,7 +390,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
     case "unchosen-reach":
       options.out("status: unchosen-reach");
       options.fail(
-        "egma creates the one connection you choose and never both. Say " +
+        "Egma creates the one connection you choose and never both. Say " +
           `--reach text or --reach phone, or set ${REACH_VARIABLE}. Nothing was written.`,
       );
       break;
@@ -398,14 +398,14 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       options.out(`retell_numbers: ${outcome.numbers.length}`);
       options.out("status: unchosen-number");
       options.fail(
-        `Retell routes ${outcome.numbers.length} numbers to that agent. Name the one egma ` +
+        `Retell routes ${outcome.numbers.length} numbers to that agent. Name the one Egma ` +
           `should dial with --phone-number, or with ${NUMBER_VARIABLE}. Nothing was written.`,
       );
       break;
     case "no-numbers":
       options.out("status: no-numbers");
       options.fail(
-        "Retell routes no phone number to that agent, so there is nothing for egma to " +
+        "Retell routes no phone number to that agent, so there is nothing for Egma to " +
           "dial. Assign one in the Retell dashboard, or connect over text with --reach text.",
       );
       break;
@@ -417,7 +417,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       break;
     case "interrupted":
       options.out("status: interrupted");
-      options.fail("egma connect was stopped before it finished. Nothing was written.");
+      options.fail("The egma connect command was stopped before it finished. Nothing was written.");
       break;
     case "failed":
       options.out("status: failed");

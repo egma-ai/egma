@@ -176,7 +176,7 @@ async function toTheGate(
 
   // Text or phone. Not this check's subject, and not skippable
   // either: egma never picks one of the two for a developer.
-  await showing(run, "How should egma reach this agent?");
+  await showing(run, "How should Egma reach this agent?");
   if (overThePhone) {
     run.write("\u001B[B");
     await showing(run, "\u203a Phone");
@@ -311,7 +311,7 @@ describe("the files arriving", () => {
 
     // Text or phone. Not this check's subject, and not skippable
     // either: egma never picks one of the two for a developer.
-    await showing(run, "How should egma reach this agent?");
+    await showing(run, "How should Egma reach this agent?");
     run.write("\r");
     await showing(run, "Do you already have test cases", "[n] none");
 
@@ -342,7 +342,7 @@ describe("the files arriving", () => {
     // developer was never told about is a half-truth.
     expect(await run.exited).toBe(130);
     expect(run.scrollback().trim()).toBe(
-      "egma stopped before the task finished, and shut node down. Your 1 test is in egma/tests/.",
+      "Egma stopped before the task finished, and shut node down. Your 1 test is in egma/tests/.",
     );
 
     // And what the agent had already written is still the developer's.
@@ -501,7 +501,7 @@ describe("the gate", () => {
     // Still an interruption to a shell, and still an honest line to a person.
     expect(await run.exited).toBe(130);
     expect(run.scrollback().trim()).toBe(
-      "egma stopped. Your 5 tests are in egma/tests/ — read them, then run egma push.",
+      "Egma stopped. Your 5 tests are in egma/tests/ — read them, then run egma push.",
     );
 
     expect(await testsInFolder()).toHaveLength(5);
@@ -646,7 +646,7 @@ describe("the gate", () => {
 
     await showing(
       run,
-      "egma could not start egma-no-such-editor-on-this-machine",
+      "Egma could not start egma-no-such-editor-on-this-machine",
       ...GATE_HINTS,
     );
 
@@ -702,7 +702,7 @@ describe("the gate", () => {
       run,
       "1 test generated",
       "egma/tests/half-written.md",
-      "egma could not read it",
+      "Egma could not read it",
       "egma/tests/nothing-to-check.md",
       "no expected behaviors",
       ...GATE_HINTS,
@@ -768,7 +768,7 @@ describe("the gate", () => {
       run,
       "1 test generated",
       "egma/tests/wanted-it-by-friday.md",
-      'egma has no persona called "in-a-hurry"',
+      'Egma has no persona called "in-a-hurry"',
       ...GATE_HINTS,
     );
 
