@@ -416,6 +416,10 @@
   background: var(--surface);
 }
 
+.form > .section:first-child {
+  margin-top: 0;
+}
+
 .formRow {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -478,24 +482,32 @@
   font-size: var(--text-sm);
 }
 
+.fact,
+.fact dd {
+  min-width: 0;
+}
+
 .fact dd {
   margin: 0;
   color: var(--foreground);
   font-size: var(--text-md);
   line-height: var(--line-normal);
+  overflow-wrap: anywhere;
 }
 
 /* A titled block of one page: traits, history, what uses this. */
 .section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
   margin-top: var(--space-7);
 }
 
 .sectionHead {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
-  margin-bottom: var(--space-4);
 }
 
 .sectionTitle {
@@ -526,7 +538,6 @@
 }
 
 .statedTraits {
-  margin-bottom: var(--space-5);
   padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
