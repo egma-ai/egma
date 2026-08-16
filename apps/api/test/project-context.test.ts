@@ -915,5 +915,23 @@ describe("a key for the whole organization, where the organization holds two pro
     });
     expect(asked.statusCode, asked.body).toBe(503);
     expect((asked.json() as { error: string }).error).toBe("no_object_store");
+
+    /*
+      The conversation itself, which is the other door the same page opens.
+
+      This is the one the recording's own fix walked past: the evidence page
+      asks for the transcript and the audio together, so a key that could fetch
+      the audio and not the transcript made one page answer one question two
+      ways. Asserted here rather than in a case of its own, because "the same
+      page, both doors, one credential" is the claim — and two cases could drift
+      until only one of them was moved, which is exactly what happened.
+    */
+    const conversationRead = await api.app.inject({
+      method: "GET",
+      url: `/api/simulations/${conversation}`,
+      headers: { authorization: `Bearer ${ada.secret}` },
+    });
+    expect(conversationRead.statusCode, conversationRead.body).toBe(200);
+    expect((conversationRead.json() as { id: string }).id).toBe(conversation);
   });
 });
