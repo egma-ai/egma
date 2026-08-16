@@ -69,8 +69,6 @@ export function reportPathFor(simulationId: string): string {
   return `/v1/simulations/${simulationId}/reports`;
 }
 
-type Body = Record<string, unknown>;
-
 /** One status event, after the contract check has vouched for its shape. */
 type StatusEvent = {
   readonly status: "running" | "completed" | "failed" | "canceled";
@@ -95,6 +93,12 @@ type StatusEvent = {
       readonly uncovered: readonly string[];
     };
   };
+};
+
+/** The part of an accepted report this route reads. */
+type AcceptedReport = {
+  readonly simulation_id: string;
+  readonly events: readonly StatusEvent[];
 };
 
 /**
@@ -223,7 +227,7 @@ export async function reportRoutes(
    */
   app.post(REPORTS_PATH, async (request, reply) => {
     const { simulationId } = request.params as { simulationId: string };
-    const document = (request.body ?? {}) as Body;
+    const document: unknown = request.body ?? {};
 
     // The contract check first, before a byte of the document is believed —
     // the same schema the simulator compiled before sending, so the
@@ -242,13 +246,17 @@ export async function reportRoutes(
       );
     }
 
+    // SAFETY: reportComplaints accepted this value against the closed report
+    // schema, which requires simulation_id and permits only status events.
+    const report = document as AcceptedReport;
+
     // A document about another simulation is refused, not rerouted: the URL
     // and the document each name the simulation, and when they disagree
     // there is no honest way to pick one.
-    if (document.simulation_id !== simulationId) {
+    if (report.simulation_id !== simulationId) {
       return invalid(
         reply,
-        `this document says it is about ${String(document.simulation_id)}, ` +
+        `this document says it is about ${report.simulation_id}, ` +
           `but it was posted to ${simulationId}. Post each report to the ` +
           `simulation its own simulation_id names.`,
       );
@@ -258,25 +266,20 @@ export async function reportRoutes(
     if (standing === undefined) {
       return notFound(
         reply,
-        `there is no simulation ${simulationId} on this egma. Reports land ` +
+        `there is no simulation ${simulationId} on this Egma instance. Reports land ` +
           `on the simulation a claimed spec named in its simulation_id; ` +
           `nothing about this document can be retried.`,
       );
     }
 
-    const events = document.events as readonly Record<string, unknown>[];
     let lastKnownStatus: string = standing.status;
 
     // Every event here is a lifecycle transition, because the contract check
     // above has already refused anything else: a conversation's turns, tool
     // calls and measurements arrive as spans at the OTLP door, and a report
     // claiming to carry one does not validate.
-    for (const event of events) {
-      const applied = await applyStatusEvent(
-        reply,
-        simulationId,
-        event as unknown as StatusEvent,
-      );
+    for (const event of report.events) {
+      const applied = await applyStatusEvent(reply, simulationId, event);
       if (typeof applied !== "string") return applied;
       lastKnownStatus = applied;
     }
@@ -306,7 +309,7 @@ async function applyStatusEvent(
     // It answered moments ago and is gone: the run was deleted mid-request.
     return notFound(
       reply,
-      `simulation ${simulationId} is gone from this egma; there is nothing ` +
+        `simulation ${simulationId} is gone from this Egma instance; there is nothing ` +
         `left to report against.`,
     );
   }

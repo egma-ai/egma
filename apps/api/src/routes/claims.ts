@@ -149,10 +149,12 @@ function platformBlock(
     provider: held.persona_model_provider,
     model: held.persona_model,
     key: held.persona_model_key,
+    reasoning_effort: held.persona_model_reasoning_effort,
   });
   const speech = onlyWhatIsHeld({
     stt_provider: held.speech_to_text_provider,
     stt_key: held.speech_to_text_key,
+    stt_model: held.speech_to_text_model,
     tts_provider: held.text_to_speech_provider,
     tts_key: held.text_to_speech_key,
     tts_model: held.text_to_speech_model,
@@ -236,7 +238,7 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
       refusal:
         "wait_seconds is how long this request may be held open while the " +
         "queue is empty, as a number of seconds of at least 0. Leave it out " +
-        `and egma holds for ${DEFAULT_HOLD_SECONDS}.`,
+        `and Egma holds for ${DEFAULT_HOLD_SECONDS}.`,
     };
   }
 

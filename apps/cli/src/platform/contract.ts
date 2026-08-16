@@ -112,10 +112,10 @@ export function contractRefusal(platform: PlatformContract): string | null {
 
   const behind = platform < REPOSITORY_CONTRACT ? "platform" : "egma";
   return [
-    `This egma speaks repository contract ${String(REPOSITORY_CONTRACT)} and this platform speaks ${String(platform)}.`,
+    `This Egma instance speaks repository contract ${String(REPOSITORY_CONTRACT)} and this platform speaks ${String(platform)}.`,
     behind === "egma"
-      ? "This copy of egma is older than the platform, and it would read only part of what the platform answers. Run npx egma@latest, then run this again."
-      : "The platform is older than this copy of egma, and it cannot answer everything a test file now records. Upgrade the platform, or use the egma that shipped with it.",
+      ? "This copy of Egma is older than the platform, and it would read only part of what the platform answers. Run npx egma@latest, then run this again."
+      : "The platform is older than this copy of Egma, and it cannot answer everything a test file now records. Upgrade the platform, or use the egma that shipped with it.",
     "Nothing was read and nothing was uploaded.",
   ].join(" ");
 }

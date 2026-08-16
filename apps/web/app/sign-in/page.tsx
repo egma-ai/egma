@@ -46,7 +46,7 @@ export default function SignInPage() {
       };
       setProblem(body.message ?? "that email and password did not match");
     } catch {
-      setProblem("egma could not be reached. Is the API running?");
+      setProblem("Egma could not be reached. Is the API running?");
     } finally {
       setSubmitting(false);
     }
@@ -109,7 +109,7 @@ export default function SignInPage() {
       <p className={styles.linkLine}>
         No account yet?{" "}
         <a href={returnTo === null ? "/signup" : withReturnTo("/signup", returnTo)}>
-          Set up egma
+          Set up Egma
         </a>
         .
       </p>

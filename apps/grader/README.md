@@ -45,7 +45,7 @@ Two rules run through all of it. **A simulation that never ran is `errored` for
 every grader and never `failed`** — a broken test is not a broken agent. And **a
 check that could not be made says so**: a measure this conversation does not
 have is `skipped` and leaves the score's denominator; a measure recorded in a
-shape egma never writes is `errored`, because a corrupted row and a missing one
+shape Egma never writes is `errored`, because a corrupted row and a missing one
 are different facts.
 
 ## The two lanes a verdict lands in
@@ -71,7 +71,7 @@ A grader names the measure it reads as a string, and a string that names nothing
 produces a grader that reads nothing, judges nothing, and is `skipped` forever.
 The **measure catalog** — `packages/simulation-contract/measure-catalog.md`,
 beside the two schemas, with `src/measures.ts` as the same list in code — names
-every measure egma records, **and now pins each one's span-level definition
+every measure Egma records, **and now pins each one's span-level definition
 beside its name**: the rule that says how it is computed from a conversation's
 spans, or that no span carries it at all.
 
@@ -93,14 +93,14 @@ drift alarm over all of it: it scans the source for a second reader of the timin
 kind, a second nanosecond conversion, and a hand-rolled reduction, and it names
 the files allowed to do each.
 
-**A conversation egma holds only part of is judged by nobody.** A read over the
+**A conversation Egma holds only part of is judged by nobody.** A read over the
 store's span limit returns a prefix, and the worst measurement of a prefix is the
 worst of that part rather than of the call. Both sources refuse it with the same
 sentence; the read endpoint marks such measures `partial` rather than hiding
 them, because a display may show what there is and may not claim it is the whole.
 
 The module knows nothing about where a conversation came from. Identical spans
-therefore produce identical numbers whether egma conducted the conversation or a
+therefore produce identical numbers whether Egma conducted the conversation or a
 real caller had it, which is what makes "passes in simulation, fails in
 production" a fact about the agent rather than about two readers.
 

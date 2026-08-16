@@ -94,6 +94,19 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
     setRefused(null);
     setSaving(true);
 
+    /**
+     * **The project is named the one way every write in the product names
+     * it** — `writeJson`'s own option, which puts it in the address.
+     *
+     * It was worth a comment when the door only read a body key. Naming it in
+     * the query then was not refused, it was *ignored*: the door found no
+     * project, fell back to the session's own — the organization's **first** —
+     * answered 201, and sent the browser to a detail page for an agent that is
+     * not in the project the address names. Nothing below this line could
+     * catch it, because the request is well formed and the answer is a real
+     * agent. The door now reads the address as well as the body, so the fault
+     * is closed where it was rather than only in this caller.
+     */
     const answer = await writeJson<{ readonly agent: ListedAgent }>(
       AGENTS_PATH,
       {
@@ -131,7 +144,7 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
         <PageHeader
           eyebrow="Agents"
           title="Register an agent"
-          lead="Give egma the agent you want to test."
+          lead="Give Egma the agent you want to test."
         />
         <PageBody>
           <NotFound
@@ -148,7 +161,7 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
       <PageHeader
         eyebrow="Agents"
         title="Register an agent"
-        lead="Its name and description in egma. Its prompt, model and tools stay where you configure them."
+        lead="Its name and description in Egma. Its prompt, model and tools stay where you configure them."
       />
       <PageBody>
         <Form onSubmit={() => void register()}>

@@ -577,7 +577,7 @@ function requestedPersonaIdsFromRow(
     mayBeEmpty: false,
     malformed: () =>
       new Error(
-        `run ${runId} holds a requested-persona selection in a shape egma never writes; the row needs repairing before anybody can read it`,
+        `run ${runId} holds a requested-persona selection in a shape Egma never writes; the row needs repairing before anybody can read it`,
       ),
   });
 }
@@ -592,7 +592,7 @@ function pinnedTestVersionIdsFromRow(
     mayBeEmpty: true,
     malformed: () =>
       new Error(
-        `run ${runId} holds a pinned-version selection in a shape egma never writes; the row needs repairing before anybody can read it`,
+        `run ${runId} holds a pinned-version selection in a shape Egma never writes; the row needs repairing before anybody can read it`,
       ),
   });
 }
@@ -603,7 +603,7 @@ function connectionSnapshotFromRow(
 ): ConnectionSnapshot {
   const malformed = () =>
     new Error(
-      `run ${runId} holds a connection snapshot in a shape egma never writes; the row needs repairing before anybody can read it`,
+      `run ${runId} holds a connection snapshot in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
 
   if (typeof value !== "object" || value === null) throw malformed();
@@ -639,7 +639,7 @@ function mockToolSnapshotFromRow(
 ): MockToolSnapshot {
   const malformed = () =>
     new Error(
-      `run ${runId} holds a mock tool snapshot in a shape egma never writes; the row needs repairing before anybody can read it`,
+      `run ${runId} holds a mock tool snapshot in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
 
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -775,7 +775,7 @@ function mockToolCoverageFromRow(
 
   const malformed = (): Error =>
     new Error(
-      `simulation ${simulationId} holds a mock tool coverage stamp in a shape egma never writes; the row needs repairing before anybody can read it`,
+      `simulation ${simulationId} holds a mock tool coverage stamp in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
 
   if (typeof value !== "object" || Array.isArray(value)) throw malformed();
@@ -964,7 +964,7 @@ async function makeGradable(
 
 /** What a caller does instead, when a run named the wrong agent. */
 const NAME_THE_RIGHT_AGENT =
-  "Name the agent that connection is on, or leave the agent out and egma " +
+  "Name the agent that connection is on, or leave the agent out and Egma " +
   "takes the connection's own.";
 
 /**
@@ -1092,7 +1092,7 @@ export async function startRun(
     refuseRun(
       "not_admitted",
       "a run is conducted over a connection, and this request named none. " +
-        "Send connection with the con_ id of the way egma should reach the " +
+        "Send connection with the con_ id of the way Egma should reach the " +
         "agent — registering the agent answered with one.",
     );
   }
@@ -2446,7 +2446,7 @@ export async function resolveSimulationConnection(
 
   if (auth.via !== "simulator") {
     throw new Error(
-      "a connection's credentials are unsealed for egma's own simulator and for nothing else, because conducting is the only thing egma does with them",
+      "a connection's credentials are unsealed for Egma's own simulator and for nothing else, because conducting is the only thing Egma does with them",
     );
   }
 
@@ -2477,7 +2477,7 @@ export async function resolveSimulationConnection(
 
   const malformed = (held: string) => () =>
     new Error(
-      `connection ${row.connectionId} holds ${held} in a shape egma never ` +
+      `connection ${row.connectionId} holds ${held} in a shape Egma never ` +
         `writes; the row needs repairing before anybody can conduct over it`,
     );
 

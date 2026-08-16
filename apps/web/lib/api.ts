@@ -85,45 +85,6 @@ export function unreachable<T>(): Answer<T> {
   };
 }
 
-/**
- * One write, with the project named in the body where the caller named one.
- *
- * The same four answers a read has, for the same reason: a page has to be able
- * to tell a refusal it can show from a session that has expired, and inventing
- * a second vocabulary for writes would give it two ways to get that wrong.
- *
- * **The project travels in the body rather than the query**, which is where
- * every write route in this API looks for it — so a page cannot accidentally
- * send a write that names no project and have it land somewhere plausible.
- */
-export async function sendJson<T>(
-  path: string,
-  options: {
-    readonly method: "POST" | "PATCH" | "PUT";
-    readonly body: Record<string, unknown>;
-    readonly project?: string;
-    readonly signal?: AbortSignal;
-  },
-): Promise<Answer<T>> {
-  try {
-    const response = await fetch(path, {
-      method: options.method,
-      cache: "no-store",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(
-        options.project === undefined
-          ? options.body
-          : { ...options.body, project: options.project },
-      ),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
-    const body = await response.json().catch(() => null);
-    return answerFor<T>(response.status, body);
-  } catch {
-    return unreachable<T>();
-  }
-}
-
 /** One read, with the project named in it where the caller named one. */
 export async function readJson<T>(
   path: string,
@@ -157,14 +118,24 @@ export async function readJson<T>(
  * sentence is kept and never paraphrased: it names the next move, and the
  * conflict refusals name the revision to retry against.
  *
- * A write says where it lands, and the route decides where it reads that from:
- * a caller that names `project` here gets it in the query, and a caller whose
- * route reads it from the body puts it there itself.
+ * **`project` here means the address, and it is now the only spelling a page
+ * has.** There used to be a second helper, `sendJson`, one keystroke away, that
+ * put the project in the *body* — and its comment said the body "is where every
+ * write route in this API looks for it", while this one said the address was
+ * the only spelling a page should use. Both sentences were in the same file,
+ * sixty lines apart, and by then only one of them was true of any given door.
+ * Six pages were using the wrong one, and nothing at the type level told a
+ * reader which door read which.
+ *
+ * So `sendJson` is gone. Every write door in this API reads `projectNamed`'s
+ * one rule — the query, then the body — so a page names its project in the
+ * address, a terminal names it in the body, and neither spelling is ignored by
+ * anything. There is one helper here because there is one rule there.
  */
 export async function writeJson<T>(
   path: string,
   options: {
-    readonly method: "POST" | "PATCH";
+    readonly method: "POST" | "PATCH" | "PUT";
     readonly project?: string;
     readonly body?: unknown;
     readonly signal?: AbortSignal;

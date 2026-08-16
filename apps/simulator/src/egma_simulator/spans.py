@@ -386,11 +386,11 @@ class SpanEmitter:
             raise ValueError(
                 "a tool call's result and the mock tool that served it are "
                 "one fact: an answer with nothing to say where it came from "
-                "would read as a result egma observed rather than authored"
+                "would read as a result Egma observed rather than authored"
             )
         if refused and answer is not None:
             raise ValueError(
-                "a refused call is one egma would not answer, so it cannot "
+                "a refused call is one Egma would not answer, so it cannot "
                 "carry an answer: the two stamps describe opposite halves of "
                 "the same moment and only one of them happened"
             )
@@ -400,9 +400,9 @@ class SpanEmitter:
             # arguments nobody was answered about — a stamp with no fact
             # under it.
             raise ValueError(
-                "late-attached is a caveat about a call egma served for a "
+                "late-attached is a caveat about a call Egma served for a "
                 "tool the census never named, so it has nothing to qualify "
-                "on a call egma did not answer"
+                "on a call Egma did not answer"
             )
         attributes: dict[str, str | bool] = {TOOL_NAME_ATTRIBUTE: name}
         if arguments is not None:

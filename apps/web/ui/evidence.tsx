@@ -353,7 +353,7 @@ export function MockToolEvidence({
     return (
       <Empty
         title="Nothing was mocked, and nothing was asked"
-        lead="This run froze no mocked answers, and nobody asked the agent what tools it has — so egma stood in the path of nothing and claims nothing about what ran."
+        lead="This run froze no mocked answers, and nobody asked the agent what tools it has — so Egma stood in the path of nothing and claims nothing about what ran."
       />
     );
   }
@@ -379,7 +379,7 @@ export function MockToolEvidence({
       ) : (
         <>
           <div className={styles.toolGroup}>
-            <strong>Answered by egma</strong>
+            <strong>Answered by Egma</strong>
             {coverage.covered.length === 0 ? (
               <span className={styles.mono}>none</span>
             ) : (

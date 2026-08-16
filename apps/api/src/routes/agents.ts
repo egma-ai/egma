@@ -42,6 +42,7 @@ import {
 } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
+import { given, projectNamed, text } from "../http/reading.ts";
 import {
   CODES,
   identityConflict,
@@ -243,10 +244,10 @@ function unknownKeyIn(
     if (held.includes(key)) continue;
     if (key === "pulled") {
       return invalid(
-        `egma no longer keeps what was pulled from the provider, so ${what} ` +
+          `Egma no longer keeps what was pulled from the provider, so ${what} ` +
           'has no "pulled" key. Drop it and send ' +
           `${held.join(", ")}; the agent's content stays at the provider, ` +
-          "where egma reads it fresh rather than out of a copy that would go " +
+          "where Egma reads it fresh rather than out of a copy that would go " +
           "stale.",
       );
     }
@@ -551,8 +552,14 @@ function refusalOf(acting: ActingRefusal): Refusal {
  * route group. Only the wording is this group's own, and it lives beside the
  * other group's in that module, where the two can be unified in one edit the
  * day the dev picks a winner.
+ *
+ * **Not to be confused with `projectNamed`, which this group also uses.** That
+ * one reads *where* the caller wrote the project down; this one decides whether
+ * the credential may reach it. They were both called `projectNamed` — one name
+ * for two things, in one directory, in the change whose whole point was one way
+ * to say where a project is.
  */
-async function projectNamed(
+async function reachableProject(
   auth: AuthContext,
   named: string,
   verb: "writes into" | "reads",
@@ -579,7 +586,7 @@ async function writingIn(
   named: string | undefined,
 ): Promise<AuthContext | Refusal> {
   if (named !== undefined) {
-    const project = await projectNamed(auth, named, "writes into");
+    const project = await reachableProject(auth, named, "writes into");
     return isRefusal(project) ? project : { ...auth, projectId: project };
   }
 
@@ -602,7 +609,7 @@ async function readingIn(
 ): Promise<AuthContext | Refusal> {
   if (named === undefined) return auth;
 
-  const project = await projectNamed(auth, named, "reads");
+  const project = await reachableProject(auth, named, "reads");
   return isRefusal(project) ? project : { ...auth, projectId: project };
 }
 
@@ -718,6 +725,7 @@ export async function agentRoutes(
   app.post("/api/agents", async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Record<string, unknown>;
 
     const unknown = unknownKeyIn(body, AGENT_KEYS, "a registration");
     if (unknown !== undefined) return refused(reply, unknown);
@@ -726,8 +734,22 @@ export async function agentRoutes(
     if (isRefusal(name)) return refused(reply, name);
     const description = textWhenGiven(body.description, "an agent's description");
     if (isRefusal(description)) return refused(reply, description);
-    const project = textWhenGiven(body.project, "a project");
-    if (isRefusal(project)) return refused(reply, project);
+    /*
+     * **The query and the body**, which is `projectNamed`'s one rule for the
+     * whole API — see `http/reading.ts` for why a door that reads only one of
+     * the two ignores the other rather than refusing it, and for what that cost
+     * this very route.
+     *
+     * The type gate stays this group's own, and it has to run first: a
+     * `project` that is not text is refused **by name** here, and
+     * `projectNamed` would read it as absent and fall back to the credential's
+     * own project — silently, which is the thing this route already got wrong
+     * once.
+     */
+    const said = textWhenGiven(body.project, "a project");
+    if (isRefusal(said)) return refused(reply, said);
+
+    const project = projectNamed(query, body);
 
     const inline =
       body.connection === undefined

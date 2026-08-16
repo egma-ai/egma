@@ -1,14 +1,14 @@
 ---
 name: writing-tests-for-a-voice-agent
-description: Write egma tests for a voice agent as markdown files in the developer's repository — the file format, what makes an expected behavior worth having, and the marker lines egma reads progress from.
+description: Write Egma tests for a voice agent as markdown files in the developer's repository — the file format, what makes an expected behavior worth having, and the marker lines Egma reads progress from.
 ---
 
 # Write tests for this voice agent
 
-egma is driving you. A **test** describes one situation to put a voice agent
-in, and says what should happen. egma runs each test as a **simulation**: a
+Egma is driving you. A **test** describes one situation to put a voice agent
+in, and says what should happen. Egma runs each test as a **simulation**: a
 **persona** — the synthetic person on the other end — speaks with the agent,
-and egma grades what happened against the test's **expected behaviors**.
+and Egma grades what happened against the test's **expected behaviors**.
 
 Your job is to write those tests as files. One test, one file.
 
@@ -35,22 +35,22 @@ Rules for the file, and none of them is optional:
 
 - **`name`** is lower case, with hyphens between words, and it says what the
   situation is. It matches the file name.
-- **`personas`** is a list, and you usually leave the whole line out. egma has
+- **`personas`** is a list, and you usually leave the whole line out. Egma has
   a default persona and it applies to every test that names nobody. Name one
   only when the situation is *about* a particular kind of person — somebody in
   a hurry, somebody with a strong accent, somebody who will not give a name.
-  **The task below says which personas egma has. Never name one that is not on
-  that list**: egma resolves the name when the file is uploaded, and a name it
+  **The task below says which personas Egma has. Never name one that is not on
+  that list**: Egma resolves the name when the file is uploaded, and a name it
   does not know is a test it throws away.
-- **Never write a `version:` line.** egma writes that itself when the file and
+- **Never write a `version:` line.** Egma writes that itself when the file and
   the platform are next put in step.
 - **`## Scenario`** is prose. Two or three sentences: what the person wants,
   and the circumstances that make it interesting.
 - **`## Expected behaviors`** is a numbered list, and **there is always at
-  least one**. A test with none can never fail, so egma refuses it and the
+  least one**. A test with none can never fail, so Egma refuses it and the
   developer is told a file was thrown away. Two to four is a good number.
 - **`## Mock tools`** is optional, comes last, and you leave it out unless the
-  task below names the tools egma answers for. It is how one test asks for a
+  task below names the tools Egma answers for. It is how one test asks for a
   different answer from one of the agent's tools — an empty calendar, a booking
   service that is down — and it looks like this:
 
@@ -74,7 +74,7 @@ Rules for the file, and none of them is optional:
   said it, asked it, used a tool, ended without doing it.
 - **True whether the agent is spoken to or typed at.** A test never mentions
   voice, audio, phones or typing — the same test is run both ways on purpose,
-  and the difference between the two is the most useful thing egma reports.
+  and the difference between the two is the most useful thing Egma reports.
 - **Grounded in the words the agent actually runs on.** If the prompt says
   never to quote a price, then "the agent does not quote a price" is a real
   expectation. If the prompt says nothing about it, you are inventing a rule
@@ -86,7 +86,7 @@ nothing useful, and the ones where the person is difficult, silent, or wrong.
 
 ## How to report: marker lines
 
-egma shows the developer a list that fills in as you work. It reads these lines
+Egma shows the developer a list that fills in as you work. It reads these lines
 and nothing else, so a file you do not announce is a file nobody watches
 arrive. Put each one at the very start of a line, with no bullet, no number and
 no code fence around it:
@@ -110,7 +110,7 @@ egma:note Reading the prompt
 egma:abort I cannot write into that folder.
 ```
 
-Use `egma:abort` only when something stops you outright; egma itself ends the
+Use `egma:abort` only when something stops you outright; Egma itself ends the
 work when it reads that line.
 
 **End every marker line with a line break, and never put ordinary words on the
@@ -134,5 +134,5 @@ same line as a marker.**
 ## When you are done
 
 Stop once the last `egma:wrote` line is written. Do not offer to make more
-changes and do not ask a question. egma reads your marker lines and the files
+changes and do not ask a question. Egma reads your marker lines and the files
 you left behind, not your prose.

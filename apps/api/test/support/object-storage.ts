@@ -237,6 +237,13 @@ export async function startObjectStorage(
       "sh",
       "-c",
       [
+        // `egma` here is the name `mc` files this store under on its own disk,
+        // and every line below reaches the store by it. It is an identifier,
+        // not the product's name: `main`'s identity sweep capitalized four of
+        // these six at a3ab932 and left `mc mb egma/...` as it was, so the
+        // alias the bucket was made under no longer existed and the bucket was
+        // never created — every recording assertion in the browser lane failed
+        // with `NoSuchBucket`, naming the store rather than this line.
         `mc alias set egma http://127.0.0.1:9000 ${ROOT_ACCESS_KEY_ID} ${ROOT_SECRET_ACCESS_KEY}`,
         `mc mb --ignore-existing egma/${BUCKET}`,
         `printf '%s' '${JSON.stringify(READ_ONLY_POLICY)}' > /tmp/read-recordings.json`,

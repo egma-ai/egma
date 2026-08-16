@@ -269,7 +269,7 @@ describe("one repository, one agent", () => {
 
     expect(refused.code).toBe(5);
     expect(valuesOf(refused.stdout, "reason-code")).toEqual(["archived"]);
-    expect(refused.stderr).toContain("is archived, so egma will not write to it");
+    expect(refused.stderr).toContain("is archived, so Egma will not write to it");
     expect(refused.stderr).toContain("Restore it in Egma");
   });
 });
@@ -913,7 +913,7 @@ describe("a link removed after the preflight", () => {
 
     // What actually happened, in the sentence beside that count: one went up,
     // one did not, and the pull is the real next move.
-    expect(spoken).toContain("egma uploaded 1 of these and then refused second");
+    expect(spoken).toContain("Egma uploaded 1 of these and then refused second");
     expect(spoken).toContain("What has landed has landed — first");
     expect(spoken).toContain("Run egma pull");
     // And nothing in it says the opposite of the count printed beside it.
@@ -930,7 +930,7 @@ describe("a link removed after the preflight", () => {
    *
    * A file that already says what egma holds is never sent — it is in the
    * report because the push looked at it, and its version did not move. Adding
-   * it to "egma uploaded 3 of these" sends somebody to check three tests and
+   * it to "Egma uploaded 3 of these" sends somebody to check three tests and
    * find one untouched, which is the same mistake as the sentence this one
    * replaced, made one decimal place further in.
    *
@@ -995,7 +995,7 @@ describe("a link removed after the preflight", () => {
 
     // So the count is one, on the line and in the sentence alike.
     expect(factOf(printed, "uploaded")).toBe("1");
-    expect(spoken).toContain("egma uploaded 1 of these and then refused c-refused");
+    expect(spoken).toContain("Egma uploaded 1 of these and then refused c-refused");
     expect(spoken).toContain("What has landed has landed — b-edited");
     // And the settled test is named in neither, because nothing was sent for it.
     expect(spoken).not.toContain("a-settled");
@@ -1033,7 +1033,7 @@ describe("two egmas that read different shapes", () => {
 
       expect(refused.code, verb).toBe(7);
       expect(factOf(refused.stdout, "status"), verb).toBe("outdated");
-      expect(refused.stderr, verb).toContain("This copy of egma is older than the platform");
+      expect(refused.stderr, verb).toContain("This copy of Egma is older than the platform");
       expect(refused.stderr, verb).toContain("npx egma@latest");
       expect(refused.stderr, verb).toContain("Nothing was read and nothing was uploaded.");
     }
@@ -1053,7 +1053,7 @@ describe("two egmas that read different shapes", () => {
     const refused = await egma(["pull"]);
 
     expect(refused.code).toBe(7);
-    expect(refused.stderr).toContain("The platform is older than this copy of egma");
+    expect(refused.stderr).toContain("The platform is older than this copy of Egma");
     expect(refused.stderr).not.toContain("npx egma@latest");
   });
 });

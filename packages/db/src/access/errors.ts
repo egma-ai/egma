@@ -614,7 +614,7 @@ export class PredefinedGraderError extends Error {
 
   constructor(libraryId: string, graderName: string) {
     super(
-      `"${graderName}" (${libraryId}) is one of egma's own graders, and those cannot be deleted: it is written by every release and would come back at the next start. Stop running a copy of it instead — a library entry judges nothing on its own.`,
+      `"${graderName}" (${libraryId}) is one of Egma's own graders, and those cannot be deleted: it is written by every release and would come back at the next start. Stop running a copy of it instead — a library entry judges nothing on its own.`,
     );
     this.name = "PredefinedGraderError";
     this.libraryId = libraryId;
@@ -683,7 +683,7 @@ export class UnknownGraderLibraryEntryError extends Error {
 
   constructor(libraryId: string) {
     super(
-      `${libraryId} is not a grader on this shelf, so there is nothing to make a copy of; read the library to see what egma ships`,
+      `${libraryId} is not a grader on this shelf, so there is nothing to make a copy of; read the library to see what Egma ships`,
     );
     this.name = "UnknownGraderLibraryEntryError";
     this.libraryId = libraryId;

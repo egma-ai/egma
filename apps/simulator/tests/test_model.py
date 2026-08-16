@@ -214,3 +214,43 @@ async def test_a_model_that_never_answers_is_a_model_failure(model_stub):
             await client.reply(system_and_history())
     finally:
         await client.close()
+
+
+async def test_a_reasoning_effort_rides_the_request_when_one_was_asked_for(
+    model_stub,
+):
+    model_stub.answer_with("Hello, I am calling about my appointment.")
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url,
+        api_key="key-under-test",
+        model_name="model-under-test",
+        reasoning_effort="none",
+    )
+    try:
+        await client.reply(system_and_history(("user", "Hello?")))
+    finally:
+        await client.close()
+
+    assert model_stub.requests[0]["reasoning_effort"] == "none"
+
+
+async def test_no_reasoning_field_is_sent_when_nobody_asked(model_stub):
+    """Absent stays absent on the wire.
+
+    Providers speaking one chat-completions shape do not agree on the
+    accepted values, and some models refuse the field outright — so a
+    request that always carried it would narrow which models a deployment
+    can run to the ones this file happened to know about.
+    """
+    model_stub.answer_with("Hello, I am calling about my appointment.")
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url,
+        api_key="key-under-test",
+        model_name="model-under-test",
+    )
+    try:
+        await client.reply(system_and_history(("user", "Hello?")))
+    finally:
+        await client.close()
+
+    assert "reasoning_effort" not in model_stub.requests[0]

@@ -257,10 +257,11 @@ function Runs({ projectId }: { readonly projectId: string }) {
     setRowRefused(null);
     setStopping(true);
 
+    // Named the one way every write in the product names it. See the same call
+    // on the run's own page.
     const answered = await writeJson<RunRow>(runCancelPath(runId), {
       method: "POST",
       project: projectId,
-      body: {},
     });
 
     setStopping(false);

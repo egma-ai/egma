@@ -203,7 +203,7 @@ describe("a copy whose entry cannot be read", () => {
       verdict: "errored",
       score: 0,
     });
-    expect(only?.rationale).toContain("library entry egma cannot read");
+    expect(only?.rationale).toContain("library entry Egma cannot read");
   });
 });
 

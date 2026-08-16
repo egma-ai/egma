@@ -9,7 +9,7 @@ conversation itself — every turn, tool call and measurement — as
 OpenTelemetry spans. It never touches the database and never imports
 monorepo code: the versioned JSON contract in
 `packages/simulation-contract` is its entire connection to the rest of
-egma, which is also what lets this one app be Python inside a TypeScript
+Egma, which is also what lets this one app be Python inside a TypeScript
 monorepo.
 
 Five seams shape the inside, and each exists to be swapped without
@@ -320,7 +320,7 @@ workbench story and every contributor's checkout run.
 | --- | --- | --- |
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | (required) | Where to claim, heartbeat, and report. |
 | `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN` — under compose one variable reaches both sides and neither has a default, so a deployment states it once in `.env` and Compose refuses by name until it does; the claim answers carry live provider credentials. The workbench asks for none. |
-| `EGMA_SIMULATOR_CAPACITY` | `2` | Most simulations conducted at once. Compose passes an unset value through, so this process owns the default in every deployment. |
+| `EGMA_SIMULATOR_CAPACITY` | `2` | Most simulations conducted at once. Compose passes an unset value through, so this process owns the default in every deployment. A voice simulation costs a channel on the deployment's carrier trunk, so raise it only as far as the trunk allows. |
 | `EGMA_SIMULATOR_CLAIMANT` | `egma-simulator-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |
 | `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | `30` | How long one claim request is willing to hang, sent as the claim's `wait_seconds` so the control plane holds no longer than the client will wait. The control plane caps its own hold below this default. |
@@ -329,14 +329,16 @@ workbench story and every contributor's checkout run.
 | `EGMA_SIMULATOR_MODEL_BASE_URL` | `https://api.openai.com/v1` | The provider, for `openai` — any OpenAI-compatible endpoint. |
 | `EGMA_SIMULATOR_MODEL_NAME` | (required for `openai`) | Which model to ask for. |
 | `EGMA_SIMULATOR_MODEL_API_KEY` | (required for `openai`) | The provider key. Never logged. |
-| `EGMA_SIMULATOR_STT_PROVIDER` | `scripted` | What the persona hears with, in a voice simulation: `scripted`, `deepgram` or `openai`. |
+| `EGMA_SIMULATOR_MODEL_REASONING_EFFORT` | (none) | How hard the model thinks before the persona speaks, in the provider's own words. Unset sends nothing at all, which is what a model that has never heard of the field needs. A caller on a live line does not pause to reason, so turning it off is the ordinary setting. |
+| `EGMA_SIMULATOR_STT_PROVIDER` | `scripted` | What the persona hears with, in a voice simulation: `scripted`, `deepgram`, `openai` or `openai_realtime`. The last two are one account and two transports: `openai` posts a finished recording of each turn and waits for the answer, `openai_realtime` holds a socket open and transcribes while the agent is still talking. On a phone line the second is the one worth having. |
 | `EGMA_SIMULATOR_DEEPGRAM_API_KEY` | (required for `deepgram`) | The provider key. Never logged. |
-| `EGMA_SIMULATOR_TTS_PROVIDER` | `scripted` | What the persona speaks with: `scripted`, `elevenlabs` or `openai`. |
+| `EGMA_SIMULATOR_TTS_PROVIDER` | `scripted` | What the persona speaks with: `scripted`, `elevenlabs`, `openai` or `cartesia`. |
 | `EGMA_SIMULATOR_ELEVENLABS_API_KEY` | (required for `elevenlabs`) | The provider key. Never logged. |
-| `EGMA_SIMULATOR_OPENAI_API_KEY` | (required for `openai` ears or mouth) | One key for both legs, because one account speaks and listens. Never logged. |
-| `EGMA_SIMULATOR_STT_MODEL` | `gpt-4o-transcribe` | Which model the `openai` listening leg asks for. |
-| `EGMA_SIMULATOR_TTS_MODEL` | `gpt-4o-mini-tts` | Which model the `openai` speaking leg asks for. |
-| `EGMA_SIMULATOR_TTS_VOICE` | `alloy` | Which OpenAI voice a persona speaks with when its own traits name none. |
+| `EGMA_SIMULATOR_CARTESIA_API_KEY` | (required for `cartesia`) | The provider key. Never logged. |
+| `EGMA_SIMULATOR_OPENAI_API_KEY` | (required for `openai` ears or mouth) | One key for both legs, and for `openai_realtime` too, because one account speaks and listens over either transport. Never logged. |
+| `EGMA_SIMULATOR_STT_MODEL` | per provider | Which model the listening leg asks for. Unset, each leg asks for its own provider's default: `gpt-4o-transcribe` for `openai`, `gpt-live-transcribe` for `openai_realtime`. |
+| `EGMA_SIMULATOR_TTS_MODEL` | per provider | Which model the speaking leg asks for. Unset, each leg asks for its own provider's default: `gpt-4o-mini-tts` for `openai`, `sonic-3.5` for `cartesia`. |
+| `EGMA_SIMULATOR_TTS_VOICE` | per provider | Which voice a persona speaks with when its own traits name none. A voice identifier belongs to the provider that minted it, so unset means each leg uses its own provider's default voice. |
 | `EGMA_SIMULATOR_VAD_PROVIDER` | `scripted` | What hears the agent start and stop speaking: `scripted`, which reads the test tone exactly, or `silero`. Needs no key either way — Silero ships inside the pinned pipecat wheel and downloads nothing. |
 | `EGMA_SIMULATOR_MEDIA_BACKEND` | (none) | Which bridge places a phone call: `livekit`, or `scripted` for the local stand-in that places none. Unset, the simulator places no calls and says so when a simulation names a number. |
 | `EGMA_SIMULATOR_LIVEKIT_URL` | (required for `livekit`) | The LiveKit server — self-hosted or Cloud, only the URL differs. |
@@ -401,7 +403,7 @@ the fixtures already inside the image.
 The LiveKit server, its SIP gateway and their Redis are not an overlay:
 they are in the default compose file, so `docker compose up` starts them
 with everything else. The simulator publishes nothing whichever overlays
-are on — the gateway is the one container in egma a carrier talks to, and
+are on — the gateway is the one container in Egma a carrier talks to, and
 what that costs a self-hoster is the root README's story to tell.
 
 ## Tests

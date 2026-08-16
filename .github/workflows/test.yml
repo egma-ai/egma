@@ -138,7 +138,22 @@ jobs:
         # of their own from the image the compose file deploys, so pulling it
         # through compose keeps one version in one place.
         if: github.base_ref == 'main'
-        run: docker compose pull minio
+        # **Compose interpolates every service before it pulls one**, and the
+        # self-hosted phone platform declares ten variables with no default —
+        # the LiveKit pair, the recording store's four credentials, the auth
+        # secret. So `docker compose pull minio` fails on a variable that has
+        # nothing to do with MinIO, before any network call happens.
+        #
+        # Those guards are right where they are: a self-hoster who has not run
+        # `egma self-host up` should be told which variable by name rather than
+        # handed a half-started platform. CI is not that person and starts none
+        # of those services. Placeholders would work today and break on the
+        # eleventh variable, so this does not use them.
+        #
+        # The tag still lives in one place. This reads it out of the compose
+        # file rather than repeating it, so the image CI warms stays the image
+        # the compose file deploys.
+        run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
 
       - name: Run the fast lane
         # PostgreSQL and ClickHouse come up inside `test:fast`, which is also
@@ -192,7 +207,11 @@ jobs:
         # The recording flows start a MinIO of their own from the image the
         # compose file deploys. Pulling it first keeps a cold registry out of
         # the suite's own timeout.
-        run: docker compose pull minio
+        #
+        # Pulled by tag rather than through compose, for the reason the fast
+        # lane's own step gives: compose interpolates every service before it
+        # pulls one, and the self-host platform's variables have no defaults.
+        run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
 
       - name: Run the browser lane
         env:

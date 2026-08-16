@@ -96,7 +96,7 @@ function runEditor(
     const child = spawn(command, [...args], { stdio: "inherit", env });
 
     child.once("error", (error: Error) => {
-      resolve(`egma could not start ${command}: ${error.message}`);
+      resolve(`Egma could not start ${command}: ${error.message}`);
     });
     child.once("exit", (code, signal) => {
       // An editor that was killed, or that exited unhappily, has not

@@ -9,7 +9,7 @@ speech rather than against a tone the test itself invented. A transcriber that
 reads this file and answers with that sentence has been proved end to end; one
 fed a synthetic waveform has been proved against nothing.
 
-Recorded by running egma's own text-to-speech leg once and keeping what came
+Recorded by running Egma's own text-to-speech leg once and keeping what came
 back, then trimming to the words and a short pause each side. Nothing about it
 is secret and nothing in it identifies anybody: it is a machine reading a
 sentence about a cleaning appointment.

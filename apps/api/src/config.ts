@@ -182,14 +182,14 @@ function smtpSettings(
   }
   if (!["smtp:", "smtps:"].includes(parsed.protocol)) {
     throw new Error(
-      `EGMA_SMTP_URL speaks ${parsed.protocol} and egma posts mail over smtp: or smtps:`,
+      `EGMA_SMTP_URL speaks ${parsed.protocol} and Egma posts mail over smtp: or smtps:`,
     );
   }
 
   return {
     url,
     from:
-      environment.EGMA_MAIL_FROM?.trim() || `egma <egma@${new URL(baseUrl).hostname}>`,
+      environment.EGMA_MAIL_FROM?.trim() || `Egma <egma@${new URL(baseUrl).hostname}>`,
   };
 }
 
@@ -219,7 +219,7 @@ export function loadConfig(
   }
   if (!["http:", "https:"].includes(clickhouse.protocol)) {
     throw new Error(
-      `CLICKHOUSE_URL speaks ${clickhouse.protocol} and egma reaches ClickHouse over http: or https:`,
+      `CLICKHOUSE_URL speaks ${clickhouse.protocol} and Egma reaches ClickHouse over http: or https:`,
     );
   }
 
@@ -320,9 +320,9 @@ export function loadConfig(
       parsedBaseUrl.hash !== "" ? "a fragment" : "",
     ].filter((part) => part !== "");
     throw new Error(
-      `EGMA_BASE_URL must be only the address egma is reached at — scheme, host and port, nothing else — and this one carries ${wrong.join(
+      `EGMA_BASE_URL must be only the address Egma is reached at — scheme, host and port, nothing else — and this one carries ${wrong.join(
         " and ",
-      )}. Set it to ${parsedBaseUrl.origin} and start egma again. Egma serves its whole public surface, including the platform identity the CLI reads, at the root of this address; anything after the port cannot be honoured and is a sign that a proxy is putting egma under a subpath, which is not supported.`,
+      )}. Set it to ${parsedBaseUrl.origin} and start Egma again. Egma serves its whole public surface, including the platform identity the CLI reads, at the root of this address; anything after the port cannot be honoured and is a sign that a proxy is putting Egma under a subpath, which is not supported.`,
     );
   }
   const baseUrl = parsedBaseUrl.origin;
@@ -384,8 +384,11 @@ function platformSettings(
     persona_model_provider: environment.EGMA_PERSONA_MODEL_PROVIDER?.trim(),
     persona_model: environment.EGMA_PERSONA_MODEL?.trim(),
     persona_model_key: environment.EGMA_PERSONA_MODEL_API_KEY?.trim(),
+    persona_model_reasoning_effort:
+      environment.EGMA_PERSONA_MODEL_REASONING_EFFORT?.trim(),
     speech_to_text_provider: environment.EGMA_PERSONA_STT_PROVIDER?.trim(),
     speech_to_text_key: environment.EGMA_PERSONA_STT_API_KEY?.trim(),
+    speech_to_text_model: environment.EGMA_PERSONA_STT_MODEL?.trim(),
     text_to_speech_provider: environment.EGMA_PERSONA_TTS_PROVIDER?.trim(),
     text_to_speech_key: environment.EGMA_PERSONA_TTS_API_KEY?.trim(),
     text_to_speech_model: environment.EGMA_PERSONA_TTS_MODEL?.trim(),
@@ -491,11 +494,11 @@ function blobStore(
         "will not fetch that: a page loaded over https: blocks audio loaded " +
         "over http: as mixed content, and it blocks it before the request is " +
         "sent — so every recording fails with the store never asked and the " +
-        "signature never checked, the player shows an error egma did not " +
+        "signature never checked, the player shows an error Egma did not " +
         "send, and the only explanation is a line in the browser's own " +
         "console. Give EGMA_BLOB_PUBLIC_URL an https: address the browser " +
         "reaches the store at — the proxy or certificate the store is " +
-        "published behind, alongside the one egma itself is published behind.",
+        "published behind, alongside the one Egma itself is published behind.",
     );
   }
   // Scheme, host and port, and nothing after them — the same narrowing
@@ -517,7 +520,7 @@ function blobStore(
       `EGMA_BLOB_PUBLIC_URL must be only the address a browser reaches the ` +
         `recording store at — scheme, host and port, nothing else — and this ` +
         `one carries more. Set it to ${parsed.origin}. A signed link covers ` +
-        `the path it was signed for, so egma cannot serve a store under a ` +
+        `the path it was signed for, so Egma cannot serve a store under a ` +
         `sub-path a proxy then rewrites.`,
     );
   }
@@ -585,7 +588,7 @@ function blobRegion(environment: NodeJS.ProcessEnv, address: URL): string {
     throw new Error(
       `EGMA_BLOB_PUBLIC_URL points at ${address.hostname}, which is Amazon's ` +
         "own S3, and no EGMA_BLOB_REGION was set. A signature carries the " +
-        "region and S3 refuses one signed for another, so egma would sign " +
+        "region and S3 refuses one signed for another, so Egma would sign " +
         "every recording for us-east-1 and every one of them would come back " +
         "SignatureDoesNotMatch. Set EGMA_BLOB_REGION to the bucket's region — " +
         "the same one the simulator uploads with, which is EGMA_S3_REGION if " +

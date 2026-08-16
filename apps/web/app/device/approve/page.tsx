@@ -120,7 +120,7 @@ export default function ApproveDevicePage() {
 
       window.location.assign(ENDING[body.status ?? ""] ?? "/device/denied");
     } catch {
-      setProblem("egma could not be reached. Is the API running?");
+      setProblem("Egma could not be reached. Is the API running?");
     } finally {
       setBusy(false);
     }
@@ -131,7 +131,7 @@ export default function ApproveDevicePage() {
   if (state.at === "unreachable") {
     return (
       <StatePage
-        title="egma could not be reached"
+        title="Egma could not be reached"
         lead="Nothing was approved. Check that your instance is running and try the code again."
       >
         <p className={styles.linkLine}>

@@ -84,7 +84,7 @@ export function agentNotApplicableLate(file: string, agentId: string): string {
  */
 export function testArchived(testId: string, name: string): string {
   return (
-    `Test ${testId} "${name}" is archived, so egma will not write to it. ` +
+    `Test ${testId} "${name}" is archived, so Egma will not write to it. ` +
     "Restore it in Egma, or remove this local file; egma push changed " +
     "neither side."
   );
@@ -101,7 +101,7 @@ export function testArchived(testId: string, name: string): string {
 export function keptUnmigrated(file: string, because: string): string {
   return (
     `${file} has a version pin but no identity revision, and ${because}, so ` +
-    "egma left it exactly as it is rather than guess which side the change " +
+    "Egma left it exactly as it is rather than guess which side the change " +
     "came from. Copy the draft aside, delete this file, run egma pull to " +
     "write the platform's version, then reapply the draft."
   );

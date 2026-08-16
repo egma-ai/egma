@@ -428,7 +428,9 @@ MAY_BE_ABSENT = {
     "EGMA_PERSONA_MODEL_PROVIDER": "seeded",
     "EGMA_PERSONA_MODEL": "seeded",
     "EGMA_PERSONA_MODEL_API_KEY": "seeded",
+    "EGMA_PERSONA_MODEL_REASONING_EFFORT": "seeded",
     "EGMA_PERSONA_STT_PROVIDER": "seeded",
+    "EGMA_PERSONA_STT_MODEL": "seeded",
     "EGMA_PERSONA_STT_API_KEY": "seeded",
     "EGMA_PERSONA_TTS_PROVIDER": "seeded",
     "EGMA_PERSONA_TTS_API_KEY": "seeded",
@@ -469,6 +471,16 @@ MAY_BE_ABSENT = {
     # out for itself.
     "EGMA_SIMULATOR_MODEL_BASE_URL": "a property of this container's network",
     "EGMA_SIMULATOR_STT_MODEL": "empty means egma's own default",
+    # These two are the platform's settings first — it seeds and holds
+    # `speech_to_text_model` and `persona_model_reasoning_effort`, and what it
+    # holds wins over anything written here. Empty is also a real answer on
+    # its own: the listening leg asks for its own provider's default, and the
+    # model call carries no reasoning field at all, which is what a model that
+    # has never heard of one needs. The cartesia key is empty for the reason
+    # every other provider key is absent from this container: the platform
+    # holds it and hands it over on the work order.
+    "EGMA_SIMULATOR_MODEL_REASONING_EFFORT": "empty sends no reasoning field",
+    "EGMA_SIMULATOR_CARTESIA_API_KEY": "seeded",
     "EGMA_LIVEKIT_ADVERTISE_IP": "empty is right for every ordinary deployment",
     "EGMA_LIVEKIT_SIP_EXTERNAL_IP": "empty means ask a STUN server",
     # Empty is right for the MinIO this file runs, which ignores regions; the

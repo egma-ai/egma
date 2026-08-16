@@ -40,7 +40,7 @@ export const LIBRARY = {
    * is what stops somebody looking for a button that does not exist.
    */
   empty:
-    "The library is empty, which egma never leaves it. Its own graders are " +
+    "The library is empty, which Egma never leaves it. Its own graders are " +
     "written at start-up, so a platform still booting shows nothing here for " +
     "a moment. Reload in a few seconds.",
 } as const;
@@ -130,7 +130,7 @@ export const TYPES: Readonly<Record<string, string>> = {
  * flag, which is why there is no third word here for anybody to set.
  */
 export const OWNERS: Readonly<Record<string, string>> = {
-  egma: "egma",
+  egma: "Egma",
   organization: "Your team",
 };
 

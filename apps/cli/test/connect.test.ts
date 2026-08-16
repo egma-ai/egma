@@ -219,7 +219,7 @@ describe("the key, and the two failures worth a second try", () => {
     // The second ask carries the reason the first answer did not work.
     expect(ui.record.keyAsks[1]?.problem).toBe(INVALID_KEY_LINE);
     expect(CUSTODY_LINE).toBe(
-      "It is sent to egma and stored encrypted. It never lands in a file here.",
+      "It is sent to Egma and stored encrypted. It never lands in a file here.",
     );
   });
 
@@ -414,10 +414,10 @@ describe("what lands on the platform", () => {
     expect(await answer.json()).toEqual({
       error: "invalid_request",
       message:
-        "egma no longer keeps what was pulled from the provider, so a " +
+        "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
         "description, project, connection; the agent's content stays at the " +
-        "provider, where egma reads it fresh rather than out of a copy that " +
+        "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });
     expect(platform.registered.agents).toHaveLength(0);
@@ -493,7 +493,7 @@ describe("what lands on the platform", () => {
     // Said in plain words, on the screen, and never as a failure.
     expect(second.ui.record.statuses.join("\n")).toContain(
       "This voice agent was already registered as order-line, and retell-1 was " +
-        "already the way egma reaches it. Nothing new was registered.",
+        "already the way Egma reaches it. Nothing new was registered.",
     );
     // And each half is reported on its own, because a retry cares about both.
     expect(second.connected?.registration).toEqual({
@@ -584,7 +584,7 @@ describe("the drift line", () => {
       path.dirname(workspace.dir),
       `outside-${path.basename(workspace.dir)}.md`,
     );
-    await writeFile(above, "Words from somewhere egma was never invited.\n", "utf8");
+    await writeFile(above, "Words from somewhere Egma was never invited.\n", "utf8");
     return above;
   }
 
@@ -845,7 +845,7 @@ describe("a registration answer this build cannot read", () => {
 
     expect(answer).toEqual({
       kind: "refused",
-      reason: "egma answered without saying what it wrote. Check that this egma is up to date.",
+      reason: "Egma answered without saying what it wrote. Check that this Egma instance is up to date.",
     });
   });
 
@@ -854,7 +854,7 @@ describe("a registration answer this build cannot read", () => {
 
     expect(answer).toEqual({
       kind: "refused",
-      reason: "egma answered without saying what it wrote. Check that this egma is up to date.",
+      reason: "Egma answered without saying what it wrote. Check that this Egma instance is up to date.",
     });
   });
 });

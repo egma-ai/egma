@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { sendJson, type Refusal } from "../../../../lib/api.ts";
+import { writeJson, type Refusal } from "../../../../lib/api.ts";
 import {
   filledParams,
   firstChoices,
@@ -44,7 +44,7 @@ import {
  * off the entry, the write door checks the same catalog they were built from,
  * and the two cannot disagree.
  *
- * **The project rides in the body, because a copy lands in exactly one
+ * **The project rides in the address, because a copy lands in exactly one
  * project.** This is what the organization-wide version of this form could not
  * say: it posted a body with no project in it and the API resolved one for
  * itself, so a person with three projects switched a grader on in whichever
@@ -174,7 +174,7 @@ export function UseForm({
     setBusy(true);
     setRefused(null);
 
-    const answer = await sendJson<RunningGrader>(GRADERS_PATH, {
+    const answer = await writeJson<RunningGrader>(GRADERS_PATH, {
       method: "POST",
       project: projectId,
       body: {

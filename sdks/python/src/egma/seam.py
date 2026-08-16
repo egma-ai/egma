@@ -220,7 +220,7 @@ def mocked_tools_in(reply: str) -> tuple[str, ...]:
     mocked = answered.get("mocked_tools")
     if not isinstance(mocked, list):
         raise SeamError(
-            f"{HELLO_METHOD} answers with the tool names egma covers, as a "
+            f"{HELLO_METHOD} answers with the tool names Egma covers, as a "
             f"list of strings, and this reply carried {_kind_of(mocked)}"
         )
     names: list[str] = []

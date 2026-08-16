@@ -65,7 +65,7 @@ export const IDENTITY_TIMEOUT_MS = 10_000;
 
 /** What egma says when it cannot tell what the address in front of it is. */
 const NOT_A_PLATFORM =
-  "Check the address. If it is right, this is probably not an Egma platform, or it is older than this copy of egma.";
+  "Check the address. If it is right, this is probably not an Egma platform, or it is older than this copy of the Egma CLI.";
 
 /**
  * A platform answered, but not with the public contract the CLI requires.
@@ -88,7 +88,7 @@ export class PlatformIdentityError extends Error {
     options: { readonly advice?: string; readonly worthRetrying?: boolean } = {},
   ) {
     super(
-      `egma asked ${origin} which platform it is, and ${because} ${options.advice ?? NOT_A_PLATFORM}`,
+      `Egma asked ${origin} which platform it is, and ${because} ${options.advice ?? NOT_A_PLATFORM}`,
     );
     this.name = "PlatformIdentityError";
     this.said = because;
@@ -116,7 +116,7 @@ export class PlatformRedirectedError extends PlatformIdentityError {
         : `it redirected to ${to} instead.`,
       {
         advice:
-          "egma does not follow that. Something in front of this address is answering for it — a sign-in page or a proxy — so this is where to look, not at your copy of egma.",
+          "Egma does not follow that. Something in front of this address is answering for it — a sign-in page or a proxy — so this is where to look, not at your copy of the Egma CLI.",
       },
     );
     this.name = "PlatformRedirectedError";
@@ -127,7 +127,7 @@ export class PlatformRedirectedError extends PlatformIdentityError {
 export class PlatformTimedOutError extends PlatformUnreachableError {
   constructor(origin: string, cause: unknown) {
     super(origin, cause);
-    this.message = `egma at ${origin} took the connection but did not answer within ${String(
+    this.message = `Egma at ${origin} took the connection but did not answer within ${String(
       IDENTITY_TIMEOUT_MS / 1000,
     )} seconds. Check that the instance is healthy, then run this again.`;
     this.name = "PlatformTimedOutError";
@@ -170,8 +170,8 @@ export class PlatformOriginMismatchError extends Error {
     const statedIsOnlyItsOwnMachine = isLoopback(stated) && !isLoopback(asked);
     super(
       [
-        `egma asked ${asked} which platform it is, and it answered that it lives at ${stated}.`,
-        "egma uses the address you gave it and never follows a platform to another one.",
+        `Egma asked ${asked} which platform it is, and it answered that it lives at ${stated}.`,
+        "Egma uses the address you gave it and never follows a platform to another one.",
         `Set EGMA_BASE_URL on the platform to the address people reach it at and restart it${
           statedIsOnlyItsOwnMachine
             ? ` — ${stated} names only the platform's own machine, so nobody else can reach it there.`
@@ -221,7 +221,7 @@ export function whatAnswered(cause: unknown): WhatAnswered {
   if (cause instanceof PlatformIdentityError) {
     return { said: cause.said, worthRetrying: cause.worthRetrying };
   }
-  return { said: "egma could not use what came back.", worthRetrying: true };
+  return { said: "Egma could not use what came back.", worthRetrying: true };
 }
 
 function text(value: unknown): string {
@@ -283,7 +283,7 @@ export async function readPlatformIdentity(
   if (!PLATFORM_INSTANCE_ID.test(instanceId)) {
     throw new PlatformIdentityError(
       selectedOrigin,
-      "what came back carries no platform identity egma can use.",
+      "what came back carries no platform identity Egma can use.",
     );
   }
 
@@ -293,7 +293,7 @@ export async function readPlatformIdentity(
   } catch {
     throw new PlatformIdentityError(
       selectedOrigin,
-      "what came back names no address egma can use.",
+      "what came back names no address Egma can use.",
     );
   }
   if (stated !== selectedOrigin) {

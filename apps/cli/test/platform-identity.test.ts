@@ -59,10 +59,10 @@ function expectTheWholeMove(said: string): void {
   expect(said).toContain("Your tests move with you");
   expect(said).toContain("stay on the platform that ran them");
   // The refusal teaches the move. Nothing offers to perform it.
-  expect(said).not.toMatch(/egma rebind|--rebind|egma move/u);
+  expect(said).not.toMatch(/egma rebind|--rebind|Egma move/u);
 }
 
-describe("verifying an Egma platform", () => {
+describe("verifying an egma platform", () => {
   let platform: Platform;
   let workspace: Workspace;
 
@@ -388,15 +388,15 @@ describe("verifying an Egma platform", () => {
         refusal: "unreachable" as const,
       },
       {
-        what: "an address that is not egma",
+        what: "an address that is not Egma",
         answer: () => new Response("<html>somebody else</html>", { status: 404 }),
         says: "it answered 404 rather than its identity.",
         refusal: "refused" as const,
       },
       {
-        what: "a page that answers but says nothing egma knows",
+        what: "a page that answers but says nothing Egma knows",
         answer: () => Response.json({ nothing: "useful" }),
-        says: "what came back carries no platform identity egma can use.",
+        says: "what came back carries no platform identity Egma can use.",
         refusal: "refused" as const,
       },
       {
@@ -615,7 +615,7 @@ describe("verifying an Egma platform", () => {
 
     await expect(resolution).rejects.toBeInstanceOf(BoundPlatformUnavailableError);
     await expect(resolution).rejects.toThrow(
-      "egma did not fall back to its own platform",
+      "Egma did not fall back to its own platform",
     );
     // One address asked, and it is the bound one. The built-in address exists
     // now, so this list is what proves a bound repository never reaches it.

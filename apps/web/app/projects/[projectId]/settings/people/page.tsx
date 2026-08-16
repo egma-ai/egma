@@ -415,7 +415,7 @@ function Invitations({
   const [role, setRole] = useState<string>("viewer");
   const [link, setLink] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  useUnsavedChanges(busy || email.trim() !== "" || link !== null);
+  useUnsavedChanges(email.trim() !== "" || link !== null, busy);
 
   /**
    * One invitation asked for, whether the form asked for it or a dead row did.
@@ -517,7 +517,7 @@ function Invitations({
     <>
       <Section
         title="Invite somebody"
-        lead="If no mail transport is configured, egma gives you a one-time link to send yourself."
+        lead="If no mail transport is configured, Egma gives you a one-time link to send yourself."
       >
         {note === null ? null : <Help>{note}</Help>}
         {link === null ? null : (

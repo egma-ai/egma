@@ -173,7 +173,7 @@ describe("no coding agent on this machine", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Open the coding agent you use, and paste this into it:");
     expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(
-      "egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead.",
+      "Egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead.",
     );
   });
 
@@ -223,7 +223,7 @@ describe("no voice agent anywhere", () => {
     expect(ui.record.asked).toEqual(["prompts-pointer"]);
     expect(report).toEqual({ kind: "no-agent-context" });
     expect(buildExitLine(report)).toBe(
-      "egma found no voice agent to test. Run egma again where your agent is defined.",
+      "Egma found no voice agent to test. Run egma again where your agent is defined.",
     );
 
     // Nothing was registered and no folder was made, because egma never got as
@@ -253,7 +253,7 @@ describe("a Retell key Retell will not take", () => {
     expect(ui.record.statuses.filter((line) => line === INVALID_KEY_LINE)).toHaveLength(1);
 
     expect(report).toEqual({ kind: "failed", reason: "Retell would not take that key." });
-    expect(buildExitLine(report)).toBe("egma could not finish: Retell would not take that key.");
+    expect(buildExitLine(report)).toBe("Egma could not finish: Retell would not take that key.");
 
     // Nothing was written anywhere on a key that never worked.
     expect(platform.registered.agents).toHaveLength(0);
@@ -275,7 +275,7 @@ describe("a connection egma has no adapter for", () => {
 
     const refusal = platform.running.noAdapterMessage("retell");
     expect(report).toEqual({ kind: "failed", reason: refusal });
-    expect(buildExitLine(report)).toBe(`egma could not finish: ${refusal}`);
+    expect(buildExitLine(report)).toBe(`Egma could not finish: ${refusal}`);
     // Verbatim: not summarised, not softened, not swallowed.
     expect(buildExitLine(report)).toContain("no simulator adapter for a retell connection yet");
     expect(ui.record.statuses.join("\n")).toContain(refusal);

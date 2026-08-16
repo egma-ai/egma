@@ -239,6 +239,72 @@ export async function standingOf(
   };
 }
 
+/**
+ * One conversation of a run somebody already started, moved the way a simulator
+ * moves it: claimed, started, landed.
+ *
+ * `aConductedRun` below builds the whole arrangement — agent, test, run — for a
+ * caller who only wants the finished state. This is the other half of that, for
+ * a caller who started the run *itself* and now needs it to have happened: the
+ * browser journey plans and starts a run through the product's own screens, and
+ * then has to land a conversation to have any evidence to open.
+ *
+ * **Only the movement is at this seam, and deliberately.** No simulator runs in
+ * these suites, so the alternative is not a real conversation — it is a fake
+ * feed, which would prove that a page can render invented rows. What lands here
+ * is what a real report lands, through the same data-access functions the
+ * simulator calls.
+ *
+ * Answers the conversation it conducted, which is the address a caller then
+ * opens the evidence at.
+ *
+ * **One conversation is claimed, and only one.** `claimSimulations` is the
+ * simulator's own drain: it takes the oldest queued conversations *across the
+ * whole instance*, with no way to ask for one run's — deliberately, because a
+ * simulator has no business caring whose work it picks up. This helper used to
+ * ask for fifty of them and then filter by run, which claimed every other
+ * pending run's conversations and never completed one of them. Nothing noticed,
+ * because no suite here has ever had two runs in flight at once; the first one
+ * to try would have found its own conversations already claimed by a claimant
+ * that had walked away, and would have had to work out why from a page that
+ * simply never moved.
+ *
+ * So the capacity is one, which is all this helper ever needed. What it still
+ * cannot do is *choose* — if some other run left a conversation queued and
+ * older, that is the one that comes back. It is asserted rather than filtered,
+ * so the arrangement fails at this line, naming the run it got instead, rather
+ * than at whatever the caller went on to assert.
+ */
+export async function landOneConversationOf(
+  auth: AuthContext,
+  runId: string,
+  options: { readonly reference?: string } = {},
+): Promise<string> {
+  const [first] = await claimSimulations({ claimant: CLAIMANT, capacity: 1 });
+  expect(first, "this run wrote a conversation to claim").toBeDefined();
+  expect(
+    first?.runId,
+    "the oldest queued conversation on this instance belongs to another run, " +
+      "so this arrangement has two runs in flight; land the earlier one first " +
+      "or start this one in an instance of its own",
+  ).toBe(runId);
+  const conversation = first?.id ?? "";
+
+  await startSimulation(auth, conversation, CLAIMANT);
+  await completeSimulation(auth, conversation, CLAIMANT, {
+    endingReason: "agent_ended",
+    turnCount: 6,
+    ...(options.reference === undefined
+      ? {}
+      : {
+          recordingReference: options.reference,
+          measuredAudioBandHertz: 8000,
+        }),
+  });
+
+  return conversation;
+}
+
 export type ConductedRunOptions = {
   /** What the recorded conversation reports as its recording. */
   readonly reference: string;

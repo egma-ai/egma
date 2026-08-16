@@ -146,8 +146,8 @@ export function TraitFields({
           htmlFor="persona-provider"
           hint={
             voiceProviders === null
-              ? "Reading the voices egma can ask for…"
-              : "The providers this egma can ask for."
+              ? "Reading the voices Egma can ask for…"
+              : "The providers this Egma instance can ask for."
           }
         >
           <Select

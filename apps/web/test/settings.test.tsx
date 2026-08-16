@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -122,7 +123,8 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-type Stubbed = { status: number; body: unknown } | "never";
+type StubbedResponse = { status: number; body: unknown };
+type Stubbed = StubbedResponse | Promise<StubbedResponse> | "never";
 
 /** Every request the browser made, in order. */
 let sent: { url: string; method: string; body: unknown }[] = [];
@@ -159,7 +161,8 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
         : (held as Stubbed);
 
       if (answer === "never") return new Promise<Response>(() => undefined);
-      return json(answer.status, answer.body);
+      const ready = await answer;
+      return json(ready.status, ready.body);
     }),
   );
 }
@@ -380,6 +383,75 @@ describe("project settings", () => {
           .hasAttribute("disabled"),
       ).toBe(false);
     });
+  });
+
+  it("keeps an edit made while Save reloads the stored project", async () => {
+    let finishSave!: (answer: StubbedResponse) => void;
+    let finishReload!: (answer: StubbedResponse) => void;
+    const saveAnswer = new Promise<StubbedResponse>((resolve) => {
+      finishSave = resolve;
+    });
+    const reloadAnswer = new Promise<StubbedResponse>((resolve) => {
+      finishReload = resolve;
+    });
+    const renamed = { ...PROJECT, name: "Renamed", revision: "rev_2" };
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirm);
+
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/projects/prj_1": [
+        { status: 200, body: PROJECT },
+        saveAnswer,
+        reloadAnswer,
+      ],
+    });
+    render(<ProjectSettingsPage />);
+
+    const name = (await screen.findByDisplayValue("Default")) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save project" }));
+
+    expect(await screen.findByRole("button", { name: "Saving…" })).toBeTruthy();
+    const settings = screen.getByRole("navigation", { name: "Settings" });
+    const judge = within(settings).getByRole("link", { name: "Judge" });
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    judge.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+
+    // Saving does not lock the fields. This edit is a new draft, made after
+    // the submitted value was captured and before the confirming read lands.
+    fireEvent.change(name, { target: { value: "Rename after saving" } });
+    await act(async () => {
+      finishSave({ status: 200, body: renamed });
+    });
+    await waitFor(() => {
+      expect(
+        sent.filter((request) => request.url === "/api/projects/prj_1"),
+      ).toHaveLength(3);
+    });
+
+    await act(async () => {
+      finishReload({ status: 200, body: renamed });
+    });
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Rename after saving",
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Save project" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+    expect(screen.queryByText(/Saved\. Everybody/)).toBeNull();
+
+    const leaving = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(true);
   });
 
   it("asks before a Settings link or project switch discards a draft", async () => {
@@ -947,7 +1019,7 @@ describe("organization settings", () => {
     const field = screen.getByLabelText("New key") as HTMLInputElement;
     expect(field.value).toBe("");
     expect(field.type).toBe("password");
-    expect(screen.getByText(/egma will not show it to you/)).toBeTruthy();
+    expect(screen.getByText(/Egma will not show it to you/)).toBeTruthy();
   });
 
   /**
@@ -1403,11 +1475,11 @@ describe("judge settings", () => {
       expect(sent.some((one) => one.method === "PUT")).toBe(true);
     });
     const put = sent.find((one) => one.method === "PUT");
+    expect(put?.url).toBe("/api/judge?project=prj_1");
     expect(put?.body).toEqual({
       provider: "openai",
       model: "gpt-4.1-mini",
       source: "jcr_1",
-      project: "prj_1",
     });
   });
 });
@@ -1984,9 +2056,7 @@ describe("API keys", () => {
     people.dispatchEvent(click);
 
     expect(click.defaultPrevented).toBe(true);
-    expect(confirm).toHaveBeenCalledWith(
-      "Discard your unsaved changes?",
-    );
+    expect(confirm).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Creating…" })).toBeTruthy();
   });
 

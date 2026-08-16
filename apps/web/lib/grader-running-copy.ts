@@ -38,7 +38,7 @@ export const RUNNING = {
    */
   empty:
     "Nothing is judging this project, so a run would finish with nothing " +
-    "judged. Every project is given egma's expected-behaviors grader when it " +
+    "judged. Every project is given Egma's expected-behaviors grader when it " +
     "is created — if it is gone, pick it from the library and press Use.",
 } as const;
 

@@ -606,9 +606,9 @@ export function planExplanation(state: FrozenPlan["state"]): string {
     return "Frozen when this run started. These are the exact grader versions and judge choices it was judged against.";
   }
   if (state === "migration_snapshot") {
-    return "Captured while egma was upgraded, not when this run started. This run predates frozen plans and still had work outstanding, so the plan as it stood at the upgrade is what its grading used.";
+    return "Captured while Egma was upgraded, not when this run started. This run predates frozen plans and still had work outstanding, so the plan as it stood at the upgrade is what its grading used.";
   }
-  return "This run predates frozen grading plans and had nothing outstanding when egma was upgraded, so no plan was recorded. Egma will not reconstruct one from today's graders.";
+  return "This run predates frozen grading plans and had nothing outstanding when Egma was upgraded, so no plan was recorded. Egma will not reconstruct one from today's graders.";
 }
 
 /**

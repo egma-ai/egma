@@ -52,7 +52,7 @@ export function cannotActIn(projectId: string): string {
  */
 export const NAME_THE_PROJECT =
   "this organization holds more than one project and this credential names " +
-  "none, so egma cannot tell which project this is about. Send project with " +
+        "none, so Egma cannot tell which project this is about. Send project with " +
   "the one you mean, or use a key minted for that project.";
 
 /**
@@ -198,6 +198,12 @@ export async function resolveAbsentProject(auth: AuthContext): Promise<Acting> {
  * the project the credential is authorized for, or the organization's single
  * project for a key minted for the whole customer. Named, it has to be one this
  * credential may act in.
+ *
+ * **Use this where the request has to land in one project**: a create, or a
+ * list of a project's things. There the absent case has to *choose*, and
+ * `NAME_THE_PROJECT` is the honest answer when there is more than one to choose
+ * from. Where the address already carries the id of the one row being asked
+ * about, `reachingIn` below is the one to use instead.
  */
 export async function actingIn(
   auth: AuthContext,
@@ -205,6 +211,53 @@ export async function actingIn(
 ): Promise<Acting> {
   return named === undefined
     ? resolveAbsentProject(auth)
+    : resolveNamedProject(auth, named, ACTING_WORDING);
+}
+
+/**
+ * The acting context for a route addressed by **one resource's own id**, where
+ * the project is a filter rather than a destination.
+ *
+ * Named, it is exactly `actingIn`'s rule and the same wording: a session may
+ * name any project of its organization, a key minted for one project may not
+ * name a sibling.
+ *
+ * **Absent, it is whatever the credential itself reaches, and the two callers
+ * that arrive here are told apart by `AuthContext.projectId` alone.**
+ *
+ * - A **session** always carries a project. `apps/api/src/auth/session.ts`
+ *   fills it from the membership and throws rather than leaving it out, so
+ *   `{ auth }` here is the session's own project. That is the case ticket 12
+ *   asked for: a browser naming no project is still answered from the project
+ *   it is standing in, not from the whole organization.
+ * - A **key minted for the whole organization** carries none, deliberately —
+ *   `AuthContext.projectId` is `string | undefined` so that this absence is a
+ *   case every reader has to answer rather than a value that defaults. `{ auth }`
+ *   here leaves it absent, `inActingProject` returns no predicate for it, and
+ *   the read spans the customer. That is the first-class case for such a key,
+ *   in the agents group's own words: *"reading across a whole customer is the
+ *   first-class case, because two projects of one customer are always readable
+ *   together."*
+ *
+ * One expression answers both because `projectId` is precisely the fact that
+ * separates them, and neither answer is a guess: the session's project was
+ * chosen by a person, and the organization-wide one narrows by nothing.
+ *
+ * **Why not `actingIn`.** It resolves an absent project by *choosing* one, and
+ * refuses with `NAME_THE_PROJECT` where an organization holds more than one.
+ * On a route addressed by a run id or a simulation id there is nothing to
+ * choose: the id is unique inside the organization, and the caller — `egma run`
+ * following a `results_url`, a terminal holding an id egma printed — has no
+ * reason to know which project it belongs to. Sending it there turns an
+ * organization-wide read into a 400. This function exists so that the two
+ * meanings of "no project named" cannot be swapped by picking the shorter name.
+ */
+export async function reachingIn(
+  auth: AuthContext,
+  named: string | undefined,
+): Promise<Acting> {
+  return named === undefined
+    ? { auth }
     : resolveNamedProject(auth, named, ACTING_WORDING);
 }
 

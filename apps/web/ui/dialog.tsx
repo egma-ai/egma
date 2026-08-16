@@ -119,7 +119,7 @@ export function Dialog({
       if (!hasNativeModal) document.removeEventListener("keydown", fallbackEscape);
       if (dialog.open && typeof dialog.close === "function") dialog.close();
       else dialog.removeAttribute("open");
-      opener?.focus();
+      if (opener?.isConnected === true) opener.focus();
     };
   }, [requestClose]);
 

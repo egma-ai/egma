@@ -21,7 +21,7 @@ export function TaskScreen({ state }: TaskScreenProps) {
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       <Text>{`Coding agent: ${drivenAgentName}`}</Text>
       <Text>

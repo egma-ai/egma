@@ -431,7 +431,7 @@ describe("values that do not answer what the entry asked", () => {
           error instanceof Error ? error.message : String(error),
       );
 
-      expect(refusal).toContain(`"${measure}" is a measure egma records`);
+      expect(refusal).toContain(`"${measure}" is a measure Egma records`);
       expect(refusal).toContain("no span carries it");
     }
   });

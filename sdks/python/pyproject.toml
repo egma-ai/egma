@@ -1,7 +1,7 @@
 [project]
 name = "egma"
 version = "0.0.0"
-description = "The egma SDK: mock tools for LiveKit agents, answered by egma during a simulation and inert everywhere else."
+description = "The Egma SDK: mock tools for LiveKit agents, answered by Egma during a simulation and inert everywhere else."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"

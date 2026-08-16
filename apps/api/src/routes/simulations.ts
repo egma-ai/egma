@@ -27,11 +27,11 @@ import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
-import { actingIn, refuseActing } from "../http/acting.ts";
+import { actingIn, reachingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { describedMockTool } from "../http/mock-tools.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, text } from "../http/reading.ts";
+import { given, projectNamed, text } from "../http/reading.ts";
 import {
   describedOutcome,
   describedVerdict,
@@ -111,24 +111,6 @@ export type SimulationRoutesOptions = {
 
 export const SIMULATION_PATH = "/api/simulations/:simulationId";
 export const SIMULATION_REGRADE_PATH = "/api/simulations/:simulationId/regrade";
-
-/**
- * Which project a request acts in, wherever the caller put it.
- *
- * **The query and the body, because both are in honest use.** A browser's write
- * helper appends the project to the address, and a terminal's body carries it
- * beside everything else it is sending — and a route that read only one of the
- * two would silently fall back to "the organization's single project" for the
- * other, which is right in a one-project organization and wrong in every other.
- * A caller that names it in both is naming it twice, and the two agree or the
- * refusal below says so.
- */
-function projectNamed(
-  query: Record<string, unknown>,
-  body: Record<string, unknown>,
-): string | undefined {
-  return given(text(query.project)) ?? given(text(body.project));
-}
 
 /**
  * A conversation nobody may see reads exactly like a conversation nobody
@@ -359,7 +341,17 @@ export async function simulationRoutes(
     const query = (request.query ?? {}) as Record<string, unknown>;
     const { simulationId } = request.params as { simulationId: string };
 
-    const acting = await actingIn(auth, projectNamed(query, {}));
+    /*
+      `reachingIn`, because the conversation's own id says which one, and a
+      credential naming no project reads across the whole customer.
+
+      This route and the recording beside it are the two doors one evidence page
+      opens. The recording was moved when the four run routes were; this one was
+      not, so an organization-wide key in a customer holding two projects got
+      the transcript refused and the audio served — the same page answering the
+      same question two ways.
+    */
+    const acting = await reachingIn(auth, projectNamed(query, {}));
     if ("refusal" in acting) return refuseActing(reply, acting);
     const who = acting.auth;
 
@@ -647,7 +639,7 @@ export async function simulationRoutes(
       return narrowerGradingInFlight(
         reply,
         `simulation ${simulationId} is being judged right now, for one grader ` +
-          `that does not cover what you asked for, and egma will not ` +
+          `that does not cover what you asked for, and Egma will not ` +
           `interrupt a judgment that is already running. Nothing was queued ` +
           `and no verdict for this ask is coming. Ask again once those ` +
           `verdicts land.`,

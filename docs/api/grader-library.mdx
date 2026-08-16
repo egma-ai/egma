@@ -1,0 +1,124 @@
+---
+title: "Grader Library: Browse and Activate Judgment Templates"
+sidebarTitle: "Grader Library"
+description: "Browse Egma's catalog of grader definitions. Each entry is a reusable judgment template you activate for your project by creating a grader copy."
+---
+
+The grader library is Egma's catalog of judgment templates. Each entry defines a type of judgment — the prompt sent to the model, the output schema, and the form fields your team fills in when activating it. Entries maintained by Egma are available to every organization; your own organization's custom entries appear alongside them once the authoring surface is available.
+
+Browse the library to discover what Egma ships, read the `params` field to understand what each entry expects you to fill in, and then [create a grader](/api/graders) from any entry you want to run against your project.
+
+---
+
+## List grader library entries
+
+Returns all library entries visible to your organization, ordered newest first.
+
+**`GET /api/grader-library`**
+
+<ParamField query="project" type="string">
+  The `prj_` identifier of the project context. Omit this to read the library across your whole organization.
+</ParamField>
+
+<ParamField query="cursor" type="string">
+  Pagination cursor. Pass the `next_cursor` value from a previous response to fetch the next page. Omit to start from the first page.
+</ParamField>
+
+<ResponseField name="items" type="array">
+  Array of library entry objects. See the [library entry object](#the-library-entry-object) below.
+</ResponseField>
+
+<ResponseField name="next_cursor" type="string | null">
+  Cursor for the next page. `null` means you have reached the last page.
+</ResponseField>
+
+```bash title="List all library entries"
+curl https://your-egma-instance/api/grader-library \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+```bash title="Paginate through the library"
+curl "https://your-egma-instance/api/grader-library?cursor=grl_xyz789" \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+---
+
+## The library entry object
+
+<ResponseField name="id" type="string">
+  The `grl_` identifier for this library entry. Pass this as `library_id` when [creating a grader](/api/graders).
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Human-readable name of this grader template.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  What this grader judges and why you would use it.
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  The kind of judgment this entry makes. All graders created from this entry share this type.
+</ResponseField>
+
+<ResponseField name="owner" type="string">
+  Either `"egma"` for built-in entries or `"organization"` for entries your team created.
+</ResponseField>
+
+<ResponseField name="project_id" type="string | null">
+  The project this entry is scoped to, if it was authored for a specific project. `null` for organization-wide and Egma-maintained entries.
+</ResponseField>
+
+<ResponseField name="version" type="number">
+  The current version of the library entry's definition.
+</ResponseField>
+
+<ResponseField name="prompt" type="string">
+  The judge prompt Egma sends to the model when evaluating a conversation. This is the exact text used at judgment time — what you read here is what the model receives.
+</ResponseField>
+
+<ResponseField name="params" type="array">
+  The form fields your team fills in when creating a grader from this entry. Each element describes one field: its key, type, label, and any constraints. Pass the filled-in values as the `params` object when calling `POST /api/graders`.
+</ResponseField>
+
+<ResponseField name="output_definition" type="object">
+  The schema of the verdict this grader produces.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  ISO 8601 timestamp of when this entry was created.
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  ISO 8601 timestamp of the last update to this entry's definition.
+</ResponseField>
+
+---
+
+## Activating a library entry
+
+To start judging conversations with a library entry, create a project grader from it. The library entry decides what kind of judgment is made and what parameters it accepts; your copy holds the values you chose.
+
+```bash title="Read the library entry first"
+curl https://your-egma-instance/api/grader-library \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+```bash title="Create a grader from the entry"
+curl -X POST https://your-egma-instance/api/graders \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "library_id": "grl_latency_01",
+    "params": { "metric": "turn_response_latency", "bound": 1500 },
+    "scope": "all",
+    "required": true
+  }'
+```
+
+<Note>
+  The `params` object must match the shape described by the entry's `params` array. Sending keys the entry does not define, or omitting required ones, returns `422 Unprocessable Content` with a message explaining exactly what went wrong. Read the `params` field on the library entry before constructing your request.
+</Note>
+
+Each library entry can have multiple active project copies — useful when you want to run the same grader with different thresholds, scopes, or `required` settings. Use the entry's `id` as `library_id` in each `POST /api/graders` call.

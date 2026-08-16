@@ -188,10 +188,10 @@ export function newId(prefix: IdPrefix): string {
 /** When an identifier was minted, read back out of its own leading bits. */
 export function mintedAt(id: string): Date {
   const separator = id.indexOf("_");
-  if (separator === -1) throw new Error(`not an egma identifier: ${id}`);
+  if (separator === -1) throw new Error(`not an Egma identifier: ${id}`);
   const body = id.slice(separator + 1);
   if (body.length !== ID_BODY_LENGTH) {
-    throw new Error(`not an egma identifier: ${id}`);
+    throw new Error(`not an Egma identifier: ${id}`);
   }
   return new Date(Number(decode(body) >> 80n));
 }

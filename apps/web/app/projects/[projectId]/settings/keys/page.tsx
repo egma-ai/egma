@@ -138,7 +138,8 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   useUnsavedChanges(
-    busy || minted !== null || name.trim() !== "" || scope !== projectId,
+    minted !== null || name.trim() !== "" || scope !== projectId,
+    busy,
   );
 
   useEffect(() => {
@@ -242,7 +243,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
       <PageHeader
         eyebrow="Settings"
         title="API keys"
-        lead="What a terminal or a script authenticates to egma with."
+        lead="What a terminal or a script authenticates to Egma with."
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="keys">

@@ -216,12 +216,12 @@ describe("who may read and change them", () => {
       expect(refused.statusCode).toBe(403);
       expect(refused.body.message).toBe(
         "the settings of this platform are read and changed by an " +
-          "organization owner, and only while this egma serves one " +
+          "organization owner, and only while this Egma instance serves one " +
           "organization. They are the deployment's own provider credentials — " +
           "whose account every simulation is conducted on — which is a " +
           "decision of the same kind as billing rather than of the same kind " +
           "as writing a test; and where several organizations share a platform " +
-          "they belong to none of them, so egma refuses everybody rather than " +
+          "they belong to none of them, so Egma refuses everybody rather than " +
           "picking one.",
       );
     }
@@ -280,7 +280,7 @@ describe("a write that cannot be acted on", () => {
     // as settings move in, and what has to hold is that the refusal names the
     // typo and then every setting the platform really has.
     expect(refused.body.message).toBe(
-      '"persona_moddel" is not a platform setting egma knows; it holds ' +
+      '"persona_moddel" is not a platform setting Egma knows; it holds ' +
         PLATFORM_SETTINGS.map((setting) => setting.name).join(", "),
     );
     expect(String(refused.body.message)).toContain("carrier_trunk_address");
@@ -389,6 +389,13 @@ describe("what the platform says about its own setup", () => {
         (setting) => setting.name,
       ),
     ).toEqual([
+      // Turning the persona's reasoning off is what a live line wants, but
+      // absent has to stay absent: a model that has never heard of the field
+      // refuses a request carrying it, so egma cannot require an answer.
+      "persona_model_reasoning_effort",
+      // The three model-and-voice names, each of which the built leg answers
+      // for out of its own provider's defaults.
+      "speech_to_text_model",
       "text_to_speech_model",
       "text_to_speech_voice",
       // A trunk the carrier authenticates by the address it came from is a
@@ -594,7 +601,7 @@ describe("a platform that serves more than one organization", () => {
       expect(read.statusCode).toBe(403);
       expect(write.statusCode).toBe(403);
       expect(read.body.message).toContain(
-        "only while this egma serves one organization",
+        "only while this Egma instance serves one organization",
       );
     }
   });

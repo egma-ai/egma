@@ -204,7 +204,7 @@ describe("egma login", () => {
     const said = facts(result.stdout);
     expect(said.status).toBe("refused");
     expect(said.reason).toBe(
-      "egma would not mint a key for this login. Start again from the terminal.",
+      "Egma would not mint a key for this login. Start again from the terminal.",
     );
     await expect(readFile(workspace.credentialsFile, "utf8")).rejects.toThrow();
   });
@@ -254,7 +254,7 @@ describe("egma login", () => {
         said: "this endpoint understands urn:ietf:params:oauth:grant-type:device_code and nothing else",
       },
       {
-        named: "a refusal egma has never sent before",
+        named: "a refusal Egma has never sent before",
         error: "not_permitted",
         said: "this role may not mint a key for that project in that organization",
       },
@@ -300,7 +300,7 @@ describe("egma login", () => {
     expect(help.stdout).toContain("2 denied");
     // 4 is both an egma that never answered and one that said no, and the help
     // says both rather than only the one that reads better.
-    expect(help.stdout).toContain("4 egma did not answer, or refused");
+    expect(help.stdout).toContain("4 Egma did not answer, or refused");
   });
 
   it("names what a self-hoster sets, in the help", async () => {

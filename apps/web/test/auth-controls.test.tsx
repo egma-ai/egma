@@ -64,7 +64,9 @@ describe("the shared controls on access pages", () => {
     expect(password.getAttribute("autocomplete")).toBe("new-password");
     expect(password.getAttribute("minlength")).toBe("8");
     expect(screen.getByLabelText("First project")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create my egma" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Create my Egma instance" }),
+    ).toBeTruthy();
   });
 
   it("keeps invitation identity fixed and the new password writable", async () => {

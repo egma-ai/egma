@@ -72,7 +72,7 @@ export async function signupRoutes(
             open: false,
             reason: "invitation_required",
             message:
-              "this egma has been claimed. Ask an admin for an invitation.",
+              "this Egma instance has been claimed. Ask an admin for an invitation.",
           }
         : { open: true },
     );

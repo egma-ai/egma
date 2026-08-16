@@ -1,12 +1,13 @@
 /**
  * Which project a tab is looking at, and how it says so.
  *
- * **The address is the whole of the answer.** There is no chosen project in a
- * cookie, in local storage, or on the server's session — a person with
- * Outbound open in one tab and Support in another is an ordinary person, and
- * neither tab can be right if one mutable value decides for both. Reload,
- * Back, Forward and a pasted link all keep working for the same reason: they
- * all restore an address, and the address is all there is.
+ * **The address is the whole of the product-navigation answer.** There is no
+ * mutable chosen project in a cookie or local storage — a person with Outbound
+ * open in one tab and Support in another is an ordinary person, and neither tab
+ * can be right if one mutable value decides for both. The API session does
+ * carry its initial project for projectless requests, but every project page
+ * names its project in both its URL and its requests. Reload, Back, Forward and
+ * a pasted link therefore restore the same product context.
  *
  * Every product page therefore lives under `/projects/{projectId}/…` and every
  * product request it makes carries the same identifier. The identifier is the
@@ -70,9 +71,33 @@ export function sectionIn(pathname: string): string | null {
  * in the project they just picked and the link would land on a refusal. So the
  * section is kept and everything under it is dropped.
  *
- * An address with no project in it at all — a page not yet converted to
- * explicit project context — becomes the new project's landing page, because
- * there is no area to carry across.
+ * An address with no project in it at all becomes the new project's landing
+ * page, because there is no area to carry across. **Five addresses carry no
+ * project, and every one of them can reach this function**, because the only
+ * caller is the selector's click handler and `AppShell` draws the selector on
+ * every page it wraps, unconditionally, whatever the address says:
+ *
+ * - `/new-project`, which an organization holding none has to be able to reach.
+ * - `/traces` and `/traces/{traceId}`, whose browser reads use the project on
+ *   the session even though their addresses do not name it.
+ * - `/runs/{runId}`, the address a terminal prints, which reads the run's own
+ *   project and forwards into it.
+ * - `/members`, the kept legacy Settings address, which chooses the caller's
+ *   first project on purpose because People is the organization's and any
+ *   project serves as its frame.
+ *
+ * **The last two forward, and forwarding is not the same as never being here.**
+ * Both draw `ProductStatePage`, which is this shell around a page, so the
+ * selector is on screen for as long as the read takes — and longer than that
+ * when the read does not end in a forward at all. Open a `results_url` for a
+ * run in a project the session cannot reach and `/runs/{runId}` settles into
+ * its `missing` state and stays there, shell and selector included, with one
+ * click on the selector calling straight into this function. So the two that
+ * were once written down as unreachable are in fact the two most likely to
+ * arrive, because they are the two that can get stuck.
+ *
+ * All five land on the same answer, which is the right one for each: there is
+ * no area on any of these addresses to carry into the project just picked.
  */
 export function inProject(pathname: string, projectId: string): string {
   const address = addressIn(pathname);

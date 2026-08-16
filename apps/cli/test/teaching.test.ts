@@ -218,7 +218,7 @@ describe("the pane, while the files land", () => {
     });
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
       await showing(terminal, "Paste your Retell API key");
@@ -226,7 +226,7 @@ describe("the pane, while the files land", () => {
 
       // Text or phone. Not this check's subject, and not skippable
       // either: egma never picks one of the two for a developer.
-      await showing(terminal, "How should egma reach this agent?");
+      await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 
       await showing(terminal, "Do you already have test cases");
@@ -331,7 +331,7 @@ describe("the pane, while the files land", () => {
 
       // Text or phone. Not this check's subject, and not skippable
       // either: egma never picks one of the two for a developer.
-      await showing(terminal, "How should egma reach this agent?");
+      await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
       await showing(terminal, "Do you already have test cases");
       terminal.write("n");

@@ -356,7 +356,7 @@ describe("a simulation whose trace never closed", () => {
     const judge = await judgingWith();
     const graderId = await seedGrader(
       world,
-      aLatencyCopy({ name: "Asked about a conversation egma holds half of" }),
+      aLatencyCopy({ name: "Asked about a conversation Egma holds half of" }),
     );
     const testId = await seedTest(world, [THE_BEHAVIOR]);
 
@@ -419,7 +419,7 @@ describe("a simulation with no spans at all", () => {
     await judgingWith();
     const graderId = await seedGrader(
       world,
-      aLatencyCopy({ name: "Asked about a conversation egma has no record of" }),
+      aLatencyCopy({ name: "Asked about a conversation Egma has no record of" }),
     );
     const testId = await seedTest(world, [
       "confirms the new time back before finishing",

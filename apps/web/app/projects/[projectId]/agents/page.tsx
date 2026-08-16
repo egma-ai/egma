@@ -201,7 +201,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
     <PageHeader
       eyebrow="Project"
       title="Agents"
-      lead="The voice agents egma can test in this project."
+      lead="The voice agents Egma can test in this project."
       action={register("strong")}
     />
   );
@@ -254,7 +254,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
       ) : (
         <Empty
           title="No agents in this project yet"
-          lead="Register the voice agent you want to test, then give egma a way to reach it."
+          lead="Register the voice agent you want to test, then give Egma a way to reach it."
           action={register("strong")}
         />
       );

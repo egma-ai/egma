@@ -44,7 +44,7 @@ import {
   REFUSALS,
 } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, text, textList } from "../http/reading.ts";
+import { given, projectNamed, text, textList } from "../http/reading.ts";
 
 /**
  * The tests of one project: the list a browser filters, one frozen version by
@@ -195,7 +195,7 @@ function overrideEntries(value: unknown): WrittenOverrides {
     if ("delay_ms" in written && typeof written.delay_ms !== "number") {
       return {
         refusal:
-          "delay_ms is how long egma holds an answer back, as a whole number " +
+        "delay_ms is how long Egma holds this answer back, as a whole number " +
           `of milliseconds, and one entry in mock_tools sent ${typeof written.delay_ms}.`,
       };
     }
@@ -286,7 +286,7 @@ function personaEntries(value: unknown): NamedPersonas {
       refusal:
         "personas is the list of people who call about this test, by name. " +
         'Send it as a list of text, like ["impatient-caller"], or leave it ' +
-        "out and egma takes the project's default persona.",
+        "out and Egma takes the project's default persona.",
     };
   }
 
@@ -502,7 +502,7 @@ export async function testRoutes(
     if (version === undefined) {
       return notFound(
         reply,
-        `there is no test version ${versionId} on this egma. List the tests ` +
+        `there is no test version ${versionId} on this Egma instance. List the tests ` +
           `to see the version each of them stands on now.`,
       );
     }
@@ -560,6 +560,7 @@ export async function testRoutes(
   app.post(TESTS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "author_definitions", {
       organizationId: auth.organizationId,
@@ -600,7 +601,9 @@ export async function testRoutes(
       return unprocessable(reply, capabilities.refusal);
     }
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    // The query and the body, `projectNamed`'s one rule. The authoring page
+    // names its project in the address; `egma test push` names it in the body.
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const personaIds = await resolvePersonaNames(acting.auth, personas.entries);
@@ -644,6 +647,7 @@ export async function testRoutes(
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "author_definitions", {
       organizationId: auth.organizationId,
@@ -732,7 +736,8 @@ export async function testRoutes(
       );
     }
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    // The query and the body, exactly as the create beside it reads them.
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const personaIds =

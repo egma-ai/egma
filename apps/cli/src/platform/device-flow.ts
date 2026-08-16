@@ -56,11 +56,11 @@ export type Fetch = typeof fetch;
 export function refusalFor(code: string): string {
   switch (code) {
     case "invalid_grant":
-      return "egma would not mint a key for this login. Start again from the terminal.";
+      return "Egma would not mint a key for this login. Start again from the terminal.";
     case "unsupported_grant_type":
-      return "egma did not understand this login request. Update egma, then try again.";
+      return "Egma did not understand this login request. Update the Egma CLI, then try again.";
     default:
-      return "egma refused this login. Start again from the terminal, and check the address if it happens again.";
+      return "Egma refused this login. Start again from the terminal, and check the address if it happens again.";
   }
 }
 
@@ -68,7 +68,7 @@ export function refusalFor(code: string): string {
 export class PlatformUnreachableError extends Error {
   constructor(url: string, cause: unknown) {
     super(
-      `egma at ${url} did not answer. Check the address, and that the instance is running.`,
+      `Egma at ${url} did not answer. Check the address, and that the instance is running.`,
       { cause },
     );
     this.name = "PlatformUnreachableError";
@@ -123,7 +123,7 @@ export async function startDeviceAuthorization(
     // What the instance said about it is read and dropped, for the reason
     // `refusalFor` gives: the words a terminal says are egma's own.
     throw new Error(
-      `egma at ${url} would not start a login (${response.status}). Check the address, and that this egma is up to date.`,
+      `Egma at ${url} would not start a login (${response.status}). Check the address, and that this Egma instance is up to date.`,
     );
   }
 
@@ -135,7 +135,7 @@ export async function startDeviceAuthorization(
 
   if (deviceCode === "" || userCode === "" || approveUrl === "") {
     throw new Error(
-      `egma at ${url} answered a login request without a code to approve`,
+      `Egma at ${url} answered a login request without a code to approve`,
     );
   }
 
@@ -182,7 +182,7 @@ export async function collectKey(
     if (key === "") {
       return {
         kind: "refused",
-        reason: "egma minted no key for this login. Start again from the terminal.",
+        reason: "Egma minted no key for this login. Start again from the terminal.",
       };
     }
     return { kind: "key", key };

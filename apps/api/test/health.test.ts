@@ -138,7 +138,7 @@ describe("configuration", () => {
       expect(() => loadConfig({ ...enough, EGMA_BASE_URL: given })).toThrow(names);
       // The value to put there instead, so nobody has to work it out.
       expect(() => loadConfig({ ...enough, EGMA_BASE_URL: given })).toThrow(
-        /Set it to https:\/\/egma\.acme\.example and start egma again/,
+        /Set it to https:\/\/egma\.acme\.example and start Egma again/,
       );
       expect(() => loadConfig({ ...enough, EGMA_BASE_URL: given })).not.toThrow(
         /hunter2-not-real/,
@@ -197,7 +197,7 @@ describe("configuration", () => {
       }).smtp,
     ).toEqual({
       url: "smtp://postmaster:secret@smtp.acme.example:587",
-      from: "egma <egma@egma.acme.example>",
+      from: "Egma <egma@egma.acme.example>",
     });
   });
 
@@ -505,7 +505,7 @@ describe("the email seam", () => {
     expect(
       smtpEmailSender({
         url: "smtp://postmaster:secret@smtp.acme.example:587",
-        from: "egma <egma@acme.example>",
+        from: "Egma <egma@acme.example>",
       }).delivers,
     ).toBe(true);
   });

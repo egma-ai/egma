@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { sendJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
+import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
   credentialsIn,
   JUDGE_CREDENTIALS_PATH,
@@ -113,7 +113,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
 
   const named = name.trim() !== "";
   const changed = settled !== null && name.trim() !== settled.name;
-  useUnsavedChanges(changed && !saving);
+  useUnsavedChanges(changed && !saving, saving);
 
   async function save(): Promise<void> {
     if (!mayAdminister || !named || !changed || saving) return;
@@ -188,7 +188,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
               <Field
                 label="Name"
                 htmlFor="organization-name"
-                hint="What egma calls your organization. Changing it breaks no link and no invitation."
+                hint="What Egma calls your organization. Changing it breaks no link and no invitation."
               >
                 <TextInput
                   id="organization-name"
@@ -283,10 +283,8 @@ function Credentials({
   const [confirmingArchive, setConfirmingArchive] =
     useState<JudgeCredential | null>(null);
   useUnsavedChanges(
-    !busy &&
-      (label.trim() !== "" ||
-        key.trim() !== "" ||
-        replacement.trim() !== ""),
+    label.trim() !== "" || key.trim() !== "" || replacement.trim() !== "",
+    busy,
   );
 
   /**
@@ -308,11 +306,12 @@ function Credentials({
     if (!mayAdminister || busy || label.trim() === "" || key.trim() === "") return;
     setFailed(null);
     setBusy(true);
-    const written = await sendJson<JudgeCredential>(JUDGE_CREDENTIALS_PATH, {
+    const written = await writeJson<JudgeCredential>(JUDGE_CREDENTIALS_PATH, {
       method: "POST",
-      // **No project travels with this.** A judge credential belongs to the
-      // organization, and the route holds four keys and refuses a fifth — so a
-      // project named here was refused as an unknown key rather than ignored.
+      // **No project travels with this**, in the address or anywhere else. A
+      // judge credential belongs to the organization, and the route holds four
+      // body keys and refuses a fifth — so a project named here was refused as
+      // an unknown key rather than ignored.
       body: { label: label.trim(), provider: "openai", key: key.trim() },
     });
     setBusy(false);
@@ -339,7 +338,7 @@ function Credentials({
     if (!mayAdminister || busy) return;
     setFailed(null);
     setBusy(true);
-    const written = await sendJson<JudgeCredential>(
+    const written = await writeJson<JudgeCredential>(
       judgeCredentialArchivePath(credential.id),
       {
         method: "POST",
@@ -375,7 +374,7 @@ function Credentials({
     if (!mayAdminister || busy || replacement.trim() === "") return;
     setFailed(null);
     setBusy(true);
-    const written = await sendJson<JudgeCredential>(
+    const written = await writeJson<JudgeCredential>(
       judgeCredentialPath(credential.id),
       {
         method: "PATCH",
@@ -524,7 +523,7 @@ function Credentials({
                 <Field
                   label="New key"
                   htmlFor={`rotate-${rotatingCredential.id}`}
-                  hint="Replaces the stored key whole. You do not need the old one, and egma will not show it to you."
+                  hint="Replaces the stored key whole. You do not need the old one, and Egma will not show it to you."
                 >
                   <TextInput
                     id={`rotate-${rotatingCredential.id}`}

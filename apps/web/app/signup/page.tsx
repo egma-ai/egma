@@ -92,20 +92,20 @@ export default function SignUpPage() {
       };
       setProblem(body.message ?? "signing up did not complete");
     } catch {
-      setProblem("egma could not be reached. Is the API running?");
+      setProblem("Egma could not be reached. Is the API running?");
     } finally {
       setSubmitting(false);
     }
   }
 
   if (availability === null) {
-    return <StatePage title="Loading egma" lead="Checking whether this instance is ready for setup." />;
+    return <StatePage title="Loading Egma" lead="Checking whether this instance is ready for setup." />;
   }
 
   if (!availability.open) {
     return (
       <StatePage
-        title="This egma has been claimed"
+        title="This Egma instance has been claimed"
         lead={
           availability.message ??
           "Somebody has already set this instance up. Ask them for an invitation."
@@ -129,7 +129,7 @@ export default function SignUpPage() {
   return (
     <AuthShell
       eyebrow="First setup"
-      title="Set up egma"
+      title="Set up Egma"
       lead="One step. Your organization and your first project are created together."
     >
       <Form onSubmit={() => void submit()}>
@@ -184,7 +184,7 @@ export default function SignUpPage() {
         </Field>
 
         <Button weight="strong" type="submit" disabled={submitting}>
-          {submitting ? "Setting up…" : "Create my egma"}
+          {submitting ? "Setting up…" : "Create my Egma instance"}
         </Button>
       </Form>
 

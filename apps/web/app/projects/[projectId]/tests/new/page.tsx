@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { sendJson, type Refusal } from "../../../../../lib/api.ts";
+import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { agentsQuery, type AgentPage } from "../../../../../lib/agents.ts";
 import { personasPath, type PersonaPage } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
@@ -130,7 +130,7 @@ function NewTest({ projectId }: { readonly projectId: string }) {
   async function write(): Promise<void> {
     setRefused(null);
     setSaving(true);
-    const written = await sendJson<ListedTest>("/api/tests", {
+    const written = await writeJson<ListedTest>("/api/tests", {
       method: "POST",
       project: projectId,
       body: {
@@ -270,7 +270,7 @@ function NewTest({ projectId }: { readonly projectId: string }) {
 
           <Section
             title="Who calls"
-            lead="Choose none and egma takes the project's default persona, so a first test never waits on authoring a caller."
+            lead="Choose none and Egma takes the project's default persona, so a first test never waits on authoring a caller."
           >
             <NamedChoices
               legend="Personas"

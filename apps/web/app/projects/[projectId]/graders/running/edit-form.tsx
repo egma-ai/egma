@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { deleteJson, sendJson, type Refusal } from "../../../../../lib/api.ts";
+import { deleteJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
   EDIT,
   SCOPES,
@@ -175,7 +175,7 @@ export function EditForm({
     setBusy(true);
     setRefused(null);
 
-    const answer = await sendJson<RunningGrader>(graderPath(copy.id), {
+    const answer = await writeJson<RunningGrader>(graderPath(copy.id), {
       method: "PATCH",
       project: projectId,
       body: {

@@ -186,7 +186,7 @@ describe("the media server's credential", () => {
       // are being replaced by this run — and because what those containers held
       // until this moment is a security fact they are entitled to hear plainly.
       expect(run.stderr).toContain("media-server credential was generated");
-      expect(run.stderr).toContain("published in egma's own repository");
+      expect(run.stderr).toContain("published in Egma's own repository");
       expect(run.stderr).toContain("media containers are replaced by this start");
     } finally {
       await platform.close();

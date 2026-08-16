@@ -56,7 +56,7 @@ export default function ForgotPasswordPage() {
       };
       setProblem(said.message ?? "that reset could not be asked for");
     } catch {
-      setProblem("egma could not be reached. Is the API running?");
+      setProblem("Egma could not be reached. Is the API running?");
     } finally {
       setSubmitting(false);
     }
@@ -66,10 +66,10 @@ export default function ForgotPasswordPage() {
     return (
       <StatePage
         title="Check your email"
-        lead={`If ${email} has an egma account, a link to set a new password is on its way to it. The link works once, and runs out in an hour.`}
+        lead={`If ${email} has an Egma account, a link to set a new password is on its way to it. The link works once, and runs out in an hour.`}
       >
         <p className={styles.linkLine}>
-          Nothing arrived? On an egma with no mail configured the message is
+          Nothing arrived? On an Egma instance with no mail configured the message is
           written to the platform's log instead.{" "}
           <a
             href={
@@ -88,7 +88,7 @@ export default function ForgotPasswordPage() {
     <AuthShell
       eyebrow="Forgotten password"
       title="Set a new password."
-      lead="Name the address you signed up with, and egma sends a link to set a new one."
+      lead="Name the address you signed up with, and Egma sends a link to set a new one."
     >
       <Form onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}

@@ -467,7 +467,7 @@ describe("egma run", () => {
         "name: never-pushed",
         "---",
         "## Scenario",
-        "Somebody rings about something egma has never heard of.",
+        "Somebody rings about something Egma has never heard of.",
         "## Expected behaviors",
         "1. The agent says the workshop's name.",
         "",
@@ -525,8 +525,8 @@ describe("egma run", () => {
     // a run it will not conduct, and it answers with its own number.
     expect(factOf(said.lines, "status")).toBe("not-pushed");
     expect(factOf(said.lines, "stderr")).toBe(
-      "egma holds something other than what this file says: quoted-a-price. Run egma " +
-        "push to put your edit on egma, then run this again. Nothing was started.",
+      "Egma holds something other than what this file says: quoted-a-price. Run egma " +
+        "push to put your edit on Egma, then run this again. Nothing was started.",
     );
     // Nothing was started, and nothing was pinned.
     expect(platform.running.runs).toHaveLength(0);

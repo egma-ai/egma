@@ -190,9 +190,9 @@ export async function memberRoutes(
     // because at that point the person it names is the one who should hold it.
     await options.emailSender.send({
       to: email,
-      subject: `Join ${joining} on egma`,
+      subject: `Join ${joining} on Egma`,
       body:
-        `You have been invited to ${joining} on egma.\n\n${link}\n\n` +
+        `You have been invited to ${joining} on Egma.\n\n${link}\n\n` +
         `The link works once, and expires on ${minted.expiresAt.toDateString()}.`,
     });
 

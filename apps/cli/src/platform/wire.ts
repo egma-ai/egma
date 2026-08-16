@@ -45,7 +45,7 @@ export async function bodyOf(response: Response): Promise<Record<string, unknown
 /** What the platform said about a refusal, or egma's own words for a silence. */
 export function saidBy(body: Record<string, unknown>, status: number): string {
   const message = text(body.message);
-  return message === "" ? `egma answered ${status} and said nothing about it` : message;
+  return message === "" ? `Egma answered ${status} and said nothing about it` : message;
 }
 
 export type Call = {

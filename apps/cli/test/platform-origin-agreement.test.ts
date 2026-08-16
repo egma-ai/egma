@@ -29,7 +29,7 @@ const startableApi = {
 
 describe("the API and CLI platform-origin agreement", () => {
   it.each([
-    [" HTTPS://Egma.Example:443/ ", "https://egma.example"],
+    [" HTTPS://egma.Example:443/ ", "https://egma.example"],
     ["http://127.0.0.1:3101/", "http://127.0.0.1:3101"],
   ])("normalizes %s to %s at both boundaries", (candidate, expected) => {
     expect(normalizePlatformOrigin(candidate)).toBe(expected);

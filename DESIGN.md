@@ -45,7 +45,7 @@ The Egma logo does not become a Mistral-style mark.
 Canonical supplied assets:
 
 - `apps/web/public/brand/egma-mark.svg`
-- `apps/web/public/brand/egma-logo.svg`
+- `apps/web/public/brand/egma-wordmark.svg`
 
 Rules:
 

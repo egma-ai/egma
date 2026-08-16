@@ -422,7 +422,7 @@ describe("one simulation's evidence", () => {
     page();
     render(<SimulationEvidencePage />);
 
-    await screen.findByText("Answered by egma");
+    await screen.findByText("Answered by Egma");
     await screen.findByText("charge_card");
     // A record of what was served, not an editor of the project's world.
     expect(

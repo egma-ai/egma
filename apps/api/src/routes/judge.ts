@@ -24,7 +24,7 @@ import type { Config } from "../config.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, text } from "../http/reading.ts";
+import { given, projectNamed, text } from "../http/reading.ts";
 import {
   invalid,
   notPermitted,
@@ -377,6 +377,7 @@ export async function judgeRoutes(
   app.put(PROJECT_JUDGE_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     if (auth.role !== "admin") {
       return refuseRole(reply, auth, "change the project judge");
@@ -385,7 +386,12 @@ export async function judgeRoutes(
     const unknown = unknownKeyIn(body, JUDGE_KEYS, "a project judge");
     if (unknown !== undefined) return invalid(reply, unknown);
 
-    const acting = await namingAProject(auth, given(text(body.project)));
+    // The query and the body, `projectNamed`'s one rule — and it matters more
+    // here than anywhere: `namingAProject` **refuses** a session that names
+    // none, so a page moved to the address against a body-only door would not
+    // be quietly misplaced, it would be told to name a project it had just
+    // named.
+    const acting = await namingAProject(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     await setProjectJudge(acting.auth, {

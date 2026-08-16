@@ -115,9 +115,9 @@ export const EMPTY_CONFIG: FolderConfig = {
 const CONFIG_KEYS = ["agent", "connection", "suite"] as const;
 
 const CONFIG_HEADER = [
-  "# What this folder points at on egma.",
+  "# What this folder points at on Egma.",
   "#",
-  "# Committed on purpose: nothing in this folder is secret. egma writes an id",
+  "# Committed on purpose: nothing in this folder is secret. Egma writes an id",
   "# beside each name once it has registered one.",
 ];
 
@@ -345,13 +345,13 @@ export async function bindRepositoryPlatform(
     if (held.platform.instance !== binding.instance) {
       throw new Error(
         teachingTheMove(
-          `This repository is already bound to Egma platform ${held.platform.instance} at ${held.platform.origin}, and this run reached Egma platform ${binding.instance} at ${binding.origin}. egma does not move a repository between platforms, and nothing was sent.`,
+          `This repository is already bound to Egma platform ${held.platform.instance} at ${held.platform.origin}, and this run reached Egma platform ${binding.instance} at ${binding.origin}. Egma does not move a repository between platforms, and nothing was sent.`,
         ),
       );
     }
     if (held.platform.origin !== binding.origin) {
       throw new Error(
-        `This repository records Egma platform ${held.platform.instance} at ${held.platform.origin}, and this run reached it at ${binding.origin}. egma will not move a committed platform address for you. Use ${held.platform.origin}, or edit egma/config.yaml on purpose.`,
+        `This repository records Egma platform ${held.platform.instance} at ${held.platform.origin}, and this run reached it at ${binding.origin}. Egma will not move a committed platform address for you. Use ${held.platform.origin}, or edit egma/config.yaml on purpose.`,
       );
     }
     return held;
@@ -375,21 +375,21 @@ const MOCK_TOOLS_HEADER = [
   "",
   "Each one answers for a tool of the voice agent while a simulation runs, so a",
   "test never reaches the real backend and can ask for the branch it needs. An",
-  "answer may be a failure, and may hold egma back a while so a mocked backend",
+  "answer may be a failure, and may hold Egma back a while so a mocked backend",
   "takes as long as the real one.",
   "",
   "Committed like everything else in this folder: an answer is your own data, and",
   "nothing here is secret.",
   "",
-  "egma writes this file from what it holds, and a mock tool is not versioned — so",
-  "`egma pull` writes egma's answer over what is here, and `egma push` writes what",
-  "is here over egma's. Whichever ran last, wins. A mock tool egma has never heard",
+  "Egma writes this file from what it holds, and a mock tool is not versioned — so",
+  "`egma pull` writes Egma's answer over what is here, and `egma push` writes what",
+  "is here over Egma's. Whichever ran last, wins. A mock tool Egma has never heard",
   "of is left exactly as it is until you push it.",
   "",
   "Neither verb removes one: a block taken out of this file comes back on the next",
   "`egma pull`, exactly as deleting a test file does not delete the test.",
   "",
-  "This prose is egma's own. Either verb rewrites the whole file from what egma",
+  "This prose is Egma's own. Either verb rewrites the whole file from what Egma",
   "holds, so a note added up here does not survive the next one.",
   "",
   "A test that needs a different answer writes it under the same heading in its own",

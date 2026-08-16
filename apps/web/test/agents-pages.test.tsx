@@ -342,6 +342,22 @@ describe("registering an agent", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.method).toBe("POST");
+    /*
+     * **The project is in the address, which is the one spelling every write
+     * in the product uses** — and what this assertion is really holding is
+     * that the page names it *at all*.
+     *
+     * It named it in the query once before and that was right about the page
+     * and wrong about the door: `POST /api/agents` read a body key only, so
+     * the query was not refused, it was **ignored**. The door found no project,
+     * fell back to the session's own — the organization's **first** — wrote the
+     * agent there, and answered 201, sending the browser to a detail page for
+     * an agent that is not in the project the address names. Only a real
+     * browser standing in a second project could see that, and one did. The
+     * door now reads the address as well as the body, so the fault is closed
+     * where it was rather than in this caller alone, and this file no longer
+     * has to know which half a door happens to read.
+     */
     expect(sent[0]?.url).toBe("/api/agents?project=prj_1");
     expect(sent[0]?.body).toEqual({
       name: "Front desk",

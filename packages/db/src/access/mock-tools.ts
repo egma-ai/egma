@@ -202,7 +202,7 @@ function servedBytes(value: unknown, key: AnswerKey): number {
   }
   if (written === undefined) {
     throw new UnprocessableInputError(
-      `${key} has to be something egma can serialize and hand to the agent, ` +
+      `${key} has to be something Egma can serialize and hand to the agent, ` +
         `and this one is not.`,
     );
   }
@@ -343,7 +343,7 @@ export function answerFromRow(
 ): MockToolAnswer {
   const malformed = () =>
     new Error(
-      `${noun} ${id} holds an answer in a shape egma never writes; the row needs repairing before anybody can read it`,
+      `${noun} ${id} holds an answer in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
 
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

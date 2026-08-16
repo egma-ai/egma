@@ -360,7 +360,7 @@ describe("the two kinds of audio a transcript can offer", () => {
       // they arrive when somebody is already confused about what they heard.
       "what is said when it will not play": copy.RECORDING.unplayable,
       "what a browser that cannot play it is told": copy.RECORDING.fallback,
-      "what is said when egma will not hand it over": copy.RECORDING.refused(404),
+      "what is said when Egma will not hand it over": copy.RECORDING.refused(404),
     };
 
     for (const [where, said] of Object.entries(labels)) {
@@ -623,7 +623,7 @@ describe("what the exchange measured", () => {
     );
 
     expect(page).toContain("one.partial");
-    expect(copy.MEASURES.partialWorst).toContain("part egma holds");
+    expect(copy.MEASURES.partialWorst).toContain("part Egma holds");
   });
 
   it("says nothing was measured rather than showing a blank", () => {

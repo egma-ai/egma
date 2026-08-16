@@ -84,7 +84,7 @@ describe("one task, driven on a scripted agent", () => {
     });
 
     expect(report).toEqual({ kind: "found-agent", framework: "retell-sdk", prompts: null });
-    expect(buildExitLine(report)).toBe("egma found your voice agent: retell-sdk.");
+    expect(buildExitLine(report)).toBe("Egma found your voice agent: retell-sdk.");
 
     const observed = await reportIn(workspace);
     expect(observed.protocolVersion).toBeGreaterThan(0);
@@ -310,7 +310,7 @@ describe("one task, driven on a scripted agent", () => {
 
     expect(report).toEqual({ kind: "interrupted", drivenAgentName: "Fake Agent" });
     expect(buildExitLine(report)).toBe(
-      "egma stopped before the task finished, and shut Fake Agent down.",
+      "Egma stopped before the task finished, and shut Fake Agent down.",
     );
 
     // The agent started a process of its own; ending the agent ended that too.

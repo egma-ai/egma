@@ -237,7 +237,13 @@ describe("the grader library, in one project", () => {
     expect(screen.getAllByText("Computed")).not.toHaveLength(0);
     expect(screen.queryByText("llm_as_judge")).toBeNull();
     expect(screen.queryByText("expected_behaviors")).toBeNull();
-    expect(screen.getAllByText("egma")).not.toHaveLength(0);
+
+    // The owner word is the approved identity, and the stored key is never what
+    // a person is shown. `grader-library.test.ts` held this against the copy
+    // module and was deleted with the organization-wide pages it read; the
+    // claim is stronger here, because a rendering is what a person meets.
+    expect(screen.getAllByText("Egma")).not.toHaveLength(0);
+    expect(screen.queryByText("egma")).toBeNull();
   });
 
   /**
@@ -264,11 +270,15 @@ describe("the grader library, in one project", () => {
     expect(
       (await screen.findByRole("status")).textContent,
     ).toContain("Expected behaviors is running on this project now");
+    // **In the address, which is what this case is named for.** It used to
+    // assert the project in the *body* under exactly this name — the page said
+    // one thing and its test agreed with the other, which is how a spelling
+    // nobody meant survives a review.
     const written = asked.find((one) => one.method === "POST");
+    expect(written?.path).toBe("/api/graders?project=prj_2");
     expect(written?.body).toEqual({
       library_id: "grl_behaviors",
       required: true,
-      project: "prj_2",
     });
   });
 
@@ -298,10 +308,12 @@ describe("the grader library, in one project", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start judging" }));
 
     await screen.findByRole("status");
+    expect(asked.find((one) => one.method === "POST")?.path).toBe(
+      "/api/graders?project=prj_1",
+    );
     expect(asked.find((one) => one.method === "POST")?.body).toEqual({
       library_id: "grl_latency",
       required: true,
-      project: "prj_1",
       params: { metric: "turn_response_latency", bound: 2000 },
     });
   });
@@ -337,7 +349,7 @@ describe("the grader library, in one project", () => {
         status: 422,
         body: {
           error: "unprocessable",
-          message: "egma does not compute a measure called that.",
+          message: "Egma does not compute a measure called that.",
         },
       },
     });
@@ -350,7 +362,7 @@ describe("the grader library, in one project", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start judging" }));
 
     expect(
-      await screen.findByText("egma does not compute a measure called that."),
+      await screen.findByText("Egma does not compute a measure called that."),
     ).toBeTruthy();
     expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
       "2000",
@@ -924,7 +936,7 @@ describe("changing a running copy", () => {
 
     await screen.findByRole("status");
     const written = asked.find((one) => one.method === "PATCH");
-    expect(written?.path).toBe("/api/graders/grd_2");
+    expect(written?.path).toBe("/api/graders/grd_2?project=prj_2");
     expect(written?.body).toEqual({
       name: "latency",
       // Null rather than the empty string: emptying a note is a real intent and
@@ -934,7 +946,6 @@ describe("changing a running copy", () => {
       required: true,
       production_sample_rate: 10,
       params: { metric: "turn_response_latency", bound: 1200 },
-      project: "prj_2",
     });
   });
 
@@ -1128,7 +1139,7 @@ describe("changing a running copy", () => {
         status: 422,
         body: {
           error: "unprocessable",
-          message: "egma does not compute a measure called that.",
+          message: "Egma does not compute a measure called that.",
         },
       },
     });
@@ -1141,7 +1152,7 @@ describe("changing a running copy", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
-      await screen.findByText("egma does not compute a measure called that."),
+      await screen.findByText("Egma does not compute a measure called that."),
     ).toBeTruthy();
     expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
       "1200",

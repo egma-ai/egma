@@ -199,7 +199,7 @@ describe("a provider that does not answer", () => {
       answering({ decision: "probably", rationale: "hmm", cited_turns: [] }),
     );
 
-    await expect(judge(QUESTION)).rejects.toThrow(/decision egma does not know/);
+    await expect(judge(QUESTION)).rejects.toThrow(/decision Egma does not know/);
   });
 
   it("never puts the request — and so never the key — in what it throws", async () => {

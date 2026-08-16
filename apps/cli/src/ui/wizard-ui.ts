@@ -53,7 +53,7 @@ export type AskId =
   | "phone-number"
   | "existing-tests"
   /**
-   * Whether to install the egma skill, and where.
+   * Whether to install the Egma skill, and where.
    *
    * A question rather than a gate because there are three answers and skip is
    * one of them, and a question the developer never answers answers `null` —

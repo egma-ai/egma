@@ -75,11 +75,15 @@ const EVERY_ANSWER: NodeJS.ProcessEnv = {
 /** What a platform holds once setup has finished against a working carrier. */
 const EVERYTHING_HELD = {
   persona_model_provider: "openai",
-  persona_model: "gpt-4o",
+  persona_model: "gpt-5.6-terra",
   persona_model_key: MODEL_KEY,
-  speech_to_text_provider: "openai",
+  // A caller on a live line does not pause to reason, so the interview's own
+  // suggestion turns it off — the one model setting egma does suggest a value
+  // for, because it is a behavior rather than a provider's model name.
+  persona_model_reasoning_effort: "none",
+  speech_to_text_provider: "openai_realtime",
   speech_to_text_key: LISTENING_KEY,
-  text_to_speech_provider: "openai",
+  text_to_speech_provider: "cartesia",
   text_to_speech_key: SPEAKING_KEY,
   voice_activity_provider: "silero",
   media_backend: "livekit",
@@ -182,8 +186,11 @@ describe("egma self-host setup", () => {
     });
     expect((platform.held().carrier_trunk_password ?? "").length).toBeGreaterThan(8);
 
-    // The two the simulator has a working default for are not demanded of a run
-    // with nobody watching, and readiness does not wait for them either.
+    // The three the simulator has a working default for are not demanded of a
+    // run with nobody watching, and readiness does not wait for them either.
+    // Each leg answers with its own provider's default, which is the whole
+    // reason egma does not store a second opinion about a model's name here.
+    expect(answered.settings_written).not.toContain("speech_to_text_model");
     expect(answered.settings_written).not.toContain("text_to_speech_model");
     expect(answered.settings_written).not.toContain("text_to_speech_voice");
 
@@ -369,7 +376,7 @@ describe("egma self-host setup", () => {
     });
 
     expect(run.code).toBe(4);
-    expect(run.stderr).toContain(`egma at ${address} did not answer`);
+    expect(run.stderr).toContain(`Egma at ${address} did not answer`);
     expect(run.stderr).toContain("that the instance is running");
     // Nothing was asked of anybody's carrier on the way to finding out.
     expect(twilio.requests).toEqual([]);
@@ -399,7 +406,7 @@ describe("egma self-host setup", () => {
     // role they hold, and the kind of deployment this is.
     const refusal =
       "the settings of this platform are read and changed by an organization owner, " +
-      "and only while this egma serves one organization.";
+      "and only while this Egma instance serves one organization.";
     platform = await startPlatform({ refuses: { status: 403, message: refusal } });
     await workspace.signIn(platform);
 
@@ -497,7 +504,7 @@ describe("egma self-host setup", () => {
 
     expect(run.code).toBe(4);
     expect(run.stdout).toContain("holds no number");
-    expect(run.stdout).toContain("egma never buys, ports or registers one");
+    expect(run.stdout).toContain("Egma never buys, ports or registers one");
     // Nothing was created on the way to finding out — at the carrier or here.
     expect(twilio.writes).toEqual([]);
     expect(platform.written).toEqual([]);

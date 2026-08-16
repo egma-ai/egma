@@ -69,7 +69,7 @@ export class PlatformRefusedError extends Error {
 export class NotSignedInError extends Error {
   constructor(url: string) {
     super(
-      `egma self-host setup writes every answer through this platform's own API, and this machine is not signed in to the egma at ${url}. ` +
+      `The egma self-host setup command writes every answer through this platform's own API, and this machine is not signed in to the Egma instance at ${url}. ` +
         `Run \`egma login --url ${url}\` first — an organization owner's key is what the settings door opens for — then run setup again. Nothing was asked and nothing was written.`,
     );
     this.name = "NotSignedInError";
@@ -102,7 +102,7 @@ async function ask(
     throw new PlatformRefusedError(
       response.status,
       said === ""
-        ? `egma at ${access.url} answered ${response.status} and said nothing about it, so ` +
+        ? `Egma at ${access.url} answered ${response.status} and said nothing about it, so ` +
           "there is nothing here to act on. Look at what that platform logged — " +
           "`docker compose logs api` in its workspace — and run setup again. Nothing was " +
           "written."
@@ -205,7 +205,7 @@ export const SETUP_INPUTS = {
     supply: "asked",
     variable: "EGMA_PERSONA_MODEL",
     secret: false,
-    suggested: "gpt-4o",
+    suggested: "gpt-5.6-terra",
     required: true,
   },
   persona_model_key: {
@@ -215,11 +215,24 @@ export const SETUP_INPUTS = {
     suggested: null,
     required: true,
   },
+  // The one model setting egma does suggest a value for, and it is not a
+  // model name: it is how hard the persona thinks before it speaks. A
+  // caller on a live line does not pause to reason — the reasoning under
+  // test is the agent's — so the suggestion turns it off. The word is the
+  // provider's own, and leaving the answer blank sends nothing at all,
+  // which is what a model that has never heard of the field needs.
+  persona_model_reasoning_effort: {
+    supply: "asked",
+    variable: "EGMA_PERSONA_MODEL_REASONING_EFFORT",
+    secret: false,
+    suggested: "none",
+    required: false,
+  },
   speech_to_text_provider: {
     supply: "asked",
     variable: "EGMA_PERSONA_STT_PROVIDER",
     secret: false,
-    suggested: "openai",
+    suggested: "openai_realtime",
     required: true,
   },
   speech_to_text_key: {
@@ -229,11 +242,18 @@ export const SETUP_INPUTS = {
     suggested: null,
     required: true,
   },
+  speech_to_text_model: {
+    supply: "asked",
+    variable: "EGMA_PERSONA_STT_MODEL",
+    secret: false,
+    suggested: null,
+    required: false,
+  },
   text_to_speech_provider: {
     supply: "asked",
     variable: "EGMA_PERSONA_TTS_PROVIDER",
     secret: false,
-    suggested: "openai",
+    suggested: "cartesia",
     required: true,
   },
   text_to_speech_key: {
@@ -243,10 +263,14 @@ export const SETUP_INPUTS = {
     suggested: null,
     required: true,
   },
-  // No suggestion for either of these two, deliberately. The simulator has a
-  // working default for both, so a platform that never names one still speaks —
-  // and a default egma invented here would be a second opinion about the
-  // provider's model names, stored, and wrong the week one is retired.
+  // No suggestion for any of the three model-and-voice settings — the two
+  // below and the speech-to-text model above — deliberately. The simulator
+  // has a working default for each, chosen per provider, so a platform that
+  // never names one still speaks and still hears. A default egma invented
+  // here would be a second opinion about the provider's own model names,
+  // stored, and wrong the week one is retired — and stored is the worse half:
+  // the simulator's default moves with a release, and a value written into
+  // the platform on setup day stays until somebody edits it.
   text_to_speech_model: {
     supply: "asked",
     variable: "EGMA_PERSONA_TTS_MODEL",

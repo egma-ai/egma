@@ -41,10 +41,12 @@ import { useTheme } from "./theme.tsx";
  * chosen project of its own. Two tabs on two projects are therefore two
  * ordinary tabs.
  *
- * A page that has not been converted to explicit project context yet still
- * renders inside this shell, and the selector falls back to the first project
- * so that it has something to say. That fallback is the expand half of the
- * project-context change and it goes away with the last unconverted page.
+ * **There is no fallback left, and this paragraph used to describe one.** While
+ * pages were being converted to explicit project context the selector fell back
+ * to the first project so that it had something to say; that half of the
+ * expand-contract change is finished, and both fallbacks — this shell's and the
+ * selector's own — are gone. An address inside no project draws no product
+ * navigation and says **No project**, which is the honest answer.
  */
 
 export type Session = {
@@ -319,13 +321,14 @@ export function AppShell({
    * grader screens were the last pages it was standing in for, and they are
    * under `/projects/:projectId/graders` now.
    *
-   * Two surfaces still name no project on purpose. `/new-project` must exist
-   * outside one so an empty organization can reach it. The production trace
-   * reader at `/traces` still uses the older organization-wide read contract.
-   * Neither draws project navigation or a mobile navigation button, because an
-   * address that names no project cannot honestly say which project's links it
-   * is opening. The selector stays visible, so choosing one remains the way
-   * into the project product.
+   * Some addresses still name no project on purpose: `/new-project`, the two
+   * transcript addresses, the terminal's `/runs/{runId}` address and the kept
+   * `/members` address. They do not draw project navigation or a mobile
+   * navigation button, because an address that names no project cannot honestly
+   * say which project's links it is opening. The selector stays visible, so
+   * choosing one remains the way into the project product. Each page still
+   * decides its own data scope; the browser transcript read, for example, uses
+   * the project carried by the session even though its URL has no project.
    */
   const shown = projectIdIn(pathname);
   /**

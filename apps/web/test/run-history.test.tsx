@@ -446,6 +446,11 @@ describe("the run list", () => {
     await waitFor(() => {
       expect(sentWith("/api/runs/run_1/cancel", "POST")).toHaveLength(1);
     });
+    // And which project the run is in, said the one way every write in the
+    // product says it.
+    expect(sentWith("/api/runs/run_1/cancel", "POST")[0]?.url).toBe(
+      "/api/runs/run_1/cancel?project=prj_1",
+    );
   });
 });
 
@@ -840,6 +845,13 @@ describe("one run's page", () => {
     await waitFor(() => {
       expect(sentWith("/api/runs/run_1/cancel", "POST")).toHaveLength(1);
     });
+    // **And it says which project it is stopping a run in.** A cancel that
+    // named none was answered from the session's own project — the
+    // organization's first — so this page could not stop a run it was looking
+    // straight at anywhere else.
+    expect(sentWith("/api/runs/run_1/cancel", "POST")[0]?.url).toBe(
+      "/api/runs/run_1/cancel?project=prj_1",
+    );
     await screen.findByText(/This run was canceled/u);
     // Stopping early never reads as a suite that went green.
     expect(screen.queryAllByText("completed")).toEqual([]);
@@ -874,6 +886,9 @@ describe("one run's page", () => {
      */
     expect(asked?.body?.idempotency_key).toBe(retryKeyFor("run_1"));
     expect(retryKeyFor("run_1")).toBe(retryKeyFor("run_1"));
+    // And which project the retry lands in, for the same reason Cancel above
+    // says it.
+    expect(asked?.url).toBe("/api/runs/run_1/retry?project=prj_1");
     // The new run is where somebody lands, and the old one is not touched.
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_9");
   });

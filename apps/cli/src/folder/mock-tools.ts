@@ -170,7 +170,7 @@ function saidBy(
   } catch (problem) {
     throw new MockToolProblem(
       where,
-      `the block under the mock tool "${tool}" is not JSON egma can read — ` +
+      `the block under the mock tool "${tool}" is not JSON Egma can read — ` +
         `${problem instanceof Error ? problem.message : String(problem)}`,
     );
   }

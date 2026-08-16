@@ -1,0 +1,223 @@
+---
+title: "Members: Invite, Assign Roles, and Remove Team Members"
+sidebarTitle: "Members"
+description: "List organization members, send invitations, change roles, remove members, and deactivate accounts. Invite and member management requires the admin role."
+---
+
+Every Egma organization has a roster of members, each with a role that determines what they can do. All members can read the roster. Inviting new members, changing roles, removing members, and deactivating accounts are admin-only operations.
+
+Roles in Egma are `admin`, `member`, and `viewer`. An admin can perform all write operations and manage the team. A member can create and edit tests, runs, and graders. A viewer can read everything but cannot write.
+
+---
+
+## List members
+
+Returns everyone currently in your organization. Available to all roles.
+
+**`GET /api/members`**
+
+<ResponseField name="members" type="array">
+  Array of member objects.
+</ResponseField>
+
+<ResponseField name="may_manage_members" type="boolean">
+  Whether the authenticated user has permission to invite, re-role, remove, or deactivate members. Use this to conditionally render admin controls in your own tooling.
+</ResponseField>
+
+```bash title="List members"
+curl https://your-egma-instance/api/members \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+### Member object
+
+<ResponseField name="user_id" type="string">
+  The user's unique identifier. Use this in role, remove, and deactivate operations.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  The user's email address.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The user's display name.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  Current role: `"admin"`, `"member"`, or `"viewer"`.
+</ResponseField>
+
+<ResponseField name="joined_at" type="string">
+  ISO 8601 timestamp of when they joined the organization.
+</ResponseField>
+
+<ResponseField name="deactivated_at" type="string | null">
+  ISO 8601 timestamp of when the account was deactivated. `null` for active members.
+</ResponseField>
+
+---
+
+## List pending invitations
+
+Returns invitations that have been sent but not yet accepted. Admin only.
+
+**`GET /api/invitations`**
+
+<ResponseField name="invitations" type="array">
+  Array of pending invitation objects.
+</ResponseField>
+
+```bash title="List pending invitations"
+curl https://your-egma-instance/api/invitations \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+### Invitation object
+
+<ResponseField name="id" type="string">
+  The invitation's identifier.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  The email address the invitation was sent to.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  The role the invited person will receive when they accept.
+</ResponseField>
+
+<ResponseField name="expires_at" type="string">
+  ISO 8601 timestamp of when the invitation expires.
+</ResponseField>
+
+<ResponseField name="created_by" type="string">
+  The user ID of the admin who sent the invitation.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  ISO 8601 timestamp of when the invitation was created.
+</ResponseField>
+
+---
+
+## Invite a member
+
+Sends an invitation to join your organization. Admin only.
+
+**`POST /api/invitations`**
+
+<ParamField body="email" type="string" required>
+  The email address to invite.
+</ParamField>
+
+<ParamField body="role" type="string">
+  The role to assign when the invitation is accepted. One of `"admin"`, `"member"`, or `"viewer"`. Defaults to `"admin"` when omitted.
+</ParamField>
+
+Returns `201 Created` with the invitation object and delivery status.
+
+<ResponseField name="delivered" type="boolean">
+  `true` if Egma sent the invitation email. `false` if your deployment has no SMTP configured.
+</ResponseField>
+
+<ResponseField name="accept_url" type="string">
+  The acceptance link, included only when `delivered` is `false`. Pass this link to the invitee through your own channel. The link is single-use and expires.
+</ResponseField>
+
+```bash title="Invite a member"
+curl -X POST https://your-egma-instance/api/invitations \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "colleague@example.com", "role": "member" }'
+```
+
+<Note>
+  If your Egma instance has no SMTP configured, `delivered` is `false` and the response includes `accept_url`. Copy that URL and send it to the invitee yourself — through Slack, email, or any other channel. The invitation still works exactly the same way; Egma just could not post the message for you.
+</Note>
+
+<Note>
+  An invitation token is 256 bits of randomness and is hashed on write. Egma stores only the hash, never the plaintext. The `accept_url` is present in this response only, and is not retrievable from the invitations list.
+</Note>
+
+---
+
+## Change a member's role
+
+Updates a member's role. Takes effect immediately — any API key that member holds re-reads their role on the next request, so no key rotation is needed. Admin only.
+
+**`POST /api/members/:userId/role`**
+
+<ParamField path="userId" type="string" required>
+  The `user_id` of the member whose role you want to change.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  The new role. One of `"admin"`, `"member"`, or `"viewer"`.
+</ParamField>
+
+Returns the updated member object.
+
+```bash title="Change a member's role"
+curl -X POST https://your-egma-instance/api/members/usr_abc123/role \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "role": "viewer" }'
+```
+
+<Note>
+  You cannot demote the last admin in an organization. Egma returns `409 Conflict` with `error: "last_admin"`. Promote another member to admin first, then change the original admin's role.
+</Note>
+
+---
+
+## Remove a member
+
+Removes a person from the organization and revokes all API keys they created. Their name remains on everything they authored. Admin only.
+
+**`POST /api/members/:userId/remove`**
+
+<ParamField path="userId" type="string" required>
+  The `user_id` of the member to remove.
+</ParamField>
+
+<ResponseField name="user_id" type="string">
+  The ID of the removed member.
+</ResponseField>
+
+<ResponseField name="keys_revoked" type="number">
+  The number of API keys revoked as part of this operation.
+</ResponseField>
+
+```bash title="Remove a member"
+curl -X POST https://your-egma-instance/api/members/usr_abc123/remove \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json"
+```
+
+<Note>
+  Removing a member revokes all API keys they created, effective immediately. Any service using one of those keys stops authenticating on its next request. Rotate affected keys before removing the member if you need uninterrupted service.
+</Note>
+
+---
+
+## Deactivate an account
+
+Deactivates a user account without removing the person from the organization. All API keys they created stop working immediately. Their membership record and everything they authored remain intact. Admin only.
+
+**`POST /api/members/:userId/deactivate`**
+
+<ParamField path="userId" type="string" required>
+  The `user_id` of the member to deactivate.
+</ParamField>
+
+Returns the updated member object with `deactivated_at` set.
+
+```bash title="Deactivate an account"
+curl -X POST https://your-egma-instance/api/members/usr_abc123/deactivate \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json"
+```
+
+<Note>
+  Deactivation is the deprovisioning path — it shuts off access without erasing history. Use this when an employee leaves but you want to keep their contribution record intact. Use [remove](#remove-a-member) when you want to clear the membership entirely.
+</Note>

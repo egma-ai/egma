@@ -54,7 +54,7 @@ export function ExistingTestsScreen({ onAnswer }: ExistingTestsScreenProps) {
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       <Text>
         Do you already have test cases or situations written down — a
@@ -62,7 +62,7 @@ export function ExistingTestsScreen({ onAnswer }: ExistingTestsScreenProps) {
       </Text>
       <Box height={1} />
       <Text dimColor>
-        Drop a path and egma turns them into test files before it writes any of
+        Drop a path and Egma turns them into test files before it writes any of
         its own. CSV and markdown both read. It must be inside this folder.
       </Text>
       <Box height={1} />

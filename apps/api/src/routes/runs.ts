@@ -50,7 +50,12 @@ import { isId } from "@egma/ids";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
-import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
+import {
+  actingIn,
+  cannotActIn,
+  reachingIn,
+  refuseActing,
+} from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { describedMockTool } from "../http/mock-tools.ts";
 import {
@@ -59,7 +64,7 @@ import {
   onlyReporting,
 } from "../http/verdicts.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, text } from "../http/reading.ts";
+import { given, projectNamed, text } from "../http/reading.ts";
 import {
   conflict,
   invalid,
@@ -985,6 +990,7 @@ export async function runRoutes(
   app.post(RUNS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     // The role is checked before anything is read, which is the stance the
     // factories take for the same reason: a viewer is refused for being a
@@ -997,7 +1003,10 @@ export async function runRoutes(
     const pinned = pinnedVersions(body.test_versions ?? []);
     if ("refusal" in pinned) return unprocessable(reply, pinned.refusal);
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    // The query and the body, `projectNamed`'s one rule — the same one Cancel
+    // and Retry beside this keep. A page starting a run names its project in
+    // the address; a terminal posts it in the body.
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     /**
@@ -1144,22 +1153,48 @@ export async function runRoutes(
   app.get(RUN_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
+    const query = (request.query ?? {}) as Record<string, unknown>;
 
-    const header = await getRun(auth, runId);
+    /**
+     * **The project the caller named, exactly as the list beside it reads
+     * one.**
+     *
+     * This route read none, and every read under it narrows by the acting
+     * project — so a browser could list a project's runs, follow a row into
+     * one, and be told *no run of yours has that id* about the run it had just
+     * been shown. A session's acting project is the organization's **first**,
+     * so the whole of run detail worked in exactly one project and in no other,
+     * and every test in the repository passed: they authenticate with keys, and
+     * a key's own project is the project its runs are in.
+     *
+     * **`reachingIn` rather than `actingIn`, and the difference is a route this
+     * one already has.** A run id is unique inside the organization, so naming
+     * no project here is a filter left off rather than a destination left
+     * unsaid. `actingIn` would answer a credential that names none — a key for
+     * the whole organization — with *name the project*, which is a 400 to a
+     * terminal following the `results_url` egma printed for it. A session names
+     * none only on that same address, and carries a project of its own either
+     * way.
+     */
+    const acting = await reachingIn(auth, given(text(query.project)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+    const who = acting.auth;
+
+    const header = await getRun(who, runId);
     if (header === undefined) return notFound(reply, NO_SUCH_RUN);
 
     const described = await runAsItStands(
-      auth,
+      who,
       runId,
       options.baseUrl,
       header,
     );
     if (described === undefined) return notFound(reply, NO_SUCH_RUN);
 
-    const plan = await getGradingPlan(auth, runId);
-    const ranAgainst = await getAgent(auth, header.agentId);
+    const plan = await getGradingPlan(who, runId);
+    const ranAgainst = await getAgent(who, header.agentId);
     const ranOver = await getConnection(
-      auth,
+      who,
       header.agentId,
       header.connectionId,
     );
@@ -1203,7 +1238,19 @@ export async function runRoutes(
   app.get(RUN_EVENTS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
-    const query = (request.query ?? {}) as { readonly after?: string };
+    const query = (request.query ?? {}) as {
+      readonly after?: string;
+      readonly project?: string;
+    };
+
+    // The project the caller named, for the reason the run's own read beside
+    // this one gives: `listRunEvents` narrows by the acting project, so a feed
+    // that read no project followed a run in the organization's first project
+    // and answered "no such run" about every other one. `reachingIn` for the
+    // reason that read gives too — a feed a caller can open and cannot follow
+    // is the same fault as a run it can find and cannot read.
+    const acting = await reachingIn(auth, given(text(query.project)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
 
     // Digits and nothing else. `Number` would take 0x10, 1e3, 5.0 and a
     // padded " 7 " and quietly answer about a page nobody asked for, while
@@ -1228,7 +1275,7 @@ export async function runRoutes(
       );
     }
 
-    const page = await listRunEvents(auth, runId, { after });
+    const page = await listRunEvents(acting.auth, runId, { after });
     if (page === undefined) return notFound(reply, NO_SUCH_RUN);
 
     return reply.send({
@@ -1262,13 +1309,14 @@ export async function runRoutes(
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "start_and_cancel_runs", {
       organizationId: auth.organizationId,
       projectId: auth.projectId,
     });
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     // Required here for the reason it is required on a start: a retry dials a
@@ -1302,20 +1350,40 @@ export async function runRoutes(
   app.post(RUN_CANCEL_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
+    const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "start_and_cancel_runs", {
       organizationId: auth.organizationId,
       projectId: auth.projectId,
     });
 
+    /**
+     * **The project the caller named, exactly as Retry beside it reads one.**
+     *
+     * This route used to read none, and `cancelRun` narrows by the acting
+     * project — so a session, whose acting project is the organization's
+     * *first*, could not cancel a run in any other one. The page was looking
+     * straight at the run and egma answered that there is no such run.
+     *
+     * **A key naming nothing still lands where it always did** — its own
+     * project, or the whole organization for a key minted for the whole
+     * organization. That is `reachingIn`'s absent case, and it is the one this
+     * route answered before it read any project at all: a run id is unique in
+     * the organization, so Cancel does not need a project to know which run it
+     * was handed.
+     */
+    const acting = await reachingIn(auth, projectNamed(query, body));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
     // The header comes back from the write itself rather than from a second
     // read: it is the run as the cancel left it, which is the thing a caller
     // asked about.
-    const canceled = await cancelRun(auth, runId);
+    const canceled = await cancelRun(acting.auth, runId);
     if (canceled === undefined) return notFound(reply, NO_SUCH_RUN);
 
     const described = await runAsItStands(
-      auth,
+      acting.auth,
       runId,
       options.baseUrl,
       canceled,

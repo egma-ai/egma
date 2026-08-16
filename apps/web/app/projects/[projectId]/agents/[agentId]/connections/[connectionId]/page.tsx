@@ -486,7 +486,7 @@ function ConnectionDetail({
                 <Help>
                   Egma ships nothing that can check these on this connection, so
                   it does not know either way. A test that requires one is
-                  skipped because egma cannot tell — not because the target
+                  skipped because Egma cannot tell — not because the target
                   cannot do it.
                 </Help>
               )}
@@ -494,7 +494,7 @@ function ConnectionDetail({
           ) : (
             <Empty
               title="Nobody has measured this target"
-              lead="Unknown is not the same as unsupported. Until something measures it, a test that requires a capability is skipped because egma cannot tell, rather than because the target cannot."
+              lead="Unknown is not the same as unsupported. Until something measures it, a test that requires a capability is skipped because Egma cannot tell, rather than because the target cannot."
             />
           )}
         </Section>

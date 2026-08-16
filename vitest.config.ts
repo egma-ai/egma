@@ -24,6 +24,14 @@ const REAL_BROWSER_TEST = "apps/api/test/browser.test.ts";
 const THE_PLANNING_REPOSITORY = "egma-planning/**";
 
 /**
+ * Local agent worktrees are separate Git checkouts, not source directories.
+ *
+ * Vitest otherwise walks into stale copies under `.claude/worktrees` and runs
+ * their tests against this checkout's built packages and databases.
+ */
+const LOCAL_AGENT_WORKTREES = "**/.claude/worktrees/**";
+
+/**
  * Two lanes, so daily work does not pay for a real browser on every edit.
  *
  * **The lanes are defined by what they leave out, never by a list of what they
@@ -68,6 +76,7 @@ export default defineConfig({
           exclude: [
             ...defaultExclude,
             THE_PLANNING_REPOSITORY,
+            LOCAL_AGENT_WORKTREES,
             "**/.next/**",
             REAL_BROWSER_TEST,
           ],

@@ -479,7 +479,7 @@ describe("the test file format", () => {
         },
       ],
       [
-        "an override answering nothing at all, which egma's door refuses",
+        "an override answering nothing at all, which Egma's door refuses",
         { ...plain, mockTools: [{ tool: "check_availability", says: { answer: null } }] },
       ],
       [
@@ -620,7 +620,7 @@ describe("the egma folder", () => {
 
     expect(moving).not.toBeNull();
     const said = moving?.message ?? "";
-    expect(said).toContain("egma does not move a repository between platforms");
+    expect(said).toContain("Egma does not move a repository between platforms");
     expect(said).toContain("nothing was sent");
 
     // All four things a developer deletes, named at once. A refusal naming one
@@ -659,7 +659,7 @@ describe("the egma folder", () => {
 
     // And no command that does it: the refusal teaches the move and nothing
     // offers to perform it.
-    expect(said).not.toMatch(/egma rebind|--rebind|egma move/u);
+    expect(said).not.toMatch(/egma rebind|--rebind|Egma move/u);
 
     expect(await readFile(paths.config, "utf8")).toBe(asCommitted);
   });
@@ -703,9 +703,9 @@ describe("the egma folder", () => {
     expect(written).not.toContain("egma_sk_");
     expect(written).toBe(
       [
-        "# What this folder points at on egma.",
+        "# What this folder points at on Egma.",
         "#",
-        "# Committed on purpose: nothing in this folder is secret. egma writes an id",
+        "# Committed on purpose: nothing in this folder is secret. Egma writes an id",
         "# beside each name once it has registered one.",
         "platform:",
         "  origin: http://127.0.0.1:3101",

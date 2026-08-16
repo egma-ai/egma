@@ -120,7 +120,7 @@ export async function executeExpectedBehaviors(
     return behaviors.map((_, at) =>
       couldNotJudge(
         at,
-        `the ${execution.definition.name} grader in egma's library carries no judge prompt, so there was nothing to ask with.`,
+        `the ${execution.definition.name} grader in Egma's library carries no judge prompt, so there was nothing to ask with.`,
       ),
     );
   }

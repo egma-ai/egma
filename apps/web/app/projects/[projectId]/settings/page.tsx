@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { IDENTITY_CONFLICT, writeJson, type Refusal } from "../../../../lib/api.ts";
 import { roleOf } from "../../../../lib/me.ts";
@@ -100,12 +100,37 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   const [saved, setSaved] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
 
+  /**
+   * Which local draft a successful write captured.
+   *
+   * The fields stay editable while the request is active. If somebody types
+   * again after pressing Save, the confirming read must update `settled`
+   * without copying its older values over that newer draft. A number records
+   * the edit rather than comparing text, because typing and then returning to
+   * the same text still clears Saved and is still a new local action.
+   */
+  const editVersion = useRef(0);
+  const confirmingSave = useRef<{
+    readonly projectId: string;
+    readonly editVersion: number;
+  } | null>(null);
+
   useEffect(() => {
     if (settled === null) return;
+
+    const confirming = confirmingSave.current;
+    confirmingSave.current = null;
+    if (
+      confirming?.projectId === projectId &&
+      editVersion.current !== confirming.editVersion
+    ) {
+      return;
+    }
+
     setName(settled.name);
     setSlug(settled.slug);
     setDescription(settled.description ?? "");
-  }, [settled]);
+  }, [projectId, settled]);
 
   useEffect(() => {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
@@ -117,10 +142,11 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
     (name.trim() !== settled.name ||
       slug.trim() !== settled.slug ||
       description.trim() !== (settled.description ?? ""));
-  useUnsavedChanges(changed && !saving);
+  useUnsavedChanges(changed && !saving, saving);
 
   async function save(): Promise<void> {
     if (!mayAdminister || settled === null || !named || !changed || saving) return;
+    const submittedEditVersion = editVersion.current;
     setRefused(null);
     setSaved(false);
     setSaving(true);
@@ -150,7 +176,11 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
       setRefused(written.refusal);
       return;
     }
-    setSaved(true);
+    confirmingSave.current = {
+      projectId,
+      editVersion: submittedEditVersion,
+    };
+    setSaved(editVersion.current === submittedEditVersion);
     reload();
   }
 
@@ -224,6 +254,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                     disabled={!mayAdminister}
                     invalid={name.trim() === ""}
                     onChange={(next) => {
+                      editVersion.current += 1;
                       setName(next);
                       setSaved(false);
                     }}
@@ -240,6 +271,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                     disabled={!mayAdminister}
                     invalid={slug.trim() === ""}
                     onChange={(next) => {
+                      editVersion.current += 1;
                       setSlug(next);
                       setSaved(false);
                     }}
@@ -257,6 +289,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                   value={description}
                   disabled={!mayAdminister}
                   onChange={(next) => {
+                    editVersion.current += 1;
                     setDescription(next);
                     setSaved(false);
                   }}

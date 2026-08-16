@@ -34,8 +34,8 @@ export function Brand() {
   return (
     <Image
       className={styles.brand}
-      src="/brand/egma-logo.svg"
-      alt="egma"
+      src="/brand/egma-wordmark.svg"
+      alt="Egma"
       width={151}
       height={41}
       priority

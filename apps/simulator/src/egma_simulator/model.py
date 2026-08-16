@@ -117,11 +117,13 @@ class OpenAICompatibleModel:
         base_url: str,
         api_key: str,
         model_name: str,
+        reasoning_effort: str | None = None,
         timeout_seconds: float = MODEL_TIMEOUT_SECONDS,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model_name = model_name
+        self._reasoning_effort = reasoning_effort
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self._session: aiohttp.ClientSession | None = None
 
@@ -131,10 +133,19 @@ class OpenAICompatibleModel:
         return self._session
 
     async def reply(self, messages: list[dict[str, str]]) -> PersonaReply:
+        # **The field is absent unless somebody asked for it**, rather than
+        # sent with a default this file chose. Providers speaking one
+        # chat-completions shape do not agree on the accepted values, and
+        # some models refuse the field outright — so a request that always
+        # carried it would be egma narrowing which models a deployment can
+        # run to the ones egma happened to know about.
+        asked = {"model": self._model_name, "messages": messages}
+        if self._reasoning_effort is not None:
+            asked["reasoning_effort"] = self._reasoning_effort
         try:
             async with self._live_session().post(
                 f"{self._base_url}/chat/completions",
-                json={"model": self._model_name, "messages": messages},
+                json=asked,
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 timeout=self._timeout,
             ) as response:
@@ -178,7 +189,7 @@ def build_model_client(
 
     **The platform's own settings win over this container's.** They arrive
     on the work order, they are read afresh for every simulation, and each
-    of the three replaces this container's answer on its own — so a
+    of the four replaces this container's answer on its own — so a
     deployment that has configured the persona's model centrally needs no
     model variables on any simulator, and a replaced key applies to the
     next simulation with no restart. A setting the platform does not hold
@@ -216,4 +227,7 @@ def build_model_client(
         base_url=config.model_base_url,
         api_key=api_key,
         model_name=model_name,
+        reasoning_effort=(
+            said.reasoning_effort or config.model_reasoning_effort
+        ),
     )
