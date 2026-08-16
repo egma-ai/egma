@@ -2666,6 +2666,26 @@ describe("the complete product, walked in order in a second project", () => {
       .toContain(route.says);
   }
 
+  /**
+   * The route one address is, so a case that walks a handful of addresses can
+   * wait for a settled page without keeping its own copy of what each one says.
+   *
+   * **An address with no entry throws rather than skipping the wait**, which is
+   * the whole point of routing through the one list: a case that quietly
+   * stopped waiting would go on asserting absences against a blank page, and a
+   * blank page satisfies every absence there is.
+   */
+  function routeAt(address: string): ProductRoute {
+    const found = everyProductRoute().find((one) => one.address === address);
+    if (found === undefined) {
+      throw new Error(
+        `no product route is listed at ${address}, so nothing here knows what ` +
+          `its settled page says. Add it to everyProductRoute().`,
+      );
+    }
+    return found;
+  }
+
   describe("reload, a copied link, Back and Forward", () => {
     /**
      * Every one of them, opened cold and then reloaded.
@@ -3791,9 +3811,10 @@ describe("the complete product, walked in order in a second project", () => {
       async () => {
         for (const address of [agentAddress, at("agents", "new")]) {
           await walk.goto(address);
-          await expect
-            .poll(() => selectorOf(walk).innerText(), { timeout: 30_000 })
-            .toContain("Support");
+          // The settled page, not the shell: every assertion below is an
+          // absence, and a page that never rendered asks for no Prompt, no
+          // Model and no Tools either.
+          await landedOn(walk, routeAt(address));
 
           for (const provider of ["Prompt", "Model", "Tools"]) {
             expect(
@@ -3819,9 +3840,9 @@ describe("the complete product, walked in order in a second project", () => {
           at("settings"),
         ]) {
           await walk.goto(address);
-          await expect
-            .poll(() => selectorOf(walk).innerText(), { timeout: 30_000 })
-            .toContain("Support");
+          // The settled page, for the reason the case above gives: nothing
+          // offers to author a mock tool on a page that has not drawn.
+          await landedOn(walk, routeAt(address));
 
           for (const control of [
             "New mock tool",
