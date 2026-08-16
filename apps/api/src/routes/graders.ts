@@ -24,7 +24,7 @@ import {
   unprocessable,
 } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, text } from "../http/reading.ts";
+import { given, projectNamed, text } from "../http/reading.ts";
 
 /**
  * The running graders: the copies a project actually judges with, the act that
@@ -426,6 +426,7 @@ export async function graderRoutes(
   app.post(GRADERS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "author_definitions", {
       organizationId: auth.organizationId,
@@ -465,10 +466,14 @@ export async function graderRoutes(
     const scope = textIn(body, "scope", SCOPE_TAKES);
     if ("refusal" in scope) return unprocessable(reply, scope.refusal);
 
+    // The type gate first, so a `project` that is not text is refused by name
+    // rather than read as absent — then `projectNamed`'s one rule, the query
+    // and the body. **Use** is pressed from a page, which names its project in
+    // the address.
     const project = textIn(body, "project", PROJECT_TAKES);
     if ("refusal" in project) return unprocessable(reply, project.refusal);
 
-    const acting = await actingIn(auth, given(project.value));
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const created = await useLibraryEntry(acting.auth, {
@@ -526,6 +531,7 @@ export async function graderRoutes(
     const { auth } = requesterOf(request);
     const { graderId } = request.params as { graderId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "author_definitions", {
       organizationId: auth.organizationId,
@@ -559,10 +565,12 @@ export async function graderRoutes(
     const scope = textIn(body, "scope", SCOPE_TAKES);
     if ("refusal" in scope) return unprocessable(reply, scope.refusal);
 
+    // The type gate first, then `projectNamed`'s one rule, exactly as **Use**
+    // beside this reads them.
     const project = textIn(body, "project", PROJECT_TAKES);
     if ("refusal" in project) return unprocessable(reply, project.refusal);
 
-    const acting = await actingIn(auth, given(project.value));
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const edited = await editGrader(acting.auth, graderId, {

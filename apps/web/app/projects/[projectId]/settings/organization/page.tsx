@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { sendJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
+import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
   credentialsIn,
   JUDGE_CREDENTIALS_PATH,
@@ -304,11 +304,12 @@ function Credentials({
     if (!mayAdminister || busy || label.trim() === "" || key.trim() === "") return;
     setFailed(null);
     setBusy(true);
-    const written = await sendJson<JudgeCredential>(JUDGE_CREDENTIALS_PATH, {
+    const written = await writeJson<JudgeCredential>(JUDGE_CREDENTIALS_PATH, {
       method: "POST",
-      // **No project travels with this.** A judge credential belongs to the
-      // organization, and the route holds four keys and refuses a fifth — so a
-      // project named here was refused as an unknown key rather than ignored.
+      // **No project travels with this**, in the address or anywhere else. A
+      // judge credential belongs to the organization, and the route holds four
+      // body keys and refuses a fifth — so a project named here was refused as
+      // an unknown key rather than ignored.
       body: { label: label.trim(), provider: "openai", key: key.trim() },
     });
     setBusy(false);
@@ -335,7 +336,7 @@ function Credentials({
     if (!mayAdminister || busy) return;
     setFailed(null);
     setBusy(true);
-    const written = await sendJson<JudgeCredential>(
+    const written = await writeJson<JudgeCredential>(
       judgeCredentialArchivePath(credential.id),
       {
         method: "POST",
@@ -371,7 +372,7 @@ function Credentials({
     if (!mayAdminister || busy || replacement.trim() === "") return;
     setFailed(null);
     setBusy(true);
-    const written = await sendJson<JudgeCredential>(
+    const written = await writeJson<JudgeCredential>(
       judgeCredentialPath(credential.id),
       {
         method: "PATCH",

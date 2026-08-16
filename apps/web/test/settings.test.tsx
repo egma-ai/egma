@@ -1169,11 +1169,11 @@ describe("judge settings", () => {
       expect(sent.some((one) => one.method === "PUT")).toBe(true);
     });
     const put = sent.find((one) => one.method === "PUT");
+    expect(put?.url).toBe("/api/judge?project=prj_1");
     expect(put?.body).toEqual({
       provider: "openai",
       model: "gpt-4.1-mini",
       source: "jcr_1",
-      project: "prj_1",
     });
   });
 });

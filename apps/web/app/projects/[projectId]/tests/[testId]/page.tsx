@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { sendJson, type Refusal } from "../../../../../lib/api.ts";
+import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { agentsQuery, type AgentPage } from "../../../../../lib/agents.ts";
 import { asDay } from "../../../../../lib/instants.ts";
 import { roleOf } from "../../../../../lib/me.ts";
@@ -174,7 +174,7 @@ function TestDetail({
   ): Promise<ListedTest | null> {
     setRefused(null);
     setSaving(true);
-    const written = await sendJson<ListedTest>(path, {
+    const written = await writeJson<ListedTest>(path, {
       method,
       project: projectId,
       body,

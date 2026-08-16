@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { readJson, sendJson, type Refusal } from "../../../../../lib/api.ts";
+import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
   agentsQuery,
   agentDetailQuery,
@@ -328,7 +328,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
     if (!mayStart || starting || !readyToPlan) return;
     setRefused(null);
     setStarting(true);
-    const written = await sendJson<StartedRun>(RUNS_PATH, {
+    const written = await writeJson<StartedRun>(RUNS_PATH, {
       method: "POST",
       project: projectId,
       body: {

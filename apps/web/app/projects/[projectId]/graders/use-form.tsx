@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { sendJson, type Refusal } from "../../../../lib/api.ts";
+import { writeJson, type Refusal } from "../../../../lib/api.ts";
 import {
   filledParams,
   firstChoices,
@@ -173,7 +173,7 @@ export function UseForm({
     setBusy(true);
     setRefused(null);
 
-    const answer = await sendJson<RunningGrader>(GRADERS_PATH, {
+    const answer = await writeJson<RunningGrader>(GRADERS_PATH, {
       method: "POST",
       project: projectId,
       body: {

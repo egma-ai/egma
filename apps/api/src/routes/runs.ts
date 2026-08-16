@@ -990,6 +990,7 @@ export async function runRoutes(
   app.post(RUNS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     // The role is checked before anything is read, which is the stance the
     // factories take for the same reason: a viewer is refused for being a
@@ -1002,7 +1003,10 @@ export async function runRoutes(
     const pinned = pinnedVersions(body.test_versions ?? []);
     if ("refusal" in pinned) return unprocessable(reply, pinned.refusal);
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    // The query and the body, `projectNamed`'s one rule — the same one Cancel
+    // and Retry beside this keep. A page starting a run names its project in
+    // the address; a terminal posts it in the body.
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     /**

@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { sendJson, type Refusal } from "../../../../../lib/api.ts";
+import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { GRADERS_SECTION } from "../../../../../lib/graders.ts";
 import {
   credentialLabel,
@@ -156,7 +156,7 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
     setRefused(null);
     setSaving(true);
 
-    const written = await sendJson<ProjectJudge>(JUDGE_PATH, {
+    const written = await writeJson<ProjectJudge>(JUDGE_PATH, {
       method: "PUT",
       project: projectId,
       body: { provider, model: model.trim(), source },

@@ -1,5 +1,6 @@
 import {
   claimSimulations,
+  PREDEFINED_GRADERS,
   completeSimulation,
   createProject,
   startSimulation,
@@ -522,6 +523,157 @@ describe("a browser working in a project that is not the first", () => {
       headers: { cookie: ada.cookie },
     });
     expect(named.statusCode, named.body).toBe(200);
+  });
+
+  /**
+   * **Every other write a page makes, with the project named only in the
+   * address.**
+   *
+   * The ticket wrote down that "every page in the product now names its project
+   * the one way `writeJson` documents, in the address". It did not: six pages
+   * were still sending it in the body through a second helper one keystroke
+   * away, because six doors read only a body key. A page moved to the address
+   * against one of those doors is not refused — it is **ignored**, and the
+   * write lands in the session's own project, which is the organization's
+   * first, with a confident 201.
+   *
+   * So the doors are proved here rather than the pages: one session standing in
+   * the first project, authoring in the second, naming it **only** in the
+   * address, every time. Each half is asserted twice — the thing is in Outbound
+   * *and* the first project is still empty — because a door that ignored the
+   * address would answer exactly the same status code.
+   */
+  it("authors a test, a grader, a judge and a run in the project its address names", async () => {
+    const { ada, outbound } = await twoProjects("browser_writes_by_address");
+    const inOutbound = { cookie: ada.cookie };
+
+    const asBrowser = (
+      method: "POST" | "PATCH" | "PUT" | "GET",
+      url: string,
+      payload?: Record<string, unknown>,
+    ) =>
+      api.app.inject({
+        method,
+        url,
+        headers: inOutbound,
+        ...(payload === undefined ? {} : { payload }),
+      });
+
+    /* An agent and a connection to run against, in Outbound. */
+    const registered = await asBrowser("POST", `/api/agents?project=${outbound}`, {
+      name: "Outbound desk",
+      connection: {
+        type: "retell",
+        modality: "chat",
+        config: { retellAgentId: "agent_in_retell_by_address" },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    });
+    expect(registered.statusCode, registered.body).toBe(201);
+    const connectionId = (
+      registered.json() as { connection: { id: string } }
+    ).connection.id;
+
+    /* POST /api/tests */
+    const authored = await asBrowser("POST", `/api/tests?project=${outbound}`, {
+      name: "Reschedules a booked appointment",
+      scenario: "Their cleaning has to move to any afternoon next week.",
+      expected_behaviors: ["confirms the new time back before finishing"],
+    });
+    expect(authored.statusCode, authored.body).toBe(201);
+    const testId = (authored.json() as { id: string }).id;
+
+    /* PATCH /api/tests/{id} */
+    const edited = await asBrowser(
+      "PATCH",
+      `/api/tests/${testId}?project=${outbound}`,
+      { name: "Reschedules a booked appointment, politely" },
+    );
+    expect(edited.statusCode, edited.body).toBe(200);
+    const versionId = (edited.json() as { version_id: string }).version_id;
+
+    /* POST /api/graders */
+    const used = await asBrowser("POST", `/api/graders?project=${outbound}`, {
+      library_id: PREDEFINED_GRADERS.latency,
+      params: { metric: "turn_response_latency", bound: 2000 },
+      name: "Answers inside two seconds",
+    });
+    expect(used.statusCode, used.body).toBe(201);
+    const graderId = (used.json() as { id: string }).id;
+
+    /* PATCH /api/graders/{id} */
+    const retuned = await asBrowser(
+      "PATCH",
+      `/api/graders/${graderId}?project=${outbound}`,
+      { name: "Answers inside a second and a half" },
+    );
+    expect(retuned.statusCode, retuned.body).toBe(200);
+
+    /* PUT /api/judge */
+    const judged = await asBrowser("PUT", `/api/judge?project=${outbound}`, {
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      source: "platform",
+    });
+    expect(judged.statusCode, judged.body).toBe(200);
+
+    /* POST /api/runs */
+    const started = await asBrowser("POST", `/api/runs?project=${outbound}`, {
+      connection: connectionId,
+      test_versions: [versionId],
+      idempotency_key: newId("run"),
+      label: "Started from the address",
+    });
+    expect(started.statusCode, started.body).toBe(201);
+    expect((started.json() as { project_id: string }).project_id).toBe(outbound);
+
+    /* Everything landed in Outbound... */
+    const outboundTests = await asBrowser("GET", `/api/tests?project=${outbound}`);
+    expect(
+      (outboundTests.json() as { items: { name: string }[] }).items.map(
+        (one) => one.name,
+      ),
+    ).toEqual(["Reschedules a booked appointment, politely"]);
+
+    const outboundGraders = await asBrowser(
+      "GET",
+      `/api/graders?project=${outbound}`,
+    );
+    expect(
+      (outboundGraders.json() as { items: { name: string }[] }).items.map(
+        (one) => one.name,
+      ),
+    ).toContain("Answers inside a second and a half");
+
+    const outboundRuns = await asBrowser("GET", `/api/runs?project=${outbound}`);
+    expect(
+      (outboundRuns.json() as { items: { label: string }[] }).items,
+    ).toHaveLength(1);
+
+    /* ...and nothing landed in the project the session is standing in. */
+    const firstTests = await asBrowser("GET", `/api/tests?project=${ada.projectId}`);
+    expect((firstTests.json() as { items: unknown[] }).items).toEqual([]);
+
+    const firstRuns = await asBrowser("GET", `/api/runs?project=${ada.projectId}`);
+    expect((firstRuns.json() as { items: unknown[] }).items).toEqual([]);
+
+    // The seeded expected-behaviors copy and nothing else: the latency copy was
+    // made in Outbound and the first project never heard about it.
+    const firstGraders = await asBrowser(
+      "GET",
+      `/api/graders?project=${ada.projectId}`,
+    );
+    expect(
+      (firstGraders.json() as { items: { name: string }[] }).items.map(
+        (one) => one.name,
+      ),
+    ).toEqual(["expected_behaviors"]);
+
+    // The judge is the project's, and the first project's is untouched.
+    const outboundJudge = await asBrowser("GET", `/api/judge?project=${outbound}`);
+    expect((outboundJudge.json() as { model: string }).model).toBe(
+      "gpt-4.1-mini",
+    );
   });
 
   /**

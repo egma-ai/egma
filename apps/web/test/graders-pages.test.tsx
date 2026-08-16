@@ -257,11 +257,15 @@ describe("the grader library, in one project", () => {
     expect(
       (await screen.findByRole("status")).textContent,
     ).toContain("Expected behaviors is running on this project now");
+    // **In the address, which is what this case is named for.** It used to
+    // assert the project in the *body* under exactly this name — the page said
+    // one thing and its test agreed with the other, which is how a spelling
+    // nobody meant survives a review.
     const written = asked.find((one) => one.method === "POST");
+    expect(written?.path).toBe("/api/graders?project=prj_2");
     expect(written?.body).toEqual({
       library_id: "grl_behaviors",
       required: true,
-      project: "prj_2",
     });
   });
 
@@ -291,10 +295,12 @@ describe("the grader library, in one project", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start judging" }));
 
     await screen.findByRole("status");
+    expect(asked.find((one) => one.method === "POST")?.path).toBe(
+      "/api/graders?project=prj_1",
+    );
     expect(asked.find((one) => one.method === "POST")?.body).toEqual({
       library_id: "grl_latency",
       required: true,
-      project: "prj_1",
       params: { metric: "turn_response_latency", bound: 2000 },
     });
   });
@@ -722,7 +728,7 @@ describe("changing a running copy", () => {
 
     await screen.findByRole("status");
     const written = asked.find((one) => one.method === "PATCH");
-    expect(written?.path).toBe("/api/graders/grd_2");
+    expect(written?.path).toBe("/api/graders/grd_2?project=prj_2");
     expect(written?.body).toEqual({
       name: "Latency",
       // Null rather than the empty string: emptying a note is a real intent and
@@ -732,7 +738,6 @@ describe("changing a running copy", () => {
       required: true,
       production_sample_rate: 10,
       params: { metric: "turn_response_latency", bound: 1200 },
-      project: "prj_2",
     });
   });
 

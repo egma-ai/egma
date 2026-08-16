@@ -44,7 +44,7 @@ import {
   REFUSALS,
 } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, text, textList } from "../http/reading.ts";
+import { given, projectNamed, text, textList } from "../http/reading.ts";
 
 /**
  * The tests of one project: the list a browser filters, one frozen version by
@@ -560,6 +560,7 @@ export async function testRoutes(
   app.post(TESTS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "author_definitions", {
       organizationId: auth.organizationId,
@@ -600,7 +601,9 @@ export async function testRoutes(
       return unprocessable(reply, capabilities.refusal);
     }
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    // The query and the body, `projectNamed`'s one rule. The authoring page
+    // names its project in the address; `egma test push` names it in the body.
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const personaIds = await resolvePersonaNames(acting.auth, personas.entries);
@@ -644,6 +647,7 @@ export async function testRoutes(
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "author_definitions", {
       organizationId: auth.organizationId,
@@ -732,7 +736,8 @@ export async function testRoutes(
       );
     }
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    // The query and the body, exactly as the create beside it reads them.
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const personaIds =
