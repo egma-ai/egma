@@ -100,12 +100,14 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   /** The local draft captured by the write whose confirming read is next. */
   const editVersion = useRef(0);
   const confirmingSave = useRef<number | null>(null);
+  const [confirmingRead, setConfirmingRead] = useState(false);
 
   useEffect(() => {
     if (settled === null) return;
 
     const confirming = confirmingSave.current;
     confirmingSave.current = null;
+    setConfirmingRead(false);
     if (confirming !== null && editVersion.current !== confirming) return;
 
     setName(settled.name);
@@ -122,7 +124,12 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
 
   const named = name.trim() !== "";
   const changed = settled !== null && name.trim() !== settled.name;
-  useUnsavedChanges(changed && !saving, saving);
+  const confirming = confirmingSave.current;
+  const changedWhileConfirming =
+    confirmingRead &&
+    confirming !== null &&
+    editVersion.current !== confirming;
+  useUnsavedChanges((changed || changedWhileConfirming) && !saving, saving);
 
   async function save(): Promise<void> {
     if (!mayAdminister || !named || !changed || saving) return;
@@ -146,6 +153,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
       return;
     }
     confirmingSave.current = submittedEditVersion;
+    setConfirmingRead(true);
     setSaved(editVersion.current === submittedEditVersion);
     reload();
   }

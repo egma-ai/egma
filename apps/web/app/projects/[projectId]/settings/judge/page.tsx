@@ -119,12 +119,14 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
     readonly projectId: string;
     readonly editVersion: number;
   } | null>(null);
+  const [confirmingRead, setConfirmingRead] = useState(false);
 
   useEffect(() => {
     if (settled === null) return;
 
     const confirming = confirmingSave.current;
     confirmingSave.current = null;
+    setConfirmingRead(false);
     if (
       confirming?.projectId === projectId &&
       editVersion.current !== confirming.editVersion
@@ -192,7 +194,12 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
     registry?.status === "ready" &&
     credentials?.status === "ready" &&
     isChoiceComplete({ provider, model, source });
-  useUnsavedChanges(changed && !saving, saving);
+  const confirming = confirmingSave.current;
+  const changedWhileConfirming =
+    confirmingRead &&
+    confirming?.projectId === projectId &&
+    editVersion.current !== confirming.editVersion;
+  useUnsavedChanges((changed || changedWhileConfirming) && !saving, saving);
 
   async function saveChoice(): Promise<void> {
     if (!mayAdminister || !complete || !changed || saving) return;
@@ -219,6 +226,7 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
       projectId,
       editVersion: submittedEditVersion,
     };
+    setConfirmingRead(true);
     reloadJudge();
   }
 

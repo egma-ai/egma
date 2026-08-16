@@ -388,11 +388,15 @@ describe("project settings", () => {
   it("keeps an edit made while Save reloads the stored project", async () => {
     let finishSave!: (answer: StubbedResponse) => void;
     let finishReload!: (answer: StubbedResponse) => void;
+    let finishRetry!: (answer: StubbedResponse) => void;
     const saveAnswer = new Promise<StubbedResponse>((resolve) => {
       finishSave = resolve;
     });
     const reloadAnswer = new Promise<StubbedResponse>((resolve) => {
       finishReload = resolve;
+    });
+    const retryAnswer = new Promise<StubbedResponse>((resolve) => {
+      finishRetry = resolve;
     });
     const renamed = { ...PROJECT, name: "Renamed", revision: "rev_2" };
     const confirm = vi.fn(() => true);
@@ -404,6 +408,7 @@ describe("project settings", () => {
         { status: 200, body: PROJECT },
         saveAnswer,
         reloadAnswer,
+        retryAnswer,
       ],
     });
     render(<ProjectSettingsPage />);
@@ -427,6 +432,7 @@ describe("project settings", () => {
     // Saving does not lock the fields. This edit is a new draft, made after
     // the submitted value was captured and before the confirming read lands.
     fireEvent.change(name, { target: { value: "Rename after saving" } });
+    confirm.mockReturnValue(false);
     await act(async () => {
       finishSave({ status: 200, body: renamed });
     });
@@ -436,8 +442,44 @@ describe("project settings", () => {
       ).toHaveLength(3);
     });
 
+    const clickWhileConfirming = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    within(screen.getByRole("navigation", { name: "Settings" }))
+      .getByRole("link", { name: "Judge" })
+      .dispatchEvent(clickWhileConfirming);
+    expect(clickWhileConfirming.defaultPrevented).toBe(true);
+    expect(confirm).toHaveBeenLastCalledWith("Discard your unsaved changes?");
+
     await act(async () => {
-      finishReload({ status: 200, body: renamed });
+      finishReload({
+        status: 503,
+        body: { error: "unavailable", message: "Project storage is offline." },
+      });
+    });
+    expect(await screen.findByText("Project storage is offline.")).toBeTruthy();
+
+    const clickAfterFailure = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    within(screen.getByRole("navigation", { name: "Settings" }))
+      .getByRole("link", { name: "Judge" })
+      .dispatchEvent(clickAfterFailure);
+    expect(clickAfterFailure.defaultPrevented).toBe(true);
+    expect(confirm).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => {
+      expect(
+        sent.filter((request) => request.url === "/api/projects/prj_1"),
+      ).toHaveLength(4);
+    });
+    await act(async () => {
+      finishRetry({ status: 200, body: renamed });
     });
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
       "Rename after saving",
@@ -851,13 +893,19 @@ describe("organization settings", () => {
   it("keeps a newer organization name typed while Save is confirming", async () => {
     let finishSave!: (answer: StubbedResponse) => void;
     let finishReload!: (answer: StubbedResponse) => void;
+    let finishRetry!: (answer: StubbedResponse) => void;
     const saveAnswer = new Promise<StubbedResponse>((resolve) => {
       finishSave = resolve;
     });
     const reloadAnswer = new Promise<StubbedResponse>((resolve) => {
       finishReload = resolve;
     });
+    const retryAnswer = new Promise<StubbedResponse>((resolve) => {
+      finishRetry = resolve;
+    });
     const renamed = { ...ORGANIZATION, name: "Acme Voice" };
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
 
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -865,6 +913,7 @@ describe("organization settings", () => {
         { status: 200, body: ORGANIZATION },
         saveAnswer,
         reloadAnswer,
+        retryAnswer,
       ],
       "/api/judge-credentials": { status: 200, body: { items: [] } },
     });
@@ -885,8 +934,49 @@ describe("organization settings", () => {
       ).toHaveLength(3);
     });
 
+    const clickWhileConfirming = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    within(screen.getByRole("navigation", { name: "Settings" }))
+      .getByRole("link", { name: "Judge" })
+      .dispatchEvent(clickWhileConfirming);
+    expect(clickWhileConfirming.defaultPrevented).toBe(true);
+    expect(confirm).toHaveBeenLastCalledWith("Discard your unsaved changes?");
+
     await act(async () => {
-      finishReload({ status: 200, body: renamed });
+      finishReload({
+        status: 503,
+        body: {
+          error: "unavailable",
+          message: "Organization storage is offline.",
+        },
+      });
+    });
+    expect(
+      await screen.findByText("Organization storage is offline."),
+    ).toBeTruthy();
+
+    const clickAfterFailure = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    within(screen.getByRole("navigation", { name: "Settings" }))
+      .getByRole("link", { name: "Judge" })
+      .dispatchEvent(clickAfterFailure);
+    expect(clickAfterFailure.defaultPrevented).toBe(true);
+    expect(confirm).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => {
+      expect(
+        sent.filter((request) => request.url === "/api/organization"),
+      ).toHaveLength(4);
+    });
+    await act(async () => {
+      finishRetry({ status: 200, body: renamed });
     });
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
       "Acme Voice Labs",
@@ -1488,11 +1578,15 @@ describe("judge settings", () => {
   it("keeps newer judge choices typed while Save is confirming", async () => {
     let finishSave!: (answer: StubbedResponse) => void;
     let finishReload!: (answer: StubbedResponse) => void;
+    let finishRetry!: (answer: StubbedResponse) => void;
     const saveAnswer = new Promise<StubbedResponse>((resolve) => {
       finishSave = resolve;
     });
     const reloadAnswer = new Promise<StubbedResponse>((resolve) => {
       finishReload = resolve;
+    });
+    const retryAnswer = new Promise<StubbedResponse>((resolve) => {
+      finishRetry = resolve;
     });
     const configured = {
       state: "configured",
@@ -1505,6 +1599,8 @@ describe("judge settings", () => {
       updated_at: "2026-08-01T10:00:00.000Z",
     };
     const saved = { ...configured, model: "gpt-4.1" };
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
 
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -1512,6 +1608,7 @@ describe("judge settings", () => {
         { status: 200, body: configured },
         saveAnswer,
         reloadAnswer,
+        retryAnswer,
       ],
       "/api/judge/registry": { status: 200, body: REGISTRY },
       "/api/judge-credentials": {
@@ -1541,8 +1638,44 @@ describe("judge settings", () => {
       ).toHaveLength(3);
     });
 
+    const clickWhileConfirming = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    within(screen.getByRole("navigation", { name: "Settings" }))
+      .getByRole("link", { name: "Organization" })
+      .dispatchEvent(clickWhileConfirming);
+    expect(clickWhileConfirming.defaultPrevented).toBe(true);
+    expect(confirm).toHaveBeenLastCalledWith("Discard your unsaved changes?");
+
     await act(async () => {
-      finishReload({ status: 200, body: saved });
+      finishReload({
+        status: 503,
+        body: { error: "unavailable", message: "Judge storage is offline." },
+      });
+    });
+    expect(await screen.findByText("Judge storage is offline.")).toBeTruthy();
+
+    const clickAfterFailure = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    within(screen.getByRole("navigation", { name: "Settings" }))
+      .getByRole("link", { name: "Organization" })
+      .dispatchEvent(clickAfterFailure);
+    expect(clickAfterFailure.defaultPrevented).toBe(true);
+    expect(confirm).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => {
+      expect(
+        sent.filter((request) => request.url === "/api/judge?project=prj_1"),
+      ).toHaveLength(4);
+    });
+    await act(async () => {
+      finishRetry({ status: 200, body: saved });
     });
     expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe(
       "gpt-4.1-nano",

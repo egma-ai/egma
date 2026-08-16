@@ -114,12 +114,14 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
     readonly projectId: string;
     readonly editVersion: number;
   } | null>(null);
+  const [confirmingRead, setConfirmingRead] = useState(false);
 
   useEffect(() => {
     if (settled === null) return;
 
     const confirming = confirmingSave.current;
     confirmingSave.current = null;
+    setConfirmingRead(false);
     if (
       confirming?.projectId === projectId &&
       editVersion.current !== confirming.editVersion
@@ -142,7 +144,12 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
     (name.trim() !== settled.name ||
       slug.trim() !== settled.slug ||
       description.trim() !== (settled.description ?? ""));
-  useUnsavedChanges(changed && !saving, saving);
+  const confirming = confirmingSave.current;
+  const changedWhileConfirming =
+    confirmingRead &&
+    confirming?.projectId === projectId &&
+    editVersion.current !== confirming.editVersion;
+  useUnsavedChanges((changed || changedWhileConfirming) && !saving, saving);
 
   async function save(): Promise<void> {
     if (!mayAdminister || settled === null || !named || !changed || saving) return;
@@ -180,6 +187,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
       projectId,
       editVersion: submittedEditVersion,
     };
+    setConfirmingRead(true);
     setSaved(editVersion.current === submittedEditVersion);
     reload();
   }
