@@ -102,6 +102,32 @@ export function SettingsNav({
 }
 
 /**
+ * The stable frame every Settings state uses.
+ *
+ * Settings navigation is local to this area, so it stays beside the page on a
+ * wide screen instead of becoming a large card above every form. On a narrow
+ * screen the same navigation becomes a compact, horizontally scrollable band.
+ * Loading and failure states use this frame too, which stops the page from
+ * moving when its data arrives.
+ */
+export function SettingsLayout({
+  projectId,
+  current,
+  children,
+}: {
+  readonly projectId: string;
+  readonly current: SettingsSection;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className={styles.layout}>
+      <SettingsNav projectId={projectId} current={current} />
+      <div className={styles.content}>{children}</div>
+    </div>
+  );
+}
+
+/**
  * What an organization-wide Settings page says under its heading.
  *
  * The selector is still on screen and still naming a project, because leaving

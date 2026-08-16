@@ -261,6 +261,15 @@ describe("the Settings navigation", () => {
     expect(
       within(nav).getByRole("link", { name: "Judge" }).getAttribute("href"),
     ).toBe("/projects/prj_1/settings/judge");
+
+    // The navigation and the state it controls share one stable frame. The
+    // frame is present before the read settles and does not move when the form
+    // replaces the loading state.
+    const layout = nav.parentElement;
+    expect(layout?.firstElementChild).toBe(nav);
+    expect(
+      await within(layout as HTMLElement).findByDisplayValue("Default"),
+    ).toBeTruthy();
   });
 
   /**
@@ -328,6 +337,8 @@ describe("project settings", () => {
     expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toBe(
       "The first one.",
     );
+    expect(screen.queryByText(PROJECT.id)).toBeNull();
+    expect(screen.queryByText("Identifier")).toBeNull();
 
     fireEvent.change(name, { target: { value: "Renamed" } });
     fireEvent.click(screen.getByRole("button", { name: "Save project" }));
@@ -764,6 +775,8 @@ describe("organization settings", () => {
       name: "Acme Voice",
     });
     expect(await screen.findByText("Saved.")).toBeTruthy();
+    expect(screen.queryByText(ORGANIZATION.id)).toBeNull();
+    expect(screen.queryByText("Identifier")).toBeNull();
     const savedButton = screen.getByRole("button", {
       name: "Save organization",
     });
@@ -2064,18 +2077,20 @@ describe("API keys", () => {
   });
 
   /**
-   * Only an admin is answered with anybody else's key, and the rows say who
-   * holds each one and what it reaches — which is what responding to a leak
-   * needs, and is the whole of what a row may say about somebody else's key.
+   * Only an admin is answered with anybody else's key. The API has only an
+   * internal user identifier here, so the section states ownership and the row
+   * shows the useful scope without pretending that token is a person's name.
    */
-  it("shows an admin every key, with its owner and its scope and no secret", async () => {
+  it("shows an admin other members' keys with their scope and no internal owner token", async () => {
     open("admin", [MY_KEY, SOMEBODY_ELSES]);
 
+    expect(await screen.findByText("Other members’ keys")).toBeTruthy();
     const others = await screen.findByRole("table", {
       name: "Other people's API keys",
     });
     expect(others.textContent).toContain("Bob's CI");
-    expect(others.textContent).toContain("usr_2");
+    expect(others.textContent).not.toContain("usr_2");
+    expect(within(others).queryByRole("columnheader", { name: "Owner" })).toBeNull();
     expect(others.textContent).toContain("Project · Outbound");
     expect(others.textContent).toContain("egma_sk_ab…WXYZ");
   });

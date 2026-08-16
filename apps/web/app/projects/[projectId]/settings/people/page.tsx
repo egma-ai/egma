@@ -40,7 +40,10 @@ import {
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
-import { ScopeNote, SettingsNav } from "../../../../../ui/settings-nav.tsx";
+import {
+  ScopeNote,
+  SettingsLayout,
+} from "../../../../../ui/settings-nav.tsx";
 import {
   confirmUnsavedSettingsNavigation,
   useOrganizationRead,
@@ -201,8 +204,9 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       <ProductPage>
         <PageHeader eyebrow="Settings" title="People" />
         <PageBody>
-          <SettingsNav projectId={projectId} current="people" />
-          <Loading what="this organization's people" />
+          <SettingsLayout projectId={projectId} current="people">
+            <Loading what="this organization's people" />
+          </SettingsLayout>
         </PageBody>
       </ProductPage>
     );
@@ -213,15 +217,16 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       <ProductPage>
         <PageHeader eyebrow="Settings" title="People" />
         <PageBody>
-          <SettingsNav projectId={projectId} current="people" />
-          <Failure
-            message={
-              answer.status === "signed-out"
-                ? "Your session has ended. Sign in and try again."
-                : answer.refusal.message
-            }
-            onRetry={reload}
-          />
+          <SettingsLayout projectId={projectId} current="people">
+            <Failure
+              message={
+                answer.status === "signed-out"
+                  ? "Your session has ended. Sign in and try again."
+                  : answer.refusal.message
+              }
+              onRetry={reload}
+            />
+          </SettingsLayout>
         </PageBody>
       </ProductPage>
     );
@@ -300,50 +305,51 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
         lead="Everybody in this organization, and what each of them may do."
       />
       <PageBody>
-        <SettingsNav projectId={projectId} current="people" />
-        <ScopeNote>
-          Membership belongs to the whole organization. Somebody invited here
-          can work in every project, and a role changed here changes it
-          everywhere.
-        </ScopeNote>
+        <SettingsLayout projectId={projectId} current="people">
+          <ScopeNote>
+            Membership belongs to the whole organization. Somebody invited here
+            can work in every project, and a role changed here changes it
+            everywhere.
+          </ScopeNote>
 
-        {refused === null ? null : <Refused message={refused.message} />}
+          {refused === null ? null : <Refused message={refused.message} />}
 
-        {mayManage ? (
-          <Choice
-            label="Which list to show"
-            value={shownTab}
-            options={[
-              { value: "people", label: "People" },
-              { value: "invitations", label: "Invitations" },
-            ]}
-            onChange={showTab}
-          />
-        ) : null}
+          {mayManage ? (
+            <Choice
+              label="Which list to show"
+              value={shownTab}
+              options={[
+                { value: "people", label: "People" },
+                { value: "invitations", label: "Invitations" },
+              ]}
+              onChange={showTab}
+            />
+          ) : null}
 
-        {shownTab === "people" ? (
-          <Section title="People">
-            {members.length === 0 ? (
-              <Empty title="Nobody is here yet." />
-            ) : (
-              <DataTable
-                label="Members"
-                columns={columns}
-                rows={members}
-                keyOf={(member) => member.user_id}
-              />
-            )}
-          </Section>
-        ) : (
-          <Invitations
-            invitations={invitations}
-            busy={busy}
-            onSent={() => void refreshInvitations()}
-            onRetry={() => void refreshInvitations()}
-            onRefused={setRefused}
-            onBusy={setBusy}
-          />
-        )}
+          {shownTab === "people" ? (
+            <Section title="People">
+              {members.length === 0 ? (
+                <Empty title="Nobody is here yet." />
+              ) : (
+                <DataTable
+                  label="Members"
+                  columns={columns}
+                  rows={members}
+                  keyOf={(member) => member.user_id}
+                />
+              )}
+            </Section>
+          ) : (
+            <Invitations
+              invitations={invitations}
+              busy={busy}
+              onSent={() => void refreshInvitations()}
+              onRetry={() => void refreshInvitations()}
+              onRefused={setRefused}
+              onBusy={setBusy}
+            />
+          )}
+        </SettingsLayout>
       </PageBody>
 
       {confirming === null ? null : (

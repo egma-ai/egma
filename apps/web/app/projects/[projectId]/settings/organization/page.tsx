@@ -31,8 +31,11 @@ import {
 } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
-import { Failure, Loading } from "../../../../../ui/page-state.tsx";
-import { ScopeNote, SettingsNav } from "../../../../../ui/settings-nav.tsx";
+import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
+import {
+  ScopeNote,
+  SettingsLayout,
+} from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
@@ -147,8 +150,9 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
       <ProductPage>
         <PageHeader eyebrow="Settings" title="Organization" />
         <PageBody>
-          <SettingsNav projectId={projectId} current="organization" />
-          <Loading what="this organization" />
+          <SettingsLayout projectId={projectId} current="organization">
+            <Loading what="this organization" />
+          </SettingsLayout>
         </PageBody>
       </ProductPage>
     );
@@ -159,15 +163,16 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
       <ProductPage>
         <PageHeader eyebrow="Settings" title="Organization" />
         <PageBody>
-          <SettingsNav projectId={projectId} current="organization" />
-          <Failure
-            message={
-              answer.status === "signed-out"
-                ? "Your session has ended. Sign in and try again."
-                : answer.refusal.message
-            }
-            onRetry={reload}
-          />
+          <SettingsLayout projectId={projectId} current="organization">
+            <Failure
+              message={
+                answer.status === "signed-out"
+                  ? "Your session has ended. Sign in and try again."
+                  : answer.refusal.message
+              }
+              onRetry={reload}
+            />
+          </SettingsLayout>
         </PageBody>
       </ProductPage>
     );
@@ -183,83 +188,83 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
         lead="The customer every project below belongs to."
       />
       <PageBody>
-        <SettingsNav projectId={projectId} current="organization" />
-        <ScopeNote>
-          Everything on this page belongs to the whole organization. It applies
-          in every project, whichever one the selector above is showing.
-        </ScopeNote>
+        <SettingsLayout projectId={projectId} current="organization">
+          <ScopeNote>
+            Everything on this page belongs to the whole organization. It applies
+            in every project, whichever one the selector above is showing.
+          </ScopeNote>
 
-        <Section title="Details">
-          {refused === null ? null : <Refused message={refused.message} />}
+          <Section title="Details">
+            {refused === null ? null : <Refused message={refused.message} />}
 
-          <Form onSubmit={() => void save()}>
-            <Field
-              label="Name"
-              htmlFor="organization-name"
-              hint="What egma calls your organization. Changing it breaks no link and no invitation."
-            >
-              <TextInput
-                id="organization-name"
-                value={name}
-                disabled={!mayAdminister}
-                invalid={!named}
-                onChange={(next) => {
-                  setName(next);
-                  setSaved(false);
-                }}
-              />
-            </Field>
-
-            {named ? null : <Problem>An organization needs a name.</Problem>}
-            {saved && refused === null ? <Help>Saved.</Help> : null}
-
-            <FormActions>
-              <Button
-                weight="strong"
-                type="submit"
-                disabled={!mayAdminister || !named || !changed || saving}
-                why={
-                  mayAdminister || role === null
-                    ? undefined
-                    : `Your ${role} role cannot change organization settings. Ask an organization admin.`
-                }
+            <Form onSubmit={() => void save()}>
+              <Field
+                label="Name"
+                htmlFor="organization-name"
+                hint="What egma calls your organization. Changing it breaks no link and no invitation."
               >
-                {saving ? "Saving…" : "Save organization"}
-              </Button>
-            </FormActions>
-          </Form>
+                <TextInput
+                  id="organization-name"
+                  value={name}
+                  disabled={!mayAdminister}
+                  invalid={!named}
+                  onChange={(next) => {
+                    setName(next);
+                    setSaved(false);
+                  }}
+                />
+              </Field>
 
-          <Facts
-            facts={[
-              { label: "Identifier", value: organization.id },
-              {
-                label: "Short name",
-                value: organization.slug,
-              },
-              {
-                label: "Created",
-                value: new Date(organization.created_at).toLocaleDateString(),
-              },
-            ]}
+              {named ? null : <Problem>An organization needs a name.</Problem>}
+              {saved && refused === null ? <Help>Saved.</Help> : null}
+
+              <FormActions>
+                <Button
+                  weight="strong"
+                  type="submit"
+                  disabled={!mayAdminister || !named || !changed || saving}
+                  why={
+                    mayAdminister || role === null
+                      ? undefined
+                      : `Your ${role} role cannot change organization settings. Ask an organization admin.`
+                  }
+                >
+                  {saving ? "Saving…" : "Save organization"}
+                </Button>
+              </FormActions>
+            </Form>
+
+            <Facts
+              facts={[
+                {
+                  label: "Short name",
+                  value: organization.slug,
+                },
+                {
+                  label: "Created",
+                  value: new Date(organization.created_at).toLocaleDateString(),
+                },
+              ]}
+            />
+          </Section>
+
+          <Credentials
+            credentials={
+              credentials?.status === "ready"
+                ? credentialsIn(credentials.value)
+                : null
+            }
+            unreadable={
+              credentials !== null && credentials.status !== "ready"
+                ? credentials.status === "signed-out"
+                  ? "Your session has ended. Sign in and try again."
+                  : credentials.refusal.message
+                : null
+            }
+            mayAdminister={mayAdminister}
+            onChanged={reloadCredentials}
           />
-        </Section>
-
-        <Credentials
-          credentials={
-            credentials?.status === "ready"
-              ? credentialsIn(credentials.value)
-              : null
-          }
-          unreadable={
-            credentials !== null && credentials.status !== "ready"
-              ? credentials.status === "signed-out"
-                ? "Your session has ended. Sign in and try again."
-                : credentials.refusal.message
-              : null
-          }
-          mayAdminister={mayAdminister}
-          onChanged={reloadCredentials}
-        />
+        </SettingsLayout>
       </PageBody>
     </ProductPage>
   );
@@ -498,102 +503,111 @@ function Credentials({
   ];
 
   return (
-    <section aria-label="Judge credentials">
-      <h2>Organization keys</h2>
-      <p>
-        A key belongs to the organization, not to a project, so one key can serve
-        every project. Egma shows the last four characters and never the key
-        itself — not here, and not through any other page.
-      </p>
-
-      {failed === null ? null : (
-        <Failure
-          title={failed.what}
-          message={failed.refusal.message}
-          onRetry={failed.again}
-        />
-      )}
-
-      {unreadable === null ? null : (
-        <Failure
-          title="Egma could not list this organization's judge keys."
-          message={unreadable}
-          onRetry={onChanged}
-        />
-      )}
-
-      {credentials === null ? (
-        unreadable === null ? (
-          <Loading what="this organization's judge keys" />
-        ) : null
-      ) : credentials.length === 0 ? (
-        <p>No judge credentials yet.</p>
-      ) : (
-        <>
-          <DataTable
-            label="Organization keys"
-            columns={columns}
-            rows={credentials}
-            keyOf={(credential) => credential.id}
-          />
-
-          {/*
-           * The replacement form is drawn once, under the table, for whichever
-           * row asked for it — never inside a cell. This keeps one labelled
-           * secret field tied to the row that opened it, instead of making a
-           * table cell own a form whose state outlives that cell.
-           */}
-          {rotatingCredential === undefined ? null : (
-            <>
-              <Field
-                label="New key"
-                htmlFor={`rotate-${rotatingCredential.id}`}
-                hint="Replaces the stored key whole. You do not need the old one, and egma will not show it to you."
-              >
-                <TextInput
-                  id={`rotate-${rotatingCredential.id}`}
-                  value={replacement}
-                  secret
-                  disabled={!mayAdminister || busy}
-                  onChange={setReplacement}
-                />
-              </Field>
-              <Button
-                weight="strong"
-                disabled={!mayAdminister || busy || replacement.trim() === ""}
-                onClick={() => void rotate(rotatingCredential)}
-              >
-                Save new key
-              </Button>
-            </>
-          )}
-        </>
-      )}
-
-      <h3>Add a key</h3>
-      <Field label="Label" htmlFor="credential-label">
-        <TextInput
-          id="credential-label"
-          value={label}
-          disabled={!mayAdminister || busy}
-          onChange={setLabel}
-        />
-      </Field>
-      <Field label="OpenAI key" htmlFor="credential-key">
-        <TextInput
-          id="credential-key"
-          value={key}
-          secret
-          disabled={!mayAdminister || busy}
-          onChange={setKey}
-        />
-      </Field>
-      <Button
-        disabled={!mayAdminister || busy || label.trim() === "" || key.trim() === ""}
-        onClick={() => void add()}
+    <div role="region" aria-label="Judge credentials">
+      <Section
+        title="Organization keys"
+        lead="A key belongs to the organization, not to a project, so one key can serve every project. Egma shows the last four characters and never the key itself — not here, and not through any other page."
       >
-        Add key
-      </Button>
+        {failed === null ? null : (
+          <Failure
+            title={failed.what}
+            message={failed.refusal.message}
+            onRetry={failed.again}
+          />
+        )}
+
+        {unreadable === null ? null : (
+          <Failure
+            title="Egma could not list this organization's judge keys."
+            message={unreadable}
+            onRetry={onChanged}
+          />
+        )}
+
+        {credentials === null ? (
+          unreadable === null ? (
+            <Loading what="this organization's judge keys" />
+          ) : null
+        ) : credentials.length === 0 ? (
+          <Empty title="No judge credentials yet." />
+        ) : (
+          <>
+            <DataTable
+              label="Organization keys"
+              columns={columns}
+              rows={credentials}
+              keyOf={(credential) => credential.id}
+            />
+
+            {/*
+             * The replacement form is drawn once, under the table, for whichever
+             * row asked for it — never inside a cell. This keeps one labelled
+             * secret field tied to the row that opened it, instead of making a
+             * table cell own a form whose state outlives that cell.
+             */}
+            {rotatingCredential === undefined ? null : (
+              <Form onSubmit={() => void rotate(rotatingCredential)}>
+                <Field
+                  label="New key"
+                  htmlFor={`rotate-${rotatingCredential.id}`}
+                  hint="Replaces the stored key whole. You do not need the old one, and egma will not show it to you."
+                >
+                  <TextInput
+                    id={`rotate-${rotatingCredential.id}`}
+                    value={replacement}
+                    secret
+                    disabled={!mayAdminister || busy}
+                    onChange={setReplacement}
+                  />
+                </Field>
+                <FormActions>
+                  <Button
+                    weight="strong"
+                    type="submit"
+                    disabled={!mayAdminister || busy || replacement.trim() === ""}
+                  >
+                    Save new key
+                  </Button>
+                </FormActions>
+              </Form>
+            )}
+          </>
+        )}
+      </Section>
+
+      <Section
+        title="Add a key"
+        lead="Add a named OpenAI key for projects in this organization to use."
+      >
+        <Form onSubmit={() => void add()}>
+          <Field label="Label" htmlFor="credential-label">
+            <TextInput
+              id="credential-label"
+              value={label}
+              disabled={!mayAdminister || busy}
+              onChange={setLabel}
+            />
+          </Field>
+          <Field label="OpenAI key" htmlFor="credential-key">
+            <TextInput
+              id="credential-key"
+              value={key}
+              secret
+              disabled={!mayAdminister || busy}
+              onChange={setKey}
+            />
+          </Field>
+          <FormActions>
+            <Button
+              weight="strong"
+              type="submit"
+              disabled={!mayAdminister || busy || label.trim() === "" || key.trim() === ""}
+            >
+              Add key
+            </Button>
+          </FormActions>
+        </Form>
+      </Section>
 
       {confirmingArchive === null ? null : (
         <Dialog
@@ -623,6 +637,6 @@ function Credentials({
           )}
         </Dialog>
       )}
-    </section>
+    </div>
   );
 }

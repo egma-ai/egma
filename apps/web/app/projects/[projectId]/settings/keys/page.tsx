@@ -31,7 +31,10 @@ import {
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
-import { ScopeNote, SettingsNav } from "../../../../../ui/settings-nav.tsx";
+import {
+  ScopeNote,
+  SettingsLayout,
+} from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
@@ -191,7 +194,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
     reload();
   }
 
-  function columns(mine: boolean): readonly Column<ApiKey>[] {
+  function columns(): readonly Column<ApiKey>[] {
     return [
       {
         key: "name",
@@ -201,16 +204,6 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
       },
       { key: "looks_like", header: "Key", mono: true, cell: (key) => key.looks_like },
       { key: "scope", header: "Scope", cell: (key) => scopeOf(key, projects) },
-      ...(mine
-        ? []
-        : [
-            {
-              key: "owner",
-              header: "Owner",
-              mono: true,
-              cell: (key: ApiKey) => key.created_by_user_id,
-            },
-          ]),
       {
         key: "used",
         header: "Last used",
@@ -247,135 +240,136 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
         lead="What a terminal or a script authenticates to egma with."
       />
       <PageBody>
-        <SettingsNav projectId={projectId} current="keys" />
-        <ScopeNote>
-          Keys belong to the organization. A key can be scoped to one project or
-          to the whole organization, and every row below says which.
-        </ScopeNote>
+        <SettingsLayout projectId={projectId} current="keys">
+          <ScopeNote>
+            Keys belong to the organization. A key can be scoped to one project or
+            to the whole organization, and every row below says which.
+          </ScopeNote>
 
-        {refused === null ? null : <Refused message={refused.message} />}
+          {refused === null ? null : <Refused message={refused.message} />}
 
-        {minted === null ? null : (
-          <ApiKeyReceipt keyValue={minted} onDismiss={() => setMinted(null)} />
-        )}
+          {minted === null ? null : (
+            <ApiKeyReceipt keyValue={minted} onDismiss={() => setMinted(null)} />
+          )}
 
-        {answer === null ? (
-          <Loading what="your keys" />
-        ) : answer.status !== "ready" ? (
-          <Failure
-            message={
-              answer.status === "signed-out"
-                ? "Your session has ended. Sign in and try again."
-                : answer.refusal.message
-            }
-            onRetry={reload}
-          />
-        ) : (
-          <>
-            <Section
-              title="Create a key"
-              lead="Every role may create, list and revoke their own keys."
-            >
-              <Form onSubmit={() => void mint()}>
-                <FormRow>
-                  <Field
-                    label="Name"
-                    htmlFor="key-name"
-                    hint="Optional. What this key is for, so a key nobody needs is recognisable later."
-                  >
-                    <TextInput
-                      id="key-name"
-                      value={name}
-                      disabled={busy}
-                      onChange={setName}
-                    />
-                  </Field>
-                  <Field
-                    label="Scope"
-                    htmlFor="key-scope"
-                    hint="A project-scoped key reaches that project only. It cannot be widened later."
-                  >
-                    <Select
-                      id="key-scope"
-                      value={scope}
-                      disabled={busy}
-                      options={[
-                        ...projects.map((project) => ({
-                          value: project.id,
-                          label: `Project · ${project.name}`,
-                        })),
-                        {
-                          value: WHOLE_ORGANIZATION,
-                          label: "Whole organization",
-                        },
-                      ]}
-                      onChange={setScope}
-                    />
-                  </Field>
-                </FormRow>
-                <FormActions>
-                  <Button
-                    weight="strong"
-                    type="submit"
-                    disabled={busy || minted !== null}
-                    why={
-                      minted === null
-                        ? undefined
-                        : "Copy and dismiss the key above before you create another one."
-                    }
-                  >
-                    {busy ? "Creating…" : "Create key"}
-                  </Button>
-                </FormActions>
-              </Form>
-            </Section>
-
-            <Section title="Your keys">
-              {mine.length === 0 ? (
-                <Empty
-                  title="You have no keys yet."
-                  lead="Create one above, or run egma login and let the terminal mint one."
-                />
-              ) : (
-                <DataTable
-                  label="Your API keys"
-                  columns={columns(true)}
-                  rows={mine}
-                  keyOf={(key) => key.id}
-                />
-              )}
-            </Section>
-
-            {/*
-              * Everybody else's, which the server answers with only for an admin.
-              * The section is absent rather than empty for anybody else, because
-              * there is nothing being withheld from them: the read simply does not
-              * carry other people's rows, so a heading over nothing would suggest a
-              * list they are not being shown.
-              */}
-            {others.length === 0 ? null : (
+          {answer === null ? (
+            <Loading what="your keys" />
+          ) : answer.status !== "ready" ? (
+            <Failure
+              message={
+                answer.status === "signed-out"
+                  ? "Your session has ended. Sign in and try again."
+                  : answer.refusal.message
+              }
+              onRetry={reload}
+            />
+          ) : (
+            <>
               <Section
-                title="Everybody else's keys"
-                lead="An admin sees every key in the organization, so responding to a leak never depends on who created one."
+                title="Create a key"
+                lead="Every role may create, list and revoke their own keys."
               >
-                <DataTable
-                  label="Other people's API keys"
-                  columns={columns(false)}
-                  rows={others}
-                  keyOf={(key) => key.id}
-                />
+                <Form onSubmit={() => void mint()}>
+                  <FormRow>
+                    <Field
+                      label="Name"
+                      htmlFor="key-name"
+                      hint="Optional. What this key is for, so a key nobody needs is recognisable later."
+                    >
+                      <TextInput
+                        id="key-name"
+                        value={name}
+                        disabled={busy}
+                        onChange={setName}
+                      />
+                    </Field>
+                    <Field
+                      label="Scope"
+                      htmlFor="key-scope"
+                      hint="A project-scoped key reaches that project only. It cannot be widened later."
+                    >
+                      <Select
+                        id="key-scope"
+                        value={scope}
+                        disabled={busy}
+                        options={[
+                          ...projects.map((project) => ({
+                            value: project.id,
+                            label: `Project · ${project.name}`,
+                          })),
+                          {
+                            value: WHOLE_ORGANIZATION,
+                            label: "Whole organization",
+                          },
+                        ]}
+                        onChange={setScope}
+                      />
+                    </Field>
+                  </FormRow>
+                  <FormActions>
+                    <Button
+                      weight="strong"
+                      type="submit"
+                      disabled={busy || minted !== null}
+                      why={
+                        minted === null
+                          ? undefined
+                          : "Copy and dismiss the key above before you create another one."
+                      }
+                    >
+                      {busy ? "Creating…" : "Create key"}
+                    </Button>
+                  </FormActions>
+                </Form>
               </Section>
-            )}
-          </>
-        )}
 
-        {role === "viewer" ? (
-          <Help>
-            Your viewer role cannot change agents, tests, personas or graders —
-            and your own keys are the exception, because a credential you cannot
-            rotate is one you cannot keep safe.
-          </Help>
-        ) : null}
+              <Section title="Your keys">
+                {mine.length === 0 ? (
+                  <Empty
+                    title="You have no keys yet."
+                    lead="Create one above, or run egma login and let the terminal mint one."
+                  />
+                ) : (
+                  <DataTable
+                    label="Your API keys"
+                    columns={columns()}
+                    rows={mine}
+                    keyOf={(key) => key.id}
+                  />
+                )}
+              </Section>
+
+              {/*
+                * Everybody else's, which the server answers with only for an admin.
+                * The section is absent rather than empty for anybody else, because
+                * there is nothing being withheld from them: the read simply does not
+                * carry other people's rows, so a heading over nothing would suggest a
+                * list they are not being shown.
+                */}
+              {others.length === 0 ? null : (
+                <Section
+                  title="Other members’ keys"
+                  lead="An admin sees every key in the organization, so responding to a leak never depends on who created one."
+                >
+                  <DataTable
+                    label="Other people's API keys"
+                    columns={columns()}
+                    rows={others}
+                    keyOf={(key) => key.id}
+                  />
+                </Section>
+              )}
+            </>
+          )}
+
+          {role === "viewer" ? (
+            <Help>
+              Your viewer role cannot change agents, tests, personas or graders —
+              and your own keys are the exception, because a credential you cannot
+              rotate is one you cannot keep safe.
+            </Help>
+          ) : null}
+        </SettingsLayout>
       </PageBody>
 
       {confirmingRevoke === null ? null : (

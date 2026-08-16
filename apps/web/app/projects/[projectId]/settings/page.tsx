@@ -13,7 +13,6 @@ import {
 import {
   Button,
   ButtonLink,
-  Facts,
   Field,
   Form,
   FormActions,
@@ -26,7 +25,7 @@ import {
   TextInput,
 } from "../../../../ui/controls.tsx";
 import { Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
-import { SettingsNav } from "../../../../ui/settings-nav.tsx";
+import { SettingsLayout } from "../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
@@ -162,8 +161,9 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
       <ProductPage>
         <PageHeader eyebrow="Settings" title="Project" />
         <PageBody>
-          <SettingsNav projectId={projectId} current="project" />
-          <Loading what="this project" />
+          <SettingsLayout projectId={projectId} current="project">
+            <Loading what="this project" />
+          </SettingsLayout>
         </PageBody>
       </ProductPage>
     );
@@ -174,25 +174,24 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
       <ProductPage>
         <PageHeader eyebrow="Settings" title="Project" />
         <PageBody>
-          <SettingsNav projectId={projectId} current="project" />
-          {answer.status === "missing" ? (
-            <NotFound message={answer.refusal.message} />
-          ) : (
-            <Failure
-              message={
-                answer.status === "signed-out"
-                  ? "Your session has ended. Sign in and try again."
-                  : answer.refusal.message
-              }
-              onRetry={reload}
-            />
-          )}
+          <SettingsLayout projectId={projectId} current="project">
+            {answer.status === "missing" ? (
+              <NotFound message={answer.refusal.message} />
+            ) : (
+              <Failure
+                message={
+                  answer.status === "signed-out"
+                    ? "Your session has ended. Sign in and try again."
+                    : answer.refusal.message
+                }
+                onRetry={reload}
+              />
+            )}
+          </SettingsLayout>
         </PageBody>
       </ProductPage>
     );
   }
-
-  const project = answer.value;
 
   return (
     <ProductPage>
@@ -215,106 +214,94 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
         }
       />
       <PageBody>
-        <SettingsNav projectId={projectId} current="project" />
-
-        <Section
-          title="Details"
-          lead="Every link anybody has sent is written against the identifier below, not the slug, so renaming is safe."
-        >
-          {refused === null ? null : (
-            <Refused
-              message={refused.message}
-              action={
-                refused.error === IDENTITY_CONFLICT ? (
-                  <Button onClick={reload}>Read this project again</Button>
-                ) : undefined
-              }
-            />
-          )}
-
-          <Form onSubmit={() => void save()}>
-            <FormRow>
-              <Field label="Name" htmlFor="project-name">
-                <TextInput
-                  id="project-name"
-                  value={name}
-                  disabled={!mayAdminister}
-                  invalid={name.trim() === ""}
-                  onChange={(next) => {
-                    setName(next);
-                    setSaved(false);
-                  }}
-                />
-              </Field>
-              <Field
-                label="Slug"
-                htmlFor="project-slug"
-                hint="The short word this project is known by. Changing it does not break existing links."
-              >
-                <TextInput
-                  id="project-slug"
-                  value={slug}
-                  disabled={!mayAdminister}
-                  invalid={slug.trim() === ""}
-                  onChange={(next) => {
-                    setSlug(next);
-                    setSaved(false);
-                  }}
-                />
-              </Field>
-            </FormRow>
-
-            <Field
-              label="Description"
-              htmlFor="project-description"
-              hint="Optional. What this project is for, for whoever opens the selector next."
-            >
-              <TextArea
-                id="project-description"
-                value={description}
-                disabled={!mayAdminister}
-                onChange={(next) => {
-                  setDescription(next);
-                  setSaved(false);
-                }}
-              />
-            </Field>
-
-            {named ? null : (
-              <Problem>A project needs a name and a slug.</Problem>
-            )}
-            {saved && refused === null ? (
-              <Help>Saved. Everybody in this organization sees the new name.</Help>
-            ) : null}
-
-            <FormActions>
-              <Button
-                weight="strong"
-                type="submit"
-                disabled={!mayAdminister || !named || !changed || saving}
-                why={
-                  mayAdminister || role === null
-                    ? undefined
-                    : `Your ${role} role cannot change project settings. Ask an organization admin.`
+        <SettingsLayout projectId={projectId} current="project">
+          <Section
+            title="Details"
+            lead="Renaming this project or changing its slug does not break existing links."
+          >
+            {refused === null ? null : (
+              <Refused
+                message={refused.message}
+                action={
+                  refused.error === IDENTITY_CONFLICT ? (
+                    <Button onClick={reload}>Read this project again</Button>
+                  ) : undefined
                 }
-              >
-                {saving ? "Saving…" : "Save project"}
-              </Button>
-            </FormActions>
-          </Form>
-        </Section>
+              />
+            )}
 
-        <Section title="This project in egma">
-          <Facts
-            facts={[
-              { label: "Identifier", value: project.id },
-              {
-                label: "Created",
-                value: new Date(project.created_at).toLocaleDateString(),
-              },
-            ]}
-          />
-        </Section>
+            <Form onSubmit={() => void save()}>
+              <FormRow>
+                <Field label="Name" htmlFor="project-name">
+                  <TextInput
+                    id="project-name"
+                    value={name}
+                    disabled={!mayAdminister}
+                    invalid={name.trim() === ""}
+                    onChange={(next) => {
+                      setName(next);
+                      setSaved(false);
+                    }}
+                  />
+                </Field>
+                <Field
+                  label="Slug"
+                  htmlFor="project-slug"
+                  hint="The short word this project is known by. Changing it does not break existing links."
+                >
+                  <TextInput
+                    id="project-slug"
+                    value={slug}
+                    disabled={!mayAdminister}
+                    invalid={slug.trim() === ""}
+                    onChange={(next) => {
+                      setSlug(next);
+                      setSaved(false);
+                    }}
+                  />
+                </Field>
+              </FormRow>
+
+              <Field
+                label="Description"
+                htmlFor="project-description"
+                hint="Optional. What this project is for, for whoever opens the selector next."
+              >
+                <TextArea
+                  id="project-description"
+                  value={description}
+                  disabled={!mayAdminister}
+                  onChange={(next) => {
+                    setDescription(next);
+                    setSaved(false);
+                  }}
+                />
+              </Field>
+
+              {named ? null : (
+                <Problem>A project needs a name and a slug.</Problem>
+              )}
+              {saved && refused === null ? (
+                <Help>Saved. Everybody in this organization sees the new name.</Help>
+              ) : null}
+
+              <FormActions>
+                <Button
+                  weight="strong"
+                  type="submit"
+                  disabled={!mayAdminister || !named || !changed || saving}
+                  why={
+                    mayAdminister || role === null
+                      ? undefined
+                      : `Your ${role} role cannot change project settings. Ask an organization admin.`
+                  }
+                >
+                  {saving ? "Saving…" : "Save project"}
+                </Button>
+              </FormActions>
+            </Form>
+          </Section>
+        </SettingsLayout>
       </PageBody>
     </ProductPage>
   );
