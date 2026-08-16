@@ -74,6 +74,7 @@ function columnsFor(projectId: string): readonly Column<ListedAgent>[] {
     {
       key: "description",
       header: "Description",
+      hideOnMobile: true,
       cell: (agent) => agent.description ?? "—",
     },
     {
@@ -86,6 +87,7 @@ function columnsFor(projectId: string): readonly Column<ListedAgent>[] {
     {
       key: "created",
       header: "Registered",
+      hideOnMobile: true,
       mono: true,
       width: "120px",
       cell: (agent) => asDay(agent.created_at),
@@ -309,6 +311,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
           columns={columnsFor(projectId)}
           rows={items}
           keyOf={(agent) => agent.id}
+          rowHref={(agent) => projectPath(projectId, "agents", agent.id)}
           {...(cursor === null
             ? {}
             : {

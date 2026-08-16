@@ -240,6 +240,7 @@ export default function TranscriptsPage() {
               columns={TRACE_COLUMNS}
               rows={state.rows}
               keyOf={(row) => row.trace_id}
+              rowHref={transcriptPath}
               {...(more === null
                 ? {}
                 : {
@@ -325,6 +326,14 @@ const COLUMN_ORDER: readonly (readonly [
   [COLUMNS.connection, (row) => row.connection_type],
 ];
 
+/** Keep the exchange, when it happened, and any failure legible on a phone. */
+const MOBILE_TRACE_COLUMNS = new Set<string>([
+  COLUMNS.started,
+  COLUMNS.duration,
+  COLUMNS.preview,
+  COLUMNS.errors,
+]);
+
 /**
  * The list's columns and its compact layout are one definition.
  *
@@ -337,6 +346,7 @@ const TRACE_COLUMNS: readonly Column<Listed>[] = COLUMN_ORDER.map(
     key: header,
     header,
     cell,
+    hideOnMobile: !MOBILE_TRACE_COLUMNS.has(header),
     primary: index === 0,
     mono: index === 0,
   }),

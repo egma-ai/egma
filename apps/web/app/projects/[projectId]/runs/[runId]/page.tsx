@@ -510,6 +510,15 @@ function RunDetailView({
               columns={simulationColumns(projectId, runId)}
               rows={simulations}
               keyOf={(one) => one.id}
+              rowHref={(one) =>
+                projectPath(
+                  projectId,
+                  "runs",
+                  runId,
+                  "simulations",
+                  one.id,
+                )
+              }
             />
           )}
         </Section>
@@ -716,6 +725,7 @@ function simulationColumns(
     {
       key: "grading",
       header: "Grading",
+      hideOnMobile: true,
       width: "110px",
       cell: (one) => <GradingState grading={one.grading} />,
     },
@@ -728,12 +738,14 @@ function simulationColumns(
     {
       key: "checks",
       header: "Checks",
+      hideOnMobile: true,
       width: "160px",
       cell: (one) => <VerdictTally counts={one.counts} />,
     },
     {
       key: "score",
       header: "Score",
+      hideOnMobile: true,
       mono: true,
       width: "70px",
       cell: (one) => shownScore(one.score),

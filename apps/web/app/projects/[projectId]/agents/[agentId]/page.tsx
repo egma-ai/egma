@@ -107,10 +107,16 @@ function connectionColumns(
         </Link>
       ),
     },
-    { key: "type", header: "Type", width: "110px", cell: (one) => one.type },
+    {
+      key: "type",
+      header: "Type",
+      width: "110px",
+      cell: (one) => one.type,
+    },
     {
       key: "modality",
       header: "Modality",
+      hideOnMobile: true,
       width: "100px",
       cell: (one) => one.modality,
     },
@@ -123,6 +129,7 @@ function connectionColumns(
     {
       key: "credential",
       header: "Credential",
+      hideOnMobile: true,
       width: "140px",
       cell: (one) =>
         one.credential_present ? (
@@ -352,6 +359,15 @@ function AgentDetailView({
               columns={connectionColumns(projectId, agentId)}
               rows={connections}
               keyOf={(one) => one.id}
+              rowHref={(one) =>
+                projectPath(
+                  projectId,
+                  "agents",
+                  agentId,
+                  "connections",
+                  one.id,
+                )
+              }
             />
           )}
         </Section>
@@ -642,6 +658,7 @@ function ApplicableTests({
     {
       key: "behaviors",
       header: "Expects",
+      hideOnMobile: true,
       width: "120px",
       cell: (test) =>
         `${String(test.expected_behaviors.length)} ${
@@ -684,6 +701,7 @@ function ApplicableTests({
             columns={columns}
             rows={answer.value.items}
             keyOf={(test) => test.id}
+            rowHref={(test) => projectPath(projectId, "tests", test.id)}
           />
         )
       ) : (

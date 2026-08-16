@@ -465,13 +465,14 @@ export function RecentRuns({
     },
     {
       key: "status",
-      header: "Run",
+      header: "Status",
       width: "110px",
       cell: (run) => <RunStatus status={run.status} />,
     },
     {
       key: "simulations",
       header: "Simulations",
+      hideOnMobile: true,
       width: "200px",
       cell: (run) => <SimulationTally counts={run.simulation_counts} />,
     },
@@ -505,6 +506,7 @@ export function RecentRuns({
             columns={columns}
             rows={answer.value.items}
             keyOf={(run) => run.id}
+            rowHref={(run) => projectPath(projectId, "runs", run.id)}
           />
         )
       ) : (

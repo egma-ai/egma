@@ -75,6 +75,7 @@ function columnsFor(projectId: string): readonly Column<Persona>[] {
     {
       key: "description",
       header: "Description",
+      hideOnMobile: true,
       cell: (persona) => persona.description ?? "—",
     },
     {
@@ -87,6 +88,7 @@ function columnsFor(projectId: string): readonly Column<Persona>[] {
     {
       key: "version",
       header: "Version",
+      hideOnMobile: true,
       mono: true,
       width: "90px",
       cell: (persona) => `v${persona.version}`,
@@ -287,6 +289,9 @@ function Personas({ projectId }: { readonly projectId: string }) {
           columns={columnsFor(projectId)}
           rows={items}
           keyOf={(persona) => persona.id}
+          rowHref={(persona) =>
+            projectPath(projectId, "personas", persona.id)
+          }
           {...(cursor === null
             ? {}
             : {

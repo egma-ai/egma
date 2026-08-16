@@ -115,10 +115,17 @@ function columnsFor(
       cell: (entry) => entry.name,
     },
     { key: "type", header: COLUMNS.type, width: "140px", cell: typeOf },
-    { key: "owner", header: COLUMNS.owner, width: "120px", cell: ownerOf },
+    {
+      key: "owner",
+      header: COLUMNS.owner,
+      hideOnMobile: true,
+      width: "120px",
+      cell: ownerOf,
+    },
     {
       key: "description",
       header: COLUMNS.description,
+      hideOnMobile: true,
       cell: (entry) => entry.description ?? NOTHING,
     },
     {

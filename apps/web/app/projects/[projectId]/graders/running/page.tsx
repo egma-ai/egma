@@ -196,6 +196,7 @@ function columnsFor(
     {
       key: "config",
       header: RUNNING_COLUMNS.config,
+      hideOnMobile: true,
       cell: (copy) => (copy.config === null ? NOTHING : configOf(copy)),
     },
     {

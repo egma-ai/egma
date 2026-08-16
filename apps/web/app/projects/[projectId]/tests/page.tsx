@@ -86,9 +86,9 @@ function Applies({ test }: { readonly test: ListedTest }) {
 /**
  * The columns, built for one project so the name can be the way in.
  *
- * A row's name is a link rather than the whole row being clickable: a row
- * carries several facts and one of them is where to go, and a click target that
- * covers a table cell is one a keyboard cannot reach.
+ * The name stays a real link for keyboard and assistive technology. The table
+ * also gives pointer users the whole row because every row has one clear
+ * destination and no competing action.
  */
 function columnsFor(projectId: string): readonly Column<ListedTest>[] {
   return [
@@ -114,6 +114,7 @@ const REST: readonly Column<ListedTest>[] = [
   {
     key: "behaviors",
     header: "Expects",
+    hideOnMobile: true,
     width: "100px",
     cell: (test) =>
       `${String(test.expected_behaviors.length)} ${
@@ -123,12 +124,14 @@ const REST: readonly Column<ListedTest>[] = [
   {
     key: "personas",
     header: "Personas",
+    hideOnMobile: true,
     width: "110px",
     cell: (test) => test.personas.map((one) => one.name).join(", "),
   },
   {
     key: "version",
     header: "Version",
+    hideOnMobile: true,
     mono: true,
     width: "90px",
     cell: (test) => `v${test.version}`,
@@ -340,6 +343,7 @@ function Tests({ projectId }: { readonly projectId: string }) {
           columns={columnsFor(projectId)}
           rows={items}
           keyOf={(test) => test.id}
+          rowHref={(test) => projectPath(projectId, "tests", test.id)}
           {...(cursor === null
             ? {}
             : {

@@ -108,19 +108,21 @@ function columnsFor(
     },
     {
       key: "status",
-      header: "Run",
+      header: "Status",
       width: "110px",
       cell: (run) => <RunStatus status={run.status} />,
     },
     {
       key: "simulations",
       header: "Simulations",
+      hideOnMobile: true,
       width: "220px",
       cell: (run) => <SimulationTally counts={run.simulation_counts} />,
     },
     {
       key: "grading",
       header: "Grading",
+      hideOnMobile: true,
       width: "120px",
       cell: (run) =>
         `${String(run.graded_count)} of ${String(run.gradable_count)} judged`,
