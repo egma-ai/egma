@@ -8,7 +8,8 @@
  * which is the same reason the components below it are shared at all.
  *
  * The palette lives in `app/globals.css` beside the light and dark switch and
- * is not repeated here. What is here is everything about *size*.
+ * is not repeated here. The preserved Mistral reference stays outside the live
+ * bundle until the proof-surface ticket maps it into semantic product states.
  *
  * Compactness is the direction and it is measurable: a sidebar narrow enough to
  * leave the screen to the data, rows that are one line of reading rather than
