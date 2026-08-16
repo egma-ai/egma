@@ -1045,6 +1045,41 @@
   border-top: 0;
 }
 
+.tableRowInteractive {
+  position: relative;
+}
+
+.tableRowHit {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  cursor: pointer;
+}
+
+/* Real row controls stay above the pointer-only link that covers the row. */
+.tableRowInteractive td
+  :is(
+    a,
+    button,
+    input,
+    select,
+    textarea,
+    label,
+    summary,
+    [role="button"],
+    [role="link"],
+    [role="checkbox"],
+    [role="switch"]
+  ) {
+  position: relative;
+  z-index: 2;
+}
+
+.tableRowInteractive td .tableRowHit {
+  position: absolute;
+  z-index: 1;
+}
+
 .cell {
   display: block;
   overflow: hidden;
@@ -1146,7 +1181,7 @@
     background: var(--surface);
   }
 
-  .table tbody tr:hover td {
+  .tableRowInteractive:hover td {
     background: var(--surface-soft);
   }
 }
@@ -1357,6 +1392,10 @@
     padding: 0;
     border: 0;
     font-size: var(--text-sm);
+  }
+
+  .table [data-mobile-hidden="true"] {
+    display: none;
   }
 
   .table td:not(.tableCellPrimary)::before {

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { Button } from "./controls.tsx";
@@ -30,6 +31,8 @@ export type Column<Row> = {
   readonly cell: (row: Row) => ReactNode;
   /** The column that names the row. Exactly one, and it leads the small layout. */
   readonly primary?: boolean;
+  /** A supporting fact that the narrow layout can omit without hiding the row's name. */
+  readonly hideOnMobile?: boolean;
   /** Identifiers, counts and times, which read straight in the mono face. */
   readonly mono?: boolean;
   readonly width?: string;
@@ -47,6 +50,7 @@ export function DataTable<Row>({
   columns,
   rows,
   keyOf,
+  rowHref,
   more,
 }: {
   /** What this table is a table of. Read out where there is no visible caption. */
@@ -54,9 +58,18 @@ export function DataTable<Row>({
   readonly columns: readonly Column<Row>[];
   readonly rows: readonly Row[];
   readonly keyOf: (row: Row) => string;
+  /**
+   * Makes a natural navigation row clickable with a pointer. The primary cell
+   * must still render its own real link for keyboard and assistive technology.
+   */
+  readonly rowHref?: (row: Row) => string;
   readonly more?: More;
 }) {
   const primary = columns.find((column) => column.primary) ?? columns[0];
+  function mobileHidden(column: Column<Row>): "true" | undefined {
+    return column !== primary && column.hideOnMobile === true ? "true" : undefined;
+  }
+
   function cellClass(column: Column<Row>): string {
     return [
       styles.cell,
@@ -74,26 +87,48 @@ export function DataTable<Row>({
           <thead>
             <tr>
               {columns.map((column) => (
-                <th key={column.key} scope="col" style={{ width: column.width }}>
+                <th
+                  data-mobile-hidden={mobileHidden(column)}
+                  key={column.key}
+                  scope="col"
+                  style={{ width: column.width }}
+                >
                   {column.header}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={keyOf(row)}>
-                {columns.map((column) => (
-                  <td
-                    className={column === primary ? styles.tableCellPrimary : undefined}
-                    data-label={column.header}
-                    key={column.key}
-                  >
-                    <span className={cellClass(column)}>{column.cell(row)}</span>
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {rows.map((row) => {
+              const href = rowHref?.(row);
+
+              return (
+                <tr
+                  className={href === undefined ? undefined : styles.tableRowInteractive}
+                  key={keyOf(row)}
+                >
+                  {columns.map((column) => (
+                    <td
+                      className={column === primary ? styles.tableCellPrimary : undefined}
+                      data-label={column.header}
+                      data-mobile-hidden={mobileHidden(column)}
+                      key={column.key}
+                    >
+                      <span className={cellClass(column)}>{column.cell(row)}</span>
+                      {column === primary && href !== undefined ? (
+                        <Link
+                          aria-hidden="true"
+                          className={styles.tableRowHit}
+                          href={href}
+                          prefetch={false}
+                          tabIndex={-1}
+                        />
+                      ) : null}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
