@@ -101,7 +101,7 @@ export function GateScreen({
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       <Text>{`${gate.rows.length} ${gate.rows.length === 1 ? "test" : "tests"} generated · suite "${gate.suite}"`}</Text>
       <Box height={1} />

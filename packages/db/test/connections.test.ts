@@ -297,7 +297,7 @@ describe("a livekit connection", () => {
       name: "quickstart",
       type: "livekit",
       modality: "voice",
-      // Derived from the type: the agent joins the room egma opened.
+      // Derived from the type: the agent joins the room Egma opened.
       topology: "agent-dials-out",
       config: { url: "wss://acme.livekit.cloud" },
       // The last four of the key, never of the secret.
@@ -373,12 +373,12 @@ describe("a livekit connection", () => {
 
 /**
  * The second shape: the customer keeps the key pair that signs tokens for
- * their whole LiveKit project, and egma asks an endpoint of theirs for one
+ * their whole LiveKit project, and Egma asks an endpoint of theirs for one
  * scoped token per simulation.
  *
  * What is pinned here is the same three things mode A pins — what lands, what
  * a read shows, and what the resolver hands the simulator — because the
- * headers that authenticate egma to that endpoint are a credential exactly as
+ * headers that authenticate Egma to that endpoint are a credential exactly as
  * the key pair is, and nothing about them being headers makes them less so.
  */
 describe("a livekit connection that asks an endpoint for its tokens", () => {
@@ -449,7 +449,7 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
   /**
    * A credential belongs to the shape its config is in. An edit that moved a
    * connection between the two shapes and left the credential behind would
-   * write a row that is half of each — a config asking egma to fetch a token,
+   * write a row that is half of each — a config asking Egma to fetch a token,
    * over a sealed key pair nothing will ever open again.
    */
   it("refuses an edit that moves a connection between the shapes on its own", async () => {

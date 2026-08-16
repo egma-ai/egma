@@ -85,7 +85,7 @@ describe("somebody with no account", () => {
       organizationName: "Acme",
     });
 
-    // The cookie a person can see says egma. Which library set it is not
+    // The cookie a person can see says Egma. Which library set it is not
     // something a provider swap should make visible.
     expect(cookiesFrom(created.headers["set-cookie"])).toContain(
       "egma.session_token=",
@@ -135,10 +135,10 @@ describe("somebody with no account", () => {
    * The auth provider's own sentence for this is `[body.email] Invalid email
    * address`, which names a field in its body schema — code rather than the
    * situation a person is in, and exactly what ADR-0007 says a refusal must not
-   * be generated from. None of it reaches a caller: the sentence is egma's, and
+   * be generated from. None of it reaches a caller: the sentence is Egma's, and
    * it says what to look at.
    */
-  it("is refused for an address that is not one, in egma's own words", async () => {
+  it("is refused for an address that is not one, in Egma's own words", async () => {
     api = await createApi("signup_bad_address");
 
     const response = await signUp({
@@ -249,7 +249,7 @@ describe("the organization and its first project", () => {
 });
 
 describe("the external-identity columns", () => {
-  it("sit empty, because the provider writes into egma's own user table", async () => {
+  it("sit empty, because the provider writes into Egma's own user table", async () => {
     api = await createApi("signup_external_identity");
 
     await signUp({

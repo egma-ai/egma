@@ -1,5 +1,5 @@
 /**
- * The one skill egma installs, and the three answers it can be given.
+ * The one skill Egma installs, and the three answers it can be given.
  *
  * This is the only thing in the whole walk that writes outside the developer's
  * repository, so what is checked is the filesystem itself: which file landed,
@@ -80,11 +80,11 @@ describe("where the skill goes", () => {
   });
 
   /**
-   * A coding agent whose skill convention egma does not know gets no offer at
+   * A coding agent whose skill convention Egma does not know gets no offer at
    * all. Guessing at a directory would put a file somewhere nothing reads, and
-   * tell the developer egma had done something for them.
+   * tell the developer Egma had done something for them.
    */
-  it("offers nothing for a coding agent whose convention egma does not know", () => {
+  it("offers nothing for a coding agent whose convention Egma does not know", () => {
     expect(placesFor("gemini")).toBeNull();
     expect(placesFor("some-agent-nobody-has-heard-of")).toBeNull();
   });
@@ -92,7 +92,7 @@ describe("where the skill goes", () => {
   it("reads the home from the environment the way every other tool does", () => {
     expect(homeIn({ HOME: "/home/somebody" })).toBe("/home/somebody");
     expect(homeIn({ USERPROFILE: "C:\\Users\\somebody" })).toBe("C:\\Users\\somebody");
-    // And never egma's own folder: moving where the key lives is not moving
+    // And never Egma's own folder: moving where the key lives is not moving
     // where a coding agent keeps its configuration.
     expect(homeIn({ HOME: "/home/somebody", EGMA_HOME: "/elsewhere/.egma" })).toBe(
       "/home/somebody",
@@ -168,7 +168,7 @@ describe("installing it", () => {
 
     expect(second.replaced).toBe(true);
     expect(installedLine("project", second.file, places.name, second.replaced)).toBe(
-      `The egma skill in ${places.project} was replaced with this version's. Commit it, and everybody on this repository has it.`,
+      `The Egma skill in ${places.project} was replaced with this version's. Commit it, and everybody on this repository has it.`,
     );
 
     expect(await filesUnder(repository.dir)).toEqual(
@@ -216,7 +216,7 @@ describe("the skill that gets installed", () => {
     expect(path.basename(installableSkillFile())).toBe("SKILL.md");
   });
 
-  it("teaches the four things a coding agent needs to drive egma", () => {
+  it("teaches the four things a coding agent needs to drive Egma", () => {
     const content = installableSkill();
 
     expect(content).toContain("egma/config.yaml");
@@ -245,12 +245,12 @@ describe("the skill that gets installed", () => {
   /**
    * The same ban list the sent skills are held to, and for a harder reason.
    *
-   * This is the only text egma leaves on the machine, and a coding agent reads
+   * This is the only text Egma leaves on the machine, and a coding agent reads
    * it in every future task in that repository. A near synonym in here does not
    * teach one developer the wrong word once — it teaches their agent the wrong
    * word for good, and the agent will then use it back at them.
    */
-  it("uses the words egma uses, because this is the text that stays behind", () => {
+  it("uses the words Egma uses, because this is the text that stays behind", () => {
     const content = installableSkill().replaceAll(SCENARIO_HEADING, "");
 
     for (const banned of BANNED) {
@@ -276,7 +276,7 @@ describe("the skill that gets installed", () => {
     const { stdout: help } = await run(process.execPath, [CLI_ENTRY, "--help"]);
 
     // Only what it tells a reader to type: what is inside a fence, and what is
-    // inside backticks. Prose about egma is prose, and "egma from this
+    // inside backticks. Prose about Egma is prose, and "Egma from this
     // repository" is a sentence rather than a verb.
     const fenced = [...content.matchAll(/```[a-z]*\n(?<body>[\s\S]*?)```/gu)].flatMap((found) =>
       (found.groups?.body ?? "").split("\n"),

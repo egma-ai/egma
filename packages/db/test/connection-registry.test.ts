@@ -187,8 +187,8 @@ describe("what a livekit connection is made of", () => {
     const descriptor = descriptorOf("livekit");
 
     expect(descriptor.modalities).toEqual(["voice"]);
-    // Derived from the type: a livekit agent joins the room egma opened, so
-    // egma never has to reach a laptop.
+    // Derived from the type: a livekit agent joins the room Egma opened, so
+    // Egma never has to reach a laptop.
     expect(descriptor.topology).toBe("agent-dials-out");
     expect(shapeOf("livekit", { url: A_URL }).credentials).toMatchObject({
       required: true,
@@ -400,7 +400,7 @@ describe("a livekit connection that names a token endpoint", () => {
     ).toEqual({ url: A_URL, tokenEndpoint: "http://10.0.0.4/t" });
 
     for (const tokenEndpoint of [
-      // The server URL's own schemes: egma POSTs to this one, so a websocket
+      // The server URL's own schemes: Egma POSTs to this one, so a websocket
       // address here is the two keys pasted the wrong way round.
       "wss://acme.livekit.cloud",
       "ws://127.0.0.1:7880",
@@ -418,7 +418,7 @@ describe("a livekit connection that names a token endpoint", () => {
   /**
    * Both are powers a key pair buys, and this shape has no key pair: it cannot
    * create the room that would carry the metadata, and cannot dispatch the
-   * agent that would be named. A key egma would silently ignore is worse than
+   * agent that would be named. A key Egma would silently ignore is worse than
    * one it refuses by name.
    */
   it("has no place for an agent name or metadata, and says which keys it holds", () => {
@@ -505,7 +505,7 @@ describe("a livekit connection that is half of each shape", () => {
       "a livekit connection whose config names a tokenEndpoint asks that " +
         "endpoint for every token, so it holds no key pair of its own: its " +
         "credentials are the endpoint's auth headers, shaped { headers }. " +
-        "Send those, or drop the tokenEndpoint and egma will mint its own " +
+        "Send those, or drop the tokenEndpoint and Egma will mint its own " +
         "tokens from an apiKey and apiSecret.",
     );
   });
@@ -514,7 +514,7 @@ describe("a livekit connection that is half of each shape", () => {
     expect(() => validCredentials("livekit", { url: A_URL }, HEADERS)).toThrow(
       "a livekit connection mints its own tokens, so it needs the project's " +
         "apiKey and apiSecret. Send the pair, or name a tokenEndpoint in the " +
-        "config and egma will ask that endpoint for a token instead — which " +
+        "config and Egma will ask that endpoint for a token instead — which " +
         "is the shape where the project's secret never leaves the customer.",
     );
   });
@@ -527,7 +527,7 @@ describe("a livekit connection that is half of each shape", () => {
 
   /**
    * A stray key is a typo, not a mix, and it has to keep reading like one:
-   * pointing somebody at the other shape would be egma guessing at an
+   * pointing somebody at the other shape would be Egma guessing at an
    * intention nothing in the payload supports.
    */
   it("still calls a stray credential key a stray key", () => {
@@ -538,7 +538,7 @@ describe("a livekit connection that is half of each shape", () => {
 });
 
 /**
- * Which types egma can conduct a run over, which is the whole of what the
+ * Which types Egma can conduct a run over, which is the whole of what the
  * capability registry publishes about the simulator.
  *
  * It is a fact about the shipped build and never about one deployment: a
@@ -553,14 +553,14 @@ describe("what the shipped simulator can conduct", () => {
   });
 
   it("names every shipped type in the refusal, and takes the list from the registry", () => {
-    // The sentence exists for a type egma has not shipped an adapter for.
+    // The sentence exists for a type Egma has not shipped an adapter for.
     // Every type in `CONNECTION_TYPES` has one today, so the rule is exercised
     // on a name the registry does not hold — which is exactly the case the
     // refusal is kept for.
     expect(noSimulatorAdapterMessage("vapi")).toBe(
-      "egma has no simulator adapter for a vapi connection yet, so it will " +
+      "Egma has no simulator adapter for a vapi connection yet, so it will " +
         "not start a run it cannot conduct. Run these tests over a " +
-        `connection egma conducts today: ${conductableConnectionTypes().join(", ")}.`,
+        `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`,
     );
     expect(conductableConnectionTypes()).toEqual(["retell", "phone", "livekit"]);
   });

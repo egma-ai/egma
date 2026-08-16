@@ -415,7 +415,7 @@ async function runUp(
   } catch (cause) {
     options.out("status: failed");
     options.out(
-      `reason: this workspace has no media-server credential and egma could not write one: ${
+      `reason: this workspace has no media-server credential and Egma could not write one: ${
         (cause as Error).message
       }`,
     );
@@ -457,7 +457,7 @@ async function runUp(
     options.out("status: failed");
     options.out(
       `reason: ${missing} has no value, and this deployment deliberately has no ` +
-        "default for it. It is one of the secrets or addresses egma cannot invent " +
+        "default for it. It is one of the secrets or addresses Egma cannot invent " +
         "for you, so nothing was started at all rather than started on a value " +
         "published in this repository. Set it in .env in this workspace — the line " +
         "above says what makes one — and run this again.",
@@ -527,7 +527,7 @@ async function runUp(
   options.out(`connect: npx @egma/cli --url ${address}`);
 
   options.fail("");
-  options.fail(`egma is running at ${address}`);
+  options.fail(`Egma is running at ${address}`);
   if (platform.setupState === "ready") {
     options.fail(
       "It is configured, and it keeps that configuration through a restart, an upgrade and a move to another machine.",
@@ -543,7 +543,7 @@ async function runUp(
         platform.setupMissing.length === 0 ? "setting up" : platform.setupMissing.join(", ")
       }. Sign up at ${address} if you have not — the first person to sign up on a fresh`,
     );
-    options.fail("egma becomes its owner — then, here:");
+    options.fail("Egma becomes its owner — then, here:");
     options.fail(`  npx @egma/cli login --url ${address}`);
     options.fail("  npx @egma/cli self-host setup");
   }
@@ -566,11 +566,11 @@ async function runUp(
  */
 const MEDIA_CREDENTIAL_NOTICE = [
   "A media-server credential was generated for this workspace and written to " +
-    ".egma-platform/platform.env. It is egma's own password between its media " +
+    ".egma-platform/platform.env. It is Egma's own password between its media " +
     "server, its simulator and its SIP gateway: you never choose it and never " +
     "type it, and a pair that exists is never replaced. Keep that file wherever " +
     "the rest of this deployment's secrets live.",
-  "Until this, all three fell back to a pair published in egma's own repository. " +
+  "Until this, all three fell back to a pair published in Egma's own repository. " +
     "If this deployment was already running, that is what it was using, and its " +
     "media containers are replaced by this start.",
 ] as const;
@@ -811,7 +811,7 @@ async function runSetup(
     if (!media.settled) return SELF_HOST_EXIT.refused;
     options.fail("");
     options.fail(
-      "This egma already holds every setting it needs. Nothing was asked and nothing was written.",
+      "This Egma instance already holds every setting it needs. Nothing was asked and nothing was written.",
     );
     return SELF_HOST_EXIT.ok;
   }
@@ -877,7 +877,7 @@ async function runSetup(
       sourceNumber = normalizeNumber(
         await askPlainly(
           CARRIER_VARIABLES.sourceNumber,
-          "A voice number this Twilio account already owns, in E.164 (egma never buys one)",
+          "A voice number this Twilio account already owns, in E.164 (Egma never buys one)",
           ask,
         ),
       );
@@ -962,7 +962,7 @@ async function runSetup(
       throw new CarrierError(
         `Twilio accepted a new SIP password for ${applied.sipUsername}, and this platform would not take it: ${
           (cause as Error).message
-        }. The carrier now accepts only a password egma could not store, so calls would fail to authenticate. Run \`egma self-host setup\` again — it mints another password and writes both ends together. Nothing was charged and no call was placed.`,
+        }. The carrier now accepts only a password Egma could not store, so calls would fail to authenticate. Run \`egma self-host setup\` again — it mints another password and writes both ends together. Nothing was charged and no call was placed.`,
       );
     }
   }
@@ -1046,7 +1046,7 @@ async function runSetup(
     ...(media.settled ? [] : [MEDIA_DID_NOT_COME_BACK]),
     ...(platform === null
       ? [
-          `the settings were written but ${address} stopped answering, so egma cannot say whether this platform is configured`,
+          `the settings were written but ${address} stopped answering, so Egma cannot say whether this platform is configured`,
         ]
       : platform.setupState === "ready"
         ? []
@@ -1069,7 +1069,7 @@ async function runSetup(
 
   answer(options, mode, { ...done, status: "ready" }, allSecrets);
   options.fail("");
-  options.fail("This egma is configured.");
+  options.fail("This Egma instance is configured.");
   options.fail(
     "Its settings live in the platform's own store, sealed, so they survive a restart, an upgrade and a move to another machine — and every simulator is handed them on the work order it claims.",
   );

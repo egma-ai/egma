@@ -1,9 +1,9 @@
-"""egma answering for the agent's tools, whole, with no LiveKit anywhere.
+"""Egma answering for the agent's tools, whole, with no LiveKit anywhere.
 
-The exchange is two methods on egma's participant, and everything below
+The exchange is two methods on Egma's participant, and everything below
 is proved against the room-shaped LiveKit in :mod:`room_stub`, whose
 rooms now carry calls as well as audio. What answers those calls is
-egma's own code, unchanged — so what is proved here about a census, an
+Egma's own code, unchanged — so what is proved here about a census, an
 answer, a delay, a late-attached call or a refusal is proved about the
 code a customer's server runs.
 
@@ -280,7 +280,7 @@ async def test_a_spec_naming_mocked_tools_comes_back_as_a_record_of_them(
         session,
     )
 
-    # The coverage stamp: what the agent said it had, what egma stood
+    # The coverage stamp: what the agent said it had, what Egma stood
     # ready for, and what ran its own implementation untouched.
     assert terminal_facts(client)["mock_tool_coverage"] == {
         "discovered": [
@@ -328,7 +328,7 @@ async def test_a_simulation_that_mocks_nothing_records_exactly_what_it_used_to(
     No mock tools, and nobody in the room asking: no tool spans, and the
     coverage stamp says the asking happened and nothing came back — which
     is a different sentence from the stamp being absent, and the honest
-    one for a room egma really stood ready in.
+    one for a room Egma really stood ready in.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
 
@@ -387,7 +387,7 @@ async def opened(
     *,
     seam: MockToolSeam | None = None,
 ) -> object:
-    """One room, joined, with egma standing ready to answer in it.
+    """One room, joined, with Egma standing ready to answer in it.
 
     ``seam`` is for the one test that has to ask what the seam claims
     afterwards; everything else only cares what comes back on the wire.
@@ -507,7 +507,7 @@ async def test_a_call_the_census_never_reported_lands_late_attached(
         "egma.tool.mock_tool": "send_confirmation_sms",
         "egma.tool.late_attached": True,
     }
-    # Covered names the whole set egma stood ready for, so a late-attached
+    # Covered names the whole set Egma stood ready for, so a late-attached
     # name is exactly one that is covered and was never discovered.
     coverage = terminal_facts(client)["mock_tool_coverage"]
     assert set(coverage["covered"]) - set(coverage["discovered"]) == {
@@ -519,7 +519,7 @@ async def test_a_call_the_census_never_reported_lands_late_attached(
 
 
 async def refused(stub: RoomStub, method: str, payload: str):
-    """One call egma will not answer, and the error the room carried back."""
+    """One call Egma will not answer, and the error the room carried back."""
     from livekit import rtc
 
     with pytest.raises(rtc.RpcError) as refusal:
@@ -532,10 +532,10 @@ async def test_a_call_outside_the_answers_is_refused_and_never_waved_through(
 ):
     """A protocol error, not a pass-through.
 
-    The other side was told exactly which names egma answers for. A call
+    The other side was told exactly which names Egma answers for. A call
     for any other name is that side asking for something it was never
     offered, and answering it — or quietly letting it run real while
-    saying nothing — would put a tool egma had no answer for on the record
+    saying nothing — would put a tool Egma had no answer for on the record
     as one it served.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
@@ -559,9 +559,9 @@ async def test_a_call_outside_the_answers_is_refused_and_never_waved_through(
     )
 
     # On the record too, and honestly: no result and no mock tool, because
-    # nothing answered it — but stamped `refused`, because egma was in the
+    # nothing answered it — but stamped `refused`, because Egma was in the
     # path and said no. A span with no stamp at all is the other fact
-    # entirely: the real tool ran, with egma nowhere near it.
+    # entirely: the real tool ran, with Egma nowhere near it.
     (refused_call,) = tool_spans(client)
     assert attributes_of(refused_call) == {
         "egma.tool.name": "charge_card",
@@ -616,7 +616,7 @@ async def test_a_call_outside_the_answers_is_refused_and_never_waved_through(
             "nothing",
         ),
         (
-            "a hello in a version egma does not speak",
+            "a hello in a version Egma does not speak",
             HELLO_METHOD,
             '{"protocol_version":99,"tools":[]}',
             UNSUPPORTED_PROTOCOL_VERSION,
@@ -660,9 +660,9 @@ async def test_a_refusal_names_the_shape_it_got_and_never_the_bytes():
 
 
 async def test_a_method_nobody_offered_is_refused_by_the_room_itself():
-    """Two methods and no more. Anything else is refused before egma is
+    """Two methods and no more. Anything else is refused before Egma is
     reached at all, which is the transport's own answer and the right
-    one: egma never registered it, so there is nothing to ask."""
+    one: Egma never registered it, so there is nothing to ask."""
     from livekit import rtc
 
     stub = RoomStub(greeting="Front desk.")
@@ -784,7 +784,7 @@ async def test_a_hello_egma_refused_covers_nothing_at_all(
 ):
     """The stamp never claims an isolation that did not happen.
 
-    A session whose hello egma refused was told nothing, so it wrapped
+    A session whose hello Egma refused was told nothing, so it wrapped
     nothing, so every tool it has ran its own implementation. Naming those
     tools covered would be the record saying the simulation was isolated
     when it was not — which is the one thing this stamp exists to make
@@ -819,11 +819,11 @@ async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
 ):
     """Nothing about mock tools may fail a conversation that would have run.
 
-    A room where egma answered for nothing is exactly the room every
+    A room where Egma answered for nothing is exactly the room every
     simulation was before mock tools existed, so a participant that will
     not take the methods costs the exchange and nothing else: it is said
     loudly, the conversation goes on, and the record claims nothing about
-    tools — which is the truth, because egma never stood in their path.
+    tools — which is the truth, because Egma never stood in their path.
     """
     caplog.set_level("ERROR")
     stub = RoomStub(
@@ -856,7 +856,7 @@ async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
 
 
 def test_a_seam_nobody_stood_ready_with_claims_nothing():
-    """A room that was never joined has no stamp to make: egma was not
+    """A room that was never joined has no stamp to make: Egma was not
     there, so it learned nothing and claims nothing."""
     assert MockToolSeam((a_mock("check_calendar", {"slots": []}),)).coverage() is None
 

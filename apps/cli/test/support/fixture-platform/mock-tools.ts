@@ -8,7 +8,7 @@
  * the real thing anywhere:
  *
  * - **An edit overwrites.** There is no `expected_version_id` here and there is
- *   no version to name: a mock tool is the one authored thing egma does not
+ *   no version to name: a mock tool is the one authored thing Egma does not
  *   version. So a second push of the same file is a write that changes nothing
  *   rather than a conflict.
  * - **One answer per tool name.** A create naming a tool this project already
@@ -118,7 +118,7 @@ const AN_AGENT_IS_TEXT =
 
 function delayIsNotANumber(sent: string): string {
   return (
-    "delay_ms is how long egma holds this answer back, as a whole number " +
+    "delay_ms is how long Egma holds this answer back, as a whole number " +
     `of milliseconds, and this request sent ${sent}.`
   );
 }
@@ -249,7 +249,7 @@ function takenBy(toolName: string, mockToolId: string): string {
 
 function noSuchMockTool(mockToolId: string): string {
   return (
-    `there is no mock tool ${mockToolId} on this egma. List the mock tools ` +
+    `there is no mock tool ${mockToolId} on this Egma. List the mock tools ` +
     `to see what this project answers for.`
   );
 }

@@ -1,4 +1,4 @@
-"""This agent is the same agent whether or not egma exists.
+"""This agent is the same agent whether or not Egma exists.
 
 The SDK proves inertness about itself, against agents it wrote for the
 purpose. This file proves it about **this** agent — the one with the
@@ -7,7 +7,7 @@ that is a different claim: a wiring mistake here would leave the SDK's own
 suite green and this fixture changed.
 
 Nothing here needs a room, a model or a key. A production room is a room
-with no egma named in its dispatch metadata, and that is a string, so the
+with no Egma named in its dispatch metadata, and that is a string, so the
 whole property is testable on a laptop with the network unplugged.
 """
 
@@ -45,7 +45,7 @@ async def test_a_room_with_no_egma_in_it_leaves_this_agent_alone(metadata, sessi
     assert all(now is then for now, then in zip(after, before, strict=True))
 
     # And not one word said, which is the assertion that carries this
-    # test. An SDK that discovered egma's absence by *asking* would cost
+    # test. An SDK that discovered Egma's absence by *asking* would cost
     # every production session a round trip before it could greet
     # anybody — and the substitution it installs afterwards is written
     # into a side table rather than onto the agent, so the objects above

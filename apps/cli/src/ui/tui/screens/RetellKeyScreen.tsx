@@ -94,7 +94,7 @@ export function RetellKeyScreen({ state, onAnswer }: RetellKeyScreenProps) {
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       {ask?.problem == null ? null : (
         <Box flexDirection="column">

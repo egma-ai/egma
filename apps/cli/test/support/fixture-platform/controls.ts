@@ -9,7 +9,7 @@
  *
  * They are reachable over HTTP rather than only in the process that started the
  * server, because the thing being checked is usually a subprocess: the built
- * `egma` command, with a stand-in browser beside it.
+ * `Egma` command, with a stand-in browser beside it.
  */
 
 import type { DeviceControls } from "./device.ts";

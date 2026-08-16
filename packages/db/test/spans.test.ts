@@ -24,7 +24,7 @@ import {
  * Everything here runs against a real ClickHouse. Row counts after a repeat,
  * what a `LowCardinality` column does with a long string, and whether an insert
  * of ten thousand rows arrives whole are engine behaviours, and a substitute
- * would confirm only the strings egma sends.
+ * would confirm only the strings Egma sends.
  */
 
 let store: MigratedTraceStore;
@@ -178,7 +178,7 @@ describe("a batch too big for one insert", () => {
    * wire, so how many partitions an insert touches is a client's decision:
    * `max_partitions_per_insert_block` is a hundred, and a batch over it is
    * refused whole by the engine rather than trimmed. An agent backfilling a
-   * year of history, or one with a broken clock, is not a client egma may lose
+   * year of history, or one with a broken clock, is not a client Egma may lose
    * a trace over.
    */
   it("is split by month as well as by size, because an insert may touch a hundred partitions", async () => {
@@ -303,7 +303,7 @@ describe("a field too big for its column", () => {
 describe("sending the same batch twice", () => {
   /**
    * The producer owes non-duplication and an exporter's retry is byte-identical
-   * by design, so this is the backstop under a path egma does not own. It only
+   * by design, so this is the backstop under a path Egma does not own. It only
    * works because the rows are a pure function of the arguments: nothing here
    * stamps a clock or a random token on the way past.
    */

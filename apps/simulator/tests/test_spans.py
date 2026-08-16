@@ -210,7 +210,7 @@ def test_a_call_egma_answered_carries_the_whole_exchange():
     ``voice-mocked-tool-calls.json`` is the vocabulary as bytes for every
     call that reaches egma: an ordinary served one with its arguments
     whole and its declared delay showing as the span's own duration, a
-    late-attached one whose arguments never arrived, and one egma refused.
+    late-attached one whose arguments never arrived, and one Egma refused.
     What the emitter produces has to be those attributes exactly, or the
     two sides of the contract have drifted.
     """
@@ -273,7 +273,7 @@ def test_the_late_attached_flag_is_a_genuine_boolean_and_only_ever_true():
 def test_a_result_is_never_recorded_without_the_stamp_that_placed_it():
     """The contract's one inviolable rule about a tool call, held here
     rather than discovered by a reader of the record: an answer with
-    nothing to say where it came from would read as a result egma observed
+    nothing to say where it came from would read as a result Egma observed
     rather than one it authored."""
     spans, _sink, _clock = emitter()
     spans.opened()
@@ -288,8 +288,8 @@ def test_a_result_is_never_recorded_without_the_stamp_that_placed_it():
 def test_a_refused_call_is_stamped_and_carries_nothing_it_was_never_given():
     """The stamp that keeps a refusal from reading as a pass-through.
 
-    A call egma would not answer never reached a backend. A call with no
-    stamp at all *did* — the real tool ran with egma nowhere near it. The
+    A call Egma would not answer never reached a backend. A call with no
+    stamp at all *did* — the real tool ran with Egma nowhere near it. The
     two are opposite facts about the agent's own systems, so the record
     gives them different shapes.
     """
@@ -311,7 +311,7 @@ def test_a_refused_call_is_stamped_and_carries_nothing_it_was_never_given():
     # mock tool to name.
     assert attribute(refused_call, "egma.tool.result") is None
     assert attribute(refused_call, "egma.tool.mock_tool") is None
-    # And the call egma only watched go past still carries no stamp, which is
+    # And the call Egma only watched go past still carries no stamp, which is
     # what makes the two readable apart.
     assert attribute(observed, "egma.tool.provenance") is None
 
@@ -319,7 +319,7 @@ def test_a_refused_call_is_stamped_and_carries_nothing_it_was_never_given():
 def test_the_two_stamps_of_one_moment_are_never_written_together():
     """A refusal and an answer are opposite halves of the same instant,
     and only one of them happened. And late-attached is a caveat about a
-    call egma *served*: on a call nothing served it would be a stamp with
+    call Egma *served*: on a call nothing served it would be a stamp with
     no fact under it."""
     spans, _sink, _clock = emitter()
     spans.opened()

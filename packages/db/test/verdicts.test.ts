@@ -28,7 +28,7 @@ import {
  * ClickHouse behaviour: whether a re-run of the same judgment collapses onto the
  * one it replaces, whether a re-grade at a new grader version lands beside the
  * old rather than over it, whether a second grader's word about the same
- * assertion stands on its own. A substitute would confirm the strings egma sends
+ * assertion stands on its own. A substitute would confirm the strings Egma sends
  * and nothing about what they do — and what they do is the entire point of the
  * table's identity.
  *
@@ -623,7 +623,7 @@ describe("a whole run's worth of judgments", () => {
         rationale: "the agent said it back at turn six; the sharpened judge saw it.",
         judgedAtMicroseconds: judgedAt("2026-08-07T11:00:00Z"),
       }),
-      // One egma could not judge — never `failed`, which is the distinction the
+      // One Egma could not judge — never `failed`, which is the distinction the
       // fold carries all the way up to this header.
       verdict({
         traceId: brokeDown,
@@ -710,7 +710,7 @@ describe("a whole run's worth of judgments", () => {
       },
     ]);
 
-    // Nothing failed once the re-grade is counted, and one conversation egma
+    // Nothing failed once the re-grade is counted, and one conversation Egma
     // could not judge — so the run errored rather than passed. A run that went
     // green because a simulation never ran is the exact false trust the words
     // `skipped` and `errored` exist to prevent.

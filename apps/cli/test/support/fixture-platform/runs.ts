@@ -9,7 +9,7 @@
  *
  * - **A run pins the versions it executed.** The request names test version
  *   ids, every one is resolved before anything is written, and a version this
- *   egma never issued refuses the whole creation rather than quietly running
+ *   Egma never issued refuses the whole creation rather than quietly running
  *   eleven of twelve.
  * - **A run produces one simulation per test per persona.** The count is
  *   stamped at creation and never moves, exactly as `expected_simulation_count`
@@ -204,7 +204,7 @@ export type RunControls = {
    */
   advance(step: AdvanceStep): void;
   /**
-   * Make this egma refuse a run over a connection of this type, because no
+   * Make this Egma refuse a run over a connection of this type, because no
    * simulator adapter for it has shipped. The refusal is the platform's own
    * and the CLI must relay it word for word.
    *
@@ -238,21 +238,21 @@ const NO_SUCH_RUN =
 /**
  * The platform's own words for a connection type it cannot conduct a run over.
  *
- * A connection type lands in egma one adapter at a time, and a run over a type
+ * A connection type lands in Egma one adapter at a time, and a run over a type
  * whose adapter has not shipped can never happen — so it is refused at
  * creation, loudly, rather than left queued forever. The wording is the
- * platform's; egma's terminal repeats it and never paraphrases it.
+ * platform's; Egma's terminal repeats it and never paraphrases it.
  *
- * It says all of it in one place: what is missing, why egma would rather refuse
+ * It says all of it in one place: what is missing, why Egma would rather refuse
  * now than queue something forever, and the move that works today. The list of
  * types that work comes off the registry rather than out of the sentence, so it
  * can never name an adapter that has not shipped or miss one that has.
  */
 export function noAdapterMessage(type: string, conductable: readonly string[]): string {
   return (
-    `egma has no simulator adapter for a ${type} connection yet, ` +
+    `Egma has no simulator adapter for a ${type} connection yet, ` +
     `so it will not start a run it cannot conduct. Run these tests over a ` +
-    `connection egma conducts today: ${conductable.join(", ")}.`
+    `connection Egma conducts today: ${conductable.join(", ")}.`
   );
 }
 
@@ -261,14 +261,14 @@ const MOST_SIMULATIONS_PER_RUN = 200;
 
 /** What a caller does instead, when a run named the wrong agent. */
 const NAME_THE_RIGHT_AGENT =
-  "Name the agent that connection is on, or leave the agent out and egma " +
+  "Name the agent that connection is on, or leave the agent out and Egma " +
   "takes the connection's own.";
 
 export function runRoutes(options: {
   readonly holdsKey: (key: string) => boolean;
   /** Where this instance is, for the address a person opens results at. */
   readonly origin: () => string;
-  /** One pinned version, or `null` when this egma never issued it. */
+  /** One pinned version, or `null` when this Egma never issued it. */
   readonly versionById: (versionId: string) => PinnedVersion | null;
   /** One connection, or `null` when no agent of this key's has it. */
   readonly connectionById: (connectionId: string) => ReachableConnection | null;
@@ -439,7 +439,7 @@ export function runRoutes(options: {
     // whether the connection it names is even there. Text, and every entry of
     // it: an entry that is not a version id is refused rather than dropped,
     // because dropping one would start a run over the rest and the caller would
-    // read green about a selection egma quietly shortened.
+    // read green about a selection Egma quietly shortened.
     const pinnedIn = said.test_versions ?? [];
     if (!Array.isArray(pinnedIn)) {
       return refuse(
@@ -480,7 +480,7 @@ export function runRoutes(options: {
         422,
         "unprocessable",
         "a run is conducted over a connection, and this request named none. " +
-          "Send connection with the con_ id of the way egma should reach the " +
+          "Send connection with the con_ id of the way Egma should reach the " +
           "agent — registering the agent answered with one.",
       );
     }
@@ -547,7 +547,7 @@ export function runRoutes(options: {
         return refuse(
           422,
           "unprocessable",
-          `there is no test version ${versionId} on this egma. Push the test ` +
+          `there is no test version ${versionId} on this Egma. Push the test ` +
             `first, or read the test and pin the version_id it names now.`,
         );
       }
@@ -763,7 +763,7 @@ export function runRoutes(options: {
  *
  * The same separation the login controls keep: nothing the CLI does touches a
  * `/fixture` path, and they are reachable over HTTP because the thing being
- * checked is usually a subprocess — the built `egma` command, watched through
+ * checked is usually a subprocess — the built `Egma` command, watched through
  * a terminal.
  */
 export function runControlRoutes(controls: () => RunControls): RouteGroup {

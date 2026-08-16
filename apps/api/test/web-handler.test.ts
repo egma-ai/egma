@@ -224,14 +224,14 @@ describe("the response", () => {
       async () =>
         new Response("no", {
           status: 418,
-          headers: { "content-type": "text/plain", "x-egma": "yes" },
+          headers: { "content-type": "text/plain", "x-Egma": "yes" },
         }),
     );
 
     const response = await app.inject({ method: "GET", url: "/api/auth/x" });
 
     expect(response.statusCode).toBe(418);
-    expect(response.headers["x-egma"]).toBe("yes");
+    expect(response.headers["x-Egma"]).toBe("yes");
     expect(response.body).toBe("no");
   });
 

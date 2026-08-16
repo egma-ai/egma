@@ -119,16 +119,16 @@ async def mockable(agent: Agent, ctx: JobContext, session: AgentSession) -> None
     context = _egma_context(ctx)
     if context is None:
         logger.debug(
-            "no egma context in this job's dispatch metadata, so nothing is "
+            "no Egma context in this job's dispatch metadata, so nothing is "
             "wrapped and every tool runs its own implementation"
         )
         return
 
     if not _speaks_this_version(context.protocol_version):
         logger.error(
-            "egma speaks protocol version %r here and this SDK speaks %d, so "
+            "Egma speaks protocol version %r here and this SDK speaks %d, so "
             "no mock tool can be served: every tool ran its own "
-            "implementation. Upgrade the egma SDK",
+            "implementation. Upgrade the Egma SDK",
             context.protocol_version,
             seam.PROTOCOL_VERSION,
         )
@@ -161,7 +161,7 @@ async def mockable(agent: Agent, ctx: JobContext, session: AgentSession) -> None
         return
     except seam.SeamError as unreadable:
         logger.error(
-            "egma answered %s in a shape this SDK cannot read, so nothing is "
+            "Egma answered %s in a shape this SDK cannot read, so nothing is "
             "wrapped and every tool ran its own implementation: %s",
             seam.HELLO_METHOD,
             unreadable,
@@ -173,7 +173,7 @@ async def mockable(agent: Agent, ctx: JobContext, session: AgentSession) -> None
     }
     mock_tools(type(agent), couriers, session=session)
     logger.info(
-        "simulation %s: the agent reported %d tool(s) and egma answers for "
+        "simulation %s: the agent reported %d tool(s) and Egma answers for "
         "%d of them (%s); every other tool runs its own implementation",
         context.simulation_id,
         len(tools),
@@ -283,14 +283,14 @@ def _hello_refused(refused: RpcError, context: _EgmaContext) -> None:
     """Say what a refused census means, in the terms it means it in."""
     if refused.code in seam.EGMA_NOT_REACHED:
         logger.warning(
-            "no egma participant answered at %r in this room, so nothing is "
+            "no Egma participant answered at %r in this room, so nothing is "
             "wrapped and every tool runs its own implementation (%s)",
             context.identity,
             refused.message,
         )
         return
     logger.error(
-        "egma refused this agent's census with code %s, so nothing is wrapped "
+        "Egma refused this agent's census with code %s, so nothing is wrapped "
         "and every tool ran its own implementation: %s",
         refused.code,
         refused.message,
@@ -359,7 +359,7 @@ def _courier(
             seam.fits_on_the_wire(f"the call to {name!r}", asking)
         except seam.SeamError as too_much:
             logger.warning("the call to %r could not be sent: %s", name, too_much)
-            raise ToolError(f"egma could not answer {name}: {too_much}") from too_much
+            raise ToolError(f"Egma could not answer {name}: {too_much}") from too_much
 
         try:
             answered = await seat.ask(seam.TOOL_METHOD, asking)
@@ -377,7 +377,7 @@ def _courier(
             # tool to author, or a room that could not carry a message.
             logger.warning(
                 "%s the call to %r with code %s: %s",
-                "egma refused"
+                "Egma refused"
                 if refused.code in seam.EGMA_REFUSALS
                 else "the room could not carry",
                 name,
@@ -385,17 +385,17 @@ def _courier(
                 refused.message,
             )
             raise ToolError(
-                f"egma could not answer {name}: {refused.message}"
+                f"Egma could not answer {name}: {refused.message}"
             ) from refused
 
         try:
             served = seam.served_in(answered)
         except seam.SeamError as unreadable:
             logger.error(
-                "egma answered the call to %r unreadably: %s", name, unreadable
+                "Egma answered the call to %r unreadably: %s", name, unreadable
             )
             raise ToolError(
-                f"egma could not answer {name}: {unreadable}"
+                f"Egma could not answer {name}: {unreadable}"
             ) from unreadable
 
         if served.failed:
@@ -426,7 +426,7 @@ def _signature_of(
     except (TypeError, ValueError):
         logger.warning(
             "could not read the parameters of tool %r, so calls to it will be "
-            "answered by egma with their arguments unreported",
+            "answered by Egma with their arguments unreported",
             getattr(tool.info, "name", tool),
             exc_info=True,
         )
@@ -502,14 +502,14 @@ async def _really(
     tool = original or ToolContext(agent.tools).function_tools.get(name)
     if tool is None:
         logger.error(
-            "egma was not reached for the call to %r (%s) and this agent has "
+            "Egma was not reached for the call to %r (%s) and this agent has "
             "no tool by that name to run instead",
             name,
             refused.message,
         )
         raise ToolError(f"{name} could not be run") from refused
     logger.warning(
-        "egma was not reached for the call to %r (%s), so its own "
+        "Egma was not reached for the call to %r (%s), so its own "
         "implementation ran",
         name,
         refused.message,
@@ -524,7 +524,7 @@ async def _really(
         # function, which is what a developer would otherwise have to
         # work backwards from.
         logger.error(
-            "egma was not reached for the call to %r, and its own "
+            "Egma was not reached for the call to %r, and its own "
             "implementation could not be run without the arguments this "
             "call arrived without: %s",
             name,

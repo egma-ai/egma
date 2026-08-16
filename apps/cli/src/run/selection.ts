@@ -67,7 +67,7 @@ export type Selection = {
 export function pushFirstRefusal(unknown: readonly Unpinnable[]): string {
   const names = unknown.map((one) => one.name).join(", ");
   const one = unknown.length === 1;
-  return `egma has no test for ${one ? "this file" : "these files"}: ${names}. Run egma push to put ${one ? "it" : "them"} on egma, then run this again. Nothing was started.`;
+  return `Egma has no test for ${one ? "this file" : "these files"}: ${names}. Run egma push to put ${one ? "it" : "them"} on Egma, then run this again. Nothing was started.`;
 }
 
 /**
@@ -81,7 +81,7 @@ export function pushFirstRefusal(unknown: readonly Unpinnable[]): string {
 export function pushEditsRefusal(diverged: readonly Unpinnable[]): string {
   const names = diverged.map((one) => one.name).join(", ");
   const one = diverged.length === 1;
-  return `egma holds something other than what ${one ? "this file says" : "these files say"}: ${names}. Run egma push to put your ${one ? "edit" : "edits"} on egma, then run this again. Nothing was started.`;
+  return `Egma holds something other than what ${one ? "this file says" : "these files say"}: ${names}. Run egma push to put your ${one ? "edit" : "edits"} on Egma, then run this again. Nothing was started.`;
 }
 
 export type SelectOptions = {

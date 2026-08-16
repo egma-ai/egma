@@ -106,7 +106,7 @@ export function phoneReadiness(held: PlatformFacts): PhoneReadiness {
  */
 export function phoneSetupRequiredMessage(readiness: PhoneReadiness): string {
   return (
-    "this egma has not been set up to place phone calls, so nothing was " +
+    "this Egma instance has not been set up to place phone calls, so nothing was " +
     `dialled and nothing was charged. It is missing ${readiness.missing.join(
       " and ",
     )}. Whoever runs this platform makes it ready with one command in the ` +

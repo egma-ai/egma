@@ -4,7 +4,7 @@ sidebarTitle: "Mock Tools"
 description: "Create, update, delete, and list project-level mock tools that intercept agent tool calls during simulations with controlled responses and delays."
 ---
 
-Mock tools let you control what your agent "hears back" when it calls an external tool during a simulation. When egma runs a test, it intercepts each tool call your agent makes and returns the configured answer (or error) instead of hitting your real backend. This lets you test exactly how your agent handles any outcome — including errors, edge cases, and slow responses — without depending on live external systems.
+Mock tools let you control what your agent "hears back" when it calls an external tool during a simulation. When Egma runs a test, it intercepts each tool call your agent makes and returns the configured answer (or error) instead of hitting your real backend. This lets you test exactly how your agent handles any outcome — including errors, edge cases, and slow responses — without depending on live external systems.
 
 Project-level mock tools apply to every run started in the project unless a test overrides them for a specific tool. Unlike tests, mock tools are not versioned: edits take effect for runs started after the edit, and runs already in progress keep answering the world they froze at start. Unknown keys in a request body are refused by name rather than silently ignored, so a typo surfaces immediately.
 
@@ -14,7 +14,7 @@ Project-level mock tools apply to every run started in the project unless a test
 
 `POST /api/mock-tools`
 
-Create a new project-level mock tool. Returns `201 Created` with the full mock tool object. If a mock tool for the same `tool` name already exists in the project, egma returns `409 Conflict`.
+Create a new project-level mock tool. Returns `201 Created` with the full mock tool object. If a mock tool for the same `tool` name already exists in the project, Egma returns `409 Conflict`.
 
 ### Request body
 
@@ -31,7 +31,7 @@ Create a new project-level mock tool. Returns `201 Created` with the full mock t
 </ParamField>
 
 <ParamField body="delay_ms" type="integer">
-  How long egma holds the answer back, in milliseconds. Use this to test your agent's behavior when a tool call is slow.
+  How long Egma holds the answer back, in milliseconds. Use this to test your agent's behavior when a tool call is slow.
 </ParamField>
 
 <ParamField body="agents" type="string[]">

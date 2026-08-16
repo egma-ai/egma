@@ -83,11 +83,11 @@ export function LoginScreen({
     // The border and paddingX below are counted in `FRAMING_COLUMNS`, which is
     // what decides whether the address fits. Changing either changes that.
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       <Text>
         {login?.browserOpened === true
-          ? "Your browser is open on egma. Approve this code there."
+          ? "Your browser is open on Egma. Approve this code there."
           : "Open this address in a browser and approve this code."}
       </Text>
       <Box height={1} />
@@ -120,7 +120,7 @@ export function LoginScreen({
       */}
       {state.detection === null ? null : (
         <Box flexDirection="column" marginTop={1}>
-          <Text dimColor>While you were away, egma looked around:</Text>
+          <Text dimColor>While you were away, Egma looked around:</Text>
           {detectionLines(state.detection).map((line) => (
             <Text key={line} dimColor>
               {`  ${line}`}

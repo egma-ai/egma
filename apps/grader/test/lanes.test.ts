@@ -80,7 +80,7 @@ describe("a diagnostic copy", () => {
    * conversation's answer is exactly what it would have been with the copy
    * switched off. A diagnostic that could redden a run would not be one.
    *
-   * The copy is of `latency`, which egma cannot execute yet, so every row it
+   * The copy is of `latency`, which Egma cannot execute yet, so every row it
    * writes is `errored` — the loudest word a diagnostic can say, and still not
    * one that reaches an outcome.
    */
@@ -97,7 +97,7 @@ describe("a diagnostic copy", () => {
 
     // A bound this conversation misses, so the diagnostic genuinely **fails** —
     // which is what the case is named for. It used to be a copy of an entry
-    // egma could not execute, answering `errored`; now that latency is computed
+    // Egma could not execute, answering `errored`; now that latency is computed
     // the same test is made with the word the lane is actually about, and
     // `failed` is the stronger of the two: it is the one a required copy would
     // have turned the whole conversation red with.

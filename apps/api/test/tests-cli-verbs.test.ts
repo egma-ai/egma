@@ -25,7 +25,7 @@ import { mintKey, signUp, type Customer } from "./support/traces.ts";
  * API and a real Postgres.
  *
  * The rest of this suite drives the API directly and asserts what a caller
- * observes. This file asks the other question: whether the client egma actually
+ * observes. This file asks the other question: whether the client Egma actually
  * ships can work against this API with nothing changed but its configuration.
  * It imports the sync module itself rather than restating what it sends, so a
  * client and a server that drift apart fail here rather than in somebody's
@@ -134,7 +134,7 @@ describe("push, against a real instance", () => {
     expect(report.conflicts).toEqual([]);
     expect(report.tests.map((test) => test.state)).toEqual(["created"]);
 
-    // The file now carries the pin, and the pin is a version this egma issued.
+    // The file now carries the pin, and the pin is a version this Egma issued.
     const [held] = await readFolderTests(folder);
     expect(held?.test.version).toBe(report.tests[0]?.versionId);
     expect(String(held?.test.version)).toMatch(/^tstv_/u);
@@ -255,7 +255,7 @@ describe("push, against a real instance", () => {
     expect(Number(rows[0]?.count)).toBe(2);
   });
 
-  it("refuses a file pinned to a version this egma never issued, uploading nothing", async () => {
+  it("refuses a file pinned to a version this Egma never issued, uploading nothing", async () => {
     api = await createApi("sync_push_unknown_pin");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
@@ -351,7 +351,7 @@ describe("push, against a real instance", () => {
         shown: "egma/tests/reschedules.md",
         file: fileAt("reschedules.md"),
         reason:
-          'egma has no persona called "Nobody At All" in this project. Name a persona this project already has, or name none and egma takes the project\'s default.',
+          'Egma has no persona called "Nobody At All" in this project. Name a persona this project already has, or name none and Egma takes the project\'s default.',
         // The door's refusal, not the client's belt — which is the point of
         // this check: the real instance said it, and the words are its own.
         refusedBy: "platform",

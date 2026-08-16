@@ -127,7 +127,7 @@ export default function InvitePage() {
       };
       setProblem(said.message ?? "that invitation could not be accepted");
     } catch {
-      setProblem("egma could not be reached. Is the API running?");
+      setProblem("Egma could not be reached. Is the API running?");
     } finally {
       setSubmitting(false);
     }
@@ -206,7 +206,7 @@ export default function InvitePage() {
     );
   }
 
-  const joining = `Join ${invitation.organization.name} on egma`;
+  const joining = `Join ${invitation.organization.name} on Egma`;
 
   if (signedInAs !== null) {
     return (
@@ -282,7 +282,7 @@ export default function InvitePage() {
       </form>
 
       <p className={styles.linkLine}>
-        Already have an egma account?{" "}
+        Already have an Egma account?{" "}
         <a
           href={withReturnTo(
             "/sign-in",

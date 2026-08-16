@@ -32,7 +32,7 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * The grader library: the shelf egma ships, seeded from egma's own catalog.
+ * The grader library: the shelf Egma ships, seeded from Egma's own catalog.
  *
  * **Two properties carry the whole mechanism, and both are here.** Run the
  * seeding twice and the second run writes nothing at all — not a row, not a
@@ -43,10 +43,10 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  * and what keeps "which words judged this verdict" answerable afterwards.
  *
  * The third property is the one the schema holds rather than the module:
- * **null tenancy means egma owns the entry**, the one deliberate exception in
+ * **null tenancy means Egma owns the entry**, the one deliberate exception in
  * this schema, and it is where the Owner label is derived from. So the reads
  * below check the derivation, and the delete checks the refusal that follows
- * from it — egma's entries are written again at the next start, so removing one
+ * from it — Egma's entries are written again at the next start, so removing one
  * could only ever be temporary, and saying no is the honest answer.
  */
 
@@ -135,7 +135,7 @@ afterAll(async () => {
   await database.drop();
 });
 
-describe("seeding egma's own graders", () => {
+describe("seeding Egma's own graders", () => {
   it("writes the catalog, with the catalog's own identifiers and birthdays", async () => {
     const written = await seedGraderLibrary();
 
@@ -158,10 +158,10 @@ describe("seeding egma's own graders", () => {
       expect(row?.prompt).toBe(entry.prompt);
       expect(row?.params).toEqual(entry.params);
       expect(row?.output_definition).toEqual(entry.outputDefinition);
-      // The day egma shipped it, from the catalog — not the day this database
+      // The day Egma shipped it, from the catalog — not the day this database
       // was created.
       expect(row?.created_at.toISOString()).toBe(entry.createdAt.toISOString());
-      // Null on both, which is this schema's way of saying egma owns it.
+      // Null on both, which is this schema's way of saying Egma owns it.
       expect(row?.organization_id).toBeNull();
       expect(row?.project_id).toBeNull();
       // Reserved for custom code entries, and nothing writes them in v0.
@@ -218,12 +218,12 @@ describe("seeding egma's own graders", () => {
 
   /**
    * **The dropdown's own values, on the entry.** The Library screen is a browser
-   * page with no way to read egma's packages, so a list of measures typed there
+   * page with no way to read Egma's packages, so a list of measures typed there
    * would be a second copy of the measure catalog — stale the first time a
    * measure joined or left, and its first symptom a write refused for offering
    * exactly what the form offered.
    *
-   * They are exactly the measures egma computes from a conversation's spans,
+   * They are exactly the measures Egma computes from a conversation's spans,
    * which is the same list the write door accepts and the same list the shared
    * measure module implements. Narrower than the catalog on purpose: a measure
    * that arrives on the terminal transition is a real number a grader reading a
@@ -285,7 +285,7 @@ describe("a catalog entry whose words changed", () => {
     const after = (await shelf()).find((row) => row.id === first.id);
     expect(after?.description).toBe(improved.description);
     expect(after?.version).toBe(2);
-    // Its birthday is the day egma shipped it and does not move; the moment it
+    // Its birthday is the day Egma shipped it and does not move; the moment it
     // last changed does.
     expect(after?.created_at.toISOString()).toBe(
       before?.created_at.toISOString(),
@@ -419,7 +419,7 @@ describe("a type no engine executes", () => {
     },
   );
 
-  it("is refused for a word egma has never heard of either", async () => {
+  it("is refused for a word Egma has never heard of either", async () => {
     await expect(
       database.sql(
         `insert into grader_library (id, name, type, params)
@@ -433,7 +433,7 @@ describe("a type no engine executes", () => {
 });
 
 describe("half a tenancy", () => {
-  it("is refused, because an entry belongs to a project or to egma", async () => {
+  it("is refused, because an entry belongs to a project or to Egma", async () => {
     // The nullable pair is one fact, not two columns somebody can set
     // independently: an entry owned by an organization and by no project would
     // be a definition nothing could scope.
@@ -450,7 +450,7 @@ describe("half a tenancy", () => {
 });
 
 describe("reading the shelf", () => {
-  it("derives egma as the owner of an entry that belongs to nobody", async () => {
+  it("derives Egma as the owner of an entry that belongs to nobody", async () => {
     const page = await listGraderLibrary(actingIn(acme));
 
     expect(page.items.map((entry) => entry.name).sort()).toEqual(
@@ -472,13 +472,13 @@ describe("reading the shelf", () => {
     expect(found?.owner).toBe("organization");
     expect(found?.projectId).toBe(acme.project);
 
-    // And egma's are still on the shelf beside it, which is the whole point of
+    // And Egma's are still on the shelf beside it, which is the whole point of
     // one table for both owners.
     const owners = page.items.map((entry: LibraryEntry) => entry.owner).sort();
     expect(owners).toEqual(["egma", "egma", "organization"]);
   });
 
-  it("shows one customer nothing of another's, while both see egma's", async () => {
+  it("shows one customer nothing of another's, while both see Egma's", async () => {
     const theirs = await insertTeamEntry(globex);
 
     const asAcme = await listGraderLibrary(actingIn(acme));
@@ -509,7 +509,7 @@ describe("reading the shelf", () => {
         .filter((entry) => entry.owner === "egma")
         .map((entry) => entry.name),
     ).toEqual(GRADER_LIBRARY_CATALOG.map((entry) => entry.name));
-    // And egma's come first outright, because they were minted before anything
+    // And Egma's come first outright, because they were minted before anything
     // a customer could have written.
     expect(page.items[0]?.name).toBe("expected_behaviors");
   });
@@ -525,7 +525,7 @@ describe("reading the shelf", () => {
 });
 
 describe("deleting from the shelf", () => {
-  it("refuses one of egma's, naming it", async () => {
+  it("refuses one of Egma's, naming it", async () => {
     const [predefined] = GRADER_LIBRARY_CATALOG;
     if (predefined === undefined) throw new Error("the catalog ships no entries");
 

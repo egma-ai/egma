@@ -384,7 +384,7 @@ describe("an exported call that could reach the database without a customer", ()
    * keeps that from being a hole is that nothing in it can be *asked* about a
    * customer, and that is the half of the reasoning a rule can hold.
    */
-  it("allows the two calls that dispatch egma's own work across the deployment", async () => {
+  it("allows the two calls that dispatch Egma's own work across the deployment", async () => {
     await withSurface(
       'export { claimGradingJobs, watchGradingWork } from "./things.ts";\n',
       "export type GradingClaimRequest = { readonly claimant: string; readonly capacity: number };\nexport async function claimGradingJobs(request: GradingClaimRequest): Promise<string[]> {\n  return [request.claimant];\n}\nexport async function watchGradingWork(onWork: () => void): Promise<void> {\n  onWork();\n}\n",

@@ -30,7 +30,7 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  * report machinery in `runs.test.ts`; what this file pins down is the part
  * the telemetry door leans on: the answer carries the row's pins — the run,
  * the agent, the versions the conversation executed — so a span row is
- * stamped from egma's own row and never from the wire; it reaches every
+ * stamped from Egma's own row and never from the wire; it reaches every
  * customer's simulations, because the evidence door stands behind them all;
  * and it answers for a row the sweep already called orphaned, because a
  * late-returning orphan's spans are evidence and are kept.

@@ -1,6 +1,6 @@
 """The exchange, from the customer's seat: census, couriers, and answers.
 
-Every test here runs against a room-shaped stand-in for egma's
+Every test here runs against a room-shaped stand-in for Egma's
 participant, so the whole of the SDK's own code is exercised — the
 metadata read, the census built off a real agent, the couriers stood in
 LiveKit's own side table, the reply read, the fail-open — with no LiveKit
@@ -26,12 +26,12 @@ from egma import mockable, seam
 
 
 def answer(value: object) -> dict:
-    """What egma sends for an answer, tagged as the wire tags it."""
+    """What Egma sends for an answer, tagged as the wire tags it."""
     return {"answer": value}
 
 
 def failure(message: str) -> dict:
-    """What egma sends for the branch a test forces on purpose."""
+    """What Egma sends for the branch a test forces on purpose."""
     return {"error": message}
 
 
@@ -44,7 +44,7 @@ async def test_the_census_goes_first_and_names_every_tool(session):
 
     await mockable(agent, in_a_simulation(room), session)
 
-    # First, before anything else could have been said. An egma that is
+    # First, before anything else could have been said. An Egma that is
     # not in the room has to be discovered here rather than by a caller
     # waiting mid-conversation.
     assert room.methods_asked[0] == seam.HELLO_METHOD
@@ -90,7 +90,7 @@ async def test_the_census_sets_both_knobs_explicitly(session):
 
 
 async def test_couriers_stand_for_exactly_the_names_egma_answered_with(session):
-    """Not the overlap with the census — egma's whole list.
+    """Not the overlap with the census — Egma's whole list.
 
     ``book_appointment`` is a tool this agent does not have. It still
     gets a courier, because the side table is read by name at call time
@@ -106,10 +106,10 @@ async def test_couriers_stand_for_exactly_the_names_egma_answered_with(session):
 
 
 async def test_an_unmocked_tool_is_left_exactly_as_it_was(session):
-    """``read_notice`` is in the census and not in egma's answer.
+    """``read_notice`` is in the census and not in Egma's answer.
 
     So no courier stands for it, its object is the one the agent was
-    built with, and calling it really runs it. egma is not in its path
+    built with, and calling it really runs it. Egma is not in its path
     and never sees the call — which is what the record's coverage stamp
     is there to say out loud.
     """
@@ -244,7 +244,7 @@ async def test_a_default_the_model_left_out_is_reported_as_it_was_applied(sessio
 
     The model sent one argument; the framework filled the other from the
     signature's default. The call really ran with both, so both are what
-    egma writes down.
+    Egma writes down.
     """
     agent = ReceptionAgent()
     room = StubRoom(
@@ -351,10 +351,10 @@ async def test_a_raw_schema_call_is_reported_as_the_model_sent_it(session):
 async def test_a_tool_attached_after_this_runs_is_intercepted_on_its_first_call(
     session,
 ):
-    """The reason couriers stand for egma's whole list.
+    """The reason couriers stand for Egma's whole list.
 
     ``book_appointment`` did not exist when the census went out. Its
-    courier did, because egma said it answers for that name — and when
+    courier did, because Egma said it answers for that name — and when
     the tool arrives, its very first call is answered.
     """
     agent = ReceptionAgent()
@@ -383,7 +383,7 @@ async def test_a_tool_attached_after_this_runs_is_intercepted_on_its_first_call(
 async def test_a_late_attached_call_reports_no_arguments_rather_than_wrong_ones(
     session,
 ):
-    """The caveat egma flags on the record, made concrete here.
+    """The caveat Egma flags on the record, made concrete here.
 
     There was no signature to copy, so the framework hands this courier
     nothing. It says so — the call carries no ``arguments`` key at all —
@@ -401,7 +401,7 @@ async def test_a_late_attached_call_reports_no_arguments_rather_than_wrong_ones(
     assert room.tool_calls == [{"name": "book_appointment"}]
 
 
-# -- When egma is not reached -------------------------------------------------
+# -- When Egma is not reached -------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -429,7 +429,7 @@ async def test_a_call_egma_never_received_runs_the_real_tool(session, code):
 
 
 async def test_a_census_egma_never_received_wraps_nothing(session, caplog):
-    """An absent egma is discovered here, before any tool call."""
+    """An absent Egma is discovered here, before any tool call."""
     agent = ReceptionAgent()
     before = agent.tools
     room = StubRoom(refuses_with=not_reached())
@@ -445,7 +445,7 @@ async def test_a_census_egma_never_received_wraps_nothing(session, caplog):
 async def test_a_late_attached_tool_falls_open_to_whatever_the_agent_has_now(session):
     """The only handle a courier with no captured original can offer.
 
-    There was nothing to capture when it was made, so when egma turns out
+    There was nothing to capture when it was made, so when Egma turns out
     to be unreachable it looks the name up on the agent as it stands.
     """
     agent = ReceptionAgent()
@@ -473,7 +473,7 @@ async def test_a_late_attached_tool_that_needs_arguments_fails_rather_than_waits
 ):
     """The corner where falling open cannot work, said plainly.
 
-    egma was not reached, and the tool that turned up late wants
+    Egma was not reached, and the tool that turned up late wants
     arguments this call was never handed — because there was no
     signature to read them through. It ends in an error the model can
     hear, rather than a type error from somebody else's function that a
@@ -501,7 +501,7 @@ async def test_a_late_attached_tool_that_needs_arguments_fails_rather_than_waits
 
 
 async def test_a_call_with_nothing_to_fall_back_on_fails_rather_than_waits(session):
-    """No egma, and no tool of that name either.
+    """No Egma, and no tool of that name either.
 
     Somebody called a tool the agent does not have, which the framework
     would not normally allow — so this is the impossible corner. It ends
@@ -519,7 +519,7 @@ async def test_a_call_with_nothing_to_fall_back_on_fails_rather_than_waits(sessi
         await called(couriers_on(session, agent)["book_appointment"])
 
 
-# -- When egma refuses --------------------------------------------------------
+# -- When Egma refuses --------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -527,11 +527,11 @@ async def test_a_call_with_nothing_to_fall_back_on_fails_rather_than_waits(sessi
     [
         pytest.param(
             RpcError(seam.UNKNOWN_TOOL, "this simulation has no mock tool for it"),
-            id="902 a name egma does not answer for",
+            id="902 a name Egma does not answer for",
         ),
         pytest.param(
             RpcError(seam.MALFORMED_REQUEST, "unreadable"),
-            id="901 a message egma could not read",
+            id="901 a message Egma could not read",
         ),
         pytest.param(
             RpcError(seam.ANSWER_TOO_LARGE, "17000 bytes"),
@@ -539,21 +539,21 @@ async def test_a_call_with_nothing_to_fall_back_on_fails_rather_than_waits(sessi
         ),
         pytest.param(
             RpcError(RpcError.ErrorCode.RESPONSE_TIMEOUT, "took too long"),
-            id="1502 egma took too long",
+            id="1502 Egma took too long",
         ),
         pytest.param(
             RpcError(RpcError.ErrorCode.APPLICATION_ERROR, "handler blew up"),
-            id="1500 egma's handler failed",
+            id="1500 Egma's handler failed",
         ),
     ],
 )
 async def test_a_refusal_reaches_the_model_and_never_the_real_tool(session, refusal):
     """Every refusal ends the call, and none of them runs the real tool.
 
-    egma answered — with a no. Running the real implementation on the
+    Egma answered — with a no. Running the real implementation on the
     back of a no would be the SDK deciding that a simulation may touch a
     real backend, which is the one decision it must never make: fail-open
-    belongs to *not reaching* egma, never to being refused by it.
+    belongs to *not reaching* Egma, never to being refused by it.
     """
     agent = ReceptionAgent()
     room = StubRoom(mocked_tools=("check_calendar",), refuses_tool_with=refusal)
@@ -567,23 +567,23 @@ async def test_a_refusal_reaches_the_model_and_never_the_real_tool(session, refu
 
 
 async def test_a_census_egma_refuses_wraps_nothing_and_says_so(session, caplog):
-    """egma is there and will not answer for anything.
+    """Egma is there and will not answer for anything.
 
     Nothing is wrapped, so every tool runs its own implementation — and
-    egma's own record agrees, because a refused census covers nothing.
+    Egma's own record agrees, because a refused census covers nothing.
     The agent is never taken down over it: that would lose the simulation
     as well as the isolation.
     """
     agent = ReceptionAgent()
     room = StubRoom(
-        refuses_with=RpcError(seam.UNSUPPORTED_PROTOCOL_VERSION, "egma speaks 2")
+        refuses_with=RpcError(seam.UNSUPPORTED_PROTOCOL_VERSION, "Egma speaks 2")
     )
 
     with caplog.at_level("ERROR", logger="egma"):
         await mockable(agent, in_a_simulation(room), session)
 
     assert couriers_on(session, agent) == {}
-    assert "egma speaks 2" in caplog.text
+    assert "Egma speaks 2" in caplog.text
     assert await agent.read_notice() == "really ran: the notice"
 
 
@@ -638,7 +638,7 @@ async def test_an_answer_this_side_cannot_read_fails_rather_than_waits(session, 
 async def test_a_call_too_big_for_one_message_is_refused_before_it_is_sent(session):
     """The cap is the same cap on both messages of the exchange.
 
-    egma refuses an answer that would not fit rather than truncating it;
+    Egma refuses an answer that would not fit rather than truncating it;
     this side refuses a call the same way. Refused here rather than by
     the transport, whose own complaint reaches the model as a tool that
     failed for no stated reason.
@@ -657,7 +657,7 @@ async def test_a_call_too_big_for_one_message_is_refused_before_it_is_sent(sessi
         )
 
     assert str(seam.LARGEST_PAYLOAD_BYTES) in str(raised.value)
-    # Never put on the wire, so egma was never asked and the real
+    # Never put on the wire, so Egma was never asked and the real
     # calendar was never read either.
     assert room.tool_calls == []
 

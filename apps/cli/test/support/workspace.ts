@@ -26,7 +26,7 @@ export const RETELL_FIXTURE_REPO = fileURLToPath(
 );
 
 /**
- * Test cases somebody had written down before egma existed, committed so CI
+ * Test cases somebody had written down before Egma existed, committed so CI
  * has some. A spreadsheet export and a page of notes, both invented, both
  * about the bookbinding workshop that does not exist.
  */
@@ -51,7 +51,7 @@ export const PRETEND_OLD_NODE = fileURLToPath(
 export type Workspace = {
   readonly dir: string;
   /**
-   * The egma folder this workspace's runs use, inside the throwaway directory.
+   * The Egma folder this workspace's runs use, inside the throwaway directory.
    *
    * Every check that starts the command hands this over, so no check anywhere
    * can read or write the credentials of the person running the suite.
@@ -65,7 +65,7 @@ export type Workspace = {
   signIn(url: string, key?: string): Promise<void>;
   /**
    * A stand-in browser to point `BROWSER` at, and the file it writes every
-   * address egma hands it into.
+   * address Egma hands it into.
    */
   browser(): Promise<{ readonly command: string; readonly opened: string }>;
   /**
@@ -73,7 +73,7 @@ export type Workspace = {
    * given into `opened`, adds one line to the last of them, and leaves. A real
    * editor owns the terminal for as long as a person is in it; this one owns it
    * for as long as two writes take, which is all a check needs to prove that
-   * egma handed it over and took it back.
+   * Egma handed it over and took it back.
    *
    * Every argument, because `$EDITOR` is a command line and not a command:
    * `code --wait` and `emacs -nw` are both ordinary settings, and an editor
@@ -91,7 +91,7 @@ export type Workspace = {
   ): Promise<{ readonly command: string; readonly opened: string }>;
   /** Writes a script and answers the path to it. */
   script(script: FakeScript): Promise<string>;
-  /** How egma would be told to start the fake agent with that script. */
+  /** How Egma would be told to start the fake agent with that script. */
   launch(scriptPath: string): DrivenAgentLaunch;
   remove(): Promise<void>;
 };
@@ -120,7 +120,7 @@ export const NO_BROWSER = "/usr/bin/true";
 export const NO_RETELL = "http://127.0.0.1:1";
 
 /**
- * An egma that is not hosted egma.
+ * An Egma that is not hosted Egma.
  *
  * The built-in address a repository falls back to is the real hosted platform,
  * and a check that reached it would sign in to production, create real
@@ -165,7 +165,7 @@ export async function makeWorkspace(
       if (extra.RETELL_API_KEY === undefined) delete env.RETELL_API_KEY;
       if (extra.EGMA_RETELL_AGENT_ID === undefined) delete env.EGMA_RETELL_AGENT_ID;
       // And a way to reach an agent that the person running the suite happens
-      // to have set is not a way any check may take: which connection egma
+      // to have set is not a way any check may take: which connection Egma
       // creates is what several of them are about.
       if (extra.EGMA_REACH === undefined) delete env.EGMA_REACH;
       if (extra.EGMA_PHONE_NUMBER === undefined) delete env.EGMA_PHONE_NUMBER;
@@ -205,7 +205,7 @@ export async function makeWorkspace(
                 "printf 'STAND-IN EDITOR HAS THE SCREEN\\n' > /dev/tty 2>/dev/null || true",
               ]
             : []),
-          // Every argument, in the order egma passed them, and the last of them
+          // Every argument, in the order Egma passed them, and the last of them
           // is the file: that is the one contract `$EDITOR` has.
           'last=""',
           "for argument in \"$@\"; do",

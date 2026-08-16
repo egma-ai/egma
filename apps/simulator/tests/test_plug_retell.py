@@ -117,7 +117,7 @@ async def test_the_agent_ending_the_exchange_is_read_from_its_end_tool(
 
 async def test_the_tools_an_answer_called_are_read_off_it(start_retell_stub):
     """Retell reports its invocations beside the words, which is what makes
-    a tool call observable from egma's side of the wire at all."""
+    a tool call observable from Egma's side of the wire at all."""
     running = await start_retell_stub(
         api_key=SENTINEL_KEY,
         replies=["Done — moved to Thursday."],

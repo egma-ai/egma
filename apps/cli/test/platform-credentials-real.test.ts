@@ -1,7 +1,7 @@
 /**
  * Two real platforms, two real logins, one machine.
  *
- * A developer who self-hosts and also uses hosted egma signs in to both from the
+ * A developer who self-hosts and also uses hosted Egma signs in to both from the
  * same laptop. The promise is that the second login does not sign them out of
  * the first, and that the key each platform minted is only ever offered back to
  * that platform. Both halves are proved here against real API processes with

@@ -33,7 +33,7 @@ import { cannotDetermine, met, notMet } from "./support/scripted-judge.ts";
  * times the service woke up. That is what lets later work change the middle of
  * this without rewriting the suite that proves it works.
  *
- * **The graders are the two egma ships, because those are the only two there
+ * **The graders are the two Egma ships, because those are the only two there
  * are.** A project is created holding an active copy of `expected_behaviors`,
  * so the conversation below is judged against its test's own sentences with
  * nothing set up at all; a copy of `latency` is what a second grader on the
@@ -45,7 +45,7 @@ import { cannotDetermine, met, notMet } from "./support/scripted-judge.ts";
  * and nothing about the test in front of it.
  *
  * **The judge is scripted and no key is present anywhere in this file.** What
- * is under test here is egma's side of the seam — which graders applied, what
+ * is under test here is Egma's side of the seam — which graders applied, what
  * their rows say, what a broken conversation comes to — and asserting that
  * against a real model would be paying an account to learn something a model
  * cannot tell you reliably anyway.
@@ -184,7 +184,7 @@ describe("a conversation reaching its terminal transition", () => {
  * spans, held to a bound somebody typed.
  *
  * **No model is asked anything on this path.** The judge is scripted for the
- * behaviors grader beside it, and the rows below come from egma's own engine
+ * behaviors grader beside it, and the rows below come from Egma's own engine
  * reading the numbers the shared measure module worked out — the same numbers
  * the metrics display shows for this conversation.
  */

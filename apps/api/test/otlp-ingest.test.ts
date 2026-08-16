@@ -16,7 +16,7 @@ import {
  * at.
  *
  * This is the spine: fourteen captured OTLP bodies, byte for byte as an
- * exporter sent them, posted over HTTP to the running API with an ordinary egma
+ * exporter sent them, posted over HTTP to the running API with an ordinary Egma
  * API key, landing in a real ClickHouse. It exercises the credential, the
  * protobuf decoding, the normalisation, the tenancy stamp and the append in one
  * pass — because every one of those is a place the path could be right in

@@ -227,9 +227,9 @@ describe("commands after a repository is bound", () => {
  * The refusal a developer meets when they really are moving, in the terminal
  * they meet it in.
  *
- * Now that an unbound repository falls back to egma's own platform, the first
+ * Now that an unbound repository falls back to Egma's own platform, the first
  * thing somebody moving off their own deployment types is the address they want
- * — and this is what answers. It has to arrive whole: one sentence saying egma
+ * — and this is what answers. It has to arrive whole: one sentence saying Egma
  * will not do it, then every line to delete, then what moving costs. A refusal
  * that named the first step and stopped is what left a developer deleting the
  * platform block, running again, and meeting a stranger failure about
@@ -277,7 +277,7 @@ describe("moving a bound repository to another platform", () => {
 
     expect(refused.code).toBe(4);
     expect(refused.stdout).toContain("status: refused");
-    expect(refused.stderr).toContain("egma does not move a repository between platforms");
+    expect(refused.stderr).toContain("Egma does not move a repository between platforms");
     expect(refused.stderr).toContain("no repository identifiers were sent");
 
     // Every line to delete, in the terminal, as a block that starts on its own
@@ -289,7 +289,7 @@ describe("moving a bound repository to another platform", () => {
     expect(opens).toBeGreaterThan(0);
     expect(said[opens - 1]).toBe("");
     // In that order, and the platform block last. Deleting it is what unbinds
-    // the repository, and an unbound repository falls back to egma's own
+    // the repository, and an unbound repository falls back to Egma's own
     // platform — so a developer following this list top-down must never be one
     // line in and holding another platform's identifiers with nothing left to
     // keep them there.
@@ -305,7 +305,7 @@ describe("moving a bound repository to another platform", () => {
     expect(said[opens + 7]).toContain("stay on the platform that ran them");
 
     // No command performs the move, so none is offered.
-    expect(refused.stderr).not.toMatch(/egma rebind|--rebind|egma move/u);
+    expect(refused.stderr).not.toMatch(/egma rebind|--rebind|Egma move/u);
 
     // And nothing was sent: neither platform was asked so much as who it is.
     expect(here.records).toEqual([]);

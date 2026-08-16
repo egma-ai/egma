@@ -185,7 +185,7 @@ afterAll(async () => {
 
 let nextWireId = 0;
 
-/** An id off the wire — fixed-width hex, which egma's own format is not. */
+/** An id off the wire — fixed-width hex, which Egma's own format is not. */
 function wireId(bytes: 8 | 16): string {
   nextWireId += 1;
   return nextWireId.toString(16).padStart(bytes * 2, "0");
@@ -506,7 +506,7 @@ describe("a production trace at the door", () => {
   it("records nothing for a simulation's own spans, whoever exported them", async () => {
     const traceId = wireId(16);
     // Simulations reach the queue through the transaction that ends them. When
-    // egma's own runtime starts exporting through this door, its spans must not
+    // Egma's own runtime starts exporting through this door, its spans must not
     // make a second job for a conversation that already has one.
     await recordProductionTraces(auth, [
       aSpan({ traceId, source: "simulation" }),
@@ -557,12 +557,12 @@ describe("the claim", () => {
   /**
    * The window a production trace is read inside travels with the claim, and it
    * belongs on this list rather than beside it: those two instants are stamps
-   * egma's own door made off the telemetry it accepted, in the same family as
+   * Egma's own door made off the telemetry it accepted, in the same family as
    * the id and the tenancy. Nothing a customer wrote crosses here — no
    * transcript, no name, no configuration.
    *
    * The grader a re-grade narrowed to is here on the same terms: an identifier
-   * egma minted, saying which of this customer's graders to judge with, and
+   * Egma minted, saying which of this customer's graders to judge with, and
    * never a word of what that grader says — which the engine reads for itself,
    * through the scoped surface, with the context this claim hands back.
    */

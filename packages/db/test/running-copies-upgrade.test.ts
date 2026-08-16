@@ -607,7 +607,7 @@ describe("the release that turns graders into running copies (0026)", () => {
 describe("the boot that follows the upgrade", () => {
   beforeAll(async () => {
     // Exactly what `apps/api` does, in the order it does it: the migrations
-    // above, then egma's own graders onto the shelf, then a copy of the
+    // above, then Egma's own graders onto the shelf, then a copy of the
     // mandatory one into every project that has never held it.
     connect({
       databaseUrl: database.url,

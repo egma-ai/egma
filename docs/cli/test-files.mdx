@@ -1,7 +1,7 @@
 ---
-title: "egma Test Files — Format, Structure, and Sync Workflow"
+title: "Egma Test Files — Format, Structure, and Sync Workflow"
 sidebarTitle: "Test Files"
-description: "Learn the egma/ folder layout, test file anatomy, mock-tools format, and the pull → review → push workflow for keeping local files in sync with egma."
+description: "Learn the egma/ folder layout, test file anatomy, mock-tools format, and the pull → review → push workflow for keeping local files in sync with Egma."
 ---
 
 Your tests are files in your repository. Every test is a Markdown file with YAML front matter, stored in `egma/tests/`. Nothing secret ever lands in the `egma/` folder, so there are no `.gitignore` lines to write and none to forget. Your team reviews tests in pull requests, edits them in the same editor as your agent code, and keeps their full history in git.
@@ -12,12 +12,12 @@ Your tests are files in your repository. Every test is a Markdown file with YAML
 
 ```
 egma/
-  config.yaml      names and IDs — which egma instance, which agent, which suite
+  config.yaml      names and IDs — which Egma instance, which agent, which suite
   mock-tools.md    mocked tool responses used during simulations
   tests/           one .md file per test case
 ```
 
-Everything under `egma/` is committed. The `config.yaml` file records the verified identity of your egma instance, so every command run in this repository finds it automatically.
+Everything under `egma/` is committed. The `config.yaml` file records the verified identity of your Egma instance, so every command run in this repository finds it automatically.
 
 ## Test file anatomy
 
@@ -56,7 +56,7 @@ Name a persona only when the situation calls for a particular kind of caller. Mo
     Keep it concrete: who the caller is, what they want, and any relevant context (time pressure, emotional state, prior history). The more specific the scenario, the more useful the simulation.
   </Tab>
   <Tab title="## Expected behaviors">
-    A numbered list of things the agent should do during the call. Each item becomes one graded expected behavior — egma writes a verdict for each one with a rationale and the conversation turns it cites.
+    A numbered list of things the agent should do during the call. Each item becomes one graded expected behavior — Egma writes a verdict for each one with a rationale and the conversation turns it cites.
 
     ```markdown
     ## Expected behaviors
@@ -65,7 +65,7 @@ Name a persona only when the situation calls for a particular kind of caller. Mo
     3. The agent confirms the new booking before ending the call.
     ```
 
-    A test with no expected behaviors can never fail, so egma will not store one. Write at least one behavior per test.
+    A test with no expected behaviors can never fail, so Egma will not store one. Write at least one behavior per test.
   </Tab>
 </Tabs>
 
@@ -101,7 +101,7 @@ Each tool gets its own `###` section. The body is a JSON code block with the fol
 |---|---|---|
 | `answer` | Yes (or `error`) | The value returned to the agent when it calls this tool |
 | `error` | Yes (or `answer`) | An error raised instead of returning a value — use this to test failure handling |
-| `delay_ms` | No | How long egma waits before returning the answer, so the mock behaves like the real backend |
+| `delay_ms` | No | How long Egma waits before returning the answer, so the mock behaves like the real backend |
 | `agents` | No | A list of agent IDs to scope this mock to. Omit it and the mock applies to all agents in the project |
 
 ### Example
@@ -146,7 +146,7 @@ Each tool gets its own `###` section. The body is a JSON code block with the fol
 ````
 
 <Note>
-  The project's `mock-tools.md` is the one file egma does not version — pushing
+  The project's `mock-tools.md` is the one file Egma does not version — pushing
   an edit writes over what was there. Test-level tool overrides (inside a test
   file) are versioned with the test itself.
 </Note>
@@ -191,13 +191,13 @@ had a booking confirmed by SMS, but the confirmation never arrived.
 ```
 ```
 
-## Keeping local files in sync with egma
+## Keeping local files in sync with Egma
 
-The `egma/` folder and egma each hold a copy of your tests. Sync is explicit — nothing happens in the background — because silent two-way saves are how this goes wrong everywhere it has been tried.
+The `egma/` folder and Egma each hold a copy of your tests. Sync is explicit — nothing happens in the background — because silent two-way saves are how this goes wrong everywhere it has been tried.
 
 <Steps>
-  <Step title="Pull egma's current versions">
-    Run `egma pull` to write egma's current version of every test into your local files. This updates the `version:` field in each file's front matter.
+  <Step title="Pull Egma's current versions">
+    Run `egma pull` to write Egma's current version of every test into your local files. This updates the `version:` field in each file's front matter.
 
     ```bash
     egma pull
@@ -216,7 +216,7 @@ The `egma/` folder and egma each hold a copy of your tests. Sync is explicit —
     Open the files in your editor. Review what your teammate changed in the dashboard. Make your own edits. Commit to a branch and open a pull request if you want team review before pushing.
   </Step>
   <Step title="Push your versions">
-    Run `egma push` to upload your local tests. egma creates a new version of each test and writes the new version ID back into the file's front matter.
+    Run `egma push` to upload your local tests. Egma creates a new version of each test and writes the new version ID back into the file's front matter.
 
     ```bash
     egma push
@@ -228,7 +228,7 @@ The `egma/` folder and egma each hold a copy of your tests. Sync is explicit —
 
 ### Conflict detection
 
-`egma push` compares the version your file last synced at with the version egma currently holds. If egma has moved on — because a teammate edited the test in the dashboard after your last pull — the push is refused:
+`egma push` compares the version your file last synced at with the version Egma currently holds. If Egma has moved on — because a teammate edited the test in the dashboard after your last pull — the push is refused:
 
 ```
 conflict: missed-appointment-reschedule
@@ -240,8 +240,8 @@ status: refused
 Nothing is merged and nothing is uploaded. Run `egma pull`, review the changes, then push again. The comparison is done field by field on the test content — not just version numbers — so editing a file and not pushing it is also caught correctly.
 
 <Warning>
-  `egma push` also relays egma's own refusals. A test with no expected behaviors
-  is rejected by egma (not just by the local check), and the exact reason egma
+  `egma push` also relays Egma's own refusals. A test with no expected behaviors
+  is rejected by Egma (not just by the local check), and the exact reason Egma
   returns is printed verbatim so you know exactly what to fix.
 </Warning>
 
@@ -253,8 +253,8 @@ Both commands print one fact per line and exit with a number you can branch on i
 |---|---|
 | `0` | Done |
 | `1` | No `egma/` folder found here |
-| `2` | Not signed in to egma |
-| `4` | egma did not answer, or refused |
-| `5` | Push refused: egma has moved on — run `egma pull` first |
-| `6` | egma rejected a test at its door |
+| `2` | Not signed in to Egma |
+| `4` | Egma did not answer, or refused |
+| `5` | Push refused: Egma has moved on — run `egma pull` first |
+| `6` | Egma rejected a test at its door |
 | `130` | Stopped partway through |

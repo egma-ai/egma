@@ -1,6 +1,6 @@
 /**
  * `egma connect` as a coding agent runs it: the built command, in a real
- * subprocess, against a fixture of egma's public HTTP API and a fake Retell.
+ * subprocess, against a fixture of Egma's public HTTP API and a fake Retell.
  *
  * Nothing here is a terminal and nothing here answers a question, because the
  * whole promise of the verb is that neither is needed. What is asserted is the
@@ -92,7 +92,7 @@ function egma(
   const env = workspace.env({
     ...(retell === undefined ? {} : { EGMA_RETELL_URL: retell.url }),
     // Every check written before there was a choice is about the connection
-    // egma made then, and that is the text one. The checks that are about the
+    // Egma made then, and that is the text one. The checks that are about the
     // choice itself say so in their own arguments, which win over this.
     EGMA_REACH: "text",
     ...options.env,
@@ -162,7 +162,7 @@ describe("egma connect", () => {
     // The custody sentence is said before the key is asked for, on this
     // surface as much as on the wizard's.
     expect(result.stdout).toContain(
-      "note: It is sent to egma and stored encrypted. It never lands in a file here.",
+      "note: It is sent to Egma and stored encrypted. It never lands in a file here.",
     );
 
     expect(platform.registered.agents).toHaveLength(1);
@@ -197,7 +197,7 @@ describe("egma connect", () => {
     expect(facts(theirs.stdout).connection_registration).toBe("reused");
     expect(theirs.stdout).toContain(
       "note: This voice agent was already registered as order-line, and retell-1 was " +
-        "already the way egma reaches it. Nothing new was registered.",
+        "already the way Egma reaches it. Nothing new was registered.",
     );
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.connections).toHaveLength(1);
@@ -234,7 +234,7 @@ describe("egma connect", () => {
    * with no record of which platform can resolve it. Bind earlier and every
    * ending that creates nothing — no key, a key Retell will not take, an empty
    * account, an unanswered choice — leaves an egma folder behind in a
-   * repository the developer had not decided to use egma in yet.
+   * repository the developer had not decided to use Egma in yet.
    */
   it("writes no folder for an ending that created nothing", async () => {
     retell = await startFakeRetell(ONE_AGENT);
@@ -375,10 +375,10 @@ describe("egma connect", () => {
  *
  * The wizard has a screen for it; this has a flag, an environment variable, and
  * an exit code for the case nobody said. What must not exist on either surface
- * is a default — egma picking one of the two would be egma deciding whether to
+ * is a default — Egma picking one of the two would be Egma deciding whether to
  * dial somebody's telephone.
  */
-describe("which connection egma creates", () => {
+describe("which connection Egma creates", () => {
   it("creates only the phone connection, holding the number and nothing else", async () => {
     retell = await startFakeRetell(ONE_AGENT);
 
@@ -398,7 +398,7 @@ describe("which connection egma creates", () => {
     expect(platform.registered.sealed).toEqual([]);
     expect(JSON.stringify(platform.registered)).not.toContain(KEY);
 
-    // And the committed file names the connection egma really made.
+    // And the committed file names the connection Egma really made.
     const written = await readConfig(folderPathsIn(workspace.dir).config);
     expect(written.connection).toEqual({ name: "phone-1", id: said.connection_id });
     expect(JSON.stringify(written)).not.toContain(KEY);
@@ -427,7 +427,7 @@ describe("which connection egma creates", () => {
     const result = await egma(["connect", "--reach", "carrier-pigeon"], { stdin: KEY });
 
     expect(result.code).toBe(CONNECT_EXIT.unchosen);
-    expect(result.stderr).toContain("is not a way egma reaches an agent");
+    expect(result.stderr).toContain("is not a way Egma reaches an agent");
     expect(retell.requests).toHaveLength(0);
   });
 
@@ -542,7 +542,7 @@ describe("the whole walk, headless", () => {
     expect(platform.registered.connections[0]?.name).toBe("retell-1");
 
     // And the walk did not stop at connecting: the test the coding agent wrote
-    // is a file in the repository and a version on egma.
+    // is a file in the repository and a version on Egma.
     expect(result.stdout).toContain("test: price-question default persona");
     expect(platform.tests.tests.map((test) => test.name)).toEqual(["price-question"]);
     // And it did not stop at pushing either: the run is going, and the line

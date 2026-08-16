@@ -1,10 +1,10 @@
 ---
-title: "Register and Manage Voice Agents with the egma API"
+title: "Register and Manage Voice Agents with the Egma API"
 sidebarTitle: "Agents"
 description: "Register voice agents, attach provider connections, and list or retrieve agents by id. Connections are always reached through their agent."
 ---
 
-Agents are the voice-agent identities egma tests and monitors. Each agent you register maps to one agent in your provider — Retell or LiveKit — and carries one or more **connections** that tell egma how to reach it. Registering is retry-safe: if you send the same agent name and provider id twice, egma reuses the existing agent and tells you so in the `result` field rather than minting a second identity. Credentials you supply are sealed before storage; only the last four characters come back in `credentials_hint`, so a serializer can never accidentally leak a key.
+Agents are the voice-agent identities Egma tests and monitors. Each agent you register maps to one agent in your provider — Retell or LiveKit — and carries one or more **connections** that tell Egma how to reach it. Registering is retry-safe: if you send the same agent name and provider id twice, Egma reuses the existing agent and tells you so in the `result` field rather than minting a second identity. Credentials you supply are sealed before storage; only the last four characters come back in `credentials_hint`, so a serializer can never accidentally leak a key.
 
 ---
 
@@ -27,7 +27,7 @@ The `result` field in the response tells you exactly what happened:
 ### Request body
 
 <ParamField body="name" type="string">
-  Display name for the agent. Required unless you want egma to pick a numbered default. Must be unique within the project.
+  Display name for the agent. Required unless you want Egma to pick a numbered default. Must be unique within the project.
 </ParamField>
 
 <ParamField body="description" type="string">

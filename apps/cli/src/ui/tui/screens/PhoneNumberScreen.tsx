@@ -72,7 +72,7 @@ export function PhoneNumberScreen({ state, onAnswer }: PhoneNumberScreenProps) {
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       <Text>{NUMBER_ASK_LINE}</Text>
       <Box height={1} />

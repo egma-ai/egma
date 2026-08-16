@@ -4,7 +4,7 @@ sidebarTitle: "Graders"
 description: "Create, update, and delete project graders — copies of library entries that judge your agent's conversations in simulations and production."
 ---
 
-Project graders are the active judgment layer for a specific project. Each grader is a copy of an entry from the [grader library](/api/grader-library) — the entry supplies the prompt and the schema, and your copy holds the filled-in parameters, the scope it operates in, and whether its verdict can block a test run. When you press **Use** on a library entry in the dashboard, egma calls `POST /api/graders` on your behalf. Use the API directly to automate grader configuration, provision graders during CI setup, or manage them programmatically across projects.
+Project graders are the active judgment layer for a specific project. Each grader is a copy of an entry from the [grader library](/api/grader-library) — the entry supplies the prompt and the schema, and your copy holds the filled-in parameters, the scope it operates in, and whether its verdict can block a test run. When you press **Use** on a library entry in the dashboard, Egma calls `POST /api/graders` on your behalf. Use the API directly to automate grader configuration, provision graders during CI setup, or manage them programmatically across projects.
 
 ---
 
@@ -123,7 +123,7 @@ curl -X POST https://your-egma-instance/api/graders \
 
 ## Update a grader
 
-Modifies a running grader. What you send determines whether egma mints a new version or updates in place.
+Modifies a running grader. What you send determines whether Egma mints a new version or updates in place.
 
 **`PATCH /api/graders/:graderId`**
 

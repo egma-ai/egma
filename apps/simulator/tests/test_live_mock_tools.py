@@ -2,14 +2,14 @@
 
 The seam is proved offline against a room-shaped fake, which says the
 exchange is right and nothing at all about whether a real agent's tool
-call really reaches egma across a real room. This file is the other half:
-a spec carrying one mocked tool goes in at the control plane, egma makes a
+call really reaches Egma across a real room. This file is the other half:
+a spec carrying one mocked tool goes in at the control plane, Egma makes a
 room in a real LiveKit project, the dumb-agent worker is dispatched into
-it with the egma SDK wired in, a persona asks about Tuesday out loud —
-and the agent is told, by egma, that Tuesday is full.
+it with the Egma SDK wired in, a persona asks about Tuesday out loud —
+and the agent is told, by Egma, that Tuesday is full.
 
 Nothing about that answer exists anywhere but in this file. There is no
-calendar behind the fixture and no calendar behind egma; the branch the
+calendar behind the fixture and no calendar behind Egma; the branch the
 agent takes is a branch a test ordered up, which is the whole promise mock
 tools make.
 
@@ -22,7 +22,7 @@ process's memory:
   at session start, so mock authoring could start from the real names;
 - **the answer this spec carried is the answer the agent got**, byte for
   byte, with the provenance stamp and the mock tool that served it;
-- **the tool egma does not answer for is named uncovered** and has no
+- **the tool Egma does not answer for is named uncovered** and has no
   span at all, which is how the record admits a simulation was not fully
   isolated;
 - **the declared delay really was spent** in the middle of a live
@@ -155,7 +155,7 @@ SECRETS = tuple(
 SIMULATION = "sim-livekit-mock-tools-live-001"
 
 # The two tools `fixtures/livekit-dumb-agent` carries. Written out here
-# rather than imported, because the point of the census is that egma
+# rather than imported, because the point of the census is that Egma
 # learns these from the running agent rather than from a list somebody
 # kept: if the fixture is renamed and this is not, the assertion below is
 # supposed to fail.
@@ -215,7 +215,7 @@ it never made.
 # that a live conversation still fits inside its walls.
 DECLARED_DELAY_MS = 1500
 
-# What the span may hold beyond the delay. The two ends are egma's own —
+# What the span may hold beyond the delay. The two ends are Egma's own —
 # the moment the call arrived and the moment the answer went back — so
 # what sits inside them besides the sleep is reading a small JSON object
 # and writing one, which is microseconds. A second is room enough for a
@@ -249,7 +249,7 @@ WITHIN_SECONDS = AGENT_JOIN_SECONDS + MAX_DURATION_SECONDS + 60
 
 
 def mocked_spec() -> dict:
-    """One spec: a real room, a real worker, and one tool egma answers for."""
+    """One spec: a real room, a real worker, and one tool Egma answers for."""
     config: dict = {"url": LIVEKIT_URL}
     if AGENT_NAME:
         config["agentName"] = AGENT_NAME
@@ -300,10 +300,10 @@ def deployment() -> dict[str, str]:
 
 
 def tool_calls_in(records: list[dict]) -> list[dict]:
-    """Every call egma answered, as the spans they landed as.
+    """Every call Egma answered, as the spans they landed as.
 
-    A tool egma does not answer for has no span here at all, by design:
-    egma is not in its path and never sees it. That absence is a fact this
+    A tool Egma does not answer for has no span here at all, by design:
+    Egma is not in its path and never sees it. That absence is a fact this
     test asserts rather than a gap it works around.
     """
     return [
@@ -368,7 +368,7 @@ async def test_a_mock_tool_answers_a_real_agent_in_a_real_room(
     #    start from the real names rather than somebody's memory of them.
     coverage = facts["mock_tool_coverage"]
     assert coverage is not None, (
-        "no coverage stamp on a livekit simulation: egma never stood in "
+        "no coverage stamp on a livekit simulation: Egma never stood in "
         "the tool path, so the agent's own tools ran"
     )
     assert set(coverage["discovered"]) == {BOOKING_TOOL, UNMOCKED_TOOL}, coverage
@@ -391,12 +391,12 @@ async def test_a_mock_tool_answers_a_real_agent_in_a_real_room(
     # assertion about it is exactly the run where seeing it matters.
     hand_back(spoken, calls[0], coverage)
 
-    # 3. The unmocked tool has no span, in either direction. egma is not
+    # 3. The unmocked tool has no span, in either direction. Egma is not
     #    in its path and does not observe it, so a span naming it would
     #    mean the record had invented one.
     assert [span_attribute(call, "egma.tool.name") for call in calls] == [
         BOOKING_TOOL
-    ] * len(calls), "a tool egma answers for nothing landed on the record"
+    ] * len(calls), "a tool Egma answers for nothing landed on the record"
 
     call = calls[0]
     assert span_attribute(call, "egma.tool.arguments"), (
@@ -415,7 +415,7 @@ async def test_a_mock_tool_answers_a_real_agent_in_a_real_room(
     # 5. The declared delay really was spent, in the middle of a live
     #    conversation, and the record carries it as the call's own
     #    duration — the span's two ends being the moment the call reached
-    #    egma and the moment the answer went back. Bounded above as well
+    #    Egma and the moment the answer went back. Bounded above as well
     #    as below: a duration that only cleared the floor could be
     #    measuring anything.
     took = milliseconds_of(call)

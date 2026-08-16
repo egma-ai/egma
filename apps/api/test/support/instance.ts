@@ -25,7 +25,7 @@ import {
 } from "../../../../packages/db/test/support/clickhouse.ts";
 
 /**
- * A whole egma, running: a Postgres of its own, a ClickHouse of its own, the
+ * A whole Egma, running: a Postgres of its own, a ClickHouse of its own, the
  * real API, and the real Next process with its real rewrites — reachable at one
  * origin, exactly as a `docker compose up` leaves it.
  *
@@ -36,7 +36,7 @@ import {
  * and none of those three is a claim a mock can make.
  *
  * **One origin, and both halves know it.** Both ports are chosen up front,
- * because the API has to be told the address a browser reaches egma on and the
+ * because the API has to be told the address a browser reaches Egma on and the
  * web process has to be told where to forward the API's paths.
  *
  * **One at a time, and that is why every browser test is in one file.** A
@@ -169,7 +169,7 @@ export async function startInstance(
   });
   connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
 
-  // egma's own graders, on the shelf before anything can point at one — what
+  // Egma's own graders, on the shelf before anything can point at one — what
   // the real entry point writes in the same breath as applying its migrations.
   // Every project created afterwards is seeded with a copy of one, so an
   // instance that skipped this would refuse the first signup that reached it,

@@ -87,7 +87,7 @@ export type FakeRetellScript = {
    * Answer these paths with this status instead, and everything else normally.
    *
    * For the half-broken account, which is a real thing and not a contrived one:
-   * a listing that works and a second one that does not. What egma does when
+   * a listing that works and a second one that does not. What Egma does when
    * one read fails is a different question from what it does when the whole
    * service is down, and a fake that could only do the second could not ask it.
    */

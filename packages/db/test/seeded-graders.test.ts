@@ -121,7 +121,7 @@ afterAll(async () => {
 });
 
 describe("the project signup creates", () => {
-  it("is born judging, with an active copy of egma's expected-behaviors grader", async () => {
+  it("is born judging, with an active copy of Egma's expected-behaviors grader", async () => {
     const page = await listGraders(acme.auth);
 
     expect(page.items).toHaveLength(1);

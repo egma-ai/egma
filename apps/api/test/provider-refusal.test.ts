@@ -11,7 +11,7 @@ import { testConfig } from "./support/api.ts";
  * What the auth provider refuses, as the two doors that relay to it say it.
  *
  * Signup and the completing half of a password reset both post at the
- * provider's own endpoints and both have to turn its answer into egma's. **The
+ * provider's own endpoints and both have to turn its answer into Egma's. **The
  * claim here is that they say the same thing**: one refusal, one code, whichever
  * door met it. A code is what a client branches on and the only thing it may
  * branch on, so two doors spelling one refusal two ways would be two contracts
@@ -23,7 +23,7 @@ import { testConfig } from "./support/api.ts";
  * `NODE_ENV=production`, which is what the API's own container sets and what no
  * test does — so the answer a person clicking "Send the link" a fourth time
  * gets is unreachable here any other way. Everything in front of the stub is
- * egma's own code, driven over HTTP exactly as a browser drives it.
+ * Egma's own code, driven over HTTP exactly as a browser drives it.
  */
 
 /** Exactly what the provider's rate limiter writes, headers and all. */
@@ -76,7 +76,7 @@ async function bothDoors(answer: () => Response): Promise<FastifyInstance> {
 }
 
 /**
- * A link this egma would have minted, so the refusal under test is the
+ * A link this Egma would have minted, so the refusal under test is the
  * provider's rather than the seal's.
  */
 function aLiveLink(): string {
@@ -93,7 +93,7 @@ describe("a provider that is refusing for rate", () => {
   /**
    * Clicking "Send the link" a fourth time inside a minute is ordinary human
    * impatience, and the provider's default budget for that endpoint is three.
-   * A refusal is the honest answer; a 500 naming egma's own internals is not —
+   * A refusal is the honest answer; a 500 naming Egma's own internals is not —
    * it tells the person nothing they can act on, and it writes an error to the
    * operator's log for somebody behaving normally.
    */
@@ -112,7 +112,7 @@ describe("a provider that is refusing for rate", () => {
     // What happened, and what to do about it.
     expect(said.message).toMatch(/too many/i);
     expect(said.message).toMatch(/wait 42 seconds/i);
-    // Never egma's own machinery, which is what a 500 would have named.
+    // Never Egma's own machinery, which is what a 500 would have named.
     expect(said.message).not.toMatch(/auth provider|500/i);
     expect(asked.headers["retry-after"]).toBe("42");
   });
@@ -150,12 +150,12 @@ describe("a provider that is refusing for rate", () => {
 
 describe("a provider that is refusing what was typed", () => {
   /**
-   * The provider spells its codes `PASSWORD_TOO_SHORT`; every code egma has
+   * The provider spells its codes `PASSWORD_TOO_SHORT`; every code Egma has
    * ever shipped is snake_case. Relaying the vendor's exact spelling would make
    * each of these codes a vendor's word to keep, and a provider swap a breaking
    * change for every client rather than a change behind the seam.
    */
-  it("arrives in egma's spelling rather than the provider's", async () => {
+  it("arrives in Egma's spelling rather than the provider's", async () => {
     const door = await bothDoors(() =>
       refusesWith(400, "PASSWORD_TOO_SHORT", "Password is too short"),
     );
@@ -203,16 +203,16 @@ describe("a provider that is refusing what was typed", () => {
 
   /**
    * Egma's own refusals travel this same channel — the signup hooks throw them
-   * from inside the provider's call stack — already spelled egma's way. They
+   * from inside the provider's call stack — already spelled Egma's way. They
    * pass through untouched, which is what keeps `invitation_required` the word
    * the signup page reads.
    */
-  it("leaves egma's own codes exactly as egma wrote them", async () => {
+  it("leaves Egma's own codes exactly as Egma wrote them", async () => {
     const door = await bothDoors(() =>
       refusesWith(
         403,
         "invitation_required",
-        "this egma has been claimed. Ask an admin for an invitation.",
+        "this Egma has been claimed. Ask an admin for an invitation.",
       ),
     );
 
@@ -280,7 +280,7 @@ describe("a provider that is refusing what was typed", () => {
   });
 
   /**
-   * And an answer that named no code egma could relay — a proxy's own page, an
+   * And an answer that named no code Egma could relay — a proxy's own page, an
    * empty body, HTML. A client branching on `error` must never be handed a
    * sentence or an empty string wearing the shape of a promise.
    */

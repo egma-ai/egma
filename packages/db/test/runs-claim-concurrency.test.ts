@@ -22,7 +22,7 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  * is instance-wide. The claim is atomic — `SKIP LOCKED` underneath — so racing
  * claimants split it between them and never take the same conversation twice.
  * These tests race real transactions on a real Postgres, because the guarantee
- * under test is Postgres's locking, not egma's code.
+ * under test is Postgres's locking, not Egma's code.
  */
 
 let database: MigratedDatabase;

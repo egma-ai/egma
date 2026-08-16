@@ -2,8 +2,8 @@
  * The wizard's first screen, on a real terminal, in a repository that names no
  * platform.
  *
- * A bare command now reaches egma's own platform when nothing else names one,
- * so which egma this is stopped being something the developer chose. It is
+ * A bare command now reaches Egma's own platform when nothing else names one,
+ * so which Egma this is stopped being something the developer chose. It is
  * therefore something they have to be told — and told on the screen that takes
  * the keystroke of consent, before that address has been asked anything at all.
  * Both halves of that are terminal facts, so both are checked here: what the
@@ -56,7 +56,7 @@ function bareWizard(): TerminalRun {
   const args = [CLI_ENTRY, "--cwd", workspace.dir];
   expect(args).not.toContain("--url");
   const env = workspace.env({
-    // The stand-in for egma's own address. Nothing here dials the real one.
+    // The stand-in for Egma's own address. Nothing here dials the real one.
     EGMA_TEST_DEFAULT_URL: platform.url,
   });
 
@@ -72,7 +72,7 @@ function bareWizard(): TerminalRun {
 /**
  * The same bare command, in a repository that has committed its platform.
  *
- * The stand-in for egma's own address is left as the closed port every
+ * The stand-in for Egma's own address is left as the closed port every
  * workspace hands over, so the address this screen names can only have come out
  * of the committed file.
  */
@@ -100,7 +100,7 @@ async function wizardInBoundRepository(): Promise<TerminalRun> {
 }
 
 describe("the wizard's first screen", () => {
-  it("names the egma it will use, and says how to choose another", async () => {
+  it("names the Egma it will use, and says how to choose another", async () => {
     const terminal = bareWizard();
     try {
       const screen = await showingIn(
@@ -124,7 +124,7 @@ describe("the wizard's first screen", () => {
       // has sent nothing anywhere.
       expect(platform.records).toEqual([]);
 
-      // And the keystroke is what lets egma speak to it.
+      // And the keystroke is what lets Egma speak to it.
       terminal.write("\r");
       expect(
         await terminal.waitFor(() =>
@@ -141,11 +141,11 @@ describe("the wizard's first screen", () => {
    *
    * `--url <address>` naming another platform is refused, with the whole move
    * block under it, once a repository has committed one. Offering it here would
-   * be egma sending a developer to a command egma turns away — and offering it
+   * be Egma sending a developer to a command Egma turns away — and offering it
    * from the screen that takes the keystroke of consent is the worst place in
    * the product to be wrong about what happens next.
    */
-  it("offers a bound repository the edit it can make, not a flag egma refuses", async () => {
+  it("offers a bound repository the edit it can make, not a flag Egma refuses", async () => {
     const terminal = await wizardInBoundRepository();
     try {
       const screen = await showingIn(terminal, asOneLine, platform.url, "[enter] begin");

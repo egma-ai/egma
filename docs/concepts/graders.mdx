@@ -1,14 +1,14 @@
 ---
 title: "Graders: LLM-Based Judges for Voice Agent Behavior"
 sidebarTitle: "Graders"
-description: "Learn how egma's LLM-based graders evaluate conversations, how to configure params and scope, and the difference between required and diagnostic graders."
+description: "Learn how Egma's LLM-based graders evaluate conversations, how to configure params and scope, and the difference between required and diagnostic graders."
 ---
 
 A **Grader** is an LLM-based judge that reads a completed conversation and evaluates it against the expected behaviors in your tests. After each simulation ends, the grader claims the conversation, reads it turn by turn, and writes one verdict per expected behavior — each verdict carrying a rationale, the turns it cites, and the grader that produced it. The same grading engine runs on both simulation transcripts and production telemetry.
 
 ## The Grader Library
 
-egma ships a library of built-in graders, accessible at **/graders** in your dashboard. Each library entry defines a type of judgment — behavioral evaluation, latency measurement, tool-call checking, and so on — along with the form of parameters it accepts.
+Egma ships a library of built-in graders, accessible at **/graders** in your dashboard. Each library entry defines a type of judgment — behavioral evaluation, latency measurement, tool-call checking, and so on — along with the form of parameters it accepts.
 
 You activate a grader for your project by pressing **Use** on a library entry. This creates a **project grader**: a copy of that library entry with your chosen parameters, scope, and settings. Your project can have multiple copies of the same library entry, each configured differently.
 
@@ -44,7 +44,7 @@ The `required` flag is the most important grader setting. It controls whether a 
 </CardGroup>
 
 <Tip>
-Switching a grader from required to diagnostic (or back) takes effect immediately across all historical runs. The verdicts themselves do not change — only what they add up to changes, through the fold egma computes at read time. A run that failed on a grader alone reads as passed the moment you set it to diagnostic.
+Switching a grader from required to diagnostic (or back) takes effect immediately across all historical runs. The verdicts themselves do not change — only what they add up to changes, through the fold Egma computes at read time. A run that failed on a grader alone reads as passed the moment you set it to diagnostic.
 </Tip>
 
 ## Grader versioning
@@ -92,7 +92,7 @@ curl -X PATCH https://your-egma/api/graders/grd_01K… \
 ```
 
 <Warning>
-Send `params` as a properly typed JSON object, not as a string. Send `required` as `true` or `false`, not as `"true"` or `"false"`. egma refuses wrong types by name rather than silently coercing them — a mis-typed field would otherwise leave your grader configured differently from what you intended, with nothing in the response to say so.
+Send `params` as a properly typed JSON object, not as a string. Send `required` as `true` or `false`, not as `"true"` or `"false"`. Egma refuses wrong types by name rather than silently coercing them — a mis-typed field would otherwise leave your grader configured differently from what you intended, with nothing in the response to say so.
 </Warning>
 
 ## Switching a grader off
@@ -103,7 +103,7 @@ Deletion is a soft delete. Every verdict the grader already wrote remains readab
 
 ## Mock tools and grading
 
-The `egma/mock-tools.md` file in your repository controls what egma returns for your agent's tool calls during simulation. This is not a grader setting, but it is central to what graders are judging: the agent's behavior in a controlled world where tool responses are predictable.
+The `egma/mock-tools.md` file in your repository controls what Egma returns for your agent's tool calls during simulation. This is not a grader setting, but it is central to what graders are judging: the agent's behavior in a controlled world where tool responses are predictable.
 
 Individual tests can override the project-level mock tools by including a `## Mock tools` section in their own file. That override is versioned alongside the test — changing it mints a new test version — while the project's mock tools are unversioned and a push always replaces what was there.
 

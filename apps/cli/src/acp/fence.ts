@@ -25,7 +25,7 @@ import path from "node:path";
 
 /** What the agent is told when it reaches for a fenced file. */
 export const FENCE_MESSAGE =
-  "egma keeps .env files away from the coding agents it drives, so this file was not read. Work from the code and the committed example files instead, and ask the developer for any value you still need.";
+  "Egma keeps .env files away from the coding agents it drives, so this file was not read. Work from the code and the committed example files instead, and ask the developer for any value you still need.";
 
 /** What the developer sees when the fence stops the agent. */
 export function fenceStatusLine(target: string): string {

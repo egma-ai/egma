@@ -19,7 +19,7 @@ import {
 /**
  * What a developer's `connect` can count on.
  *
- * Registering an agent is the first write anybody makes against egma, and it
+ * Registering an agent is the first write anybody makes against Egma, and it
  * happens from a terminal, often through a coding agent, often twice because
  * the first attempt's answer was lost. So the promises tested here are the
  * ones that make that safe: the agent and the first way of reaching it are
@@ -232,7 +232,7 @@ describe("a connection payload its type will not take", () => {
    * rather than only at the seam below because the sentence a developer's
    * terminal prints is the one that came over the wire.
    */
-  it("names an unknown connection type, and what egma does know", async () => {
+  it("names an unknown connection type, and what Egma does know", async () => {
     api = await createApi("agents_unknown_type");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -245,7 +245,7 @@ describe("a connection payload its type will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"vapi" is not a connection type egma knows; expected one of retell, phone, livekit',
+        '"vapi" is not a connection type Egma knows; expected one of retell, phone, livekit',
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -329,7 +329,7 @@ describe("a connection payload its type will not take", () => {
 /**
  * The livekit type through the door a developer actually knocks on.
  *
- * A LiveKit connection is the first one where egma opens the room and the
+ * A LiveKit connection is the first one where Egma opens the room and the
  * customer's agent joins it, which is what makes an agent running on a laptop
  * reachable at all. Two things are asserted here rather than only at the seam:
  * the sentences, because the one a terminal prints is the one that came over
@@ -413,7 +413,7 @@ describe("a livekit connection", () => {
    * ask for a token instead of carrying the key pair that would mint one.
    *
    * What a read shows is the whole point of the shape. The endpoint is
-   * configuration and comes back; the headers that authenticate egma to it are
+   * configuration and comes back; the headers that authenticate Egma to it are
    * a credential and do not, hinted by their names — which is what a person
    * needs to recognise the connection, and is not a secret, where the last
    * four characters of a bearer token would be four real characters of one.
@@ -450,7 +450,7 @@ describe("a livekit connection", () => {
   });
 
   /**
-   * An endpoint on a private network can be reachable only from egma and open
+   * An endpoint on a private network can be reachable only from Egma and open
    * to it. The hardening recipe says not to leave it that way and says what an
    * open one means, but the door cannot see whose network the endpoint is on,
    * so it does not turn that advice into a rule it would be lying about.
@@ -559,7 +559,7 @@ describe("a livekit connection", () => {
       message:
         "a livekit connection mints its own tokens, so it needs the " +
         "project's apiKey and apiSecret. Send the pair, or name a " +
-        "tokenEndpoint in the config and egma will ask that endpoint for a " +
+        "tokenEndpoint in the config and Egma will ask that endpoint for a " +
         "token instead — which is the shape where the project's secret " +
         "never leaves the customer.",
     },
@@ -576,7 +576,7 @@ describe("a livekit connection", () => {
         "a livekit connection whose config names a tokenEndpoint asks that " +
         "endpoint for every token, so it holds no key pair of its own: its " +
         "credentials are the endpoint's auth headers, shaped { headers }. " +
-        "Send those, or drop the tokenEndpoint and egma will mint its own " +
+        "Send those, or drop the tokenEndpoint and Egma will mint its own " +
         "tokens from an apiKey and apiSecret.",
     },
     {
@@ -588,13 +588,13 @@ describe("a livekit connection", () => {
       message:
         "a livekit connection mints its own tokens, so it needs the " +
         "project's apiKey and apiSecret. Send the pair, or name a " +
-        "tokenEndpoint in the config and egma will ask that endpoint for a " +
+        "tokenEndpoint in the config and Egma will ask that endpoint for a " +
         "token instead — which is the shape where the project's secret " +
         "never leaves the customer.",
     },
     {
-      // The two URL keys pasted the wrong way round: egma POSTs to this one.
-      named: "a token endpoint in a scheme egma cannot post to",
+      // The two URL keys pasted the wrong way round: Egma POSTs to this one.
+      named: "a token endpoint in a scheme Egma cannot post to",
       slug: "bad_token_endpoint",
       payload: {
         config: {
@@ -698,7 +698,7 @@ describe("a livekit connection", () => {
   /**
    * The secret half, followed everywhere it could surface.
    *
-   * `apiSecret` is the one field on a livekit connection that egma can never
+   * `apiSecret` is the one field on a livekit connection that Egma can never
    * hand back and can never write down in the clear: it signs the tokens that
    * open rooms on the customer's own LiveKit project. So this drives a
    * registration that works and several that are refused, all carrying the
@@ -982,11 +982,11 @@ describe("registering the same vendor agent again", () => {
   });
 });
 
-describe("the vendor payload egma no longer keeps", () => {
+describe("the vendor payload Egma no longer keeps", () => {
   /**
    * Nothing ever read it back, and a stored copy of what lives at the provider
    * rots from the moment it is written. Dropping it silently would leave a
-   * client believing egma held something it does not, so a body carrying it is
+   * client believing Egma held something it does not, so a body carrying it is
    * refused by name.
    */
   it("is refused as an unknown key, loudly rather than ignored", async () => {
@@ -1008,10 +1008,10 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "egma no longer keeps what was pulled from the provider, so a " +
+        "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
         "description, project, connection; the agent's content stays at the " +
-        "provider, where egma reads it fresh rather than out of a copy that " +
+        "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });
     expect(await agentRowCount()).toBe(0);
@@ -1038,10 +1038,10 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "egma no longer keeps what was pulled from the provider, so a " +
+        "Egma no longer keeps what was pulled from the provider, so a " +
         'connection has no "pulled" key. Drop it and send name, type, ' +
         "modality, environment, config, credentials; the agent's content " +
-        "stays at the provider, where egma reads it fresh rather than out of " +
+        "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
   });
@@ -1454,7 +1454,7 @@ describe("the project a request names", () => {
       error: "invalid_request",
       message:
         "this organization holds more than one project and this credential " +
-        "names none, so egma cannot tell which project this is about. Send " +
+        "names none, so Egma cannot tell which project this is about. Send " +
         "project with the one you mean, or use a key minted for that project.",
     });
 
@@ -1558,7 +1558,7 @@ describe("the project a request names", () => {
   });
 });
 
-describe("a request egma cannot place", () => {
+describe("a request Egma cannot place", () => {
   it("is refused before anything in the body is read", async () => {
     api = await createApi("agents_not_authenticated");
     await signUp(api.app, "ada@acme.example", "Acme");
@@ -1567,11 +1567,11 @@ describe("a request egma cannot place", () => {
       error: "not_authenticated",
       message:
         "this request carried no session and no usable API key. " +
-        "Sign in, or send Authorization: Bearer with an egma key.",
+        "Sign in, or send Authorization: Bearer with an Egma key.",
     };
 
     // A body that would be refused twice over if anything read it: an unknown
-    // key and a connection egma would turn away. It hears about the key.
+    // key and a connection Egma would turn away. It hears about the key.
     const nobody = await post(
       "/api/agents",
       withKey("egma_sk_this-was-never-a-key-anybody-was-given"),

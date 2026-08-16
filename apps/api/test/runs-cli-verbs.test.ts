@@ -27,7 +27,7 @@ import {
 } from "./support/traces.ts";
 
 /**
- * `egma run`'s own seam — the client egma actually ships — against the real
+ * `egma run`'s own seam — the client Egma actually ships — against the real
  * API and a real Postgres.
  *
  * The rest of this suite drives the routes directly and asserts what a caller
@@ -107,7 +107,7 @@ const PHONE_IS_SET_UP = {
   text_to_speech_provider: "openai",
 } as const;
 
-/** A number egma dials, registered the way the wizard registers one. */
+/** A number Egma dials, registered the way the wizard registers one. */
 const PHONE_CONNECTION = {
   type: "phone",
   modality: "voice",
@@ -264,7 +264,7 @@ describe("starting a run from the terminal's own code", () => {
 
     // This was the `no_adapter` refusal until the phone adapter shipped. The
     // terminal's own code now gets a run back over a number, the same way it
-    // does over any other type egma conducts.
+    // does over any other type Egma conducts.
     expect(answer.kind).toBe("started");
     if (answer.kind !== "started") return;
     expect(answer.run.connectionType).toBe("phone");
@@ -278,7 +278,7 @@ describe("starting a run from the terminal's own code", () => {
    * client knows about — it is a 422 like any other, and the client's whole
    * job is to carry the sentence up unread. That is worth pinning here rather
    * than only at the route: a client that started branching on codes would
-   * pass the route's test and still leave a developer with egma's paraphrase
+   * pass the route's test and still leave a developer with Egma's paraphrase
    * of somebody else's decision.
    */
   it("carries a platform-with-no-carrier's refusal up as an answer, word for word", async () => {
@@ -308,7 +308,7 @@ describe("starting a run from the terminal's own code", () => {
     expect(answer.kind).toBe("refused");
     if (answer.kind !== "refused") return;
     expect(answer.reason).toBe(
-      "this egma has not been set up to place phone calls, so nothing was " +
+      "this Egma has not been set up to place phone calls, so nothing was " +
         "dialled and nothing was charged. It is missing the carrier trunk " +
         "and the source number and the text-to-speech provider. Whoever runs " +
         "this platform makes it ready with one command in the platform " +
@@ -330,12 +330,12 @@ describe("starting a run from the terminal's own code", () => {
     );
 
     // A refusal, not an exception: the terminal prints the sentence as it
-    // stands, because paraphrasing a decision it did not make would be egma
+    // stands, because paraphrasing a decision it did not make would be Egma
     // inventing an explanation.
     expect(answer).toEqual({
       kind: "refused",
       reason:
-        `there is no test version ${missing} on this egma. Push the test ` +
+        `there is no test version ${missing} on this Egma. Push the test ` +
         `first, or read the test and pin the version_id it names now.`,
     });
   });

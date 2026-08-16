@@ -1,16 +1,16 @@
-"""egma's half of the mock-tool exchange, held to the contract's bytes.
+"""Egma's half of the mock-tool exchange, held to the contract's bytes.
 
 The exchange has two halves written twice on purpose: this service's, and
 the SDK a customer installs in their own agent. Neither imports the
-other — a package inside somebody else's process must not drag egma's
+other — a package inside somebody else's process must not drag Egma's
 dependencies in with it — so nothing but a test can keep the two speaking
 the same language.
 
 ``packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json``
 is that language written down: the version, the two method names, the
 four refusal codes, both caps, and a canonical message for every shape
-either side sends. This suite asserts egma's constants against it and
-drives egma's own handlers with its exact bytes. The SDK's suite reads
+either side sends. This suite asserts Egma's constants against it and
+drives Egma's own handlers with its exact bytes. The SDK's suite reads
 the same file and asserts its own. A number or a shape that moves on one
 side now fails a hermetic test on that side, with the file naming what it
 was supposed to be.
@@ -82,7 +82,7 @@ def test_the_refusal_codes_are_the_contracts():
     assert UNKNOWN_TOOL == 902
     assert ANSWER_TOO_LARGE == 903
     assert UNSUPPORTED_PROTOCOL_VERSION == 904
-    # egma's own block, clear of the transport's, so a code always says
+    # Egma's own block, clear of the transport's, so a code always says
     # whose complaint it is.
     assert GOLDEN["reserved_for_the_transport"]["from"] > UNSUPPORTED_PROTOCOL_VERSION
 
@@ -96,7 +96,7 @@ def test_the_payload_cap_is_the_contracts():
 
 
 async def test_the_hello_reply_is_the_golden_bytes():
-    """The census in, the names egma answers for out — byte for byte.
+    """The census in, the names Egma answers for out — byte for byte.
 
     The fixture's census names two tools and this simulation answers for
     one of them, which is the ordinary case and the one where the reply
@@ -136,7 +136,7 @@ async def test_both_tool_replies_are_the_golden_bytes():
 async def test_a_call_with_no_arguments_at_all_is_read_the_same_way():
     """The shape a tool attached after the census arrives in: no
     ``arguments`` key at all, because an empty object would say the call
-    had none. egma answers it exactly as it answers a call that carried
+    had none. Egma answers it exactly as it answers a call that carried
     them."""
     seam = MockToolSeam((MockTool("check_calendar", {"answer": {"slots": []}}, 0),))
 
@@ -148,7 +148,7 @@ async def test_a_call_with_no_arguments_at_all_is_read_the_same_way():
 async def test_the_hello_reply_names_only_what_this_simulation_answers_for():
     """The census's second tool is absent from the reply, and a call to
     it is refused with the code the fixture names — which is the sentence
-    the whole exchange rests on: the far side wraps exactly what egma
+    the whole exchange rests on: the far side wraps exactly what Egma
     said, so anything else is a protocol error."""
     seam = MockToolSeam((MockTool("check_calendar", {"answer": {"slots": []}}, 0),))
     await seam.hello(message("hello_request"))

@@ -152,10 +152,10 @@ function unknownKeyIn(
     if (held.includes(key)) continue;
     if (key === "pulled") {
       return invalid(
-        `egma no longer keeps what was pulled from the provider, so ${what} ` +
+          `Egma no longer keeps what was pulled from the provider, so ${what} ` +
           'has no "pulled" key. Drop it and send ' +
           `${held.join(", ")}; the agent's content stays at the provider, ` +
-          "where egma reads it fresh rather than out of a copy that would go " +
+          "where Egma reads it fresh rather than out of a copy that would go " +
           "stale.",
       );
     }

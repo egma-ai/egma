@@ -1,4 +1,4 @@
-"""What egma would be told this agent has, and when.
+"""What Egma would be told this agent has, and when.
 
 The census is read off the agent object at the moment ``mockable`` runs,
 so two things have to be true of this file and neither is obvious from
@@ -35,7 +35,7 @@ def test_the_agent_carries_both_tools_before_anything_is_wrapped():
 def test_the_booking_shaped_tool_takes_the_day_it_is_asked_about():
     """The one parameter, by name.
 
-    egma copies this signature onto the stand-in it registers, because
+    Egma copies this signature onto the stand-in it registers, because
     LiveKit trims a call to the parameters the stand-in declares. So the
     name here is what lands on the record as the call's arguments — rename
     it and a live record's ``egma.tool.arguments`` changes shape with it.

@@ -1,7 +1,7 @@
 ---
-title: "Environment Variables Reference for egma Self-Hosting"
+title: "Environment Variables Reference for Egma Self-Hosting"
 sidebarTitle: "Environment Variables"
-description: "Complete reference for every environment variable egma reads on startup — required secrets, optional defaults, and the commands that generate safe values."
+description: "Complete reference for every environment variable Egma reads on startup — required secrets, optional defaults, and the commands that generate safe values."
 ---
 
 Copy `.env.example` to `.env` before you start the platform. Most variables have working defaults that are safe to leave alone. Ten do not — the deployment refuses to start if any one of them is absent, printing the name of the missing variable rather than guessing at a value. Those ten are your deployment's own secrets and its own address: a default for any of them would be a value every reader of this repository already holds.
@@ -84,15 +84,15 @@ All variables in this section have working defaults. Override them only when the
 
 ### PostgreSQL
 
-<ParamField path="POSTGRES_USER" type="string" default="egma">
+<ParamField path="POSTGRES_USER" type="string" default="Egma">
   The PostgreSQL role name used by the API.
 </ParamField>
 
-<ParamField path="POSTGRES_PASSWORD" type="string" default="egma">
+<ParamField path="POSTGRES_PASSWORD" type="string" default="Egma">
   Password for `POSTGRES_USER`. Change this — and narrow or close the bind address — before exposing port 5433 to any network.
 </ParamField>
 
-<ParamField path="POSTGRES_DB" type="string" default="egma">
+<ParamField path="POSTGRES_DB" type="string" default="Egma">
   The PostgreSQL database name.
 </ParamField>
 
@@ -106,15 +106,15 @@ All variables in this section have working defaults. Override them only when the
 
 ### ClickHouse
 
-<ParamField path="CLICKHOUSE_USER" type="string" default="egma">
+<ParamField path="CLICKHOUSE_USER" type="string" default="Egma">
   The ClickHouse user name. Holds every conversation trace your platform records.
 </ParamField>
 
-<ParamField path="CLICKHOUSE_PASSWORD" type="string" default="egma">
+<ParamField path="CLICKHOUSE_PASSWORD" type="string" default="Egma">
   Password for `CLICKHOUSE_USER`. Same caution as `POSTGRES_PASSWORD` applies.
 </ParamField>
 
-<ParamField path="CLICKHOUSE_DB" type="string" default="egma">
+<ParamField path="CLICKHOUSE_DB" type="string" default="Egma">
   The ClickHouse database name.
 </ParamField>
 
@@ -129,11 +129,11 @@ All variables in this section have working defaults. Override them only when the
 ### Object storage (S3 / MinIO)
 
 <ParamField path="EGMA_S3_BUCKET" type="string" default="egma-recordings">
-  The bucket recordings land in. Created on first start. Change this only if you are pointing egma at a bucket you already own.
+  The bucket recordings land in. Created on first start. Change this only if you are pointing Egma at a bucket you already own.
 </ParamField>
 
 <ParamField path="EGMA_S3_REGION" type="string" default="">
-  The AWS region included in object-store request signatures. Leave empty for MinIO, which ignores regions entirely. Set to the real region (for example, `us-east-1`) when pointing egma at Amazon S3 — the API refuses to start on an `amazonaws.com` endpoint without one rather than silently signing everything for the wrong region.
+  The AWS region included in object-store request signatures. Leave empty for MinIO, which ignores regions entirely. Set to the real region (for example, `us-east-1`) when pointing Egma at Amazon S3 — the API refuses to start on an `amazonaws.com` endpoint without one rather than silently signing everything for the wrong region.
 
   Both the simulator (upload) and the API (playback-link signing) read this value, so set it once here and both halves use the same region.
 </ParamField>
@@ -198,7 +198,7 @@ Email is entirely optional. Without it, invitation links are returned directly t
 
   ```bash
   # Example
-  EGMA_MAIL_FROM='egma <egma@example.com>'
+  EGMA_MAIL_FROM='Egma <egma@example.com>'
   ```
 </ParamField>
 

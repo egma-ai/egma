@@ -18,7 +18,7 @@
  *   nothing on the CLI's side can see coming — the file is perfectly readable
  *   and only the platform knows the answer — so it is the one this fixture has
  *   to be able to make.
- * - **Identifiers are egma's.** `tst_` and `tstv_`, minted by the same
+ * - **Identifiers are Egma's.** `tst_` and `tstv_`, minted by the same
  *   generator every table uses, so a pinned version id in a committed file is
  *   the same string it would be against a real instance.
  *
@@ -134,7 +134,7 @@ const EMPTY_BEHAVIOR = "an expected behavior needs to say something";
 const PERSONAS_NOT_A_LIST =
   "personas is the list of people who call about this test, by name. " +
   'Send it as a list of text, like ["impatient-caller"], or leave it ' +
-  "out and egma takes the project's default persona.";
+  "out and Egma takes the project's default persona.";
 
 const A_PERSONA_IS_TEXT =
   "a test names each persona as text — their name, or their prs_ " +
@@ -209,7 +209,7 @@ function overrideEntries(value: unknown): WrittenOverrides {
     if ("delay_ms" in written && typeof written.delay_ms !== "number") {
       return {
         refusal:
-          "delay_ms is how long egma holds an answer back, as a whole number " +
+          "delay_ms is how long Egma holds an answer back, as a whole number " +
           `of milliseconds, and one entry in mock_tools sent ${typeof written.delay_ms}.`,
       };
     }
@@ -366,7 +366,7 @@ export function testRoutes(options: {
         return {
           refusal: isId("prs", wanted)
             ? `there is no persona ${wanted} in this project`
-            : `egma has no persona called "${wanted}" in this project. Name a persona this project already has, or name none and egma takes the project's default.`,
+            : `Egma has no persona called "${wanted}" in this project. Name a persona this project already has, or name none and Egma takes the project's default.`,
         };
       }
       if (ids.includes(found.id)) {
@@ -663,7 +663,7 @@ export function testRoutes(options: {
               return refuse(
                 404,
                 "not_found",
-                `there is no test version ${wanted} on this egma. List the tests ` +
+                `there is no test version ${wanted} on this Egma. List the tests ` +
                   `to see the version each of them stands on now.`,
               );
             }
@@ -744,7 +744,7 @@ export function testRoutes(options: {
               return refuse(
                 404,
                 "not_found",
-                `there is no test ${request.params.testId ?? ""} on this egma. List ` +
+                `there is no test ${request.params.testId ?? ""} on this Egma. List ` +
                   `the tests to see what this project holds, or create this one ` +
                   `instead of editing it.`,
               );

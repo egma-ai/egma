@@ -583,7 +583,7 @@ describe("the longest delay, said in two places", () => {
  * The same agreement, one seam further out.
  *
  * An answer's size and a delay's length are each one number said in four
- * places written in two languages: this side's authoring gate, egma's own
+ * places written in two languages: this side's authoring gate, Egma's own
  * simulator, and the SDK a customer installs in their agent — with the
  * contract's seam fixture as the one document all of them read. None of the
  * four can import another, so nothing but a fixture and the tests either side

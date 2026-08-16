@@ -1,15 +1,15 @@
 /**
- * Text or phone: the choice that decides what egma creates.
+ * Text or phone: the choice that decides what Egma creates.
  *
  * A fake Retell speaking the shapes the real service answers with, the fixture
- * platform speaking egma's public API, and the headless UI in between. What is
+ * platform speaking Egma's public API, and the headless UI in between. What is
  * asserted is what a developer could check afterwards in their own project: how
  * many connections are on it, what each one holds, and — the whole reason this
  * exists — that the one they did not choose was never created.
  *
- * The rule under all of it: **egma creates the selected connection and nothing
+ * The rule under all of it: **Egma creates the selected connection and nothing
  * else.** A wizard that made both would put a connection in somebody's project
- * that they never asked for, and on the phone side that is a connection egma
+ * that they never asked for, and on the phone side that is a connection Egma
  * would dial a real telephone over.
  */
 
@@ -168,7 +168,7 @@ describe("choosing the phone", () => {
     expect(connected?.reach).toBe("phone");
     expect(connected?.number).toBe(DIALLED);
 
-    // One connection, and it is the phone one. The retell connection egma used
+    // One connection, and it is the phone one. The retell connection Egma used
     // to create whatever was chosen is the bug this whole ticket exists for.
     expect(platform.registered.connections).toHaveLength(1);
     const [connection] = platform.registered.connections;
@@ -183,7 +183,7 @@ describe("choosing the phone", () => {
     expect(connection?.credentialsHint).toBeNull();
     expect(platform.registered.sealed).toEqual([]);
 
-    // And the key never reached egma at all — it went to Retell, and stayed
+    // And the key never reached Egma at all — it went to Retell, and stayed
     // there, because a phone connection has nowhere to put one.
     const written = JSON.stringify(platform.registered);
     expect(written).not.toContain(KEY);
@@ -215,7 +215,7 @@ describe("choosing the phone", () => {
     const { ui } = await run({ reach: "phone" });
 
     expect(ui.record.asked).not.toContain("phone-number");
-    expect(ui.record.statuses).toContain(`◆ egma will dial ${DIALLED}.`);
+    expect(ui.record.statuses).toContain(`◆ Egma will dial ${DIALLED}.`);
   });
 
   it("reads the chosen number's own document before it registers it", async () => {
@@ -255,7 +255,7 @@ describe("choosing the phone", () => {
 
     expect(report).toEqual({
       kind: "failed",
-      reason: "nobody said which number egma should dial.",
+      reason: "nobody said which number Egma should dial.",
     });
     expect(platform.registered.agents).toHaveLength(0);
   });
@@ -302,7 +302,7 @@ describe("choosing neither", () => {
     expect(report).toEqual({
       kind: "failed",
       reason:
-        "nobody said whether egma should reach this agent by text or by phone, " +
+        "nobody said whether Egma should reach this agent by text or by phone, " +
         "so nothing was created.",
     });
     expect(platform.registered.agents).toHaveLength(0);
@@ -314,7 +314,7 @@ describe("choosing neither", () => {
     expect(await wroteAnEgmaFolder()).toBe(false);
   });
 
-  it("binds the repository at the moment egma is asked to create something", async () => {
+  it("binds the repository at the moment Egma is asked to create something", async () => {
     retell = await startFakeRetell(ACCOUNT);
 
     const { ui } = await run({ reach: "phone" });
@@ -375,7 +375,7 @@ describe("running it twice", () => {
   it("still takes the next name for a different voice agent called the same thing", async () => {
     // Two agents on the account with one name between them, which a real
     // account does produce. The second is a different agent and gets its own
-    // egma agent — the name loop this replaced was there for exactly this, and
+    // Egma agent — the name loop this replaced was there for exactly this, and
     // reading the refusal rather than working around it must not lose it.
     retell = await startFakeRetell({
       ...ACCOUNT,
@@ -410,7 +410,7 @@ describe("running it twice", () => {
    * The one case where neither signal answers, and the direction it goes.
    *
    * A phone-only agent names no vendor, so the numbers are the only way to tell
-   * whose it is — and here Retell will not list them. egma cannot identify the
+   * whose it is — and here Retell will not list them. Egma cannot identify the
    * agent, and the two ways of being wrong are not equally bad: a merged
    * results history cannot be unpicked, and a spare agent is one delete. So it
    * takes the next name.
@@ -449,7 +449,7 @@ describe("running it twice", () => {
    * neither has written anything when either looks. One then loses the
    * connection-name index — and the right answer for the loser is the
    * connection the winner just wrote, because that is what it was going to
-   * create. Telling them their egma is out of date would send a developer to
+   * create. Telling them their Egma is out of date would send a developer to
    * check a version when the only thing that happened is that their other
    * terminal got there first.
    */

@@ -8,7 +8,7 @@ import {
 import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
 
 /**
- * What egma asks of an auth provider, and the width of it.
+ * What Egma asks of an auth provider, and the width of it.
  *
  * The seam is the whole reason a vendor decision taken today is not permanent,
  * and a seam nobody states is a seam that grows. So its width is written down
@@ -54,7 +54,7 @@ describe("the seam", () => {
 
   /**
    * Adding a call to the interface without listing it above stops the build
-   * here rather than quietly widening what egma depends on. `satisfies` on the
+   * here rather than quietly widening what Egma depends on. `satisfies` on the
    * list catches a name that is not in the interface; this catches the other
    * direction.
    */
@@ -70,8 +70,8 @@ describe("the seam", () => {
   });
 
   /**
-   * Written down and also true. The list above states what egma depends on;
-   * this says the provider egma actually runs answers all of it, so a call that
+   * Written down and also true. The list above states what Egma depends on;
+   * this says the provider Egma actually runs answers all of it, so a call that
    * exists only on paper cannot sit there unnoticed until a terminal needs it.
    */
   it("is implemented in full by the provider this instance runs", async () => {
@@ -93,7 +93,7 @@ describe("the seam", () => {
 });
 
 describe("the provider's footprint on the schema", () => {
-  /** Every table egma's own migrations create, and the whole of it. */
+  /** Every table Egma's own migrations create, and the whole of it. */
   const EGMA_TABLES = [
     "account",
     "agent",
@@ -148,8 +148,8 @@ describe("the provider's footprint on the schema", () => {
     // The provider ships an organization plugin whose tables are these. It is
     // not enabled: its authorization is organization-scoped and resource-blind,
     // and `teamMember` — the level that would have to carry a project role —
-    // is the one table in it that takes no additional fields. So egma owns
-    // `organization`, `project` and `membership`, with egma's own foreign keys.
+    // is the one table in it that takes no additional fields. So Egma owns
+    // `organization`, `project` and `membership`, with Egma's own foreign keys.
     const { rows } = await api.database.sql<{ table_name: string }>(
       `select table_name from information_schema.tables
         where table_schema = 'public'

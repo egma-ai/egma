@@ -222,7 +222,7 @@ describe("a test's expected behaviors", () => {
     const fetched = await getTest(actingAsAcme(), created.id);
     expect(fetched?.expectedBehaviors).toEqual(["confirms the new time back"]);
 
-    // And the next edit writes the shape egma writes now, without the caller
+    // And the next edit writes the shape Egma writes now, without the caller
     // having said anything about behaviors at all.
     const edited = await editTest(actingAsAcme(), created.id, {
       scenario: "They want to move Thursday afternoon.",

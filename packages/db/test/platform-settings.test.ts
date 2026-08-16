@@ -287,7 +287,7 @@ describe("a deployment that serves more than one organization", () => {
    * simulations at an account nobody else agreed to.
    *
    * Whose settings these are on such a deployment is a real question and it is
-   * deliberately not answered yet. Until it is, egma refuses everybody rather
+   * deliberately not answered yet. Until it is, Egma refuses everybody rather
    * than picking one of them — the same guard the platform's own judge is
    * behind, which is only ever given away on a single-organization deployment.
    */
@@ -362,7 +362,7 @@ describe("a write that cannot be acted on", () => {
         // here rather than written and forgotten.
         { not_a_setting: "anything" } as unknown as PlatformSettingValues,
       ),
-    ).rejects.toThrow(/not a platform setting egma knows/u);
+    ).rejects.toThrow(/not a platform setting Egma knows/u);
   });
 
   it("refuses an empty value, because clearing a setting is not writing one", async () => {

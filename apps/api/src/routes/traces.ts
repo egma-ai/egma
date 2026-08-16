@@ -147,7 +147,7 @@ function decompressed(
   if (encoding === "" || encoding === "identity") return body;
   if (encoding !== "gzip") {
     throw new NotOtlpError(
-      `this body says it is ${encoding}-encoded, and egma reads identity and gzip.`,
+      `this body says it is ${encoding}-encoded, and Egma reads identity and gzip.`,
     );
   }
 
@@ -350,7 +350,7 @@ async function simulatorExport(
       encoding,
       400,
       RPC_INVALID_ARGUMENT,
-      `there is no simulation ${unknown} on this egma, so its spans have ` +
+        `there is no simulation ${unknown} on this Egma instance, so its spans have ` +
         "nowhere to file. A simulation id arrives inside a claimed spec and " +
         "is echoed verbatim — check the resource attribute against the spec, " +
         "and check the simulator is pointed at the deployment that handed " +
@@ -527,7 +527,7 @@ export async function traceRoutes(
       error: "not_authenticated",
       message:
         "this request carried no session and no usable API key. " +
-        "Sign in, or send Authorization: Bearer with an egma key.",
+        "Sign in, or send Authorization: Bearer with an Egma key.",
     });
   });
 

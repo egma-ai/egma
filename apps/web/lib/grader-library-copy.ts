@@ -24,20 +24,20 @@
 export const LIBRARY = {
   navigation: "Graders",
   title: "Grader library",
-  lead: "The graders egma ships, and the ones your team writes. Every project starts with egma's.",
+  lead: "The graders Egma ships, and the ones your team writes. Every project starts with Egma's.",
   loading: "Loading…",
   signedOut: "Sign in first",
   signedOutLead: "This page is about your project.",
   signIn: "Sign in",
-  setUp: "Set up egma",
-  unreachable: "egma could not be reached. Is the API running?",
+  setUp: "Set up Egma",
+  unreachable: "Egma could not be reached. Is the API running?",
   /**
    * An empty shelf is a deployment that has not finished starting, not a team
    * with nothing set up: egma writes its own graders on every boot. Saying so
    * is what stops somebody looking for a button that does not exist.
    */
   empty:
-    "The library is empty, which egma never leaves it. Its own graders are " +
+    "The library is empty, which Egma never leaves it. Its own graders are " +
     "written at start-up, so a platform still booting shows nothing here for " +
     "a moment. Reload in a few seconds.",
   counted: (howMany: number): string =>
@@ -98,7 +98,7 @@ export const USE = {
   seeRunning: "See the running graders",
   /** A refusal the platform did not explain — the network, or a proxy. */
   unreachable:
-    "egma could not be reached, so nothing was switched on. Is the API running?",
+    "Egma could not be reached, so nothing was switched on. Is the API running?",
 } as const;
 
 /**
@@ -124,7 +124,7 @@ export const TYPES: Readonly<Record<string, string>> = {
  * flag, which is why there is no third word here for anybody to set.
  */
 export const OWNERS: Readonly<Record<string, string>> = {
-  egma: "egma",
+  egma: "Egma",
   organization: "Your team",
 };
 

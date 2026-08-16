@@ -264,7 +264,7 @@ class TwilioAccount {
     throw new CarrierError(
       `this Twilio account holds no number ${number}. It has to be one this ` +
         "account already owns, in E.164 (+15551234567), because a carrier will " +
-        "not place a call from a number somebody else holds — and egma never " +
+        "not place a call from a number somebody else holds — and Egma never " +
         "buys, ports or registers one on your behalf. Buy the number in the " +
         "Twilio console and run this again.",
     );
@@ -430,7 +430,7 @@ export async function planCarrier(
     sid: existingCredential === null ? null : String(existingCredential["sid"]),
     detail:
       existingCredential === null
-        ? `create a SIP credential for ${name} with a password egma mints`
+        ? `create a SIP credential for ${name} with a password Egma mints`
         : `set a new password on the existing SIP credential for ${name} — twilio ` +
           "shows a password once and never again, so a re-run has to mint another",
   });

@@ -135,7 +135,7 @@ function delayIn(body: Body): WrittenDelay {
   if (typeof body.delay_ms !== "number") {
     return {
       refusal:
-        "delay_ms is how long egma holds this answer back, as a whole number " +
+        "delay_ms is how long Egma holds this answer back, as a whole number " +
         `of milliseconds, and this request sent ${typeof body.delay_ms}.`,
     };
   }
@@ -189,7 +189,7 @@ function agentEntries(value: unknown): NamedAgents {
  */
 function noSuchMockTool(mockToolId: string): string {
   return (
-    `there is no mock tool ${mockToolId} on this egma. List the mock tools ` +
+        `there is no mock tool ${mockToolId} on this Egma instance. List the mock tools ` +
     `to see what this project answers for.`
   );
 }

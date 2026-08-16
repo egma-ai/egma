@@ -118,8 +118,8 @@ function writes(name: string): FakeStep[] {
  * The wizard, walked all the way through the gate, with the run created and
  * every simulation queued on the platform.
  *
- * The coding agent is named as well as commanded: the command is what egma
- * starts, and the name is what egma calls it — which is what decides where a
+ * The coding agent is named as well as commanded: the command is what Egma
+ * starts, and the name is what Egma calls it — which is what decides where a
  * skill for it would go.
  */
 async function toTheRun(cols = 100): Promise<TerminalRun> {
@@ -175,8 +175,8 @@ async function toTheRun(cols = 100): Promise<TerminalRun> {
   run.write(`${KEY}\r`);
 
   // Text or phone. Not this check's subject, and not skippable
-  // either: egma never picks one of the two for a developer.
-  await showing(run, "How should egma reach this agent?");
+  // either: Egma never picks one of the two for a developer.
+  await showing(run, "How should Egma reach this agent?");
   run.write("\r");
 
   await showing(run, "Do you already have test cases", "[n] none");
@@ -231,12 +231,12 @@ describe("the run screen", () => {
     expect(landed).toContain("waiting 2");
     // The other two are still moving, and the screen says the suite is not
     // waiting on this terminal.
-    expect(landed).toContain("The suite keeps running on egma");
+    expect(landed).toContain("The suite keeps running on Egma");
   });
 
   /**
    * The glossary rule, on the screen a developer actually reads: four verdicts,
-   * four words. A test egma could not run is never drawn as a test that failed.
+   * four words. A test Egma could not run is never drawn as a test that failed.
    */
   it("draws skipped and errored as themselves, never as failed", async () => {
     const run = await toTheRun();
@@ -289,7 +289,7 @@ describe("the run screen", () => {
       verdict: "passed",
     });
 
-    await showing(run, "Install the egma skill into Claude Code", ...OFFER_HINTS);
+    await showing(run, "Install the Egma skill into Claude Code", ...OFFER_HINTS);
 
     // On the platform, the suite is exactly where it was: one judged, two not.
     const held = platform.running.simulationsOf();
@@ -302,7 +302,7 @@ describe("the skill offer and what is left behind", () => {
   /**
    * Wide, because the lines under check here are lines rather than sentences.
    * A terminal wraps whatever will not fit, and a check that read a wrapped
-   * line as two would be checking the terminal's width and not egma's output.
+   * line as two would be checking the terminal's width and not Egma's output.
    */
   const WIDE = 200;
 
@@ -319,7 +319,7 @@ describe("the skill offer and what is left behind", () => {
       verdict: "passed",
     });
 
-    await showing(run, "Install the egma skill into Claude Code", ...OFFER_HINTS);
+    await showing(run, "Install the Egma skill into Claude Code", ...OFFER_HINTS);
     return run;
   }
 

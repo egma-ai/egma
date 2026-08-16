@@ -20,7 +20,7 @@
  *    configured platform answer "nothing to do" rather than doing it all again.
  * 3. **A plan writes nothing, anywhere**, and asks nobody for anything.
  * 4. **No supplied secret reaches the terminal, the JSON, the receipt or the
- *    bootstrap file egma writes.** Sentinel values, swept for by hand.
+ *    bootstrap file Egma writes.** Sentinel values, swept for by hand.
  * 5. **The refusals name the problem**: a platform that did not answer, a
  *    platform that answered no, and a machine holding no key for it.
  */
@@ -78,7 +78,7 @@ const EVERYTHING_HELD = {
   persona_model: "gpt-5.6-terra",
   persona_model_key: MODEL_KEY,
   // A caller on a live line does not pause to reason, so the interview's own
-  // suggestion turns it off — the one model setting egma does suggest a value
+  // suggestion turns it off — the one model setting Egma does suggest a value
   // for, because it is a behavior rather than a provider's model name.
   persona_model_reasoning_effort: "none",
   speech_to_text_provider: "openai_realtime",
@@ -189,7 +189,7 @@ describe("egma self-host setup", () => {
     // The three the simulator has a working default for are not demanded of a
     // run with nobody watching, and readiness does not wait for them either.
     // Each leg answers with its own provider's default, which is the whole
-    // reason egma does not store a second opinion about a model's name here.
+    // reason Egma does not store a second opinion about a model's name here.
     expect(answered.settings_written).not.toContain("speech_to_text_model");
     expect(answered.settings_written).not.toContain("text_to_speech_model");
     expect(answered.settings_written).not.toContain("text_to_speech_voice");
@@ -376,7 +376,7 @@ describe("egma self-host setup", () => {
     });
 
     expect(run.code).toBe(4);
-    expect(run.stderr).toContain(`egma at ${address} did not answer`);
+    expect(run.stderr).toContain(`Egma at ${address} did not answer`);
     expect(run.stderr).toContain("that the instance is running");
     // Nothing was asked of anybody's carrier on the way to finding out.
     expect(twilio.requests).toEqual([]);
@@ -406,7 +406,7 @@ describe("egma self-host setup", () => {
     // role they hold, and the kind of deployment this is.
     const refusal =
       "the settings of this platform are read and changed by an organization owner, " +
-      "and only while this egma serves one organization.";
+      "and only while this Egma serves one organization.";
     platform = await startPlatform({ refuses: { status: 403, message: refusal } });
     await workspace.signIn(platform);
 
@@ -466,7 +466,7 @@ describe("egma self-host setup", () => {
     }
 
     // A receipt is a document people commit and paste into issues, so no secret
-    // reaches one — including the SIP password egma minted, which is named as
+    // reaches one — including the SIP password Egma minted, which is named as
     // existing and never written down.
     const receipts = await readdir(path.join(workspace.dir, ".egma-platform", "receipts"));
     expect(receipts).toHaveLength(1);
@@ -481,7 +481,7 @@ describe("egma self-host setup", () => {
     expect(receipt).toContain(EXISTING_TRUNK.sid);
     for (const password of twilio.passwords) expect(receipt).not.toContain(password);
 
-    // And the one file egma still writes here holds no provider key at all,
+    // And the one file Egma still writes here holds no provider key at all,
     // because no provider key is this command's to keep.
     const bootstrap = path.join(workspace.dir, ".egma-platform", "platform.env");
     const text = await readFile(bootstrap, "utf8");
@@ -504,7 +504,7 @@ describe("egma self-host setup", () => {
 
     expect(run.code).toBe(4);
     expect(run.stdout).toContain("holds no number");
-    expect(run.stdout).toContain("egma never buys, ports or registers one");
+    expect(run.stdout).toContain("Egma never buys, ports or registers one");
     // Nothing was created on the way to finding out — at the carrier or here.
     expect(twilio.writes).toEqual([]);
     expect(platform.written).toEqual([]);

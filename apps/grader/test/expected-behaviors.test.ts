@@ -246,7 +246,7 @@ describe("a judge call that fails after its retries", () => {
   /**
    * The reason the fan-out is N independent calls rather than one. A judge that
    * fell over on the second behavior must not cost the first and third their
-   * answers, and the row it leaves behind must say egma could not make the
+   * answers, and the row it leaves behind must say Egma could not make the
    * check rather than that the agent failed it.
    */
   it("errors that behavior alone and leaves its siblings' verdicts intact", async () => {
@@ -400,7 +400,7 @@ describe("a grading that fell over before it could ask anything", () => {
     ]);
     // And this grader's own folded answer is `passed` — nothing errored is left
     // under it for the fold to prefer. (The conversation as a whole is still
-    // `errored`, because the project's latency copy is on it and egma does not
+    // `errored`, because the project's latency copy is on it and Egma does not
     // compute that one yet; that is a different grader's row and not this
     // grader's business.)
     const seeded = await theSeededGrader(world);

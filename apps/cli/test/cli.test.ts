@@ -1,5 +1,5 @@
 /**
- * `egma` as a developer runs it: the built entry point, in a real subprocess.
+ * `Egma` as a developer runs it: the built entry point, in a real subprocess.
  */
 
 import { execFile, spawn } from "node:child_process";
@@ -30,7 +30,7 @@ let platform: Platform;
  *
  * `--url` on every invocation rather than a shell that names one once: a flag
  * on the command is the only way to name a platform, so a check that reached
- * this one any other way would be checking something egma does not offer.
+ * this one any other way would be checking something Egma does not offer.
  */
 async function egma(
   args: readonly string[],
@@ -49,7 +49,7 @@ async function egma(
   }
 }
 
-describe("the egma command", () => {
+describe("the Egma command", () => {
   let workspace: Workspace;
 
   beforeEach(async () => {
@@ -82,7 +82,7 @@ describe("the egma command", () => {
     });
 
     expect(refused.code).toBe(1);
-    expect(refused.stderr).toContain("egma needs Node 22 or newer");
+    expect(refused.stderr).toContain("Egma needs Node 22 or newer");
     expect(refused.stderr).toContain("18.20.4");
     // The refusal came first: not even --help was answered.
     expect(refused.stderr).not.toContain("Usage:");
@@ -108,12 +108,12 @@ describe("the egma command", () => {
 
     // The test seams are not product surface, so neither is offered: not the
     // one that starts a scripted coding agent, and not the one that stands an
-    // address in for egma's own.
+    // address in for Egma's own.
     expect(help.stdout).not.toContain("-- <command>");
     expect(help.stdout).not.toContain("EGMA_TEST_DEFAULT_URL");
 
     // One explicit way to name a platform, and it is offered as one. The
-    // whole-shell variable that used to sit beside it is a setting egma no
+    // whole-shell variable that used to sit beside it is a setting Egma no
     // longer has, and offering a setting that does nothing is worse than
     // offering none.
     expect(help.stdout).toContain("--url <address>");
@@ -138,7 +138,7 @@ describe("the egma command", () => {
   });
 
   it("refuses to run the wizard where there is no terminal to agree in", async () => {
-    // Not a terminal: this is `npx egma | tee log`, where the keystroke that
+    // Not a terminal: this is `npx Egma | tee log`, where the keystroke that
     // means yes can never be pressed.
     const result = await egma(["--cwd", workspace.dir], workspace);
 
@@ -187,7 +187,7 @@ describe("the egma command", () => {
     expect(lines).toContain("Paste your Retell API key (Retell dashboard → Settings → API keys).");
     expect(result.code).toBe(1);
     expect(lines.at(-1)).toBe(
-      "egma could not finish: no Retell key was given, so there is nothing to test.",
+      "Egma could not finish: no Retell key was given, so there is nothing to test.",
     );
   });
 
@@ -242,7 +242,7 @@ describe("the egma command", () => {
 
     expect(result.code).toBe(1);
     expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(
-      "egma found no voice agent to test. Run egma again where your agent is defined.",
+      "Egma found no voice agent to test. Run egma again where your agent is defined.",
     );
   });
 

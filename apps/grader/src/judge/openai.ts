@@ -170,7 +170,7 @@ function answerOf(said: unknown): JudgeAnswer {
   const decision = DECISIONS.find((known) => known === fields["decision"]);
   if (decision === undefined) {
     throw new JudgeRefused(
-      `the judge model answered a decision egma does not know; expected one of ${DECISIONS.join(", ")}`,
+      `the judge model answered a decision Egma does not know; expected one of ${DECISIONS.join(", ")}`,
       false,
     );
   }

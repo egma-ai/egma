@@ -1,16 +1,16 @@
 ---
 title: "Telemetry: Ingest OTLP Traces from Your Live Agents"
 sidebarTitle: "Telemetry"
-description: "Send OTLP traces from your production voice agents to egma, then read them as turn-by-turn transcripts and run graders against them."
+description: "Send OTLP traces from your production voice agents to Egma, then read them as turn-by-turn transcripts and run graders against them."
 ---
 
-egma ingests OpenTelemetry traces from your live production voice agents over OTLP/HTTP. Once you configure your agent to export spans to egma, every conversation shows up in the dashboard as a structured transcript — turns in order, tool calls expanded, latency measurements computed — exactly like a simulation trace, but filed by your own agent rather than egma's simulator.
+Egma ingests OpenTelemetry traces from your live production voice agents over OTLP/HTTP. Once you configure your agent to export spans to Egma, every conversation shows up in the dashboard as a structured transcript — turns in order, tool calls expanded, latency measurements computed — exactly like a simulation trace, but filed by your own agent rather than Egma's simulator.
 
 The same grading engine that evaluates simulations can also evaluate production traces. You control the scope on each grader.
 
 ## How it works
 
-Your agent sends an OTLP export to `POST /v1/traces` on the egma API. egma stores the spans, assembles them into a transcript, and makes the conversation available at **/traces** in the dashboard. If any of your graders have `scope: production` or `scope: both`, the grader picks up the conversation and writes verdicts for it automatically.
+Your agent sends an OTLP export to `POST /v1/traces` on the Egma API. Egma stores the spans, assembles them into a transcript, and makes the conversation available at **/traces** in the dashboard. If any of your graders have `scope: production` or `scope: both`, the grader picks up the conversation and writes verdicts for it automatically.
 
 The ingest endpoint speaks standard OTLP/HTTP — both protobuf (`application/x-protobuf`) and JSON (`application/json`) encodings are accepted. Any standard OpenTelemetry SDK can send to it without modification.
 
@@ -108,17 +108,17 @@ Failed steps are marked on the turn before you open it, so you can scan for prob
 
 ## Simulation traces vs. production traces
 
-egma stores traces from two sources, and the dashboard distinguishes them:
+Egma stores traces from two sources, and the dashboard distinguishes them:
 
 | Source | Filed by | `simulation_id` | Recording |
 |---|---|---|---|
-| **Simulation** | egma's own simulator | Present — links to the run | Available if voice modality |
+| **Simulation** | Egma's own simulator | Present — links to the run | Available if voice modality |
 | **Production** | Your live agent | `null` | Not available |
 
-A simulation trace and a production trace are the same shape at rest and arrive over the same ingest path. The difference is who filed them: egma's own simulator files traces on behalf of a simulation it conducted, while your agent files them using your project API key.
+A simulation trace and a production trace are the same shape at rest and arrive over the same ingest path. The difference is who filed them: Egma's own simulator files traces on behalf of a simulation it conducted, while your agent files them using your project API key.
 
 <Note>
-`simulation_id` is only returned for traces egma actually conducted. Your production traces will always show `simulation_id: null`.
+`simulation_id` is only returned for traces Egma actually conducted. Your production traces will always show `simulation_id: null`.
 </Note>
 
-The recording player appears only on simulation traces that used a voice connection. Production traces are shown as text transcripts regardless of whether your agent used speech — egma did not conduct the call and has no access to the audio.
+The recording player appears only on simulation traces that used a voice connection. Production traces are shown as text transcripts regardless of whether your agent used speech — Egma did not conduct the call and has no access to the audio.

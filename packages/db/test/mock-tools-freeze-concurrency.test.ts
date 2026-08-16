@@ -23,7 +23,7 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  * as long as the run is kept: a mock tool re-scoped from one agent to another
  * mid-freeze would be frozen serving the new agent the old answer.
  *
- * The guarantee under test is Postgres's, not egma's arithmetic: one statement
+ * The guarantee under test is Postgres's, not Egma's arithmetic: one statement
  * sees one snapshot. So these tests reach past the package to the freeze's own
  * seam — it takes its `Queryable` as an argument — and hand it a connection that
  * counts statements and can commit an edit between them. The freeze is given

@@ -4,7 +4,7 @@ sidebarTitle: "API Keys"
 description: "Create API keys for programmatic access, list your active keys, and revoke any key instantly. The secret is shown exactly once at creation time."
 ---
 
-API keys let you authenticate programmatically against egma's API — from CI pipelines, agent SDKs, telemetry exporters, and automation scripts. Each key is scoped to either your whole organization or to a single project. Keys inherit the role of the user who minted them, so a `viewer`'s key reads but cannot write.
+API keys let you authenticate programmatically against Egma's API — from CI pipelines, agent SDKs, telemetry exporters, and automation scripts. Each key is scoped to either your whole organization or to a single project. Keys inherit the role of the user who minted them, so a `viewer`'s key reads but cannot write.
 
 Every role may mint and revoke their own keys. Admins can see and revoke all keys in the organization.
 
@@ -85,7 +85,7 @@ curl -X POST https://your-egma-instance/api/keys \
 ```
 
 <Note>
-  The `secret` field is returned only once, at creation time. egma stores only a hash. If you lose the secret, revoke the key and mint a new one.
+  The `secret` field is returned only once, at creation time. Egma stores only a hash. If you lose the secret, revoke the key and mint a new one.
 </Note>
 
 ---

@@ -17,7 +17,7 @@ import { capturedRequests, type CapturedRequest } from "./support/fixture.ts";
  * conversation has ended is read off telemetry, and the reading is the thing
  * that can be wrong: the root span arrives alone in the fourteenth flush, thirty
  * seconds after the caller said goodbye, and no assertion written against a
- * hand-made body would have noticed if egma had decided a trace was over on the
+ * hand-made body would have noticed if Egma had decided a trace was over on the
  * first one.
  *
  * It is a file of its own rather than more assertions beside the ingest tests,
@@ -172,7 +172,7 @@ describe("a captured conversation arriving on a project's key", () => {
     // widens the window at both ends before it uses it.
     expect(job?.first_span_at.toISOString()).toBe("2026-08-02T18:04:40.281Z");
     expect(job?.last_span_at.toISOString()).toBe("2026-08-02T18:05:53.771Z");
-    // When egma last *heard* about the trace, which is a different fact: a trace
+    // When Egma last *heard* about the trace, which is a different fact: a trace
     // backfilled an hour late would look silent the moment it landed if the two
     // were confused.
     expect(job?.last_seen_at.getTime()).toBeGreaterThan(

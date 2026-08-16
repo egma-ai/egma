@@ -127,7 +127,7 @@ describe("a list request that does not say when", () => {
    * `new Date('+275760-09-12T00:00:00Z')` is a perfectly good JavaScript date,
    * and `toISOString` writes its year with a sign and six digits — so a window
    * naming one used to reach ClickHouse as a timestamp literal that was not a
-   * timestamp, and the caller was told their query was a fault of egma's. It is
+   * timestamp, and the caller was told their query was a fault of Egma's. It is
    * a window, it is refused, and it is refused with the reason.
    */
   it("is refused when it names a year the trace store cannot hold", async () => {
@@ -570,7 +570,7 @@ describe("filtering a list to one project", () => {
  * The README says both of them read traces, and the plumbing is shared — the
  * same hook resolves a key or a cookie into the same context before either
  * route runs — but "shared" is a claim about code that only a request can
- * settle. A signed-in browser is how egma's own dashboard will read this, so it
+ * settle. A signed-in browser is how Egma's own dashboard will read this, so it
  * is the path a regression would be found in last.
  *
  * A session acts in the project signup made, which is why this ingests through

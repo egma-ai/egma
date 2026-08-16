@@ -431,7 +431,7 @@ export async function graderRoutes(
       return invalid(
         reply,
         "library_id names the grader on the shelf to start judging with, as " +
-          "its grl_ identifier. Read the library to see what egma ships.",
+        "its grl_ identifier. Read the library to see what Egma ships.",
       );
     }
 

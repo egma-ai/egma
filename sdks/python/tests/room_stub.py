@@ -1,18 +1,18 @@
-"""A room with egma in it, on this machine — what CI holds the SDK against.
+"""A room with Egma in it, on this machine — what CI holds the SDK against.
 
 The customer's side of the exchange is proved with no LiveKit server, no
 project, no worker and no network. What this stands in for is exactly the
-one place the SDK reaches a LiveKit — the call it makes to egma's
+one place the SDK reaches a LiveKit — the call it makes to Egma's
 participant — and nothing else. Everything above that is the SDK's own
 code: reading the metadata, building the census, standing the couriers,
 reading a reply, falling open.
 
 Two things it can be, and a test picks by what it builds:
 
-- **egma answering** — a script of replies, keyed by method. The calls it
+- **Egma answering** — a script of replies, keyed by method. The calls it
   received are on the record, in order, so a test can say the census went
   first.
-- **egma absent** — every call refused with the transport's own
+- **Egma absent** — every call refused with the transport's own
   ``RECIPIENT_NOT_FOUND``, which is the whole of what a production room
   looks like from in here.
 
@@ -33,7 +33,7 @@ from livekit.rtc import RpcError
 from egma import seam
 
 EGMA_IDENTITY = "egma-persona"
-"""Who egma is in the room. The name is the address and the whole of the
+"""Who Egma is in the room. The name is the address and the whole of the
 authorisation: a room with nobody by it has nobody to ask."""
 
 A_SIMULATION = "sim-sdk-0001"
@@ -41,7 +41,7 @@ A_SIMULATION = "sim-sdk-0001"
 
 @dataclass(frozen=True)
 class Asked:
-    """One call the SDK made, as egma received it."""
+    """One call the SDK made, as Egma received it."""
 
     method: str
     identity: str
@@ -84,13 +84,13 @@ class StubParticipant:
 class StubRoom:
     """A room, from the seat the SDK sits in.
 
-    ``mocked_tools`` is what egma answers a census with. ``answers`` is
+    ``mocked_tools`` is what Egma answers a census with. ``answers`` is
     what it answers each tool call with, by name, already in the tagged
     shape the wire carries — ``{"answer": …}`` or ``{"error": …}`` — so a
-    test writes the same bytes egma would send.
+    test writes the same bytes Egma would send.
 
     ``refuses_with`` puts a code in front of everything instead, which is
-    how an absent egma and every honest refusal are both said.
+    how an absent Egma and every honest refusal are both said.
     """
 
     mocked_tools: tuple[str, ...] = ()
@@ -161,7 +161,7 @@ def egma_metadata(
     simulation_id: str = A_SIMULATION,
     protocol_version: object = seam.PROTOCOL_VERSION,
 ) -> str:
-    """The dispatch metadata egma really sends, byte for byte in shape.
+    """The dispatch metadata Egma really sends, byte for byte in shape.
 
     Written here rather than imported so this suite holds the SDK to the
     *contract*, not to a constant the two halves could move together.
@@ -178,7 +178,7 @@ def egma_metadata(
 
 
 def not_reached() -> RpcError:
-    """What the transport says about a room with no egma in it."""
+    """What the transport says about a room with no Egma in it."""
     return RpcError(
         RpcError.ErrorCode.RECIPIENT_NOT_FOUND,
         RpcError.ErrorMessage[RpcError.ErrorCode.RECIPIENT_NOT_FOUND],

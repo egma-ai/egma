@@ -138,7 +138,7 @@ describe("configuration", () => {
       expect(() => loadConfig({ ...enough, EGMA_BASE_URL: given })).toThrow(names);
       // The value to put there instead, so nobody has to work it out.
       expect(() => loadConfig({ ...enough, EGMA_BASE_URL: given })).toThrow(
-        /Set it to https:\/\/egma\.acme\.example and start egma again/,
+        /Set it to https:\/\/egma\.acme\.example and start Egma again/,
       );
       expect(() => loadConfig({ ...enough, EGMA_BASE_URL: given })).not.toThrow(
         /hunter2-not-real/,
@@ -180,7 +180,7 @@ describe("configuration", () => {
   });
 
   /**
-   * Mail is the one setting whose *absence* is a supported way to run egma
+   * Mail is the one setting whose *absence* is a supported way to run Egma
    * rather than a mistake, so it is asserted as one. A self-hoster who never
    * sets it can still add a second person.
    */
@@ -197,12 +197,12 @@ describe("configuration", () => {
       }).smtp,
     ).toEqual({
       url: "smtp://postmaster:secret@smtp.acme.example:587",
-      from: "egma <egma@egma.acme.example>",
+      from: "Egma <egma@egma.acme.example>",
     });
   });
 
   /**
-   * Set-but-unusable refuses to start, and unset does not. A transport egma
+   * Set-but-unusable refuses to start, and unset does not. A transport Egma
    * believes in and cannot reach is worse than none: it turns verification on
    * and stops handing invitation links back, and then delivers neither.
    */
@@ -374,7 +374,7 @@ describe("configuration", () => {
    * The one pair of schemes no browser will honour, and the one this file exists
    * to refuse by name.
    *
-   * Both settings are addresses of the *same browser* — one to egma, one to the
+   * Both settings are addresses of the *same browser* — one to Egma, one to the
    * store. A page served over https: may not fetch audio over http:: the browser
    * blocks it as mixed content before the request is sent, so the store is never
    * asked and the signature is never checked. The player fails and the only
@@ -382,7 +382,7 @@ describe("configuration", () => {
    * looking at. Which is exactly the failure the address binding and the region
    * were each refused at startup to prevent, arriving by a third route.
    */
-  it("refuses an https egma pointed at an http store, and names both variables", () => {
+  it("refuses an https Egma pointed at an http store, and names both variables", () => {
     const withCredential = {
       ...enough,
       EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
@@ -404,7 +404,7 @@ describe("configuration", () => {
       }),
     ).toThrow(/EGMA_BLOB_PUBLIC_URL is http:\/\/192\.168\.1\.10:9000/);
     // And it says what the browser does, because "mixed content" is the word to
-    // search for and egma is the only thing in a position to say it.
+    // search for and Egma is the only thing in a position to say it.
     expect(() =>
       loadConfig({
         ...withCredential,
@@ -426,7 +426,7 @@ describe("configuration", () => {
       EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
     };
 
-    // The default deployment: egma and its store both on this machine, in the
+    // The default deployment: Egma and its store both on this machine, in the
     // clear, which is what the compose file publishes.
     expect(
       loadConfig({
@@ -446,7 +446,7 @@ describe("configuration", () => {
     ).toBe("https://recordings.acme.example");
 
     // The converse of the refusal above, and not a problem: a plaintext page
-    // may fetch encrypted bytes. Nothing blocks this and egma must not either.
+    // may fetch encrypted bytes. Nothing blocks this and Egma must not either.
     expect(
       loadConfig({
         ...withCredential,
@@ -461,11 +461,11 @@ describe("configuration", () => {
    *
    * A plaintext store at a *remote* address means the recording and a link
    * reusable for fifteen minutes are readable by anybody who can see the
-   * traffic. It is allowed, because it is only reachable from an egma that is
+   * traffic. It is allowed, because it is only reachable from an Egma that is
    * itself plaintext — where the session cookie that opens every recording
    * already crosses the same network in the clear. Refusing the audio while
    * serving the cookie would apply a rule to one byte stream and not the other,
-   * and would lock out a self-hoster on a private network egma cannot see. The
+   * and would lock out a self-hoster on a private network Egma cannot see. The
    * cost is written beside the example instead, in `.env.example`, the compose
    * file and the README.
    */
@@ -497,7 +497,7 @@ describe("the email seam", () => {
     await sender.send({ to: "bob@acme.example", subject: "hi", body: "there" });
 
     // Written down rather than dropped: a self-hoster with no transport still
-    // sees every message egma would have sent, where they are already looking.
+    // sees every message Egma would have sent, where they are already looking.
     expect(sent.map((email) => email.to)).toEqual(["bob@acme.example"]);
   });
 
@@ -505,7 +505,7 @@ describe("the email seam", () => {
     expect(
       smtpEmailSender({
         url: "smtp://postmaster:secret@smtp.acme.example:587",
-        from: "egma <egma@acme.example>",
+        from: "Egma <egma@acme.example>",
       }).delivers,
     ).toBe(true);
   });
@@ -542,7 +542,7 @@ describe("the API once it has booted", () => {
   /**
    * Both stores, because the container health check is what the web service
    * waits on and what an operator reads. An API that answered `ok` while the
-   * trace store was unreachable would be reporting on half of egma.
+   * trace store was unreachable would be reporting on half of Egma.
    */
   it("reports healthy, having reached both stores", async () => {
     const response = await app.inject({ method: "GET", url: "/health" });

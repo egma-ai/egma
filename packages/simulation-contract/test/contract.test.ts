@@ -331,7 +331,7 @@ describe("what the golden fixtures cover", () => {
 });
 
 /**
- * The coverage stamp: which of the agent's tools egma stood ready to answer
+ * The coverage stamp: which of the agent's tools Egma stood ready to answer
  * for, and which ran their real implementations untouched.
  *
  * It rides the terminal facts for the same reason the measured audio band
@@ -398,7 +398,7 @@ describe("the coverage stamp on the terminal facts", () => {
       ([, stamp]) => stamp === undefined,
     );
     // The fixtures that predate mock tools still validate untouched, and their
-    // silence is the honest reading: egma never asked this agent what tools it
+    // silence is the honest reading: Egma never asked this agent what tools it
     // had, so the record claims nothing about them.
     expect(unstamped.length).toBeGreaterThan(0);
   });

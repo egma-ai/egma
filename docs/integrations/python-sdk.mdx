@@ -1,10 +1,10 @@
 ---
-title: "egma Python SDK: Mock Tools for LiveKit Voice Agents"
+title: "Egma Python SDK: Mock Tools for LiveKit Voice Agents"
 sidebarTitle: "Python SDK"
-description: "Add one line to your LiveKit agent entrypoint and egma intercepts tool calls during simulations — zero impact on production behavior, guaranteed."
+description: "Add one line to your LiveKit agent entrypoint and Egma intercepts tool calls during simulations — zero impact on production behavior, guaranteed."
 ---
 
-The `egma` Python package lets egma answer your agent's tool calls during a simulation, without touching anything in production. Add one call after your agent is built and egma intercepts the tools it has mock answers for. Every other tool — and every room with no egma in it — runs exactly as if the package were not installed.
+The `egma` Python package lets Egma answer your agent's tool calls during a simulation, without touching anything in production. Add one call after your agent is built and Egma intercepts the tools it has mock answers for. Every other tool — and every room with no Egma in it — runs exactly as if the package were not installed.
 
 This solves a real problem: a simulation that reaches your real tools has real side effects. It books the appointment, sends the message, charges the card. And a real backend only ever shows you the branch its data happens to be on — "the calendar is full", "the lookup fails", "the booking API errors" are where voice agents die in production, but none of them can be ordered up on demand from a real backend.
 
@@ -70,12 +70,12 @@ That is the whole integration.
 
 ## What `mockable` does
 
-`mockable` reads the dispatch metadata on `ctx.job` once. In any room without an egma participant in it — which is every production room — it returns immediately having touched nothing. Your tools are the same objects, called the same way, with no wrapper between them and the model. This is enforced by a test in the package (`tests/test_inert.py`), not just described in documentation.
+`mockable` reads the dispatch metadata on `ctx.job` once. In any room without an Egma participant in it — which is every production room — it returns immediately having touched nothing. Your tools are the same objects, called the same way, with no wrapper between them and the model. This is enforced by a test in the package (`tests/test_inert.py`), not just described in documentation.
 
 In a simulation, `mockable`:
 
-1. **Reads your agent's tools** — names and schemas — off the `agent` object and sends them to egma as a census. Mock authoring in egma starts from your real tool names and signatures, not from your memory of them.
-2. **Learns which tools egma answers for** in this simulation.
+1. **Reads your agent's tools** — names and schemas — off the `agent` object and sends them to Egma as a census. Mock authoring in Egma starts from your real tool names and signatures, not from your memory of them.
+2. **Learns which tools Egma answers for** in this simulation.
 3. **Installs a courier** in front of each of those tools using LiveKit's own `mock_tools`. Couriers go into a side table LiveKit keeps per session; they do not touch your agent, your agent's class, or your tool registry. The model keeps seeing your real tool schemas throughout.
 4. **Leaves every other tool exactly as it was.**
 
@@ -83,7 +83,7 @@ Every covered tool call lands on the simulation record with its arguments, its a
 
 ### Placement
 
-Call `mockable` after the agent object exists and before `session.start`. The census is the first message sent, so an egma that is not in the room is discovered before any tool call rather than halfway through a test.
+Call `mockable` after the agent object exists and before `session.start`. The census is the first message sent, so an Egma that is not in the room is discovered before any tool call rather than halfway through a test.
 
 If your application hands off between several `Agent` classes, call `mockable` once per class you want covered.
 
@@ -91,13 +91,13 @@ If your application hands off between several `Agent` classes, call `mockable` o
 
 The inert path is not a best-effort claim — it is a construction property with a test behind it.
 
-- **No egma participant in the room** → `mockable` returns immediately. Zero added latency, no side effects, no wrapped tools.
-- **egma present but unreachable mid-simulation** → the real tool runs. A room that lost its egma participant behaves as a room that never had one.
-- **egma explicitly refuses a call** (unknown tool, malformed payload) → `ToolError` is raised so the model hears a tool that failed and can respond accordingly. Falling open on a refusal would mean a simulation has real side effects on egma's behalf, which is never the right outcome.
+- **No Egma participant in the room** → `mockable` returns immediately. Zero added latency, no side effects, no wrapped tools.
+- **Egma present but unreachable mid-simulation** → the real tool runs. A room that lost its Egma participant behaves as a room that never had one.
+- **Egma explicitly refuses a call** (unknown tool, malformed payload) → `ToolError` is raised so the model hears a tool that failed and can respond accordingly. Falling open on a refusal would mean a simulation has real side effects on Egma's behalf, which is never the right outcome.
 
 | Situation | Behavior |
 |---|---|
-| Production room (no egma) | Returns immediately, nothing wrapped |
+| Production room (no Egma) | Returns immediately, nothing wrapped |
 | Simulation — tool has a mock | Egma answers; result returned to model |
 | Simulation — tool has no mock | Real tool runs |
 | Egma not reachable (fail-open) | Real tool runs |
@@ -105,9 +105,9 @@ The inert path is not a best-effort claim — it is a construction property with
 
 ## How tool matching works
 
-Mock tools are matched by tool name, strictly. egma sends a list of the names it will answer for in this simulation. A courier is installed for each of those names, whether or not the agent currently has a tool by that name. Matching happens per call, by name, against the side table LiveKit keeps.
+Mock tools are matched by tool name, strictly. Egma sends a list of the names it will answer for in this simulation. A courier is installed for each of those names, whether or not the agent currently has a tool by that name. Matching happens per call, by name, against the side table LiveKit keeps.
 
-A tool you attach to the agent *after* calling `mockable` is still intercepted on its first call — because couriers are matched by name at call time, not at registration time. Its arguments may be incomplete on the record (since there was no signature to read them through when the courier was made), and egma marks that call so you can see it.
+A tool you attach to the agent *after* calling `mockable` is still intercepted on its first call — because couriers are matched by name at call time, not at registration time. Its arguments may be incomplete on the record (since there was no signature to read them through when the courier was made), and Egma marks that call so you can see it.
 
 The transport used for tool calls is LiveKit RPC over the room you are already connected to. No new endpoint, no new credential, nothing new to expose.
 
@@ -120,7 +120,7 @@ import logging
 logging.getLogger("egma").setLevel(logging.INFO)
 ```
 
-At `INFO` level, the line after the census names how many tools your agent has and how many egma answers for in this simulation. This is the first thing to check when wiring an agent up for the first time.
+At `INFO` level, the line after the census names how many tools your agent has and how many Egma answers for in this simulation. This is the first thing to check when wiring an agent up for the first time.
 
 ## Version pinning
 
@@ -132,7 +132,7 @@ If `mock_tools` ever moves in a future version, the documented fallback is `Agen
 
 ## Before you install anything: the interim recipe
 
-If you need tool isolation today without the egma SDK, you can use LiveKit's own `mock_tools` with a guard you write yourself:
+If you need tool isolation today without the Egma SDK, you can use LiveKit's own `mock_tools` with a guard you write yourself:
 
 ```python
 import json
@@ -161,11 +161,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     await session.start(agent=agent, room=ctx.room)
 ```
 
-This is production-safe by the same logic — no egma in the room means the guard is false and nothing is wrapped. But it has real limitations:
+This is production-safe by the same logic — no Egma in the room means the guard is false and nothing is wrapped. But it has real limitations:
 
 - One canned answer per tool for every simulation. You cannot author different answers for different tests without editing your agent's source code.
-- Nothing about those tool calls reaches egma's record: no arguments, no answers, no timings, no coverage stamp. Graders that read tool facts have nothing to read.
+- Nothing about those tool calls reaches Egma's record: no arguments, no answers, no timings, no coverage stamp. Graders that read tool facts have nothing to read.
 - No declared delay, so latency numbers from a mocked run will flatter you.
-- The guard couples your agent to the exact shape of egma's dispatch metadata today. If that shape changes, your agent breaks in a way your own tests would not catch. `mockable` exists to own that coupling so your side stays one line.
+- The guard couples your agent to the exact shape of Egma's dispatch metadata today. If that shape changes, your agent breaks in a way your own tests would not catch. `mockable` exists to own that coupling so your side stays one line.
 
 Use this as a bridge while migrating, not as a permanent solution.

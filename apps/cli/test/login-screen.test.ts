@@ -92,7 +92,7 @@ async function wizard(options: {
 /**
  * The code the terminal is showing, read off its screen.
  *
- * Whatever is on that line is the code. What shape egma issues codes in is the
+ * Whatever is on that line is the code. What shape Egma issues codes in is the
  * instance's business and is asserted where the instance is — baking it in here
  * would make this screen check fail the day the codes get a character longer.
  */
@@ -143,7 +143,7 @@ async function declineTheKey(terminal: TerminalRun): Promise<void> {
   terminal.write("");
   expect(await terminal.exited).toBe(1);
   expect(terminal.scrollback().trim()).toBe(
-    "egma could not finish: no Retell key was given, so there is nothing to test.",
+    "Egma could not finish: no Retell key was given, so there is nothing to test.",
   );
 }
 
@@ -260,7 +260,7 @@ describe("the login screen", () => {
 
       await declineTheKey(terminal);
 
-      // A key was minted and kept, and it is the one this egma issued.
+      // A key was minted and kept, and it is the one this Egma issued.
       expect(platform.device.keys).toHaveLength(1);
     } finally {
       await terminal.kill();

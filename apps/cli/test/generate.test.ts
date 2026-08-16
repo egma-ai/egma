@@ -1,8 +1,8 @@
 /**
- * From what egma has learned to tests on egma, with a scripted agent and
+ * From what Egma has learned to tests on Egma, with a scripted agent and
  * nobody watching.
  *
- * No model, no terminal, no human, and no assertion about the order egma does
+ * No model, no terminal, no human, and no assertion about the order Egma does
  * things in. What is checked is what a developer could check afterwards: which
  * files are in their repository, what those files say, which tests are on the
  * platform and pinned, and the line the wizard left behind.
@@ -193,7 +193,7 @@ async function runWalk(options: {
 }
 
 /**
- * How many tests the walk put on egma, read from the run it went on to start.
+ * How many tests the walk put on Egma, read from the run it went on to start.
  *
  * A run pins the version of every test it executes, and this walk's run is over
  * exactly what the push uploaded — so the run is the record of the push, and
@@ -221,7 +221,7 @@ async function readTest(name: string): Promise<ReturnType<typeof parseTestFile>>
   return parseTestFile(await readFile(file, "utf8"), name, name.replace(/\.md$/u, ""));
 }
 
-/** Every set of instructions egma sent the coding agent, in order. */
+/** Every set of instructions Egma sent the coding agent, in order. */
 async function tasksSent(): Promise<string[]> {
   const report = JSON.parse(
     await readFile(path.join(workspace.dir, "fake-agent-report.json"), "utf8"),
@@ -239,7 +239,7 @@ describe("the whole generate step", () => {
 
     // Two out of the developer's own material, ten written to reach twelve —
     // and one of the ten with nothing to check, which is the whole point.
-    // A persona the developer's own material names, and that egma holds — the
+    // A persona the developer's own material names, and that Egma holds — the
     // one shape of file that may carry a personas line.
     platform.tests.addPersona("somebody-in-a-hurry");
 
@@ -283,11 +283,11 @@ describe("the whole generate step", () => {
 
     const { ui, report } = await runWalk({ script, existingTests: material });
 
-    // Twelve files are in the repository, including the one egma will not push.
+    // Twelve files are in the repository, including the one Egma will not push.
     expect(await filesInFolder()).toHaveLength(12);
     expect(await filesInFolder()).toContain("nothing-to-check.md");
 
-    // Eleven are on egma, each as a pinned version, and the twelfth is not.
+    // Eleven are on Egma, each as a pinned version, and the twelfth is not.
     expect(report.kind).toBe("run-started");
     expect(pushedToEgma()).toBe(11);
     expect(platform.tests.tests).toHaveLength(11);
@@ -299,7 +299,7 @@ describe("the whole generate step", () => {
       expect(held.expectedBehaviors.length, name).toBeGreaterThan(0);
     }
 
-    // The file egma would not push is exactly as the coding agent left it: no
+    // The file Egma would not push is exactly as the coding agent left it: no
     // pin, and nobody tidied it away.
     const refused = await readTest("nothing-to-check.md");
     expect(refused.version).toBeNull();
@@ -382,7 +382,7 @@ describe("the whole generate step", () => {
     const convert = tasks.find((task) => task.includes(CONVERT_TASK)) ?? "";
     const held = await readFile(path.join(EXISTING_TESTS_FIXTURES, material), "utf8");
 
-    // Every word of the file is in the task egma sent, so the agent has no
+    // Every word of the file is in the task Egma sent, so the agent has no
     // reason to open anything, and is told so.
     expect(convert).toContain(held.trimEnd());
     expect(convert).toContain("Do not open the file");
@@ -419,8 +419,8 @@ describe("the whole generate step", () => {
     expect(generate).toContain("prompts/order-line.md");
     expect(generate).toContain("order-line");
 
-    // And what egma does not have is said as plainly: a file may not name a
-    // persona egma would turn the whole test away over.
+    // And what Egma does not have is said as plainly: a file may not name a
+    // persona Egma would turn the whole test away over.
     expect(generate).toContain("leave the `personas` line out of every file");
 
     // Nobody was asked to convert anything, because nobody had anything.
@@ -482,7 +482,7 @@ describe("the whole generate step", () => {
       howManyTests: 1,
     });
 
-    expect(ui.record.statuses.join("\n")).toContain("egma never reads .env files");
+    expect(ui.record.statuses.join("\n")).toContain("Egma never reads .env files");
     // The task that ran carried nothing of the file, and nothing was converted.
     const tasks = await tasksSent();
     expect(tasks.join("\n")).not.toContain("SECRET=shhh");
@@ -662,7 +662,7 @@ describe("with nobody watching", () => {
     const result = await withNobodyWatching(script, [
       "--existing-tests",
       material,
-      // Named as well as commanded, so the skill offer is reached at all: egma
+      // Named as well as commanded, so the skill offer is reached at all: Egma
       // will not offer to write a skill for an agent it has no convention for.
       "--coding-agent",
       "claude-acp",
@@ -686,10 +686,10 @@ describe("with nobody watching", () => {
 });
 
 /**
- * The one path a person types, and what egma will open with it.
+ * The one path a person types, and what Egma will open with it.
  *
  * It is the same discipline the drift check works under, and it is checked on
- * its own because every one of these answers is a thing egma must refuse
+ * its own because every one of these answers is a thing Egma must refuse
  * whatever else is happening around it.
  */
 describe("the file a developer points at", () => {
@@ -735,7 +735,7 @@ describe("the file a developer points at", () => {
     const refused = await readExistingTests(workspace.dir, ".env.local");
     expect(refused).toEqual({
       kind: "unusable",
-      reason: "egma never reads .env files, and never hands one on.",
+      reason: "Egma never reads .env files, and never hands one on.",
     });
   });
 
@@ -773,7 +773,7 @@ describe("the file a developer points at", () => {
       expect(climbing.kind).toBe("unusable");
       expect(climbing.kind === "unusable" && climbing.reason).toContain("outside");
 
-      // A link that stays inside the folder but lands on the one file egma
+      // A link that stays inside the folder but lands on the one file Egma
       // never reads is refused by the fence it really reaches, not by its name.
       await writeFile(path.join(workspace.dir, ".env"), "SECRET=shhh\n", "utf8");
       await symlink(
@@ -783,11 +783,11 @@ describe("the file a developer points at", () => {
       const fenced = await readExistingTests(workspace.dir, "harmless-cases.csv");
       expect(fenced).toEqual({
         kind: "unusable",
-        reason: "egma never reads .env files, and never hands one on.",
+        reason: "Egma never reads .env files, and never hands one on.",
       });
 
       // A link inside the folder pointing at a file inside the folder is an
-      // ordinary file, and egma reads it.
+      // ordinary file, and Egma reads it.
       await writeFile(path.join(workspace.dir, "real-cases.csv"), "a,b\n1,2\n", "utf8");
       await symlink(
         path.join(workspace.dir, "real-cases.csv"),
@@ -807,10 +807,10 @@ describe("the file a developer points at", () => {
 /**
  * What somebody else's words can do to a task built around them.
  *
- * Both tasks carry text nobody at egma wrote: the developer's own file in one,
+ * Both tasks carry text nobody at Egma wrote: the developer's own file in one,
  * and whatever the provider is running in the other. Neither is trusted, and
  * neither has to be — but a container the content can close is not a container,
- * and everything after a forged close reads as egma's own instructions.
+ * and everything after a forged close reads as Egma's own instructions.
  */
 describe("the words a task carries but did not write", () => {
   /** A file that tries every way out of its own block at once. */
@@ -841,10 +841,10 @@ describe("the words a task carries but did not write", () => {
     expect(opened).toBeGreaterThan(-1);
     expect(closed).toBeGreaterThan(opened);
     // The whole of the material sits between the two, so nothing it says lands
-    // where egma's own instructions are read.
+    // where Egma's own instructions are read.
     expect(task.indexOf(HOSTILE)).toBeGreaterThan(opened);
     expect(task.indexOf(HOSTILE)).toBeLessThan(closed);
-    // Everything after the block is egma's, and it is still there.
+    // Everything after the block is Egma's, and it is still there.
     expect(task.slice(closed)).toContain("egma:wrote");
     expect(task.slice(closed)).toContain("When you are done");
 
@@ -882,8 +882,8 @@ describe("the words a task carries but did not write", () => {
     await writeFile(path.join(workspace.dir, ".env"), "SECRET=shhh\n", "utf8");
 
     // A coding agent that reads the material back to the developer, word for
-    // word, which is the ordinary way a forged marker ever reaches egma. The
-    // abort it echoes is enforced, because egma cannot tell an echo from a
+    // word, which is the ordinary way a forged marker ever reaches Egma. The
+    // abort it echoes is enforced, because Egma cannot tell an echo from a
     // decision — so the convert ends there, and the walk carries on.
     const script = await workspace.script({
       steps: FOUND,
@@ -936,13 +936,13 @@ describe("the words a task carries but did not write", () => {
 });
 
 /**
- * A file the folder holds that egma cannot turn into a test.
+ * A file the folder holds that Egma cannot turn into a test.
  *
  * A coding agent writing twelve files writes a broken one sometimes, and the
  * eleven good ones are not forfeit because of it. It is named and left where it
  * is, exactly like a file with nothing to check.
  */
-describe("a file egma cannot read", () => {
+describe("a file Egma cannot read", () => {
   it("is named and held back, and the rest of the suite still goes up", async () => {
     const broken = [
       "---",
@@ -978,7 +978,7 @@ describe("a file egma cannot read", () => {
     expect(ui.record.gate?.rows.map((row) => row.name)).toEqual(["price-question"]);
     expect(ui.record.gate?.heldBack).toHaveLength(1);
     expect(ui.record.gate?.heldBack[0]?.shown).toBe("egma/tests/half-written.md");
-    expect(ui.record.gate?.heldBack[0]?.reason).toContain("egma could not read it");
+    expect(ui.record.gate?.heldBack[0]?.reason).toContain("Egma could not read it");
     // The reader's own words, which say where in the file to look.
     expect(ui.record.gate?.heldBack[0]?.reason).toContain("half-written.md, line 2");
 
@@ -994,7 +994,7 @@ describe("a file egma cannot read", () => {
 /**
  * The refusal nothing on this side can see coming.
  *
- * A file naming a persona reads perfectly well, and whether egma holds a persona
+ * A file naming a persona reads perfectly well, and whether Egma holds a persona
  * of that name is a thing only the platform knows. So the refusal arrives after
  * the keystroke, over a list the developer has already agreed to — and a wizard
  * that carried on would run a different list from the one it was given.
@@ -1003,20 +1003,20 @@ describe("a test the platform's own door turns away", () => {
   /** The persona nobody authored, which is what the door is refusing. */
   const UNHELD = "somebody-in-a-hurry";
   const REFUSAL =
-    `egma has no persona called "${UNHELD}" in this project. Name a persona ` +
-    `this project already has, or name none and egma takes the project's ` +
+    `Egma has no persona called "${UNHELD}" in this project. Name a persona ` +
+    `this project already has, or name none and Egma takes the project's ` +
     `default.`;
   const GOOD = ["price-question", "sunday-drop-off"];
   const NAMED = "asked-for-the-binder";
 
-  /** Three files, one of them naming a persona egma does not hold. */
+  /** Three files, one of them naming a persona Egma does not hold. */
   async function threeFiles(): Promise<string> {
     return workspace.script({
       steps: FOUND,
       stepsByTask: [
         {
           // However many were asked for: what lands on disk is the list, and a
-          // walk with nobody watching asks for egma's own default.
+          // walk with nobody watching asks for Egma's own default.
           contains: GENERATE_TASK,
           steps: [
             ...GOOD.flatMap((name) =>
@@ -1053,7 +1053,7 @@ describe("a test the platform's own door turns away", () => {
 
     // Said in the platform's words while the push was happening, and named
     // again on the line a machine reads the list by.
-    expect(ui.record.statuses.join("\n")).toContain(`egma would not take egma/tests/${NAMED}.md`);
+    expect(ui.record.statuses.join("\n")).toContain(`Egma would not take egma/tests/${NAMED}.md`);
     expect(lines).toContain(`held-back: egma/tests/${NAMED}.md ${REFUSAL}`);
 
     // The run went on exactly what the second keystroke agreed to.
@@ -1113,7 +1113,7 @@ describe("a test the platform's own door turns away", () => {
     expect(result.code).toBe(0);
     for (const name of GOOD) expect(result.stdout).toContain(`test: ${name} default persona`);
     expect(result.stdout).toContain(`held-back: egma/tests/${NAMED}.md ${REFUSAL}`);
-    expect(result.stdout).toContain(`egma would not take egma/tests/${NAMED}.md: ${REFUSAL}`);
+    expect(result.stdout).toContain(`Egma would not take egma/tests/${NAMED}.md: ${REFUSAL}`);
 
     // The run happened, over what the platform took and nothing else.
     expect(result.stdout).toMatch(/^first-verdict: /mu);

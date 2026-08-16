@@ -1,5 +1,5 @@
 /**
- * egma's skills as a shipped artifact.
+ * Egma's skills as a shipped artifact.
  *
  * A skill nobody can read is not a skill, and a skill that falls out of the
  * package on the way to npm is worse than none — it works on the machine it was
@@ -31,7 +31,7 @@ const run = promisify(execFile);
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-describe("egma's skills", () => {
+describe("Egma's skills", () => {
   it("are markdown content, shaped the way a skill file is", () => {
     for (const name of SKILL_NAMES) {
       const content = skill(name);
@@ -44,7 +44,7 @@ describe("egma's skills", () => {
     }
   });
 
-  it("teach the marker lines egma reads answers from", () => {
+  it("teach the marker lines Egma reads answers from", () => {
     const finding = skill("context-finding");
     expect(finding).toContain("egma:found framework");
     expect(finding).toContain("egma:note");
@@ -59,7 +59,7 @@ describe("egma's skills", () => {
     expect(writing).toContain("egma:wrote");
   });
 
-  it("say what a test file is made of, in the shape egma writes one", () => {
+  it("say what a test file is made of, in the shape Egma writes one", () => {
     const writing = skill("writing-tests");
     expect(writing).toContain("egma/tests/");
     expect(writing).toContain("## Expected behaviors");
@@ -78,7 +78,7 @@ describe("egma's skills", () => {
    * code is the source of truth; this is what keeps the prose from drifting
    * away from it without anybody noticing.
    */
-  it("ask for the facts egma reads back, in the words egma reads them", () => {
+  it("ask for the facts Egma reads back, in the words Egma reads them", () => {
     // Prose is wrapped to a width, and a phrase does not stop meaning what it
     // means because a line ending landed in the middle of it.
     const unwrapped = (text: string): string => text.replace(/\s+/g, " ");
@@ -105,7 +105,7 @@ describe("egma's skills", () => {
     const layout = [
       "egma/",
       "  config.yaml     what this folder points at — names and ids",
-      "  mock-tools.md   what egma answers for the agent's tools with",
+      "  mock-tools.md   what Egma answers for the agent's tools with",
       "  tests/          one markdown file per test",
     ].join("\n");
 
@@ -155,7 +155,7 @@ describe("egma's skills", () => {
       [
         "skills/egma/SKILL.md",
         installableSkill(),
-        "## Keeping the folder and egma in step",
+        "## Keeping the folder and Egma in step",
       ],
       ["skills/writing-tests.md", skill("writing-tests"), "## How to report: marker lines"],
       [
@@ -181,7 +181,7 @@ describe("egma's skills", () => {
     // The two halves behave differently, and a coding agent that did not know
     // which was which would author the wrong one.
     const unwrapped = driving.replace(/\s+/g, " ");
-    expect(unwrapped).toContain("the one authored thing egma does not version");
+    expect(unwrapped).toContain("the one authored thing Egma does not version");
     expect(unwrapped).toContain("That override belongs to the test and is versioned with it");
 
     // The skill that writes tests points at the test's own file and nowhere
@@ -199,7 +199,7 @@ describe("egma's skills", () => {
     expect(retell).toContain("llm_");
   });
 
-  it("use the words egma uses, because a skill is user-facing text", () => {
+  it("use the words Egma uses, because a skill is user-facing text", () => {
     for (const name of SKILL_NAMES) {
       const content = skill(name).replaceAll(SCENARIO_HEADING, "");
       for (const banned of BANNED) {

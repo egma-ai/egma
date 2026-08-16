@@ -277,7 +277,7 @@ describe("the pages", () => {
 
   /**
    * Spent, never-minted and too-old-to-tell are three different things and each
-   * says so. A spent link means you already did this — sign in. One this egma
+   * says so. A spent link means you already did this — sign in. One this Egma
    * never minted means check what was copied. One past the hour means both are
    * still possible, and the page says so. Sharing a sentence would send half
    * the people holding one exactly the wrong way.
@@ -301,7 +301,7 @@ describe("the pages", () => {
    *
    * "Your old password still works" is true of a link that ran out unused and
    * false of one somebody already reset with, and there is one deadline now —
-   * the auth provider forgets the token at the moment egma stops honouring the
+   * the auth provider forgets the token at the moment Egma stops honouring the
    * link, so nothing can tell those two apart afterwards. The reassurance is
    * therefore not on any refusal, anywhere on this page. It used to be, on the
    * refusal that was checked; that refusal no longer exists to hold it.
@@ -600,7 +600,7 @@ describe("coming back after signing in", () => {
    * A redirect decided by a query parameter is the shape of every open-redirect
    * bug there has ever been, and this one is handed to somebody in the middle
    * of authorizing a terminal — which is exactly when a page that looks like
-   * egma but is not would be worth the most to somebody.
+   * Egma but is not would be worth the most to somebody.
    *
    * The rule used to be a list of the shapes that leave, and a list is a thing
    * somebody finds the next entry in: the tab was the entry. It is resolution
@@ -647,7 +647,7 @@ describe("coming back after signing in", () => {
  *
  * It is the whole substance of the player's honesty rule, and it has been got
  * wrong twice — once by hiding a failure that arrived after a player was
- * already on screen, once by hiding every fault egma could have. Both times it
+ * already on screen, once by hiding every fault Egma could have. Both times it
  * was carried entirely by a render branch, which nothing could reach. It is a
  * function now, and this is where it is held.
  */
@@ -677,8 +677,8 @@ describe("a refusal of a recording", () => {
   });
 
   /**
-   * Everything about **egma** rather than about the conversation. A store
-   * nobody configured, a fault, an egma that answered nothing at all, and a row
+   * Everything about **Egma** rather than about the conversation. A store
+   * nobody configured, a fault, an Egma that answered nothing at all, and a row
    * carrying a reference no simulator could have written — the last of which
    * has a code of its own precisely so it is not mistaken for an absence.
    *
@@ -687,7 +687,7 @@ describe("a refusal of a recording", () => {
    * surface that asks about every conversation somebody opens is where it would
    * spread furthest.
    */
-  it("is said out loud when it is about egma rather than about the conversation", () => {
+  it("is said out loud when it is about Egma rather than about the conversation", () => {
     for (const code of [
       "no_object_store",
       "unsignable_reference",
@@ -700,7 +700,7 @@ describe("a refusal of a recording", () => {
   });
 
   /**
-   * And an answer that was not egma's at all.
+   * And an answer that was not Egma's at all.
    *
    * Fastify's own not-found reply is `{"statusCode":404,"error":"Not
    * Found","message":"Route GET:… not found"}` — a 404 carrying a message, from
@@ -710,7 +710,7 @@ describe("a refusal of a recording", () => {
    * own promise and nobody else's, so a code is what is read; `Not Found` with
    * a capital and a space is not one of them.
    */
-  it("is said out loud when the answer did not come from egma", () => {
+  it("is said out loud when the answer did not come from Egma", () => {
     expect(offersNothing({ code: undefined }, A_TRANSCRIPT)).toBe(false);
     expect(offersNothing({ code: "Not Found" }, A_TRANSCRIPT)).toBe(false);
   });

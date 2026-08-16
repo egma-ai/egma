@@ -4,7 +4,7 @@ The other half of the room-shaped LiveKit in :mod:`room_stub`. Where that
 one stands in for the calls the driver makes *of a LiveKit*, this one does
 not stand in for anything: it is a real HTTP server on loopback, and the
 driver really posts to it over a socket. So what CI proves about the
-request egma sends and the answers it will take is proved about the
+request Egma sends and the answers it will take is proved about the
 driver's own HTTP code, not about a mock of it — and the contract this
 serves is the same one the public docs publish, which is what makes the
 docs a thing that is tested rather than a thing that was written.

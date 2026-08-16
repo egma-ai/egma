@@ -15,7 +15,7 @@ import type {
  *
  * **This is the seam the whole engine suite runs on.** Per-behavior fan-out,
  * the skipped denominator, one judge call failing while its siblings land —
- * every one of those is a claim about egma rather than about a model, and
+ * every one of those is a claim about Egma rather than about a model, and
  * asserting them against a real judge would be
  * paying an account to learn something a model cannot tell you reliably anyway.
  * The thin live smoke beside these files is where a real model is asked whether

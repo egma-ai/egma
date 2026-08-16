@@ -386,7 +386,7 @@ describe("values that do not answer what the entry asked", () => {
    * not carry it, so the engine cannot tell a typo from a modality. Only this
    * moment can.
    */
-  it("is refused for a measure egma does not compute, naming every one it does", async () => {
+  it("is refused for a measure Egma does not compute, naming every one it does", async () => {
     const refusal = await useLibraryEntry(actingAsAcme(), {
       libraryId: PREDEFINED_GRADERS.latency,
       params: { metric: "turn_responze_latency", bound: 2_000 },
@@ -408,7 +408,7 @@ describe("values that do not answer what the entry asked", () => {
    * **A measure the catalog names and no span carries is refused too**, and the
    * refusal says which of the two things went wrong.
    *
-   * The turn count and the audio band are real numbers egma records — they
+   * The turn count and the audio band are real numbers Egma records — they
    * arrive on the transition that ends a simulation and live on the simulation
    * row — and a grader reading a conversation's spans would never find one. So a
    * copy naming one is exactly the forever-`skipped` check this rule exists to
@@ -431,7 +431,7 @@ describe("values that do not answer what the entry asked", () => {
           error instanceof Error ? error.message : String(error),
       );
 
-      expect(refusal).toContain(`"${measure}" is a measure egma records`);
+      expect(refusal).toContain(`"${measure}" is a measure Egma records`);
       expect(refusal).toContain("no span carries it");
     }
   });
@@ -534,7 +534,7 @@ describe("values that do not answer what the entry asked", () => {
 });
 
 describe("a copy whose settings are not settings", () => {
-  it("is refused for a scope or sample rate egma does not know", async () => {
+  it("is refused for a scope or sample rate Egma does not know", async () => {
     await expect(
       useLibraryEntry(actingAsAcme(), {
         ...aLatencyCopy,
@@ -565,7 +565,7 @@ describe("a copy whose settings are not settings", () => {
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("is refused for a judge egma cannot ask", async () => {
+  it("is refused for a judge Egma cannot ask", async () => {
     await expect(
       useLibraryEntry(actingAsAcme(), {
         ...aBehaviorsCopy,

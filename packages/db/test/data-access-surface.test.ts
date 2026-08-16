@@ -76,7 +76,7 @@ const INSTANCE_SCOPED = [
 ];
 
 /**
- * What hands egma's own services their work, and what keeps a dispatch honest
+ * What hands Egma's own services their work, and what keeps a dispatch honest
  * afterwards. The grader and the simulator each stand behind every
  * organization on the deployment at once and hold no credential, because
  * there is no honest one to give them — so each is handed work rather than
@@ -87,12 +87,12 @@ const INSTANCE_SCOPED = [
  *
  * Six names, and a seventh is a decision somebody makes on purpose. None takes
  * an argument by which a caller could name a customer, and a build rule refuses
- * one that grows one; the only rows any of them reaches are egma's own queues —
- * grading jobs, and the simulations egma itself wrote and claimed. A claim
+ * one that grows one; the only rows any of them reaches are Egma's own queues —
+ * grading jobs, and the simulations Egma itself wrote and claimed. A claim
  * arrives carrying the `AuthContext` narrowed to that row's own organization
  * and project, which is what all of the work afterwards goes through; the
  * heartbeat can stamp only a row already claimed under the caller's own name
- * and answers one boolean egma wrote; the sweep files each orphan's grading
+ * and answers one boolean Egma wrote; the sweep files each orphan's grading
  * work under the tenancy the row itself carries and answers identifiers and
  * no content; `resolveSimulationStanding` is the claim's context derived
  * again, by the id the claim handed out, for every call that comes back
@@ -166,7 +166,7 @@ const CONTEXT_REQUIRING = [
   "deleteAgent",
   "deleteGrader",
   // The library's delete, which in v0 exists to refuse: every entry on the
-  // shelf is one egma ships, and egma's are undeletable because the next boot
+  // shelf is one Egma ships, and Egma's are undeletable because the next boot
   // writes them again.
   "deleteGraderLibraryEntry",
   "deleteMockTool",
@@ -188,7 +188,7 @@ const CONTEXT_REQUIRING = [
   "getAgent",
   "getConnection",
   "getGrader",
-  // The shelf: one entry, and one page of it. Both answer egma's entries
+  // The shelf: one entry, and one page of it. Both answer Egma's entries
   // beside the caller's own, with owner derived from tenancy rather than
   // stored — which is the whole reason that one table's tenancy is nullable.
   "getGraderLibraryEntry",
@@ -247,7 +247,7 @@ const CONTEXT_REQUIRING = [
   "removeConnection",
   "reopenGradingJob",
   "removeMember",
-  // The second secret egma holds, on the first one's terms: the read answers a
+  // The second secret Egma holds, on the first one's terms: the read answers a
   // reference and a hint, and this is the one door to the plaintext behind it.
   "resolveJudgeKey",
   // The same translation for a mock tool's scope: names off a reviewed file
@@ -258,19 +258,19 @@ const CONTEXT_REQUIRING = [
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
   // The dispatch path's door to the deployment's own settings in the clear —
-  // the third secret egma holds, and the same door the connection's
+  // the third secret Egma holds, and the same door the connection's
   // credentials below come through. It takes the context like everything else
   // and then refuses every one that did not come from a simulation claim,
-  // because conducting is the only thing egma does with these.
+  // because conducting is the only thing Egma does with these.
   "resolvePlatformSettings",
   // The dispatch path's door to a connection's plaintext. It takes the context
   // like everything else — and then refuses every one that did not come from a
-  // simulation claim, because conducting is the only thing egma does with a
+  // simulation claim, because conducting is the only thing Egma does with a
   // connection's credentials at this seam.
   "resolveSimulationConnection",
   "revokeApiKey",
   "seedDefaultJudge",
-  // egma's own graders, written onto the shelf from egma's own catalog at
+  // Egma's own graders, written onto the shelf from Egma's own catalog at
   // start-up. The deployment configuring itself again, one table over: no
   // user, no customer — a predefined entry belongs to none — and an upsert, so
   // running it on every boot writes only what a release changed.
@@ -315,7 +315,7 @@ const PERMISSION = [
 const THE_PLATFORMS_SETTINGS = ["PLATFORM_SETTINGS"];
 
 /**
- * What egma ships on the shelf, and the vocabulary a library entry is written
+ * What Egma ships on the shelf, and the vocabulary a library entry is written
  * in.
  *
  * The catalog is exported because it is the source of truth for what a
@@ -331,7 +331,7 @@ const THE_GRADER_LIBRARY = [
   "GRADER_LIBRARY_CATALOG",
   "LARGEST_GRADER_SOURCE_CODE_BYTES",
   "LIBRARY_TYPES",
-  // The identifiers of the entries egma ships, by the name a person calls
+  // The identifiers of the entries Egma ships, by the name a person calls
   // them. Exported because three things outside this module point at one — the
   // copy every project is seeded with, the engine's roster of what it can
   // execute, and the tests that press Use — and a repeated literal is an
@@ -362,7 +362,7 @@ const VALUES = [
   "MockToolTakenError",
   "NotPermittedError",
   "PersonaNamedByTestsError",
-  // A delete that named one of egma's own graders. Its own class because
+  // A delete that named one of Egma's own graders. Its own class because
   // nothing about the request is wrong and nothing is in the way — the entry
   // simply is not anybody's to remove.
   "PredefinedGraderError",

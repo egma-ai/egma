@@ -4,7 +4,7 @@
  *
  * Everything else about the unbound path is proven against a platform standing
  * in for that address. This file is the one place the real one is named, so
- * that "the shipped default is hosted egma" is asserted once, and so that a
+ * that "the shipped default is hosted Egma" is asserted once, and so that a
  * check which quietly started signing in to production would fail here first.
  */
 
@@ -37,7 +37,7 @@ async function filesUnder(folder: string): Promise<string[]> {
 }
 
 describe("the built-in address", () => {
-  it("ships hosted egma", () => {
+  it("ships hosted Egma", () => {
     expect(DEFAULT_PLATFORM_URL).toBe("https://app.egma.ai");
   });
 
@@ -67,7 +67,7 @@ describe("the built-in address", () => {
   /**
    * The fence above scans text, and text is a proxy. **This is the guard.**
    *
-   * What actually keeps the suite away from hosted egma is that every workspace
+   * What actually keeps the suite away from hosted Egma is that every workspace
    * hands the command a closed port in the built-in address's place. A check
    * that resolved a platform without going through a workspace would dial
    * production, and the scan above would still pass — it names no host, because
@@ -125,7 +125,7 @@ describe("the built-in address", () => {
   /**
    * Not documented and not stable — the same treatment `-- <command>` already
    * carries. A seam a developer found written down would become a seam they
-   * used, and then a promise egma has to keep. `--help` is checked where every
+   * used, and then a promise Egma has to keep. `--help` is checked where every
    * other `--help` claim is, against the built command.
    */
   it("has a seam that is written down nowhere a developer reads", async () => {

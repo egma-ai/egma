@@ -1,10 +1,10 @@
 ---
-title: "Configuring Platform Settings on a Self-Hosted egma"
+title: "Configuring Platform Settings on a Self-Hosted Egma"
 sidebarTitle: "Platform Settings"
-description: "Configure the LLM persona, speech providers, VAD, phone trunk, and judge defaults for your self-hosted egma instance using the CLI or the API."
+description: "Configure the LLM persona, speech providers, VAD, phone trunk, and judge defaults for your self-hosted Egma instance using the CLI or the API."
 ---
 
-A started egma instance is not yet a configured one. Before it can conduct simulations, it needs to know what the persona thinks with, how it speaks and hears, and — for phone simulations — how calls reach the telephone network. The platform reports `setup: setup_required` and names each missing setting until you supply it. Once you do, those settings live in the platform's own database, sealed with `EGMA_ENCRYPTION_KEY`, so they survive a restart, an upgrade, and a move to another machine. Every simulator is handed the current settings on the work order it claims — a second simulator on another host needs nothing copied to it.
+A started Egma instance is not yet a configured one. Before it can conduct simulations, it needs to know what the persona thinks with, how it speaks and hears, and — for phone simulations — how calls reach the telephone network. The platform reports `setup: setup_required` and names each missing setting until you supply it. Once you do, those settings live in the platform's own database, sealed with `EGMA_ENCRYPTION_KEY`, so they survive a restart, an upgrade, and a move to another machine. Every simulator is handed the current settings on the work order it claims — a second simulator on another host needs nothing copied to it.
 
 You can configure the platform in two ways: interactively with `egma self-host setup`, or programmatically via the `PATCH /api/platform/settings` endpoint.
 

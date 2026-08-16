@@ -27,7 +27,7 @@ import {
  * it was created holding a copy of `expected_behaviors`, which is what "a first
  * run is judged with zero setup" means at this altitude. **Values are checked
  * against what the entry actually asked for**, so a bound sent to an entry that
- * asks for none, or a measure egma does not compute, is refused here rather
+ * asks for none, or a measure Egma does not compute, is refused here rather
  * than becoming a grader that is `skipped` forever — and refused in the same
  * words whether it arrives on a Use or on an edit, because there is one check
  * and not two. And **an edit is two acts wearing one verb**: values mint the
@@ -159,7 +159,7 @@ describe("reading the running graders", () => {
       await request("GET", "/api/graders", await projectKeyFor(api.app, grace)),
     );
 
-    // Each project has its own copy of egma's entry — the same definition, two
+    // Each project has its own copy of Egma's entry — the same definition, two
     // rows — so the ids never overlap even though the shelf behind them is one.
     expect(theirs.map((one) => one.id)).not.toEqual(others.map((one) => one.id));
     expect(theirs[0]?.library_id).toBe(others[0]?.library_id);
@@ -240,12 +240,12 @@ describe("pressing Use on a library entry", () => {
 
   /**
    * The one write-door rule that is about the world rather than about the
-   * shape: a measure egma does not compute is a grader that reads nothing,
+   * shape: a measure Egma does not compute is a grader that reads nothing,
    * judges nothing and is `skipped` forever. Nothing downstream can tell that
    * from a conversation whose spans legitimately lack it, so only this moment
    * can.
    */
-  it("refuses a measure egma does not compute, naming the ones it does", async () => {
+  it("refuses a measure Egma does not compute, naming the ones it does", async () => {
     api = await createApi("graders_use_bad_measure");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
@@ -531,7 +531,7 @@ describe("changing a running copy", () => {
   });
 
   /** The measure rule is the same one door, said the same way, too. */
-  it("refuses a measure egma does not compute, in the words Use refuses it in", async () => {
+  it("refuses a measure Egma does not compute, in the words Use refuses it in", async () => {
     api = await createApi("graders_edit_bad_measure");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
@@ -726,10 +726,10 @@ describe("the fields a body sends as words", () => {
   /**
    * **The scope's vocabulary is the factory's gate, not this door's.** The route
    * casts the word it read into the scope union, which is safe precisely
-   * because `validScope` refuses a word egma has never heard of and names the
+   * because `validScope` refuses a word Egma has never heard of and names the
    * three it knows. This is that claim checked rather than asserted.
    */
-  it("refuses a scope egma has never heard of, naming the ones it knows", async () => {
+  it("refuses a scope Egma has never heard of, naming the ones it knows", async () => {
     api = await createApi("graders_edit_scope_word");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);

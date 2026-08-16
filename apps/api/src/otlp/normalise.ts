@@ -449,7 +449,7 @@ function environmentOf(
       refusal:
         `the environment name "${declared}" starts with the reserved prefix ` +
         `"${RESERVED_ENVIRONMENT_PREFIX}". Names beginning that way are kept ` +
-        `for egma's own use; pick another and the spans will be stored.`,
+        `for Egma's own use; pick another and the spans will be stored.`,
     };
   }
   return { environment: declared };
@@ -481,12 +481,12 @@ function payloadPrefixFor(
 /** The two ways one request can ask for more than egma turns into rows. */
 const TOO_MANY_SPANS =
   `this export carried more than the ${MAXIMUM_SPANS_PER_REQUEST.toLocaleString("en-US")} ` +
-  "spans egma turns into rows from one request. The spans that fitted were " +
+  "spans Egma turns into rows from one request. The spans that fitted were " +
   "stored and the rest were refused rather than retried: send them as more " +
   "than one export, which is what an exporter's own batch size is for.";
 
 const TOO_MANY_BYTES =
-  `this export's spans came to more than the ${MAXIMUM_NORMALISED_BYTES / (1024 * 1024)} MiB of rows egma ` +
+  `this export's spans came to more than the ${MAXIMUM_NORMALISED_BYTES / (1024 * 1024)} MiB of rows Egma ` +
   "writes from one request — every span carries its resource and its scope " +
   "verbatim, so a large resource repeated across many spans reaches this long " +
   "before the body does. The spans that fitted were stored and the rest were " +
@@ -552,7 +552,7 @@ export function normaliseOtlpExport(
         if (traceId === "" || spanId === "") {
           rejected.push({
             reason:
-              "a span arrived without a usable trace id and span id. egma " +
+              "a span arrived without a usable trace id and span id. Egma " +
               "adopts both from the wire and mints neither, so there is no " +
               "row to write for one that named itself nothing.",
           });

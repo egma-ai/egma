@@ -138,14 +138,14 @@ describe("setting a project's judge", () => {
     );
   });
 
-  it("refuses a provider egma cannot ask, naming the ones it can", async () => {
+  it("refuses a provider Egma cannot ask, naming the ones it can", async () => {
     await expect(
       setJudgeConfiguration(actingAsAcme(), {
         provider: "anthropic",
         model: "claude",
         key: A_KEY,
       }),
-    ).rejects.toThrow(/not a judge provider egma knows/);
+    ).rejects.toThrow(/not a judge provider Egma knows/);
   });
 
   it("refuses a key too short to be one any provider issued", async () => {
@@ -208,13 +208,13 @@ describe("resolving the key", () => {
     });
   });
 
-  it("round-trips through the one door egma's engine knocks on", async () => {
+  it("round-trips through the one door Egma's engine knocks on", async () => {
     expect(await resolveJudgeKey(theEngineInAcme(), acme.project)).toBe(A_KEY);
   });
 
   /**
    * The narrow gate, and the reason it is not a role: judging is the only thing
-   * egma does with a judge key, and the only thing that judges is the grading
+   * Egma does with a judge key, and the only thing that judges is the grading
    * service. A person's session is refused at every role, so no product surface
    * can grow into one that hands a customer their own key back.
    */

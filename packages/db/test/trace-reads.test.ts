@@ -169,7 +169,7 @@ describe("who may read a trace", () => {
   /**
    * Every role, `viewer` included, and this is not an oversight to tighten
    * later. Reading what an agent did *is* the product — a read-only QA lead is
-   * a use case egma's own positioning names as first-class — and a role that
+   * a use case Egma's own positioning names as first-class — and a role that
    * could not do it would be a login with nothing behind it. The permission
    * table's `read` row has said so since the first commit; these two functions
    * ask for that row and no other.
@@ -306,7 +306,7 @@ describe("the window a read is bounded by", () => {
    * into a statement, and the reason is that the literal built from one is not a
    * timestamp: `toISOString` writes a year outside 0000–9999 with a sign and six
    * digits, and the store answers a mangled literal with a parse error the
-   * customer would read as a fault of egma's rather than as a window they
+   * customer would read as a fault of Egma's rather than as a window they
    * cannot have.
    */
   it("is refused when it names an instant the store cannot hold", async () => {
@@ -410,7 +410,7 @@ describe("a span whose parent never arrived", () => {
  * walk down from the top never arrives at a span whose parent is present, is not
  * a turn, and is not under the root — so a cycle of two would leave the store
  * counting spans the transcript did not show. A response that disagrees with the
- * number printed beside it reads as egma having lost something.
+ * number printed beside it reads as Egma having lost something.
  */
 describe("a parent cycle longer than one span", () => {
   const CYCLED = "eeee1111111111111111111111111111";

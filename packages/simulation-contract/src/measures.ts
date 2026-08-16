@@ -235,7 +235,7 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
     origin: "timing_span",
     fromSpans: timedByItsOwnSpan("persona_speech_duration"),
     means:
-      "how long egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did",
+      "how long Egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did",
     aggregations: EVERY_AGGREGATION,
   },
   {

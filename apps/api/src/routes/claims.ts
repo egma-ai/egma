@@ -238,7 +238,7 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
       refusal:
         "wait_seconds is how long this request may be held open while the " +
         "queue is empty, as a number of seconds of at least 0. Leave it out " +
-        `and egma holds for ${DEFAULT_HOLD_SECONDS}.`,
+        `and Egma holds for ${DEFAULT_HOLD_SECONDS}.`,
     };
   }
 

@@ -85,7 +85,7 @@ export async function execute(
     return couldNotJudge(
       execution,
       nothingToJudge ??
-        `egma does not execute the ${execution.definition.name} grader yet, so this check was not made.`,
+        `Egma does not execute the ${execution.definition.name} grader yet, so this check was not made.`,
     );
   }
 

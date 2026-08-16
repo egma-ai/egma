@@ -156,7 +156,7 @@ function windowOf(query: Query): ParsedWindow {
     return {
       refusal:
         "from and to are RFC 3339 timestamps, and one of these is not a time " +
-        "egma can read. An example of the shape: 2026-08-02T18:04:40.281989Z. " +
+          "Egma can read. An example of the shape: 2026-08-02T18:04:40.281989Z. " +
         "Fractional seconds are honoured to six digits, which is what the " +
         "store holds; a finer one is refused rather than rounded, because " +
         "rounding an exclusive bound moves the edge of your window.",

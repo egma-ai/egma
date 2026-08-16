@@ -85,7 +85,7 @@ export function detectionLines(detection: Detection): readonly string[] {
     `egma folder    ${
       detection.egmaFolder
         ? `already here, ${detection.testsAlreadyHere} ${detection.testsAlreadyHere === 1 ? "test" : "tests"} in it`
-        : "none yet — egma will make one"
+        : "none yet — Egma will make one"
     }`,
   );
   return lines;

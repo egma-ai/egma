@@ -44,7 +44,7 @@ const THE_SEEDED_ENTRY = ((): PredefinedGrader => {
   );
   if (entry === undefined) {
     throw new Error(
-      "egma's catalog no longer ships the expected-behaviors grader, and every project is seeded with a copy of it",
+      "Egma's catalog no longer ships the expected-behaviors grader, and every project is seeded with a copy of it",
     );
   }
   return entry;

@@ -235,7 +235,7 @@ describe("several config entries", () => {
    * threw; if it answered different keys, those rows would sit beside the real
    * ones outranking every `passed` and nothing could reach them.
    */
-  it("name the same keys whether egma judges them or only describes them", () => {
+  it("name the same keys whether Egma judges them or only describes them", () => {
     const asked = execution([
       { metric: "turn_response_latency", bound: 2_000 },
       { metric: "first_response_latency", bound: 1_000 },
@@ -254,7 +254,7 @@ describe("several config entries", () => {
  * case would only prove the measure it happened to pick.
  *
  * The loop is over the catalog rather than over a list written here, so a
- * measure added to egma starts being asked about the day it is added.
+ * measure added to Egma starts being asked about the day it is added.
  */
 describe("a conversation a measure cannot be computed for", () => {
   for (const cataloged of MEASURE_CATALOG) {
@@ -306,11 +306,11 @@ describe("a conversation there is nothing to judge", () => {
   /**
    * `errored`, one row per assertion, in the conversation's own words — never
    * `failed`. A simulation the simulator reported never ran, or one whose spans
-   * never arrived, went wrong on egma's side of the glass, and the one thing a
+   * never arrived, went wrong on Egma's side of the glass, and the one thing a
    * test product must never do is score that as the agent behaving badly.
    *
    * One row per assertion rather than one for the grader, so a page shows the
-   * same list of checks whether egma managed to make them or not — and so a
+   * same list of checks whether Egma managed to make them or not — and so a
    * later grading writes over exactly these rows.
    */
   it("is errored for every entry, with the conversation's own reason", () => {
@@ -354,7 +354,7 @@ describe("a config row nothing could have written", () => {
    * so a stored entry always holds a measure and a number. It is answered rather
    * than thrown over anyway, because a grading service is not the place to fall
    * over a row that came out of its own database — and the word is `errored`,
-   * because egma could not make the check and the agent did nothing.
+   * because Egma could not make the check and the agent did nothing.
    *
    * **Its key falls back to the position**, which is the one thing an entry
    * holding nothing readable has. It is the last resort rather than the rule,

@@ -316,7 +316,7 @@ function configFromRow(
     value,
     () =>
       new Error(
-        `connection ${connectionId} holds config in a shape egma never ` +
+        `connection ${connectionId} holds config in a shape Egma never ` +
           `writes; the row needs repairing before anybody can read it`,
       ),
   );
@@ -1184,4 +1184,3 @@ export async function removeConnection(
   if (row === undefined) return undefined;
   return { ...row, deletedAt };
 }
-

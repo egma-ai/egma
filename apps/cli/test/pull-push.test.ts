@@ -1,6 +1,6 @@
 /**
  * `egma init`, `egma pull` and `egma push` as a coding agent runs them: the
- * built command, in a real subprocess, against a fixture of egma's public HTTP
+ * built command, in a real subprocess, against a fixture of Egma's public HTTP
  * API.
  *
  * Nothing here is a terminal and nothing here answers a question. What is
@@ -72,7 +72,7 @@ async function runEgma(
  *
  * `--url` on each one rather than a shell that names it once: one explicit way
  * to name a platform per invocation is the whole order, so a check that reached
- * this platform any other way would be checking something egma does not offer.
+ * this platform any other way would be checking something Egma does not offer.
  */
 async function egma(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<Result> {
   return runEgma(["--url", platform.url, ...args], env);
@@ -257,7 +257,7 @@ describe("egma init", () => {
       });
       expect(result.stdout).toContain("status: created");
       // And it names no platform, which is what makes the folder above safe to
-      // make before anybody has decided which egma this repository is on.
+      // make before anybody has decided which Egma this repository is on.
       expect(
         (await readConfig(path.join(nowhere.dir, "egma", "config.yaml"))).platform,
       ).toBeNull();
@@ -335,7 +335,7 @@ describe("egma init", () => {
    *
    * A folder somebody else committed before this repository was on any platform
    * is how a teammate ordinarily arrives: the folder is there, nothing in it
-   * names an egma, and `init --url` is what they are told to run. Recognising
+   * names an Egma, and `init --url` is what they are told to run. Recognising
    * the folder and dropping the flag would be the silent no-op this command
    * used to be, moved one case along.
    */
@@ -380,7 +380,7 @@ describe("egma init", () => {
 
       expect(refused.code).toBe(4);
       expect(refused.stdout).toContain("status: refused");
-      expect(refused.stderr).toContain("egma does not move a repository between platforms");
+      expect(refused.stderr).toContain("Egma does not move a repository between platforms");
       expect(await readFile(configFile(), "utf8")).toBe(before);
       // Neither platform was asked so much as who it is: the file decided.
       expect(elsewhere.records).toEqual([]);
@@ -438,7 +438,7 @@ describe("egma init", () => {
 });
 
 describe("egma pull", () => {
-  it("writes egma's current versions into files and pins the version ids", async () => {
+  it("writes Egma's current versions into files and pins the version ids", async () => {
     const first = platform.tests.add({
       name: "missed-appointment-reschedule",
       scenario: "The caller missed yesterday's appointment and wants to reschedule.",
@@ -559,7 +559,7 @@ describe("egma pull", () => {
 });
 
 describe("egma push", () => {
-  it("creates versions on egma for fresh files and pins them back", async () => {
+  it("creates versions on Egma for fresh files and pins them back", async () => {
     await makeFolder();
     await writeTest(
       "missed-appointment-reschedule.md",
@@ -590,7 +590,7 @@ describe("egma push", () => {
       "missed-appointment-reschedule",
     ]);
 
-    // Every file now pins the version egma minted for it, in egma's own id
+    // Every file now pins the version Egma minted for it, in Egma's own id
     // shape rather than in one this end invented.
     const pins = valuesOf(result.stdout, "version");
     expect(pins).toHaveLength(2);
@@ -646,7 +646,7 @@ describe("egma push", () => {
     expect(held.expected_behaviors).toEqual(["The agent acknowledges it without blame."]);
   });
 
-  it("uploads nothing when the files say what egma already holds", async () => {
+  it("uploads nothing when the files say what Egma already holds", async () => {
     platform.tests.add({ name: "one", scenario: "s", expectedBehaviors: ["b"] });
     await makeFolder();
     await egma(["pull"]);
@@ -670,7 +670,7 @@ describe("egma push", () => {
     expect(result.code).toBe(6);
     expect(factOf(result.stdout, "status")).toBe("turned-away");
     expect(valuesOf(result.stdout, "turned-away")).toEqual(["unfalsifiable"]);
-    // egma can see this refusal coming without asking, so the reason is its
+    // Egma can see this refusal coming without asking, so the reason is its
     // own belt, said before any upload. The door's sentence is proven where
     // the door is reached directly.
     expect(factOf(result.stdout, "reason")).toBe(
@@ -710,7 +710,7 @@ describe("egma push", () => {
   });
 
   /**
-   * A file egma cannot read is still the developer's file. It is named and left
+   * A file Egma cannot read is still the developer's file. It is named and left
    * alone, and the folder's other tests are not forfeit over it — a verb that
    * ended on the first broken file would be the one that most needs saying.
    */
@@ -732,7 +732,7 @@ describe("egma push", () => {
     expect(await readTest("half-written.md")).toBe(broken);
   });
 
-  it("refuses when egma has moved, names exactly the tests that moved, and uploads nothing", async () => {
+  it("refuses when Egma has moved, names exactly the tests that moved, and uploads nothing", async () => {
     for (const name of ["first", "second", "third"]) {
       platform.tests.add({ name, scenario: `${name} happens`, expectedBehaviors: ["b"] });
     }
@@ -762,7 +762,7 @@ describe("egma push", () => {
     expect(platform.tests.versionsOf("first")).toBe(2);
     expect(platform.tests.versionsOf("third")).toBe(2);
 
-    // Pull, then push, and it goes through. Pull writes egma's current version
+    // Pull, then push, and it goes through. Pull writes Egma's current version
     // into every file it does not already match — including the one the
     // developer had edited, which is why the refusal above came first and why
     // the folder is committed.
@@ -781,7 +781,7 @@ describe("egma push", () => {
     expect(platform.tests.versionsOf("second")).toBe(2);
   });
 
-  it("refuses a pin egma has never issued, and says what to do about it", async () => {
+  it("refuses a pin Egma has never issued, and says what to do about it", async () => {
     await makeFolder();
     await writeTest(
       "from-somewhere-else.md",
@@ -832,18 +832,18 @@ describe("egma push", () => {
 });
 
 /**
- * The mocked world, between the folder and egma.
+ * The mocked world, between the folder and Egma.
  *
  * A mock tool answers for one of the agent's tools while a simulation runs, and
  * it is authored where every other authored thing is: in the folder, synced
  * with the two verbs already here. Two halves, and they behave differently on
- * purpose — the project's own mock tools are the one authored thing egma does
+ * purpose — the project's own mock tools are the one authored thing Egma does
  * not version, so an edit overwrites; a test's overrides are test content, so
  * an edit to one mints the test's next version exactly as an edit to an
  * expected behavior does.
  */
 describe("the folder carries mock tools", () => {
-  it("pulls what egma answers with into the folder, and a fresh push changes nothing", async () => {
+  it("pulls what Egma answers with into the folder, and a fresh push changes nothing", async () => {
     platform.mocking.add({ tool: "check_availability", answer: { slots: [] } });
     platform.mocking.add({
       tool: "book_appointment",
@@ -897,7 +897,7 @@ describe("the folder carries mock tools", () => {
       ].join("\n"),
     );
 
-    // And the folder as it now stands is a folder egma has nothing to do about.
+    // And the folder as it now stands is a folder Egma has nothing to do about.
     const before = { ...(await folderBytes()), "mock-tools.md": file };
     const pushed = await egma(["push"]);
 
@@ -933,7 +933,7 @@ describe("the folder carries mock tools", () => {
 
     // Edited in the folder and pushed again: the same mock tool, written over.
     // There is no version chain here and no second row — the one authored thing
-    // egma does not version.
+    // Egma does not version.
     await writeMockTools([["check_availability", { answer: { slots: [] }, delay_ms: 250 }]]);
     const edited = await egma(["push"]);
 
@@ -949,7 +949,7 @@ describe("the folder carries mock tools", () => {
       },
     ]);
 
-    // And the file egma wrote back is the file a pull would have written.
+    // And the file Egma wrote back is the file a pull would have written.
     const after = await readMockTools();
     expect(await egma(["pull"])).toMatchObject({ code: 0 });
     expect(await readMockTools()).toBe(after);
@@ -1031,7 +1031,7 @@ describe("the folder carries mock tools", () => {
     expect(platform.mocking.mockTools).toEqual([]);
   });
 
-  it("relays egma's own refusal for an answer or a delay egma cannot carry", async () => {
+  it("relays Egma's own refusal for an answer or a delay Egma cannot carry", async () => {
     await makeFolder();
     const tooLong = LONGEST_MOCK_TOOL_DELAY_MILLISECONDS + 1;
     const tooBig = "x".repeat(LARGEST_MOCK_TOOL_ANSWER_BYTES);
@@ -1048,7 +1048,7 @@ describe("the folder carries mock tools", () => {
     expect(valuesOf(result.stdout, "turned-away")).toEqual(["book_appointment", "read_notes"]);
     expect(valuesOf(result.stdout, "file")).toContain("egma/mock-tools.md");
 
-    // egma's own sentences, word for word, arithmetic included. Nothing out
+    // Egma's own sentences, word for word, arithmetic included. Nothing out
     // here holds a second copy of either ceiling — the numbers in these
     // sentences are the platform's own, which is why they can be trusted to
     // still be right the day the budget moves.
@@ -1065,7 +1065,7 @@ describe("the folder carries mock tools", () => {
         `document rather than a tool answer.`,
     ]);
 
-    // The one egma could take, landed; the two it could not, left in the file
+    // The one Egma could take, landed; the two it could not, left in the file
     // exactly as they were written, so the author is looking at what the
     // refusal is about.
     expect(platform.mocking.mockTools.map((one) => one.tool)).toEqual(["send_sms"]);
@@ -1104,8 +1104,8 @@ describe("the folder carries mock tools", () => {
 
     expect(result.code).toBe(0);
     expect(valuesOf(result.stdout, "mock-tool-updated")).toEqual(["check_availability"]);
-    // What the file stopped saying, egma stopped answering. A field left out of
-    // an edit is one egma keeps, so a folder that only sent what it still said
+    // What the file stopped saying, Egma stopped answering. A field left out of
+    // an edit is one Egma keeps, so a folder that only sent what it still said
     // would never be able to take anything back.
     expect(platform.mocking.mockTools).toEqual([
       {
@@ -1166,7 +1166,7 @@ describe("the folder carries mock tools", () => {
     await egma(["pull"]);
 
     // The order somebody types `delay_ms` and `answer` in is not something they
-    // said — egma has one order it writes them in. A folder that thought
+    // said — Egma has one order it writes them in. A folder that thought
     // otherwise would report an edit that edited nothing, every time.
     await writeMockTools([["check_availability", { delay_ms: 250, answer: { slots: [] } }]]);
     const held = await readTest("calendar-is-full.md");
@@ -1287,7 +1287,7 @@ describe("both verbs, run with nobody watching", () => {
     }
   });
 
-  it("answer 4 and name the address when egma does not answer", async () => {
+  it("answer 4 and name the address when Egma does not answer", async () => {
     await makeFolder();
     await writeTest(
       "one.md",
@@ -1313,8 +1313,8 @@ describe("both verbs, run with nobody watching", () => {
     expect(help.stdout).toContain("egma init");
     expect(help.stdout).toContain("egma pull");
     expect(help.stdout).toContain("egma push");
-    expect(help.stdout).toContain("5 push refused: egma has moved on, pull first");
-    expect(help.stdout).toContain("6 egma turned a test or a mock tool away at its door");
+    expect(help.stdout).toContain("5 push refused: Egma has moved on, pull first");
+    expect(help.stdout).toContain("6 Egma turned a test or a mock tool away at its door");
   });
 
   /**
@@ -1329,12 +1329,12 @@ describe("both verbs, run with nobody watching", () => {
   it("never print the key, and never write it into the folder", async () => {
     platform.tests.add({ name: "one", scenario: "s", expectedBehaviors: ["b"] });
     // The folder, and deliberately no binding with it: what is under check
-    // below includes an egma that does not answer, and a bound repository
+    // below includes an Egma that does not answer, and a bound repository
     // would be refused for naming another address before it ever got there.
     await runEgma(["init", "--agent", "receptionist"]);
     await egma(["pull"]);
 
-    // A conflict, a refusal at the door, and an egma that does not answer.
+    // A conflict, a refusal at the door, and an Egma that does not answer.
     platform.tests.editInDashboard("one", { scenario: "s, changed" });
     const held = await readTest("one.md");
     await writeTest("one.md", held.replace("1. b", "1. b, said better"));
@@ -1364,7 +1364,7 @@ describe("both verbs, run with nobody watching", () => {
   });
 
   /**
-   * What egma set up for a new account is settled in the browser and said
+   * What Egma set up for a new account is settled in the browser and said
    * nowhere out here. A relayed message is the one way those words could reach
    * a terminal from the far end of an HTTP request, so every path that relays
    * one is held against the list.

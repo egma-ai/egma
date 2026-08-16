@@ -216,7 +216,7 @@ function devicePollOutcome(cause: unknown): DevicePollOutcome {
 
 export function createIdentity(options: IdentityOptions): Identity {
   const auth = betterAuth({
-    appName: "egma",
+    appName: "Egma",
     baseURL: options.baseUrl,
     basePath: options.basePath,
     secret: options.secret,
@@ -348,9 +348,9 @@ export function createIdentity(options: IdentityOptions): Identity {
 
         await options.emailSender.send({
           to: user.email,
-          subject: "Reset your egma password",
+          subject: "Reset your Egma password",
           body:
-            `Somebody asked to set a new password for your egma account. ` +
+            `Somebody asked to set a new password for your Egma account. ` +
             `Set one here: ${link}\n\n` +
             `The link works once, and runs out ${PASSWORD_RESET_LIFETIME_MINUTES} ` +
             `minutes after it was asked for. If it was not you, nothing has ` +
@@ -364,8 +364,8 @@ export function createIdentity(options: IdentityOptions): Identity {
       sendVerificationEmail: async ({ user, url }) => {
         await options.emailSender.send({
           to: user.email,
-          subject: "Confirm your email address for egma",
-          body: `Confirm your email address to finish setting up egma: ${url}`,
+          subject: "Confirm your email address for Egma",
+          body: `Confirm your email address to finish setting up Egma: ${url}`,
         });
       },
     },

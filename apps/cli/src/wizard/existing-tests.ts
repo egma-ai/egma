@@ -84,15 +84,15 @@ export async function readExistingTests(cwd: string, said: string | null): Promi
   try {
     root = await realpath(cwd);
   } catch {
-    return { kind: "unusable", reason: `egma cannot read ${cwd}.` };
+    return { kind: "unusable", reason: `Egma cannot read ${cwd}.` };
   }
 
-  const outside = `${typed} is outside ${root}. egma reads only the folder it was started in, so copy the file in and run egma again.`;
+  const outside = `${typed} is outside ${root}. Egma reads only the folder it was started in, so copy the file in and run egma again.`;
 
   const named = path.resolve(root, typed);
   if (!inside(root, named)) return { kind: "unusable", reason: outside };
   if (fenced(named)) {
-    return { kind: "unusable", reason: "egma never reads .env files, and never hands one on." };
+    return { kind: "unusable", reason: "Egma never reads .env files, and never hands one on." };
   }
 
   let real: string;
@@ -103,7 +103,7 @@ export async function readExistingTests(cwd: string, said: string | null): Promi
   }
   if (!inside(root, real)) return { kind: "unusable", reason: outside };
   if (fenced(real)) {
-    return { kind: "unusable", reason: "egma never reads .env files, and never hands one on." };
+    return { kind: "unusable", reason: "Egma never reads .env files, and never hands one on." };
   }
 
   const shown = path.relative(root, real);
@@ -116,13 +116,13 @@ export async function readExistingTests(cwd: string, said: string | null): Promi
     }
     size = found.size;
   } catch {
-    return { kind: "unusable", reason: `egma could not open ${shown}.` };
+    return { kind: "unusable", reason: `Egma could not open ${shown}.` };
   }
 
   if (size > MAX_EXISTING_TESTS_BYTES) {
     return {
       kind: "unusable",
-      reason: `${shown} is larger than ${Math.round(MAX_EXISTING_TESTS_BYTES / 1024)} KB, which is far more than a list of test cases. Point egma at the list itself.`,
+      reason: `${shown} is larger than ${Math.round(MAX_EXISTING_TESTS_BYTES / 1024)} KB, which is far more than a list of test cases. Point Egma at the list itself.`,
     };
   }
 
@@ -130,13 +130,13 @@ export async function readExistingTests(cwd: string, said: string | null): Promi
   try {
     content = await readFile(real, "utf8");
   } catch {
-    return { kind: "unusable", reason: `egma could not read ${shown}.` };
+    return { kind: "unusable", reason: `Egma could not read ${shown}.` };
   }
 
   if (!isText(content)) {
     return {
       kind: "unusable",
-      reason: `${shown} is not a text file. Export it as CSV, or as a document egma can read, and run egma again.`,
+      reason: `${shown} is not a text file. Export it as CSV, or as a document Egma can read, and run egma again.`,
     };
   }
   if (content.trim() === "") {

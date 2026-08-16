@@ -87,7 +87,7 @@ export function admitIdentity(
     if (!singleOrganization) return;
     if (!(await instanceIsClaimed())) return;
     throw new SignupClosedError(
-      "this egma already has an organization, and open signup closed when it " +
+        "this Egma instance already has an organization, and open signup closed when it " +
         "was claimed. Ask an admin for an invitation.",
     );
   };

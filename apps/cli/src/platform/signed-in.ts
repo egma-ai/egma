@@ -28,5 +28,5 @@ export async function signedInAt(access: PlatformAccess): Promise<SignedIn | nul
 
 /** What a developer is told when there is no key for this egma. */
 export function notSignedInRefusal(url: string): string {
-  return `This machine is not signed in to egma at ${url}. Run egma login first, then run this again.`;
+  return `This machine is not signed in to Egma at ${url}. Run egma login first, then run this again.`;
 }

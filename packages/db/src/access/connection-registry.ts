@@ -467,7 +467,7 @@ export const CONNECTION_REGISTRY: Readonly<
           required: false,
           refusal:
             "a phone connection takes no credential: the customer supplies a " +
-            "public number, and egma dials it with its own telephony " +
+            "public number, and Egma dials it with its own telephony " +
             "configuration",
         },
       },
@@ -539,7 +539,7 @@ export const CONNECTION_REGISTRY: Readonly<
         mixedUp:
           "a livekit connection mints its own tokens, so it needs the " +
           "project's apiKey and apiSecret. Send the pair, or name a " +
-          "tokenEndpoint in the config and egma will ask that endpoint for a " +
+          "tokenEndpoint in the config and Egma will ask that endpoint for a " +
           "token instead — which is the shape where the project's secret " +
           "never leaves the customer.",
       },
@@ -568,7 +568,7 @@ export const CONNECTION_REGISTRY: Readonly<
           "a livekit connection whose config names a tokenEndpoint asks that " +
           "endpoint for every token, so it holds no key pair of its own: its " +
           "credentials are the endpoint's auth headers, shaped { headers }. " +
-          "Send those, or drop the tokenEndpoint and egma will mint its own " +
+          "Send those, or drop the tokenEndpoint and Egma will mint its own " +
           "tokens from an apiKey and apiSecret.",
       },
     ],
@@ -643,9 +643,9 @@ export function conductableConnectionTypes(): readonly ConnectionType[] {
  */
 export function noSimulatorAdapterMessage(type: string): string {
   return (
-    `egma has no simulator adapter for a ${type} connection yet, ` +
+    `Egma has no simulator adapter for a ${type} connection yet, ` +
     `so it will not start a run it cannot conduct. Run these tests over a ` +
-    `connection egma conducts today: ${conductableConnectionTypes().join(", ")}.`
+    `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`
   );
 }
 
@@ -655,7 +655,7 @@ export function descriptorOf(type: string): ConnectionDescriptor {
   if (descriptor === undefined) {
     throw new AgentWriteRefusedError(
       "not_admitted",
-      `"${type}" is not a connection type egma knows; expected one of ` +
+      `"${type}" is not a connection type Egma knows; expected one of ` +
         CONNECTION_TYPES.join(", "),
     );
   }

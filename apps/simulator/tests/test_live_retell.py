@@ -15,10 +15,10 @@ environment it skips — visibly, never failing, never waiting on anybody:
 
 The agent is the only live thing in the exchange: the persona still speaks
 through the scripted model client, so what varies between two runs is the
-agent's own answers and nothing of egma's. Assertions read the workbench's
+agent's own answers and nothing of Egma's. Assertions read the workbench's
 records, exactly as the offline acceptance suite does — plus one question
 put to Retell itself, because whether the chat was really ended at the
-platform is not visible from inside egma.
+platform is not visible from inside Egma.
 """
 
 from __future__ import annotations

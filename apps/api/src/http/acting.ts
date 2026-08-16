@@ -48,7 +48,7 @@ export function cannotActIn(projectId: string): string {
  */
 export const NAME_THE_PROJECT =
   "this organization holds more than one project and this credential names " +
-  "none, so egma cannot tell which project this is about. Send project with " +
+        "none, so Egma cannot tell which project this is about. Send project with " +
   "the one you mean, or use a key minted for that project.";
 
 /**

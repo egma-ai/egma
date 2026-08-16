@@ -437,7 +437,7 @@ describe("somebody who already belongs to an organization", () => {
     const ada = await signUp("ada@acme.example", "Acme");
     const invited = await invite(ada, "bob@acme.example");
 
-    // Bob goes and sets egma up for himself instead, which nothing about the
+    // Bob goes and sets Egma up for himself instead, which nothing about the
     // invitation could have anticipated.
     const bob = await signUp("bob@acme.example", "Bob's own");
 
@@ -470,7 +470,7 @@ describe("an invited person on a claimed self-hosted instance", () => {
   /**
    * Open signup closes the moment the first person claims the instance, and
    * without this there would be no way past it — which would make a self-hosted
-   * egma a single-person product.
+   * Egma a single-person product.
    */
   it("gets past the door that open signup closed behind the first person", async () => {
     api = await createApi("invite_claimed_instance", {

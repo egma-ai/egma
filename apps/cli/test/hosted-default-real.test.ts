@@ -12,7 +12,7 @@
  * proof is the whole real thing, run the way a developer runs it.
  *
  * The address it reaches is a local instance, put in the built-in address's
- * place through `EGMA_TEST_DEFAULT_URL`. Nothing here dials hosted egma.
+ * place through `EGMA_TEST_DEFAULT_URL`. Nothing here dials hosted Egma.
  */
 
 import { spawn } from "node:child_process";

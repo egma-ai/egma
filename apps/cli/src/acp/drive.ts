@@ -251,7 +251,7 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
     const stdin = child.stdin;
     const stdout = child.stdout;
     if (stdin === null || stdout === null) {
-      return { kind: "failed", reason: `egma could not talk to ${launch.name}.` };
+      return { kind: "failed", reason: `Egma could not talk to ${launch.name}.` };
     }
 
     const stream = acp.ndJsonStream(

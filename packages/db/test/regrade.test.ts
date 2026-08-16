@@ -598,7 +598,7 @@ describe("re-grading with a grader named", () => {
     await regrade(auth, { runId, graderId });
     const job = await theJobFor(simulationId);
 
-    // Three copies take it and vanish, which is what abandons it. egma is not
+    // Three copies take it and vanish, which is what abandons it. Egma is not
     // going to judge this conversation for that grader, and a job left narrowed
     // after it settles would hand the instruction to whoever reopens it next.
     for (let attempt = 1; attempt <= 3; attempt += 1) {

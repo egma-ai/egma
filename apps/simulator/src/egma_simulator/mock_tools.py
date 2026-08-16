@@ -329,7 +329,7 @@ class MockToolSeam:
         # with more mocked tools than one message can name is also a fault
         # worth naming, where the transport's own complaint would arrive
         # as a hello that mysteriously failed.
-        _fits_on_the_wire("the list of tools egma answers for", reply)
+        _fits_on_the_wire("the list of tools Egma answers for", reply)
 
         replaced = self._censuses
         self._censuses += 1
@@ -407,15 +407,15 @@ class MockToolSeam:
             )
             offered = ", ".join(self._answers) or "no tools at all"
             logger.warning(
-                "a call for %r reached egma, which has no answer for it; the "
+                "a call for %r reached Egma, which has no answer for it; the "
                 "hello reply named %s. Refused rather than waved through: a "
-                "call egma cannot answer is not a call egma answered",
+                "call Egma cannot answer is not a call Egma answered",
                 name,
                 offered,
             )
             raise MockToolRefusal(
                 UNKNOWN_TOOL,
-                f"this simulation has no mock tool for {name!r}, so egma has "
+                f"this simulation has no mock tool for {name!r}, so Egma has "
                 f"nothing to answer with. It answers for: {offered}",
             )
 
@@ -502,7 +502,7 @@ def _speaks_this_version(asked: dict) -> None:
     raise MockToolRefusal(
         UNSUPPORTED_PROTOCOL_VERSION,
         f"{HELLO_METHOD} declares which version of this exchange it speaks; "
-        f"egma speaks {PROTOCOL_VERSION} and this one declared {declared}",
+        f"Egma speaks {PROTOCOL_VERSION} and this one declared {declared}",
     )
 
 

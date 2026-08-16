@@ -97,7 +97,7 @@ export function RunScreen({ run }: RunScreenProps) {
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       <Text>
         {`run ${run.runId}  ·  ${tally.total} ${tally.total === 1 ? "simulation" : "simulations"}`}
@@ -124,7 +124,7 @@ export function RunScreen({ run }: RunScreenProps) {
         {`passed ${tally.passed}  ·  failed ${tally.failed}  ·  skipped ${tally.skipped}  ·  errored ${tally.errored}  ·  waiting ${tally.pending}`}
       </Text>
       <Box height={1} />
-      <Text dimColor>The suite keeps running on egma whether this stays open or not.</Text>
+      <Text dimColor>The suite keeps running on Egma whether this stays open or not.</Text>
       <Box height={1} />
       <Text dimColor>[ctrl-c] stop</Text>
     </Box>

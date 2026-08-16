@@ -1,11 +1,15 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "name": "egma",
+  "name": "Egma",
   "theme": "luma",
   "colors": {
-    "primary": "#6B4FFF",
-    "light": "#EDE9FF",
-    "dark": "#3A2BAA"
+    "primary": "#020202",
+    "light": "#FFFFFF",
+    "dark": "#020202"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
   },
   "favicon": "/favicon.svg",
   "seo": {

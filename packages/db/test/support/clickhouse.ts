@@ -12,7 +12,7 @@ import {
  * Every guarantee under test is a ClickHouse-specific behaviour — the sort key,
  * the partition key, what a materialised view does with a block, whether a
  * repeated insert lands twice — so tests run against a real ClickHouse and never
- * a substitute. A mocked one would confirm the strings egma sends and nothing
+ * a substitute. A mocked one would confirm the strings Egma sends and nothing
  * about what they do.
  *
  * Each test file owns a database of its own, created here and dropped

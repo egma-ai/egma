@@ -1,17 +1,17 @@
 ---
-title: "Connect Your Retell Voice Agent to egma for Testing"
+title: "Connect Your Retell Voice Agent to Egma for Testing"
 sidebarTitle: "Retell"
-description: "Register your Retell agent with egma in one command. Choose text or phone reach, seal your credentials, and start running simulations."
+description: "Register your Retell agent with Egma in one command. Choose text or phone reach, seal your credentials, and start running simulations."
 ---
 
-The fastest way to connect a Retell agent is `egma connect`. Run it from your agent's repository and the wizard prompts you for your Retell API key, lists the agents on your account, and asks you to choose how egma should reach the one you pick — all without writing anything to a file or passing a secret as a command argument.
+The fastest way to connect a Retell agent is `egma connect`. Run it from your agent's repository and the wizard prompts you for your Retell API key, lists the agents on your account, and asks you to choose how Egma should reach the one you pick — all without writing anything to a file or passing a secret as a command argument.
 
 ## Prerequisites
 
 Before you run `egma connect`, make sure you have:
 
 - A Retell account with at least one agent configured
-- An egma account (cloud or self-hosted instance) — sign in first with `egma login`
+- An Egma account (cloud or self-hosted instance) — sign in first with `egma login`
 - Node 22 or newer to run `npx @egma/cli`
 
 ## Interactive wizard
@@ -26,21 +26,21 @@ The wizard walks you through every step. Here is what it looks like from start t
 
 ```text
 ◇ Paste your Retell API key (Retell dashboard → Settings → API keys).
-  It is sent to egma and stored encrypted. It never lands in a file here.
+  It is sent to Egma and stored encrypted. It never lands in a file here.
   › ●●●●●●●●●●●●●●●●
 
 ◇ Found 1 agent on this account.
   › customer-support
 
-◇ How should egma reach this agent?
-  › Text — egma exchanges messages with the agent. No phone call, nothing dialled.
-    Phone — egma dials one of the agent's numbers and talks to it over the
+◇ How should Egma reach this agent?
+  › Text — Egma exchanges messages with the agent. No phone call, nothing dialled.
+    Phone — Egma dials one of the agent's numbers and talks to it over the
     telephone network, the way the people who call it do.
 
-  egma creates the one you choose, and only that one.
+  Egma creates the one you choose, and only that one.
 ```
 
-After you confirm, egma registers the agent and prints one fact per line:
+After you confirm, Egma registers the agent and prints one fact per line:
 
 ```text
 url: https://app.egma.ai
@@ -64,7 +64,7 @@ grounded_in: retell
 status: connected
 ```
 
-Your agent is now registered. egma sealed the API key on arrival — reading the connection back shows the last four characters of the key and no line at all for the secret.
+Your agent is now registered. Egma sealed the API key on arrival — reading the connection back shows the last four characters of the key and no line at all for the secret.
 
 ## Reach types
 
@@ -72,20 +72,20 @@ Choosing the right reach is the one decision that shapes what a simulation exerc
 
 <CardGroup cols={2}>
   <Card title="Text reach" icon="message">
-    egma exchanges text messages with your agent directly. No audio, no phone call, nothing dialled. Tests your agent's reasoning, prompt logic, and tool calls at full speed. This is the default for new integrations and works on any egma instance with no additional setup.
+    Egma exchanges text messages with your agent directly. No audio, no phone call, nothing dialled. Tests your agent's reasoning, prompt logic, and tool calls at full speed. This is the default for new integrations and works on any Egma instance with no additional setup.
   </Card>
   <Card title="Phone reach" icon="phone">
-    egma dials one of your agent's Retell numbers over a real SIP trunk and Twilio, exactly as a caller would. Tests everything text tests — plus speech recognition, text-to-speech, interruption handling, and the telephone line itself. Requires a phone number configured on your egma instance.
+    Egma dials one of your agent's Retell numbers over a real SIP trunk and Twilio, exactly as a caller would. Tests everything text tests — plus speech recognition, text-to-speech, interruption handling, and the telephone line itself. Requires a phone number configured on your Egma instance.
   </Card>
 </CardGroup>
 
 <Note>
-  The same test run over both reaches is the sharpest signal egma can give you: a test that passes on text and fails on phone means your prompt is fine and your speech stack is not.
+  The same test run over both reaches is the sharpest signal Egma can give you: a test that passes on text and fails on phone means your prompt is fine and your speech stack is not.
 </Note>
 
 ### Phone reach requirements
 
-Phone reach calls your agent's number through the public telephone network. Your egma instance must have a SIP trunk and Twilio carrier configured before you run a phone simulation. Run `npx @egma/cli self-host setup` on your instance to configure the phone stack, or contact your egma admin if you are on a shared instance.
+Phone reach calls your agent's number through the public telephone network. Your Egma instance must have a SIP trunk and Twilio carrier configured before you run a phone simulation. Run `npx @egma/cli self-host setup` on your instance to configure the phone stack, or contact your Egma admin if you are on a shared instance.
 
 ## Headless and CI usage
 
@@ -101,7 +101,7 @@ EGMA_RETELL_API_KEY=key_live_… egma connect \
   --phone-number +14155550111
 ```
 
-Pass `--headless` to suppress all prompts. With `--headless` and no `--reach`, the command exits with code 5 — egma will not decide on your behalf whether to dial somebody's telephone.
+Pass `--headless` to suppress all prompts. With `--headless` and no `--reach`, the command exits with code 5 — Egma will not decide on your behalf whether to dial somebody's telephone.
 
 All environment variables the command reads:
 
@@ -124,7 +124,7 @@ The `registration:` line in the output tells you exactly what happened:
 | `reused` | The agent and connection already existed; nothing changed |
 | `connection_added` | The agent already existed; a second connection (the other reach) was added |
 
-When a connection is added, egma also prints a `note:` line saying so in plain words. One voice agent, two connections, one results history.
+When a connection is added, Egma also prints a `note:` line saying so in plain words. One voice agent, two connections, one results history.
 
 ## Exit codes
 
@@ -132,19 +132,19 @@ When a connection is added, egma also prints a `note:` line saying so in plain w
 0   connected
 2   the API key was refused by Retell
 3   no agents on that Retell account
-4   Retell or egma did not answer, or refused
+4   Retell or Egma did not answer, or refused
 5   a choice only you can make was not made: which agent, text or phone, or which number
 6   no key given
-7   not signed in to egma
+7   not signed in to Egma
 8   Retell routes no number to that agent
 130 stopped part way
 ```
 
 ## What happens after connect
 
-Once `egma connect` completes, egma holds a sealed copy of your Retell credentials and a record of the agent. Nothing in this step writes to your Retell account — every request egma makes during connect is a read.
+Once `egma connect` completes, Egma holds a sealed copy of your Retell credentials and a record of the agent. Nothing in this step writes to your Retell account — every request Egma makes during connect is a read.
 
-From here you can write tests in `egma/tests/` and run them with `egma run`. Each test becomes one simulation per persona, and each simulation calls your agent through the connection egma just registered.
+From here you can write tests in `egma/tests/` and run them with `egma run`. Each test becomes one simulation per persona, and each simulation calls your agent through the connection Egma just registered.
 
 <Tip>
   If your repository keeps a prompt file and it differs from what Retell is currently running, `egma connect` prints a `drift: yes` line and names which version your tests will be grounded in. It never blocks on drift — being out of step is a signal, not an error.

@@ -116,7 +116,7 @@ export const KEYS_UNUSABLE = "unusable-keys";
 export class CredentialsFileUnreadableError extends KeysUnusableError {
   constructor(file: string, cause: unknown) {
     super(
-      `egma could not read the keys in ${file}, so it stopped rather than write over them. Look at that file. If it is damaged, move it aside and sign in again — you will be signed out of every platform, which is why egma will not do that for you.`,
+      `Egma could not read the keys in ${file}, so it stopped rather than write over them. Look at that file. If it is damaged, move it aside and sign in again — you will be signed out of every platform, which is why Egma will not do that for you.`,
       { cause },
     );
     this.name = "CredentialsFileUnreadableError";
@@ -127,7 +127,7 @@ export class CredentialsFileUnreadableError extends KeysUnusableError {
 export class CredentialsFileBusyError extends KeysUnusableError {
   constructor(file: string, lock: string) {
     super(
-      `egma waited for another egma to finish writing ${file} and it did not. If nothing else is running, delete ${lock} and try again.`,
+      `Egma waited for another Egma process to finish writing ${file} and it did not. If nothing else is running, delete ${lock} and try again.`,
     );
     this.name = "CredentialsFileBusyError";
   }
@@ -303,7 +303,7 @@ export async function writeCredentials(
     // but it is a reason to say so, because the developer is about to hold a
     // key in a place other people on this machine can look into.
     warn(
-      `egma could not make ${folder} readable by you alone. The key is written, and anybody who can read that folder can read it.`,
+      `Egma could not make ${folder} readable by you alone. The key is written, and anybody who can read that folder can read it.`,
     );
   }
 
@@ -378,7 +378,7 @@ export type SelectedPlatform = {
 const SOURCE_NAMES: Record<PlatformSource, string> = {
   "--url": "--url",
   binding: "the repository platform binding",
-  default: "egma's built-in address",
+  default: "Egma's built-in address",
 };
 
 /**
@@ -473,7 +473,7 @@ export class PlatformBindingMismatchError extends Error {
   constructor(binding: PlatformBinding, selected: PlatformIdentity) {
     super(
       teachingTheMove(
-        `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and the platform answering there now says it is ${selected.instanceId}. That address is the one this repository records, so what changed is the platform at it rather than an address anybody named. If it is this same platform reinstalled — a rebuilt stack has a new database and so a new identity — edit the platform instance in egma/config.yaml to ${selected.instanceId} and change nothing else; the move below is for a different platform, not a reinstall of this one. egma does not move a repository between platforms, and no repository identifiers were sent.`,
+        `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and the platform answering there now says it is ${selected.instanceId}. That address is the one this repository records, so what changed is the platform at it rather than an address anybody named. If it is this same platform reinstalled — a rebuilt stack has a new database and so a new identity — edit the platform instance in egma/config.yaml to ${selected.instanceId} and change nothing else; the move below is for a different platform, not a reinstall of this one. Egma does not move a repository between platforms, and no repository identifiers were sent.`,
       ),
     );
     this.name = "PlatformBindingMismatchError";
@@ -504,7 +504,7 @@ export class PlatformBindingMismatchError extends Error {
 export class BoundPlatformAddressError extends Error {
   constructor(binding: PlatformBinding, source: PlatformSource, selected: string) {
     const named = SOURCE_NAMES[source];
-    const refusal = `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and ${named} names ${selected} instead. Drop ${named} to use the bound platform. If ${selected} is that same platform at a new address, edit the platform origin in egma/config.yaml to ${selected} and change nothing else — the move below is for a different platform, not a new address for this one. egma does not move a repository between platforms, and no repository identifiers were sent.`;
+    const refusal = `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and ${named} names ${selected} instead. Drop ${named} to use the bound platform. If ${selected} is that same platform at a new address, edit the platform origin in egma/config.yaml to ${selected} and change nothing else — the move below is for a different platform, not a new address for this one. Egma does not move a repository between platforms, and no repository identifiers were sent.`;
     super(source === "binding" ? refusal : teachingTheMove(refusal));
     this.name = "BoundPlatformAddressError";
   }
@@ -514,7 +514,7 @@ export class BoundPlatformAddressError extends Error {
 export class BoundPlatformUnavailableError extends Error {
   constructor(binding: PlatformBinding, cause: unknown) {
     super(
-      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and it did not answer. Start the bound platform and run this again. egma did not fall back to its own platform, and no repository identifiers were sent.`,
+      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and it did not answer. Start the bound platform and run this again. Egma did not fall back to its own platform, and no repository identifiers were sent.`,
       { cause },
     );
     this.name = "BoundPlatformUnavailableError";
@@ -546,10 +546,10 @@ export class DefaultPlatformUnusableError extends Error {
     const answered = whatAnswered(cause);
     super(
       [
-        `This repository names no Egma platform, so egma used its own at ${url}, and ${answered.said}`,
+        `This repository names no Egma platform, so Egma used its own at ${url}, and ${answered.said}`,
         answered.worthRetrying
-          ? "Try again in a moment, or point egma at another platform with --url <address>."
-          : "That is egma's to fix and not yours, and waiting will not change it. To carry on now, point egma at another platform with --url <address>.",
+          ? "Try again in a moment, or point Egma at another platform with --url <address>."
+          : "That is Egma's to fix and not yours, and waiting will not change it. To carry on now, point Egma at another platform with --url <address>.",
         "Nothing was sent.",
       ].join(" "),
       { cause },
@@ -586,7 +586,7 @@ export class UnboundPlatformIdentifiersError extends Error {
   constructor(held: readonly string[]) {
     super(
       teachingTheMove(
-        `This repository names no Egma platform, and it still holds identifiers that only the platform which issued them can resolve — under ${held.join(", ")} in egma/config.yaml. egma will not send them anywhere, because the line that said which platform they came from is the one that is gone. Two ways on: put the platform: block back in egma/config.yaml, which is committed and so is in this repository's history, or delete the identifiers below and connect again on whichever platform you name next. Nothing was sent.`,
+        `This repository names no Egma platform, and it still holds identifiers that only the platform which issued them can resolve — under ${held.join(", ")} in egma/config.yaml. Egma will not send them anywhere, because the line that said which platform they came from is the one that is gone. Two ways on: put the platform: block back in egma/config.yaml, which is committed and so is in this repository's history, or delete the identifiers below and connect again on whichever platform you name next. Nothing was sent.`,
       ),
     );
     this.name = "UnboundPlatformIdentifiersError";
@@ -597,7 +597,7 @@ export class UnboundPlatformIdentifiersError extends Error {
 export class RepositoryPlatformConfigError extends Error {
   constructor(cause: unknown) {
     super(
-      "Egma could not read this repository's egma/config.yaml, so it did not select a platform. Fix that file and run this again. egma did not fall back to its own platform.",
+      "Egma could not read this repository's egma/config.yaml, so it did not select a platform. Fix that file and run this again. Egma did not fall back to its own platform.",
       { cause },
     );
     this.name = "RepositoryPlatformConfigError";

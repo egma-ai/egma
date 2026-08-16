@@ -4,7 +4,7 @@ Everything else about the livekit plug is proved against a room-shaped
 fake, which says the lifecycle is right and nothing at all about a real
 LiveKit project, a real worker, or a real dispatch. This file is the
 other half: a spec whose connection names a room goes in at the control
-plane, egma makes the room in that project, a real agent worker is
+plane, Egma makes the room in that project, a real agent worker is
 dispatched into it, a genuine spoken exchange happens, and the record
 that comes back is read the same way the offline acceptance suite reads
 one.
@@ -303,7 +303,7 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     # A real agent said real words, and the transcript alternates the way
     # a conversation does. What was said is not pinned: a live agent
     # answers differently every time, and pinning it would be pinning the
-    # agent rather than egma.
+    # agent rather than Egma.
     #
     # The transcript is read where the transcript now lives — the turn
     # spans, off the trace door — because the report door carries the
@@ -337,7 +337,7 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     # agree is a thing only a real run can say.
     assert facts["turn_count"] == len(spoken)
 
-    # The room egma made is the provider reference: one room, one
+    # The room Egma made is the provider reference: one room, one
     # simulation, and the one join between this record and the project's
     # own telemetry.
     reference = facts["provider_reference"]

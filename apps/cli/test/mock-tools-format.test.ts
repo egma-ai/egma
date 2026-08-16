@@ -3,8 +3,8 @@
  *
  * One shape serves the project's own file and a test's overrides, so this is
  * checked once and both places inherit it. The promise being kept is the
- * folder's oldest one: everything egma writes goes out through one serializer,
- * so reading a file egma wrote gives back exactly what was written.
+ * folder's oldest one: everything Egma writes goes out through one serializer,
+ * so reading a file Egma wrote gives back exactly what was written.
  */
 
 import { describe, expect, it } from "vitest";
@@ -69,8 +69,8 @@ describe("a mock tool in a file", () => {
   });
 
   it("writes the keys in the order it was handed them, and reads them back so", () => {
-    // Writing does not reorder anything, because everything egma writes is
-    // handed to it in the one order egma projects an answer into. What that
+    // Writing does not reorder anything, because everything Egma writes is
+    // handed to it in the one order Egma projects an answer into. What that
     // buys is the round trip: the bytes are decided by the value, so a `pull`
     // straight after a `push` computes the same file and finds nothing to do.
     const one = written([{ tool: "t", says: { delay_ms: 10, answer: 1 } }]);
@@ -105,8 +105,8 @@ describe("a mock tool in a file", () => {
     ]);
   });
 
-  it("carries a key egma does not know about, rather than dropping it", () => {
-    // What a mock tool holds is egma's to decide. A folder that only knew
+  it("carries a key Egma does not know about, rather than dropping it", () => {
+    // What a mock tool holds is Egma's to decide. A folder that only knew
     // today's keys would swallow tomorrow's, and the author would never be told
     // which half of their mocked world went missing.
     const entries = read(
@@ -118,7 +118,7 @@ describe("a mock tool in a file", () => {
 
   it("reads a mock tool with nothing under it as saying nothing", () => {
     // Refusing it here would be this end holding an opinion about what a mock
-    // tool must answer with. egma's door holds that one, and says it better.
+    // tool must answer with. Egma's door holds that one, and says it better.
     expect(read(["## Mock tools", "### check_availability"].join("\n"))).toEqual([
       { tool: "check_availability", says: {} },
     ]);
@@ -152,7 +152,7 @@ describe("a mock tool in a file", () => {
 
   it("compares two entries by what they say, not by the order they say it in", () => {
     // The order somebody typed the entry's own keys in is not something they
-    // said: egma has one order it writes them in, and a file that arrived in
+    // said: Egma has one order it writes them in, and a file that arrived in
     // another is the same mock tool. What is *inside* those keys is compared as
     // written, because an answer is whatever shape that tool's contract has and
     // the platform compares an answer the same way.
@@ -170,7 +170,7 @@ describe("a mock tool in a file", () => {
     ).toBe(false);
   });
 
-  it("compares two lists the way egma compares them: same order, same keys", () => {
+  it("compares two lists the way Egma compares them: same order, same keys", () => {
     const one: readonly MockToolEntry[] = [{ tool: "a", says: { answer: 1 } }];
 
     expect(sameMockTools(one, [{ tool: "a", says: { answer: 1 } }])).toBe(true);

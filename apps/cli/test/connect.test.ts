@@ -2,13 +2,13 @@
  * Connecting a Retell voice agent, end to end, with nobody watching.
  *
  * A fake Retell speaking the shapes its published SDK speaks, the fixture
- * platform speaking egma's public API, and the headless UI in between. No real
+ * platform speaking Egma's public API, and the headless UI in between. No real
  * key exists anywhere here and CI never reaches the real Retell.
  *
  * What is asserted is what a developer could check afterwards: what was said on
  * screen, what landed on the platform, and — for the two rules that cannot be
- * checked any other way — that egma read both halves of the provider's agent,
- * and that neither of them went anywhere near egma's own store.
+ * checked any other way — that Egma read both halves of the provider's agent,
+ * and that neither of them went anywhere near Egma's own store.
  */
 
 import { rm, symlink, writeFile } from "node:fs/promises";
@@ -101,9 +101,9 @@ type RunOptions = {
   /** Which agent they pick, when they are asked. */
   readonly agent?: string | null;
   /**
-   * Which way they say egma should reach it. `text` unless a check is about
+   * Which way they say Egma should reach it. `text` unless a check is about
    * the phone: every check written before there was a choice is about the
-   * connection egma made then, and text is that connection.
+   * connection Egma made then, and text is that connection.
    */
   readonly reach?: string | null;
   /** Which number they pick, when Retell routes the agent more than one. */
@@ -219,7 +219,7 @@ describe("the key, and the two failures worth a second try", () => {
     // The second ask carries the reason the first answer did not work.
     expect(ui.record.keyAsks[1]?.problem).toBe(INVALID_KEY_LINE);
     expect(CUSTODY_LINE).toBe(
-      "It is sent to egma and stored encrypted. It never lands in a file here.",
+      "It is sent to Egma and stored encrypted. It never lands in a file here.",
     );
   });
 
@@ -308,7 +308,7 @@ describe("one agent, and several", () => {
     retell = await startFakeRetell(THREE_AGENTS);
 
     // agent_0003 is a chat agent and agent_0002 is a voice one. Text is what
-    // egma is doing over the connection, not what the agent is: reaching a
+    // Egma is doing over the connection, not what the agent is: reaching a
     // voice agent by text is exactly the point of the choice, and the modality
     // says which layer is under test rather than which kind of agent answered.
     const { connected } = await run({ keys: [KEY], agent: "agent_0003" });
@@ -339,18 +339,18 @@ describe("one agent, and several", () => {
 
 describe("what lands on the platform", () => {
   /**
-   * egma reads both halves of a Retell agent, and sends neither anywhere.
+   * Egma reads both halves of a Retell agent, and sends neither anywhere.
    *
-   * A Retell agent is in two halves at two addresses, and egma reads both —
+   * A Retell agent is in two halves at two addresses, and Egma reads both —
    * the identity and the voice from one, the words and the tools from the
    * other — because the half it skipped would be the half the tests needed.
    * Then it lets them go. What the agent is running lives at the provider,
-   * reachable forever through the sealed credential; a copy on egma would start
+   * reachable forever through the sealed credential; a copy on Egma would start
    * going stale the moment it was written and nothing ever read it back. So the
-   * request egma sends carries identity, the way of reaching the agent, and the
+   * request Egma sends carries identity, the way of reaching the agent, and the
    * credential, and nothing else at all.
    */
-  it("reads both halves of the agent, and sends neither to egma", async () => {
+  it("reads both halves of the agent, and sends neither to Egma", async () => {
     const provider = await startFakeRetell(ONE_AGENT);
     retell = provider;
 
@@ -361,7 +361,7 @@ describe("what lands on the platform", () => {
     expect(asked).toContain("/get-agent/agent_0001");
     expect(asked).toContain("/get-retell-llm/llm_0001");
 
-    // And what egma read out of them is what the next step is grounded in —
+    // And what Egma read out of them is what the next step is grounded in —
     // the identity and voice from the first, the words and tools from the
     // second.
     expect(connected?.config.name).toBe("order-line");
@@ -370,7 +370,7 @@ describe("what lands on the platform", () => {
     expect(connected?.config.prompt).toBe(PROMPT);
     expect(connected?.config.tools).toHaveLength(1);
 
-    // None of it went to egma. The platform keeps identity, the connection and
+    // None of it went to Egma. The platform keeps identity, the connection and
     // the sealed key — and the agent it just registered holds no trace of what
     // the provider is running.
     const [agent] = platform.registered.agents;
@@ -388,7 +388,7 @@ describe("what lands on the platform", () => {
   /**
    * And a client that still sent it hears about it by name.
    *
-   * Dropping it silently would leave a client believing egma held something it
+   * Dropping it silently would leave a client believing Egma held something it
    * does not, which is the one outcome worse than either keeping it or
    * refusing it.
    */
@@ -414,10 +414,10 @@ describe("what lands on the platform", () => {
     expect(await answer.json()).toEqual({
       error: "invalid_request",
       message:
-        "egma no longer keeps what was pulled from the provider, so a " +
+        "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
         "description, project, connection; the agent's content stays at the " +
-        "provider, where egma reads it fresh rather than out of a copy that " +
+        "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });
     expect(platform.registered.agents).toHaveLength(0);
@@ -455,7 +455,7 @@ describe("what lands on the platform", () => {
    * and not a rare one: a developer runs it again, or a coding agent retries
    * after a network failure it could not read the answer to.
    *
-   * egma answers the registration that already exists, rotates the key it was
+   * Egma answers the registration that already exists, rotates the key it was
    * just given, and writes no second identity — so results stay under one
    * agent. And it says so out loud, in its own words, because a screen that
    * looked identical to the first run would leave a developer counting agents
@@ -493,7 +493,7 @@ describe("what lands on the platform", () => {
     // Said in plain words, on the screen, and never as a failure.
     expect(second.ui.record.statuses.join("\n")).toContain(
       "This voice agent was already registered as order-line, and retell-1 was " +
-        "already the way egma reaches it. Nothing new was registered.",
+        "already the way Egma reaches it. Nothing new was registered.",
     );
     // And each half is reported on its own, because a retry cares about both.
     expect(second.connected?.registration).toEqual({
@@ -584,7 +584,7 @@ describe("the drift line", () => {
       path.dirname(workspace.dir),
       `outside-${path.basename(workspace.dir)}.md`,
     );
-    await writeFile(above, "Words from somewhere egma was never invited.\n", "utf8");
+    await writeFile(above, "Words from somewhere Egma was never invited.\n", "utf8");
     return above;
   }
 
@@ -765,9 +765,9 @@ describe("the platform's own rules, held by the fixture", () => {
  *
  * Driven at the module's own seam rather than through the fixture, because the
  * fixture answers the contract and what is under test here is an answer that
- * breaks it — a newer egma, a proxy that rewrote something, a half-deployed
+ * breaks it — a newer Egma, a proxy that rewrote something, a half-deployed
  * instance. There is one honest thing to do with any of them and it is the same
- * thing: say egma answered without saying what it wrote, and stop.
+ * thing: say Egma answered without saying what it wrote, and stop.
  */
 describe("a registration answer this build cannot read", () => {
   const AGENT = { id: "agt_01K000000000000000000000AA", name: "order-line" };
@@ -809,9 +809,9 @@ describe("a registration answer this build cannot read", () => {
   }
 
   it("reads a reply that names no outcome as a creation, which is what it was", async () => {
-    // Every egma before the field existed answered exactly this, and a reply
+    // Every Egma before the field existed answered exactly this, and a reply
     // carrying an agent and a connection meant one thing then: both were
-    // written. That is the only reading that cannot describe a write egma did
+    // written. That is the only reading that cannot describe a write Egma did
     // not make, so it stays.
     const answer = await register({ agent: AGENT, connection: CONNECTION });
 
@@ -845,7 +845,7 @@ describe("a registration answer this build cannot read", () => {
 
     expect(answer).toEqual({
       kind: "refused",
-      reason: "egma answered without saying what it wrote. Check that this egma is up to date.",
+      reason: "Egma answered without saying what it wrote. Check that this Egma instance is up to date.",
     });
   });
 
@@ -854,7 +854,7 @@ describe("a registration answer this build cannot read", () => {
 
     expect(answer).toEqual({
       kind: "refused",
-      reason: "egma answered without saying what it wrote. Check that this egma is up to date.",
+      reason: "Egma answered without saying what it wrote. Check that this Egma instance is up to date.",
     });
   });
 });

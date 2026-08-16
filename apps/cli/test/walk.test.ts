@@ -1,7 +1,7 @@
 /**
  * The walk, end to end, with a scripted agent and nobody watching.
  *
- * No model, no terminal, no human — and no assertion about the order egma does
+ * No model, no terminal, no human — and no assertion about the order Egma does
  * things in. What is checked is what a developer could check afterwards: which
  * files landed, what they say, and the line left behind.
  */
@@ -84,7 +84,7 @@ describe("one task, driven on a scripted agent", () => {
     });
 
     expect(report).toEqual({ kind: "found-agent", framework: "retell-sdk", prompts: null });
-    expect(buildExitLine(report)).toBe("egma found your voice agent: retell-sdk.");
+    expect(buildExitLine(report)).toBe("Egma found your voice agent: retell-sdk.");
 
     const observed = await reportIn(workspace);
     expect(observed.protocolVersion).toBeGreaterThan(0);
@@ -310,7 +310,7 @@ describe("one task, driven on a scripted agent", () => {
 
     expect(report).toEqual({ kind: "interrupted", drivenAgentName: "Fake Agent" });
     expect(buildExitLine(report)).toBe(
-      "egma stopped before the task finished, and shut Fake Agent down.",
+      "Egma stopped before the task finished, and shut Fake Agent down.",
     );
 
     // The agent started a process of its own; ending the agent ended that too.
@@ -318,11 +318,11 @@ describe("one task, driven on a scripted agent", () => {
   });
 
   /**
-   * Which egma is said first, and asked second.
+   * Which Egma is said first, and asked second.
    *
-   * A bare command reaches egma's own platform when nothing else names one, so
+   * A bare command reaches Egma's own platform when nothing else names one, so
    * where a repository's identifiers are about to go is the developer's to read
-   * before egma has said one word to that address. The gate is where the
+   * before Egma has said one word to that address. The gate is where the
    * keystroke of consent is taken, so the gate is what the first request waits
    * behind — and a developer who reads the address and closes the wizard has
    * sent nothing anywhere.
@@ -369,7 +369,7 @@ describe("one task, driven on a scripted agent", () => {
     openTheGate();
 
     // And a refusal from that read leaves the walk rather than becoming an exit
-    // line: it is egma declining to talk to an address, which is answered in
+    // line: it is Egma declining to talk to an address, which is answered in
     // the same sentence and the same number every verb answers it with.
     await expect(running).rejects.toThrow("this platform did not answer");
     expect(asked).toBe(1);

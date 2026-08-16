@@ -11,17 +11,17 @@
  * check:
  *
  * - **Nothing is left running.** The coding agent starts a process tree of its
- *   own, and ending only the process egma spawned would leave the rest behind.
+ *   own, and ending only the process Egma spawned would leave the rest behind.
  * - **Nothing is left in the repository without being said.** Files that were
  *   written are the developer's, and the line has to name where they are.
  * - **The line tells the truth about where it stopped**, and it is the only
  *   thing in scrollback.
  *
  * Those four moments have three endings between them, and which one a moment
- * gets is decided by what egma had really done by then rather than by which
- * key was pressed. A stop while egma is working stopped work. A stop at the
+ * gets is decided by what Egma had really done by then rather than by which
+ * key was pressed. A stop while Egma is working stopped work. A stop at the
  * gate stopped nothing and left files. A stop at the run screen stopped
- * nothing at all: the tests are on egma and the suite is going without this
+ * nothing at all: the tests are on Egma and the suite is going without this
  * terminal, so the developer leaves with the address of a live run.
  */
 
@@ -141,11 +141,11 @@ describe("Ctrl-C while the browser is being waited on", () => {
     const terminal = startWizard(script);
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
       // The login screen: a code to approve, an address it is already in, and
-      // the wait filled with what egma worked out while the developer read the
+      // the wait filled with what Egma worked out while the developer read the
       // intro. None of it was asked for and none of it is waited on.
       //
       // Every line is waited for rather than read off one screen and asserted
@@ -156,16 +156,16 @@ describe("Ctrl-C while the browser is being waited on", () => {
         terminal,
         "Code:",
         "Approve this code",
-        "While you were away, egma looked around:",
+        "While you were away, Egma looked around:",
         "Coding agent   node",
         "Git            not a repository",
-        "egma folder    none yet — egma will make one",
+        "egma folder    none yet — Egma will make one",
       );
 
       terminal.write(CTRL_C);
 
       expect(await terminal.exited).toBe(130);
-      expect(terminal.scrollback().trim()).toBe("egma stopped before the task finished.");
+      expect(terminal.scrollback().trim()).toBe("Egma stopped before the task finished.");
 
       // Nothing was driven, so nothing was written and nothing was registered.
       expect(await testsInFolder()).toEqual([]);
@@ -182,7 +182,7 @@ describe("Ctrl-C while the coding agent is working", () => {
 
     const script = await workspace.script({
       // The agent starts a process of its own, exactly as a real adapter starts
-      // its engine. Ending only the process egma spawned would strand it.
+      // its engine. Ending only the process Egma spawned would strand it.
       spawnChild: true,
       steps: [
         { kind: "tool-call", id: "t1", title: "Reading the repository" },
@@ -193,7 +193,7 @@ describe("Ctrl-C while the coding agent is working", () => {
     const terminal = startWizard(script);
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
       await showing(terminal, "Reading the repository");
 
@@ -208,7 +208,7 @@ describe("Ctrl-C while the coding agent is working", () => {
 
       expect(await terminal.exited).toBe(130);
       expect(terminal.scrollback().trim()).toBe(
-        "egma stopped before the task finished, and shut node down.",
+        "Egma stopped before the task finished, and shut node down.",
       );
 
       // The agent's own process is gone, and so is the one it started.
@@ -233,7 +233,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
       ],
       stepsByTask: [
         {
-          // Whatever size of suite egma asked for, this agent writes three and
+          // Whatever size of suite Egma asked for, this agent writes three and
           // stops. What reaches the gate is what is really on disk.
           contains: GENERATE_TASK,
           steps: [
@@ -248,15 +248,15 @@ describe("Ctrl-C at the gate, with the files already written", () => {
     const terminal = startWizard(script);
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
       await showing(terminal, "Paste your Retell API key");
       terminal.write(`${KEY}\r`);
 
       // Text or phone. Not this check's subject, and not skippable
-      // either: egma never picks one of the two for a developer.
-      await showing(terminal, "How should egma reach this agent?");
+      // either: Egma never picks one of the two for a developer.
+      await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 
       await showing(terminal, "Do you already have test cases");
@@ -272,7 +272,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
       // shut nothing down. It stopped, and the files are where they always were.
       expect(await terminal.exited).toBe(130);
       expect(terminal.scrollback().trim()).toBe(
-        "egma stopped. Your 3 tests are in egma/tests/ — read them, then run egma push.",
+        "Egma stopped. Your 3 tests are in egma/tests/ — read them, then run egma push.",
       );
 
       // The agent that wrote them, and the process it started, are both gone —
@@ -285,7 +285,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
 
       // The files are exactly where the line says they are, and nothing was
       // uploaded: the developer stopped before the one keystroke that would
-      // have put them on egma.
+      // have put them on Egma.
       expect((await testsInFolder()).sort()).toEqual(names.map((name) => `${name}.md`).sort());
       expect(platform.tests.tests).toHaveLength(0);
     } finally {
@@ -318,7 +318,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
 
     // Wide, because what is under check is lines rather than sentences: a
     // terminal wraps whatever will not fit, and a check that read a wrapped
-    // line as two would be checking the terminal's width and not egma's.
+    // line as two would be checking the terminal's width and not Egma's.
     const terminal = runInTerminal({
       command: process.execPath,
       args: [
@@ -338,15 +338,15 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
     });
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
       await showing(terminal, "Paste your Retell API key");
       terminal.write(`${KEY}\r`);
 
       // Text or phone. Not this check's subject, and not skippable
-      // either: egma never picks one of the two for a developer.
-      await showing(terminal, "How should egma reach this agent?");
+      // either: Egma never picks one of the two for a developer.
+      await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 
       await showing(terminal, "Do you already have test cases");
@@ -365,7 +365,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
       terminal.write(CTRL_C);
 
       // Nothing was stopped, so the shell is not told anything was. The tests
-      // are on egma and the suite is queued there; the terminal going away
+      // are on Egma and the suite is queued there; the terminal going away
       // never had anything to do with it.
       expect(await terminal.exited).toBe(0);
 
@@ -385,7 +385,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
       // No token rides the address, and none is anywhere in scrollback.
       expect(new URL(address).search).toBe("");
       expect(terminal.scrollback()).not.toContain("egma_sk_");
-      // Not one word about egma having stopped, because egma did not.
+      // Not one word about Egma having stopped, because Egma did not.
       expect(terminal.scrollback()).not.toContain("stopped");
 
       expect(platform.tests.tests).toHaveLength(3);

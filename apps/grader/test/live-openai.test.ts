@@ -7,7 +7,7 @@ import type { JudgeInput } from "../src/judge/index.ts";
 /**
  * One real question put to a real OpenAI judge — opt-in.
  *
- * Everything else in this suite runs on the scripted judge, which proves egma's
+ * Everything else in this suite runs on the scripted judge, which proves Egma's
  * side of the seam: the fan-out, the isolation, the skipped denominator, the
  * errored sibling. It proves nothing at all about the wire. This file is the
  * other half — the provider, the request shape, the answer shape — against the
@@ -30,7 +30,7 @@ const MODEL = process.env["TEST_OPENAI_MODEL"]?.trim() ?? "gpt-4.1-mini";
 
 /**
  * The words a real judge is told it is working under: the ones on the
- * `expected_behaviors` library entry, which is where the only judge prompt egma
+ * `expected_behaviors` library entry, which is where the only judge prompt Egma
  * ships lives. Asking a real model with anything else would be smoke-testing a
  * prompt no deployment sends.
  */
@@ -77,7 +77,7 @@ describe.skipIf(API_KEY === "")(
      * The other half of the answer shape, and the one a judge has to be able to
      * reach: a criterion this conversation says nothing about. Asserted as "not
      * met" rather than as one exact word, because whether a model calls silence
-     * `not_met` or `cannot_determine` is its judgment to make — what egma needs
+     * `not_met` or `cannot_determine` is its judgment to make — what Egma needs
      * is that it never calls it met.
      */
     it("does not call a criterion met when the conversation never touched it", async () => {

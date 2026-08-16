@@ -143,7 +143,7 @@ it("verifies an explicitly selected platform and commits its identity on first o
 
     // The binding is committed, so what is written beside it is read by
     // everybody who clones this repository. It carries identity and no key:
-    // not the key this machine signs in to egma with, and not the provider key
+    // not the key this machine signs in to Egma with, and not the provider key
     // the wizard was handed on the way through.
     const committed = await readFile(paths.config, "utf8");
     for (const secret of [PLATFORM_KEY, PROVIDER_KEY]) {

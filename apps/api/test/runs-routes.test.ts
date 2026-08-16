@@ -107,7 +107,7 @@ const RETELL = {
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
-/** A number egma dials: the shipped phone adapter's own connection shape. */
+/** A number Egma dials: the shipped phone adapter's own connection shape. */
 const PHONE = {
   type: "phone",
   modality: "voice",
@@ -119,7 +119,7 @@ const PHONE = {
  * trunk, a number its calls come from, and a voice to speak with.
  *
  * Non-secret, all three of it — see `phone-readiness.ts`. What it stands for
- * here is the difference between an egma that can dial and one that has never
+ * here is the difference between an Egma that can dial and one that has never
  * been given a carrier, which is the only thing the run door asks about.
  */
 const PHONE_IS_SET_UP = {
@@ -285,7 +285,7 @@ describe("starting a run", () => {
     expect(unknown.body).toEqual({
       error: "unprocessable",
       message:
-        `there is no test version ${missing} on this egma. Push the test ` +
+        `there is no test version ${missing} on this Egma. Push the test ` +
         `first, or read the test and pin the version_id it names now.`,
     });
 
@@ -370,7 +370,7 @@ describe("starting a run", () => {
       error: "not_found",
       message:
         `connection ${connectionId} is not on agent ${other.agentId}. Name ` +
-        `the agent that connection is on, or leave the agent out and egma ` +
+        `the agent that connection is on, or leave the agent out and Egma ` +
         `takes the connection's own.`,
     });
 
@@ -387,7 +387,7 @@ describe("starting a run", () => {
       message:
         `"${connectionId}" is not an agent id, so no connection is on it. ` +
         `Name the agent that connection is on, or leave the agent out and ` +
-        `egma takes the connection's own.`,
+        `Egma takes the connection's own.`,
     });
 
     // And a connection id that could not be one either.
@@ -420,7 +420,7 @@ describe("starting a run", () => {
         error: "unprocessable",
         message:
           "a run is conducted over a connection, and this request named " +
-          "none. Send connection with the con_ id of the way egma should " +
+          "none. Send connection with the con_ id of the way Egma should " +
           "reach the agent — registering the agent answered with one.",
       });
     }
@@ -565,7 +565,7 @@ describe("starting a run", () => {
     expect(refused.body).toEqual({
       error: "phone_setup_required",
       message:
-        "this egma has not been set up to place phone calls, so nothing was " +
+        "this Egma has not been set up to place phone calls, so nothing was " +
         "dialled and nothing was charged. It is missing the carrier trunk " +
         "and the source number and the text-to-speech provider. Whoever runs " +
         "this platform makes it ready with one command in the platform " +
@@ -610,8 +610,8 @@ describe("starting a run", () => {
   });
 
   it("lets a run over a connection that does not use the platform's carrier through a platform with none", async () => {
-    // The whole point of two readiness facts rather than one: an egma nobody
-    // has given a carrier is a working egma for everything that is not a
+    // The whole point of two readiness facts rather than one: an Egma nobody
+    // has given a carrier is a working Egma for everything that is not a
     // phone call, and a gate that refused chat work would make the first-run
     // story impossible to tell.
     const { key, connectionId, oneCaller } = await aCustomerReadyToRun(
@@ -687,7 +687,7 @@ describe("starting a run", () => {
       error: "not_authenticated",
       message:
         "this request carried no session and no usable API key. " +
-        "Sign in, or send Authorization: Bearer with an egma key.",
+        "Sign in, or send Authorization: Bearer with an Egma key.",
     });
   });
 });
@@ -712,7 +712,7 @@ describe("the project a run lands in", () => {
       error: "invalid_request",
       message:
         "this organization holds more than one project and this credential " +
-        "names none, so egma cannot tell which project this is about. Send " +
+        "names none, so Egma cannot tell which project this is about. Send " +
         "project with the one you mean, or use a key minted for that project.",
     });
   });

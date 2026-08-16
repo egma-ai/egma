@@ -37,7 +37,7 @@ const REPOSITORY = path.resolve(import.meta.dirname, "..", "..", "..");
 const THE_MODULE = "packages/db/src/measures/from-spans.ts";
 
 /**
- * Every file egma actually runs.
+ * Every file Egma actually runs.
  *
  * Tests may say anything — a fixture builder writes timing spans by name, and
  * should — so what is scanned is source. `dist` is the same source compiled and
@@ -70,7 +70,7 @@ async function everySourceFile(): Promise<readonly string[]> {
 /**
  * A file's code, with its prose taken out.
  *
- * Every rule here is about what egma *runs*. A docstring explaining that the
+ * Every rule here is about what Egma *runs*. A docstring explaining that the
  * ingest door files a span as `timing`, or that a provider reports latency as a
  * bag of samples, is the opposite of a second reader — it is somebody writing
  * down why there is only one — and a scan that flagged it would push authors
@@ -119,7 +119,7 @@ describe("reading a measurement", () => {
   /**
    * The two files allowed to name the span kind a measurement arrives under.
    *
-   * - The **ingest door** writes it: a span arriving under egma's own emitting
+   * - The **ingest door** writes it: a span arriving under Egma's own emitting
    *   scope, named for a measure the catalog says comes off a span, is filed as
    *   `timing`. That is the one place the word is produced.
    * - The **module** reads it, and is the one place a measurement becomes a

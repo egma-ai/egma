@@ -18,7 +18,7 @@
  * 2. **The pair reaches compose**, because a credential written to a file no
  *    container reads is the same as no credential at all.
  * 3. **The secret is never printed, and the file it lands in is private.** It
- *    is a password between egma's own parts, and the operator never sees it,
+ *    is a password between Egma's own parts, and the operator never sees it,
  *    chooses it or types it.
  * 4. **A workspace prepared before this change is told** what happened, because
  *    its containers are recreated underneath it.
@@ -84,12 +84,12 @@ describe("the media server's credential", () => {
       // one edit away from being trimmed to something tidy-looking.
       expect(secret.length).toBeGreaterThanOrEqual(32);
       // Nothing in either value may need quoting: they travel through a
-      // `NAME=value` file egma parses itself, a child process environment, and
+      // `NAME=value` file Egma parses itself, a child process environment, and
       // a YAML scalar in the compose file.
       expect(key).toMatch(/^[A-Za-z0-9_-]+$/u);
       expect(secret).toMatch(/^[A-Za-z0-9_-]+$/u);
 
-      // It is a password between egma's own parts. The operator never sees it.
+      // It is a password between Egma's own parts. The operator never sees it.
       expect(`${run.stdout}\n${run.stderr}`).not.toContain(secret);
 
       // And `up` is now the *first* writer of this file, so the mode it creates
@@ -163,10 +163,10 @@ describe("the media server's credential", () => {
       const stored = await workspace.storedConfig();
       expect(stored[KEY_VARIABLE]).not.toBe(undefined);
       expect(stored[SECRET_VARIABLE]).not.toBe(undefined);
-      // **A line egma no longer writes is left exactly where it is.** An
+      // **A line Egma no longer writes is left exactly where it is.** An
       // operator upgrading may need to read their own key out of this file
       // once, and a provider that shows a key exactly once is a provider whose
-      // key egma must not throw away on their behalf.
+      // key Egma must not throw away on their behalf.
       expect(stored.EGMA_PHONE_SOURCE_NUMBER).toBe("+15550100100");
       expect(stored.EGMA_PERSONA_MODEL_API_KEY).toBe("sk-an-old-key");
       // **And neither reaches a container.** Handing an old setting to Compose
@@ -186,7 +186,7 @@ describe("the media server's credential", () => {
       // are being replaced by this run — and because what those containers held
       // until this moment is a security fact they are entitled to hear plainly.
       expect(run.stderr).toContain("media-server credential was generated");
-      expect(run.stderr).toContain("published in egma's own repository");
+      expect(run.stderr).toContain("published in Egma's own repository");
       expect(run.stderr).toContain("media containers are replaced by this start");
     } finally {
       await platform.close();

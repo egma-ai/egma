@@ -2,7 +2,7 @@
  * The words the glossary bans, in the shapes that would slip past a reader.
  *
  * This is the whole banned list, not a sample of it, and it lives here rather
- * than beside any one check because there is more than one kind of text egma
+ * than beside any one check because there is more than one kind of text Egma
  * writes for a person to read: the skills it puts in front of a coding agent,
  * and the cards it teaches a developer with while they wait. Two lists would
  * eventually differ, and the day they differed is the day one of them would be

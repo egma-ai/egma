@@ -1,18 +1,18 @@
 ---
-title: "Self-Hosting egma: Deploy on Your Own Infrastructure"
+title: "Self-Hosting Egma: Deploy on Your Own Infrastructure"
 sidebarTitle: "Self-Hosting"
-description: "Run egma with Docker Compose — set required secrets, configure LLM and speech providers, enable phone simulation, and invite your team."
+description: "Run Egma with Docker Compose — set required secrets, configure LLM and speech providers, enable phone simulation, and invite your team."
 ---
 
-egma is fully self-hostable. A single `npx @egma/cli self-host up` command starts the entire stack — API, web application, simulator, grader, databases, object store, and media server — on your own machine or server. This guide walks you through the prerequisites, required secrets, provider configuration, and day-two operations so you can run a production-ready instance without surprises.
+Egma is fully self-hostable. A single `npx @egma/cli self-host up` command starts the entire stack — API, web application, simulator, grader, databases, object store, and media server — on your own machine or server. This guide walks you through the prerequisites, required secrets, provider configuration, and day-two operations so you can run a production-ready instance without surprises.
 
 ## Prerequisites
 
 Before you start, make sure you have:
 
-- **Node 22 or newer** — the egma CLI requires it
+- **Node 22 or newer** — the Egma CLI requires it
 - **Docker with Compose** — the only runtime dependency for the platform itself
-- A clone of the egma repository, or a dedicated workspace directory where you will store platform credentials and configuration
+- A clone of the Egma repository, or a dedicated workspace directory where you will store platform credentials and configuration
 
 <Note>
   The platform workspace (where you run `self-host up`) is deliberately separate from your agent repository. Platform credentials belong to whoever operates the platform; an agent repository holds only tests and the address of the platform it points at. On one laptop both are often yours, and they are still two directories — one platform serves many agent repositories.
@@ -20,7 +20,7 @@ Before you start, make sure you have:
 
 ## Step 1 — Copy and fill in the environment file
 
-Clone the egma repository, then copy the example environment file:
+Clone the Egma repository, then copy the example environment file:
 
 ```bash
 cp .env.example .env
@@ -64,7 +64,7 @@ The value must start with `egma_st_` so that secret scanners can recognise a lea
 
 ### S3 credentials (four values)
 
-egma ships with a MinIO object store for voice simulation recordings. You need two credential pairs: one with write access (for the simulator to upload recordings) and one that is read-only (for the API to sign playback links).
+Egma ships with a MinIO object store for voice simulation recordings. You need two credential pairs: one with write access (for the simulator to upload recordings) and one that is read-only (for the API to sign playback links).
 
 ```bash
 # Write pair — admin access to the object store
@@ -158,7 +158,7 @@ Every answer is written through the platform's own API and sealed with `EGMA_ENC
 
 ### Phone configuration (Twilio)
 
-For phone simulation, the setup wizard asks for your Twilio account SID, an Auth Token, and a voice number **already on your account** — egma never buys, ports, or registers numbers.
+For phone simulation, the setup wizard asks for your Twilio account SID, an Auth Token, and a voice number **already on your account** — Egma never buys, ports, or registers numbers.
 
 The wizard shows a plan of what it will create before writing anything to your Twilio account. On approval it creates the SIP trunk, attaches your number and a credential, and writes the trunk details into the platform's sealed store. The Auth Token is used once and kept nowhere afterward.
 
@@ -192,7 +192,7 @@ Use your API's address (port 3100), not the web application (port 3101). Mint th
 
 ## Single-organization mode
 
-By default, egma runs in single-organization mode:
+By default, Egma runs in single-organization mode:
 
 ```bash
 EGMA_SINGLE_ORGANIZATION=true
@@ -208,7 +208,7 @@ To enable email delivery:
 
 ```bash
 EGMA_SMTP_URL=smtp://user:password@smtp.example.com:587
-EGMA_MAIL_FROM='egma <noreply@example.com>'
+EGMA_MAIL_FROM='Egma <noreply@example.com>'
 ```
 
 Setting `EGMA_SMTP_URL` automatically enables email verification on signup and password-reset emails. There is no second setting to keep in step.
@@ -241,7 +241,7 @@ If you are upgrading from a release that used `egma self-host phone setup`, your
   This means `EGMA_BLOB_PUBLIC_URL` names a different host than the browser uses to reach the object store. Set it to the address a browser on your network actually reaches — for example, `http://192.168.1.10:9000` if that is your server's LAN address. Also verify that `EGMA_BASE_URL` and `EGMA_BLOB_PUBLIC_URL` both use the same scheme (`http:` or `https:`): a mixed-content mismatch silently blocks every recording.
 </Accordion>
 
-<Accordion title="egma self-host up works but the run never starts">
+<Accordion title="Egma self-host up works but the run never starts">
   Check that `egma self-host setup` has been run and that the platform reports no missing settings. A platform missing its persona model will accept runs but the simulator will error on every simulation. Run `npx @egma/cli self-host setup --plan` to see what is still unset.
 </Accordion>
 

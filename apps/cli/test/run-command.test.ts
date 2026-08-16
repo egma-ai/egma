@@ -1,5 +1,5 @@
 /**
- * `egma run` as a coding agent runs it: against a fixture of egma's public HTTP
+ * `egma run` as a coding agent runs it: against a fixture of Egma's public HTTP
  * API, with the run's whole lifecycle choreographed step by step.
  *
  * Nothing here is a terminal and nothing here answers a question. What is
@@ -104,7 +104,7 @@ async function register(type = "retell"): Promise<Registered> {
  * repository at the moment before it registers anything, so an id under `agent`
  * or `connection` never exists in this file without the platform block above it
  * naming who issued it. A folder holding one and not the other is the
- * half-applied move, and egma refuses to resolve a platform from it.
+ * half-applied move, and Egma refuses to resolve a platform from it.
  */
 async function makeFolder(registered: Registered | null): Promise<void> {
   const made = await createEgmaFolder({ repository: workspace.dir });
@@ -412,10 +412,10 @@ describe("egma run", () => {
   /**
    * The failure branch the transcript names: a connection whose adapter has not
    * shipped. The platform refuses at creation and the terminal repeats what it
-   * said, word for word, because egma neither made that decision nor knows a
+   * said, word for word, because Egma neither made that decision nor knows a
    * better way to explain it.
    */
-  it("repeats egma's refusal to start the run, word for word", async () => {
+  it("repeats Egma's refusal to start the run, word for word", async () => {
     const registered = await register("phone");
     await makeFolder(registered);
     await seed(["quoted-a-price"]);
@@ -445,7 +445,7 @@ describe("egma run", () => {
     expect(platform.running.simulationsOf().map((one) => one.status)).toEqual(["queued"]);
   });
 
-  it("refuses when a file in the folder is not on egma, and starts nothing", async () => {
+  it("refuses when a file in the folder is not on Egma, and starts nothing", async () => {
     const registered = await register();
     await makeFolder(registered);
     await seed(["quoted-a-price"]);
@@ -456,7 +456,7 @@ describe("egma run", () => {
         "name: never-pushed",
         "---",
         "## Scenario",
-        "Somebody rings about something egma has never heard of.",
+        "Somebody rings about something Egma has never heard of.",
         "## Expected behaviors",
         "1. The agent says the workshop's name.",
         "",
@@ -478,9 +478,9 @@ describe("egma run", () => {
   /**
    * The hard gate, and the case it exists for.
    *
-   * A developer edits a test this morning, forgets to push, and runs. egma
+   * A developer edits a test this morning, forgets to push, and runs. Egma
    * holds last week's wording; the file says this morning's. A run over what
-   * egma holds would look completely ordinary and would come back green — about
+   * Egma holds would look completely ordinary and would come back green — about
    * content nobody executed. The developer, or the coding agent reading that
    * green, would then report an edit verified that never ran.
    *
@@ -514,22 +514,22 @@ describe("egma run", () => {
     // a run it will not conduct, and it answers with its own number.
     expect(factOf(said.lines, "status")).toBe("not-pushed");
     expect(factOf(said.lines, "stderr")).toBe(
-      "egma holds something other than what this file says: quoted-a-price. Run egma " +
-        "push to put your edit on egma, then run this again. Nothing was started.",
+      "Egma holds something other than what this file says: quoted-a-price. Run egma " +
+        "push to put your edit on Egma, then run this again. Nothing was started.",
     );
     // Nothing was started, and nothing was pinned.
     expect(platform.running.runs).toHaveLength(0);
     expect(valuesOf(said.lines, "pin")).toEqual([]);
-    // And egma still holds exactly what it held: a refused run writes nothing.
+    // And Egma still holds exactly what it held: a refused run writes nothing.
     expect(platform.tests.tests[0]?.versionId).toBe(pinned);
   });
 
   /**
    * The other direction, refused for the same reason: somebody moved the test
    * on the platform and this folder has not pulled it. The file says something
-   * egma does not hold, and which side is behind changes nothing about that.
+   * Egma does not hold, and which side is behind changes nothing about that.
    */
-  it("refuses a run over a file egma has moved past", async () => {
+  it("refuses a run over a file Egma has moved past", async () => {
     const registered = await register();
     await makeFolder(registered);
     await seed(["quoted-a-price"]);
@@ -555,7 +555,7 @@ describe("egma run", () => {
    * And the ordinary folder, which is the whole point of the two refusals
    * above: when the two agree, nothing changed at all.
    */
-  it("runs a folder that agrees with egma, exactly as it always did", async () => {
+  it("runs a folder that agrees with Egma, exactly as it always did", async () => {
     const registered = await register();
     await makeFolder(registered);
     await seed(["quoted-a-price", "asked-for-a-refund"]);
@@ -566,7 +566,7 @@ describe("egma run", () => {
     expect(said.code).toBe(RUN_EXIT.done);
     expect(factOf(said.lines, "status")).toBe("started");
     expect(valuesOf(said.lines, "not-pushed")).toEqual([]);
-    // Every test in the folder, each pinned at the version egma holds for it.
+    // Every test in the folder, each pinned at the version Egma holds for it.
     // The order is the folder's, so the two lists are compared as sets.
     expect([...(platform.running.runs[0]?.testVersionIds ?? [])].sort()).toEqual(
       [...versions].sort(),
@@ -596,7 +596,7 @@ describe("egma run", () => {
   });
 
   /**
-   * Stopping a terminal is not stopping a run. The run is on egma, and a verb
+   * Stopping a terminal is not stopping a run. The run is on Egma, and a verb
    * that said it had stopped one would be saying something that did not happen
    * — and would send whoever read it looking for a run that is still going.
    */

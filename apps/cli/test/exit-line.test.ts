@@ -98,7 +98,7 @@ describe("the exit line", () => {
         framework: "retell-sdk",
         prompts: "prompts/order-line.md",
       }),
-    ).toBe("egma found your voice agent: retell-sdk, prompts in prompts/order-line.md.");
+    ).toBe("Egma found your voice agent: retell-sdk, prompts in prompts/order-line.md.");
 
     expect(buildExitLine({ kind: "no-agent-context" })).toContain(
       "Run egma again where your agent is defined",
@@ -113,7 +113,7 @@ describe("the exit line", () => {
     expect(
       buildExitLine({ kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 12 }),
     ).toBe(
-      "egma stopped before the task finished, and shut Claude Agent down. Your 12 tests are in egma/tests/.",
+      "Egma stopped before the task finished, and shut Claude Agent down. Your 12 tests are in egma/tests/.",
     );
 
     expect(buildExitLine({ kind: "failed", reason: "no answer" })).toContain("no answer");
@@ -126,14 +126,14 @@ describe("the exit line", () => {
    */
   it("says where the tests are, whichever way the gate ended", () => {
     expect(buildExitLine({ kind: "tests-pushed", count: 12 })).toBe(
-      "egma put 12 tests on egma and left them in egma/tests/ — commit them, edit them, then run egma push.",
+      "Egma put 12 tests on Egma and left them in egma/tests/ — commit them, edit them, then run egma push.",
     );
     expect(buildExitLine({ kind: "tests-kept", count: 12, stopped: false })).toBe(
       "Nothing was uploaded. Your 12 tests are in egma/tests/ — read them, then run egma push.",
     );
 
     // One test is one test, in both of them.
-    expect(buildExitLine({ kind: "tests-pushed", count: 1 })).toContain("1 test on egma");
+    expect(buildExitLine({ kind: "tests-pushed", count: 1 })).toContain("1 test on Egma");
     expect(buildExitLine({ kind: "tests-kept", count: 1, stopped: false })).toContain(
       "Your test is in",
     );
@@ -143,13 +143,13 @@ describe("the exit line", () => {
     // did — and it still says where the files are, which is the whole job of
     // this line.
     expect(buildExitLine({ kind: "tests-kept", count: 12, stopped: true })).toBe(
-      "egma stopped. Your 12 tests are in egma/tests/ — read them, then run egma push.",
+      "Egma stopped. Your 12 tests are in egma/tests/ — read them, then run egma push.",
     );
   });
 
   /**
    * A coding agent that stopped is not a folder that held nothing. Telling the
-   * second story for the first says egma looked and found no voice agent, when
+   * second story for the first says Egma looked and found no voice agent, when
    * what happened is that nobody ever looked.
    */
   it("says a stop was a stop, and whose it was", () => {
@@ -269,7 +269,7 @@ describe("the exit line", () => {
         },
       }),
     ).toBe(
-      "The egma skill is in /home/you/.claude/skills/egma/SKILL.md. Every repository you open Claude Code in has it.",
+      "The Egma skill is in /home/you/.claude/skills/egma/SKILL.md. Every repository you open Claude Code in has it.",
     );
 
     // A file that was already there is gone, and this is the only place the
@@ -289,7 +289,7 @@ describe("the exit line", () => {
         },
       }),
     ).toBe(
-      "The egma skill in /repo/.claude/skills/egma/SKILL.md was replaced with this version's. Commit it, and everybody on this repository has it.",
+      "The Egma skill in /repo/.claude/skills/egma/SKILL.md was replaced with this version's. Commit it, and everybody on this repository has it.",
     );
 
     expect(
@@ -300,9 +300,9 @@ describe("the exit line", () => {
         total: 12,
         skill: { kind: "skipped", drivenAgentName: "Codex" },
       }),
-    ).toBe("Nothing was installed. Codex can still drive egma — tell it to run egma --help.");
+    ).toBe("Nothing was installed. Codex can still drive Egma — tell it to run egma --help.");
 
-    // A coding agent egma has no skill convention for was never offered one,
+    // A coding agent Egma has no skill convention for was never offered one,
     // so there is nothing to report either way.
     expect(
       buildExitNotice({
@@ -325,7 +325,7 @@ describe("the exit line", () => {
   /**
    * A reason that arrived carrying a block keeps the block.
    *
-   * One refusal in egma is more than a sentence: the one that keeps a
+   * One refusal in Egma is more than a sentence: the one that keeps a
    * repository on the platform it is bound to ends with every line a developer
    * deletes to move it, and a coding agent is meant to act on those lines
    * without a person reading them out. Squashed into the exit line they are
@@ -338,12 +338,12 @@ describe("the exit line", () => {
    */
   it("keeps a block under the line, and flattens everything else onto it", () => {
     const refusal = teachingTheMove(
-      "This repository is already bound to Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEP at https://theirs.example, and this run reached Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ at https://ours.example. egma does not move a repository between platforms, and nothing was sent.",
+      "This repository is already bound to Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEP at https://theirs.example, and this run reached Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ at https://ours.example. Egma does not move a repository between platforms, and nothing was sent.",
     );
     const lines = exitLines({ kind: "failed", reason: refusal });
 
     expect(lines[0]).toBe(
-      "egma could not finish: This repository is already bound to Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEP at https://theirs.example, and this run reached Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ at https://ours.example. egma does not move a repository between platforms, and nothing was sent.",
+      "Egma could not finish: This repository is already bound to Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEP at https://theirs.example, and this run reached Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ at https://ours.example. Egma does not move a repository between platforms, and nothing was sent.",
     );
     expect(lines[1]).toBe("");
     expect(lines.slice(2)).toEqual([...MOVE_TO_ANOTHER_PLATFORM]);
@@ -353,6 +353,6 @@ describe("the exit line", () => {
     // And a reason that is one paragraph is still one line, however it wrapped.
     expect(
       exitLines({ kind: "failed", reason: "no answer\n  from the\n  platform" }),
-    ).toEqual(["egma could not finish: no answer from the platform"]);
+    ).toEqual(["Egma could not finish: no answer from the platform"]);
   });
 });

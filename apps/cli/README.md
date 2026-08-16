@@ -1,6 +1,6 @@
-# egma
+# Egma
 
-The egma wizard and client, in one command.
+The Egma wizard and client, in one command.
 
 ```
 npx @egma/cli
@@ -16,7 +16,7 @@ Run it in your repository. It opens a terminal wizard, tells you what it is
 about to do, and starts on one keystroke. When it closes, your terminal has one
 plain line in it and nothing else.
 
-That keystroke is how you agree to egma driving your coding agent, so egma needs
+That keystroke is how you agree to Egma driving your coding agent, so Egma needs
 a real terminal to ask in. Piped or redirected, it refuses and says so. Pass
 `--headless` to agree in the command itself and get plain lines instead — that
 is how CI runs it.
@@ -25,34 +25,34 @@ is how CI runs it.
 
 <!-- The facts are FACTS in src/wizard/facts.ts, which is the source of truth; keep this sentence in step. -->
 
-`npx @egma/cli` signs this machine in to egma, then finds your voice agent. It starts
-the coding agent you already have, hands it egma's own notes on how voice agents
+`npx @egma/cli` signs this machine in to Egma, then finds your voice agent. It starts
+the coding agent you already have, hands it Egma's own notes on how voice agents
 are built, and has it read this folder and report which framework runs it, where
 its prompts live, where its tools are defined, how it reaches production, and
 where its identifier is written down. Every action it takes appears on screen
 while it works, and the facts it finds arrive one line at a time.
 
 The task tells your coding agent to change nothing, and any file whose name
-starts with `.env` is refused when the agent goes through egma for it. Both are
+starts with `.env` is refused when the agent goes through Egma for it. Both are
 real, and neither is a lock: your coding agent runs its own commands, and a
-command that writes is one egma shows you rather than one egma stops. That is
+command that writes is one Egma shows you rather than one Egma stops. That is
 the trade — you see everything, as it happens.
 
 Your code and your prompts never leave this machine.
 
-If this folder holds no voice agent, egma asks once for the folder your prompts
+If this folder holds no voice agent, Egma asks once for the folder your prompts
 are in — teams often keep them apart — looks there, and otherwise says plainly
 that you should run it where your agent is defined.
 
-Then it connects that agent so egma can reach it, writes a first suite of tests
-for it, puts them on egma when you say so, and runs them — closing as soon as
-the first verdict has landed, with the rest of the suite still going on egma.
+Then it connects that agent so Egma can reach it, writes a first suite of tests
+for it, puts them on Egma when you say so, and runs them — closing as soon as
+the first verdict has landed, with the rest of the suite still going on Egma.
 See below.
 
 ## Signing in
 
-egma shows a short code and opens your browser on a page that already has it in
-the field. You approve it there — signing up first if you are new — and egma
+Egma shows a short code and opens your browser on a page that already has it in
+the field. You approve it there — signing up first if you are new — and Egma
 collects a key of its own. No secret is ever typed into the terminal.
 
 ```
@@ -73,7 +73,7 @@ status: stored
 credentials: /home/you/.egma/credentials
 
 0 signed in   2 denied   3 the code ran out
-4 egma did not answer, or refused   130 stopped part way
+4 Egma did not answer, or refused   130 stopped part way
 ```
 
 The key is written to `~/.egma/credentials`, readable only by you, together with
@@ -85,12 +85,12 @@ in again and replace the key this machine holds.
 
 ### On a machine with no browser
 
-Over SSH, on a devbox, in a container: press `[c]` and egma asks your terminal
+Over SSH, on a devbox, in a container: press `[c]` and Egma asks your terminal
 to put the address on the clipboard of the machine your keyboard is on. Approve
 it in a browser over there, then paste it back — the whole address, the
 `?user_code=…` part of it, or just the code. All three work.
 
-If your terminal is too narrow to show the address whole, egma says how much
+If your terminal is too narrow to show the address whole, Egma says how much
 wider it needs to be instead of drawing an address that breaks across two lines.
 
 ### Your own instance
@@ -99,7 +99,7 @@ wider it needs to be instead of drawing an address that breaks across two lines.
 egma --url http://localhost:3101
 ```
 
-`--url` is the one way to name an egma, and it names it for that one command.
+`--url` is the one way to name an Egma, and it names it for that one command.
 To say it once and be done, bind the repository — `egma init --url
 http://localhost:3101` writes that instance's verified identity into
 `egma/config.yaml`, and every later command in the repository finds it there.
@@ -109,45 +109,45 @@ which is also where the `egma` in that line comes from today.
 ## Connecting your voice agent
 
 Finding your agent in the repository is not the same as being able to reach it,
-so the next thing egma asks for is a Retell API key. It is typed as dots, and
+so the next thing Egma asks for is a Retell API key. It is typed as dots, and
 the screen says what happens to it before you type it:
 
 ```
 ◇ Paste your Retell API key (Retell dashboard → Settings → API keys).
-  It is sent to egma and stored encrypted. It never lands in a file here.
+  It is sent to Egma and stored encrypted. It never lands in a file here.
   › ●●●●●●●●●●●●●●●●
 ```
 
 That sentence is the whole promise, and it is enforced rather than intended.
-The key is held in memory, sent in one header to Retell and in one body to egma,
+The key is held in memory, sent in one header to Retell and in one body to Egma,
 which seals it. It is written to no file, printed in no line, kept in no log,
 and never passed as a command argument — arguments are readable by every
 process on your machine and are kept in your shell history.
 
-egma checks the key by listing the agents on the account. A key Retell will not
+Egma checks the key by listing the agents on the account. A key Retell will not
 take, and a key for an account with no agents on it, are told apart by name and
 each is worth one more try. One agent on the account is shown for confirmation
 with nothing to answer; several get a list to choose from.
 
 The agent's configuration — its prompt, its voice, its tools — is pulled, and
-then egma asks the one question that decides what it creates:
+then Egma asks the one question that decides what it creates:
 
 ```
-◇ How should egma reach this agent?
-  › Text — egma exchanges messages with the agent. No phone call, nothing dialled.
-    Phone — egma dials one of the agent's numbers and talks to it over the
+◇ How should Egma reach this agent?
+  › Text — Egma exchanges messages with the agent. No phone call, nothing dialled.
+    Phone — Egma dials one of the agent's numbers and talks to it over the
     telephone network, the way the people who call it do.
 
-  egma creates the one you choose, and only that one.
+  Egma creates the one you choose, and only that one.
 ```
 
 Both are real ways to test one voice agent, and they answer different
 questions. Text exercises the prompt, the reasoning and the tools. Phone
 exercises all of that plus the speech stack and the line it is carried on. The
-same test over both is the sharpest thing egma can tell you: passes on text and
+same test over both is the sharpest thing Egma can tell you: passes on text and
 fails on phone means the prompt is fine and the speech stack is not.
 
-**egma creates the connection you chose and never both.** Choose the phone and
+**Egma creates the connection you chose and never both.** Choose the phone and
 it lists the numbers Retell routes to that agent, you pick one, and the
 connection it writes holds that number and nothing else — no Retell identifier
 and no credential of any kind, because the public telephone network neither
@@ -155,13 +155,13 @@ knows nor cares what answers. Choose text and it writes one Retell chat
 connection for the voice agent you selected, with your key sealed on the
 platform.
 
-**What Retell answered is kept exactly as it answered it**, beside what egma
-read out of it, so a field egma has no place for today is still there tomorrow.
-Nothing in this step writes to your Retell account: every request egma makes to
+**What Retell answered is kept exactly as it answered it**, beside what Egma
+read out of it, so a field Egma has no place for today is still there tomorrow.
+Nothing in this step writes to your Retell account: every request Egma makes to
 it is a read.
 
 If your repository keeps a prompt of its own and it differs from what Retell is
-running, egma says so in one line and carries on. It never blocks: being out of
+running, Egma says so in one line and carries on. It never blocks: being out of
 step is not an error, and the line names which of the two your tests will be
 grounded in.
 
@@ -183,11 +183,11 @@ guess; name one with `--retell-agent`.
 
 It refuses to guess the reach as well. Say `--reach text` or `--reach phone`
 (or set `EGMA_REACH`); with neither, it creates nothing at all and exits 5 —
-egma will not decide on your behalf whether to dial somebody's telephone. With
+Egma will not decide on your behalf whether to dial somebody's telephone. With
 `--reach phone` and several numbers routed to the agent, name one with
 `--phone-number` or `EGMA_PHONE_NUMBER`.
 
-**Running it twice over the same voice agent is safe.** egma answers the
+**Running it twice over the same voice agent is safe.** Egma answers the
 registration you already have rather than making a second one and says which of
 three things it did on the `registration:` line — `created`, `reused`, or
 `connection_added` when the same agent gained another way of being reached. The
@@ -219,9 +219,9 @@ grounded_in: retell
 status: connected
 
 0 connected   2 the key was refused   3 no agents on that account
-4 Retell or egma did not answer, or refused
+4 Retell or Egma did not answer, or refused
 5 a choice only you can make was not made: which agent, text or phone, or
-  which number   6 no key given   7 not signed in to egma
+  which number   6 no key given   7 not signed in to Egma
 8 Retell routes no number to that agent   130 stopped part way
 ```
 
@@ -230,7 +230,7 @@ status: connected
 ```
 egma/
   config.yaml     what this folder points at — names and ids
-  mock-tools.md   what egma answers for the agent's tools with
+  mock-tools.md   what Egma answers for the agent's tools with
   tests/          one markdown file per test
 ```
 
@@ -280,17 +280,17 @@ make a mocked backend take as long as the real one, and `agents` to narrow a
 mock tool to some of your agents rather than all of them. A test that needs a
 different answer writes the same section into its own file, below its expected
 behaviors — that override belongs to the test and is versioned with it, while
-the project's own mock tools are the one authored thing egma does not version,
+the project's own mock tools are the one authored thing Egma does not version,
 so pushing an edit writes over what was there.
 
 ## Your first suite of tests
 
 The wizard asks one question before it writes anything: do you already have
 test cases written down — a spreadsheet, a document, a page of notes? Drop a
-path and your own coding agent turns each one into a test file first. egma
+path and your own coding agent turns each one into a test file first. Egma
 reads that file itself and hands the whole of it over inside the task, so
 nothing goes looking on your disk; the file has to be inside the folder you ran
-egma in, and `.env` files are never read. Press `[n]` and egma writes the whole
+Egma in, and `.env` files are never read. Press `[n]` and Egma writes the whole
 suite itself.
 
 Then your coding agent writes tests into `egma/tests/`, grounded in what your
@@ -307,13 +307,13 @@ behaviors that say what should
 happen.
 ```
 
-Beside them, egma's own words: what a test is, what a run and its simulations
+Beside them, Egma's own words: what a test is, what a run and its simulations
 are, and the difference between a metric and a grader. The cards turn on their
 own and nothing waits on them — the suite is written at exactly the speed it
 would be with the pane closed.
 
 Twelve tests, each with at least one expected behavior. A test with none can
-never fail, so egma will not upload one; nor will it upload a file it could not
+never fail, so Egma will not upload one; nor will it upload a file it could not
 read. Either way it says which file and why, and leaves the file exactly where
 it is for you to fix.
 
@@ -332,7 +332,7 @@ Run these against order-line over retell-1 (voice)?
 [enter] run   [e] edit first   [q] quit
 ```
 
-`[e]` opens the highlighted file in your `$EDITOR` — egma hands the terminal
+`[e]` opens the highlighted file in your `$EDITOR` — Egma hands the terminal
 over and takes it back — and returns you here. `[q]` closes the wizard with
 every file still in your repository, ready for `egma push` when you have read
 them. `[enter]` pushes them and carries on.
@@ -343,7 +343,7 @@ either way, and code is reviewed in a pull request.
 ## Your first run
 
 `[enter]` pushes the list and starts a **run**: one execution of those tests
-against your voice agent over the connection egma registered. Each test becomes
+against your voice agent over the connection Egma registered. Each test becomes
 one **simulation** per persona, and each one arrives on its own line and moves:
 
 ```
@@ -360,30 +360,30 @@ passed 1  ·  failed 0  ·  skipped 0  ·  errored 0  ·  waiting 11
 ```
 
 **The wizard does not wait for the suite.** It waits for the first verdict —
-that is the point where you stop taking egma's word for it — and then closes.
-The run carries on on egma; shutting your terminal has never stopped one.
+that is the point where you stop taking Egma's word for it — and then closes.
+The run carries on on Egma; shutting your terminal has never stopped one.
 
 **Verdicts arrive after the conversation ends.** The simulator claims each
 simulation and conducts it; the grader judges what it did and writes one
 verdict per expected behaviour, each with its own rationale, the turns it
 cites, and the judge that wrote it. The screen keeps following until every
 simulation has finished **and** every one has been judged — those are two
-different moments. Close the window whenever you like; the run is yours on egma
+different moments. Close the window whenever you like; the run is yours on Egma
 either way, at the address the screen shows.
 
-A **verdict** is one of four, and egma never turns four into three:
+A **verdict** is one of four, and Egma never turns four into three:
 
 - `passed` — the agent did what the test expected.
 - `failed` — it did not. Something in your agent is wrong.
 - `skipped` — nothing was judged. The test needed something this connection
   cannot do, or a grader had nothing it could score here.
-- `errored` — the simulation never happened. The agent was not reached, or egma
+- `errored` — the simulation never happened. The agent was not reached, or Egma
   broke.
 
 A test that could not run is not a test that failed, and reporting one as the
 other would send you hunting a bug that is not there.
 
-If your connection is of a type whose adapter has not shipped yet, egma refuses
+If your connection is of a type whose adapter has not shipped yet, Egma refuses
 the run **at creation**, in its own words, and the wizard prints those words as
 they came. You never wait on a run that could not happen.
 
@@ -421,19 +421,19 @@ status: completed
 
 0 the run finished and nothing failed or errored
 1 nothing here to run   2 not signed in   3 a test failed
-4 egma did not answer, or refused
-5 egma would not start the run, and said why
+4 Egma did not answer, or refused
+5 Egma would not start the run, and said why
 6 a simulation errored, so nothing concluded   130 stopped part way
 ```
 
 `--no-follow` starts the run and returns at once, without waiting for a verdict
 — for when you want the suite going and will read the results page later.
 
-It runs what egma holds, pinning the current version of each test, so a run is a
+It runs what Egma holds, pinning the current version of each test, so a run is a
 record of exactly what executed.
 
-**Your folder and egma have to agree, or nothing starts.** A file egma has never
-seen is named on an `unknown:` line; a file egma holds different content for is
+**Your folder and Egma have to agree, or nothing starts.** A file Egma has never
+seen is named on an `unknown:` line; a file Egma holds different content for is
 named on a `not-pushed:` line. Either one refuses the whole run and names the
 fix, which is `egma push` both times. The comparison is the content of each
 test, field by field, and never a version number — the numbers agree with each
@@ -446,7 +446,7 @@ about words nobody executed.
 The last thing the wizard asks:
 
 ```
-◇ Install the egma skill into Claude Code, so it can drive egma
+◇ Install the Egma skill into Claude Code, so it can drive Egma
   on its own next time?   [p] project   [g] global   [s] skip
 ```
 
@@ -456,10 +456,10 @@ repository you open. `[s]` writes nothing at all, and is a perfectly good
 answer: `egma --help` is enough for any coding agent to drive the whole product.
 
 Codex keeps its skills the same way, under `.codex/` instead. A coding agent
-egma has no skill convention for is not offered one, rather than being handed a
+Egma has no skill convention for is not offered one, rather than being handed a
 file in a directory it may never read.
 
-egma writes the one file itself. Nothing is downloaded, nothing else on your
+Egma writes the one file itself. Nothing is downloaded, nothing else on your
 machine is touched, and the screen names the exact path before you press
 anything.
 
@@ -482,10 +482,10 @@ The results address **opens already signed in** — your browser holds the
 sign-in from the approval at the start of the walk. That is why nothing rides on
 the address: no token, no key, no query at all.
 
-## Keeping the folder and egma in step
+## Keeping the folder and Egma in step
 
 ```
-egma pull     writes egma's current versions into your files
+egma pull     writes Egma's current versions into your files
 egma push     uploads yours
 ```
 
@@ -494,7 +494,7 @@ saving over each other silently is how this goes wrong everywhere it has been
 tried.
 
 Each file remembers the version it was last synced at. `push` compares that
-with what egma currently holds, and **refuses when egma has moved on**, naming
+with what Egma currently holds, and **refuses when Egma has moved on**, naming
 every test that moved:
 
 ```
@@ -506,12 +506,12 @@ status: refused
 
 Nothing is merged and nothing is uploaded. Run `egma pull`, look at what your
 teammate changed in the dashboard, then push again. A push that goes through
-creates a new version on egma — the old one is never overwritten, so results
+creates a new version on Egma — the old one is never overwritten, so results
 from last week still say what they ran — and writes the new version id back
 into your files.
 
-`egma push` also relays egma's own refusals. A test with no expected behaviors
-cannot ever fail, so egma will not store one, and the reason you see is egma's
+`egma push` also relays Egma's own refusals. A test with no expected behaviors
+cannot ever fail, so Egma will not store one, and the reason you see is Egma's
 own words.
 
 All three verbs print one fact per line and answer with a number you can branch
@@ -523,12 +523,12 @@ url, folder, and then one line per test: what happened to it, the file,
 and the version the file now pins.
 
 0 done   1 no egma folder here   2 not signed in
-4 egma did not answer, or refused
-5 push refused: egma has moved on, pull first
-6 egma turned a test away at its door   130 stopped part way
+4 Egma did not answer, or refused
+5 push refused: Egma has moved on, pull first
+6 Egma turned a test away at its door   130 stopped part way
 ```
 
-## The notes egma hands your coding agent
+## The notes Egma hands your coding agent
 
 They are markdown files inside this package, under `skills/`. They are sent as
 part of the task, at the moment the task is sent. Nothing is installed on your
@@ -540,28 +540,28 @@ on writing a test file that says something worth checking.
 
 A fourth, `skills/egma/SKILL.md`, is the only one that is ever *installed* —
 and only when you say so, at the end of the walk. It teaches a coding agent to
-drive egma: read `egma/config.yaml`, run `egma --help`, pull, push, run, and
+drive Egma: read `egma/config.yaml`, run `egma --help`, pull, push, run, and
 keep the four verdicts apart.
 
 ## How it reaches your coding agent
 
 Over the [Agent Client Protocol](https://agentclientprotocol.com). The agent runs
-as a subprocess and egma is the client. Which agents exist, and the command that
+as a subprocess and Egma is the client. Which agents exist, and the command that
 starts each one, come from the protocol's own agent registry, mirrored inside
 this package so a first run needs no network for the lookup.
 
-Your code and your prompts never leave your machine. There is no egma model in
-this path and no egma server in it.
+Your code and your prompts never leave your machine. There is no Egma model in
+this path and no Egma server in it.
 
 ## Questions, and the one file that is never read
 
-egma answers every permission request the agent raises, and starts it in the
+Egma answers every permission request the agent raises, and starts it in the
 most permissive mode it offers, so you are not interrupted while it works.
 That is only safe because everything the agent does appears on screen as it
 happens.
 
 One thing is never allowed: any file whose name starts with `.env`. Those hold
-secrets, and once read they are in a model's context for good. egma refuses the
+secrets, and once read they are in a model's context for good. Egma refuses the
 file and tells the agent to work from your code and to ask you for anything it
 still needs.
 
@@ -574,44 +574,44 @@ egma connect [options]   Register your voice agent and a way to reach it.
                          The key comes in on standard input or from the
                          environment, never as an argument.
 egma init [options]      Make the egma folder this repository's tests live
-                         in. Talks to nobody, unless --url names an egma to
+                         in. Talks to nobody, unless --url names an Egma to
                          bind this repository to. Safe to run again.
-egma pull [options]      Write egma's current test versions into it.
+egma pull [options]      Write Egma's current test versions into it.
 egma push [options]      Upload the tests in it. Refuses, naming names, when
-                         egma has moved on since your last pull.
+                         Egma has moved on since your last pull.
 egma run [options]       Run this folder's tests, pinning the version of each.
                          Follows the run and prints every change.
 
   --coding-agent <id>  Which coding agent to drive, named as the agent
                        registry names it. Default: claude-acp
   --cwd <path>         The folder to work in. Default: this folder.
-  --url <address>      Which egma this one command talks to. It is the only
+  --url <address>      Which Egma this one command talks to. It is the only
                        way to name one, so a command that should reach that
-                       egma carries it. With init and with the wizard: egma
+                       Egma carries it. With init and with the wizard: Egma
                        asks that address who it is and records its verified
                        identity in egma/config.yaml, and every later command
                        in this repository then needs no address at all.
   --force              With login: sign in again even when this machine
                        already holds a key.
   --no-follow          With run: start the run and return at once, without
-                       waiting for a verdict. The run carries on on egma.
+                       waiting for a verdict. The run carries on on Egma.
   --retell-agent <id>  With connect: which agent, when the Retell account
                        holds more than one.
-  --reach <text|phone> With connect and a headless wizard: how egma should
-                       reach the agent. egma creates the one you choose and
+  --reach <text|phone> With connect and a headless wizard: how Egma should
+                       reach the agent. Egma creates the one you choose and
                        never both, and creates nothing when neither is said.
   --phone-number <e164>
                        With --reach phone: which of the agent's numbers to
                        dial, when Retell routes more than one to it.
   --repo-prompt <path> With connect: the prompt file in this repository, so
-                       egma can say whether it and Retell have drifted apart.
+                       Egma can say whether it and Retell have drifted apart.
   --existing-tests <path>
                        With the wizard: test cases you already have written
                        down, inside this folder. They are turned into test
-                       files before egma writes any of its own.
+                       files before Egma writes any of its own.
   --agent <name>       With init: what to call the voice agent this
                        folder's tests are for.
-  --connection <name>  With init: what to call the way egma reaches it.
+  --connection <name>  With init: what to call the way Egma reaches it.
   --suite <name>       With init: what to call this folder's test suite.
   --headless           Run with no terminal and no keystroke: plain lines,
                        and the task taken as already agreed to.
@@ -619,7 +619,7 @@ egma run [options]       Run this folder's tests, pinning the version of each.
   -v, --version        Print the version.
 
 Environment:
-  EGMA_HOME            The folder egma keeps this machine's key in.
+  EGMA_HOME            The folder Egma keeps this machine's key in.
                        Default: ~/.egma
   EGMA_RETELL_API_KEY  Your Retell key, for egma connect. RETELL_API_KEY is
                        read too, so an environment that already has one needs
@@ -633,9 +633,9 @@ Environment:
 ```
 
 `Ctrl-C` stops a run at any point. The agent, and anything the agent started,
-is shut down before egma exits, and the line left behind says where it stopped.
+is shut down before Egma exits, and the line left behind says where it stopped.
 If tests had already been written into `egma/tests/`, that line says how many
-are there — they are yours, and egma never removes them to tidy up its own
+are there — they are yours, and Egma never removes them to tidy up its own
 report.
 
 ## Requirements
@@ -643,14 +643,14 @@ report.
 Node 22 or newer. A coding agent installed — Claude Code and Codex both work,
 as does any agent in the protocol registry that ships as a package.
 
-You do not have to be logged in to it first. If it asks egma to log in, egma
+You do not have to be logged in to it first. If it asks Egma to log in, Egma
 hands you to that agent's own login and carries on where it left off. And if
-there is no coding agent here for egma to drive at all, it prints the words to
+there is no coding agent here for Egma to drive at all, it prints the words to
 paste into whichever one you do use, and stops.
 
 ## Trying it on an instance of your own
 
-egma is open source and runs on your machine. That checkout is a **platform
+Egma is open source and runs on your machine. That checkout is a **platform
 workspace** — the deployment's own directory, and deliberately not your agent
 repository. The platform's carrier and provider credentials belong to whoever
 runs the platform; an agent repository holds only tests and the address of the
@@ -664,7 +664,7 @@ pnpm install
 npx @egma/cli self-host up
 ```
 
-That starts a whole egma — Postgres, ClickHouse, the API, the pages, the
+That starts a whole Egma — Postgres, ClickHouse, the API, the pages, the
 simulator, the grader, and the LiveKit server, SIP gateway and Redis a phone
 call needs — and prints the address to point an agent repository at. Open it and
 sign up: you become the admin of your own instance.
@@ -716,7 +716,7 @@ node ~/egma/apps/cli/dist/bin.js --url http://localhost:3101
 
 The wizard signs this machine in against that instance, registers your agent
 and a way to reach it, writes a first suite of tests with your coding agent,
-puts them on egma when you say so, and starts a run over them.
+puts them on Egma when you say so, and starts a run over them.
 
 **Then it waits for the answer.** The simulator claims the work and holds the
 conversation; the grader judges it afterwards. The first verdict opens the run
@@ -734,7 +734,7 @@ pnpm db:up
 pnpm --filter @egma/cli smoke:walk
 ```
 
-The second builds everything it needs, starts an egma of its own, signs in,
+The second builds everything it needs, starts an Egma of its own, signs in,
 registers, pushes and runs — and says at the end what it proved and what waits.
 Set `RETELL_API_KEY` to register against your own Retell account instead of the
 stand-in one it starts.

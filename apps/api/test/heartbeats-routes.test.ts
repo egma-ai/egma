@@ -271,7 +271,7 @@ describe("the steering matrix", () => {
       await aCustomerReadyToRun("beats_beyond_help");
     const token = api.config.simulatorServiceToken;
 
-    // Unknown: an id this egma never issued.
+    // Unknown: an id this Egma never issued.
     const unknown = await beat(token, newId("sim"), { claimant: SIMULATOR });
     expect(unknown.statusCode).toBe(200);
     expect(unknown.body).toEqual({ directive: "cancel" });

@@ -88,7 +88,7 @@ export default function ResetPasswordPage() {
       }
       setProblem(message);
     } catch {
-      setProblem("egma could not be reached. Is the API running?");
+      setProblem("Egma could not be reached. Is the API running?");
     } finally {
       setSubmitting(false);
     }
@@ -148,7 +148,7 @@ export default function ResetPasswordPage() {
     return (
       <StatePage
         title="That link no longer works"
-        lead="It is too old now for egma to say whether it was used before it ran out. If you set a password with it, sign in with that one. If nothing happened, ask for another link."
+        lead="It is too old now for Egma to say whether it was used before it ran out. If you set a password with it, sign in with that one. If nothing happened, ask for another link."
       >
         <p className={styles.linkLine}>
           <a href={signInHref}>Sign in</a> ·{" "}
@@ -172,7 +172,7 @@ export default function ResetPasswordPage() {
     <AuthShell
       eyebrow="Forgotten password"
       title="Choose a new password."
-      lead="This link names your account, so a password is all egma needs."
+      lead="This link names your account, so a password is all Egma needs."
     >
       <form className={styles.form} onSubmit={submit}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}

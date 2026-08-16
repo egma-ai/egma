@@ -28,7 +28,7 @@ import { met, type ScriptedJudge } from "./support/scripted-judge.ts";
  * **The judge is scripted, and what it was *shown* is the other half of the
  * evidence.** A verdict row carries the turns a judgment rests on and nothing
  * about the transcript behind them, so the cases that are about assembly look
- * at the question the engine put — which is the one place the conversation egma
+ * at the question the engine put — which is the one place the conversation Egma
  * built out of spans is visible in full. One case reaches further still, to the
  * constructor itself, for the same reason the production suite does.
  *
@@ -107,7 +107,7 @@ describe("a simulation whose spans arrived complete", () => {
     expect(mine).toMatchObject({ verdict: "passed" });
     expect(mine?.citedSpanIds).toEqual(["turn:4"]);
 
-    // And what the judge was shown, which is the conversation egma built: the
+    // And what the judge was shown, which is the conversation Egma built: the
     // turns, the tool call read off the columns the door normalised it into,
     // and the measures off the timing spans.
     const [shown] = judge.asked;
@@ -190,7 +190,7 @@ describe("a simulation whose spans arrived complete", () => {
     );
 
     // The tool call, with no result — always, because the simulator observes
-    // the call from egma's side of the connection and not the return.
+    // the call from Egma's side of the connection and not the return.
     expect(conversation.events).toMatchObject([
       {
         kind: "tool_call",
@@ -309,7 +309,7 @@ describe("a simulation whose spans arrived complete", () => {
  * What the simulator measured, as it reaches something that judges.
  *
  * A measure is a number a grader may read, and the only place it is visible
- * from outside the engine is the evidence a judge is shown. What egma computes
+ * from outside the engine is the evidence a judge is shown. What Egma computes
  * *from* those numbers is the shared measure module's story and lands with the
  * grader that reads them.
  */
@@ -356,7 +356,7 @@ describe("a simulation whose trace never closed", () => {
     const judge = await judgingWith();
     const graderId = await seedGrader(
       world,
-      aLatencyCopy({ name: "Asked about a conversation egma holds half of" }),
+      aLatencyCopy({ name: "Asked about a conversation Egma holds half of" }),
     );
     const testId = await seedTest(world, [THE_BEHAVIOR]);
 
@@ -369,7 +369,7 @@ describe("a simulation whose trace never closed", () => {
     const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
     const mine = verdicts.find((verdict) => verdict.graderId === graderId);
 
-    // Never `failed`. What egma holds is genuinely half a conversation, and an
+    // Never `failed`. What Egma holds is genuinely half a conversation, and an
     // agent that behaved perfectly would be marked down for a flush that never
     // landed.
     expect(mine?.verdict).toBe("errored");
@@ -419,7 +419,7 @@ describe("a simulation with no spans at all", () => {
     await judgingWith();
     const graderId = await seedGrader(
       world,
-      aLatencyCopy({ name: "Asked about a conversation egma has no record of" }),
+      aLatencyCopy({ name: "Asked about a conversation Egma has no record of" }),
     );
     const testId = await seedTest(world, [
       "confirms the new time back before finishing",
@@ -427,7 +427,7 @@ describe("a simulation with no spans at all", () => {
     ]);
 
     // Nothing streamed: a completed conversation whose evidence never
-    // reached egma at all, which is the only way a conversation can be
+    // reached Egma at all, which is the only way a conversation can be
     // missing now that the spans are the whole of the record.
     const conducted = await conductSimulation(world, {
       spans: null,
@@ -444,7 +444,7 @@ describe("a simulation with no spans at all", () => {
     ).toContain("no record of this conversation");
 
     // The expected-behaviors copy says the same thing, once per behavior, so a
-    // page shows the same list of checks whether egma could read the
+    // page shows the same list of checks whether Egma could read the
     // conversation or not.
     const seeded = await theSeededGrader(world);
     const behaviors = verdicts.filter(
