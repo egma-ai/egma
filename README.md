@@ -604,15 +604,11 @@ its LiveKit URL, API key and API secret, plus the agent's name if your worker
 registers one. They go on the connection rather than into this deployment's
 environment, because the project is yours and not egma's.
 
-**[Testing a LiveKit agent](docs/integrations/livekit-testing.mdx)** is the whole recipe —
-where to copy the three values from, how to tell which dispatch style your
-worker uses, the one request that registers it, and what the record carries
-afterwards. [`fixtures/livekit-dumb-agent`](fixtures/livekit-dumb-agent) is a
-deliberately boring agent to try it against before you point egma at a real one.
-For teams that won't hand a testing tool their project's key pair, **[the
-token-endpoint mode](docs/integrations/livekit-token-endpoint.mdx)** keeps the secret on your
-side: your service mints each room's token, and the page carries the hardening
-recipe to run it safely.
+[`fixtures/livekit-dumb-agent`](fixtures/livekit-dumb-agent) is a deliberately
+boring agent to try this path against before you point egma at a real one. For
+teams that will not hand a testing tool their project's key pair, the
+token-endpoint mode keeps the secret on your side: your service mints each
+room's token.
 
 ## Working on it
 
@@ -832,10 +828,8 @@ A few things worth knowing about what happens next:
   does not. There is nothing to declare first. Names beginning `egma` are
   reserved and are refused with a reason.
 
-**[Sending a LiveKit agent's telemetry](docs/integrations/livekit-telemetry.mdx)** walks the whole path
-end to end — which example agent, where its model keys come from, a development
-server on your machine or LiveKit Cloud, and the exchange on screen with its
-timings.
+The same telemetry path works with a development server on your machine or
+LiveKit Cloud.
 
 Spans egma will not store are reported in the response's partial-success field
 rather than as a failure, because the specification is explicit that rejected
