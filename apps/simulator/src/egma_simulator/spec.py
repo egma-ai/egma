@@ -66,6 +66,15 @@ class PlatformModel:
     """Kept out of the dataclass repr, like every other key in this
     process: a log line carrying one is a log line that should not have."""
 
+    reasoning_effort: str | None = None
+    """How hard the model thinks before the persona speaks, in the
+    provider's own vocabulary, or ``None`` to send nothing at all.
+
+    A persona is a caller in a hurry: the reasoning under test is the
+    agent's, and time the persona spends thinking is silence on a live
+    line. Carried verbatim, because the accepted values are the
+    provider's and change on their schedule, not egma's."""
+
 
 @dataclass(frozen=True)
 class PlatformSpeech:
@@ -79,6 +88,16 @@ class PlatformSpeech:
 
     stt_provider: str | None = None
     stt_key: str | None = field(default=None, repr=False)
+    stt_model: str | None = None
+    """Which model the listening leg asks for, where its provider has more
+    than one.
+
+    Here beside ``tts_model`` rather than left in each simulator's
+    environment, which is where it used to be alone. That asymmetry was
+    the one setting a deployment could not change centrally: an operator
+    could move the mouth from a settings page and had to edit a container
+    and restart it to move the ears."""
+
     tts_provider: str | None = None
     tts_key: str | None = field(default=None, repr=False)
     tts_model: str | None = None
@@ -163,10 +182,12 @@ class PlatformSettings:
                 provider=model.get("provider"),
                 model=model.get("model"),
                 key=model.get("key"),
+                reasoning_effort=model.get("reasoning_effort"),
             ),
             speech=PlatformSpeech(
                 stt_provider=speech.get("stt_provider"),
                 stt_key=speech.get("stt_key"),
+                stt_model=speech.get("stt_model"),
                 tts_provider=speech.get("tts_provider"),
                 tts_key=speech.get("tts_key"),
                 tts_model=speech.get("tts_model"),

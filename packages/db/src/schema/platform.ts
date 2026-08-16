@@ -119,8 +119,17 @@ export const platformSetting = pgTable(
  * that can disagree with that one, and the disagreement would be a setting an
  * operator could store and never use.
  *
- * **`required` is what setup has to supply and what readiness waits for.** Four
+ * **`required` is what setup has to supply and what readiness waits for.** Six
  * entries are not, and each is not for a stated reason.
+ *
+ * The speech-to-text model sits beside the text-to-speech model on the same
+ * terms, and it is here at all because it used to be the one speech setting a
+ * deployment could not change centrally: moving the persona's mouth was a
+ * settings page, and moving its ears was editing a container and restarting it.
+ *
+ * The persona's reasoning effort is optional because absent means send nothing,
+ * which is the only answer that is right for every provider — including the
+ * ones whose models have never heard of the field and would refuse it.
  *
  * The text-to-speech model and voice have a working default in the simulator,
  * so a platform that never names one still speaks. The carrier trunk's username
@@ -163,6 +172,12 @@ export const PLATFORM_SETTINGS = [
     required: true,
   },
   {
+    name: "persona_model_reasoning_effort",
+    label: "the persona's reasoning effort",
+    secret: false,
+    required: false,
+  },
+  {
     name: "speech_to_text_provider",
     label: "the speech-to-text provider",
     secret: false,
@@ -173,6 +188,12 @@ export const PLATFORM_SETTINGS = [
     label: "the speech-to-text key",
     secret: true,
     required: true,
+  },
+  {
+    name: "speech_to_text_model",
+    label: "the speech-to-text model",
+    secret: false,
+    required: false,
   },
   {
     name: "text_to_speech_provider",
