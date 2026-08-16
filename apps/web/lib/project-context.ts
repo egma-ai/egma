@@ -70,9 +70,12 @@ export function sectionIn(pathname: string): string | null {
  * in the project they just picked and the link would land on a refusal. So the
  * section is kept and everything under it is dropped.
  *
- * An address with no project in it at all — a page not yet converted to
- * explicit project context — becomes the new project's landing page, because
- * there is no area to carry across.
+ * An address with no project in it at all becomes the new project's landing
+ * page, because there is no area to carry across. Three addresses are like
+ * that and each on purpose: `/new-project`, which an organization holding none
+ * has to be able to reach; `/runs/{runId}`, which a terminal prints and which
+ * forwards by reading the run's own project; and `/traces`, which is
+ * organization-wide.
  */
 export function inProject(pathname: string, projectId: string): string {
   const address = addressIn(pathname);

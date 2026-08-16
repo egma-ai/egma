@@ -38,10 +38,12 @@ import { useTheme } from "./theme.tsx";
  * chosen project of its own. Two tabs on two projects are therefore two
  * ordinary tabs.
  *
- * A page that has not been converted to explicit project context yet still
- * renders inside this shell, and the selector falls back to the first project
- * so that it has something to say. That fallback is the expand half of the
- * project-context change and it goes away with the last unconverted page.
+ * **There is no fallback left, and this paragraph used to describe one.** While
+ * pages were being converted to explicit project context the selector fell back
+ * to the first project so that it had something to say; that half of the
+ * expand-contract change is finished, and both fallbacks — this shell's and the
+ * selector's own — are gone. An address inside no project draws no product
+ * navigation and says **No project**, which is the honest answer.
  */
 
 const BRAND_MARK = "/brand/egma-logo.png";
