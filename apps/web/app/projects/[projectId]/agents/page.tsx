@@ -311,7 +311,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
           columns={columnsFor(projectId)}
           rows={items}
           keyOf={(agent) => agent.id}
-          rowHref={(agent) => projectPath(projectId, "agents", agent.id)}
+          stretchPrimaryLink
           {...(cursor === null
             ? {}
             : {

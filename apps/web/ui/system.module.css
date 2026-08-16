@@ -632,6 +632,11 @@
   transform-origin: top right;
 }
 
+.menuBelowStart,
+.menuBelowEnd {
+  max-height: calc(100svh - var(--tap-target) - var(--space-8));
+}
+
 .menuAboveStart {
   bottom: calc(100% + var(--space-2));
   left: 0;
@@ -1049,14 +1054,7 @@
   position: relative;
 }
 
-.tableRowHit {
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  cursor: pointer;
-}
-
-/* Real row controls stay above the pointer-only link that covers the row. */
+/* Real row controls stay above the primary link's stretched pointer target. */
 .tableRowInteractive td
   :is(
     a,
@@ -1075,9 +1073,16 @@
   z-index: 2;
 }
 
-.tableRowInteractive td .tableRowHit {
+.tableRowInteractive .tableCellPrimary a:first-of-type {
+  position: static;
+}
+
+.tableRowInteractive .tableCellPrimary a:first-of-type::after {
   position: absolute;
   z-index: 1;
+  inset: 0;
+  cursor: pointer;
+  content: "";
 }
 
 .cell {

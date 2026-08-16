@@ -506,7 +506,7 @@ export function RecentRuns({
             columns={columns}
             rows={answer.value.items}
             keyOf={(run) => run.id}
-            rowHref={(run) => projectPath(projectId, "runs", run.id)}
+            stretchPrimaryLink
           />
         )
       ) : (

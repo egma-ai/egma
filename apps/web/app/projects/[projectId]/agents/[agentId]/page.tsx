@@ -359,15 +359,7 @@ function AgentDetailView({
               columns={connectionColumns(projectId, agentId)}
               rows={connections}
               keyOf={(one) => one.id}
-              rowHref={(one) =>
-                projectPath(
-                  projectId,
-                  "agents",
-                  agentId,
-                  "connections",
-                  one.id,
-                )
-              }
+              stretchPrimaryLink
             />
           )}
         </Section>
@@ -701,7 +693,7 @@ function ApplicableTests({
             columns={columns}
             rows={answer.value.items}
             keyOf={(test) => test.id}
-            rowHref={(test) => projectPath(projectId, "tests", test.id)}
+            stretchPrimaryLink
           />
         )
       ) : (

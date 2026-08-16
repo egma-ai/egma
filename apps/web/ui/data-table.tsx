@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { Button } from "./controls.tsx";
@@ -50,7 +49,7 @@ export function DataTable<Row>({
   columns,
   rows,
   keyOf,
-  rowHref,
+  stretchPrimaryLink = false,
   more,
 }: {
   /** What this table is a table of. Read out where there is no visible caption. */
@@ -59,10 +58,10 @@ export function DataTable<Row>({
   readonly rows: readonly Row[];
   readonly keyOf: (row: Row) => string;
   /**
-   * Makes a natural navigation row clickable with a pointer. The primary cell
-   * must still render its own real link for keyboard and assistive technology.
+   * Stretches the primary cell's first real link across a natural navigation
+   * row. There is still only one link in the accessibility tree.
    */
-  readonly rowHref?: (row: Row) => string;
+  readonly stretchPrimaryLink?: boolean;
   readonly more?: More;
 }) {
   const primary = columns.find((column) => column.primary) ?? columns[0];
@@ -99,35 +98,25 @@ export function DataTable<Row>({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => {
-              const href = rowHref?.(row);
-
-              return (
-                <tr
-                  className={href === undefined ? undefined : styles.tableRowInteractive}
-                  key={keyOf(row)}
-                >
-                  {columns.map((column) => (
-                    <td
-                      className={column === primary ? styles.tableCellPrimary : undefined}
-                      data-label={column.header}
-                      data-mobile-hidden={mobileHidden(column)}
-                      key={column.key}
-                    >
-                      <span className={cellClass(column)}>{column.cell(row)}</span>
-                      {column === primary && href !== undefined ? (
-                        <Link
-                          aria-hidden="true"
-                          className={styles.tableRowHit}
-                          href={href}
-                          tabIndex={-1}
-                        />
-                      ) : null}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
+            {rows.map((row) => (
+              <tr
+                className={
+                  stretchPrimaryLink ? styles.tableRowInteractive : undefined
+                }
+                key={keyOf(row)}
+              >
+                {columns.map((column) => (
+                  <td
+                    className={column === primary ? styles.tableCellPrimary : undefined}
+                    data-label={column.header}
+                    data-mobile-hidden={mobileHidden(column)}
+                    key={column.key}
+                  >
+                    <span className={cellClass(column)}>{column.cell(row)}</span>
+                  </td>
+                ))}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

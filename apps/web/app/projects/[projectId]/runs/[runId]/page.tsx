@@ -510,15 +510,7 @@ function RunDetailView({
               columns={simulationColumns(projectId, runId)}
               rows={simulations}
               keyOf={(one) => one.id}
-              rowHref={(one) =>
-                projectPath(
-                  projectId,
-                  "runs",
-                  runId,
-                  "simulations",
-                  one.id,
-                )
-              }
+              stretchPrimaryLink
             />
           )}
         </Section>

@@ -343,7 +343,7 @@ function Tests({ projectId }: { readonly projectId: string }) {
           columns={columnsFor(projectId)}
           rows={items}
           keyOf={(test) => test.id}
-          rowHref={(test) => projectPath(projectId, "tests", test.id)}
+          stretchPrimaryLink
           {...(cursor === null
             ? {}
             : {

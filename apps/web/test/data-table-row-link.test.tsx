@@ -3,6 +3,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DataTable, type Column } from "../ui/data-table.tsx";
+import styles from "../ui/system.module.css";
 
 type Row = {
   readonly id: string;
@@ -39,26 +40,24 @@ const COLUMNS: readonly Column<Row>[] = [
 afterEach(cleanup);
 
 describe("DataTable row links", () => {
-  it("adds one pointer-only row link while keeping the primary link accessible", () => {
+  it("stretches the one accessible primary link across a natural row", () => {
     render(
       <DataTable
         label="Agents"
         columns={COLUMNS}
         rows={[ROW]}
         keyOf={(row) => row.id}
-        rowHref={(row) => `/agents/${row.id}`}
+        stretchPrimaryLink
       />,
     );
 
     const table = screen.getByRole("table", { name: "Agents" });
     const row = within(table).getAllByRole("row")[1] as HTMLElement;
     const primaryLink = within(row).getByRole("link", { name: "Front desk" });
-    const pointerLink = row.querySelector('a[aria-hidden="true"]');
 
     expect(primaryLink.getAttribute("href")).toBe("/agents/agt_1");
     expect(primaryLink.getAttribute("tabindex")).toBeNull();
-    expect(pointerLink?.getAttribute("href")).toBe("/agents/agt_1");
-    expect(pointerLink?.getAttribute("tabindex")).toBe("-1");
+    expect(row.classList.contains(styles.tableRowInteractive)).toBe(true);
     expect(within(row).getAllByRole("link")).toHaveLength(1);
     expect(within(row).getByRole("button", { name: "Edit agent" })).toBeTruthy();
   });
@@ -83,6 +82,10 @@ describe("DataTable row links", () => {
 
     expect(registeredHeader.getAttribute("data-mobile-hidden")).toBe("true");
     expect(registeredCell.getAttribute("data-mobile-hidden")).toBe("true");
-    expect(table.querySelector('a[aria-hidden="true"]')).toBeNull();
+    expect(
+      (within(table).getAllByRole("row")[1] as HTMLElement).classList.contains(
+        styles.tableRowInteractive,
+      ),
+    ).toBe(false);
   });
 });

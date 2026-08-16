@@ -240,7 +240,7 @@ export default function TranscriptsPage() {
               columns={TRACE_COLUMNS}
               rows={state.rows}
               keyOf={(row) => row.trace_id}
-              rowHref={transcriptPath}
+              stretchPrimaryLink
               {...(more === null
                 ? {}
                 : {

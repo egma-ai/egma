@@ -289,9 +289,7 @@ function Personas({ projectId }: { readonly projectId: string }) {
           columns={columnsFor(projectId)}
           rows={items}
           keyOf={(persona) => persona.id}
-          rowHref={(persona) =>
-            projectPath(projectId, "personas", persona.id)
-          }
+          stretchPrimaryLink
           {...(cursor === null
             ? {}
             : {
