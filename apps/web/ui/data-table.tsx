@@ -120,7 +120,6 @@ export function DataTable<Row>({
                           aria-hidden="true"
                           className={styles.tableRowHit}
                           href={href}
-                          prefetch={false}
                           tabIndex={-1}
                         />
                       ) : null}
