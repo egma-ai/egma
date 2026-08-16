@@ -884,8 +884,9 @@ curl -H "authorization: Bearer egma_sk_..." \
 |---|---|---|
 | `from`, `to` | **required** | RFC 3339, honoured to the microsecond. The window is closed at `from` and open at `to`. |
 | `project_id` | optional | Narrows to one project. Absent — or empty — means the whole organization. |
+| `source` | optional | `simulation` or `production`. Narrows to one kind of traffic; absent — or empty — means both. Any other word is refused. |
 | `limit` | optional | 50 by default. Above the maximum of 200 it is clamped; zero, negative or not a count at all is refused. Empty is absent. |
-| `cursor` | optional | `next_cursor` from the previous page. |
+| `cursor` | optional | `next_cursor` from the previous page. Send `source` again on every page: a token is a position in the ordering it was minted in. |
 
 **`GET /v1/traces/:traceId`** returns one trace as a transcript: `turns` in the
 order they were taken, each carrying the spans that happened inside it, and

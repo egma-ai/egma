@@ -1,8 +1,17 @@
-import { createProject, type AuthContext } from "@egma/db";
+import {
+  createAgent,
+  createPersona,
+  createProject,
+  createTest,
+  startRun,
+  type AuthContext,
+} from "@egma/db";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
 import {
+  contextFor,
   ingest,
   listTracesAsSignedIn,
   listTracesOverHttp,
@@ -10,6 +19,7 @@ import {
   readTraceOverHttp,
   signUp,
   syntheticExport,
+  NEUTRAL_TRAITS,
   type Customer,
   type ListedPage,
 } from "./support/traces.ts";
@@ -666,6 +676,311 @@ describe("a browser session rather than a key", () => {
     expect(
       (asTheKey.json() as ListedPage).traces.map((trace) => trace.trace_id),
     ).toEqual([FILED_WITHOUT_A_PROJECT]);
+  });
+});
+
+/**
+ * The one filter this list has, and the only one it is getting: which kind of
+ * traffic.
+ *
+ * **Additive, and that is the whole claim.** A caller naming nothing reads both
+ * kinds and gets byte for byte the answer they got before the parameter
+ * existed — asserted below against the response body itself rather than against
+ * a shape. Present, it narrows; misspelled, it is refused naming both accepted
+ * words rather than quietly reading everything, because a page of simulations
+ * under a heading that promised production is exactly the failure a silent
+ * filter produces.
+ *
+ * The two kinds arrive at the two doors that actually make them: production
+ * through a customer's key, simulations through the service token with each
+ * resource naming a real simulation row this deployment conducted. Nothing is
+ * written into the store by hand, so what is filtered here is what ingest files.
+ *
+ * They are **interleaved in time on purpose**. Newest-first over a mixed window
+ * puts a simulation between every pair of production exchanges, so a walk of
+ * `source=production` at page size one crosses a simulation at every boundary —
+ * which is what separates a predicate inside the scan from a filter over a page
+ * that has already been counted.
+ */
+describe("narrowing a list to one kind of traffic", () => {
+  const MIXED = {
+    from: "2026-10-01T00:00:00Z",
+    to: "2026-10-02T00:00:00Z",
+  } as const;
+
+  /** What this test deployment's simulator would be started holding. */
+  const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
+
+  const PRODUCTION_TRACES = [
+    { traceId: "ee000000000000000000000000000001", at: "2026-10-01T09:00:00Z" },
+    { traceId: "ee000000000000000000000000000002", at: "2026-10-01T09:10:00Z" },
+    { traceId: "ee000000000000000000000000000003", at: "2026-10-01T09:20:00Z" },
+  ] as const;
+
+  /** Between each pair of the above, so neither kind is a contiguous block. */
+  const SIMULATED_AT = [
+    "2026-10-01T09:05:00Z",
+    "2026-10-01T09:15:00Z",
+    "2026-10-01T09:25:00Z",
+  ] as const;
+
+  const GLOBEX_TRACE = "ef000000000000000000000000000001";
+
+  /** Filed under the ids the simulations' own ids spell, newest last. */
+  const simulationTraces: string[] = [];
+
+  const newestFirst = (ids: readonly string[]): string[] => [...ids].reverse();
+
+  beforeAll(async () => {
+    for (const trace of PRODUCTION_TRACES) {
+      await ingest(
+        api.app,
+        acme.secret,
+        syntheticExport({
+          traceId: trace.traceId,
+          startedAt: new Date(trace.at),
+          humanSaid: `A real caller at ${trace.at}.`,
+        }),
+      );
+    }
+
+    // Three simulations of one run, which is what a run of three tests is. The
+    // rows are real: the door reads the organization, the project, the run and
+    // the pins off them, and that is what stamps the spans `simulation`.
+    const auth: AuthContext = contextFor(acme, "member");
+    const agent = await createAgent(auth, {
+      name: "Front desk",
+      connection: {
+        type: "retell",
+        modality: "chat",
+        config: { retellAgentId: "agent_mixed" },
+        credentials: { apiKey: "retell-secret-mixed" },
+      },
+    });
+    const personaId = (
+      await createPersona(auth, {
+        name: "Patient Pat",
+        traits: NEUTRAL_TRAITS,
+      })
+    ).id;
+
+    const testVersionIds: string[] = [];
+    for (const which of ["one", "two", "three"]) {
+      testVersionIds.push(
+        (
+          await createTest(auth, {
+            name: `Reschedules ${which}`,
+            scenario: "Their cleaning has to move to any afternoon next week.",
+            expectedBehaviors: ["confirms the new time back before finishing"],
+            personaIds: [personaId],
+          })
+        ).versionId,
+      );
+    }
+
+    const started = await startRun(auth, {
+      connectionId: agent.connection?.id ?? "",
+      testVersionIds,
+    });
+
+    for (const [index, simulation] of started.simulations.entries()) {
+      const traceId = traceIdOfSimulation(simulation.id);
+      const at = SIMULATED_AT[index];
+      if (traceId === undefined || at === undefined) {
+        throw new Error(`simulation ${index} has no trace to file under`);
+      }
+
+      await ingest(
+        api.app,
+        SERVICE_TOKEN,
+        syntheticExport({
+          traceId,
+          startedAt: new Date(at),
+          humanSaid: `A persona at ${at}.`,
+          simulationId: simulation.id,
+        }),
+      );
+      simulationTraces.push(traceId);
+    }
+
+    expect(simulationTraces).toHaveLength(SIMULATED_AT.length);
+  });
+
+  it("reads both kinds when nobody narrowed it, newest first and interleaved", async () => {
+    const answered = await page(acme.secret, { ...MIXED, limit: 200 });
+
+    expect(answered.traces.map((trace) => trace.trace_id)).toEqual([
+      simulationTraces[2],
+      PRODUCTION_TRACES[2].traceId,
+      simulationTraces[1],
+      PRODUCTION_TRACES[1].traceId,
+      simulationTraces[0],
+      PRODUCTION_TRACES[0].traceId,
+    ]);
+  });
+
+  it("answers only production traffic when that is what was asked for", async () => {
+    const answered = await page(acme.secret, {
+      ...MIXED,
+      source: "production",
+      limit: 200,
+    });
+
+    expect(answered.traces.map((trace) => trace.trace_id)).toEqual(
+      newestFirst(PRODUCTION_TRACES.map((trace) => trace.traceId)),
+    );
+    expect([...new Set(answered.traces.map((trace) => trace.source))]).toEqual([
+      "production",
+    ]);
+  });
+
+  it("answers only simulations when that is what was asked for", async () => {
+    const answered = await page(acme.secret, {
+      ...MIXED,
+      source: "simulation",
+      limit: 200,
+    });
+
+    expect(answered.traces.map((trace) => trace.trace_id)).toEqual(
+      newestFirst(simulationTraces),
+    );
+    expect([...new Set(answered.traces.map((trace) => trace.source))]).toEqual([
+      "simulation",
+    ]);
+  });
+
+  /**
+   * **The compatibility claim, asserted against the bytes.**
+   *
+   * An integration written before this parameter existed sends nothing, and
+   * what comes back has to be the response it has always had — not a response
+   * of the same shape, the same response. `?source=` is the third parameter to
+   * read as absence, beside `?project_id=` and `?limit=`: it is what a form
+   * submits for a field left blank.
+   */
+  it("is the same answer, byte for byte, when the parameter is absent or empty", async () => {
+    const absent = await listTracesOverHttp(api.app, acme.secret, {
+      ...MIXED,
+      limit: 200,
+    });
+    const blank = await listTracesOverHttp(api.app, acme.secret, {
+      ...MIXED,
+      source: "",
+      limit: 200,
+    });
+
+    expect(absent.statusCode, absent.body).toBe(200);
+    expect(blank.statusCode, blank.body).toBe(200);
+    expect(blank.body).toBe(absent.body);
+  });
+
+  it("refuses a word that is neither, and names the two that are", async () => {
+    for (const asked of ["prod", "PRODUCTION", "both", "live", "0"]) {
+      const response = await listTracesOverHttp(api.app, acme.secret, {
+        ...MIXED,
+        source: asked,
+      });
+      expect(response.statusCode, asked).toBe(400);
+
+      const body = response.json() as { error: string; message: string };
+      expect(body.error, asked).toBe("invalid_request");
+      expect(body.message, asked).toContain("simulation");
+      expect(body.message, asked).toContain("production");
+      expect(body.message, asked).toContain(asked);
+    }
+  });
+
+  /** The window is the one thing no filter buys anybody out of. */
+  it("still requires a window, narrowed or not", async () => {
+    const response = await listTracesOverHttp(api.app, acme.secret, {
+      source: "production",
+    });
+    expect(response.statusCode).toBe(400);
+    expect((response.json() as { message: string }).message).toContain("no from");
+  });
+
+  /**
+   * A token minted under a filter pages **within** it.
+   *
+   * At page size one every boundary of this walk falls between a production
+   * exchange and a simulation, so a token that was a position in the unfiltered
+   * ordering would resume at the simulation and either repeat or skip. It is a
+   * position in the narrowed ordering because the predicate is inside the scan
+   * the grouping and the `having` are written over.
+   */
+  it("walks a filtered list with its own token, skipping none and repeating none", async () => {
+    for (const size of [1, 2]) {
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+
+      do {
+        const answered = await page(acme.secret, {
+          ...MIXED,
+          source: "production",
+          limit: size,
+          ...(cursor === undefined ? {} : { cursor }),
+        });
+        expect(answered.traces.length).toBeLessThanOrEqual(size);
+        for (const trace of answered.traces) {
+          expect(trace.source, `page size ${size} crossed into a simulation`).toBe(
+            "production",
+          );
+        }
+        seen.push(...answered.traces.map((trace) => trace.trace_id));
+        cursor = answered.next_cursor ?? undefined;
+        pages += 1;
+        expect(pages, "the walk did not terminate").toBeLessThan(20);
+      } while (cursor !== undefined);
+
+      expect(new Set(seen).size, `page size ${size} repeated a trace`).toBe(
+        seen.length,
+      );
+      expect(seen, `page size ${size} skipped a trace`).toEqual(
+        newestFirst(PRODUCTION_TRACES.map((trace) => trace.traceId)),
+      );
+    }
+  });
+
+  /**
+   * And tenancy holds under it, which is the property a filter is most likely
+   * to be written around: two organizations, one window, one word.
+   */
+  it("shows each organization only its own, whichever kind is asked for", async () => {
+    await ingest(
+      api.app,
+      globex.secret,
+      syntheticExport({
+        traceId: GLOBEX_TRACE,
+        startedAt: new Date("2026-10-01T09:30:00Z"),
+        humanSaid: "Globex, in the same window.",
+      }),
+    );
+
+    const theirs = await page(globex.secret, {
+      ...MIXED,
+      source: "production",
+      limit: 200,
+    });
+    expect(theirs.traces.map((trace) => trace.trace_id)).toEqual([GLOBEX_TRACE]);
+
+    const ours = await page(acme.secret, {
+      ...MIXED,
+      source: "production",
+      limit: 200,
+    });
+    expect(ours.traces.map((trace) => trace.trace_id)).toEqual(
+      newestFirst(PRODUCTION_TRACES.map((trace) => trace.traceId)),
+    );
+
+    // Acme's three simulations are in the same window and the same store, and
+    // asking for simulations from the other organization reaches none of them.
+    const none = await page(globex.secret, {
+      ...MIXED,
+      source: "simulation",
+      limit: 200,
+    });
+    expect(none.traces).toEqual([]);
   });
 });
 

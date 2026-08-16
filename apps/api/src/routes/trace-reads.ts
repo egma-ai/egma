@@ -9,6 +9,7 @@ import {
   readVerdicts,
   UnreadableTraceQueryError,
   type AssertionWords,
+  type SpanSource,
   type TimeWindow,
   type TraceDetail,
   type TraceFacts,
@@ -72,6 +73,7 @@ type Query = {
   readonly from?: string;
   readonly to?: string;
   readonly project_id?: string;
+  readonly source?: string;
   readonly limit?: string;
   readonly cursor?: string;
 };
@@ -164,6 +166,56 @@ function windowOf(query: Query): ParsedWindow {
   }
 
   return { from: opened, to: closed };
+}
+
+/**
+ * The two kinds of traffic one store holds, and the only two words this
+ * parameter takes.
+ *
+ * Written here rather than derived from a type, because it is what the refusal
+ * below reads out to whoever got it wrong.
+ */
+const TRAFFIC_SOURCES: readonly SpanSource[] = ["simulation", "production"];
+
+/**
+ * Which kind of traffic to read — **optional, and absent means both.**
+ *
+ * That is the whole of what makes this addition safe on a surface that is
+ * otherwise a one-way door: an integration written before the parameter existed
+ * sends nothing, and gets byte for byte the answer it always got. Nothing is
+ * defaulted here and nothing is echoed back, so there is no shape to change.
+ *
+ * A word that is not one of the two is **refused rather than ignored**. A
+ * misspelled filter that quietly read everything would answer a different
+ * question than the one asked and say nothing about having done so — the same
+ * rule the window is held to — and on this parameter the difference is a page
+ * of simulations under a heading that promised production. The refusal names
+ * both accepted words, because a caller who got it wrong is a caller who does
+ * not know what the right ones are.
+ *
+ * An **empty** parameter is a parameter nobody set, on the same terms as
+ * `?project_id=` and `?limit=`: it is what a form submits for a field left
+ * blank, and refusing it would refuse a request nobody meant anything by.
+ */
+type ParsedSource =
+  | { readonly source: SpanSource | undefined }
+  | { readonly refusal: string };
+
+function sourceOf(query: Query): ParsedSource {
+  const asked = given(query.source);
+  if (asked === undefined) return { source: undefined };
+
+  const known = TRAFFIC_SOURCES.find((one) => one === asked);
+  if (known === undefined) {
+    return {
+      refusal:
+        `source says which kind of traffic to read, and "${asked}" is not one ` +
+        `of them. It is ${TRAFFIC_SOURCES.join(" or ")} — a conversation Egma ` +
+        `conducted, or one your own agent had. Leave it out for both, which ` +
+        `is what this list answers when nobody narrows it.`,
+    };
+  }
+  return { source: known };
 }
 
 /**
@@ -342,7 +394,14 @@ export async function traceReadRoutes(
    * is what a form submits for a field left blank, and reading it as a name
    * would answer with the traces of a project that cannot exist; `?limit=` is
    * the same case, and `Number("")` is zero, which would be refused as a page
-   * size nobody could want. Both read as absence, which is what they mean.
+   * size nobody could want. `?source=` joins them. All three read as absence,
+   * which is what they mean.
+   *
+   * **`source` is the one filter this list has, and it is additive.** Absent, it
+   * is not consulted and the answer is what it has always been; present, it
+   * narrows to one kind of traffic. It rides every page of a walk, because a
+   * token is a position in an ordering and the ordering it was minted in is the
+   * narrowed one.
    */
   app.get(TRACES_LIST_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -354,6 +413,9 @@ export async function traceReadRoutes(
     const projectId = given(query.project_id);
     const project = projectRefusal(auth.projectId, projectId);
     if (project !== undefined) return invalid(reply, project);
+
+    const source = sourceOf(query);
+    if ("refusal" in source) return invalid(reply, source.refusal);
 
     const asked = given(query.limit);
     const limit = asked === undefined ? undefined : Number(asked);
@@ -368,6 +430,7 @@ export async function traceReadRoutes(
     const list = await listTraces(auth, {
       window,
       projectId,
+      source: source.source,
       limit,
       cursor: given(query.cursor),
     });

@@ -2,6 +2,7 @@ import type { AuthContext, PersonaTraits, Role } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
 
+import { SIMULATION_ID_ATTRIBUTE } from "../../src/otlp/normalise.ts";
 import { OTLP_TRACES_PATH } from "../../src/routes/traces.ts";
 import { cookiesFrom } from "./api.ts";
 import { capturedRequests, type CapturedRequest } from "./fixture.ts";
@@ -201,6 +202,18 @@ export type SyntheticTrace = {
   /** When the root span opened, as a `Date`. Turns follow it a second apart. */
   readonly startedAt: Date;
   readonly humanSaid?: string;
+  /**
+   * The simulation these spans are evidence of, for an export posted with the
+   * service token rather than with a customer's key.
+   *
+   * Absent is the customer path, where the door stamps `production` because a
+   * customer key cannot speak for a run. Present, the resource names the
+   * simulation and the door resolves the organization, the project, the run and
+   * the pins from egma's own row — which is what stamps `simulation`. The trace
+   * id has to be the one that simulation's id spells, because the door checks
+   * it: the two are the same 128 bits written twice.
+   */
+  readonly simulationId?: string;
 };
 
 /**
@@ -244,6 +257,14 @@ export function syntheticExport(trace: SyntheticTrace): string {
         resource: {
           attributes: [
             { key: "service.name", value: { stringValue: "synthetic-agent" } },
+            ...(trace.simulationId === undefined
+              ? []
+              : [
+                  {
+                    key: SIMULATION_ID_ATTRIBUTE,
+                    value: { stringValue: trace.simulationId },
+                  },
+                ]),
           ],
         },
         scopeSpans: [
@@ -362,6 +383,8 @@ export type ReadQuery = {
   readonly from?: string;
   readonly to?: string;
   readonly project_id?: string;
+  /** `simulation` or `production`, and a word that is neither, for the refusal. */
+  readonly source?: string;
   readonly limit?: string | number;
   readonly cursor?: string;
 };
