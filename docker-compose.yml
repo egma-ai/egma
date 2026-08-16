@@ -475,7 +475,10 @@ services:
       # what it has room for, so a big run degrades to a queue rather than
       # to overload — raise this, or start a second simulator, and they
       # distribute between themselves with nothing in front of them.
-      EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-4}
+      # Blank means the simulator's own default of two. Compose passes the
+      # variable through but does not restate that default, so a bare process
+      # and a container cannot silently acquire different limits again.
+      EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-}
       # **No provider setting reaches this container.** Which model the
       # persona thinks with, what it speaks and hears with, what tells it
       # the agent has stopped talking, which bridge places a call and which
@@ -709,7 +712,7 @@ services:
   # on somebody's firewall for a deployment that places a handful of calls, and
   # a range published to the internet is a range to justify. The default here
   # is 21 ports — about ten calls at once, two ports each — which is more than
-  # the simulator's default capacity of four can use. Widen it with the two
+  # the simulator's default capacity of two can use. Widen it with the two
   # variables below if you raise capacity, and widen your firewall by exactly
   # as much.
 

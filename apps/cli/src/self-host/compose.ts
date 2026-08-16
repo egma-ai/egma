@@ -4,8 +4,9 @@
  * The deployment is a compose file and always has been; this is not a second
  * way to run egma, it is the same `docker compose` a self-hoster would type,
  * with the arguments got right and the platform's own configuration already in
- * the environment. `egma self-host up` and `docker compose up -d --wait` bring
- * up the same containers.
+ * the environment. `egma self-host up` performs the same source-checkout
+ * sequence as `docker compose build` followed by
+ * `docker compose up -d --wait`.
  *
  * **Secrets go through the environment of the child process, never through its
  * arguments.** A command line is readable by every process on the machine and

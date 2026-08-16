@@ -367,9 +367,10 @@ default. Three are worth knowing about before anything else:
   voice and hears real words. Each leg is chosen on its own, and
   `EGMA_SIMULATOR_VAD_PROVIDER=silero` is the third: what hears a real
   agent start and stop speaking, keyless and bundled.
-- **`EGMA_SIMULATOR_CAPACITY` is how many conversations happen at once.** The
-  simulator claims only what it can hold, so a big run degrades into a queue
-  rather than into overload.
+- **`EGMA_SIMULATOR_CAPACITY` is how many simulations happen at once.** The
+  default is two. The simulator claims only what it can hold, so a big run
+  degrades into a queue rather than into overload. Compose passes this setting
+  through without keeping a second default of its own.
 
 Anything set to something it cannot use stops the container on its first line,
 naming the variable. A wrongly mounted volume is caught the same way, rather
@@ -491,7 +492,7 @@ you in under a minute. If yours does not latch, use LiveKit Cloud — same API, 
 one URL.
 
 The RTP range is 21 ports by default, not LiveKit's own 10000-20000: that is
-about ten calls at once, more than the simulator's default capacity of four can
+about ten calls at once, more than the simulator's default capacity of two can
 use, and a range published to the internet is a range to justify. Widen both
 ends together if you raise capacity, and widen your firewall by the same
 amount.

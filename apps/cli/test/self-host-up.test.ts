@@ -32,6 +32,8 @@ import {
 } from "./support/platform-workspace.ts";
 
 const WORKSPACE_PREFIX = "egma-platform-up-";
+const COMPOSE_BUILD = "ARGS compose build";
+const COMPOSE_UP = "ARGS compose up -d --wait --wait-timeout 300";
 
 describe("egma self-host up", () => {
   it("starts the platform, and the address it prints is the one the platform reports", async () => {
@@ -81,8 +83,12 @@ describe("egma self-host up", () => {
       ]);
 
       const calls = await workspace.dockerCalls();
-      // Everything, in one stack. No overlay named, nothing selected by hand.
-      expect(calls).toContain("ARGS compose up -d --wait --wait-timeout 300\n");
+      // Everything, in one stack. The local services are built from this
+      // checkout before they start, so a pull cannot restart an old image.
+      // Compose still uses its normal build cache and leaves published-image
+      // services alone.
+      expect(calls).toContain(`${COMPOSE_BUILD}\n`);
+      expect(calls).toContain(`${COMPOSE_UP}\n`);
       // And the address it printed is the address the containers were given.
       expect(calls).toContain(`EGMA_BASE_URL=${platform.url}`);
 
@@ -129,6 +135,7 @@ describe("egma self-host up", () => {
     await writeFile(
       workspace.dockerShim,
       `#!/bin/sh\necho "ARGS $@" >> "${workspace.callsFile}"\n` +
+        `if [ "$*" = "compose build" ]; then exit 0; fi\n` +
         `n=$(grep -c "^ARGS compose up" "${workspace.callsFile}")\n` +
         `if [ "$n" -le 1 ]; then exit 1; fi\nexit 0\n`,
     );
@@ -141,7 +148,8 @@ describe("egma self-host up", () => {
       expect(run.stdout).toContain("status: ready");
       expect(run.stderr).toContain("did not come up on the first try");
       const said = await workspace.dockerCalls();
-      expect(said.match(/^ARGS compose up/gmu)).toHaveLength(2);
+      expect(said.split("\n").filter((line) => line === COMPOSE_BUILD)).toHaveLength(1);
+      expect(said.split("\n").filter((line) => line === COMPOSE_UP)).toHaveLength(2);
     } finally {
       await platform.close();
     }
@@ -178,7 +186,35 @@ describe("egma self-host up", () => {
       expect(run.stderr).toContain("required variable EGMA_ENCRYPTION_KEY");
       expect(run.stderr).not.toContain("did not come up on the first try");
       const said = await workspace.dockerCalls();
-      expect(said.match(/^ARGS compose up/gmu)).toHaveLength(1);
+      expect(said.split("\n").filter((line) => line === COMPOSE_BUILD)).toHaveLength(1);
+      expect(said.split("\n").filter((line) => line === COMPOSE_UP)).toHaveLength(0);
+    } finally {
+      await platform.close();
+    }
+  });
+
+  it("reports a failed image build once, without calling it a store's first boot", async () => {
+    const platform = await startPlatform();
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
+    await writeFile(
+      workspace.dockerShim,
+      `#!/bin/sh\necho "ARGS $@" >> "${workspace.callsFile}"\n` +
+        "echo 'Dockerfile: build failed' >&2\n" +
+        "exit 1\n",
+    );
+    await chmod(workspace.dockerShim, 0o755);
+
+    try {
+      const run = await runSelfHost(workspace, ["up"], {
+        EGMA_BASE_URL: platform.url,
+      });
+
+      expect(run.code).not.toBe(0);
+      expect(run.stdout).toContain("could not build the platform images");
+      expect(run.stderr).not.toContain("store's first boot");
+      const said = await workspace.dockerCalls();
+      expect(said.split("\n").filter((line) => line === COMPOSE_BUILD)).toHaveLength(1);
+      expect(said.split("\n").filter((line) => line === COMPOSE_UP)).toHaveLength(0);
     } finally {
       await platform.close();
     }
