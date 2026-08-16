@@ -16,7 +16,6 @@ import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import {
-  Badge,
   ButtonLink,
   Choice,
   TextInput,
@@ -78,18 +77,11 @@ function columnsFor(projectId: string): readonly Column<ListedAgent>[] {
       cell: (agent) => agent.description ?? "—",
     },
     {
-      key: "state",
-      header: "State",
-      width: "110px",
-      cell: (agent) =>
-        agent.archived ? <Badge tone="warn">Archived</Badge> : <Badge>Active</Badge>,
-    },
-    {
-      key: "id",
-      header: "Identifier",
+      key: "updated",
+      header: "Last changed",
       mono: true,
-      width: "220px",
-      cell: (agent) => agent.id,
+      width: "120px",
+      cell: (agent) => asDay(agent.updated_at),
     },
     {
       key: "created",

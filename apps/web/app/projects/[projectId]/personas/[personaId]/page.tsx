@@ -420,7 +420,6 @@ function PersonaDetail({
 
         <Facts
           facts={[
-            { label: "Identifier", value: <code>{one.id}</code> },
             { label: "Current version", value: `v${one.version}` },
             { label: "Language", value: one.traits.language },
             {
@@ -539,9 +538,7 @@ function PersonaDetail({
             ) : (
               <ul className={styles.plainList}>
                 {usage.value.tests.map((test) => (
-                  <li key={test.id}>
-                    {test.name} <code>{test.id}</code>
-                  </li>
+                  <li key={test.id}>{test.name}</li>
                 ))}
               </ul>
             )

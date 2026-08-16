@@ -283,7 +283,6 @@ function AgentDetailView({
 
         <Facts
           facts={[
-            { label: "Identifier", value: <code>{agent.id}</code> },
             {
               label: "State",
               value: agent.archived ? (

@@ -317,7 +317,6 @@ function ConnectionDetail({
 
         <Facts
           facts={[
-            { label: "Identifier", value: <code>{one.id}</code> },
             { label: "Type", value: <code>{one.type}</code> },
             {
               label: "Shape",
