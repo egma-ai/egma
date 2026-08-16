@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
@@ -97,8 +97,17 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   const [saved, setSaved] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
 
+  /** The local draft captured by the write whose confirming read is next. */
+  const editVersion = useRef(0);
+  const confirmingSave = useRef<number | null>(null);
+
   useEffect(() => {
     if (settled === null) return;
+
+    const confirming = confirmingSave.current;
+    confirmingSave.current = null;
+    if (confirming !== null && editVersion.current !== confirming) return;
+
     setName(settled.name);
   }, [settled]);
 
@@ -117,6 +126,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
 
   async function save(): Promise<void> {
     if (!mayAdminister || !named || !changed || saving) return;
+    const submittedEditVersion = editVersion.current;
     setRefused(null);
     setSaved(false);
     setSaving(true);
@@ -135,7 +145,8 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
       setRefused(written.refusal);
       return;
     }
-    setSaved(true);
+    confirmingSave.current = submittedEditVersion;
+    setSaved(editVersion.current === submittedEditVersion);
     reload();
   }
 
@@ -196,6 +207,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                   disabled={!mayAdminister}
                   invalid={!named}
                   onChange={(next) => {
+                    editVersion.current += 1;
                     setName(next);
                     setSaved(false);
                   }}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { GRADERS_SECTION } from "../../../../../lib/graders.ts";
@@ -113,8 +113,25 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
 
+  /** The local draft captured by the write whose confirming read is next. */
+  const editVersion = useRef(0);
+  const confirmingSave = useRef<{
+    readonly projectId: string;
+    readonly editVersion: number;
+  } | null>(null);
+
   useEffect(() => {
     if (settled === null) return;
+
+    const confirming = confirmingSave.current;
+    confirmingSave.current = null;
+    if (
+      confirming?.projectId === projectId &&
+      editVersion.current !== confirming.editVersion
+    ) {
+      return;
+    }
+
     if (settled.state === "configured") {
       setProvider(settled.provider);
       setModel(settled.model);
@@ -124,7 +141,7 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
           : (settled.credential_id ?? ""),
       );
     }
-  }, [settled]);
+  }, [projectId, settled]);
 
   useEffect(() => {
     if (
@@ -179,6 +196,7 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
 
   async function saveChoice(): Promise<void> {
     if (!mayAdminister || !complete || !changed || saving) return;
+    const submittedEditVersion = editVersion.current;
     setRefused(null);
     setSaving(true);
 
@@ -197,6 +215,10 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
       setRefused(written.refusal);
       return;
     }
+    confirmingSave.current = {
+      projectId,
+      editVersion: submittedEditVersion,
+    };
     reloadJudge();
   }
 
@@ -301,7 +323,10 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
                   id="judge-model"
                   value={model}
                   disabled={!mayAdminister}
-                  onChange={setModel}
+                  onChange={(chosen) => {
+                    editVersion.current += 1;
+                    setModel(chosen);
+                  }}
                 />
               </Field>
 
@@ -336,6 +361,7 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
                       }))}
                       disabled={!mayAdminister}
                       onChange={(chosen) => {
+                        editVersion.current += 1;
                         setProvider(chosen);
                         // A credential of the old provider cannot answer for the
                         // new one, so the choice is cleared rather than left
@@ -396,7 +422,10 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
                             : []),
                         ]}
                         disabled={!mayAdminister}
-                        onChange={setSource}
+                        onChange={(chosen) => {
+                          editVersion.current += 1;
+                          setSource(chosen);
+                        }}
                       />
                     </Field>
                   )}

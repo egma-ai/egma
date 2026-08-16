@@ -848,6 +848,57 @@ describe("organization settings", () => {
     expect(savedButton.hasAttribute("disabled")).toBe(false);
   });
 
+  it("keeps a newer organization name typed while Save is confirming", async () => {
+    let finishSave!: (answer: StubbedResponse) => void;
+    let finishReload!: (answer: StubbedResponse) => void;
+    const saveAnswer = new Promise<StubbedResponse>((resolve) => {
+      finishSave = resolve;
+    });
+    const reloadAnswer = new Promise<StubbedResponse>((resolve) => {
+      finishReload = resolve;
+    });
+    const renamed = { ...ORGANIZATION, name: "Acme Voice" };
+
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/organization": [
+        { status: 200, body: ORGANIZATION },
+        saveAnswer,
+        reloadAnswer,
+      ],
+      "/api/judge-credentials": { status: 200, body: { items: [] } },
+    });
+    render(<OrganizationSettingsPage />);
+
+    const name = (await screen.findByDisplayValue("Acme")) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Acme Voice" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save organization" }));
+    expect(await screen.findByRole("button", { name: "Saving…" })).toBeTruthy();
+
+    fireEvent.change(name, { target: { value: "Acme Voice Labs" } });
+    await act(async () => {
+      finishSave({ status: 200, body: renamed });
+    });
+    await waitFor(() => {
+      expect(
+        sent.filter((request) => request.url === "/api/organization"),
+      ).toHaveLength(3);
+    });
+
+    await act(async () => {
+      finishReload({ status: 200, body: renamed });
+    });
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Acme Voice Labs",
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Save organization" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+    expect(screen.queryByText("Saved.")).toBeNull();
+  });
+
   it.each(["viewer", "member"] as const)(
     "leaves a %s the page, disabled, with the reason beside it",
     async (role) => {
@@ -1432,6 +1483,75 @@ describe("judge settings", () => {
       target: { value: "gpt-4.1" },
     });
     expect(save.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("keeps newer judge choices typed while Save is confirming", async () => {
+    let finishSave!: (answer: StubbedResponse) => void;
+    let finishReload!: (answer: StubbedResponse) => void;
+    const saveAnswer = new Promise<StubbedResponse>((resolve) => {
+      finishSave = resolve;
+    });
+    const reloadAnswer = new Promise<StubbedResponse>((resolve) => {
+      finishReload = resolve;
+    });
+    const configured = {
+      state: "configured",
+      project_id: "prj_1",
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      source: "credential",
+      credential_id: "jcr_1",
+      hint: "1234",
+      updated_at: "2026-08-01T10:00:00.000Z",
+    };
+    const saved = { ...configured, model: "gpt-4.1" };
+
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/judge": [
+        { status: 200, body: configured },
+        saveAnswer,
+        reloadAnswer,
+      ],
+      "/api/judge/registry": { status: 200, body: REGISTRY },
+      "/api/judge-credentials": {
+        status: 200,
+        body: { items: [CREDENTIAL] },
+      },
+    });
+    render(<JudgeSettingsPage />);
+
+    const model = (await screen.findByDisplayValue(
+      "gpt-4.1-mini",
+    )) as HTMLInputElement;
+    await within(screen.getByLabelText("Key")).findByRole("option", {
+      name: /Acme production/,
+    });
+    fireEvent.change(model, { target: { value: "gpt-4.1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save judge" }));
+    expect(await screen.findByRole("button", { name: "Saving…" })).toBeTruthy();
+
+    fireEvent.change(model, { target: { value: "gpt-4.1-nano" } });
+    await act(async () => {
+      finishSave({ status: 200, body: saved });
+    });
+    await waitFor(() => {
+      expect(
+        sent.filter((request) => request.url === "/api/judge?project=prj_1"),
+      ).toHaveLength(3);
+    });
+
+    await act(async () => {
+      finishReload({ status: 200, body: saved });
+    });
+    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe(
+      "gpt-4.1-nano",
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Save judge" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
   });
 
   it("sends the provider, the model and the credential, and no key at all", async () => {
