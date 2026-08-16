@@ -440,6 +440,8 @@ export function Checkbox({
   readonly label?: string;
   readonly onChange: (checked: boolean) => void;
 }) {
+  const describedBy = describedByHint();
+
   return (
     <label className={styles.checkboxTarget}>
       <input
@@ -449,6 +451,7 @@ export function Checkbox({
         checked={checked}
         disabled={disabled}
         aria-label={label}
+        aria-describedby={describedBy}
         onChange={(event) => onChange(event.target.checked)}
       />
     </label>

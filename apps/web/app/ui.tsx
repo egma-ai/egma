@@ -72,7 +72,7 @@ export function AuthShell({
   children: ReactNode;
 }) {
   return (
-    <main className={`${styles.authShell} ${animated ? styles.authAnimated : styles.authStatic}`}>
+    <main className={`${styles.authShell} ${animated ? "" : styles.authStatic}`}>
       <aside className={styles.authBrandPanel}>
         {animated ? <TrustGate /> : null}
         <div className={styles.authBrandOverlay}>

@@ -350,8 +350,8 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
         <Dialog
           title={
             confirming.action === "remove"
-              ? "Remove this person?"
-              : "Deactivate this person?"
+              ? `Remove ${confirming.member.email}?`
+              : `Deactivate ${confirming.member.email}?`
           }
           onClose={() => setConfirming(null)}
         >

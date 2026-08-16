@@ -602,7 +602,10 @@ function RunDetailView({
       </PageBody>
 
       {confirming === "cancel" ? (
-        <Dialog title="Cancel this run?" onClose={() => setConfirming(null)}>
+        <Dialog
+          title={`Cancel run “${read.label ?? read.id}”?`}
+          onClose={() => setConfirming(null)}
+        >
           {(dismiss) => (
             <>
               <p>
@@ -623,7 +626,10 @@ function RunDetailView({
       ) : null}
 
       {confirming === "retry" ? (
-        <Dialog title="Retry this run?" onClose={() => setConfirming(null)}>
+        <Dialog
+          title={`Retry run “${read.label ?? read.id}”?`}
+          onClose={() => setConfirming(null)}
+        >
           {(dismiss) => (
             <>
               <p>{RETRY_IS_NOT_A_REPLAY}</p>

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
-import { Button, ButtonLink, Checkbox } from "../ui/controls.tsx";
+import { Button, ButtonLink, Checkbox, Field } from "../ui/controls.tsx";
 import { DataTable, type Column } from "../ui/data-table.tsx";
 import { Dialog } from "../ui/dialog.tsx";
 import { Failure, NotFound } from "../ui/page-state.tsx";
@@ -264,6 +264,18 @@ describe("the organization and project selector", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("uses the pointer exit when a keyboard-opened panel is clicked away", () => {
+    const trigger = open();
+    const panel = screen.getByRole("dialog");
+
+    fireEvent.pointerDown(document.body);
+
+    expect(trigger.parentElement?.getAttribute("data-input")).toBe("pointer");
+    expect(trigger.parentElement?.getAttribute("data-closing")).toBe("true");
+    fireEvent.transitionEnd(panel, { propertyName: "opacity" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   /**
    * Home and End belong to the caret while somebody is typing in the search
    * field. Stealing them for the list means the ends of the text cannot be
@@ -348,6 +360,28 @@ describe("a binary choice", () => {
 
     fireEvent.click(checkbox);
     expect((checkbox as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("connects the field hint to the native checkbox", () => {
+    render(
+      <Field
+        label="Required"
+        htmlFor="required-grader"
+        hint="A required grader can stop the test from passing."
+      >
+        <Checkbox
+          id="required-grader"
+          checked
+          onChange={() => undefined}
+        />
+      </Field>,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Required" });
+    const hint = screen.getByText(
+      "A required grader can stop the test from passing.",
+    );
+    expect(checkbox.getAttribute("aria-describedby")).toBe(hint.id);
   });
 });
 

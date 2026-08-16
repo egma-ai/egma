@@ -610,7 +610,10 @@ function EvidenceView({
       </PageBody>
 
       {!confirming ? null : (
-        <Dialog title="Judge this simulation again?" onClose={() => setConfirming(false)}>
+        <Dialog
+          title={`Judge simulation “${read.id}” again?`}
+          onClose={() => setConfirming(false)}
+        >
           {(dismiss) => (
             <>
               <p>{REGRADE_IS_NOT_A_REPLAY}</p>

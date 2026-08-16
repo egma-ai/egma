@@ -380,7 +380,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
 
       {confirmingRevoke === null ? null : (
         <Dialog
-          title="Revoke this API key?"
+          title={`Revoke API key “${confirmingRevoke.name ?? confirmingRevoke.looks_like}”?`}
           onClose={() => setConfirmingRevoke(null)}
         >
           {(dismiss) => (

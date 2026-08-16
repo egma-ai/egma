@@ -38,6 +38,7 @@ import {
   TextArea,
   TextInput,
 } from "../../../../../ui/controls.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { RecentRuns } from "../../../../../ui/run-status.tsx";
@@ -130,6 +131,9 @@ function TestDetail({
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [reading, setReading] = useState<TestVersionRow | null>(null);
+  const [confirmingLifecycle, setConfirmingLifecycle] = useState<
+    "archive" | "restore" | null
+  >(null);
 
   /**
    * The draft, and everything else that means "for the test on screen".
@@ -155,6 +159,7 @@ function TestDetail({
     });
     setRefused(null);
     setReading(null);
+    setConfirmingLifecycle(null);
   }, [test, projectId]);
 
   useEffect(() => {
@@ -261,6 +266,7 @@ function TestDetail({
       },
       "POST",
     );
+    setConfirmingLifecycle(null);
     if (written !== null) reload();
   }
 
@@ -570,7 +576,9 @@ function TestDetail({
             <Button
               disabled={!mayAuthor || saving}
               why={whyNot}
-              onClick={() => void setArchived(!archived)}
+              onClick={() =>
+                setConfirmingLifecycle(archived ? "restore" : "archive")
+              }
             >
               {archived ? "Restore" : "Archive"}
             </Button>
@@ -583,6 +591,41 @@ function TestDetail({
           ) : null}
         </Section>
       </PageBody>
+
+      {confirmingLifecycle === null ? null : (
+        <Dialog
+          title={`${confirmingLifecycle === "archive" ? "Archive" : "Restore"} test “${test.name}”?`}
+          onClose={() => setConfirmingLifecycle(null)}
+        >
+          {(dismiss) => (
+            <>
+              <p>
+                {confirmingLifecycle === "archive"
+                  ? "This test leaves every new run. Its versions, links, and past run evidence stay available."
+                  : "This test returns to new runs. Egma will refuse the restore while its current version names an archived persona or grader."}
+              </p>
+              <Actions>
+                <Button onClick={dismiss}>Cancel</Button>
+                <Button
+                  weight="strong"
+                  disabled={saving}
+                  onClick={() =>
+                    void setArchived(confirmingLifecycle === "archive")
+                  }
+                >
+                  {saving
+                    ? confirmingLifecycle === "archive"
+                      ? "Archiving…"
+                      : "Restoring…"
+                    : confirmingLifecycle === "archive"
+                      ? "Archive test"
+                      : "Restore test"}
+                </Button>
+              </Actions>
+            </>
+          )}
+        </Dialog>
+      )}
     </ProductPage>
   );
 }

@@ -565,7 +565,11 @@ function ConfirmLifecycle({
 
   return (
     <Dialog
-      title={archiving ? "Archive this agent?" : "Restore this agent?"}
+      title={
+        archiving
+          ? `Archive agent “${agent.name}”?`
+          : `Restore agent “${agent.name}”?`
+      }
       onClose={onClose}
     >
       {(dismiss) => (

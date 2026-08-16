@@ -831,7 +831,7 @@ describe("one run's page", () => {
     // Wait for the dialog itself before reaching for its control: the header
     // carries a button of the same name, so taking "the last one" before the
     // dialog has rendered would press the header again and send nothing.
-    await screen.findByRole("dialog", { name: "Cancel this run?" });
+    await screen.findByRole("dialog", { name: "Cancel run “Nightly smoke”?" });
     fireEvent.click(
       (await screen.findAllByRole("button", { name: "Cancel run" })).at(-1)!,
     );
@@ -852,7 +852,9 @@ describe("one run's page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
     // The page carries the same sentence, so the one inside the confirmation is
     // asked for by the dialog it belongs to rather than by text alone.
-    const asking = await screen.findByRole("dialog", { name: "Retry this run?" });
+    const asking = await screen.findByRole("dialog", {
+      name: "Retry run “Nightly smoke”?",
+    });
     expect(asking.textContent).toContain(
       "not an exact replay of the original conditions",
     );

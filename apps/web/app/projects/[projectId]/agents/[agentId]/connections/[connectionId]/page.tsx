@@ -530,7 +530,10 @@ function ConnectionDetail({
       ) : null}
 
       {dialog === "archive" ? (
-        <Dialog title="Archive this connection?" onClose={() => setDialog(null)}>
+        <Dialog
+          title={`Archive connection “${one.name}”?`}
+          onClose={() => setDialog(null)}
+        >
           {(dismiss) => (
             <>
               <p>
@@ -759,7 +762,7 @@ function RotateCredential({
   }
 
   return (
-    <Dialog title="Rotate credential" onClose={onClose}>
+    <Dialog title={`Replace credential for “${connection.name}”?`} onClose={onClose}>
       {(dismiss) => (
         <Form onSubmit={() => void rotate()}>
           <Help>{variant.credential_help}</Help>
@@ -859,7 +862,7 @@ function RestoreConnection({
   }
 
   return (
-    <Dialog title="Restore this connection?" onClose={onClose}>
+    <Dialog title={`Restore connection “${connection.name}”?`} onClose={onClose}>
       {(dismiss) => (
         <Form onSubmit={() => void restore()}>
           <p>

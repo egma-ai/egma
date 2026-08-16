@@ -236,7 +236,7 @@ export default function TranscriptsPage() {
         {state.status === "loaded" ? (
           state.rows.length === 0 ? <Notice>{LIST.empty}</Notice> : (
             <DataTable
-              label="Production traces"
+              label="Production transcripts"
               columns={TRACE_COLUMNS}
               rows={state.rows}
               keyOf={(row) => row.trace_id}

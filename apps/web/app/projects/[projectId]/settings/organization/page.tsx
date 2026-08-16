@@ -597,7 +597,7 @@ function Credentials({
 
       {confirmingArchive === null ? null : (
         <Dialog
-          title="Archive this judge credential?"
+          title={`Archive judge credential “${confirmingArchive.label}”?`}
           onClose={() => setConfirmingArchive(null)}
         >
           {(dismiss) => (

@@ -735,6 +735,12 @@ describe("one test's page", () => {
     fireEvent.click(await screen.findByLabelText("Front desk"));
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
 
+    const dialog = await screen.findByRole("dialog", {
+      name: "Restore test “Reschedules a booked appointment”?",
+    });
+    expect(sentTo("/api/tests/tst_1/restore")).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore test" }));
+
     await waitFor(() => {
       expect(sentTo("/api/tests/tst_1/restore").length).toBeGreaterThan(0);
     });

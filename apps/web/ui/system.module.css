@@ -631,10 +631,6 @@
   text-decoration: none;
 }
 
-.menuItemHighlighted {
-  background: var(--surface-soft);
-}
-
 .menuItem:disabled {
   cursor: wait;
   opacity: 0.6;

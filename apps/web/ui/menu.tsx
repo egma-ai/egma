@@ -104,6 +104,9 @@ export function Menu({
       finishClose();
       return;
     }
+    // The way out can differ from the way in. A keyboard-opened panel that is
+    // later dismissed by a pointer must switch to the pointer exit selectors.
+    setInput("pointer");
     if (closingRef.current) return;
     closingRef.current = true;
     setClosing(true);

@@ -922,7 +922,7 @@ describe("organization settings", () => {
     fireEvent.click(within(keys).getByRole("button", { name: "Archive" }));
 
     const dialog = await screen.findByRole("dialog", {
-      name: "Archive this judge credential?",
+      name: "Archive judge credential “Acme production”?",
     });
     expect(dialog.textContent).toContain("Acme production");
     expect(
@@ -2023,7 +2023,7 @@ describe("API keys", () => {
     fireEvent.click(within(table).getByRole("button", { name: "Revoke" }));
 
     const dialog = await screen.findByRole("dialog", {
-      name: "Revoke this API key?",
+      name: "Revoke API key “My laptop”?",
     });
     expect(dialog.textContent).toContain("My laptop");
     expect(
