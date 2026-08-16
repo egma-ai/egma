@@ -58,8 +58,23 @@ export type AuthContext = {
  * different secrets — a connection's credentials open only to `simulator`, a
  * judge key only to `engine` — and a door that gated on one word for both
  * would hand each service the other's.
+ *
+ * `watch` is the third of them, for the two transports that carry somebody
+ * else's production traffic into egma — the poller beside the simulation sweep
+ * and the receiving endpoint a provider delivers to. `resolveRetellWatch`
+ * builds one per switched-on connection, from the connection's own tenancy and
+ * from nothing a delivery claimed. It is its own word for the same reason
+ * `simulator` is: this context files spans and grading bookkeeping, and it must
+ * not be able to open a judge key or a connection's credentials by wearing
+ * another service's name.
  */
-export const VIA = ["session", "api_key", "engine", "simulator"] as const;
+export const VIA = [
+  "session",
+  "api_key",
+  "engine",
+  "simulator",
+  "watch",
+] as const;
 export type Via = (typeof VIA)[number];
 
 /**

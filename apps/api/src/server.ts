@@ -27,6 +27,7 @@ import { passwordResetRoutes } from "./routes/password-reset.ts";
 import { platformRoutes } from "./routes/platform.ts";
 import { platformSettingsRoutes } from "./routes/platform-settings.ts";
 import { recordingRoutes } from "./routes/recordings.ts";
+import { retellWebhookRoutes } from "./routes/retell-webhook.ts";
 import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
@@ -37,6 +38,11 @@ import { traceReadRoutes } from "./routes/trace-reads.ts";
 import { traceRoutes } from "./routes/traces.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
+import {
+  startProductionSweep,
+  type ProductionSweep,
+} from "./production-sweep.ts";
+import type { RetellReach } from "./retell/api.ts";
 import { startOrphanSweep, type OrphanSweep } from "./simulation-sweep.ts";
 import type { Config } from "./config.ts";
 
@@ -74,6 +80,17 @@ export type ServerOptions = {
    * test hands in a shorter one rather than watching a real clock.
    */
   readonly orphanSweepIntervalMilliseconds?: number;
+  /**
+   * How often the standing production sweep polls watched connections.
+   * Defaults to the ~30s cadence; a test hands in a shorter one, or leaves the
+   * loop off entirely by driving `runProductionSweep` itself.
+   */
+  readonly productionSweepIntervalMilliseconds?: number;
+  /**
+   * Where Retell answers, for the poller and for webhook registration. Absent
+   * is Retell itself; a test stands a Retell-shaped server on loopback.
+   */
+  readonly retellReach?: RetellReach;
 };
 
 export type Api = {
@@ -242,7 +259,16 @@ export function buildApi(options: ServerOptions): Api {
   // The agent group: registering an agent with the first way of reaching it,
   // reading it back, and attaching another. Its own credentialed scope, like
   // every other group, so the rate limit and the context resolve once for it.
-  void app.register(agentRoutes, { provider: identity.provider, rateLimit });
+  void app.register(agentRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    // Switching production watching on registers a webhook at this origin,
+    // when it is one a provider could reach.
+    baseUrl: config.baseUrl,
+    ...(options.retellReach === undefined
+      ? {}
+      : { retellReach: options.retellReach }),
+  });
 
   void app.register(memberRoutes, {
     provider: identity.provider,
@@ -420,6 +446,15 @@ export function buildApi(options: ServerOptions): Api {
     rateLimit,
   });
 
+  // Where Retell delivers a conversation the moment it ends. Outside the
+  // credentialed scope on purpose and necessarily: a provider's delivery
+  // carries no egma credential, and working out whose conversation it is — by
+  // the agent it names and the key that signed it — is the whole job of the
+  // door. Registered without `fastify-plugin`, like the OTLP door, because it
+  // replaces its own body parser so the signature is checked against the bytes
+  // that were sent.
+  void app.register(retellWebhookRoutes);
+
   // Outside the credentialed scope on purpose: somebody following an
   // invitation has no membership, so there is no context to resolve them into
   // and no organization to key a budget on. The token is the credential there.
@@ -441,6 +476,9 @@ export function buildApi(options: ServerOptions): Api {
   // Its timer is unref'd, so a shutdown never waits on a sweep that has not
   // happened; every replica runs one, which the seam makes harmless.
   let orphanSweep: OrphanSweep | undefined;
+  // And the production sweep beside it, on the same terms: the pull floor that
+  // makes watching a Retell agent work on a laptop no webhook can reach.
+  let productionSweep: ProductionSweep | undefined;
   app.addHook("onReady", async () => {
     orphanSweep = startOrphanSweep({
       log: app.log,
@@ -448,11 +486,19 @@ export function buildApi(options: ServerOptions): Api {
         ? {}
         : { intervalMilliseconds: options.orphanSweepIntervalMilliseconds }),
     });
+    productionSweep = startProductionSweep({
+      log: app.log,
+      ...(options.productionSweepIntervalMilliseconds === undefined
+        ? {}
+        : { intervalMilliseconds: options.productionSweepIntervalMilliseconds }),
+      ...(options.retellReach === undefined ? {} : { reach: options.retellReach }),
+    });
   });
   app.addHook("onClose", async () => {
     // Awaited, so closing drains any tick in flight: whoever closes the app
     // and then the stores knows the sweep holds no connection to them.
     await orphanSweep?.stop();
+    await productionSweep?.stop();
   });
 
   return { app, identity };

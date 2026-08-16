@@ -115,6 +115,14 @@ export type Connection = {
   readonly credentialsHint: string | null;
   /** Measured by an adapter, never declared by a caller. Unknown until one has. */
   readonly capabilities: ConnectionCapabilities;
+  /**
+   * Whether egma watches this connection's production traffic. Off for every
+   * connection that was made before the switch existed, and off for every one
+   * made since: watching is something somebody turns on.
+   */
+  readonly watchProduction: boolean;
+  /** When egma registered its receiving endpoint with the provider, or null. */
+  readonly webhookRegisteredAt: Date | null;
   /** What an edit says it was written against. New after every change. */
   readonly revision: string;
   /** When it stopped being reachable for new work, or null while it is. */
@@ -133,6 +141,19 @@ export type Connection = {
 export type ConnectionChanges = {
   readonly name?: string | undefined;
   readonly environment?: string | null | undefined;
+  /**
+   * Start or stop watching this connection's production traffic.
+   *
+   * Absent means keep, like every other field here. Turning it **off** clears
+   * the registration stamp in the same statement, because a connection nobody
+   * is watching has no endpoint registered for it — and leaving the stamp
+   * behind would make a later switch-on think it had already registered.
+   *
+   * What it deliberately does not do is touch the cursor. Everything already
+   * stored stays stored, and a connection switched back on resumes from where
+   * it left off rather than replaying history.
+   */
+  readonly watchProduction?: boolean | undefined;
   readonly config?: Readonly<Record<string, unknown>> | undefined;
   readonly credentials?: Readonly<Record<string, unknown>> | undefined;
   /** The revision this edit was written against. See `AgentChanges`. */
@@ -254,6 +275,8 @@ const CONNECTION_COLUMNS = {
   capabilitiesSupported: connection.capabilitiesSupported,
   capabilitiesCheckedAt: connection.capabilitiesCheckedAt,
   capabilitySource: connection.capabilitySource,
+  watchProduction: connection.watchProduction,
+  webhookRegisteredAt: connection.webhookRegisteredAt,
   revision: connection.revision,
   archivedAt: connection.archivedAt,
   createdAt: connection.createdAt,
@@ -426,6 +449,8 @@ type ConnectionRow = {
   readonly capabilitiesSupported: unknown;
   readonly capabilitiesCheckedAt: Date | null;
   readonly capabilitySource: string | null;
+  readonly watchProduction: boolean;
+  readonly webhookRegisteredAt: Date | null;
   readonly revision: string;
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
@@ -1547,6 +1572,20 @@ export async function updateConnection(
   // The registry rules are the row's own type's — which cannot have changed
   // since the read above, because nothing can change it at all.
   const type = current.type as ConnectionType;
+
+  // Watching is a fact about a platform egma can ask for finished
+  // conversations, and today Retell is the one it can ask. A switch that
+  // stored `true` and polled nothing would be a setting somebody turned on
+  // and then waited on forever, so it is refused by name instead.
+  if (changes.watchProduction === true && type !== "retell") {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `Egma watches production traffic over a retell connection, and this ` +
+        `one is ${type}. A ${type} agent runs where Egma can be pointed at ` +
+        `it directly, so its production traces arrive through the telemetry ` +
+        `door rather than by Egma asking the platform for them.`,
+    );
+  }
   const config =
     changes.config === undefined
       ? undefined
@@ -1596,6 +1635,23 @@ export async function updateConnection(
         : {
             credentials: sealCredentials(sealed.sealed),
             credentialsHint: sealed.hint,
+          }),
+      ...(changes.watchProduction === undefined
+        ? {}
+        : {
+            watchProduction: changes.watchProduction,
+            // **Switching on starts the cursor at now**, and that is what makes
+            // watching mean *from here on*. A null cursor asks the provider for
+            // everything it holds, which is a backfill — a deliberate, deferred
+            // feature — rather than the thing somebody just switched on. A
+            // connection switched off and on again keeps the cursor it had, so
+            // it resumes rather than restarting.
+            ...(changes.watchProduction
+              ? {
+                  productionCursor: sql`coalesce(${connection.productionCursor}, now())`,
+                }
+              : // Switching off deregisters, so the stamp goes with it.
+                { webhookRegisteredAt: null }),
           }),
       // The target moved, so what anybody measured about it is no longer about
       // this connection.

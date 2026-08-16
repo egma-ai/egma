@@ -106,6 +106,13 @@ const WORK_DISPATCHING = [
   "resolveSimulationStanding",
   "sweepOrphanedSimulations",
   "watchGradingWork",
+  // Production watching's three, on the grading claim's own terms: a poller
+  // has no user, a provider's delivery has proved nothing, and each of these
+  // hands back the context narrowed to the connection's own tenancy — which is
+  // what every write that follows goes through.
+  "countRetellWebhookRefusal",
+  "resolveRetellWatch",
+  "sweepStaleProductionClaims",
 ];
 
 /**
@@ -272,6 +279,14 @@ const CONTEXT_REQUIRING = [
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
+  // The ledger that makes a Retell conversation land exactly once however it
+  // arrived: the claim a transport takes on an identity, and the mark that
+  // moves the connection's cursor once the spans are stored. Both take the
+  // context the watch resolver handed out.
+  "claimProductionTrace",
+  "finishProductionTrace",
+  "recordRetellWebhookDelivery",
+  "recordRetellWebhookRegistration",
   // The measurement door: it asks this connection's adapter what its target
   // can do and writes down what came back. Its own verb rather than a flag on
   // an edit, because a measurement is not an authored change and must not be
