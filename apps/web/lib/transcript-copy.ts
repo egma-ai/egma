@@ -23,29 +23,24 @@
 export const LIST = {
   navigation: "Transcripts",
   title: "Transcripts",
-  lead: "What your agents did, newest first.",
+  lead: "What agents across your organization did, newest first.",
   loading: "Loading…",
   signedOut: "Sign in first",
-  signedOutLead: "This page is about your project.",
+  signedOutLead: "This page shows production telemetry across your organization.",
   signIn: "Sign in",
   setUp: "Set up egma",
   back: "Back",
   unreachable: "egma could not be reached. Is the API running?",
   /**
-   * The third sentence is the one that saves an afternoon.
-   *
-   * A browser always acts inside one project, and this page shows that
-   * project. A key minted for a whole organization names none, so what it
-   * exports files outside every project and cannot be reached from here — an
-   * empty list that looks exactly like an exporter that was never pointed at
-   * egma at all. The only place somebody meets that is here, so it is said
-   * here rather than only in the README.
+   * The scope is said here because the address names no project. This browser
+   * read is organization-wide, so telemetry written with either a project key
+   * or an organization key can appear. Claiming otherwise would make a correct
+   * exporter look broken and would contradict the request this page sends.
    */
   empty:
-    "Nothing was recorded in this window. Point an agent's OpenTelemetry " +
-    "export at egma, or widen the window above. The key that export uses has " +
-    "to name this project — a key minted for the whole organization files " +
-    "its telemetry outside every project, and none of it appears here.",
+    "Nothing was recorded across this organization in this window. Point an " +
+    "agent's OpenTelemetry export at egma, or widen the window above. " +
+    "Telemetry written with a project key or an organization key appears here.",
   window: "Window",
   showMore: "Show more",
   loadingMore: "Loading…",

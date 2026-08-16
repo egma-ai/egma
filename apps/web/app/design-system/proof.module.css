@@ -1,0 +1,210 @@
+.canvas {
+  color: var(--foreground);
+}
+
+.hero {
+  width: min(760px, 100%);
+  margin: 0 0 48px;
+}
+
+.hero h1,
+.sectionHead h2 {
+  margin: 0;
+  font-weight: 400;
+  letter-spacing: -0.04em;
+}
+
+.hero h1 {
+  max-width: 12ch;
+  font-size: clamp(44px, 7vw, 82px);
+  line-height: 0.95;
+}
+
+.hero > p:last-child {
+  max-width: 60ch;
+  margin: 24px 0 0;
+  color: var(--muted);
+}
+
+.eyebrow,
+.kicker {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  width: 100%;
+}
+
+.panel {
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.wide { grid-column: 1 / -1; }
+
+.actions,
+.badges,
+.dialogActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.actions,
+.badges { margin-top: 24px; }
+
+.checkboxRow,
+.reducedActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.checkboxRow {
+  min-height: var(--tap-target);
+  color: var(--foreground);
+  font-size: var(--text-caption);
+}
+
+.tooltipTrigger {
+  min-height: var(--control-lg);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-caption);
+  transition: transform var(--duration-press) var(--ease-out);
+}
+
+.tooltipTrigger:active:not(:focus-visible) {
+  transform: scale(0.97);
+}
+
+.meta,
+.dialogCopy {
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.meta { margin: 20px 0 12px; }
+
+.sectionHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.sectionHead h2 { font-size: 32px; }
+
+.states {
+  display: grid;
+  gap: 16px;
+}
+
+.previewGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.preview {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+}
+
+.previewHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  color: var(--foreground);
+  font-size: var(--text-caption);
+}
+
+.previewHead strong {
+  font-weight: 500;
+}
+
+.previewHead span {
+  color: var(--muted);
+}
+
+/* A fixed component frame makes narrow wrapping visible on a wide monitor. */
+.narrowFrame {
+  width: min(360px, 100%);
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+/* Match reduced motion: no spatial press, with brief useful color feedback. */
+.reducedFrame button {
+  transition:
+    background-color var(--duration-hover) linear,
+    border-color var(--duration-hover) linear,
+    color var(--duration-hover) linear;
+}
+
+.reducedFrame button:active:not(:focus-visible):not(:disabled) {
+  transform: none;
+}
+
+.reducedActions {
+  min-height: 120px;
+  justify-content: center;
+  padding: 24px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.dialogCopy { margin: 0 0 24px; }
+.dialogActions { justify-content: flex-end; }
+
+@media (max-width: 760px) {
+  .hero { margin-bottom: 32px; }
+  .grid { grid-template-columns: 1fr; gap: 16px; }
+  .wide { grid-column: auto; }
+  .panel { padding: 20px 16px; }
+  .sectionHead { align-items: stretch; flex-direction: column; }
+  .previewGrid { grid-template-columns: 1fr; gap: 16px; }
+  .previewHead { align-items: flex-start; flex-direction: column; gap: 4px; }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tooltipTrigger:hover {
+    border-color: var(--foreground);
+    background: var(--surface-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tooltipTrigger {
+    transition: none;
+  }
+
+  .tooltipTrigger:active:not(:focus-visible) {
+    transform: none;
+  }
+}

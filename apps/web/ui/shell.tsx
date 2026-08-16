@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -13,8 +12,12 @@ import {
 
 import { readJson } from "../lib/api.ts";
 import { organizationOf, roleOf, type Me, type Project } from "../lib/me.ts";
-import { activeSectionIn, navigationFor } from "../lib/navigation.ts";
-import { projectIdIn, projectLanding } from "../lib/project-context.ts";
+import {
+  activeSectionIn,
+  navigationFor,
+  type SectionId,
+} from "../lib/navigation.ts";
+import { projectIdIn } from "../lib/project-context.ts";
 import { canAuthor, VIEW_ONLY, type Role } from "../lib/roles.ts";
 import { Badge } from "./controls.tsx";
 import { Dialog } from "./dialog.tsx";
@@ -43,8 +46,6 @@ import { useTheme } from "./theme.tsx";
  * so that it has something to say. That fallback is the expand half of the
  * project-context change and it goes away with the last unconverted page.
  */
-
-const BRAND_MARK = "/brand/egma-logo.png";
 
 export type Session = {
   readonly me: Me | null;
@@ -97,9 +98,36 @@ export function useShellSession(): Session {
   return useContext(SessionContext);
 }
 
-function Mark() {
+const NAVIGATION_ICON_PATHS: Record<SectionId, readonly string[]> = {
+  agents: [
+    "M10 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+    "M4.5 16.5c.55-3 2.4-4.5 5.5-4.5s4.95 1.5 5.5 4.5",
+  ],
+  tests: ["M5 3.5h10v13H5z", "M7.5 7h5", "M7.5 10h5", "M7.5 13h3"],
+  runs: ["m6.5 4.5 8 5.5-8 5.5z"],
+  personas: [
+    "M7.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
+    "M3.5 16c.45-2.75 1.8-4.1 4-4.1 2.15 0 3.55 1.35 4 4.1",
+    "M13 5.1a2.2 2.2 0 0 1 0 4.2",
+    "M13.5 11.8c1.75.2 2.75 1.6 3 4.2",
+  ],
+  graders: [
+    "m10 3 2.05 4.15 4.58.67-3.32 3.22.78 4.55L10 12.9l-4.1 2.15.78-4.55-3.32-3.22 4.58-.67z",
+  ],
+  settings: ["M4 5h12", "M4 10h12", "M4 15h12", "M7 3v4", "M13 8v4", "M8.5 13v4"],
+};
+
+/** Small line symbols make the stable product areas easier to scan. */
+function NavigationIcon({ section }: { readonly section: SectionId }) {
   return (
-    <Image className={styles.mark} src={BRAND_MARK} alt="egma" width={146} height={31} priority />
+    <svg
+      className={styles.navIcon}
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 20 20"
+    >
+      {NAVIGATION_ICON_PATHS[section].map((path) => <path d={path} key={path} />)}
+    </svg>
   );
 }
 
@@ -126,6 +154,7 @@ function Navigation({
           aria-current={active === link.id ? "page" : undefined}
           onClick={onNavigate}
         >
+          <NavigationIcon section={link.id} />
           {link.label}
         </Link>
       ))}
@@ -290,11 +319,13 @@ export function AppShell({
    * grader screens were the last pages it was standing in for, and they are
    * under `/projects/:projectId/graders` now.
    *
-   * One page still names no project on purpose — `/new-project`, which is where
-   * an organization holding none has to be able to go — and it draws no product
-   * navigation, which is the honest answer for an address that is inside no
-   * project. The selector stays on screen throughout, so the way into one is
-   * never lost.
+   * Two surfaces still name no project on purpose. `/new-project` must exist
+   * outside one so an empty organization can reach it. The production trace
+   * reader at `/traces` still uses the older organization-wide read contract.
+   * Neither draws project navigation or a mobile navigation button, because an
+   * address that names no project cannot honestly say which project's links it
+   * is opening. The selector stays visible, so choosing one remains the way
+   * into the project product.
    */
   const shown = projectIdIn(pathname);
   /**
@@ -320,11 +351,6 @@ export function AppShell({
     <SessionContext.Provider value={session}>
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
-        <div className={styles.sidebarHead}>
-          <Link href={shown === null ? "/" : projectLanding(shown)} aria-label="egma">
-            <Mark />
-          </Link>
-        </div>
         {selector(false)}
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
         <div className={styles.sidebarFoot}>
@@ -343,15 +369,17 @@ export function AppShell({
 
       <div className={styles.body}>
         <header className={styles.topbar}>
-          <button
-            className={styles.iconButton}
-            type="button"
-            aria-label="Open product navigation"
-            aria-expanded={drawer}
-            onClick={() => setDrawer(true)}
-          >
-            <span aria-hidden="true">☰</span>
-          </button>
+          {shown === null ? null : (
+            <button
+              className={styles.iconButton}
+              type="button"
+              aria-label="Open product navigation"
+              aria-expanded={drawer}
+              onClick={() => setDrawer(true)}
+            >
+              <span aria-hidden="true">☰</span>
+            </button>
+          )}
           {selector(true)}
           <span className={styles.topbarSpacer} />
           {role !== null && !canAuthor(role) ? <Badge>{VIEW_ONLY}</Badge> : null}
@@ -365,7 +393,7 @@ export function AppShell({
         </header>
 
         {drawer && shown !== null ? (
-          <Dialog title="Navigation" onClose={() => setDrawer(false)}>
+          <Dialog kind="drawer" title="Navigation" onClose={() => setDrawer(false)}>
             <Navigation
               projectId={shown}
               pathname={pathname}

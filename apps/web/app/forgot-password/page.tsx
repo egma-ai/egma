@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { returnPathIn, withReturnTo } from "../../lib/return-to.ts";
-import { AuthShell, Field, Notice, StatePage, styles } from "../ui.tsx";
+import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
+import { AuthShell, Notice, StatePage, styles } from "../ui.tsx";
 
 /**
  * Asking for a way back in.
@@ -35,8 +36,7 @@ export default function ForgotPasswordPage() {
     setReturnTo(returnPathIn(window.location.search));
   }, []);
 
-  async function submit(event: React.FormEvent): Promise<void> {
-    event.preventDefault();
+  async function submit(): Promise<void> {
     setProblem(null);
     setSubmitting(true);
     try {
@@ -90,26 +90,25 @@ export default function ForgotPasswordPage() {
       title="Set a new password."
       lead="Name the address you signed up with, and egma sends a link to set a new one."
     >
-      <form className={styles.form} onSubmit={submit}>
+      <Form onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
         <Field label="Email" htmlFor="email">
-          <input
-            className={styles.input}
+          <TextInput
             id="email"
             name="email"
             type="email"
             autoComplete="email"
             required
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={setEmail}
           />
         </Field>
 
-        <button className={styles.button} type="submit" disabled={submitting}>
+        <Button weight="strong" type="submit" disabled={submitting}>
           {submitting ? "Sending…" : "Send the link"}
-        </button>
-      </form>
+        </Button>
+      </Form>
 
       <p className={styles.linkLine}>
         Remembered it?{" "}

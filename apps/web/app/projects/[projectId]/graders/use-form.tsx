@@ -15,6 +15,7 @@ import {
 import { USE } from "../../../../lib/grader-library-copy.ts";
 import {
   Button,
+  Checkbox,
   Field,
   Form,
   FormActions,
@@ -226,11 +227,10 @@ export function UseForm({
         hint={required ? USE.requiredOn : USE.requiredOff}
         htmlFor="use-required"
       >
-        <input
+        <Checkbox
           id="use-required"
-          type="checkbox"
           checked={required}
-          onChange={(event) => setRequired(event.target.checked)}
+          onChange={setRequired}
         />
       </Field>
 

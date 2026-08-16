@@ -125,6 +125,9 @@ export function Transcript({ transcript, highlighted = [] }: TranscriptProps) {
                 {failed ? (
                   <span className={styles.wrong}>something failed inside</span>
                 ) : null}
+                {marked.has(at + 1) ? (
+                  <span className={styles.citationMark}>cited by a verdict</span>
+                ) : null}
               </p>
             </div>
           </div>
@@ -449,7 +452,11 @@ export function VerdictEvidence({
   const cited = citedTurnPositions(speaking.cited_turns, turns);
 
   return (
-    <article className={styles.verdict} data-assertion={judged.assertion}>
+    <article
+      className={styles.verdict}
+      data-assertion={judged.assertion}
+      data-verdict={speaking.verdict ?? "pending"}
+    >
       <header className={styles.verdictHead}>
         <span className={styles.verdictWhat}>
           {/*

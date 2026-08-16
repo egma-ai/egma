@@ -1,86 +1,165 @@
 /*
- * The product shell's measurements, in one place.
+ * Egma's product design foundation.
  *
- * Density, spacing, type, colour, borders and control sizes are tokens rather
- * than numbers typed into each component, because the whole visual direction of
- * this product is going to be tuned by hand once every page exists. When that
- * happens it has to be an edit to this file and not an edit to fourteen pages —
- * which is the same reason the components below it are shared at all.
- *
- * The palette lives in `app/globals.css` beside the light and dark switch and
- * is not repeated here. The preserved Mistral reference stays outside the live
- * bundle until the proof-surface ticket maps it into semantic product states.
- *
- * Compactness is the direction and it is measurable: a sidebar narrow enough to
- * leave the screen to the data, rows that are one line of reading rather than
- * cards, and controls that sit in a toolbar without becoming the toolbar.
+ * The palette, spacing, type, shape, depth, and motion values come from the
+ * accepted direction in DESIGN.md. Route and component styles use semantic
+ * aliases so a visual decision stays here instead of drifting between pages.
  */
 
 :root {
-  /* Spacing. A four-pixel grid, named by step rather than by pixel so that
-     retuning the scale does not rename every use of it. */
+  /* Locked Mistral-inspired palette. */
+  --color-parchment: #fffaeb;
+  --color-paper: #ffffff;
+  --color-midnight: #1f1f1f;
+  --color-carbon: #000000;
+  --color-graphite: #3c3c3c;
+  --color-ember: #fa520f;
+  --color-butter: #fff0c2;
+  --color-honeycomb: #ecdaa2;
+
+  /* Semantic product colors and compatibility aliases. */
+  --background: var(--color-parchment);
+  --surface: var(--color-paper);
+  --surface-soft: var(--color-butter);
+  --foreground: var(--color-midnight);
+  --muted: var(--color-graphite);
+  --faint: color-mix(in srgb, var(--color-graphite) 72%, var(--color-parchment));
+  --border: var(--color-honeycomb);
+  --border-strong: var(--color-midnight);
+  --focus: var(--color-ember);
+  --accent: var(--color-ember);
+  --inverse: var(--color-carbon);
+  --inverse-text: var(--color-paper);
+
+  /*
+   * Product verdicts still need separate status colors during migration.
+   * These old aliases are temporary and must not gain new meanings.
+   */
+  --good: #28775a;
+  --warn: #9a691c;
+  --bad: #b44444;
+
+  /* Four-pixel spacing grid. */
   --space-1: 4px;
-  --space-2: 6px;
-  --space-3: 8px;
-  --space-4: 12px;
-  --space-5: 16px;
-  --space-6: 20px;
-  --space-7: 28px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
   --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+  --space-11: 72px;
+  --space-12: 80px;
+  --space-13: 100px;
 
-  /* Corners. */
-  --radius-sm: 5px;
-  --radius-md: 7px;
-  --radius-lg: 10px;
-  --radius-pill: 999px;
+  /* Provisional component shape, pending direct console evidence. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
 
-  /* Type. Product text is small and dense; the largest step here is a page
-     title, which is a label rather than a headline. */
-  --text-2xs: 10px;
-  --text-xs: 11px;
-  --text-sm: 12px;
-  --text-md: 13px;
-  --text-lg: 15px;
-  --text-xl: 20px;
-  --line-tight: 1.25;
-  --line-normal: 1.45;
+  /* Accepted type scale. Arial remains the licensed fallback. */
+  --text-caption: 14px;
+  --text-body: 16px;
+  --text-lead: 24px;
+  --text-subheading: 32px;
+  --text-heading-sm: 38px;
+  --text-heading: 48px;
+  --text-heading-lg: 56px;
+  --text-display: 82px;
+  --line-caption: 1.43;
+  --line-body: 1.5;
+  --line-lead: 1.33;
+  --line-heading: 1;
+  --tracking-caption: -0.35px;
+  --tracking-body: -0.4px;
+  --tracking-lead: -0.6px;
+  --tracking-subheading: -0.8px;
+  --tracking-heading-sm: -0.95px;
+  --tracking-heading: -1.2px;
+  --tracking-heading-lg: -1.4px;
+  --tracking-display: -2.05px;
+
+  /* Older component names remain valid while their CSS migrates. */
+  --text-2xs: var(--text-caption);
+  --text-xs: var(--text-caption);
+  --text-sm: var(--text-caption);
+  --text-md: var(--text-body);
+  --text-lg: var(--text-lead);
+  --text-xl: var(--text-subheading);
+  --line-tight: var(--line-heading);
+  --line-normal: var(--line-body);
   --tracking-label: 0.08em;
 
-  /* Controls. Three heights and no more: a chip, the ordinary control, and the
-     one that carries a page's main action. */
-  --control-sm: 24px;
-  --control-md: 28px;
-  --control-lg: 32px;
-  /* A pointer target is larger than a dense visual control on a touch screen. */
+  /* Dense controls keep a separate visual size from touch targets. */
+  --control-sm: 32px;
+  --control-md: 36px;
+  --control-lg: 44px;
+  --control-height: var(--control-lg);
   --tap-target: 44px;
 
-  /* Motion. Press feedback is brief and uses a responsive ease-out curve. */
+  /* Provisional motion baseline from the Emil design rules. */
   --duration-press: 120ms;
+  --duration-hover: 140ms;
+  --duration-popover-in: 180ms;
+  --duration-popover-out: 140ms;
+  --duration-dialog-in: 240ms;
+  --duration-dialog-out: 180ms;
+  --duration-drawer-in: 280ms;
+  --duration-drawer-out: 220ms;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 
-  /* List and table density. A row is a line of reading. */
-  --row-height: 36px;
+  /* A list row is one line of reading. */
+  --row-height: 40px;
   --row-padding-y: var(--space-2);
   --row-padding-x: var(--space-4);
 
-  /* The shell itself. */
-  --sidebar-width: 208px;
-  --topbar-height: 44px;
+  /* Product shell measurements. */
+  --sidebar-width: 224px;
+  --topbar-height: 48px;
   --page-gutter: var(--space-6);
-  --page-max: 1280px;
-  /* Pages whose subject is wide by nature: a transcript beside its timing. */
+  --page-max: 1200px;
   --page-max-wide: 1440px;
 
-  /* Depth, for the two things that float: a menu and a dialog. */
-  --shadow-menu: 0 10px 30px rgb(0 0 0 / 0.14);
-  --shadow-dialog: 0 24px 60px rgb(0 0 0 / 0.22);
+  /* Warm elevation is reserved for menus, dialogs, and showcase panels. */
+  --shadow-menu: 0 12px 32px rgb(127 99 21 / 0.14);
+  --shadow-dialog:
+    rgb(127 99 21 / 0.12) -8px 16px 39px 0,
+    rgb(127 99 21 / 0.1) -33px 64px 72px 0;
+  --shadow-showcase:
+    rgb(127 99 21 / 0.12) -8px 16px 39px 0,
+    rgb(127 99 21 / 0.1) -33px 64px 72px 0,
+    rgb(127 99 21 / 0.06) -73px 144px 97px 0,
+    rgb(127 99 21 / 0.02) -130px 256px 115px 0;
 }
 
 /*
- * Where the compact shell stops being two columns is NOT here, and cannot be.
- * A media query is evaluated before custom properties exist, so `@media
- * (max-width: var(--x))` is not a thing any browser does — a token for it would
- * be a dial connected to nothing, and somebody would turn it and lose an
- * afternoon. There is exactly one `@media` in `system.module.css`, and that one
- * line is the breakpoint.
+ * The current dark theme stays available as a compatibility layer. DESIGN.md
+ * keeps its redesign provisional until direct console evidence exists.
+ */
+:root[data-theme="dark"] {
+  --background: #151514;
+  --surface: #1b1b1a;
+  --surface-soft: #222220;
+  --foreground: #f2f2ed;
+  --muted: #a3a39b;
+  --faint: #82827b;
+  --border: #30302d;
+  --border-strong: #4a4a44;
+  --focus: #8da0ff;
+  --accent: var(--focus);
+  --inverse: #f4f4ef;
+  --inverse-text: #1a1a18;
+  --good: #55bd8c;
+  --warn: #d69a38;
+  --bad: #e27373;
+}
+
+/*
+ * The responsive shell breakpoint stays in system.module.css. Custom
+ * properties cannot be used in media-query conditions.
  */

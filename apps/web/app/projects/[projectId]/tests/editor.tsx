@@ -9,7 +9,7 @@ import {
   type Named,
   type TestVersionRow,
 } from "../../../../lib/tests.ts";
-import { Badge, Button, TextArea } from "../../../../ui/controls.tsx";
+import { Badge, Button, Checkbox, TextArea } from "../../../../ui/controls.tsx";
 import styles from "./editor.module.css";
 
 /**
@@ -229,27 +229,28 @@ export function Choices({
       {options.map((option) => {
         const on = chosen.includes(option.value);
         return (
-          <label
+          <div
             className={`${styles.choice} ${on ? styles.choiceOn : ""}`}
             key={option.value}
-            htmlFor={`${field}-${option.value}`}
           >
-            <input
+            <Checkbox
               id={`${field}-${option.value}`}
-              type="checkbox"
               checked={on}
               // An archived option can be taken off and never newly put on,
               // which is the same rule the platform holds a link edit to.
               disabled={disabled || (option.unavailable === true && !on)}
-              onChange={() =>
+              onChange={(checked) =>
                 onChange(
-                  on
-                    ? chosen.filter((held) => held !== option.value)
-                    : [...chosen, option.value],
+                  checked
+                    ? [...chosen, option.value]
+                    : chosen.filter((held) => held !== option.value),
                 )
               }
             />
-            <span>
+            <label
+              className={styles.choiceLabel}
+              htmlFor={`${field}-${option.value}`}
+            >
               <span className={option.unavailable === true ? styles.gone : ""}>
                 {option.label}
               </span>
@@ -262,8 +263,8 @@ export function Choices({
               {option.note === undefined ? null : (
                 <span className={styles.choiceNote}>{option.note}</span>
               )}
-            </span>
-          </label>
+            </label>
+          </div>
         );
       })}
     </fieldset>

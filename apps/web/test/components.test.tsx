@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
-import { ButtonLink } from "../ui/controls.tsx";
+import { Button, ButtonLink, Checkbox } from "../ui/controls.tsx";
 import { DataTable, type Column } from "../ui/data-table.tsx";
 import { Dialog } from "../ui/dialog.tsx";
 import { Failure, NotFound } from "../ui/page-state.tsx";
@@ -243,6 +243,27 @@ describe("the organization and project selector", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it("keeps a pointer-dismissed panel present through its short exit", () => {
+    render(
+      <ProjectSelector
+        organization={ACME}
+        projects={PROJECTS}
+        projectId="prj_1"
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: /^Organization Acme/ });
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    const panel = screen.getByRole("dialog");
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.getByRole("dialog")).toBe(panel);
+    expect(trigger.parentElement?.getAttribute("data-closing")).toBe("true");
+    fireEvent.transitionEnd(panel, { propertyName: "opacity" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   /**
    * Home and End belong to the caret while somebody is typing in the search
    * field. Stealing them for the list means the ends of the text cannot be
@@ -304,6 +325,29 @@ describe("a control somebody may not use", () => {
     expect((control as HTMLButtonElement).disabled).toBe(true);
     expect(control.getAttribute("href")).toBeNull();
     expect(control.getAttribute("title")).toBe("Your viewer role cannot.");
+  });
+});
+
+describe("a binary choice", () => {
+  it("keeps native checkbox behavior and an accessible name", () => {
+    function Example() {
+      const [checked, setChecked] = useState(false);
+      return (
+        <Checkbox
+          id="include-archived"
+          checked={checked}
+          label="Include archived agents"
+          onChange={setChecked}
+        />
+      );
+    }
+
+    render(<Example />);
+    const checkbox = screen.getByRole("checkbox", { name: "Include archived agents" });
+    expect((checkbox as HTMLInputElement).checked).toBe(false);
+
+    fireEvent.click(checkbox);
+    expect((checkbox as HTMLInputElement).checked).toBe(true);
   });
 });
 
@@ -426,11 +470,109 @@ describe("a dialog", () => {
 
     render(<Example />);
     const opener = screen.getByRole("button", { name: "Open navigation" });
+    const matches = vi.spyOn(opener, "matches").mockImplementation(
+      (selector) => selector === ":focus-visible",
+    );
     opener.focus();
     fireEvent.click(opener);
+    const dialog = screen.getByRole("dialog", { name: "Navigation" });
+    expect(dialog.getAttribute("data-input")).toBe("keyboard");
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     expect(document.activeElement).toBe(opener);
+    matches.mockRestore();
+  });
+
+  it("keeps a pointer-dismissed dialog present through its short exit", () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog title="Archive agent?" onClose={onClose}>
+        <button type="button">Confirm archive</button>
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Archive agent?" });
+    fireEvent.pointerDown(dialog);
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(dialog.getAttribute("data-closing")).toBe("true");
+    fireEvent.transitionEnd(dialog.firstElementChild as HTMLElement, {
+      propertyName: "opacity",
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the pointer exit after a dialog was opened with the keyboard", () => {
+    function Example() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open archive</button>
+          {open ? (
+            <Dialog title="Archive agent?" onClose={() => setOpen(false)}>
+              <p>Archive it.</p>
+            </Dialog>
+          ) : null}
+        </>
+      );
+    }
+
+    render(<Example />);
+    const opener = screen.getByRole("button", { name: "Open archive" });
+    const matches = vi.spyOn(opener, "matches").mockImplementation(
+      (selector) => selector === ":focus-visible",
+    );
+    opener.focus();
+    fireEvent.click(opener);
+
+    const dialog = screen.getByRole("dialog", { name: "Archive agent?" });
+    expect(dialog.getAttribute("data-input")).toBe("keyboard");
+    const close = screen.getByRole("button", { name: "Close" });
+    fireEvent.pointerDown(close);
+    fireEvent.click(close, { detail: 1 });
+
+    expect(dialog.getAttribute("data-input")).toBe("pointer");
+    expect(dialog.getAttribute("data-closing")).toBe("true");
+    fireEvent.transitionEnd(dialog.firstElementChild as HTMLElement, {
+      propertyName: "opacity",
+    });
+    expect(screen.queryByRole("dialog", { name: "Archive agent?" })).toBeNull();
+    matches.mockRestore();
+  });
+
+  it("gives pointer Cancel actions the same short exit as the close button", () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog title="Archive agent?" onClose={onClose}>
+        {(dismiss) => <Button onClick={dismiss}>Cancel</Button>}
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Archive agent?" });
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    fireEvent.pointerDown(cancel);
+    fireEvent.click(cancel, { detail: 1 });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(dialog.getAttribute("data-input")).toBe("pointer");
+    expect(dialog.getAttribute("data-closing")).toBe("true");
+    fireEvent.transitionEnd(dialog.firstElementChild as HTMLElement, {
+      propertyName: "opacity",
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps keyboard Cancel actions immediate", () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog title="Archive agent?" onClose={onClose}>
+        {(dismiss) => <Button onClick={dismiss}>Cancel</Button>}
+      </Dialog>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -480,6 +622,31 @@ describe("a page that is not showing its data", () => {
  * they do not hold. Not knowing is its own answer.
  */
 describe("the role the shell shows", () => {
+  it("starts the signed-in sidebar with project context, not a repeated logo", () => {
+    render(
+      <AppShell initialMe={meWith("admin")}>
+        <p>page</p>
+      </AppShell>,
+    );
+
+    const sidebar = screen.getByRole("complementary");
+    const firstControl = sidebar.querySelector("button");
+    expect(firstControl?.getAttribute("aria-label")).toMatch(/^Organization Acme/);
+    expect(within(sidebar).queryByRole("img", { name: /egma/i })).toBeNull();
+  });
+
+  it("keeps navigation icons decorative and every label visible", () => {
+    render(
+      <AppShell initialMe={meWith("admin")}>
+        <p>page</p>
+      </AppShell>,
+    );
+
+    const agents = screen.getAllByRole("link", { name: "Agents" })[0];
+    expect(agents?.textContent).toContain("Agents");
+    expect(agents?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
   it("claims nothing at all while the session read is in flight", async () => {
     apiAnswers({ "/api/me": "never", "/api/agents": "never" });
     render(
@@ -551,8 +718,11 @@ describe("the role the shell shows", () => {
     for (const item of ["Agents", "Tests", "Runs", "Personas", "Graders"]) {
       expect(screen.queryByRole("link", { name: item })).toBeNull();
     }
+    expect(
+      screen.queryByRole("button", { name: "Open product navigation" }),
+    ).toBeNull();
     const hrefs = screen
-      .getAllByRole("link")
+      .queryAllByRole("link")
       .map((link) => link.getAttribute("href") ?? "");
     expect(hrefs.filter((href) => href.startsWith("/projects"))).toEqual([]);
   });

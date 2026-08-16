@@ -39,6 +39,7 @@ import {
   Badge,
   Button,
   ButtonLink,
+  Checkbox,
   Facts,
   Field,
   Problem,
@@ -594,15 +595,15 @@ function TestChoices({
       header: "",
       width: "44px",
       cell: (test) => (
-        <input
-          type="checkbox"
-          aria-label={`Include ${test.name}`}
+        <Checkbox
+          id={`include-test-${test.id}`}
+          label={`Include ${test.name}`}
           checked={chosen.includes(test.id)}
-          onChange={() =>
+          onChange={(checked) =>
             onChoose(
-              chosen.includes(test.id)
-                ? chosen.filter((one) => one !== test.id)
-                : [...chosen, test.id],
+              checked
+                ? [...chosen, test.id]
+                : chosen.filter((one) => one !== test.id),
             )
           }
         />

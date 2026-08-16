@@ -1,0 +1,205 @@
+.tooltipHost {
+  position: relative;
+  display: inline-flex;
+}
+
+.tooltip {
+  position: absolute;
+  z-index: 40;
+  bottom: calc(100% + var(--space-2));
+  left: 50%;
+  width: max-content;
+  max-width: min(240px, calc(100vw - var(--space-7)));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--foreground);
+  border-radius: var(--radius-sm);
+  background: var(--foreground);
+  color: var(--surface);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+  pointer-events: none;
+  transform: translateX(-50%) scale(1);
+  transform-origin: bottom center;
+}
+
+.tooltip[data-input="pointer"]:not([data-instant="true"]) {
+  transition:
+    opacity var(--duration-hover) var(--ease-out),
+    transform var(--duration-hover) var(--ease-out);
+}
+
+.tooltip[data-input="pointer"][data-closing="true"] {
+  opacity: 0;
+  transform: translateX(-50%) scale(0.97);
+}
+
+.toast {
+  position: fixed;
+  z-index: 50;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  display: grid;
+  width: min(380px, calc(100vw - (2 * var(--space-4))));
+  min-height: var(--tap-target);
+  align-items: start;
+  grid-template-columns: var(--control-sm) minmax(0, 1fr) var(--control-sm);
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--foreground);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+  color: var(--foreground);
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast[data-kind="error"] {
+  border-left-color: var(--accent);
+}
+
+.toast[data-input="pointer"] {
+  transition:
+    opacity var(--duration-popover-in) var(--ease-out),
+    transform var(--duration-popover-in) var(--ease-out);
+}
+
+.toast[data-input="pointer"][data-closing="true"] {
+  opacity: 0;
+  transform: translateY(100%);
+  transition-duration: var(--duration-popover-out);
+}
+
+.toastMark {
+  display: grid;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  place-items: center;
+  border: 1px solid var(--foreground);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+}
+
+.toast[data-kind="error"] .toastMark {
+  border-color: var(--accent);
+}
+
+.toastCopy {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding-top: var(--space-1);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.toastCopy strong {
+  font-weight: 500;
+}
+
+.toastCopy > span {
+  color: var(--muted);
+}
+
+.toastDismiss {
+  display: grid;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: transform var(--duration-press) var(--ease-out);
+}
+
+.toastDismiss:active:not(:focus-visible) {
+  transform: scale(0.97);
+}
+
+@starting-style {
+  .tooltip[data-input="pointer"]:not([data-instant="true"]) {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.97);
+  }
+
+  .toast[data-input="pointer"] {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .toastDismiss:hover {
+    background: var(--surface-soft);
+    color: var(--foreground);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tooltip[data-input="pointer"] {
+    transform: translateX(-50%);
+    transition: opacity var(--duration-hover) linear;
+  }
+
+  .tooltip[data-input="pointer"][data-closing="true"] {
+    transform: translateX(-50%);
+  }
+
+  .toast[data-input="pointer"] {
+    transform: none;
+    transition: opacity var(--duration-hover) linear;
+  }
+
+  .toast[data-input="pointer"][data-closing="true"] {
+    transform: none;
+  }
+
+  .toastDismiss {
+    transition: none;
+  }
+
+  .toastDismiss:active:not(:focus-visible) {
+    transform: none;
+  }
+
+  @starting-style {
+    .tooltip[data-input="pointer"] {
+      opacity: 0;
+      transform: translateX(-50%);
+    }
+
+    .toast[data-input="pointer"] {
+      opacity: 0;
+      transform: none;
+    }
+  }
+}
+
+/* The development proof can show the same contract without changing the OS. */
+:global([data-preview="reduced-motion"]) .tooltip[data-input="pointer"] {
+  transform: translateX(-50%);
+  transition: opacity var(--duration-hover) linear;
+}
+
+:global([data-preview="reduced-motion"])
+  .tooltip[data-input="pointer"][data-closing="true"] {
+  transform: translateX(-50%);
+}
+
+@starting-style {
+  :global([data-preview="reduced-motion"]) .tooltip[data-input="pointer"] {
+    opacity: 0;
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 640px) {
+  .toast {
+    right: var(--space-4);
+    bottom: var(--space-4);
+  }
+}

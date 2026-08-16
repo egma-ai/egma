@@ -611,17 +611,21 @@ function EvidenceView({
 
       {!confirming ? null : (
         <Dialog title="Judge this simulation again?" onClose={() => setConfirming(false)}>
-          <p>{REGRADE_IS_NOT_A_REPLAY}</p>
-          <Actions>
-            <Button onClick={() => setConfirming(false)}>Not now</Button>
-            <Button
-              weight="strong"
-              disabled={working}
-              onClick={() => void regrade()}
-            >
-              {working ? "Asking…" : "Judge it again"}
-            </Button>
-          </Actions>
+          {(dismiss) => (
+            <>
+              <p>{REGRADE_IS_NOT_A_REPLAY}</p>
+              <Actions>
+                <Button onClick={dismiss}>Not now</Button>
+                <Button
+                  weight="strong"
+                  disabled={working}
+                  onClick={() => void regrade()}
+                >
+                  {working ? "Asking…" : "Judge it again"}
+                </Button>
+              </Actions>
+            </>
+          )}
         </Dialog>
       )}
     </ProductPage>

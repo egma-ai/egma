@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { withReturnTo } from "../../../lib/return-to.ts";
+import { Button, Select } from "../../../ui/controls.tsx";
 import { AuthShell, Notice, StatePage, styles } from "../../ui.tsx";
 
 /**
@@ -169,17 +170,15 @@ export default function ApproveDevicePage() {
         <div className={styles.definitionRow}>
           <dt><label htmlFor="project">Project</label></dt>
           <dd>
-          <select
+          <Select
             id="project"
             value={projectId}
-            onChange={(event) => setProjectId(event.target.value)}
-          >
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
+            options={projects.map((project) => ({
+              value: project.id,
+              label: project.name,
+            }))}
+            onChange={setProjectId}
+          />
           </dd>
         </div>
       ) : (
@@ -188,22 +187,19 @@ export default function ApproveDevicePage() {
       </dl>
 
       <div className={styles.buttonRow}>
-        <button
-          className={styles.buttonSecondary}
-          type="button"
+        <Button
           disabled={busy}
           onClick={() => void answer("/api/device/deny")}
         >
           Deny
-        </button>
-        <button
-          className={styles.button}
-          type="button"
+        </Button>
+        <Button
+          weight="strong"
           disabled={busy}
           onClick={() => void answer("/api/device/approve")}
         >
           {busy ? "Working…" : "Approve"}
-        </button>
+        </Button>
       </div>
     </AuthShell>
   );

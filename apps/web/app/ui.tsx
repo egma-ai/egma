@@ -34,10 +34,10 @@ export function Brand() {
   return (
     <Image
       className={styles.brand}
-      src="/brand/egma-logo.png"
+      src="/brand/egma-logo.svg"
       alt="egma"
-      width={146}
-      height={31}
+      width={151}
+      height={41}
       priority
     />
   );
@@ -109,25 +109,6 @@ export function StatePage({
     <AuthShell title={title} lead={lead}>
       {children}
     </AuthShell>
-  );
-}
-
-export function Field({
-  label,
-  hint,
-  htmlFor,
-  children,
-}: {
-  label: string;
-  hint?: ReactNode;
-  htmlFor: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className={styles.field}>
-      <label htmlFor={htmlFor}>{label}{hint === undefined ? null : <span>{hint}</span>}</label>
-      {children}
-    </div>
   );
 }
 

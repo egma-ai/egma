@@ -355,27 +355,31 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
           }
           onClose={() => setConfirming(null)}
         >
-          <p>
-            {confirming.member.email}{" "}
-            {confirming.action === "remove"
-              ? "will lose membership in this organization. Everything they authored stays where it is, with their name on it."
-              : "will no longer be able to use this organization, and every key they minted stops working on the next request."}
-          </p>
-          <Button onClick={() => setConfirming(null)}>Cancel</Button>{" "}
-          <Button
-            weight="strong"
-            disabled={busy}
-            onClick={() => {
-              const chosen = confirming;
-              setConfirming(null);
-              void act(
-                memberActionPath(chosen.member.user_id, chosen.action),
-                {},
-              );
-            }}
-          >
-            {confirming.action === "remove" ? "Remove" : "Deactivate"}
-          </Button>
+          {(dismiss) => (
+            <>
+              <p>
+                {confirming.member.email}{" "}
+                {confirming.action === "remove"
+                  ? "will lose membership in this organization. Everything they authored stays where it is, with their name on it."
+                  : "will no longer be able to use this organization, and every key they minted stops working on the next request."}
+              </p>
+              <Button onClick={dismiss}>Cancel</Button>{" "}
+              <Button
+                weight="strong"
+                disabled={busy}
+                onClick={() => {
+                  const chosen = confirming;
+                  setConfirming(null);
+                  void act(
+                    memberActionPath(chosen.member.user_id, chosen.action),
+                    {},
+                  );
+                }}
+              >
+                {confirming.action === "remove" ? "Remove" : "Deactivate"}
+              </Button>
+            </>
+          )}
         </Dialog>
       )}
     </ProductPage>

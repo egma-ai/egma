@@ -1,68 +1,67 @@
 /*
- * The layout the run surfaces need and no other page has: a labelled strip of
- * the four facts, a bar for machinery progress, and the two tallies.
- *
- * They live here rather than in `system.module.css`, which the shared system
- * holds closed. Every value is a token — density and colour are tuned once, in
- * `tokens.css`, and nothing here decides either for itself.
+ * The four run facts stay separate, but they share one warm paper strip.
+ * Status marks supply a second signal beside the written state, and the
+ * progress bar measures simulation machinery only.
  */
 
-/*
- * The four facts, side by side and labelled.
- *
- * They wrap rather than scroll, so a narrow screen stacks them into a column of
- * labelled lines instead of hiding the fourth one off the edge. Hiding the
- * verdict on a phone would be hiding the one fact somebody opened the page for.
- */
+.stateMark {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+}
+
 .facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-5);
-  padding: var(--space-4);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
 }
 
 .fact {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
   min-width: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+}
+
+.fact + .fact {
+  border-inline-start: 1px solid var(--border);
 }
 
 .factLabel {
-  font-size: var(--text-2xs);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
   color: var(--muted);
+  font-size: var(--text-caption);
 }
 
 .factValue {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--text-sm);
   color: var(--foreground);
+  font-size: var(--text-caption);
 }
 
-/* Counts read straight when the digits line up. */
-.figure {
+.figure,
+.tally {
   font-variant-numeric: tabular-nums;
 }
 
-/*
- * Machinery progress.
- *
- * One bar, and it measures simulations only. A bar over machinery and grading
- * together would have to decide what a half-full bar meant, and the two settle
- * at different moments.
- */
 .progress {
   position: relative;
-  height: var(--space-2);
+  height: 6px;
+  overflow: hidden;
   border-radius: var(--radius-pill);
   background: var(--surface-soft);
-  overflow: hidden;
 }
 
 .progressFill {
@@ -70,26 +69,43 @@
   width: 100%;
   height: 100%;
   border-radius: var(--radius-pill);
-  background: var(--muted);
+  background: var(--foreground);
   transform-origin: left center;
-  transition: transform 200ms var(--ease-out);
+  transition: transform 200ms linear;
 }
 
 .tally {
-  font-size: var(--text-xs);
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font-size: var(--text-caption);
 }
 
-@media (max-width: 40rem) {
+@media (max-width: 52rem) {
   .facts {
-    flex-direction: column;
-    gap: var(--space-4);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fact:nth-child(3) {
+    border-inline-start: 0;
+  }
+
+  .fact:nth-child(n + 3) {
+    border-top: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 32rem) {
+  .facts {
+    grid-template-columns: 1fr;
+  }
+
+  .fact + .fact {
+    border-top: 1px solid var(--border);
+    border-inline-start: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .progressFill {
-    transition: none;
+    transition-duration: 0.01ms;
   }
 }

@@ -20,6 +20,8 @@ import {
   type Listed,
   type ListPage,
 } from "../../lib/transcripts.ts";
+import { Select } from "../../ui/controls.tsx";
+import { DataTable, type Column } from "../../ui/data-table.tsx";
 import { AppShell, Notice, PageHeader, ProductPage, StatePage, styles } from "../ui.tsx";
 
 /**
@@ -214,20 +216,12 @@ export default function TranscriptsPage() {
         {LIST.window}
       </label>
       <span className={styles.compactSelectControl}>
-        <select
-          className={styles.compactSelect}
+        <Select
           id="window"
           value={choice ?? DEFAULT_WINDOW}
-          onChange={(event) => {
-            choose(windowChoiceOf(event.target.value));
-          }}
-        >
-          {WINDOWS.map((one) => (
-            <option key={one.id} value={one.id}>
-              {one.label}
-            </option>
-          ))}
-        </select>
+          options={WINDOW_OPTIONS}
+          onChange={choose}
+        />
       </span>
     </span>
   );
@@ -235,35 +229,27 @@ export default function TranscriptsPage() {
   return (
     <AppShell>
       <ProductPage wide>
-        <PageHeader eyebrow="Current project" title={LIST.title} lead={LIST.lead} action={chooser} />
+        <PageHeader eyebrow="Production telemetry" title={LIST.title} lead={LIST.lead} action={chooser} />
         {state.status === "failed" ? <Notice tone="error">{state.why}</Notice> : null}
         {state.status === "loading" ? <Notice>{LIST.loading}</Notice> : null}
 
         {state.status === "loaded" ? (
           state.rows.length === 0 ? <Notice>{LIST.empty}</Notice> : (
-            <>
-              <div className={styles.listMeta}><span>{LIST.counted(state.rows.length)}</span><span>Newest first</span></div>
-              <div className={styles.tableWrap}>
-                <table className={styles.dataTable}>
-                  <thead><tr>{COLUMN_ORDER.map(([heading]) => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
-                  <tbody>{state.rows.map((row) => <tr key={row.trace_id}>{COLUMN_ORDER.map(([heading, fill]) => <td key={heading}><span className={styles.tableCell}>{fill(row)}</span></td>)}</tr>)}</tbody>
-                </table>
-              </div>
-              <div className={styles.mobileRows}>
-                {state.rows.map((row) => (
-                  <Link className={styles.mobileRow} href={transcriptPath(row)} key={row.trace_id}>
-                    <span><span>{whenItWas(row.started_at)}</span><span className={row.errored_span_count > 0 ? styles.wrong : styles.muted}>{row.errored_span_count > 0 ? `${row.errored_span_count} errors` : "No errors"}</span></span>
-                    <strong>{row.preview === "" ? LIST.nothing : row.preview}</strong>
-                    <p>{row.turn_counts.human} {LIST.human} · {row.turn_counts.agent} {LIST.agent} · {row.tool_span_count} tools</p>
-                    <small>{howLong(row.duration_ns)} · {row.source} · {row.connection_type}</small>
-                  </Link>
-                ))}
-              </div>
-              <div className={styles.moreLine}>
-                <span>{LIST.counted(state.rows.length)}</span>
-                {more === null ? null : <button className={styles.inlineButton} type="button" disabled={busy} onClick={() => void showMore(more)}>{busy ? LIST.loadingMore : LIST.showMore}</button>}
-              </div>
-            </>
+            <DataTable
+              label="Production traces"
+              columns={TRACE_COLUMNS}
+              rows={state.rows}
+              keyOf={(row) => row.trace_id}
+              {...(more === null
+                ? {}
+                : {
+                    more: {
+                      onMore: () => void showMore(more),
+                      loading: busy,
+                      note: LIST.counted(state.rows.length),
+                    },
+                  })}
+            />
           )
         ) : null}
       </ProductPage>
@@ -338,3 +324,25 @@ const COLUMN_ORDER: readonly (readonly [
   [COLUMNS.environment, (row) => row.environment],
   [COLUMNS.connection, (row) => row.connection_type],
 ];
+
+/**
+ * The list's columns and its compact layout are one definition.
+ *
+ * `DataTable` draws one semantic tree at every width. The earlier trace list
+ * drew a second set of links for phones, which meant assistive technology and
+ * browser automation met every trace twice even though a person saw one copy.
+ */
+const TRACE_COLUMNS: readonly Column<Listed>[] = COLUMN_ORDER.map(
+  ([header, cell], index) => ({
+    key: header,
+    header,
+    cell,
+    primary: index === 0,
+    mono: index === 0,
+  }),
+);
+
+const WINDOW_OPTIONS = WINDOWS.map((window) => ({
+  value: window.id,
+  label: window.label,
+}));

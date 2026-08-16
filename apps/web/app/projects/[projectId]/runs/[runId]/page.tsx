@@ -603,30 +603,38 @@ function RunDetailView({
 
       {confirming === "cancel" ? (
         <Dialog title="Cancel this run?" onClose={() => setConfirming(null)}>
-          <p>
-            Simulations still waiting stop here and now. Simulations already
-            with a simulator are told to stop and land as canceled when they do,
-            and whatever they produced stays on the record. A canceled run never
-            becomes completed.
-          </p>
-          <Actions>
-            <Button onClick={() => setConfirming(null)}>Keep running</Button>
-            <Button weight="strong" disabled={working} onClick={() => void cancel()}>
-              {working ? "Canceling…" : "Cancel run"}
-            </Button>
-          </Actions>
+          {(dismiss) => (
+            <>
+              <p>
+                Simulations still waiting stop here and now. Simulations already
+                with a simulator are told to stop and land as canceled when they do,
+                and whatever they produced stays on the record. A canceled run never
+                becomes completed.
+              </p>
+              <Actions>
+                <Button onClick={dismiss}>Keep running</Button>
+                <Button weight="strong" disabled={working} onClick={() => void cancel()}>
+                  {working ? "Canceling…" : "Cancel run"}
+                </Button>
+              </Actions>
+            </>
+          )}
         </Dialog>
       ) : null}
 
       {confirming === "retry" ? (
         <Dialog title="Retry this run?" onClose={() => setConfirming(null)}>
-          <p>{RETRY_IS_NOT_A_REPLAY}</p>
-          <Actions>
-            <Button onClick={() => setConfirming(null)}>Not now</Button>
-            <Button weight="strong" disabled={working} onClick={() => void retry()}>
-              {working ? "Starting…" : "Start the retry"}
-            </Button>
-          </Actions>
+          {(dismiss) => (
+            <>
+              <p>{RETRY_IS_NOT_A_REPLAY}</p>
+              <Actions>
+                <Button onClick={dismiss}>Not now</Button>
+                <Button weight="strong" disabled={working} onClick={() => void retry()}>
+                  {working ? "Starting…" : "Start the retry"}
+                </Button>
+              </Actions>
+            </>
+          )}
         </Dialog>
       ) : null}
     </ProductPage>

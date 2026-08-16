@@ -600,23 +600,27 @@ function Credentials({
           title="Archive this judge credential?"
           onClose={() => setConfirmingArchive(null)}
         >
-          <p>
-            {confirmingArchive.label} will no longer be available to a project.
-            Egma will refuse this action if a project or an active run still uses
-            it.
-          </p>
-          <Button onClick={() => setConfirmingArchive(null)}>Cancel</Button>{" "}
-          <Button
-            weight="strong"
-            disabled={busy}
-            onClick={() => {
-              const credential = confirmingArchive;
-              setConfirmingArchive(null);
-              void archive(credential);
-            }}
-          >
-            Archive
-          </Button>
+          {(dismiss) => (
+            <>
+              <p>
+                {confirmingArchive.label} will no longer be available to a project.
+                Egma will refuse this action if a project or an active run still uses
+                it.
+              </p>
+              <Button onClick={dismiss}>Cancel</Button>{" "}
+              <Button
+                weight="strong"
+                disabled={busy}
+                onClick={() => {
+                  const credential = confirmingArchive;
+                  setConfirmingArchive(null);
+                  void archive(credential);
+                }}
+              >
+                Archive
+              </Button>
+            </>
+          )}
         </Dialog>
       )}
     </section>

@@ -14,29 +14,34 @@
  * reading one of these as an answer to another's question.
  */
 .facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-6);
-  padding: var(--space-4) 0;
-  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
 }
 
 .fact {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+}
+
+.fact + .fact {
+  border-inline-start: 1px solid var(--border);
 }
 
 .fact > span {
-  font-size: var(--text-2xs);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
   color: var(--muted);
+  font-size: var(--text-caption);
 }
 
 .mono {
   font-family: var(--mono);
-  font-size: var(--text-md);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
 }
 
 /* A name as it stands today, with the pin that never moves beside it. */
@@ -49,8 +54,9 @@
 
 .identity code {
   font-family: var(--mono);
-  font-size: var(--text-xs);
   color: var(--muted);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
 }
 
 .behaviors {
@@ -62,12 +68,38 @@
 }
 
 .behaviors li {
-  font-size: var(--text-md);
-  line-height: var(--line-normal);
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
 }
 
 .verdicts {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+@media (max-width: 64rem) {
+  .facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fact:nth-child(odd) {
+    border-inline-start: 0;
+  }
+
+  .fact:nth-child(n + 3) {
+    border-top: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 32rem) {
+  .facts {
+    grid-template-columns: 1fr;
+  }
+
+  .fact + .fact {
+    border-top: 1px solid var(--border);
+    border-inline-start: 0;
+  }
 }

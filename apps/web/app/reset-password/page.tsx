@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { returnPathIn, withReturnTo } from "../../lib/return-to.ts";
-import { AuthShell, Field, Notice, StatePage, styles } from "../ui.tsx";
+import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
+import { AuthShell, Notice, StatePage, styles } from "../ui.tsx";
 
 /**
  * The page behind the link, and it asks for one thing.
@@ -59,8 +60,7 @@ export default function ResetPasswordPage() {
       ? "/forgot-password"
       : withReturnTo("/forgot-password", returnTo);
 
-  async function submit(event: React.FormEvent): Promise<void> {
-    event.preventDefault();
+  async function submit(): Promise<void> {
     setProblem(null);
     setSubmitting(true);
     try {
@@ -174,12 +174,11 @@ export default function ResetPasswordPage() {
       title="Choose a new password."
       lead="This link names your account, so a password is all egma needs."
     >
-      <form className={styles.form} onSubmit={submit}>
+      <Form onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
         <Field label="New password" htmlFor="password">
-          <input
-            className={styles.input}
+          <TextInput
             id="password"
             name="password"
             type="password"
@@ -187,14 +186,14 @@ export default function ResetPasswordPage() {
             required
             minLength={8}
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={setPassword}
           />
         </Field>
 
-        <button className={styles.button} type="submit" disabled={submitting}>
+        <Button weight="strong" type="submit" disabled={submitting}>
           {submitting ? "Setting…" : "Set the password"}
-        </button>
-      </form>
+        </Button>
+      </Form>
     </AuthShell>
   );
 }

@@ -466,41 +466,43 @@ function EditAgent({
 
   return (
     <Dialog title="Edit agent" onClose={onClose}>
-      <Form onSubmit={() => void save()}>
-        <Field label="Name" htmlFor="edit-agent-name">
-          <TextInput
-            id="edit-agent-name"
-            value={name}
-            invalid={nameProblem !== null}
-            describedBy={nameProblem === null ? undefined : "edit-agent-name-problem"}
-            onChange={(next) => {
-              setName(next);
-              if (nameProblem !== null) setNameProblem(null);
-            }}
-          />
-          {nameProblem === null ? null : (
-            <Problem id="edit-agent-name-problem">{nameProblem}</Problem>
-          )}
-        </Field>
+      {(dismiss) => (
+        <Form onSubmit={() => void save()}>
+          <Field label="Name" htmlFor="edit-agent-name">
+            <TextInput
+              id="edit-agent-name"
+              value={name}
+              invalid={nameProblem !== null}
+              describedBy={nameProblem === null ? undefined : "edit-agent-name-problem"}
+              onChange={(next) => {
+                setName(next);
+                if (nameProblem !== null) setNameProblem(null);
+              }}
+            />
+            {nameProblem === null ? null : (
+              <Problem id="edit-agent-name-problem">{nameProblem}</Problem>
+            )}
+          </Field>
 
-        <Field label="Description" htmlFor="edit-agent-description">
-          <TextArea
-            id="edit-agent-description"
-            value={description}
-            rows={3}
-            onChange={setDescription}
-          />
-        </Field>
+          <Field label="Description" htmlFor="edit-agent-description">
+            <TextArea
+              id="edit-agent-description"
+              value={description}
+              rows={3}
+              onChange={setDescription}
+            />
+          </Field>
 
-        {refused === null ? null : <Problem>{refused.message}</Problem>}
+          {refused === null ? null : <Problem>{refused.message}</Problem>}
 
-        <FormActions>
-          <Button type="submit" weight="strong" disabled={saving}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-          <Button onClick={onClose}>Cancel</Button>
-        </FormActions>
-      </Form>
+          <FormActions>
+            <Button type="submit" weight="strong" disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+            <Button onClick={dismiss}>Cancel</Button>
+          </FormActions>
+        </Form>
+      )}
     </Dialog>
   );
 }
@@ -566,32 +568,36 @@ function ConfirmLifecycle({
       title={archiving ? "Archive this agent?" : "Restore this agent?"}
       onClose={onClose}
     >
-      <p>
-        {archiving
-          ? "Archiving takes this agent out of new work and archives every active connection with it. Queued simulations over those connections are canceled, and simulations already happening are asked to stop. Past runs stay readable."
-          : "Restoring brings the agent back. Its connections stay archived, and each one is restored on its own terms so that an old credential is never quietly reused."}
-      </p>
+      {(dismiss) => (
+        <>
+          <p>
+            {archiving
+              ? "Archiving takes this agent out of new work and archives every active connection with it. Queued simulations over those connections are canceled, and simulations already happening are asked to stop. Past runs stay readable."
+              : "Restoring brings the agent back. Its connections stay archived, and each one is restored on its own terms so that an old credential is never quietly reused."}
+          </p>
 
-      {archiving ? null : (
-        <Field label="Name" htmlFor="restore-agent-name">
-          <TextInput id="restore-agent-name" value={name} onChange={setName} />
-        </Field>
+          {archiving ? null : (
+            <Field label="Name" htmlFor="restore-agent-name">
+              <TextInput id="restore-agent-name" value={name} onChange={setName} />
+            </Field>
+          )}
+
+          {refused === null ? null : <Problem>{refused.message}</Problem>}
+
+          <Actions>
+            <Button weight="strong" disabled={working} onClick={() => void go()}>
+              {working
+                ? archiving
+                  ? "Archiving…"
+                  : "Restoring…"
+                : archiving
+                  ? "Archive agent"
+                  : "Restore agent"}
+            </Button>
+            <Button onClick={dismiss}>Cancel</Button>
+          </Actions>
+        </>
       )}
-
-      {refused === null ? null : <Problem>{refused.message}</Problem>}
-
-      <Actions>
-        <Button weight="strong" disabled={working} onClick={() => void go()}>
-          {working
-            ? archiving
-              ? "Archiving…"
-              : "Restoring…"
-            : archiving
-              ? "Archive agent"
-              : "Restore agent"}
-        </Button>
-        <Button onClick={onClose}>Cancel</Button>
-      </Actions>
     </Dialog>
   );
 }

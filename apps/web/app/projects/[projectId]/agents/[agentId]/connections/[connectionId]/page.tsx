@@ -531,29 +531,33 @@ function ConnectionDetail({
 
       {dialog === "archive" ? (
         <Dialog title="Archive this connection?" onClose={() => setDialog(null)}>
-          <p>
-            Egma stops claiming work over it. Queued simulations are canceled
-            and simulations already happening are asked to stop; whatever they
-            produced stays on the record. The simulator can no longer resolve
-            its credential.
-          </p>
-          {acted === null ? null : <Problem>{acted.message}</Problem>}
-          <Actions>
-            <Button
-              weight="strong"
-              disabled={busy !== null}
-              onClick={() =>
-                void act(
-                  "archive",
-                  connectionActionPath(agentId, connectionId, "archive"),
-                  { expected_revision: one.revision },
-                )
-              }
-            >
-              {busy === "archive" ? "Archiving…" : "Archive connection"}
-            </Button>
-            <Button onClick={() => setDialog(null)}>Cancel</Button>
-          </Actions>
+          {(dismiss) => (
+            <>
+              <p>
+                Egma stops claiming work over it. Queued simulations are canceled
+                and simulations already happening are asked to stop; whatever they
+                produced stays on the record. The simulator can no longer resolve
+                its credential.
+              </p>
+              {acted === null ? null : <Problem>{acted.message}</Problem>}
+              <Actions>
+                <Button
+                  weight="strong"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    void act(
+                      "archive",
+                      connectionActionPath(agentId, connectionId, "archive"),
+                      { expected_revision: one.revision },
+                    )
+                  }
+                >
+                  {busy === "archive" ? "Archiving…" : "Archive connection"}
+                </Button>
+                <Button onClick={dismiss}>Cancel</Button>
+              </Actions>
+            </>
+          )}
         </Dialog>
       ) : null}
 
@@ -654,43 +658,45 @@ function EditConnection({
 
   return (
     <Dialog title="Edit connection" onClose={onClose}>
-      <Form onSubmit={() => void save()}>
-        <Field label="Name" htmlFor="edit-connection-name">
-          <TextInput id="edit-connection-name" value={name} onChange={setName} />
-        </Field>
-        <Field label="Environment" htmlFor="edit-connection-environment">
-          <TextInput
-            id="edit-connection-environment"
-            value={environment}
-            placeholder="staging, production — a label, and optional"
-            onChange={setEnvironment}
+      {(dismiss) => (
+        <Form onSubmit={() => void save()}>
+          <Field label="Name" htmlFor="edit-connection-name">
+            <TextInput id="edit-connection-name" value={name} onChange={setName} />
+          </Field>
+          <Field label="Environment" htmlFor="edit-connection-environment">
+            <TextInput
+              id="edit-connection-environment"
+              value={environment}
+              placeholder="staging, production — a label, and optional"
+              onChange={setEnvironment}
+            />
+          </Field>
+
+          <ConnectionFields
+            variant={variant}
+            draft={draft}
+            onChange={setDraft}
+            credentialsEditable={false}
           />
-        </Field>
 
-        <ConnectionFields
-          variant={variant}
-          draft={draft}
-          onChange={setDraft}
-          credentialsEditable={false}
-        />
+          {configMoved ? (
+            <Help>
+              Changing where this connection points makes its capabilities
+              unknown. A measurement of the old target is not evidence about the
+              new one.
+            </Help>
+          ) : null}
 
-        {configMoved ? (
-          <Help>
-            Changing where this connection points makes its capabilities
-            unknown. A measurement of the old target is not evidence about the
-            new one.
-          </Help>
-        ) : null}
+          {refused === null ? null : <Problem>{refused.message}</Problem>}
 
-        {refused === null ? null : <Problem>{refused.message}</Problem>}
-
-        <FormActions>
-          <Button type="submit" weight="strong" disabled={saving}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-          <Button onClick={onClose}>Cancel</Button>
-        </FormActions>
-      </Form>
+          <FormActions>
+            <Button type="submit" weight="strong" disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+            <Button onClick={dismiss}>Cancel</Button>
+          </FormActions>
+        </Form>
+      )}
     </Dialog>
   );
 }
@@ -754,22 +760,24 @@ function RotateCredential({
 
   return (
     <Dialog title="Rotate credential" onClose={onClose}>
-      <Form onSubmit={() => void rotate()}>
-        <Help>{variant.credential_help}</Help>
-        <ConnectionFields
-          variant={{ ...variant, fields: [] }}
-          draft={draft}
-          onChange={setDraft}
-          credentialsEditable
-        />
-        {refused === null ? null : <Problem>{refused.message}</Problem>}
-        <FormActions>
-          <Button type="submit" weight="strong" disabled={saving}>
-            {saving ? "Rotating…" : "Replace credential"}
-          </Button>
-          <Button onClick={onClose}>Cancel</Button>
-        </FormActions>
-      </Form>
+      {(dismiss) => (
+        <Form onSubmit={() => void rotate()}>
+          <Help>{variant.credential_help}</Help>
+          <ConnectionFields
+            variant={{ ...variant, fields: [] }}
+            draft={draft}
+            onChange={setDraft}
+            credentialsEditable
+          />
+          {refused === null ? null : <Problem>{refused.message}</Problem>}
+          <FormActions>
+            <Button type="submit" weight="strong" disabled={saving}>
+              {saving ? "Rotating…" : "Replace credential"}
+            </Button>
+            <Button onClick={dismiss}>Cancel</Button>
+          </FormActions>
+        </Form>
+      )}
     </Dialog>
   );
 }
@@ -852,60 +860,62 @@ function RestoreConnection({
 
   return (
     <Dialog title="Restore this connection?" onClose={onClose}>
-      <Form onSubmit={() => void restore()}>
-        <p>
-          Restoring needs the parent agent to be active. Egma never brings back
-          the credential this connection was archived with.
-        </p>
+      {(dismiss) => (
+        <Form onSubmit={() => void restore()}>
+          <p>
+            Restoring needs the parent agent to be active. Egma never brings back
+            the credential this connection was archived with.
+          </p>
 
-        <Field label="Name" htmlFor="restore-connection-name">
-          <TextInput
-            id="restore-connection-name"
-            value={name}
-            onChange={setName}
-          />
-        </Field>
+          <Field label="Name" htmlFor="restore-connection-name">
+            <TextInput
+              id="restore-connection-name"
+              value={name}
+              onChange={setName}
+            />
+          </Field>
 
-        {rule === "forbidden" ? (
-          <Help>{variant.credential_help}</Help>
-        ) : (
-          <>
-            {rule === "optional" ? (
-              <Choice
-                label="Credential"
-                value={choice}
-                options={[
-                  { value: "replace", label: "Enter a new credential" },
-                  { value: "clear", label: "Store no credential" },
-                ]}
-                onChange={setChoice}
-              />
-            ) : null}
-            {replacing ? (
-              <ConnectionFields
-                variant={{ ...variant, fields: [] }}
-                draft={draft}
-                onChange={setDraft}
-                credentialsEditable
-              />
-            ) : (
-              <Help>
-                The stored credential is removed. Nothing sealed before can
-                become live again.
-              </Help>
-            )}
-          </>
-        )}
+          {rule === "forbidden" ? (
+            <Help>{variant.credential_help}</Help>
+          ) : (
+            <>
+              {rule === "optional" ? (
+                <Choice
+                  label="Credential"
+                  value={choice}
+                  options={[
+                    { value: "replace", label: "Enter a new credential" },
+                    { value: "clear", label: "Store no credential" },
+                  ]}
+                  onChange={setChoice}
+                />
+              ) : null}
+              {replacing ? (
+                <ConnectionFields
+                  variant={{ ...variant, fields: [] }}
+                  draft={draft}
+                  onChange={setDraft}
+                  credentialsEditable
+                />
+              ) : (
+                <Help>
+                  The stored credential is removed. Nothing sealed before can
+                  become live again.
+                </Help>
+              )}
+            </>
+          )}
 
-        {refused === null ? null : <Problem>{refused.message}</Problem>}
+          {refused === null ? null : <Problem>{refused.message}</Problem>}
 
-        <FormActions>
-          <Button type="submit" weight="strong" disabled={saving}>
-            {saving ? "Restoring…" : "Restore connection"}
-          </Button>
-          <Button onClick={onClose}>Cancel</Button>
-        </FormActions>
-      </Form>
+          <FormActions>
+            <Button type="submit" weight="strong" disabled={saving}>
+              {saving ? "Restoring…" : "Restore connection"}
+            </Button>
+            <Button onClick={dismiss}>Cancel</Button>
+          </FormActions>
+        </Form>
+      )}
     </Dialog>
   );
 }

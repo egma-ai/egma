@@ -11,17 +11,25 @@
 .nav {
   display: flex;
   margin-bottom: var(--space-5);
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: var(--space-5);
-  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+  gap: var(--space-7);
+  padding: var(--space-4);
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
 }
 
 .group {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
+}
+
+.group + .group {
+  padding-left: var(--space-7);
+  border-left: 1px solid var(--border);
 }
 
 /*
@@ -37,7 +45,6 @@
   margin: 0;
   padding: 0 var(--space-2);
   color: var(--faint);
-  font-family: var(--mono);
   font-size: var(--text-2xs);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
@@ -50,11 +57,12 @@
 }
 
 .item {
+  position: relative;
   display: flex;
-  height: var(--control-lg);
+  min-height: var(--control-lg);
   align-items: center;
   padding: 0 var(--space-3);
-  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: var(--text-md);
   text-decoration: none;
@@ -67,13 +75,24 @@
 }
 
 .itemActive {
-  border-bottom-color: var(--accent, var(--foreground));
+  background: var(--surface-soft);
   color: var(--foreground);
-  font-weight: 550;
+}
+
+.itemActive::before {
+  position: absolute;
+  top: var(--space-3);
+  bottom: var(--space-3);
+  left: 0;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  content: "";
 }
 
 @media (hover: hover) and (pointer: fine) {
   .item:hover {
+    background: var(--surface-soft);
     color: var(--foreground);
   }
 }
@@ -95,6 +114,31 @@
   }
 }
 
+@media (max-width: 640px) {
+  .nav {
+    flex-direction: column;
+    gap: var(--space-4);
+    overflow-x: visible;
+  }
+
+  .group,
+  .items {
+    width: 100%;
+  }
+
+  .group + .group {
+    padding-top: var(--space-4);
+    padding-left: 0;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .items {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /*
  * What an organization-wide page says under its heading.
  *
@@ -107,6 +151,7 @@
   margin: 0 0 var(--space-5);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
   border-radius: var(--radius-md);
   background: var(--surface-soft);
   color: var(--muted);

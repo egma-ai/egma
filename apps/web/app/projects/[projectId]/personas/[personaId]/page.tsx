@@ -839,66 +839,70 @@ function ArchiveDialog({
 
   return (
     <Dialog title={`Archive ${persona.name}?`} onClose={onClose}>
-      <p className={styles.stateLead}>
-        They leave the list your team authors from. Every version stays exactly
-        where it is, every run that pinned one stays readable, and Restore is on
-        this page.
-      </p>
+      {(dismiss) => (
+        <>
+          <p className={styles.stateLead}>
+            They leave the list your team authors from. Every version stays exactly
+            where it is, every run that pinned one stays readable, and Restore is on
+            this page.
+          </p>
 
-      {persona.is_default ? (
-        <Field
-          label="Replacement default persona"
-          htmlFor="persona-replacement"
-          hint="This project points at them, so a test naming nobody is given them. Somebody has to take that."
-        >
-          {unread !== null ? (
-            <Refused
-              message={unread.message}
-              action={
-                <Button onClick={() => setAttempt((one) => one + 1)}>
-                  Try again
-                </Button>
+          {persona.is_default ? (
+            <Field
+              label="Replacement default persona"
+              htmlFor="persona-replacement"
+              hint="This project points at them, so a test naming nobody is given them. Somebody has to take that."
+            >
+              {unread !== null ? (
+                <Refused
+                  message={unread.message}
+                  action={
+                    <Button onClick={() => setAttempt((one) => one + 1)}>
+                      Try again
+                    </Button>
+                  }
+                />
+              ) : others === null ? (
+                <p className={styles.fieldHint}>Reading this project's personas…</p>
+              ) : nobodyToTakeIt ? (
+                <p className={styles.fieldHint}>
+                  There is no other active persona in this project to take it.
+                  Create one first.
+                </p>
+              ) : (
+                <Select
+                  id="persona-replacement"
+                  value={chosen}
+                  options={others.map((one) => ({ value: one.id, label: one.name }))}
+                  onChange={setChosen}
+                />
+              )}
+            </Field>
+          ) : null}
+
+          {refusal === null ? null : <Refused message={refusal.message} />}
+
+          <FormActions>
+            <Button
+              weight="strong"
+              disabled={busy || cannotChoose || (persona.is_default && chosen === "")}
+              {...(cannotChoose
+                ? {
+                    why: "Egma has not been able to read this project's personas, so there is nobody to hand the default pointer to yet.",
+                  }
+                : {})}
+              onClick={() =>
+                onArchive(persona.is_default ? chosen : undefined)
               }
-            />
-          ) : others === null ? (
-            <p className={styles.fieldHint}>Reading this project's personas…</p>
-          ) : nobodyToTakeIt ? (
-            <p className={styles.fieldHint}>
-              There is no other active persona in this project to take it.
-              Create one first.
-            </p>
-          ) : (
-            <Select
-              id="persona-replacement"
-              value={chosen}
-              options={others.map((one) => ({ value: one.id, label: one.name }))}
-              onChange={setChosen}
-            />
-          )}
-        </Field>
-      ) : null}
-
-      {refusal === null ? null : <Refused message={refusal.message} />}
-
-      <FormActions>
-        <Button
-          weight="strong"
-          disabled={busy || cannotChoose || (persona.is_default && chosen === "")}
-          {...(cannotChoose
-            ? {
-                why: "Egma has not been able to read this project's personas, so there is nobody to hand the default pointer to yet.",
-              }
-            : {})}
-          onClick={() =>
-            onArchive(persona.is_default ? chosen : undefined)
-          }
-        >
-          {busy ? "Archiving…" : "Archive persona"}
-        </Button>
-        <Button disabled={busy} onClick={onClose}>
-          Cancel
-        </Button>
-      </FormActions>
+            >
+              {busy ? "Archiving…" : "Archive persona"}
+            </Button>
+            <Button disabled={busy} onClick={dismiss}>
+              Cancel
+            </Button>
+          </FormActions>
+        </>
+      )}
     </Dialog>
   );
 }

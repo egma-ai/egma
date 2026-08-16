@@ -7,7 +7,8 @@ import {
   returnPathIn,
   withReturnTo,
 } from "../../lib/return-to.ts";
-import { AuthShell, Field, Notice, styles } from "../ui.tsx";
+import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
+import { AuthShell, Notice, styles } from "../ui.tsx";
 
 /**
  * Signing in, for the second machine and everybody who arrived by invitation.
@@ -27,8 +28,7 @@ export default function SignInPage() {
     setReturnTo(returnPathIn(window.location.search));
   }, []);
 
-  async function submit(event: React.FormEvent): Promise<void> {
-    event.preventDefault();
+  async function submit(): Promise<void> {
     setProblem(null);
     setSubmitting(true);
     try {
@@ -59,39 +59,37 @@ export default function SignInPage() {
       title="Trust starts with what happened."
       lead="Sign in to continue to your organization."
     >
-      <form className={styles.form} onSubmit={submit}>
+      <Form onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
         <Field label="Email" htmlFor="email">
-          <input
-            className={styles.input}
+          <TextInput
             id="email"
             name="email"
             type="email"
             autoComplete="email"
             required
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={setEmail}
           />
         </Field>
 
         <Field label="Password" htmlFor="password">
-          <input
-            className={styles.input}
+          <TextInput
             id="password"
             name="password"
             type="password"
             autoComplete="current-password"
             required
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={setPassword}
           />
         </Field>
 
-        <button className={styles.button} type="submit" disabled={submitting}>
+        <Button weight="strong" type="submit" disabled={submitting}>
           {submitting ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
+        </Button>
+      </Form>
 
       {/* Carrying where they were headed, exactly as the signup link does.
           Somebody sent here by a terminal's approval page who turns out to have

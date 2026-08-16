@@ -383,22 +383,26 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
           title="Revoke this API key?"
           onClose={() => setConfirmingRevoke(null)}
         >
-          <p>
-            {confirmingRevoke.name ?? "This key"} will stop working on its next
-            request. This action cannot be undone.
-          </p>
-          <Button onClick={() => setConfirmingRevoke(null)}>Cancel</Button>{" "}
-          <Button
-            weight="strong"
-            disabled={busy}
-            onClick={() => {
-              const key = confirmingRevoke;
-              setConfirmingRevoke(null);
-              void revoke(key);
-            }}
-          >
-            Revoke key
-          </Button>
+          {(dismiss) => (
+            <>
+              <p>
+                {confirmingRevoke.name ?? "This key"} will stop working on its next
+                request. This action cannot be undone.
+              </p>
+              <Button onClick={dismiss}>Cancel</Button>{" "}
+              <Button
+                weight="strong"
+                disabled={busy}
+                onClick={() => {
+                  const key = confirmingRevoke;
+                  setConfirmingRevoke(null);
+                  void revoke(key);
+                }}
+              >
+                Revoke key
+              </Button>
+            </>
+          )}
         </Dialog>
       )}
     </ProductPage>

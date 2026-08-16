@@ -11,7 +11,8 @@ import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
 } from "../../lib/signup-defaults.ts";
-import { AuthShell, Field, Notice, StatePage, styles } from "../ui.tsx";
+import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
+import { AuthShell, Notice, StatePage, styles } from "../ui.tsx";
 
 /**
  * Signing up: one page, one submit, and an organization and a project at the
@@ -73,8 +74,7 @@ export default function SignUpPage() {
     }
   }
 
-  async function submit(event: React.FormEvent): Promise<void> {
-    event.preventDefault();
+  async function submit(): Promise<void> {
     setProblem(null);
     setSubmitting(true);
     try {
@@ -132,25 +132,23 @@ export default function SignUpPage() {
       title="Set up egma"
       lead="One step. Your organization and your first project are created together."
     >
-      <form className={styles.form} onSubmit={submit}>
+      <Form onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
         <Field label="Email" htmlFor="email">
-          <input
-            className={styles.input}
+          <TextInput
             id="email"
             name="email"
             type="email"
             autoComplete="email"
             required
             value={email}
-            onChange={(event) => onEmailChange(event.target.value)}
+            onChange={onEmailChange}
           />
         </Field>
 
         <Field label="Password" htmlFor="password">
-          <input
-            className={styles.input}
+          <TextInput
             id="password"
             name="password"
             type="password"
@@ -158,39 +156,37 @@ export default function SignUpPage() {
             required
             minLength={8}
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={setPassword}
           />
         </Field>
 
         <Field label="Organization" hint="Filled in from your email. Change it if you like." htmlFor="organizationName">
-          <input
-            className={styles.input}
+          <TextInput
             id="organizationName"
             name="organizationName"
             required
             value={organizationName}
-            onChange={(event) => {
+            onChange={(value) => {
               setOrganizationEdited(true);
-              setOrganizationName(event.target.value);
+              setOrganizationName(value);
             }}
           />
         </Field>
 
         <Field label="First project" htmlFor="projectName">
-          <input
-            className={styles.input}
+          <TextInput
             id="projectName"
             name="projectName"
             required
             value={projectName}
-            onChange={(event) => setProjectName(event.target.value)}
+            onChange={setProjectName}
           />
         </Field>
 
-        <button className={styles.button} type="submit" disabled={submitting}>
+        <Button weight="strong" type="submit" disabled={submitting}>
           {submitting ? "Setting up…" : "Create my egma"}
-        </button>
-      </form>
+        </Button>
+      </Form>
 
       <p className={styles.linkLine}>
         Already have an account?{" "}

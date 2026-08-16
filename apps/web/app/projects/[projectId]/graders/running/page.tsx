@@ -397,14 +397,16 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
             title={SWITCH_OFF.title(open.copy.name)}
             onClose={() => setOpen(null)}
           >
-            <SwitchOffPanel
-              key={open.copy.id}
-              copy={open.copy}
-              projectId={projectId}
-              theLastOne={rows.length === 1}
-              onCancel={() => setOpen(null)}
-              onSwitchedOff={(name) => settled(SWITCH_OFF.done(name))}
-            />
+            {(dismiss) => (
+              <SwitchOffPanel
+                key={open.copy.id}
+                copy={open.copy}
+                projectId={projectId}
+                theLastOne={rows.length === 1}
+                onCancel={dismiss}
+                onSwitchedOff={(name) => settled(SWITCH_OFF.done(name))}
+              />
+            )}
           </Dialog>
         ) : null}
       </PageBody>

@@ -18,6 +18,7 @@ import {
 import {
   Actions,
   Button,
+  Checkbox,
   Field,
   Form,
   FormActions,
@@ -231,11 +232,10 @@ export function EditForm({
         hint={required ? EDIT.requiredOn : EDIT.requiredOff}
         htmlFor="edit-required"
       >
-        <input
+        <Checkbox
           id="edit-required"
-          type="checkbox"
           checked={required}
-          onChange={(event) => setRequired(event.target.checked)}
+          onChange={setRequired}
         />
       </Field>
 

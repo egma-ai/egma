@@ -78,14 +78,50 @@ export function Menu({
   children,
 }: MenuProps) {
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [input, setInput] = useState<"keyboard" | "pointer">("keyboard");
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const closingRef = useRef(false);
+  const closeTimerRef = useRef<number | null>(null);
+  const returnFocusRef = useRef(false);
 
-  const close = useCallback((returnFocus = false) => {
+  const finishClose = useCallback(() => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+    closingRef.current = false;
+    setClosing(false);
     setOpen(false);
-    if (returnFocus) buttonRef.current?.focus();
+    if (returnFocusRef.current) buttonRef.current?.focus();
+    returnFocusRef.current = false;
+  }, []);
+
+  const close = useCallback((returnFocus = false, animate = input === "pointer") => {
+    returnFocusRef.current = returnFocus;
+    if (!animate) {
+      finishClose();
+      return;
+    }
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    // `transitionend` normally finishes this. The timer prevents a hidden menu
+    // if a browser, test environment, or injected stylesheet drops the event.
+    closeTimerRef.current = window.setTimeout(finishClose, 200);
+  }, [finishClose, input]);
+
+  const openPanel = useCallback(() => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+    closingRef.current = false;
+    setClosing(false);
+    setOpen(true);
+  }, []);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -93,7 +129,13 @@ export function Menu({
 
     const elsewhere = (event: Event) => {
       const root = rootRef.current;
-      if (root !== null && !root.contains(event.target as Node)) setOpen(false);
+      if (
+        root !== null &&
+        !root.contains(event.target as Node) &&
+        !closingRef.current
+      ) {
+        close(false, event.type === "pointerdown");
+      }
     };
 
     document.addEventListener("pointerdown", elsewhere);
@@ -102,7 +144,7 @@ export function Menu({
       document.removeEventListener("pointerdown", elsewhere);
       document.removeEventListener("focusin", elsewhere);
     };
-  }, [open]);
+  }, [close, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -114,9 +156,10 @@ export function Menu({
   }, [open]);
 
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>): void {
+    setInput("keyboard");
     if (event.key === "Escape") {
       event.stopPropagation();
-      close(true);
+      close(true, false);
       return;
     }
 
@@ -141,8 +184,11 @@ export function Menu({
     <div
       className={styles.menu}
       ref={rootRef}
+      onPointerDownCapture={() => setInput("pointer")}
       onKeyDown={onKeyDown}
       data-open={open ? "true" : "false"}
+      data-closing={closing ? "true" : "false"}
+      data-input={input}
     >
       <button
         className={`${triggerClassName ?? styles.menuItem} ${open ? (openClassName ?? "") : ""}`}
@@ -152,7 +198,11 @@ export function Menu({
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         aria-label={label}
-        onClick={() => setOpen((was) => !was)}
+        onClick={() => {
+          if (closing) openPanel();
+          else if (open) close(false);
+          else openPanel();
+        }}
       >
         {trigger}
       </button>
@@ -163,6 +213,11 @@ export function Menu({
           ref={panelRef}
           role={panelRole}
           aria-label={label}
+          onTransitionEnd={(event) => {
+            if (closing && event.target === event.currentTarget && event.propertyName === "opacity") {
+              finishClose();
+            }
+          }}
         >
           {children(() => close(true))}
         </div>

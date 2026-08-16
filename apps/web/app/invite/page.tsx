@@ -6,7 +6,8 @@ import {
   DEFAULT_SIGNED_IN_PATH,
   withReturnTo,
 } from "../../lib/return-to.ts";
-import { AuthShell, Field, Notice, StatePage, styles } from "../ui.tsx";
+import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
+import { AuthShell, Notice, StatePage, styles } from "../ui.tsx";
 
 /**
  * The page a colleague lands on.
@@ -138,16 +139,15 @@ export default function InvitePage() {
   if (state.status === "failed") {
     return (
       <StatePage title="The invitation could not be checked" lead="Egma could not reach the invitation service right now.">
-        <button
-          className={styles.button}
-          type="button"
+        <Button
+          weight="strong"
           onClick={() => {
             setState({ status: "loading" });
             setAttempt((value) => value + 1);
           }}
         >
           Try again
-        </button>
+        </Button>
       </StatePage>
     );
   }
@@ -216,16 +216,15 @@ export default function InvitePage() {
         lead={`You are signed in as ${signedInAs}, and this invitation is for ${invitation.email}.`}
       >
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
-        <button
-          className={styles.button}
-          type="button"
+        <Button
+          weight="strong"
           disabled={submitting}
           onClick={() => {
             void post("/api/invitations/accept", { token });
           }}
         >
           {submitting ? "Joining…" : `Join ${invitation.organization.name}`}
-        </button>
+        </Button>
       </AuthShell>
     );
   }
@@ -238,10 +237,8 @@ export default function InvitePage() {
         invitation.role === "admin" ? "an" : "a"
       } ${invitation.role}.`}
     >
-      <form
-        className={styles.form}
-        onSubmit={(event) => {
-          event.preventDefault();
+      <Form
+        onSubmit={() => {
           void post("/api/signup", {
             email: invitation.email,
             password,
@@ -252,8 +249,7 @@ export default function InvitePage() {
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
         <Field label="Email" hint="The address this invitation was sent to." htmlFor="email">
-          <input
-            className={styles.input}
+          <TextInput
             id="email"
             name="email"
             type="email"
@@ -263,8 +259,7 @@ export default function InvitePage() {
         </Field>
 
         <Field label="Choose a password" htmlFor="password">
-          <input
-            className={styles.input}
+          <TextInput
             id="password"
             name="password"
             type="password"
@@ -272,14 +267,14 @@ export default function InvitePage() {
             required
             minLength={8}
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={setPassword}
           />
         </Field>
 
-        <button className={styles.button} type="submit" disabled={submitting}>
+        <Button weight="strong" type="submit" disabled={submitting}>
           {submitting ? "Joining…" : `Join ${invitation.organization.name}`}
-        </button>
-      </form>
+        </Button>
+      </Form>
 
       <p className={styles.linkLine}>
         Already have an egma account?{" "}

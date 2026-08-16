@@ -71,9 +71,60 @@ const RUN_STATUS_MEANING: Readonly<Record<RunStatusWord, string>> = {
     "Somebody stopped this run, or the agent or connection it used was archived. Work already reported stays on the record.",
 };
 
+type StateMarkKind =
+  | "waiting"
+  | "active"
+  | "complete"
+  | "stopped"
+  | "failed"
+  | "skipped"
+  | "error";
+
+/**
+ * A second, non-colour signal beside every state word.
+ *
+ * The word remains the source of meaning. The small line mark makes nearby
+ * badges easier to scan and keeps their difference visible without asking a
+ * reader to learn the temporary green, amber, and red compatibility palette.
+ */
+function StateMark({ kind }: { readonly kind: StateMarkKind }) {
+  return (
+    <svg
+      className={styles.stateMark}
+      viewBox="0 0 12 12"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {kind === "waiting" ? <circle cx="6" cy="6" r="3.75" /> : null}
+      {kind === "active" ? (
+        <path d="M2 6h7M6.5 3.5 9 6 6.5 8.5" />
+      ) : null}
+      {kind === "complete" ? <path d="m2.5 6 2.25 2.25L9.5 3.5" /> : null}
+      {kind === "stopped" || kind === "failed" ? (
+        <path d="m3 3 6 6M9 3 3 9" />
+      ) : null}
+      {kind === "skipped" ? <path d="M3 6h6" /> : null}
+      {kind === "error" ? (
+        <>
+          <circle cx="6" cy="6" r="4" />
+          <path d="M6 3.5v3M6 8.5h.01" />
+        </>
+      ) : null}
+    </svg>
+  );
+}
+
+const RUN_STATUS_MARK: Readonly<Record<RunStatusWord, StateMarkKind>> = {
+  pending: "waiting",
+  running: "active",
+  completed: "complete",
+  canceled: "stopped",
+};
+
 export function RunStatus({ status }: { readonly status: RunStatusWord }) {
   return (
     <Badge tone={RUN_STATUS_TONE[status]} title={RUN_STATUS_MEANING[status]}>
+      <StateMark kind={RUN_STATUS_MARK[status]} />
       {status}
     </Badge>
   );
@@ -114,6 +165,18 @@ const SIMULATION_STATUS_MEANING: Readonly<
     "Egma never conducted this simulation, because the test required something this connection could not be shown to do. Nothing about the agent is being said.",
 };
 
+const SIMULATION_STATUS_MARK: Readonly<
+  Record<SimulationStatusWord, StateMarkKind>
+> = {
+  queued: "waiting",
+  claimed: "waiting",
+  running: "active",
+  completed: "complete",
+  failed: "failed",
+  canceled: "stopped",
+  skipped: "skipped",
+};
+
 export function SimulationStatus({
   status,
 }: {
@@ -124,6 +187,7 @@ export function SimulationStatus({
       tone={SIMULATION_STATUS_TONE[status]}
       title={SIMULATION_STATUS_MEANING[status]}
     >
+      <StateMark kind={SIMULATION_STATUS_MARK[status]} />
       {status}
     </Badge>
   );
@@ -148,9 +212,19 @@ const GRADING_MEANING: Readonly<Record<GradingWord, string>> = {
   graded: "Verdicts have arrived.",
 };
 
+const GRADING_MARK: Readonly<Record<GradingWord, StateMarkKind>> = {
+  not_required: "skipped",
+  waiting: "waiting",
+  pending: "active",
+  graded: "complete",
+};
+
 export function GradingState({ grading }: { readonly grading: GradingWord }) {
   return (
-    <Badge title={GRADING_MEANING[grading]}>{GRADING_WORD[grading]}</Badge>
+    <Badge title={GRADING_MEANING[grading]}>
+      <StateMark kind={GRADING_MARK[grading]} />
+      {GRADING_WORD[grading]}
+    </Badge>
   );
 }
 
@@ -179,18 +253,27 @@ const VERDICT_MEANING: Readonly<Record<VerdictWord, string>> = {
     "Egma could not produce a judgement. This is a platform problem, not a failing agent.",
 };
 
+const VERDICT_MARK: Readonly<Record<VerdictWord, StateMarkKind>> = {
+  passed: "complete",
+  failed: "failed",
+  skipped: "skipped",
+  errored: "error",
+};
+
 export const NOT_JUDGED_YET = "Not judged yet";
 
 export function VerdictBadge({ verdict }: { readonly verdict: VerdictWord | null }) {
   if (verdict === null) {
     return (
       <Badge title="Nobody has finished judging this yet. That is not a result, and it is certainly not a failure.">
+        <StateMark kind="waiting" />
         {NOT_JUDGED_YET}
       </Badge>
     );
   }
   return (
     <Badge tone={VERDICT_TONE[verdict]} title={VERDICT_MEANING[verdict]}>
+      <StateMark kind={VERDICT_MARK[verdict]} />
       {verdict}
     </Badge>
   );
@@ -284,6 +367,7 @@ export function RunProgress({
       aria-valuenow={finished}
       aria-valuemin={0}
       aria-valuemax={expected}
+      aria-valuetext={`${String(finished)} of ${String(expected)} simulations finished`}
     >
       <span
         className={styles.progressFill}

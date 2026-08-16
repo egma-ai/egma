@@ -51,6 +51,7 @@ export function Button({
   weight = "quiet",
   type = "button",
   disabled,
+  busy = false,
   why,
   onClick,
   children,
@@ -58,6 +59,8 @@ export function Button({
   readonly weight?: Weight;
   readonly type?: "button" | "submit";
   readonly disabled?: boolean;
+  /** A write is in flight. It remains visible, named, and inert until it settles. */
+  readonly busy?: boolean;
   /**
    * Why it is not available. Shown beside the control and named by it, so it
    * reaches a keyboard and a screen reader and not only a pointer.
@@ -67,14 +70,16 @@ export function Button({
   readonly children: ReactNode;
 }) {
   const said = useId();
-  const explained = disabled === true && why !== undefined;
+  const inert = disabled === true || busy;
+  const explained = inert && why !== undefined;
 
   return (
     <>
       <button
         className={weightClass(weight)}
         type={type}
-        disabled={disabled}
+        disabled={inert}
+        aria-busy={busy ? "true" : undefined}
         title={why}
         aria-describedby={explained ? said : undefined}
         onClick={onClick}
@@ -219,12 +224,20 @@ export function FormActions({ children }: { readonly children: ReactNode }) {
 
 export function TextInput({
   id,
+  name,
   value,
+  type,
   placeholder,
   label,
   disabled = false,
   secret = false,
   numeric = false,
+  required = false,
+  readOnly = false,
+  minLength,
+  autoComplete,
+  autoCapitalize,
+  spellCheck = false,
   invalid,
   describedBy,
   autoFocusFirst = false,
@@ -232,7 +245,11 @@ export function TextInput({
   onKeyDown,
 }: {
   readonly id: string;
+  /** The name submitted by a native form. */
+  readonly name?: string;
   readonly value: string;
+  /** Browser input behavior that cannot be inferred from the visible label. */
+  readonly type?: "email" | "password" | "text";
   readonly placeholder?: string;
   /** When the field carries its own name rather than a visible label. */
   readonly label?: string;
@@ -256,6 +273,16 @@ export function TextInput({
    * an input's value is a string whatever type it wears.
    */
   readonly numeric?: boolean;
+  /** Keep native browser validation available to forms that require a value. */
+  readonly required?: boolean;
+  /** A value shown for context but not editable, such as an invitation email. */
+  readonly readOnly?: boolean;
+  /** The auth provider's minimum, also enforced by the browser before submit. */
+  readonly minLength?: number;
+  /** Tell password managers what this value means. */
+  readonly autoComplete?: string;
+  readonly autoCapitalize?: string;
+  readonly spellCheck?: boolean;
   /** Whether this field is what a refusal was about. */
   readonly invalid?: boolean;
   /**
@@ -266,7 +293,7 @@ export function TextInput({
   readonly describedBy?: string;
   /** Whether an opening menu should put focus here. */
   readonly autoFocusFirst?: boolean;
-  readonly onChange: (value: string) => void;
+  readonly onChange?: (value: string) => void;
   readonly onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 }) {
   const hint = describedByHint();
@@ -275,16 +302,21 @@ export function TextInput({
     <input
       className={styles.input}
       id={id}
-      type={secret ? "password" : numeric ? "number" : "text"}
+      name={name}
+      type={type ?? (secret ? "password" : numeric ? "number" : "text")}
       value={value}
       placeholder={placeholder}
       aria-label={label}
       aria-invalid={invalid === true ? true : undefined}
       aria-describedby={describedBy ?? hint}
       disabled={disabled}
-      autoComplete={secret ? "new-password" : "off"}
-      spellCheck={false}
-      onChange={(event) => onChange(event.target.value)}
+      required={required}
+      readOnly={readOnly}
+      minLength={minLength}
+      autoComplete={autoComplete ?? (secret ? "new-password" : "off")}
+      autoCapitalize={autoCapitalize}
+      spellCheck={spellCheck}
+      onChange={(event) => onChange?.(event.target.value)}
       onKeyDown={onKeyDown}
       {...(autoFocusFirst ? { "data-menu-focus-first": "" } : {})}
     />
@@ -385,6 +417,41 @@ export function Select<Value extends string>({
         </option>
       ))}
     </select>
+  );
+}
+
+/**
+ * One native binary choice, styled once without replacing browser behavior.
+ *
+ * `label` is only for a checkbox that does not have a visible `<label>` linked
+ * through `id`. Callers with visible copy should keep that copy visible and
+ * use `htmlFor`, so the whole label remains a pointer target.
+ */
+export function Checkbox({
+  id,
+  checked,
+  disabled = false,
+  label,
+  onChange,
+}: {
+  readonly id: string;
+  readonly checked: boolean;
+  readonly disabled?: boolean;
+  readonly label?: string;
+  readonly onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className={styles.checkboxTarget}>
+      <input
+        className={styles.checkbox}
+        id={id}
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        aria-label={label}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </label>
   );
 }
 
