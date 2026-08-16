@@ -116,7 +116,7 @@
 
 .choiceOn {
   border-color: var(--foreground);
-  background: var(--surface-soft);
+  background: var(--surface-active);
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
@@ -177,7 +177,7 @@
 
 .versionCurrent {
   border-inline-start-color: var(--accent);
-  background: var(--surface-soft);
+  background: var(--surface-active);
 }
 
 .versionNumber {

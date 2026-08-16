@@ -65,6 +65,9 @@ describe("the development design proof", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Register agent" })[0]!);
     const dialog = screen.getByRole("dialog", { name: "Archive Support agent?" });
     expect(dialog).toBeTruthy();
+    expect(
+      within(dialog).getByRole("button", { name: "Archive agent" }).className,
+    ).toContain("buttonDestructive");
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }), { detail: 1 });
     expect(screen.getByRole("dialog", { name: "Archive Support agent?" })).toBe(dialog);

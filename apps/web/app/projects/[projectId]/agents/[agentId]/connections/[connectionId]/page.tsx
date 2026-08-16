@@ -544,7 +544,7 @@ function ConnectionDetail({
               {acted === null ? null : <Problem>{acted.message}</Problem>}
               <Actions>
                 <Button
-                  weight="strong"
+                  tone="destructive"
                   disabled={busy !== null}
                   onClick={() =>
                     void act(
