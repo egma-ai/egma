@@ -31,7 +31,7 @@ import { actingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { describedMockTool } from "../http/mock-tools.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, text } from "../http/reading.ts";
+import { given, projectNamed, text } from "../http/reading.ts";
 import {
   describedOutcome,
   describedVerdict,
@@ -111,24 +111,6 @@ export type SimulationRoutesOptions = {
 
 export const SIMULATION_PATH = "/api/simulations/:simulationId";
 export const SIMULATION_REGRADE_PATH = "/api/simulations/:simulationId/regrade";
-
-/**
- * Which project a request acts in, wherever the caller put it.
- *
- * **The query and the body, because both are in honest use.** A browser's write
- * helper appends the project to the address, and a terminal's body carries it
- * beside everything else it is sending — and a route that read only one of the
- * two would silently fall back to "the organization's single project" for the
- * other, which is right in a one-project organization and wrong in every other.
- * A caller that names it in both is naming it twice, and the two agree or the
- * refusal below says so.
- */
-function projectNamed(
-  query: Record<string, unknown>,
-  body: Record<string, unknown>,
-): string | undefined {
-  return given(text(query.project)) ?? given(text(body.project));
-}
 
 /**
  * A conversation nobody may see reads exactly like a conversation nobody

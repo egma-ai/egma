@@ -64,7 +64,7 @@ import {
   onlyReporting,
 } from "../http/verdicts.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, text } from "../http/reading.ts";
+import { given, projectNamed, text } from "../http/reading.ts";
 import {
   conflict,
   invalid,
@@ -170,24 +170,6 @@ export const RUN_CANCEL_PATH = "/api/runs/:runId/cancel";
 export const RUN_RETRY_PATH = "/api/runs/:runId/retry";
 
 type Body = Record<string, unknown>;
-
-/**
- * Which project a write acts in, wherever the caller put it.
- *
- * **The query and the body, because both are in honest use**, and the same rule
- * the simulation routes keep. A terminal posts the project in the body beside
- * everything else it is sending; a browser's write helper appends it to the
- * address, and every *read* under this group is asked that way. A door that
- * took only one of the two would not refuse the other — it would **ignore** it,
- * fall back to the session's own project, which is the organization's *first*,
- * and answer confidently about a run somebody else's page was looking at.
- *
- * The address wins where both are given, because the address is what a browser
- * is looking at.
- */
-function projectNamed(query: Body, body: Body): string | undefined {
-  return given(text(query.project)) ?? given(text(body.project));
-}
 
 /**
  * The largest page of history this list will serve.

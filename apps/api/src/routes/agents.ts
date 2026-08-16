@@ -42,7 +42,7 @@ import {
 } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, text } from "../http/reading.ts";
+import { given, projectNamed, text } from "../http/reading.ts";
 import {
   CODES,
   identityConflict,
@@ -552,8 +552,14 @@ function refusalOf(acting: ActingRefusal): Refusal {
  * route group. Only the wording is this group's own, and it lives beside the
  * other group's in that module, where the two can be unified in one edit the
  * day the dev picks a winner.
+ *
+ * **Not to be confused with `projectNamed`, which this group also uses.** That
+ * one reads *where* the caller wrote the project down; this one decides whether
+ * the credential may reach it. They were both called `projectNamed` — one name
+ * for two things, in one directory, in the change whose whole point was one way
+ * to say where a project is.
  */
-async function projectNamed(
+async function reachableProject(
   auth: AuthContext,
   named: string,
   verb: "writes into" | "reads",
@@ -580,7 +586,7 @@ async function writingIn(
   named: string | undefined,
 ): Promise<AuthContext | Refusal> {
   if (named !== undefined) {
-    const project = await projectNamed(auth, named, "writes into");
+    const project = await reachableProject(auth, named, "writes into");
     return isRefusal(project) ? project : { ...auth, projectId: project };
   }
 
@@ -603,7 +609,7 @@ async function readingIn(
 ): Promise<AuthContext | Refusal> {
   if (named === undefined) return auth;
 
-  const project = await projectNamed(auth, named, "reads");
+  const project = await reachableProject(auth, named, "reads");
   return isRefusal(project) ? project : { ...auth, projectId: project };
 }
 
@@ -729,28 +735,21 @@ export async function agentRoutes(
     const description = textWhenGiven(body.description, "an agent's description");
     if (isRefusal(description)) return refused(reply, description);
     /*
-     * **The query and the body, because both are in honest use** — the same
-     * rule `POST /api/simulations/{id}/regrade` keeps, and for the same reason.
-     * A terminal posts a registration with the project beside everything else
-     * it is sending; a browser's write helper appends it to the address, which
-     * is where every other write in this group reads it.
+     * **The query and the body**, which is `projectNamed`'s one rule for the
+     * whole API — see `http/reading.ts` for why a door that reads only one of
+     * the two ignores the other rather than refusing it, and for what that cost
+     * this very route.
      *
-     * Reading only the body was a real fault rather than a tidiness one. The
-     * query was not refused, it was **ignored**: the door found no project,
-     * fell back to the session's own — which is the organization's *first* —
-     * and answered `201` about an agent in a project nobody had named. Moving
-     * the one caller that met it fixed that caller and left the door open for
-     * the next one, and the next one would have been written to this group's
-     * own pattern.
-     *
-     * The address wins where both are given, because the address is what a
-     * browser is looking at.
+     * The type gate stays this group's own, and it has to run first: a
+     * `project` that is not text is refused **by name** here, and
+     * `projectNamed` would read it as absent and fall back to the credential's
+     * own project — silently, which is the thing this route already got wrong
+     * once.
      */
-    const project = textWhenGiven(
-      given(text(query.project)) ?? body.project,
-      "a project",
-    );
-    if (isRefusal(project)) return refused(reply, project);
+    const said = textWhenGiven(body.project, "a project");
+    if (isRefusal(said)) return refused(reply, said);
+
+    const project = projectNamed(query, body);
 
     const inline =
       body.connection === undefined
