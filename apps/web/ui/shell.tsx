@@ -190,7 +190,7 @@ function AccountMenu({
   readonly settled: boolean;
   /** Null until the session read says. Never guessed. */
   readonly role: Role | null;
-  readonly placement: "above" | "below";
+  readonly placement: "below-end" | "right-end";
   /**
    * The project Settings is drawn under, or nothing while the session read is
    * still in flight or the organization holds none.
@@ -361,7 +361,7 @@ export function AppShell({
             me={me}
             settled={session.settled}
             role={role}
-            placement="above"
+            placement="right-end"
             projectId={shown}
           />
         </div>
@@ -387,7 +387,7 @@ export function AppShell({
             me={me}
             settled={session.settled}
             role={role}
-            placement="below"
+            placement="below-end"
             projectId={shown}
           />
         </header>

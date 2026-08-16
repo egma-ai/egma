@@ -83,6 +83,7 @@ export function ProjectSelector({
       label={`Organization ${organizationName}, project ${projectName}. Choose a project`}
       triggerClassName={`${styles.selector} ${compact ? styles.selectorCompact : ""}`}
       openClassName={styles.selectorOpen}
+      placement={compact ? "below-start" : "right-start"}
       // A panel with a field to type in, so a dialog rather than a menu.
       panelRole="dialog"
       trigger={

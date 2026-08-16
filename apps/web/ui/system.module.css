@@ -17,21 +17,24 @@
 
 .sidebar {
   position: sticky;
+  z-index: 20;
   top: 0;
   display: flex;
   height: 100svh;
   flex-direction: column;
   gap: var(--space-5);
   padding: var(--space-4);
-  overflow-y: auto;
+  overflow: visible;
   border-right: 1px solid var(--border);
   background: var(--surface);
 }
 
 .nav {
   display: flex;
+  min-height: 0;
   flex-direction: column;
   gap: var(--space-1);
+  overflow-y: auto;
 }
 
 .navGroup + .navGroup {
@@ -580,7 +583,11 @@
 .menuPanel {
   position: absolute;
   z-index: 20;
-  min-width: 240px;
+  width: max-content;
+  min-width: min(240px, calc(100vw - var(--space-8)));
+  max-width: min(320px, calc(100vw - var(--space-8)));
+  max-height: calc(100svh - var(--space-8));
+  overflow-y: auto;
   padding: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -602,15 +609,39 @@
   transition-duration: var(--duration-popover-out);
 }
 
-.menuBelow {
+.menuBelowStart {
   top: calc(100% + var(--space-2));
   left: 0;
   transform-origin: top left;
 }
 
-.menuAbove {
+.menuBelowEnd {
+  top: calc(100% + var(--space-2));
+  right: 0;
+  transform-origin: top right;
+}
+
+.menuAboveStart {
   bottom: calc(100% + var(--space-2));
   left: 0;
+  transform-origin: bottom left;
+}
+
+.menuAboveEnd {
+  right: 0;
+  bottom: calc(100% + var(--space-2));
+  transform-origin: bottom right;
+}
+
+.menuRightStart {
+  top: 0;
+  left: calc(100% + var(--space-2));
+  transform-origin: top left;
+}
+
+.menuRightEnd {
+  bottom: 0;
+  left: calc(100% + var(--space-2));
   transform-origin: bottom left;
 }
 
@@ -1253,12 +1284,6 @@
   .topbar .avatar {
     width: var(--tap-target);
     height: var(--tap-target);
-  }
-
-  .topbar .menuBelow {
-    right: 0;
-    left: auto;
-    transform-origin: top right;
   }
 
   .pageHeader {

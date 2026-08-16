@@ -48,8 +48,14 @@ export type MenuProps = {
   readonly trigger: ReactNode;
   readonly triggerClassName?: string;
   readonly openClassName?: string;
-  /** Panels in a footer open upwards; panels at the top open downwards. */
-  readonly placement?: "below" | "above";
+  /** Which edge of the trigger anchors the panel. */
+  readonly placement?:
+    | "below-start"
+    | "below-end"
+    | "above-start"
+    | "above-end"
+    | "right-start"
+    | "right-end";
   /** `dialog` for a panel with a field in it; `menu` for commands alone. */
   readonly panelRole?: "menu" | "dialog";
   readonly panelClassName?: string;
@@ -72,7 +78,7 @@ export function Menu({
   trigger,
   triggerClassName,
   openClassName,
-  placement = "below",
+  placement = "below-start",
   panelRole = "menu",
   panelClassName,
   children,
@@ -87,6 +93,14 @@ export function Menu({
   const closingRef = useRef(false);
   const closeTimerRef = useRef<number | null>(null);
   const returnFocusRef = useRef(false);
+  const placementClass = {
+    "below-start": styles.menuBelowStart,
+    "below-end": styles.menuBelowEnd,
+    "above-start": styles.menuAboveStart,
+    "above-end": styles.menuAboveEnd,
+    "right-start": styles.menuRightStart,
+    "right-end": styles.menuRightEnd,
+  }[placement];
 
   const finishClose = useCallback(() => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
@@ -211,7 +225,7 @@ export function Menu({
       </button>
       {open ? (
         <div
-          className={`${styles.menuPanel} ${placement === "above" ? styles.menuAbove : styles.menuBelow} ${panelClassName ?? ""}`}
+          className={`${styles.menuPanel} ${placementClass} ${panelClassName ?? ""}`}
           id={panelId}
           ref={panelRef}
           role={panelRole}
