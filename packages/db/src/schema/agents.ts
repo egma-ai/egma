@@ -207,10 +207,16 @@ export const connection = pgTable(
      */
     watchProduction: boolean("watch_production").notNull().default(false),
     /**
-     * Everything this connection has produced at or before this instant is
-     * durably stored. **A statement of fact, never a statement of intent** —
-     * it moves only after a conversation is written, so a poller that dies
-     * mid-sweep resumes exactly where the last durable write left it.
+     * Everything this connection has produced at or before this instant has
+     * been **drained by the poller**. A statement of fact, never a statement of
+     * intent: it moves only after a conversation is written, so a poller that
+     * dies mid-sweep resumes exactly where the last durable write left it.
+     *
+     * A webhook never moves it. A delivery lands the conversation that just
+     * ended while the poller is still working through what came before it, and
+     * a cursor dragged forward by one would skip the rest for good. The
+     * delivered conversation is stored either way — the poller is offered it
+     * again on its way past, and the ledger skips it.
      */
     productionCursor: moment("production_cursor"),
     /**

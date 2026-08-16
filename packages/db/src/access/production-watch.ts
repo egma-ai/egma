@@ -301,20 +301,27 @@ export async function claimProductionTrace(
 }
 
 /**
- * The conversation is appended: mark the claim written, and move the
- * connection's cursor to it.
+ * The conversation is appended: mark the claim written, and — where the poller
+ * is what wrote it — move the connection's cursor to it.
  *
  * **One transaction, because they are one fact.** The cursor says everything at
- * or before it is durably stored, and a cursor that moved without the mark — or
- * a mark without the cursor — would make that sentence false in one of the two
- * directions that matter: a conversation offered forever, or a conversation
- * never offered again and never written.
+ * or before it is durably stored *by the poller*, and a cursor that moved
+ * without the mark, or a mark without the cursor, would make that sentence
+ * false in one of the two directions that matter: a conversation offered
+ * forever, or a conversation never offered again and never written.
  *
- * The cursor only ever moves **forward**. A webhook lands conversations the
- * moment they end and the poller works oldest-first through a backlog, so the
- * two routinely finish out of order; taking the later of the two is what keeps
- * a webhook's fresh conversation from dragging the poller's cursor past a
- * backlog it has not reached yet.
+ * **A webhook never moves the cursor, and that is the whole of why
+ * `advanceCursor` exists.** A webhook lands a conversation the moment it ends,
+ * while the poller is working oldest-first through whatever came before it — so
+ * letting a delivery drag the cursor forward would skip everything in between,
+ * permanently. The conversation the webhook stored is still stored; the poller
+ * will be offered it again on its way past, and the ledger's claim will skip
+ * it. **The cost of not moving the cursor is one refused insert; the cost of
+ * moving it is a gap**, and only one of those is recoverable.
+ *
+ * It still only ever moves forward. Two pull writes can settle out of order
+ * under two replicas, and `greatest` is what keeps the later one from being
+ * undone by the earlier one committing second.
  */
 export async function finishProductionTrace(
   auth: AuthContext,
@@ -323,6 +330,8 @@ export async function finishProductionTrace(
     readonly connectionId: string;
     readonly endedAt: Date;
     readonly degraded: boolean;
+    /** True for the poller, false for a delivery. See above. */
+    readonly advanceCursor: boolean;
   },
 ): Promise<void> {
   const now = new Date();
@@ -337,6 +346,8 @@ export async function finishProductionTrace(
           eq(productionTraceClaim.traceId, finished.traceId),
         ),
       );
+
+    if (!finished.advanceCursor) return;
 
     await tx
       .update(connection)

@@ -253,7 +253,6 @@ export async function runProductionSweep(
       agentId: connection.agentId,
       environment: connection.environment,
     });
-    replayed += 1;
   }
 
   const targets = await resolveRetellWatch({});

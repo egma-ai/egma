@@ -88,6 +88,8 @@ export async function writeRetellCall(
     connectionId: target.connectionId,
     endedAt: normalised.endedAt,
     degraded: normalised.degraded,
+    // Only the poller's own cursor is the poller's to move.
+    advanceCursor: transport === "pull",
   });
 
   return {
@@ -118,6 +120,8 @@ export async function replayProductionClaim(
     readonly traceId: string;
     readonly payload: string;
     readonly endedAt: Date;
+    /** Which transport claimed it, because only the poller's cursor moves. */
+    readonly transport: ProductionTransport;
   },
   into: {
     readonly connectionType: string;
@@ -149,5 +153,6 @@ export async function replayProductionClaim(
     connectionId: claim.connectionId,
     endedAt: normalised.endedAt,
     degraded: normalised.degraded,
+    advanceCursor: claim.transport === "pull",
   });
 }
