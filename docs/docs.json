@@ -39,9 +39,6 @@
             "group": "Integrations",
             "pages": [
               "integrations/retell",
-              "integrations/livekit-testing",
-              "integrations/livekit-token-endpoint",
-              "integrations/livekit-telemetry",
               "integrations/python-sdk"
             ]
           },
