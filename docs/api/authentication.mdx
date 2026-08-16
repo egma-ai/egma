@@ -1,22 +1,22 @@
 ---
-title: "API Key Authentication and Key Management for egma"
+title: "API Key Authentication and Key Management for Egma"
 sidebarTitle: "Authentication"
-description: "Create, use, list, and revoke egma API keys. Learn about key scoping, the one-time secret display, key rotation, and authentication error codes."
+description: "Create, use, list, and revoke Egma API keys. Learn about key scoping, the one-time secret display, key rotation, and authentication error codes."
 ---
 
-The egma REST API authenticates every request with an API key. You send the key in an HTTP header, and egma resolves your organization, project, and permission level from the key itself — no separate login step, no session cookie, no organization or project ID in the URL.
+The Egma REST API authenticates every request with an API key. You send the key in an HTTP header, and Egma resolves your organization, project, and permission level from the key itself — no separate login step, no session cookie, no organization or project ID in the URL.
 
 API keys also authenticate OTLP trace ingest at `POST /v1/traces`, so the same credential that calls the REST API is the one your voice agent's OpenTelemetry exporter uses.
 
 ## Key Format
 
-Every egma API key begins with the prefix `egma_sk_` followed by 43 characters of base64url-encoded random data:
+Every Egma API key begins with the prefix `egma_sk_` followed by 43 characters of base64url-encoded random data:
 
 ```
 egma_sk_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v2W3
 ```
 
-This fixed prefix lets secret-scanning tools (GitHub, GitLeaks, and others) detect a leaked egma key automatically. Never change or strip the prefix.
+This fixed prefix lets secret-scanning tools (GitHub, GitLeaks, and others) detect a leaked Egma key automatically. Never change or strip the prefix.
 
 ## Creating a Key
 
@@ -67,7 +67,7 @@ curl -X POST http://localhost:3100/api/keys \
 </ResponseField>
 
 <ResponseField name="secret" type="string">
-  The full API key secret. **This is the only time egma returns the secret.**
+  The full API key secret. **This is the only time Egma returns the secret.**
   Copy it immediately — after this response it is gone.
 </ResponseField>
 
@@ -114,7 +114,7 @@ curl -X POST http://localhost:3100/api/keys \
 
 <Warning>
   The `secret` field appears exactly once — in the `201` response at creation
-  time. egma stores only a SHA-256 hash of the secret, so it can never return
+  time. Egma stores only a SHA-256 hash of the secret, so it can never return
   the plaintext again. If you lose the key, revoke it and create a new one.
 </Warning>
 
@@ -213,7 +213,7 @@ Revocation takes effect immediately — the key stops working on the very next r
   </Card>
 </CardGroup>
 
-When you set up an agent to send traces to egma, always use a project-scoped key. The project the key is scoped to is where the traces, runs, and verdicts appear.
+When you set up an agent to send traces to Egma, always use a project-scoped key. The project the key is scoped to is where the traces, runs, and verdicts appear.
 
 ## Recommended Key Rotation Workflow
 
@@ -242,5 +242,5 @@ When you set up an agent to send traces to egma, always use a project-scoped key
 
 | Status | Error code | Cause |
 | ------ | ---------- | ----- |
-| `401` | `not_authenticated` | No `Authorization` header, or the bearer token is not a valid egma key |
+| `401` | `not_authenticated` | No `Authorization` header, or the bearer token is not a valid Egma key |
 | `403` | `not_permitted` | The key is valid but does not have permission for this operation (e.g. a viewer-role key attempting a write) |

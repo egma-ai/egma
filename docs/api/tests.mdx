@@ -4,9 +4,9 @@ sidebarTitle: "Tests"
 description: "Create, edit, and list simulation test scenarios. Every edit mints an immutable version; optimistic locking prevents silent overwrites."
 ---
 
-Tests are the simulation scenarios egma runs against your agents. Each test holds a natural-language scenario, a list of expected behaviors the agent should exhibit, and optional persona and mock-tool overrides. Every time you save changes to a test, egma mints a new immutable **test version** — a frozen snapshot identified by its own `version_id`. Runs always execute against pinned version ids, so the test you edited after a run started never touches that run's results.
+Tests are the simulation scenarios Egma runs against your agents. Each test holds a natural-language scenario, a list of expected behaviors the agent should exhibit, and optional persona and mock-tool overrides. Every time you save changes to a test, Egma mints a new immutable **test version** — a frozen snapshot identified by its own `version_id`. Runs always execute against pinned version ids, so the test you edited after a run started never touches that run's results.
 
-Editing a test requires you to supply the `expected_version_id` you last read. If another writer has moved the test forward in the meantime, egma refuses with `409 Conflict` and tells you both version ids, so you can read the current state before retrying. This check happens inside the write itself, not as a separate read-then-write, so there is no window for a second writer to slip through.
+Editing a test requires you to supply the `expected_version_id` you last read. If another writer has moved the test forward in the meantime, Egma refuses with `409 Conflict` and tells you both version ids, so you can read the current state before retrying. This check happens inside the write itself, not as a separate read-then-write, so there is no window for a second writer to slip through.
 
 ---
 
@@ -130,7 +130,7 @@ curl -X POST https://your-egma-host/api/tests \
 
 `PATCH /api/tests/:testId`
 
-Update one or more fields of an existing test. You must supply `expected_version_id` — the `version_id` you last read for this test. If the test has moved on since you read it, egma returns `409 Conflict` with both version ids.
+Update one or more fields of an existing test. You must supply `expected_version_id` — the `version_id` you last read for this test. If the test has moved on since you read it, Egma returns `409 Conflict` with both version ids.
 
 Fields you omit are kept as-is. An explicit empty `personas` array (`[]`) means the project's default persona; omitting `personas` entirely leaves the current persona list unchanged.
 
@@ -178,7 +178,7 @@ Same shape as the create response: the full test object at its new (or unchanged
 
 ### Conflict response
 
-When the test has moved on, egma returns `409 Conflict`:
+When the test has moved on, Egma returns `409 Conflict`:
 
 ```json
 {

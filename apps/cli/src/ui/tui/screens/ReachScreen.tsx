@@ -63,7 +63,7 @@ export function ReachScreen({ onAnswer }: ReachScreenProps) {
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       <Text>{REACH_ASK_LINE}</Text>
       <Box height={1} />
@@ -78,7 +78,7 @@ export function ReachScreen({ onAnswer }: ReachScreenProps) {
         })}
       </Box>
       <Box height={1} />
-      <Text dimColor>egma creates the one you choose, and only that one.</Text>
+      <Text dimColor>Egma creates the one you choose, and only that one.</Text>
       <Box height={1} />
       <Text dimColor>{hintBar(bindings)}</Text>
     </Box>

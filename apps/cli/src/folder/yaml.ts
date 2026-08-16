@@ -93,7 +93,7 @@ function unquote(raw: string, where: string, line: number): string {
   try {
     return JSON.parse(`"${inside}"`) as string;
   } catch {
-    throw new YamlProblem(where, line, "a quoted value egma could not read");
+    throw new YamlProblem(where, line, "a quoted value Egma could not read");
   }
 }
 
@@ -167,7 +167,7 @@ function mappingAt(
       throw new YamlProblem(
         where,
         line.number,
-        "this line is indented further than the line above it leads egma to expect",
+        "this line is indented further than the line above it leads Egma to expect",
       );
     }
 
@@ -176,7 +176,7 @@ function mappingAt(
       throw new YamlProblem(
         where,
         line.number,
-        "egma reads these files as plain name: value lines, and this line is not one",
+        "Egma reads these files as plain name: value lines, and this line is not one",
       );
     }
 

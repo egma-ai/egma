@@ -5,7 +5,7 @@
  * platform, and that is where the branches of this behaviour are covered.
  * Fixture tests cover branches; this proves the one thing they cannot — that a
  * repository naming no platform, in a shell naming none either, reaches an
- * actual Egma platform with its own database and leaves real rows in it.
+ * actual egma platform with its own database and leaves real rows in it.
  *
  * That rule belongs to the platform-binding effort and applies here for the
  * same reason: the step being added is the one nobody typed, so the only honest

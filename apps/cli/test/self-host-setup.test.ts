@@ -376,7 +376,7 @@ describe("egma self-host setup", () => {
     });
 
     expect(run.code).toBe(4);
-    expect(run.stderr).toContain(`egma at ${address} did not answer`);
+    expect(run.stderr).toContain(`Egma at ${address} did not answer`);
     expect(run.stderr).toContain("that the instance is running");
     // Nothing was asked of anybody's carrier on the way to finding out.
     expect(twilio.requests).toEqual([]);
@@ -406,7 +406,7 @@ describe("egma self-host setup", () => {
     // role they hold, and the kind of deployment this is.
     const refusal =
       "the settings of this platform are read and changed by an organization owner, " +
-      "and only while this egma serves one organization.";
+      "and only while this Egma serves one organization.";
     platform = await startPlatform({ refuses: { status: 403, message: refusal } });
     await workspace.signIn(platform);
 
@@ -504,7 +504,7 @@ describe("egma self-host setup", () => {
 
     expect(run.code).toBe(4);
     expect(run.stdout).toContain("holds no number");
-    expect(run.stdout).toContain("egma never buys, ports or registers one");
+    expect(run.stdout).toContain("Egma never buys, ports or registers one");
     // Nothing was created on the way to finding out — at the carrier or here.
     expect(twilio.writes).toEqual([]);
     expect(platform.written).toEqual([]);

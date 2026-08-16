@@ -308,7 +308,7 @@ describe("starting a run from the terminal's own code", () => {
     expect(answer.kind).toBe("refused");
     if (answer.kind !== "refused") return;
     expect(answer.reason).toBe(
-      "this egma has not been set up to place phone calls, so nothing was " +
+      "this Egma has not been set up to place phone calls, so nothing was " +
         "dialled and nothing was charged. It is missing the carrier trunk " +
         "and the source number and the text-to-speech provider. Whoever runs " +
         "this platform makes it ready with one command in the platform " +
@@ -335,7 +335,7 @@ describe("starting a run from the terminal's own code", () => {
     expect(answer).toEqual({
       kind: "refused",
       reason:
-        `there is no test version ${missing} on this egma. Push the test ` +
+        `there is no test version ${missing} on this Egma. Push the test ` +
         `first, or read the test and pin the version_id it names now.`,
     });
   });

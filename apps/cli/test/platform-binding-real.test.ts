@@ -368,7 +368,7 @@ it("refuses when the bound real platform is down, and reaches no other platform"
     expect(result.stdout).toContain("status: unreachable");
     expect(result.stderr).toContain(boundIdentity.instance_id);
     expect(result.stderr).toContain(boundOrigin);
-    expect(result.stderr).toContain("egma did not fall back to its own platform");
+    expect(result.stderr).toContain("Egma did not fall back to its own platform");
     expect(result.stderr).toContain("no repository identifiers were sent");
 
     // The platform that is up saw nothing: not a request carrying an

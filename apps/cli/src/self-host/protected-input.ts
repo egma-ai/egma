@@ -58,7 +58,7 @@ export const REFUSED_SECRET_ARGUMENTS = [
  */
 export function secretArgumentRefusal(argument: string): string {
   return [
-    `egma will not take a secret in ${argument}. Command arguments are readable by every process on this machine and are kept in shell history.`,
+    `Egma will not take a secret in ${argument}. Command arguments are readable by every process on this machine and are kept in shell history.`,
     "",
     "Run it and type the value when setup asks. Nothing you type is echoed.",
     "",

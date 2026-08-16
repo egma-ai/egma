@@ -68,7 +68,7 @@ export function RetellAgentScreen({ state, onAnswer }: RetellAgentScreenProps) {
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       <Text>{`That key reaches ${agents.length} agents. Which one do you want tested?`}</Text>
       <Box height={1} />

@@ -285,7 +285,7 @@ describe("starting a run", () => {
     expect(unknown.body).toEqual({
       error: "unprocessable",
       message:
-        `there is no test version ${missing} on this egma. Push the test ` +
+        `there is no test version ${missing} on this Egma. Push the test ` +
         `first, or read the test and pin the version_id it names now.`,
     });
 
@@ -370,7 +370,7 @@ describe("starting a run", () => {
       error: "not_found",
       message:
         `connection ${connectionId} is not on agent ${other.agentId}. Name ` +
-        `the agent that connection is on, or leave the agent out and egma ` +
+        `the agent that connection is on, or leave the agent out and Egma ` +
         `takes the connection's own.`,
     });
 
@@ -387,7 +387,7 @@ describe("starting a run", () => {
       message:
         `"${connectionId}" is not an agent id, so no connection is on it. ` +
         `Name the agent that connection is on, or leave the agent out and ` +
-        `egma takes the connection's own.`,
+        `Egma takes the connection's own.`,
     });
 
     // And a connection id that could not be one either.
@@ -420,7 +420,7 @@ describe("starting a run", () => {
         error: "unprocessable",
         message:
           "a run is conducted over a connection, and this request named " +
-          "none. Send connection with the con_ id of the way egma should " +
+          "none. Send connection with the con_ id of the way Egma should " +
           "reach the agent — registering the agent answered with one.",
       });
     }
@@ -565,7 +565,7 @@ describe("starting a run", () => {
     expect(refused.body).toEqual({
       error: "phone_setup_required",
       message:
-        "this egma has not been set up to place phone calls, so nothing was " +
+        "this Egma has not been set up to place phone calls, so nothing was " +
         "dialled and nothing was charged. It is missing the carrier trunk " +
         "and the source number and the text-to-speech provider. Whoever runs " +
         "this platform makes it ready with one command in the platform " +
@@ -687,7 +687,7 @@ describe("starting a run", () => {
       error: "not_authenticated",
       message:
         "this request carried no session and no usable API key. " +
-        "Sign in, or send Authorization: Bearer with an egma key.",
+        "Sign in, or send Authorization: Bearer with an Egma key.",
     });
   });
 });
@@ -712,7 +712,7 @@ describe("the project a run lands in", () => {
       error: "invalid_request",
       message:
         "this organization holds more than one project and this credential " +
-        "names none, so egma cannot tell which project this is about. Send " +
+        "names none, so Egma cannot tell which project this is about. Send " +
         "project with the one you mean, or use a key minted for that project.",
     });
   });

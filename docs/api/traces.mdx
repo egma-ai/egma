@@ -1,16 +1,16 @@
 ---
 title: "Traces: Ingest and Query Conversation Telemetry via OTLP"
 sidebarTitle: "Traces"
-description: "Send OpenTelemetry spans from your voice agent to egma and query them back with time-windowed list and single-trace detail endpoints."
+description: "Send OpenTelemetry spans from your voice agent to Egma and query them back with time-windowed list and single-trace detail endpoints."
 ---
 
-Traces are the raw telemetry record of a conversation — spans emitted by your voice agent as it processes audio, calls tools, and generates responses. egma accepts spans over the standard OTLP/HTTP protocol, so you connect your agent by pointing its OpenTelemetry exporter at egma's ingest endpoint. No custom SDK is required. Once spans arrive, use the read endpoints to list conversations by time window or fetch the full transcript and verdict details for a single trace.
+Traces are the raw telemetry record of a conversation — spans emitted by your voice agent as it processes audio, calls tools, and generates responses. Egma accepts spans over the standard OTLP/HTTP protocol, so you connect your agent by pointing its OpenTelemetry exporter at Egma's ingest endpoint. No custom SDK is required. Once spans arrive, use the read endpoints to list conversations by time window or fetch the full transcript and verdict details for a single trace.
 
 ---
 
 ## Ingest spans
 
-Sends an OTLP export to egma. Use this endpoint as the `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (or equivalent) in your agent's OpenTelemetry configuration.
+Sends an OTLP export to Egma. Use this endpoint as the `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (or equivalent) in your agent's OpenTelemetry configuration.
 
 **`POST /v1/traces`**
 
@@ -43,7 +43,7 @@ Spans that exceed these limits are reported in the OTLP partial-success field �
 
 ### Response
 
-egma returns a standard `ExportTraceServiceResponse`. If any spans were rejected, the `partialSuccess` field contains a count and a reason. A `200` response with an empty body means all spans were accepted.
+Egma returns a standard `ExportTraceServiceResponse`. If any spans were rejected, the `partialSuccess` field contains a count and a reason. A `200` response with an empty body means all spans were accepted.
 
 ```bash title="Send spans (protobuf)"
 curl -X POST https://your-egma-instance/v1/traces \
@@ -60,7 +60,7 @@ curl -X POST https://your-egma-instance/v1/traces \
 ```
 
 <Note>
-  Use your egma instance's API port for telemetry ingest — port **3100** by default — not the web UI port (3101). These may differ in self-hosted deployments. Check your `EGMA_API_URL` environment variable or ask your administrator if you are unsure which port is which.
+  Use your Egma instance's API port for telemetry ingest — port **3100** by default — not the web UI port (3101). These may differ in self-hosted deployments. Check your `EGMA_API_URL` environment variable or ask your administrator if you are unsure which port is which.
 </Note>
 
 <Note>
@@ -108,7 +108,7 @@ Returns a paginated list of trace summaries within a time window, ordered newest
 </ResponseField>
 
 <ResponseField name="window" type="object">
-  The time window as egma read it, formatted to microsecond precision. Use these values to paginate accurately.
+  The time window as Egma read it, formatted to microsecond precision. Use these values to paginate accurately.
 </ResponseField>
 
 ```bash title="List traces in a time window"
@@ -122,7 +122,7 @@ curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-
 ```
 
 <Note>
-  Both `from` and `to` are required. There is no default window — a query without a time bound would scan the entire store, and egma rejects it with a descriptive error asking you to supply both parameters.
+  Both `from` and `to` are required. There is no default window — a query without a time bound would scan the entire store, and Egma rejects it with a descriptive error asking you to supply both parameters.
 </Note>
 
 ### Trace summary fields
@@ -152,7 +152,7 @@ curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-
 </ResponseField>
 
 <ResponseField name="source" type="string">
-  `"simulation"` for runs egma conducted, `"production"` for live traffic from your agent.
+  `"simulation"` for runs Egma conducted, `"production"` for live traffic from your agent.
 </ResponseField>
 
 <ResponseField name="tool_span_count" type="number">
@@ -236,7 +236,7 @@ Returns the full transcript and judgment results for a single trace.
 </ResponseField>
 
 <ResponseField name="simulation_id" type="string | null">
-  The egma simulation ID for this trace, if it was conducted by egma's simulator. `null` for production traces.
+  The Egma simulation ID for this trace, if it was conducted by Egma's simulator. `null` for production traces.
 </ResponseField>
 
 <ResponseField name="verdicts" type="array">

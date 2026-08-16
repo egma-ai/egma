@@ -208,11 +208,11 @@ function unreadable(
 ): string {
   const ended = `it ended ${simulation.endingReason ?? "without a recorded reason"}`;
   if (trace === undefined) {
-    return `egma holds no record of this conversation — ${ended}, and no telemetry for it ever arrived — so there was nothing to judge.`;
+    return `Egma holds no record of this conversation — ${ended}, and no telemetry for it ever arrived — so there was nothing to judge.`;
   }
   return trace.truncated
     ? `${MORE_THAN_ONE_READING} — ${ended}, and ${OVERRAN}`
-    : `egma holds only part of this conversation — ${ended}, and the span that closes its trace never arrived — so there was nothing complete to judge.`;
+    : `Egma holds only part of this conversation — ${ended}, and the span that closes its trace never arrived — so there was nothing complete to judge.`;
 }
 
 /**
@@ -227,7 +227,7 @@ function unreadable(
  * different answers to the same problem.
  */
 const MORE_THAN_ONE_READING =
-  "egma holds more of this conversation than one reading returns";
+  "Egma holds more of this conversation than one reading returns";
 
 const OVERRAN =
   "its trace overran the reader's span limit — so judging the readable part " +

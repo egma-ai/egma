@@ -505,7 +505,7 @@ describe("a livekit connection that is half of each shape", () => {
       "a livekit connection whose config names a tokenEndpoint asks that " +
         "endpoint for every token, so it holds no key pair of its own: its " +
         "credentials are the endpoint's auth headers, shaped { headers }. " +
-        "Send those, or drop the tokenEndpoint and egma will mint its own " +
+        "Send those, or drop the tokenEndpoint and Egma will mint its own " +
         "tokens from an apiKey and apiSecret.",
     );
   });
@@ -514,7 +514,7 @@ describe("a livekit connection that is half of each shape", () => {
     expect(() => validCredentials("livekit", { url: A_URL }, HEADERS)).toThrow(
       "a livekit connection mints its own tokens, so it needs the project's " +
         "apiKey and apiSecret. Send the pair, or name a tokenEndpoint in the " +
-        "config and egma will ask that endpoint for a token instead — which " +
+        "config and Egma will ask that endpoint for a token instead — which " +
         "is the shape where the project's secret never leaves the customer.",
     );
   });
@@ -558,9 +558,9 @@ describe("what the shipped simulator can conduct", () => {
     // on a name the registry does not hold — which is exactly the case the
     // refusal is kept for.
     expect(noSimulatorAdapterMessage("vapi")).toBe(
-      "egma has no simulator adapter for a vapi connection yet, so it will " +
+      "Egma has no simulator adapter for a vapi connection yet, so it will " +
         "not start a run it cannot conduct. Run these tests over a " +
-        `connection egma conducts today: ${conductableConnectionTypes().join(", ")}.`,
+        `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`,
     );
     expect(conductableConnectionTypes()).toEqual(["retell", "phone", "livekit"]);
   });

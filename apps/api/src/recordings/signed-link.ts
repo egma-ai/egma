@@ -150,7 +150,7 @@ function refuseAnUnsignableReference(reference: string): void {
   ) {
     throw new UnsignableReferenceError(
       `a recording reference cannot start at a separator or walk upwards, ` +
-        `and this one does. Nothing egma writes produces such a reference — ` +
+        `and this one does. Nothing Egma writes produces such a reference — ` +
         `the simulator confines every key before it reports one — so this row ` +
         `was written by something else.`,
     );

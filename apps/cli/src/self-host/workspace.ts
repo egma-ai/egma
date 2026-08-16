@@ -90,13 +90,13 @@ export const BOOTSTRAP_VARIABLES = [
  * person the wrong story about what is in it.
  */
 export const PLATFORM_CONFIG_HEADER = [
-  "egma bootstrap variables — written by `egma self-host`.",
+  "Egma bootstrap variables — written by `egma self-host`.",
   "",
   "This file holds credentials. It is created readable by you and nobody",
   "else, it belongs wherever the rest of this deployment's secrets do, and",
   "it belongs in no repository.",
   "",
-  "The media server's key and secret are egma's own. They are generated when",
+  "The media server's key and secret are Egma's own. They are generated when",
   "this workspace is prepared and never regenerated, because the three",
   "containers that authenticate each other with them hold whatever they were",
   "created with. Nobody chooses them and nobody types them.",
@@ -107,7 +107,7 @@ export const PLATFORM_CONFIG_HEADER = [
   "move to another machine. `egma self-host setup` puts them there.",
   "",
   "A line below naming anything but the variables above was left by an older",
-  "egma. Nothing reads it any more. Clear it once you have run",
+  "Egma version. Nothing reads it any more. Clear it once you have run",
   "`egma self-host setup`.",
 ] as const;
 
@@ -119,7 +119,7 @@ export class NoPlatformWorkspaceError extends Error {
   constructor(startedAt: string) {
     super(
       `this is not a platform workspace: no ${COMPOSE_FILE} here or above ${startedAt}.\n\n` +
-        "A platform workspace is the directory egma's deployment lives in — the " +
+        "A platform workspace is the directory Egma's deployment lives in — the " +
         "checkout that holds its compose file. It is deliberately not your agent " +
         "repository: the platform's carrier and provider credentials belong to " +
         "whoever runs the platform, and an agent repository holds only tests and " +

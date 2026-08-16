@@ -120,7 +120,7 @@ function plain(value: unknown): string {
 
 function refusalIn(status: number, body: Record<string, unknown>): string {
   const said = plain(body["message"]);
-  return said === "" ? `egma answered ${status}` : said;
+  return said === "" ? `Egma answered ${status}` : said;
 }
 
 function agentIn(body: Record<string, unknown>): RegisteredAgent | null {
@@ -241,7 +241,7 @@ async function askPlatform(
   } catch {
     return {
       kind: "unreachable",
-      reason: `egma at ${options.url} did not answer. Check the address, and that the instance is running.`,
+      reason: `Egma at ${options.url} did not answer. Check the address, and that the instance is running.`,
     };
   }
 
@@ -352,7 +352,7 @@ export async function readAgent(
   if (typeof held !== "object" || held === null) {
     return {
       kind: "refused",
-      reason: "egma answered without saying what it holds. Check that this egma is up to date.",
+      reason: "Egma answered without saying what it holds. Check that this Egma instance is up to date.",
     };
   }
   const agent = held as Record<string, unknown>;
@@ -416,7 +416,7 @@ export async function addConnection(
   if (written === null) {
     return {
       kind: "refused",
-      reason: "egma answered without saying what it wrote. Check that this egma is up to date.",
+      reason: "Egma answered without saying what it wrote. Check that this Egma instance is up to date.",
     };
   }
   return { kind: "added", connection: written };
@@ -466,7 +466,7 @@ export async function registerAgent(
   if (agent === null || connection === null || result === null) {
     return {
       kind: "refused",
-      reason: "egma answered without saying what it wrote. Check that this egma is up to date.",
+      reason: "Egma answered without saying what it wrote. Check that this Egma instance is up to date.",
     };
   }
 

@@ -5,20 +5,20 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "egma",
+  title: "Egma",
   description: "Trust the voice agent you ship to production.",
   icons: {
     icon: [
       {
-        url: "/brand/egma-mark-light.png",
-        type: "image/png",
-        sizes: "512x512",
+        url: "/brand/egma-mark-light.svg",
+        type: "image/svg+xml",
+        sizes: "any",
         media: "(prefers-color-scheme: light)",
       },
       {
-        url: "/brand/egma-mark-dark.png",
-        type: "image/png",
-        sizes: "512x512",
+        url: "/brand/egma-mark-dark.svg",
+        type: "image/svg+xml",
+        sizes: "any",
         media: "(prefers-color-scheme: dark)",
       },
     ],

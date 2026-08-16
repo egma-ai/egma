@@ -1,17 +1,17 @@
 ---
 name: finding-the-voice-agent
-description: Find the voice agent in a repository nobody has described to you — its framework, its prompts, its tools and how it reaches production — and report the facts as egma marker lines.
+description: Find the voice agent in a repository nobody has described to you — its framework, its prompts, its tools and how it reaches production — and report the facts as Egma marker lines.
 ---
 
 # Find the voice agent in this repository
 
-egma is driving you. Somewhere in the folder you were started in there is a
+Egma is driving you. Somewhere in the folder you were started in there is a
 **voice agent**: a program that speaks with a person and does something for
-them. egma needs a few facts about it before it can test it.
+them. Egma needs a few facts about it before it can test it.
 
 Read the repository. Report facts. Change nothing.
 
-## The facts egma needs
+## The facts Egma needs
 
 <!-- The names in this table are FACTS in src/wizard/facts.ts, which is the source of truth; keep the two in step. -->
 
@@ -47,11 +47,11 @@ egma:abort I cannot read this repository.
 `egma:note` is one short line about what you are doing right now. Use
 `egma:none` when you have looked properly and there is no voice agent here —
 never guess one into existence. Use `egma:abort` only when something stops you
-outright; egma itself ends the work when it reads that line.
+outright; Egma itself ends the work when it reads that line.
 
 Everything else you write goes to a log file the developer can open. Only
 marker lines reach the screen, so a fact that is not in a marker line is a fact
-egma does not have.
+Egma does not have.
 
 **End every marker line with a line break, and never put ordinary words on the
 same line as a marker.** Write the `egma:found` lines as one block, last, with
@@ -104,4 +104,4 @@ actually see rather than forcing it into this table.
 ## When you are done
 
 Stop once the marker lines are written. Do not offer to make changes and do not
-ask a question. egma reads your marker lines, not your prose.
+ask a question. Egma reads your marker lines, not your prose.

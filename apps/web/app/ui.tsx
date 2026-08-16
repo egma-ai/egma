@@ -53,10 +53,10 @@ export function Brand() {
   return (
     <Image
       className={styles.brand}
-      src="/brand/egma-logo.png"
-      alt="egma"
-      width={146}
-      height={31}
+      src="/brand/egma-wordmark.svg"
+      alt="Egma"
+      width={151}
+      height={41}
       priority
     />
   );

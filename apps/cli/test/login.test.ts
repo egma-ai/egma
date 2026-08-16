@@ -402,7 +402,7 @@ describe("coming back from a browser on another machine", () => {
 
     await login({ watched, paste: pasteAfterApproving(watched, held) });
 
-    expect(watched.said.some((line) => line.includes("not an egma code"))).toBe(true);
+    expect(watched.said.some((line) => line.includes("not an Egma code"))).toBe(true);
   });
 });
 

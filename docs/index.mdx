@@ -1,19 +1,19 @@
 ---
-title: "egma: Open-Source Simulation Testing for Voice Agents"
-description: "Test, monitor, and improve your voice agents with egma's platform for simulation testing, production telemetry, and automated verdict grading."
+title: "Egma: Open-Source Simulation Testing for Voice Agents"
+description: "Test, monitor, and improve your voice agents with Egma's platform for simulation testing, production telemetry, and automated verdict grading."
 ---
 
-egma is the open-source platform purpose-built for teams shipping voice agents. It lets you simulate real conversations before they reach production, monitor live calls through OpenTelemetry, and automatically grade every exchange against the behaviors you expect — so you ship with confidence rather than guesswork.
+Egma is the open-source platform purpose-built for teams shipping voice agents. It lets you simulate real conversations before they reach production, monitor live calls through OpenTelemetry, and automatically grade every exchange against the behaviors you expect — so you ship with confidence rather than guesswork.
 
 <CardGroup cols={2}>
   <Card title="Introduction" icon="book-open" href="/introduction">
-    Learn what egma is, how it works, and which platforms it integrates with.
+    Learn what Egma is, how it works, and which platforms it integrates with.
   </Card>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Run your first simulation test in minutes using the egma CLI wizard.
+    Run your first simulation test in minutes using the Egma CLI wizard.
   </Card>
   <Card title="CLI Reference" icon="terminal" href="/cli/overview">
-    Every command, option, and exit code the egma CLI exposes.
+    Every command, option, and exit code the Egma CLI exposes.
   </Card>
   <Card title="API Reference" icon="code" href="/api/overview">
     REST endpoints for traces, runs, verdicts, and platform configuration.
@@ -24,14 +24,14 @@ egma is the open-source platform purpose-built for teams shipping voice agents. 
 
 <Steps>
   <Step title="Install the CLI">
-    Run the egma wizard from your voice agent's repository. No global install required — `npx` handles it.
+    Run the Egma wizard from your voice agent's repository. No global install required — `npx` handles it.
 
     ```bash
     npx @egma/cli
     ```
   </Step>
   <Step title="Connect your agent">
-    egma signs this machine in with a short browser approval, then asks for your Retell or LiveKit credentials to register your agent. Your key is sent once, sealed on the platform, and never written to a file.
+    Egma signs this machine in with a short browser approval, then asks for your Retell or LiveKit credentials to register your agent. Your key is sent once, sealed on the platform, and never written to a file.
 
     ```bash
     egma connect
@@ -45,7 +45,7 @@ egma is the open-source platform purpose-built for teams shipping voice agents. 
     ```
   </Step>
   <Step title="Run tests">
-    Push your tests to egma and start a run. The simulator conducts real conversations with your agent; the grader writes one verdict per expected behavior as each call finishes.
+    Push your tests to Egma and start a run. The simulator conducts real conversations with your agent; the grader writes one verdict per expected behavior as each call finishes.
 
     ```bash
     egma run
@@ -60,6 +60,6 @@ egma is the open-source platform purpose-built for teams shipping voice agents. 
     Test Retell voice agents over text or phone, with your live prompt and tools.
   </Card>
   <Card title="Python SDK" icon="python" href="/integrations/python-sdk">
-    Install the egma SDK in your LiveKit agent to handle tool mocking during simulations.
+    Install the Egma SDK in your LiveKit agent to handle tool mocking during simulations.
   </Card>
 </CardGroup>

@@ -73,13 +73,13 @@ function reportFor(outcome: ConnectOutcome, signal: AbortSignal): ExitReport {
       return {
         kind: "failed",
         reason:
-          "nobody said whether egma should reach this agent by text or by phone, " +
+          "nobody said whether Egma should reach this agent by text or by phone, " +
           "so nothing was created.",
       };
     case "no-numbers":
       return { kind: "failed", reason: NO_NUMBERS_LINE };
     case "unchosen-number":
-      return { kind: "failed", reason: "nobody said which number egma should dial." };
+      return { kind: "failed", reason: "nobody said which number Egma should dial." };
     case "interrupted":
       return stopReport(signal, null);
     case "failed":
@@ -126,7 +126,7 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
     return {
       report: {
         kind: "failed",
-        reason: "this machine is not signed in to egma. Run egma login, then try again.",
+        reason: "this machine is not signed in to Egma. Run egma login, then try again.",
       },
       connected: null,
     };
@@ -223,10 +223,10 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
     // The number, said on its own line and before the connection line, because
     // it is the one fact on this screen that will cost somebody money.
     if (outcome.number !== null) {
-      ui.pushStatus(`${ACTION_MARK} egma will dial ${outcome.number}.`);
+      ui.pushStatus(`${ACTION_MARK} Egma will dial ${outcome.number}.`);
     }
     ui.pushStatus(
-      `${ACTION_MARK} ${registered.agent.name} is on egma, reachable over ${registered.connection.name} (${registered.connection.type} ${registered.connection.modality}).`,
+      `${ACTION_MARK} ${registered.agent.name} is on Egma, reachable over ${registered.connection.name} (${registered.connection.type} ${registered.connection.modality}).`,
     );
     ui.pushStatus(
       `${DETAIL_MARK} agent ${outcome.registration.agent}, connection ${outcome.registration.connection}`,

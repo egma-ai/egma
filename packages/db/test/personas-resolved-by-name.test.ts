@@ -129,7 +129,7 @@ describe("a name this project cannot answer", () => {
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Nobody At All"]),
     ).rejects.toThrow(
-      'egma has no persona called "Nobody At All" in this project. Name a persona this project already has, or name none and egma takes the project\'s default.',
+      'Egma has no persona called "Nobody At All" in this project. Name a persona this project already has, or name none and Egma takes the project\'s default.',
     );
   });
 
@@ -205,7 +205,7 @@ describe("a name that is not one persona", () => {
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Twice Over"]),
     ).rejects.toThrow(
-      'this project has more than one persona called "Twice Over", so egma cannot tell which one this test means. Name the one you want by its prs_ identifier.',
+      'this project has more than one persona called "Twice Over", so Egma cannot tell which one this test means. Name the one you want by its prs_ identifier.',
     );
   });
 

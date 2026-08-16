@@ -181,7 +181,7 @@ describe("creating a test", () => {
     expect(refused.body).toEqual({
       error: "unprocessable",
       message:
-        'egma has no persona called "Impatient Rita" in this project. Name a persona this project already has, or name none and egma takes the project\'s default.',
+        'Egma has no persona called "Impatient Rita" in this project. Name a persona this project already has, or name none and Egma takes the project\'s default.',
     });
     expect(platform.tests.tests).toEqual([]);
   });
@@ -227,7 +227,7 @@ describe("creating a test", () => {
       message:
         "personas is the list of people who call about this test, by name. " +
         'Send it as a list of text, like ["impatient-caller"], or leave it ' +
-        "out and egma takes the project's default persona.",
+        "out and Egma takes the project's default persona.",
     });
 
     expect(platform.tests.tests).toEqual([]);
@@ -451,7 +451,7 @@ describe("a mock tool the folder authors", () => {
     expect(refused.body).toEqual({
       error: "not_found",
       message:
-        `there is no mock tool ${theirs} on this egma. List the mock tools to ` +
+        `there is no mock tool ${theirs} on this Egma. List the mock tools to ` +
         `see what this project answers for.`,
     });
   });
@@ -595,7 +595,7 @@ describe("the door every group is behind", () => {
       error: "not_authenticated",
       message:
         "this request carried no session and no usable API key. " +
-        "Sign in, or send Authorization: Bearer with an egma key.",
+        "Sign in, or send Authorization: Bearer with an Egma key.",
     };
 
     for (const [method, path, payload] of [
@@ -731,7 +731,7 @@ describe("one frozen version", () => {
     expect(refused.status).toBe(404);
     expect(refused.body).toEqual({
       error: "not_found",
-      message: `there is no test version ${missing} on this egma. List the tests to see the version each of them stands on now.`,
+      message: `there is no test version ${missing} on this Egma. List the tests to see the version each of them stands on now.`,
     });
   });
 });
@@ -803,7 +803,7 @@ describe("editing a test", () => {
     expect(refused.status).toBe(404);
     expect(refused.body).toEqual({
       error: "not_found",
-      message: `there is no test ${theirs} on this egma. List the tests to see what this project holds, or create this one instead of editing it.`,
+      message: `there is no test ${theirs} on this Egma. List the tests to see what this project holds, or create this one instead of editing it.`,
     });
   });
 
@@ -899,7 +899,7 @@ describe("a connection payload its type will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"vapi" is not a connection type egma knows; expected one of retell, phone, livekit',
+        '"vapi" is not a connection type Egma knows; expected one of retell, phone, livekit',
     });
     expect(platform.registered.agents).toHaveLength(0);
   });
@@ -981,7 +981,7 @@ describe("a connection payload its type will not take", () => {
       error: "invalid_request",
       message:
         "a phone connection takes no credential: the customer supplies a public number, " +
-        "and egma dials it with its own telephony configuration",
+        "and Egma dials it with its own telephony configuration",
     });
   });
 
@@ -1016,7 +1016,7 @@ describe("a connection payload its type will not take", () => {
         "a livekit connection whose config names a tokenEndpoint asks that " +
         "endpoint for every token, so it holds no key pair of its own: its " +
         "credentials are the endpoint's auth headers, shaped { headers }. " +
-        "Send those, or drop the tokenEndpoint and egma will mint its own " +
+        "Send those, or drop the tokenEndpoint and Egma will mint its own " +
         "tokens from an apiKey and apiSecret.",
     });
   });
@@ -1037,7 +1037,7 @@ describe("a connection payload its type will not take", () => {
       message:
         "a livekit connection mints its own tokens, so it needs the " +
         "project's apiKey and apiSecret. Send the pair, or name a " +
-        "tokenEndpoint in the config and egma will ask that endpoint for a " +
+        "tokenEndpoint in the config and Egma will ask that endpoint for a " +
         "token instead — which is the shape where the project's secret " +
         "never leaves the customer.",
     });
@@ -1263,10 +1263,10 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "egma no longer keeps what was pulled from the provider, so a " +
+        "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
         "description, project, connection; the agent's content stays at the " +
-        "provider, where egma reads it fresh rather than out of a copy that " +
+        "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });
     expect(platform.registered.agents).toHaveLength(0);
@@ -1282,10 +1282,10 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "egma no longer keeps what was pulled from the provider, so a " +
+        "Egma no longer keeps what was pulled from the provider, so a " +
         'connection has no "pulled" key. Drop it and send name, type, ' +
         "modality, environment, config, credentials; the agent's content " +
-        "stays at the provider, where egma reads it fresh rather than out of " +
+        "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
   });
@@ -1508,7 +1508,7 @@ describe("starting a run", () => {
     expect(unknown.body).toEqual({
       error: "unprocessable",
       message:
-        `there is no test version ${missing} on this egma. Push the test ` +
+        `there is no test version ${missing} on this Egma. Push the test ` +
         `first, or read the test and pin the version_id it names now.`,
     });
 
@@ -1581,7 +1581,7 @@ describe("starting a run", () => {
       error: "not_found",
       message:
         `connection ${connectionId} is not on agent ${other}. Name ` +
-        `the agent that connection is on, or leave the agent out and egma ` +
+        `the agent that connection is on, or leave the agent out and Egma ` +
         `takes the connection's own.`,
     });
 
@@ -1598,7 +1598,7 @@ describe("starting a run", () => {
       message:
         `"${connectionId}" is not an agent id, so no connection is on it. ` +
         `Name the agent that connection is on, or leave the agent out and ` +
-        `egma takes the connection's own.`,
+        `Egma takes the connection's own.`,
     });
 
     // And a connection id that could not be one either.
@@ -1631,7 +1631,7 @@ describe("starting a run", () => {
         error: "unprocessable",
         message:
           "a run is conducted over a connection, and this request named " +
-          "none. Send connection with the con_ id of the way egma should " +
+          "none. Send connection with the con_ id of the way Egma should " +
           "reach the agent — registering the agent answered with one.",
       });
     }
@@ -1685,7 +1685,7 @@ describe("starting a run", () => {
       error: "unprocessable",
       message:
         "a run is conducted over a connection, and this request named " +
-        "none. Send connection with the con_ id of the way egma should " +
+        "none. Send connection with the con_ id of the way Egma should " +
         "reach the agent — registering the agent answered with one.",
     });
   });

@@ -121,7 +121,7 @@ function validateTraits(traits: PersonaTraits): void {
   const { provider, voiceId, speed } = traits.voice;
   if (!VOICE_PROVIDERS.includes(provider)) {
     throw new Error(
-      `"${provider}" is not a voice provider egma knows; expected one of ${VOICE_PROVIDERS.join(", ")}`,
+      `"${provider}" is not a voice provider Egma knows; expected one of ${VOICE_PROVIDERS.join(", ")}`,
     );
   }
   if (voiceId.trim() === "") {
@@ -154,7 +154,7 @@ function validateNewPersona(input: NewPersona): void {
 function traitsFromRow(value: unknown, versionId: string): PersonaTraits {
   const malformed = () =>
     new Error(
-      `version ${versionId} holds traits in a shape egma never writes; the row needs repairing before anybody can read it`,
+      `version ${versionId} holds traits in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
 
   if (typeof value !== "object" || value === null) throw malformed();
@@ -614,12 +614,12 @@ export async function resolvePersonaNames(
       throw new UnprocessableInputError(
         isId("prs", entry)
           ? `there is no persona ${entry} in this project`
-          : `egma has no persona called "${entry}" in this project. Name a persona this project already has, or name none and egma takes the project's default.`,
+          : `Egma has no persona called "${entry}" in this project. Name a persona this project already has, or name none and Egma takes the project's default.`,
       );
     }
     if (found.length > 1) {
       throw new UnprocessableInputError(
-        `this project has more than one persona called "${entry}", so egma cannot tell which one this test means. Name the one you want by its prs_ identifier.`,
+        `this project has more than one persona called "${entry}", so Egma cannot tell which one this test means. Name the one you want by its prs_ identifier.`,
       );
     }
 

@@ -263,7 +263,7 @@ async function writeFiles(
     case "needs-login":
       return {
         kind: "failed",
-        reason: `${result.drivenAgentName} is not logged in, and egma could not hand you to its login. Log in to it, then run egma again.`,
+        reason: `${result.drivenAgentName} is not logged in, and Egma could not hand you to its login. Log in to it, then run egma again.`,
       };
     case "failed":
       ui.pushStatus(`What ${launch.name} printed is in ${log.file}`);
@@ -377,14 +377,14 @@ async function pushGate(
     ui.pushStatus(`${DETAIL_MARK} ${test.versionId}`);
   }
   for (const turned of report.turnedAway) {
-    ui.pushStatus(`${FAILURE_MARK} egma would not take ${turned.shown}: ${turned.reason}`);
+    ui.pushStatus(`${FAILURE_MARK} Egma would not take ${turned.shown}: ${turned.reason}`);
   }
   if (report.conflicts.length > 0) {
     const names = report.conflicts.map((conflict) => conflict.name).join(", ");
     return {
       report: {
         kind: "failed",
-        reason: `egma has a newer version of ${names}. Run egma pull, look at what changed, then egma push.`,
+        reason: `Egma has a newer version of ${names}. Run egma pull, look at what changed, then egma push.`,
       },
       pushed: [],
       refused: [],
@@ -451,7 +451,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   const missing = Math.max(howMany - converted.length, 0);
   if (missing === 0) {
     ui.pushStatus(
-      `${ACTION_MARK} ${converted.length} tests came out of your own material, so egma generated none.`,
+      `${ACTION_MARK} ${converted.length} tests came out of your own material, so Egma generated none.`,
     );
   } else {
     const context: GenerationContext = {
@@ -508,7 +508,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     if (gate.rows.length === 0 && refused.length === 0) {
       return ending({
         kind: "failed",
-        reason: `${options.launch.name} wrote no test egma could use. What it printed is in ${options.log.file}.`,
+        reason: `${options.launch.name} wrote no test Egma could use. What it printed is in ${options.log.file}.`,
       });
     }
 

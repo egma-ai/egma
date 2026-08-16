@@ -271,7 +271,7 @@ function knownWord<Value extends string>(
 ): Value {
   if (!(allowed as readonly string[]).includes(value)) {
     throw new UnprocessableInputError(
-      `"${value}" is not a ${what} egma knows; expected one of ${allowed.join(", ")}`,
+      `"${value}" is not a ${what} Egma knows; expected one of ${allowed.join(", ")}`,
     );
   }
   return value as Value;
@@ -369,7 +369,7 @@ async function definitionOf(
 
   if (!Array.isArray(row.params)) {
     throw new Error(
-      `library entry ${row.id} holds parameters in a shape egma never writes; the row needs repairing before anybody can use it`,
+      `library entry ${row.id} holds parameters in a shape Egma never writes; the row needs repairing before anybody can use it`,
     );
   }
 
@@ -412,8 +412,8 @@ async function definitionOf(
 function validMeasure(measure: string, parameter: string): string {
   if (!isSpanDerivedMeasure(measure)) {
     const named = isCatalogedMeasure(measure)
-      ? `"${measure}" is a measure egma records, and no span carries it — it arrives on the transition that ends a simulation — so a grader reading a conversation could never find it`
-      : `"${measure}" is not a measure egma computes, so a grader reading it could never fire`;
+      ? `"${measure}" is a measure Egma records, and no span carries it — it arrives on the transition that ends a simulation — so a grader reading a conversation could never find it`
+      : `"${measure}" is not a measure Egma computes, so a grader reading it could never fire`;
     throw new UnprocessableInputError(
       `${named}; ${parameter} takes one of ${SPAN_DERIVED_MEASURES.join(", ")}, and the measure catalog (${MEASURE_CATALOG_DOCUMENT}, version ${MEASURE_CATALOG_VERSION}) says what each of them means and how each is computed from the spans`,
     );
@@ -708,7 +708,7 @@ function wouldLoseAssertions(
 function configFromRow(value: unknown, versionId: string): GraderConfig {
   const malformed = (): Error =>
     new Error(
-      `version ${versionId} holds a config in a shape egma never writes; the row needs repairing before anybody can read it`,
+      `version ${versionId} holds a config in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
 
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -741,7 +741,7 @@ function judgeModelFromRow(
   if (value === null || value === undefined) return null;
   const malformed = (): Error =>
     new Error(
-      `version ${versionId} holds a judge model in a shape egma never writes; the row needs repairing before anybody can read it`,
+      `version ${versionId} holds a judge model in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
 
   if (typeof value !== "object" || Array.isArray(value)) throw malformed();

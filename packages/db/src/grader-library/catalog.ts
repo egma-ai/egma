@@ -281,7 +281,7 @@ export const GRADER_LIBRARY_CATALOG: readonly PredefinedGrader[] = [
     id: PREDEFINED_GRADERS.latency,
     name: "latency",
     description:
-      "Checks a measure of how fast the agent answered against a bound you choose. Computed from the conversation's spans by egma's own engine, with no model call anywhere — the same numbers the metrics display shows.",
+      "Checks a measure of how fast the agent answered against a bound you choose. Computed from the conversation's spans by Egma's own engine, with no model call anywhere — the same numbers the metrics display shows.",
     type: "code",
     prompt: null,
     params: [

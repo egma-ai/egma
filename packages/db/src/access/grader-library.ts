@@ -295,7 +295,7 @@ function ownerOf(organizationId: string | null): LibraryOwner {
 function parametersFromRow(value: unknown, id: string): readonly LibraryParameter[] {
   if (!Array.isArray(value)) {
     throw new Error(
-      `library entry ${id} holds parameters in a shape egma never writes; the row needs repairing before anybody can read it`,
+      `library entry ${id} holds parameters in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
   }
   return value as readonly LibraryParameter[];

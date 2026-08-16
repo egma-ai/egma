@@ -46,13 +46,13 @@ function toPaste(): string[] {
 /** What a developer with no drivable coding agent is given instead. */
 export function pasteFallbackMessage(): string {
   return [
-    "egma could not reach a coding agent on this machine that it can drive.",
+    "Egma could not reach a coding agent on this machine that it can drive.",
     "",
     "Open the coding agent you use, and paste this into it:",
     "",
     ...toPaste(),
     "",
-    "Then run egma again from a machine with a coding agent it can start. egma",
+    "Then run egma again from a machine with a coding agent it can start. Egma",
     "drives Claude Code and Codex today, and every agent the protocol registry",
     "publishes as a package.",
   ].join("\n");

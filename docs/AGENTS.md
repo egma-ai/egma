@@ -23,6 +23,8 @@ Do not use `eval`, `evaluator`, `digital human`, or `session` for a simulation.
 
 ## Writing style
 
+- Write the product name as **Egma** in prose and interface text. Use lowercase
+  `egma` only for commands, packages, URLs, paths, identifiers, and literal values.
 - Use active voice and address the reader as “you.”
 - Keep sentences short and direct.
 - Use sentence case for headings.

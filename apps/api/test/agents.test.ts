@@ -245,7 +245,7 @@ describe("a connection payload its type will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"vapi" is not a connection type egma knows; expected one of retell, phone, livekit',
+        '"vapi" is not a connection type Egma knows; expected one of retell, phone, livekit',
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -559,7 +559,7 @@ describe("a livekit connection", () => {
       message:
         "a livekit connection mints its own tokens, so it needs the " +
         "project's apiKey and apiSecret. Send the pair, or name a " +
-        "tokenEndpoint in the config and egma will ask that endpoint for a " +
+        "tokenEndpoint in the config and Egma will ask that endpoint for a " +
         "token instead — which is the shape where the project's secret " +
         "never leaves the customer.",
     },
@@ -576,7 +576,7 @@ describe("a livekit connection", () => {
         "a livekit connection whose config names a tokenEndpoint asks that " +
         "endpoint for every token, so it holds no key pair of its own: its " +
         "credentials are the endpoint's auth headers, shaped { headers }. " +
-        "Send those, or drop the tokenEndpoint and egma will mint its own " +
+        "Send those, or drop the tokenEndpoint and Egma will mint its own " +
         "tokens from an apiKey and apiSecret.",
     },
     {
@@ -588,13 +588,13 @@ describe("a livekit connection", () => {
       message:
         "a livekit connection mints its own tokens, so it needs the " +
         "project's apiKey and apiSecret. Send the pair, or name a " +
-        "tokenEndpoint in the config and egma will ask that endpoint for a " +
+        "tokenEndpoint in the config and Egma will ask that endpoint for a " +
         "token instead — which is the shape where the project's secret " +
         "never leaves the customer.",
     },
     {
       // The two URL keys pasted the wrong way round: egma POSTs to this one.
-      named: "a token endpoint in a scheme egma cannot post to",
+      named: "a token endpoint in a scheme Egma cannot post to",
       slug: "bad_token_endpoint",
       payload: {
         config: {
@@ -1008,10 +1008,10 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "egma no longer keeps what was pulled from the provider, so a " +
+        "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
         "description, project, connection; the agent's content stays at the " +
-        "provider, where egma reads it fresh rather than out of a copy that " +
+        "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });
     expect(await agentRowCount()).toBe(0);
@@ -1038,10 +1038,10 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "egma no longer keeps what was pulled from the provider, so a " +
+        "Egma no longer keeps what was pulled from the provider, so a " +
         'connection has no "pulled" key. Drop it and send name, type, ' +
         "modality, environment, config, credentials; the agent's content " +
-        "stays at the provider, where egma reads it fresh rather than out of " +
+        "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
   });
@@ -1454,7 +1454,7 @@ describe("the project a request names", () => {
       error: "invalid_request",
       message:
         "this organization holds more than one project and this credential " +
-        "names none, so egma cannot tell which project this is about. Send " +
+        "names none, so Egma cannot tell which project this is about. Send " +
         "project with the one you mean, or use a key minted for that project.",
     });
 
@@ -1567,7 +1567,7 @@ describe("a request egma cannot place", () => {
       error: "not_authenticated",
       message:
         "this request carried no session and no usable API key. " +
-        "Sign in, or send Authorization: Bearer with an egma key.",
+        "Sign in, or send Authorization: Bearer with an Egma key.",
     };
 
     // A body that would be refused twice over if anything read it: an unknown

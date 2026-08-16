@@ -120,7 +120,7 @@ export async function listen(
   // and Postgres has no parameter position for one. The channel names are this
   // module's own constants, never a caller's string.
   if (!/^[a-z_][a-z0-9_]*$/.test(channel)) {
-    throw new Error(`"${channel}" is not a channel name egma raises`);
+    throw new Error(`"${channel}" is not a channel name Egma raises`);
   }
 
   let closed = false;

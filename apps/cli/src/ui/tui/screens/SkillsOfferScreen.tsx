@@ -56,10 +56,10 @@ export function SkillsOfferScreen({ places, onAnswer }: SkillsOfferScreenProps) 
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-      <Text bold>egma</Text>
+      <Text bold>Egma</Text>
       <Box height={1} />
       <Text>
-        {`Install the egma skill into ${places.name}, so it can drive egma on its own next time?`}
+        {`Install the Egma skill into ${places.name}, so it can drive Egma on its own next time?`}
       </Text>
       <Box height={1} />
       {/* Said before anything is written, because a path a developer reads
@@ -68,7 +68,7 @@ export function SkillsOfferScreen({ places, onAnswer }: SkillsOfferScreenProps) 
       <Text dimColor>{`[g] writes ${places.global}`}</Text>
       <Text dimColor>[s] writes nothing at all</Text>
       <Box height={1} />
-      <Text dimColor>egma writes the one file itself. Nothing is downloaded.</Text>
+      <Text dimColor>Egma writes the one file itself. Nothing is downloaded.</Text>
       <Box height={1} />
       <Text dimColor>{hintBar(bindings)}</Text>
     </Box>

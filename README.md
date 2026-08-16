@@ -1,4 +1,4 @@
-# egma
+# Egma
 
 The first open-source platform purpose-built to help teams shipping voice agents
 gain trust in the agent they ship to production.
@@ -42,10 +42,10 @@ read the source, and nothing anywhere said so. A start missing one now stops
 with that variable's name and how to make one, before a single container is
 created.
 
-The first `up` in a workspace also **generates the credential egma's media
+The first `up` in a workspace also **generates the credential Egma's media
 server, its simulator and its SIP gateway authenticate each other with**, and
 writes it to `.egma-platform/platform.env`. You never choose it and never type
-it: it is a password between egma's own parts, in the same class as the
+it: it is a password between Egma's own parts, in the same class as the
 Postgres password. A pair that is already there is left exactly as it is, so
 starting the platform again never locks a running deployment out of itself.
 There is deliberately no default for it anywhere in this repository — a
@@ -64,7 +64,7 @@ secret, and the address this platform answers as.** The first two are in
 `.egma-platform/platform.env`, nothing points compose at that file, and a
 container reads that pair when it is *created* — so it cannot come from the
 platform's database. The pair has no default anywhere, deliberately, so a
-deployment never runs on a credential published in this repository. `egma
+deployment never runs on a credential published in this repository. `Egma
 self-host up` reads the file, hands the pair over, and sets `EGMA_BASE_URL` to
 the address it prints, which is why it is the way to start this platform.
 
@@ -139,7 +139,7 @@ honest rather than fussy.** A platform with no carrier runs text simulations
 perfectly well, so it is reported as its own fact beside the whole-platform one.
 
 **The Twilio Auth Token is used by that command and never kept.** What a running
-egma holds is a SIP credential that can authenticate one trunk and do nothing
+Egma holds is a SIP credential that can authenticate one trunk and do nothing
 else on the account.
 
 *Upgrading from a release that used `egma self-host phone setup`:* your settings
@@ -170,7 +170,7 @@ deployment this page documents. What the deployment *cannot* invent has no
 default at all: its own secrets, and its own address. Those are the ten marked
 REQUIRED in `.env.example`, and a start missing one of them is refused by name.
 Per-container tuning keeps its defaults too, because how many simulations one
-simulator takes at once is a property of your machine rather than of egma.
+simulator takes at once is a property of your machine rather than of Egma.
 
 **`EGMA_AUTH_SECRET` signs session cookies and the API refuses to start without
 one.** It has no default: one written into this repository is one every reader
@@ -186,7 +186,7 @@ to their own machine.
 
 *Upgrading:* a value carrying a path, query, fragment or credentials is now
 refused when the API starts, where it used to have its trailing slashes trimmed
-and the rest kept. Serving egma under a subpath such as
+and the rest kept. Serving Egma under a subpath such as
 `https://egma.example/egma` never worked — the API answers at the root of this
 address — so the fix is to drop everything after the port. The startup message
 names the part to remove.
@@ -194,7 +194,7 @@ names the part to remove.
 **`EGMA_BLOB_PUBLIC_URL` is the address *a browser* reaches the recording store
 at, and it is set at the same moment as the one above.** A voice simulation's
 recording is played by the browser fetching it from the object store directly,
-using a short-lived link the API signs; the audio never travels through egma,
+using a short-lived link the API signs; the audio never travels through Egma,
 which is what makes dragging the scrubber cost nothing. A signature covers the
 host it was made for — so if this names the address the API uses
 (`http://minio:9000`, inside the compose network) rather than the one a browser
@@ -208,16 +208,16 @@ two addresses, and a page served over `https:` may not fetch audio over `http:` 
 every browser blocks that as mixed content before the request is sent, so the
 store is never asked and a perfect signature is never checked. The API refuses to
 start on that pair and names both variables, because the alternative is a player
-that fails with the reason only in the browser's console. An `http:` egma reading
+that fails with the reason only in the browser's console. An `http:` Egma reading
 an `https:` store is fine, and both on `http:` is the default deployment.
 
 *A plaintext address here is allowed and is not free.* `http://192.168.1.10:9000`
 works, and it also means the recording — a customer's call audio — and the
 fifteen-minute link that replays it travel readable by anybody who can watch that
 network. `http://localhost:9000`, the default, shows that to nobody. Egma does not
-refuse it, because an egma on `http:` is already handing that same network the
+refuse it, because an Egma on `http:` is already handing that same network the
 session cookie that opens every recording; on a network you do not trust, put the
-store behind the same certificate as egma and set both addresses to `https:`.
+store behind the same certificate as Egma and set both addresses to `https:`.
 
 Leaving it unset is allowed and breaks nothing else: the platform runs, runs run,
 and asking for a recording answers with the name of this variable rather than
@@ -263,7 +263,7 @@ Email is optional, and this is load-bearing rather than a convenience. See
 [Adding a second person](#adding-a-second-person).
 
 **If a busy instance logs `Cannot open epoll descriptor … Too many open
-files`**, ClickHouse has run out of file descriptors rather than egma having a
+files`**, ClickHouse has run out of file descriptors rather than Egma having a
 bug: it keeps one per open part and per connection, and its documented
 requirement is far above what a login shell hands a container. Copy
 `docker-compose.override.yml.example` to `docker-compose.override.yml` and
@@ -299,7 +299,7 @@ node ~/egma/apps/cli/dist/bin.js --url http://localhost:3101
 `~/egma` is this checkout. The published package is `@egma/cli`; the command it installs is `egma`.
 
 It signs that machine in — a short code, approved in the browser you signed up
-in — registers your voice agent together with the way egma reaches it, writes a
+in — registers your voice agent together with the way Egma reaches it, writes a
 first suite of tests with the coding agent you already have, puts them on your
 instance, and starts a run over the exact versions it pushed. Every step is also
 a verb (`egma login`, `egma connect`, `egma push`, `egma run`) that prints one
@@ -326,7 +326,7 @@ pnpm db:up
 pnpm --filter @egma/cli smoke:walk
 ```
 
-They start a whole egma of its own, sign in through a real browser, register,
+They start a whole Egma of its own, sign in through a real browser, register,
 push, run and follow — then print what was proved and what waits.
 
 ## The two services that publish nothing
@@ -402,7 +402,7 @@ the notification raised while every copy happened to be restarting.
 It is handed the deployment's encryption key, because a judged grader runs on
 the project's own judge model and the sealed key has to be replayed to that
 provider — and never a model key of its own, because the judge is always the
-customer's choice, not egma's. `apps/grader/README.md` is the whole table.
+customer's choice, not Egma's. `apps/grader/README.md` is the whole table.
 
 ### Watching a simulator without a control plane
 
@@ -437,7 +437,7 @@ so an agent behind a number is tested over the exact path its customers dial.
 Two things have to be true for that. The simulator needs a **media bridge**
 that turns a phone call into a room it can join, and it needs a **SIP trunk**
 that carries the call to the phone network. The trunk is yours, from whatever
-carrier you already pay; egma is never in that relationship. The bridge is
+carrier you already pay; Egma is never in that relationship. The bridge is
 LiveKit, and it is already running: the LiveKit server, its SIP gateway and the
 Redis they find each other through are part of the default deployment. There is
 no overlay to ask for by name.
@@ -523,7 +523,7 @@ cannot reuse is the password — Twilio hands one out once and never again — s
 re-run mints another and tells Twilio, which is what makes the configuration it
 writes always usable rather than usable only the first time.
 
-**The number must already be on your account.** egma never searches the
+**The number must already be on your account.** Egma never searches the
 catalogue, buys, ports or registers one; if the number you name is not there, it
 says so and stops before creating anything at all.
 
@@ -570,17 +570,17 @@ no platform to be handed anything by, so there set `EGMA_SIMULATOR_TTS_PROVIDER`
 before you expect a conversation.
 
 **A phone line is 8 kHz and OpenAI returns 24 kHz whatever is asked of it**, so
-egma converts what it receives down to the band the line really carries. That
+Egma converts what it receives down to the band the line really carries. That
 conversion is not decoration: audio relabelled instead of converted is a voice
 three times too deep and three times too slow, and every measurement taken off
 it is wrong by the same factor.
 
 What a simulation's record stamps as its band is read off the frames that
-arrived rather than copied from a constant in egma — but be clear about what
+arrived rather than copied from a constant in Egma — but be clear about what
 that does and does not prove. The bridge resamples what the carrier sends down
-to the band the pipeline was assembled at *before* egma sees a frame, so on a
+to the band the pipeline was assembled at *before* Egma sees a frame, so on a
 phone call the measured band is 8 kHz whether the carrier negotiated narrowband
-or G.722. The measurement catches egma's own path going wrong; it cannot report
+or G.722. The measurement catches Egma's own path going wrong; it cannot report
 what the carrier chose. That is the safe direction — a wideband leg is
 understated rather than a narrowband one overstated — and it is the reason a
 band is never compared across connection types.
@@ -594,7 +594,7 @@ reads exactly like a wrong one.
 ## Testing a LiveKit agent in its own room
 
 A phone number is one way to reach an agent. A LiveKit agent has a shorter one:
-it is a worker waiting to be given a room, so egma makes a room in **your**
+it is a worker waiting to be given a room, so Egma makes a room in **your**
 LiveKit project, joins it, asks for your worker, and holds the conversation
 there. No trunk, no carrier, no number — and no bridge to host, because the room
 *is* the meeting place.
@@ -602,10 +602,10 @@ there. No trunk, no carrier, no number — and no bridge to host, because the ro
 What that takes is the three variables already in your agent's own environment:
 its LiveKit URL, API key and API secret, plus the agent's name if your worker
 registers one. They go on the connection rather than into this deployment's
-environment, because the project is yours and not egma's.
+environment, because the project is yours and not Egma's.
 
 [`fixtures/livekit-dumb-agent`](fixtures/livekit-dumb-agent) is a deliberately
-boring agent to try this path against before you point egma at a real one. For
+boring agent to try this path against before you point Egma at a real one. For
 teams that will not hand a testing tool their project's key pair, the
 token-endpoint mode keeps the secret on your side: your service mints each
 room's token.
@@ -696,7 +696,7 @@ packages/simulation-contract
                 simulator: a schema per direction, golden fixtures beside
                 them, and the suite that holds both to the fixtures.
 sdks/python     The package a customer installs inside their own LiveKit
-                agent, so egma can answer for the agent's tools while a
+                agent, so Egma can answer for the agent's tools while a
                 simulation runs and touch nothing anywhere else. Published
                 to PyPI as `egma`. Own toolchain (uv); see its README.
 ```
@@ -710,9 +710,9 @@ nothing a self-hoster does not run.
 ## Authentication
 
 An auth provider answers one question: who is this person, and are they logged
-in. Everything past the front door is egma's — organizations, projects,
-membership, invitations, API keys and every permission check are egma's own
-tables with egma's own foreign keys.
+in. Everything past the front door is Egma's — organizations, projects,
+membership, invitations, API keys and every permission check are Egma's own
+tables with Egma's own foreign keys.
 
 That line is held by two build rules on top of the ones above:
 
@@ -720,7 +720,7 @@ That line is held by two build rules on top of the ones above:
   may import the provider's package.** Everything else sees the four-call seam
   in `apps/api/src/auth/seam.ts`. A third file naming the provider is porting
   cost paid later by somebody who did not choose it.
-- **egma writes the DDL for the provider's tables** and its migrator is not
+- **Egma writes the DDL for the provider's tables** and its migrator is not
   wired up. It reads and writes `user`, `session`, `account`, `verification` and
   `device_code`; it cannot alter them.
 
@@ -769,8 +769,8 @@ product to most of an instance.
 
 ## Sending an agent's traces
 
-egma listens on the OpenTelemetry endpoint your agent already knows how to
-export to. Point it at this instance with an egma key and write no integration
+Egma listens on the OpenTelemetry endpoint your agent already knows how to
+export to. Point it at this instance with an Egma key and write no integration
 code:
 
 ```bash
@@ -786,7 +786,7 @@ whole variable, and the failure looks like an agent that exports nothing.
 
 **Point an exporter at the API itself, and not at the pages.** On a self-host
 that is the API's own port — `http://localhost:3100` above, or whatever address
-you publish it on. On hosted egma it is `https://api.egma.ai`, not
+you publish it on. On hosted Egma it is `https://api.egma.ai`, not
 `https://app.egma.ai`.
 
 The one-origin rule further up is about a browser: the pages proxy the API so
@@ -811,7 +811,7 @@ A few things worth knowing about what happens next:
   and **those spans do not appear in the dashboard**, because a browser session
   reads the project it is acting in. Mint the exporter's key against a project
   and the two agree.
-- **The ids are yours.** egma stores the trace and span ids that arrived and
+- **The ids are yours.** Egma stores the trace and span ids that arrived and
   mints neither; a span carrying no usable id is reported back as rejected
   rather than given one.
 - **Nothing is invented and nothing is dropped.** One span in is one row; what
@@ -831,7 +831,7 @@ A few things worth knowing about what happens next:
 The same telemetry path works with a development server on your machine or
 LiveKit Cloud.
 
-Spans egma will not store are reported in the response's partial-success field
+Spans Egma will not store are reported in the response's partial-success field
 rather than as a failure, because the specification is explicit that rejected
 data must not be retried — the rest of the batch is stored. That is also the
 answer when an export asks for more than one request stores: a body stops at
@@ -868,11 +868,11 @@ order they were taken, each carrying the spans that happened inside it, and
 `spans` for everything top-level that is not a turn — the root span above all.
 It takes `from`, `to` and `project_id` on the same terms.
 
-It also carries **`simulation_id`**: which simulation this trace is, when egma
+It also carries **`simulation_id`**: which simulation this trace is, when Egma
 conducted it, and `null` when your own agent had the exchange in production. A
 simulation id and the trace its spans are filed under are the same 128 bits
 written two ways, so this is derived rather than stored — and it is sent only
-for a trace egma conducted, because a production trace converts just as neatly
+for a trace Egma conducted, because a production trace converts just as neatly
 into an id nothing ever minted. It is what lets a reader holding one transcript
 ask for that conversation's recording without looking anything else up.
 
@@ -885,18 +885,18 @@ taken, the span each sample came off, and **`worst`**: the single measurement a
 grader holds against a bound, as `{value, span_id}`. A measure this exchange did
 not produce is **absent** rather than present with nothing in it, so an empty
 list means nothing was measured — which is the ordinary answer for a production
-exchange, since egma files a timing span only for its own simulator's telemetry.
+exchange, since Egma files a timing span only for its own simulator's telemetry.
 
 **`worst` is on the wire because the reduction is part of the answer.** A bound
 is held against one number, and which number that is — the worst measurement
-today, whichever aggregation a grader asks for later — is egma's decision rather
+today, whichever aggregation a grader asks for later — is Egma's decision rather
 than yours to reproduce. Reducing the series yourself would be a second
 implementation of exactly the figure a verdict rests on: right for as long as
 both take the maximum, and wrong with nothing to warn you the day they differ.
 
 **`partial` is true when the reading is a prefix.** A trace over the 10,000-span
 limit comes back as its first spans, so a worst measurement taken over it is the
-worst of the part egma holds and not of the exchange — the slowest turn of a
+worst of the part Egma holds and not of the exchange — the slowest turn of a
 long call is as likely to be past the cut as before it. The grader refuses such a
 conversation outright and writes no verdict from it; this endpoint shows what
 there is and says what it is.
@@ -959,7 +959,7 @@ the model, the speech synthesis, the tool, the turn detection, the speaking —
 and expand a step again for exactly what was recorded about it. Anything that
 failed is marked on the turn before you open it.
 
-**If egma conducted the exchange and it was a voice one, its recording is right
+**If Egma conducted the exchange and it was a voice one, its recording is right
 there** — a player above the turns, both channels, the human on the left and the
 agent on the right. That is where a turn looks wrong, so that is where you can
 settle whether the agent misbehaved or the transcription did. A chat, a call
@@ -983,7 +983,7 @@ Two things about this are worth knowing:
 
 The pages are drawn from the two v1 endpoints above — the same contract you
 would integrate against, on the same origin, authenticated by the same session
-that signed you in — plus one request per transcript that egma conducted, to
+that signed you in — plus one request per transcript that Egma conducted, to
 turn its recording into a link the browser fetches from the object store
 directly.
 
@@ -1021,13 +1021,13 @@ Optional, and one variable:
 
 ```bash
 EGMA_SMTP_URL=smtp://user:password@smtp.example.com:587
-EGMA_MAIL_FROM='egma <egma@example.com>'   # optional
+EGMA_MAIL_FROM='Egma <egma@example.com>'   # optional
 ```
 
 Setting it changes three things at once, by itself: invitations are emailed
 rather than handed back, signup asks for email verification, and a password
 reset link is posted to the person who asked for it. There is no second setting
-to keep in step, because there is no configuration in which egma should wait for
+to keep in step, because there is no configuration in which Egma should wait for
 a message it never sent.
 
 ## Forgetting a password
@@ -1041,7 +1041,7 @@ whole message — link included — is written to the platform's log, exactly wh
 an invitation's link comes back to whoever sent it, so a solo install still lets
 you back in.
 
-**Know what that means before you run an egma with no mail and a log other
+**Know what that means before you run an Egma with no mail and a log other
 people can read.** An invitation's link creates an account; a reset link takes
 over one that already exists, an admin's included. Whoever can read the
 platform's log for the next hour can follow one. On a solo install that is you,
@@ -1055,12 +1055,12 @@ instance, so set `EGMA_SMTP_URL` before there is a second person to keep out.
   the message promises.
 - **A link somebody already used is refused with a message that says so**,
   because "you already did this" and "nothing happened at all" are opposite
-  instructions. Once the hour is up egma can no longer tell which of the two a
-  dead link is — the provider forgot the token at the same moment egma stopped
+  instructions. Once the hour is up Egma can no longer tell which of the two a
+  dead link is — the provider forgot the token at the same moment Egma stopped
   honouring it — so it says exactly that, rather than guessing at one of them.
 - Asking about an address with no account here is answered exactly as one with
   an account — same status, same words, and the same length of wait — so the
-  form never says who holds an account on this egma.
+  form never says who holds an account on this Egma instance.
 
 ## Reading and writing data
 
@@ -1106,7 +1106,7 @@ is no transaction to roll a half-applied file back with.
 
 ## License
 
-egma is licensed under the Apache License, Version 2.0. The full text is in
+Egma is licensed under the Apache License, Version 2.0. The full text is in
 [`LICENSE`](LICENSE).
 
 One boundary is declared in advance. A directory named `ee`, at any level of

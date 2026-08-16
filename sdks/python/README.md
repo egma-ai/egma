@@ -1,6 +1,6 @@
-# egma
+# Egma
 
-Your agent's tools, answered by egma while a test runs.
+Your agent's tools, answered by Egma while a test runs.
 
 A simulation that reaches your real tools has real side effects: it books
 the appointment, sends the message, charges the card. And a real backend
@@ -10,14 +10,14 @@ agents die in production, and none of them can be ordered up from a real
 backend on demand.
 
 A **mock tool** answers for one of your agent's tools during a
-simulation. It is authored in your egma project, matched strictly by tool
+simulation. It is authored in your Egma project, matched strictly by tool
 name, and its answer may be a value, an error, or either one after a
 declared delay so a mocked backend takes as long as the real one. This
-package is the piece that lives in your own agent's process and lets egma
+package is the piece that lives in your own agent's process and lets Egma
 answer.
 
 Tools no mock tool covers run their real implementations, untouched.
-egma's record names which of your tools were covered and which were not,
+Egma's record names which of your tools were covered and which were not,
 so you always know whether a simulation was fully isolated.
 
 ## Install
@@ -50,16 +50,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
 That is the whole integration.
 
-In a simulation, `mockable` reports your agent's tools to egma — names
+In a simulation, `mockable` reports your agent's tools to Egma — names
 and schemas, read off the agent object, so mock authoring starts from
 your real tool names instead of your memory of them — and learns which of
-them this simulation answers for. Calls to those tools go to egma and
+them this simulation answers for. Calls to those tools go to Egma and
 come back with the authored answer. Every one of them lands on the
 simulation's record with its arguments, its answer, how long it took, and
 which mock tool answered.
 
-**In every other room it does nothing at all.** egma names itself in the
-job's dispatch metadata; a room with no egma in it — which is every
+**In every other room it does nothing at all.** Egma names itself in the
+job's dispatch metadata; a room with no Egma in it — which is every
 production room — is a room where `mockable` returns having touched
 nothing. Your tools are the same objects, called the same way, with no
 wrapper between them and the model. Zero added latency, by construction
@@ -69,7 +69,7 @@ rather than by care. That property is a test in this package
 ### Where to call it
 
 After the agent object exists and before `session.start`. The report of
-your tools is the first thing said, so an egma that is not in the room is
+your tools is the first thing said, so an Egma that is not in the room is
 discovered before any tool call rather than half way through a test.
 
 `mockable` covers the exact `Agent` class you hand it. If your app hands
@@ -78,30 +78,30 @@ covered.
 
 ### What a call to a mocked tool does
 
-- Goes to egma over the room you are already in. No new endpoint, no new
+- Goes to Egma over the room you are already in. No new endpoint, no new
   credential, nothing new to expose.
 - Comes back with the authored answer, or raises the authored error as
   the tool's own error, so your agent handles it exactly as it would
   handle a real backend failing.
-- **Falls open** if egma turns out not to be reachable: your real tool
+- **Falls open** if Egma turns out not to be reachable: your real tool
   runs, and the agent behaves as it would with this package uninstalled.
 - **Never waits forever.** Every branch ends in an answer, an error the
   model can hear, or your own tool running.
 
 A tool you attach to the agent *after* calling `mockable` is still
-intercepted on its first call — egma's answers are held by name. Its
-arguments may be incomplete on the record, and egma marks that call so
+intercepted on its first call — Egma's answers are held by name. Its
+arguments may be incomplete on the record, and Egma marks that call so
 you can see it.
 
 ### Logging
 
 Everything this package says goes to the `egma` logger. It is worth
 having on at `INFO` the first time you wire an agent up: the line after
-the census names how many tools you have and how many egma answers for.
+the census names how many tools you have and how many Egma answers for.
 
 ## Before you install anything: the interim recipe
 
-You can get isolation today with no egma code at all, using LiveKit's own
+You can get isolation today with no Egma code at all, using LiveKit's own
 `mock_tools` and a guard you write yourself:
 
 ```python
@@ -132,21 +132,21 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     await session.start(agent=agent, room=ctx.room)
 ```
 
-This is production-safe by the same absence logic: no egma in the room
+This is production-safe by the same absence logic: no Egma in the room
 means the guard is false and nothing is wrapped.
 
 What it cannot do is the rest of the job. One canned world for every
 test, so you cannot write "the calendar is full" as a *test* — you would
 be editing your agent's source to change a test's data. Nothing about
-those calls reaches egma's record: no arguments, no answers, no timings,
+those calls reaches Egma's record: no arguments, no answers, no timings,
 no coverage stamp, so graders that read tool facts have nothing to read.
 No declared delay, so latency numbers from a mocked run flatter you.
 
 **And the honest caveat: that guard couples your agent's source to the
-exact shape of egma's dispatch metadata today.** If the metadata grows or
+exact shape of Egma's dispatch metadata today.** If the metadata grows or
 moves, your agent breaks in a way no test of yours would catch. That
 coupling is precisely what `mockable` exists to own — the shape stays
-egma's to evolve, and your side stays one line.
+Egma's to evolve, and your side stays one line.
 
 Use the recipe as the bridge, not as the small tier.
 
@@ -201,4 +201,4 @@ Each name falls back to the plain one the tool's own CLI reads —
 
 ## License
 
-Apache-2.0, with the rest of egma.
+Apache-2.0, with the rest of Egma.

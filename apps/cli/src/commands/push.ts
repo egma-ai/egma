@@ -19,8 +19,8 @@ export function movedRefusal(conflicts: readonly PushConflict[]): string {
   const moved = conflicts.filter((conflict) => conflict.reason === "moved").length;
   const opening =
     moved === conflicts.length
-      ? `egma has a newer version of ${conflicts.length === 1 ? "this test" : "these tests"}: ${names}.`
-      : `egma cannot match ${conflicts.length === 1 ? "this test" : "these tests"} to what it holds: ${names}.`;
+      ? `Egma has a newer version of ${conflicts.length === 1 ? "this test" : "these tests"}: ${names}.`
+      : `Egma cannot match ${conflicts.length === 1 ? "this test" : "these tests"} to what it holds: ${names}.`;
   return `${opening} Run egma pull to bring ${conflicts.length === 1 ? "it" : "them"} down, look at what changed, then push again. Nothing was uploaded.`;
 }
 
@@ -94,7 +94,7 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
   if (turnedAway.length > 0) {
     options.out("status: turned-away");
     options.fail(
-      `egma would not take ${turnedAway.length === 1 ? "one of these" : `${turnedAway.length} of these`}. The reason above is egma's own; fix the ${turnedAway.length === 1 ? "file" : "files"} and push again.`,
+      `Egma would not take ${turnedAway.length === 1 ? "one of these" : `${turnedAway.length} of these`}. The reason above is Egma's own; fix the ${turnedAway.length === 1 ? "file" : "files"} and push again.`,
     );
     return FOLDER_EXIT.turnedAway;
   }

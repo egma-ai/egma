@@ -43,9 +43,9 @@ export type Receipt = {
 export class SecretInReceiptError extends Error {
   constructor(field: string) {
     super(
-      `egma refused to write a receipt: ${field} carries a secret this command was given. ` +
+      `Egma refused to write a receipt: ${field} carries a secret this command was given. ` +
         "A receipt is a document people commit and paste into issues, so nothing " +
-        "in one may be a credential. This is a bug in egma, not in your setup — " +
+        "in one may be a credential. This is a bug in Egma, not in your setup — " +
         "nothing was written and nothing leaked.",
     );
     this.name = "SecretInReceiptError";

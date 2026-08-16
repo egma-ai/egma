@@ -145,7 +145,7 @@ describe("setting a project's judge", () => {
         model: "claude",
         key: A_KEY,
       }),
-    ).rejects.toThrow(/not a judge provider egma knows/);
+    ).rejects.toThrow(/not a judge provider Egma knows/);
   });
 
   it("refuses a key too short to be one any provider issued", async () => {

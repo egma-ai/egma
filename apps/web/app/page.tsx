@@ -44,7 +44,7 @@ export default function RootPage() {
   return (
     <ProductStatePage
       active="transcripts"
-      title={failed ? "Egma could not be reached." : "Opening egma"}
+      title={failed ? "Egma could not be reached." : "Opening Egma"}
       lead={failed ? "Check the API, then try again." : "Checking your session."}
     >
       {failed ? (

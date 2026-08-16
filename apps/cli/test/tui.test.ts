@@ -73,7 +73,7 @@ describe("the wizard on a real terminal", () => {
       // The intro says what is about to happen and what the keystroke means.
       const intro = await showing(
         terminal,
-        "egma is about to find your voice agent",
+        "Egma is about to find your voice agent",
         "where its prompts live",
         "[enter] begin",
         "[q] quit",
@@ -101,7 +101,7 @@ describe("the wizard on a real terminal", () => {
       // Everything the wizard drew is gone. One line is left, and it is plain.
       const left = terminal.scrollback().trim();
       expect(left).toBe(
-        "egma could not finish: no Retell key was given, so there is nothing to test.",
+        "Egma could not finish: no Retell key was given, so there is nothing to test.",
       );
       expect(left.split("\n")).toHaveLength(1);
     } finally {
@@ -135,7 +135,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
-      await showing(terminal, "egma is about to find your voice agent", "[enter] begin");
+      await showing(terminal, "Egma is about to find your voice agent", "[enter] begin");
       terminal.write("\r");
 
       await showing(
@@ -150,7 +150,7 @@ describe("the wizard on a real terminal", () => {
 
       expect(await terminal.exited).toBe(1);
       expect(terminal.scrollback().trim()).toBe(
-        "egma found no voice agent to test. Run egma again where your agent is defined.",
+        "Egma found no voice agent to test. Run egma again where your agent is defined.",
       );
     } finally {
       await terminal.kill();
@@ -183,7 +183,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
       await showing(terminal, "Nothing in this folder looks like a voice agent", "[esc] nowhere else");
 
@@ -217,12 +217,12 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
-      await showing(terminal, "egma is about to find", "[q] quit");
+      await showing(terminal, "Egma is about to find", "[q] quit");
 
       terminal.write("q");
 
       expect(await terminal.exited).toBe(0);
-      expect(terminal.scrollback().trim()).toBe("egma closed. Nothing ran.");
+      expect(terminal.scrollback().trim()).toBe("Egma closed. Nothing ran.");
     } finally {
       await terminal.kill();
     }
@@ -256,7 +256,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
-      await showing(terminal, "egma is about to find", "[enter] begin");
+      await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
       await showing(terminal, "Thinking about it");
 
@@ -264,7 +264,7 @@ describe("the wizard on a real terminal", () => {
 
       expect(await terminal.exited).toBe(130);
       expect(terminal.scrollback().trim()).toBe(
-        "egma stopped before the task finished, and shut node down.",
+        "Egma stopped before the task finished, and shut node down.",
       );
     } finally {
       await terminal.kill();

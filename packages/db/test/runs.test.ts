@@ -460,13 +460,13 @@ describe("starting a run", () => {
     const missing = newId("tstv");
     await expect(
       startRun(actingAsAcme(), aRun({ testVersionIds: [missing] })),
-    ).rejects.toThrow(`there is no test version ${missing} on this egma`);
+    ).rejects.toThrow(`there is no test version ${missing} on this Egma`);
 
     // Another customer's version is refused in the same words as one that
     // never existed, because confirming somebody else's row exists is a leak.
     await expect(
       startRun(actingAsAcme(), aRun({ testVersionIds: [globexOwn] })),
-    ).rejects.toThrow(`there is no test version ${globexOwn} on this egma`);
+    ).rejects.toThrow(`there is no test version ${globexOwn} on this Egma`);
 
     await expect(
       startRun(actingAsAcme(), aRun({ testVersionIds: [oneCaller, oneCaller] })),
@@ -480,7 +480,7 @@ describe("starting a run", () => {
     // rather than running most of what was asked for.
     await expect(
       startRun(actingAsAcme(), aRun({ testVersionIds: [oneCaller, missing] })),
-    ).rejects.toThrow(`there is no test version ${missing} on this egma`);
+    ).rejects.toThrow(`there is no test version ${missing} on this Egma`);
 
     expect(await rowCounts()).toEqual(before);
   });

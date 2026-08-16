@@ -411,7 +411,7 @@ describe("the golden span fixtures", () => {
         "string",
       );
       expect(attributeOf(span.attributes, "egma.tool.mock_tool")).toBeTruthy();
-      // Egma stood between the agent and the answer, so the span brackets the
+      // egma stood between the agent and the answer, so the span brackets the
       // exchange it conducted rather than being the instant an observer sees.
       expect(
         BigInt(span.endTimeUnixNano ?? "0") -

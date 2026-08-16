@@ -1,12 +1,12 @@
 ---
 title: "Grader Library: Browse and Activate Judgment Templates"
 sidebarTitle: "Grader Library"
-description: "Browse egma's catalog of grader definitions. Each entry is a reusable judgment template you activate for your project by creating a grader copy."
+description: "Browse Egma's catalog of grader definitions. Each entry is a reusable judgment template you activate for your project by creating a grader copy."
 ---
 
-The grader library is egma's catalog of judgment templates. Each entry defines a type of judgment — the prompt sent to the model, the output schema, and the form fields your team fills in when activating it. Entries maintained by egma are available to every organization; your own organization's custom entries appear alongside them once the authoring surface is available.
+The grader library is Egma's catalog of judgment templates. Each entry defines a type of judgment — the prompt sent to the model, the output schema, and the form fields your team fills in when activating it. Entries maintained by Egma are available to every organization; your own organization's custom entries appear alongside them once the authoring surface is available.
 
-Browse the library to discover what egma ships, read the `params` field to understand what each entry expects you to fill in, and then [create a grader](/api/graders) from any entry you want to run against your project.
+Browse the library to discover what Egma ships, read the `params` field to understand what each entry expects you to fill in, and then [create a grader](/api/graders) from any entry you want to run against your project.
 
 ---
 
@@ -67,7 +67,7 @@ curl "https://your-egma-instance/api/grader-library?cursor=grl_xyz789" \
 </ResponseField>
 
 <ResponseField name="project_id" type="string | null">
-  The project this entry is scoped to, if it was authored for a specific project. `null` for organization-wide and egma-maintained entries.
+  The project this entry is scoped to, if it was authored for a specific project. `null` for organization-wide and Egma-maintained entries.
 </ResponseField>
 
 <ResponseField name="version" type="number">
@@ -75,7 +75,7 @@ curl "https://your-egma-instance/api/grader-library?cursor=grl_xyz789" \
 </ResponseField>
 
 <ResponseField name="prompt" type="string">
-  The judge prompt egma sends to the model when evaluating a conversation. This is the exact text used at judgment time — what you read here is what the model receives.
+  The judge prompt Egma sends to the model when evaluating a conversation. This is the exact text used at judgment time — what you read here is what the model receives.
 </ResponseField>
 
 <ResponseField name="params" type="array">

@@ -103,7 +103,7 @@ export function launchFor(entry: RegistryEntry): DrivenAgentLaunch {
   }
 
   throw new UnlaunchableDrivenAgentError(
-    `egma cannot start ${entry.name} yet: the agent registry ships it as a downloadable binary, and egma only starts agents published as packages.`,
+    `Egma cannot start ${entry.name} yet: the agent registry ships it as a downloadable binary, and Egma only starts agents published as packages.`,
   );
 }
 
@@ -115,7 +115,7 @@ export function launchForId(
   const entry = findDrivenAgent(id, from);
   if (entry === null) {
     throw new UnlaunchableDrivenAgentError(
-      `egma does not know a coding agent called "${id}". The ones it knows come from the protocol registry mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
+      `Egma does not know a coding agent called "${id}". The ones it knows come from the protocol registry mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
     );
   }
   return launchFor(entry);

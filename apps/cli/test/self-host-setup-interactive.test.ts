@@ -155,7 +155,7 @@ describe("egma self-host setup, with somebody watching", () => {
     terminal.write(`${ACCOUNT_SID}\r`);
     // The number question says the thing a person most needs to know about it
     // before they answer, which is that egma will not go and buy one.
-    await showing(terminal, "already owns", "egma never buys one");
+    await showing(terminal, "already owns", "Egma never buys one");
     terminal.write(`${SOURCE_NUMBER}\r`);
     await showing(terminal, "Twilio Auth Token", "never kept");
     terminal.write(`${AUTH_TOKEN}\r`);

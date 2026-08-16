@@ -32,7 +32,7 @@ export type ComposeOptions = {
 export class DockerMissingError extends Error {
   constructor(cause: string) {
     super(
-      `egma could not run docker compose: ${cause}\n\n` +
+      `Egma could not run docker compose: ${cause}\n\n` +
         "The whole deployment is Docker with Compose and nothing else. Install " +
         "Docker Desktop, or the docker engine with the compose plugin, and run " +
         "this again.",

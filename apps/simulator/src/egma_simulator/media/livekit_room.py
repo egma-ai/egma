@@ -388,12 +388,12 @@ class RoomSettings:
         if not isinstance(endpoint, str) or not endpoint.strip():
             raise MediaBackendError(
                 "livekit config: tokenEndpoint must be a non-empty string — "
-                "where egma asks the customer for a token"
+                "where Egma asks the customer for a token"
             )
         endpoint = endpoint.strip()
         if not endpoint.startswith(ENDPOINT_SCHEMES):
             raise MediaBackendError(
-                f"livekit config: tokenEndpoint is where egma posts a "
+                f"livekit config: tokenEndpoint is where Egma posts a "
                 f"request, so it must start with one of "
                 f"{', '.join(ENDPOINT_SCHEMES)}; got {endpoint!r}"
             )
@@ -605,7 +605,7 @@ class LiveKitRoomBackend:
             self._room.register_rpc(TOOL_METHOD, self._mock_tools.tool)
         except Exception as unoffered:
             logger.error(
-                "egma could not offer the mock-tool exchange in %s, so every "
+                "Egma could not offer the mock-tool exchange in %s, so every "
                 "tool the agent has will run its own implementation: %s",
                 self._room_name,
                 self._quotable(repr(unoffered)),
@@ -840,7 +840,7 @@ class LiveKitRoomBackend:
         )
         if token is None:
             raise MediaBackendError(
-                f"the token endpoint at {endpoint} answered no token: egma "
+                f"the token endpoint at {endpoint} answered no token: Egma "
                 f"reads one from {', '.join(TOKEN_ALIASES)} — "
                 f"{self._quotable_endpoint(said)}",
                 ending=ERROR,
@@ -866,7 +866,7 @@ class LiveKitRoomBackend:
         server_url = server_url.strip()
         if server_url and not server_url.startswith(URL_SCHEMES):
             raise MediaBackendError(
-                f"the token endpoint at {endpoint} answered a serverUrl egma "
+                f"the token endpoint at {endpoint} answered a serverUrl Egma "
                 f"cannot join: it must start with one of "
                 f"{', '.join(URL_SCHEMES)} — {self._quotable_endpoint(said)}",
                 ending=ERROR,
@@ -940,9 +940,9 @@ class LiveKitRoomBackend:
             # dispatched anybody and is not what went wrong here.
             return (
                 f"no agent joined {self._room_name} within {seconds:.0f}s — the "
-                f"token endpoint minted a token and egma joined the room with "
+                f"token endpoint minted a token and Egma joined the room with "
                 f"it, but nothing dispatched the agent. A connection that "
-                f"names a token endpoint hands egma no key pair, so egma "
+                f"names a token endpoint hands Egma no key pair, so Egma "
                 f"cannot dispatch: putting a worker in the room it was asked "
                 f"for a token into is the endpoint's own job"
             )

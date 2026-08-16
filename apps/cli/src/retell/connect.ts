@@ -60,7 +60,7 @@ export const KEY_ASK_LINE = "Paste your Retell API key (Retell dashboard → Set
  * moment the developer decides whether to hand it over rather than afterwards.
  */
 export const CUSTODY_LINE =
-  "It is sent to egma and stored encrypted. It never lands in a file here.";
+  "It is sent to Egma and stored encrypted. It never lands in a file here.";
 
 /** The exact failure for a key Retell will not take. */
 export const INVALID_KEY_LINE =
@@ -88,23 +88,23 @@ export const DEFAULT_AGENT_NAME = "voice-agent";
 export type Reach = "text" | "phone";
 
 /** What the developer is choosing between, said the same way on every surface. */
-export const REACH_ASK_LINE = "How should egma reach this agent?";
+export const REACH_ASK_LINE = "How should Egma reach this agent?";
 
 /** One line per way, said in what it tests rather than in what it is made of. */
 export const REACH_LINES: Readonly<Record<Reach, string>> = {
-  text: "Text — egma exchanges messages with the agent. No phone call, nothing dialled.",
+  text: "Text — Egma exchanges messages with the agent. No phone call, nothing dialled.",
   phone:
-    "Phone — egma dials one of the agent's numbers and talks to it over the " +
+    "Phone — Egma dials one of the agent's numbers and talks to it over the " +
     "telephone network, the way the people who call it do.",
 };
 
 /** What the developer is asked when the phone was chosen. */
 export const NUMBER_ASK_LINE =
-  "Which number should egma dial? These are the numbers Retell routes to this agent.";
+  "Which number should Egma dial? These are the numbers Retell routes to this agent.";
 
 /** The exact failure for an agent Retell routes no number to. */
 export const NO_NUMBERS_LINE =
-  "Retell routes no phone number to that agent, so there is nothing for egma to " +
+  "Retell routes no phone number to that agent, so there is nothing for Egma to " +
   "dial. Assign a number to it in the Retell dashboard, under Phone Numbers — " +
   "or reach it over text instead.";
 
@@ -129,12 +129,12 @@ export function registrationLine(registered: Registered): string | null {
     case "reused":
       return (
         `This voice agent was already registered as ${registered.agent.name}, and ` +
-        `${registered.connection.name} was already the way egma reaches it. Nothing ` +
+        `${registered.connection.name} was already the way Egma reaches it. Nothing ` +
         `new was registered.`
       );
     case "connection_added":
       return (
-        `This voice agent was already registered as ${registered.agent.name}, so egma ` +
+        `This voice agent was already registered as ${registered.agent.name}, so Egma ` +
         `added ${registered.connection.name} as another way of reaching it. No second ` +
         `agent was registered.`
       );
@@ -328,7 +328,7 @@ async function keyAndAgents(
     }
   }
 
-  return { kind: "failed", reason: "egma could not check that Retell key." };
+  return { kind: "failed", reason: "Egma could not check that Retell key." };
 }
 
 /** The key, carried between the two halves of the flow, never stored. */
@@ -504,7 +504,7 @@ async function register(
   };
   const notSignedIn: ConnectOutcome = {
     kind: "failed",
-    reason: "egma would not take this machine's key. Run egma login, then try again.",
+    reason: "Egma would not take this machine's key. Run egma login, then try again.",
   };
 
   for (let attempt = 1; attempt <= NAME_ATTEMPTS; attempt += 1) {
@@ -645,8 +645,8 @@ async function register(
         return {
           kind: "failed",
           reason:
-            `egma would not name the new connection on ${now.agent.name}, ` +
-            "and nothing else was changed. Check that this egma is up to date.",
+            `Egma would not name the new connection on ${now.agent.name}, ` +
+            "and nothing else was changed. Check that this Egma instance is up to date.",
         };
       }
       case "refused":
@@ -739,7 +739,7 @@ async function pickNumber(
   if (!confirmed.number.answeredBy.includes(config.agentId)) {
     return {
       kind: "failed",
-      reason: `Retell no longer routes ${wanted} to ${config.name}, so egma will not register it as the way to reach that agent. Run egma again to see which numbers it answers.`,
+      reason: `Retell no longer routes ${wanted} to ${config.name}, so Egma will not register it as the way to reach that agent. Run egma again to see which numbers it answers.`,
     };
   }
 

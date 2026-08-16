@@ -100,7 +100,7 @@ export function executeLatency(execution: Execution): readonly Judgment[] {
       // could not make the check and the agent did nothing.
       return couldNotCheck(
         key,
-        "this check holds no measure and bound egma can read, so it was not made.",
+        "this check holds no measure and bound Egma can read, so it was not made.",
       );
     }
 

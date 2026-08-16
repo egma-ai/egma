@@ -1,16 +1,16 @@
 ---
-title: "Agents and Connections: How egma Reaches Your Agent"
+title: "Agents and Connections: How Egma Reaches Your Agent"
 sidebarTitle: "Agents & Connections"
-description: "Learn how egma models your voice agents and the connections it uses to reach them — via Retell or LiveKit — during simulation and testing."
+description: "Learn how Egma models your voice agents and the connections it uses to reach them — via Retell or LiveKit — during simulation and testing."
 ---
 
-An **Agent** is egma's record of one of your voice agents. It holds the agent's name, its project membership, and a history of every test run and simulation ever conducted against it. A **Connection** is how egma actually reaches that agent when a simulation starts — it carries the provider credentials, the reach type, and everything else the simulator needs to place a call or exchange messages.
+An **Agent** is Egma's record of one of your voice agents. It holds the agent's name, its project membership, and a history of every test run and simulation ever conducted against it. A **Connection** is how Egma actually reaches that agent when a simulation starts — it carries the provider credentials, the reach type, and everything else the simulator needs to place a call or exchange messages.
 
 ## Agents
 
-Register an agent once and egma assigns it a stable `agt_` identifier. That identifier ties together everything that runs against that agent: test suites, individual runs, simulation traces, and verdict history. You never need to re-register after an update to your agent's prompt or tooling — the identifier stays the same.
+Register an agent once and Egma assigns it a stable `agt_` identifier. That identifier ties together everything that runs against that agent: test suites, individual runs, simulation traces, and verdict history. You never need to re-register after an update to your agent's prompt or tooling — the identifier stays the same.
 
-Registering is idempotent by design. If you run `egma connect` a second time for the same vendor agent, egma looks up the existing registration rather than creating a duplicate. The `registration` field in the response tells you exactly what happened:
+Registering is idempotent by design. If you run `egma connect` a second time for the same vendor agent, Egma looks up the existing registration rather than creating a duplicate. The `registration` field in the response tells you exactly what happened:
 
 | Value | Meaning |
 |---|---|
@@ -22,13 +22,13 @@ This makes it safe to run from CI pipelines or after a network failure — you w
 
 ## Connections
 
-A Connection defines the path from egma to your agent. One agent can have multiple connections, each representing a different way to reach it. This is useful when you want to test the same agent over both a text channel and a phone line.
+A Connection defines the path from Egma to your agent. One agent can have multiple connections, each representing a different way to reach it. This is useful when you want to test the same agent over both a text channel and a phone line.
 
 ### Connection types
 
 <CardGroup cols={2}>
   <Card title="Retell" icon="phone">
-    Connects via the Retell API. Requires a Retell API key and a Retell agent ID. egma seals the key on arrival and uses it only when placing simulation calls.
+    Connects via the Retell API. Requires a Retell API key and a Retell agent ID. Egma seals the key on arrival and uses it only when placing simulation calls.
   </Card>
   <Card title="LiveKit" icon="satellite-dish">
     Connects to a LiveKit agent by joining a room in your own LiveKit project. Requires a LiveKit URL, API key, and API secret. Optionally accepts an agent name if your worker registers one.
@@ -37,24 +37,24 @@ A Connection defines the path from egma to your agent. One agent can have multip
 
 ### Reach types
 
-Each connection has a **reach type** that determines what kind of conversation egma simulates:
+Each connection has a **reach type** that determines what kind of conversation Egma simulates:
 
 <CardGroup cols={2}>
   <Card title="text" icon="message">
-    egma exchanges messages directly with your agent. No phone call, nothing dialled. Tests your prompt, reasoning logic, and tool integrations.
+    Egma exchanges messages directly with your agent. No phone call, nothing dialled. Tests your prompt, reasoning logic, and tool integrations.
   </Card>
   <Card title="phone" icon="phone-volume">
-    egma places a real SIP call to one of your agent's phone numbers. Tests everything the text reach tests, *plus* your speech stack, TTS/STT providers, and the telephone network path.
+    Egma places a real SIP call to one of your agent's phone numbers. Tests everything the text reach tests, *plus* your speech stack, TTS/STT providers, and the telephone network path.
   </Card>
 </CardGroup>
 
 <Tip>
-Running the same test over both a `text` connection and a `phone` connection is the sharpest diagnostic egma offers. A test that passes on text and fails on phone tells you the prompt is fine and the speech stack is not.
+Running the same test over both a `text` connection and a `phone` connection is the sharpest diagnostic Egma offers. A test that passes on text and fails on phone tells you the prompt is fine and the speech stack is not.
 </Tip>
 
 ### Credential sealing
 
-Credentials you provide when creating a connection — API keys, secrets — are **encrypted immediately on arrival** and never stored in plaintext. After creation, they are not readable through any egma API. The response returns only a `credentials_hint` (the last four characters of the key) so you can confirm a rotation landed without seeing the credential itself.
+Credentials you provide when creating a connection — API keys, secrets — are **encrypted immediately on arrival** and never stored in plaintext. After creation, they are not readable through any Egma API. The response returns only a `credentials_hint` (the last four characters of the key) so you can confirm a rotation landed without seeing the credential itself.
 
 This is enforced structurally: the sealed field is absent from every read response shape, not merely blanked. There is no serializer path that could accidentally expose it.
 
@@ -102,7 +102,7 @@ A connection is only ever reachable through its agent. There is no `/api/connect
 
 ## One agent, multiple connections
 
-Having multiple connections on one agent keeps all run history unified. You do not need separate agents for "text testing" and "phone testing" — they are the same agent reached two different ways, and egma tracks their results together.
+Having multiple connections on one agent keeps all run history unified. You do not need separate agents for "text testing" and "phone testing" — they are the same agent reached two different ways, and Egma tracks their results together.
 
 ```
 agent: order-line  (agt_01K…)

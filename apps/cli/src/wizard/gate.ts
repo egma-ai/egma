@@ -116,7 +116,7 @@ export { NO_BEHAVIORS_REASON };
  * named on the same list, in the same place, for the same reason.
  */
 export function unreadableReason(problem: string): string {
-  return `egma could not read it — ${problem}. Fix the file, then run egma push.`;
+  return `Egma could not read it — ${problem}. Fix the file, then run egma push.`;
 }
 
 function personaColumn(personas: readonly string[]): string {

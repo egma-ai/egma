@@ -158,8 +158,8 @@ function foundLine(framework: string | null, prompts: string | null): string {
   const facts: string[] = [];
   if (framework !== null) facts.push(framework);
   if (prompts !== null) facts.push(`prompts in ${prompts}`);
-  if (facts.length === 0) return "egma found your voice agent.";
-  return `egma found your voice agent: ${facts.join(", ")}.`;
+  if (facts.length === 0) return "Egma found your voice agent.";
+  return `Egma found your voice agent: ${facts.join(", ")}.`;
 }
 
 /** The headline of the ending the walk exists for. */
@@ -194,33 +194,33 @@ export function buildExitLine(report: ExitReport): string {
     case "run-started":
       return runStartedLine(report.graded, report.total);
     case "connected":
-      return `egma connected your voice agent: ${report.agentName}, over ${report.connectionName}.`;
+      return `Egma connected your voice agent: ${report.agentName}, over ${report.connectionName}.`;
     case "tests-pushed":
       return report.count === 1
-        ? `egma put 1 test on egma and left it in ${TESTS_FOLDER} — commit it, edit it, then run egma push.`
-        : `egma put ${report.count} tests on egma and left them in ${TESTS_FOLDER} — commit them, edit them, then run egma push.`;
+        ? `Egma put 1 test on Egma and left it in ${TESTS_FOLDER} — commit it, edit it, then run egma push.`
+        : `Egma put ${report.count} tests on Egma and left them in ${TESTS_FOLDER} — commit them, edit them, then run egma push.`;
     case "tests-kept": {
       const where =
         report.count === 1
           ? `Your test is in ${TESTS_FOLDER} — read it, then run egma push.`
           : `Your ${report.count} tests are in ${TESTS_FOLDER} — read them, then run egma push.`;
-      return report.stopped ? `egma stopped. ${where}` : `Nothing was uploaded. ${where}`;
+      return report.stopped ? `Egma stopped. ${where}` : `Nothing was uploaded. ${where}`;
     }
     case "no-agent-context":
-      return "egma found no voice agent to test. Run egma again where your agent is defined.";
+      return "Egma found no voice agent to test. Run egma again where your agent is defined.";
     case "no-coding-agent":
-      return "egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead.";
+      return "Egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead.";
     case "coding-agent-stopped":
       return oneLine(report.reason) === ""
         ? `${report.drivenAgentName} stopped before it found your voice agent, and did not say why.`
         : `${report.drivenAgentName} stopped before it found your voice agent: ${oneLine(report.reason)}`;
     case "quit":
-      return "egma closed. Nothing ran.";
+      return "Egma closed. Nothing ran.";
     case "interrupted": {
       const stopped =
         report.drivenAgentName === null
-          ? "egma stopped before the task finished."
-          : `egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
+          ? "Egma stopped before the task finished."
+          : `Egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
       const kept = report.testsKept ?? 0;
       if (kept === 0) return stopped;
       // The folder is not empty, so the line says so. A developer who finds
@@ -230,7 +230,7 @@ export function buildExitLine(report: ExitReport): string {
         : `${stopped} Your ${kept} tests are in ${TESTS_FOLDER}.`;
     }
     case "failed":
-      return `egma could not finish: ${saidAndBlock(report.reason)[0]}`;
+      return `Egma could not finish: ${saidAndBlock(report.reason)[0]}`;
   }
 }
 

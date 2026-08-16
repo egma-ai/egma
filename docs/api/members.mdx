@@ -4,9 +4,9 @@ sidebarTitle: "Members"
 description: "List organization members, send invitations, change roles, remove members, and deactivate accounts. Invite and member management requires the admin role."
 ---
 
-Every egma organization has a roster of members, each with a role that determines what they can do. All members can read the roster. Inviting new members, changing roles, removing members, and deactivating accounts are admin-only operations.
+Every Egma organization has a roster of members, each with a role that determines what they can do. All members can read the roster. Inviting new members, changing roles, removing members, and deactivating accounts are admin-only operations.
 
-Roles in egma are `admin`, `member`, and `viewer`. An admin can perform all write operations and manage the team. A member can create and edit tests, runs, and graders. A viewer can read everything but cannot write.
+Roles in Egma are `admin`, `member`, and `viewer`. An admin can perform all write operations and manage the team. A member can create and edit tests, runs, and graders. A viewer can read everything but cannot write.
 
 ---
 
@@ -117,7 +117,7 @@ Sends an invitation to join your organization. Admin only.
 Returns `201 Created` with the invitation object and delivery status.
 
 <ResponseField name="delivered" type="boolean">
-  `true` if egma sent the invitation email. `false` if your deployment has no SMTP configured.
+  `true` if Egma sent the invitation email. `false` if your deployment has no SMTP configured.
 </ResponseField>
 
 <ResponseField name="accept_url" type="string">
@@ -132,11 +132,11 @@ curl -X POST https://your-egma-instance/api/invitations \
 ```
 
 <Note>
-  If your egma instance has no SMTP configured, `delivered` is `false` and the response includes `accept_url`. Copy that URL and send it to the invitee yourself — through Slack, email, or any other channel. The invitation still works exactly the same way; egma just could not post the message for you.
+  If your Egma instance has no SMTP configured, `delivered` is `false` and the response includes `accept_url`. Copy that URL and send it to the invitee yourself — through Slack, email, or any other channel. The invitation still works exactly the same way; Egma just could not post the message for you.
 </Note>
 
 <Note>
-  An invitation token is 256 bits of randomness and is hashed on write. egma stores only the hash, never the plaintext. The `accept_url` is present in this response only, and is not retrievable from the invitations list.
+  An invitation token is 256 bits of randomness and is hashed on write. Egma stores only the hash, never the plaintext. The `accept_url` is present in this response only, and is not retrievable from the invitations list.
 </Note>
 
 ---
@@ -165,7 +165,7 @@ curl -X POST https://your-egma-instance/api/members/usr_abc123/role \
 ```
 
 <Note>
-  You cannot demote the last admin in an organization. egma returns `409 Conflict` with `error: "last_admin"`. Promote another member to admin first, then change the original admin's role.
+  You cannot demote the last admin in an organization. Egma returns `409 Conflict` with `error: "last_admin"`. Promote another member to admin first, then change the original admin's role.
 </Note>
 
 ---

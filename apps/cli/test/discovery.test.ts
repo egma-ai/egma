@@ -127,7 +127,7 @@ describe("finding the voice agent", () => {
       prompts: "prompts/order-line.md (pushed to Retell by scripts/deploy.ts)",
     });
     expect(buildExitLine(report)).toBe(
-      "egma found your voice agent: retell-sdk, prompts in prompts/order-line.md (pushed to Retell by scripts/deploy.ts).",
+      "Egma found your voice agent: retell-sdk, prompts in prompts/order-line.md (pushed to Retell by scripts/deploy.ts).",
     );
   });
 
@@ -223,7 +223,7 @@ describe("finding the voice agent", () => {
       expect(ui.record.asked).toEqual(["prompts-pointer"]);
       expect(report).toEqual({ kind: "no-agent-context" });
       expect(buildExitLine(report)).toBe(
-        "egma found no voice agent to test. Run egma again where your agent is defined.",
+        "Egma found no voice agent to test. Run egma again where your agent is defined.",
       );
       expect(buildExitNotice(report)).toBeNull();
     } finally {

@@ -1,10 +1,10 @@
 ---
 title: "Tests and Runs: Simulate and Evaluate Voice Agents"
 sidebarTitle: "Tests & Runs"
-description: "Understand how egma test files are structured, how runs execute them as live simulations, and what each of the four verdicts means."
+description: "Understand how Egma test files are structured, how runs execute them as live simulations, and what each of the four verdicts means."
 ---
 
-A **Test** describes one situation your voice agent should handle: who the caller is, what they want, and what the agent should do in response. A **Run** executes a set of tests against a connection, sending each one to your live agent as a real simulated conversation. Tests live as Markdown files in your repository. Runs are created in egma and tracked through to a final verdict.
+A **Test** describes one situation your voice agent should handle: who the caller is, what they want, and what the agent should do in response. A **Run** executes a set of tests against a connection, sending each one to your live agent as a real simulated conversation. Tests live as Markdown files in your repository. Runs are created in Egma and tracked through to a final verdict.
 
 ## Test anatomy
 
@@ -41,13 +41,13 @@ reschedule this week. They are short on time and irritated.
 | Section | Required | Description |
 |---|---|---|
 | `## Scenario` | Yes | Natural-language description of what the call is about. The simulator reads this prose to drive the conversation. |
-| `## Expected behaviors` | Yes | A numbered list of assertions. Each one becomes a judgment target for the grader. A test with no expected behaviors can never fail, so egma will not accept one. |
+| `## Expected behaviors` | Yes | A numbered list of assertions. Each one becomes a judgment target for the grader. A test with no expected behaviors can never fail, so Egma will not accept one. |
 
 </Accordion>
 
 ### Mock tool overrides
 
-Your `egma/mock-tools.md` file defines the global mocked world: how egma answers your agent's tool calls during simulations. This prevents tests from hitting your real backend and lets you control what branch the agent sees — an empty calendar, a failing service, a specific order state.
+Your `egma/mock-tools.md` file defines the global mocked world: how Egma answers your agent's tool calls during simulations. This prevents tests from hitting your real backend and lets you control what branch the agent sees — an empty calendar, a failing service, a specific order state.
 
 ```markdown
 ## Mock tools
@@ -72,17 +72,17 @@ A test can override the project-level mock tools by adding the same section at t
 
 ## Test versioning
 
-Every time you push a changed test to egma, egma mints a new `version_id` (`tstv_…`) and writes it back into your file's frontmatter. The previous version is never overwritten — it remains readable and is still referenced by any run that pinned it.
+Every time you push a changed test to Egma, Egma mints a new `version_id` (`tstv_…`) and writes it back into your file's frontmatter. The previous version is never overwritten — it remains readable and is still referenced by any run that pinned it.
 
 This versioning guarantee means: **results from last week still say exactly what ran**. A green run from before a test change is still green, and it still names the scenario and expected behaviors that were green.
 
 <Note>
-`egma push` refuses to upload a test if egma holds a newer version than your file knows about. Run `egma pull` first, review what changed, then push.
+`egma push` refuses to upload a test if Egma holds a newer version than your file knows about. Run `egma pull` first, review what changed, then push.
 </Note>
 
 ## Runs
 
-A Run starts a batch of simulations. You name the connection to use and the exact test versions to execute. egma creates the run, queues one simulation per test-version × persona combination, and begins dispatching them to the simulator.
+A Run starts a batch of simulations. You name the connection to use and the exact test versions to execute. Egma creates the run, queues one simulation per test-version × persona combination, and begins dispatching them to the simulator.
 
 ### Starting a run
 
@@ -148,7 +148,7 @@ Execution and grading are two distinct phases. A simulation can be `completed` w
 
 ### Verdicts
 
-After a simulation finishes, the grader reads the conversation and writes one verdict per expected behavior. Each verdict is one of four values — and egma never collapses them:
+After a simulation finishes, the grader reads the conversation and writes one verdict per expected behavior. Each verdict is one of four values — and Egma never collapses them:
 
 <CardGroup cols={2}>
   <Card title="passed" icon="circle-check">
@@ -161,7 +161,7 @@ After a simulation finishes, the grader reads the conversation and writes one ve
     Nothing was judged. The test required a capability this connection does not have (for example, DTMF tones on a text connection), or the grader had nothing scoreable.
   </Card>
   <Card title="errored" icon="triangle-exclamation">
-    The conversation could not be conducted — the agent was unreachable or egma encountered a fault. The simulation attempted to run but did not complete successfully.
+    The conversation could not be conducted — the agent was unreachable or Egma encountered a fault. The simulation attempted to run but did not complete successfully.
   </Card>
 </CardGroup>
 
@@ -173,7 +173,7 @@ Each verdict carries its own rationale, the conversation turns it cites, and the
 
 ## Recordings
 
-Every voice simulation produces a **dual-channel audio recording** — the simulated caller on the left channel, your agent on the right. Recordings are stored in egma's object store and are accessible from the run results page.
+Every voice simulation produces a **dual-channel audio recording** — the simulated caller on the left channel, your agent on the right. Recordings are stored in Egma's object store and are accessible from the run results page.
 
 The recording player appears directly beside the conversation transcript, so when a turn looks wrong you can listen to exactly what was spoken and heard — and confirm whether the agent misbehaved or the transcription did.
 

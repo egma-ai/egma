@@ -717,7 +717,7 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
             line: line(parameter),
             rule: "every-exported-call-carries-an-auth-context",
             detail:
-              `${name} skips the ${AUTH_CONTEXT} because it dispatches egma's ` +
+              `${name} skips the ${AUTH_CONTEXT} because it dispatches Egma's ` +
               `own work across the deployment, and that only holds while no ` +
               `caller can name a customer to it. This parameter names one, ` +
               `which makes it a cross-tenant read wearing an exemption.`,
@@ -787,7 +787,7 @@ export async function check(root: string): Promise<Violation[]> {
             `imports the auth provider "${record.specifier}". Only ` +
             `${AUTH_PROVIDER_SEAM.join(" and ")} may: the provider answers ` +
             `who this person is and whether they are logged in, and the rest ` +
-            `of the codebase sees that answer as egma's own type. Every ` +
+            `of the codebase sees that answer as Egma's own type. Every ` +
             `import past the seam is what a provider swap would have to undo.`,
         });
       }

@@ -5,8 +5,8 @@ talking to a LiveKit voice agent, end to end: fourteen `POST /v1/traces` request
 bodies, byte for byte as an OTLP/HTTP exporter sent them, plus a manifest of the
 headers that came with each one.
 
-It exists so that egma's trace handling is built and tested against telemetry a
-voice agent actually emits, rather than against payloads invented to fit egma's
+It exists so that Egma's trace handling is built and tested against telemetry a
+voice agent actually emits, rather than against payloads invented to fit Egma's
 own schema. Replaying these files needs no LiveKit server, no model provider key
 and no microphone.
 

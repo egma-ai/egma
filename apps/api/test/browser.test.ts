@@ -284,7 +284,7 @@ describe("adding a colleague, with no mail configured", () => {
 
       // It says what he is joining and at what, and asks for the one thing it
       // needs. The address is the invitation's, so there is nothing to mistype.
-      await bob.waitForSelector("text=Join Acme on egma");
+      await bob.waitForSelector("text=Join Acme on Egma");
       await expect
         .poll(() => bob.inputValue("#email"))
         .toBe("bob@acme.example");
@@ -1452,7 +1452,7 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
 
       // Said beside it, so nobody mistakes egma's own audio for the audio a
       // framework's telemetry attached to a step of this same exchange.
-      expect(await page.innerText("main")).toContain("egma's own audio");
+      expect(await page.innerText("main")).toContain("Egma's own audio");
       saysNothingBanned(await page.innerText("main"));
 
       /*

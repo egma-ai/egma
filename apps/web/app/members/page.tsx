@@ -71,7 +71,7 @@ export default function MembersPage() {
       await load();
     } catch {
       setLoadFailed(true);
-      setProblem("egma could not be reached. Is the API running?");
+      setProblem("Egma could not be reached. Is the API running?");
     }
   }, [load]);
 
@@ -138,7 +138,7 @@ export default function MembersPage() {
       }
       return said as Record<string, unknown>;
     } catch {
-      setProblem("egma could not be reached. Is the API running?");
+      setProblem("Egma could not be reached. Is the API running?");
       return null;
     } finally {
       setBusy(false);
@@ -168,7 +168,7 @@ export default function MembersPage() {
     return (
       <StatePage title="Sign in first" lead="This page is about your organization.">
         <p className={styles.linkLine}>
-          <a href="/sign-in">Sign in</a> · <a href="/signup">Set up egma</a>
+          <a href="/sign-in">Sign in</a> · <a href="/signup">Set up Egma</a>
         </p>
       </StatePage>
     );

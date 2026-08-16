@@ -28,8 +28,8 @@ export const RUNNING = {
   signedOut: "Sign in first",
   signedOutLead: "This page is about your project.",
   signIn: "Sign in",
-  setUp: "Set up egma",
-  unreachable: "egma could not be reached. Is the API running?",
+  setUp: "Set up Egma",
+  unreachable: "Egma could not be reached. Is the API running?",
   /**
    * An empty list is a real state and a bad one: every project is given the
    * expected-behaviors grader when it is created, so nothing here means a run
@@ -38,7 +38,7 @@ export const RUNNING = {
    */
   empty:
     "Nothing is judging this project, so a run would finish with nothing " +
-    "judged. Every project is given egma's expected-behaviors grader when it " +
+    "judged. Every project is given Egma's expected-behaviors grader when it " +
     "is created — if it is gone, pick it from the library and press Use.",
   counted: (howMany: number): string =>
     `${howMany} ${howMany === 1 ? "grader" : "graders"}`,
@@ -125,7 +125,7 @@ export const EDIT = {
   saved: (name: string): string =>
     `${name} is saved. It judges everything in its scope from here on, and no verdict it has already written was rewritten.`,
   unreachable:
-    "egma could not be reached, so nothing was saved. Is the API running?",
+    "Egma could not be reached, so nothing was saved. Is the API running?",
 } as const;
 
 /**
@@ -160,7 +160,7 @@ export const SWITCH_OFF = {
   done: (name: string): string =>
     `${name} is switched off. Nothing new is judged by it, and everything it already judged reads exactly as it did.`,
   unreachable:
-    "egma could not be reached, so nothing was switched off. Is the API " +
+    "Egma could not be reached, so nothing was switched off. Is the API " +
     "running?",
 } as const;
 

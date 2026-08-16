@@ -91,7 +91,7 @@ describe("what the Library screen says out loud", () => {
   it("turns the stored type and owner into words a person reads", () => {
     expect(copy.TYPES["llm_as_judge"]).toBeDefined();
     expect(copy.TYPES["code"]).toBeDefined();
-    expect(copy.OWNERS["egma"]).toBe("egma");
+    expect(copy.OWNERS["egma"]).toBe("Egma");
     expect(copy.OWNERS["organization"]).toBeDefined();
   });
 
