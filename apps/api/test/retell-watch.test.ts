@@ -239,12 +239,11 @@ async function targetFor(wired: Wired): Promise<RetellWatchTarget> {
 }
 
 /** One tick of the real sweep, against the stub. */
-async function sweep(): Promise<void> {
-  await runProductionSweep(
-    { url: retell.url },
-    new Map<string, number>(),
-    { info: () => undefined, error: () => undefined },
-  );
+async function sweep(): Promise<{ readonly replayed: number }> {
+  return runProductionSweep({ url: retell.url }, new Map<string, number>(), {
+    info: () => undefined,
+    error: () => undefined,
+  });
 }
 
 async function deliver(
@@ -528,7 +527,8 @@ describe("a transport that died mid-protocol", () => {
 
     await backdateClaims();
     retell.calls.clear();
-    await sweep();
+    const swept = await sweep();
+    expect(swept.replayed).toBe(1);
 
     expect(await spansOf(acme, normalised.traceId)).toBe(3);
     const [row] = (await claimRows()).filter(
@@ -566,7 +566,8 @@ describe("a transport that died mid-protocol", () => {
 
     await backdateClaims();
     retell.calls.clear();
-    await sweep();
+    const swept = await sweep();
+    expect(swept.replayed).toBe(1);
 
     // The replay's append is byte-identical, so the store drops it as the
     // duplicate block it is. Three spans, not six.
