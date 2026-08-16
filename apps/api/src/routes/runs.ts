@@ -50,7 +50,12 @@ import { isId } from "@egma/ids";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
-import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
+import {
+  actingIn,
+  cannotActIn,
+  reachingIn,
+  refuseActing,
+} from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { describedMockTool } from "../http/mock-tools.ts";
 import {
@@ -1175,8 +1180,17 @@ export async function runRoutes(
      * so the whole of run detail worked in exactly one project and in no other,
      * and every test in the repository passed: they authenticate with keys, and
      * a key's own project is the project its runs are in.
+     *
+     * **`reachingIn` rather than `actingIn`, and the difference is a route this
+     * one already has.** A run id is unique inside the organization, so naming
+     * no project here is a filter left off rather than a destination left
+     * unsaid. `actingIn` would answer a credential that names none — a key for
+     * the whole organization — with *name the project*, which is a 400 to a
+     * terminal following the `results_url` egma printed for it. A session names
+     * none only on that same address, and carries a project of its own either
+     * way.
      */
-    const acting = await actingIn(auth, given(text(query.project)));
+    const acting = await reachingIn(auth, given(text(query.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
     const who = acting.auth;
 
@@ -1246,8 +1260,10 @@ export async function runRoutes(
     // The project the caller named, for the reason the run's own read beside
     // this one gives: `listRunEvents` narrows by the acting project, so a feed
     // that read no project followed a run in the organization's first project
-    // and answered "no such run" about every other one.
-    const acting = await actingIn(auth, given(text(query.project)));
+    // and answered "no such run" about every other one. `reachingIn` for the
+    // reason that read gives too — a feed a caller can open and cannot follow
+    // is the same fault as a run it can find and cannot read.
+    const acting = await reachingIn(auth, given(text(query.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     // Digits and nothing else. `Number` would take 0x10, 1e3, 5.0 and a
@@ -1362,11 +1378,16 @@ export async function runRoutes(
      * This route used to read none, and `cancelRun` narrows by the acting
      * project — so a session, whose acting project is the organization's
      * *first*, could not cancel a run in any other one. The page was looking
-     * straight at the run and egma answered that there is no such run. A key
-     * still names nothing and still lands in its own project, which is the
-     * absent case `actingIn` has always answered.
+     * straight at the run and egma answered that there is no such run.
+     *
+     * **A key naming nothing still lands where it always did** — its own
+     * project, or the whole organization for a key minted for the whole
+     * organization. That is `reachingIn`'s absent case, and it is the one this
+     * route answered before it read any project at all: a run id is unique in
+     * the organization, so Cancel does not need a project to know which run it
+     * was handed.
      */
-    const acting = await actingIn(auth, projectNamed(query, body));
+    const acting = await reachingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     // The header comes back from the write itself rather than from a second

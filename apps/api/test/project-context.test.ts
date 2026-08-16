@@ -588,3 +588,180 @@ describe("a browser working in a project that is not the first", () => {
     );
   });
 });
+
+/**
+ * The other half of the same rule, and the half nothing in this repository
+ * could see.
+ *
+ * A key minted for the **whole organization** names no project, and reading
+ * across a whole customer is what such a key is for — the agents group says so
+ * in as many words: *"Nothing, unless it named a project — reading across a
+ * whole customer is the first-class case."* `inActingProject` is where that
+ * lives: a context with no project narrows by nothing, and the organization
+ * predicate still holds.
+ *
+ * **Every other API test in this repository signs up one organization holding
+ * one project.** In such an organization a route that resolves an absent
+ * project to "the organization's single project" answers exactly as a route
+ * that narrows by nothing does, so the two are indistinguishable and the wrong
+ * one is invisible. It takes a *second* project for them to differ — and then
+ * the difference is not a narrowing at all. It is `NAME_THE_PROJECT`, an
+ * outright 400, on four routes addressed by an id a terminal already holds.
+ *
+ * The four are here together because they are one journey a terminal makes:
+ * read the run, follow it, stop it, and fetch the audio of a conversation in
+ * it. None of them needs a project to answer — the id is unique in the
+ * organization and the project is only a filter — which is exactly why the
+ * credential's own reach is the right answer for all four.
+ */
+describe("a key for the whole organization, where the organization holds two projects", () => {
+  /** A run in the organization's *second* project, and a key for the whole customer. */
+  async function aRunInTheSecondProject(
+    label: string,
+    modality: "chat" | "voice",
+  ): Promise<{
+    readonly ada: Customer;
+    readonly outbound: string;
+    readonly runId: string;
+  }> {
+    api = await createApi(label);
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    // Through the product's own door, so the second project is the whole thing
+    // — persona, judge and all — rather than a bare row no run could start in.
+    const made = await api.app.inject({
+      method: "POST",
+      url: "/api/projects",
+      headers: { cookie: ada.cookie },
+      payload: { name: "Outbound" },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const outbound = (made.json() as { id: string }).id;
+
+    // Built with a key minted for the second project, because building it is
+    // not what is under test here — reading it back without naming it is.
+    const keyForOutbound = await mintKey(
+      api.app,
+      ada.cookie,
+      "outbound only",
+      outbound,
+    );
+
+    const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
+      name: "Outbound desk",
+      connection: {
+        type: "retell",
+        modality,
+        config: { retellAgentId: `agent_in_retell_${label}` },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    });
+    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+
+    const pushed = await ask(api.app, "POST", "/api/tests", keyForOutbound, {
+      name: "Reschedules a booked appointment",
+      scenario: "Their cleaning has to move to any afternoon next week.",
+      expected_behaviors: ["confirms the new time back before finishing"],
+    });
+    expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
+
+    const started = await ask(api.app, "POST", "/api/runs", keyForOutbound, {
+      connection: (registered.body.connection as { id: string }).id,
+      test_versions: [String(pushed.body.version_id)],
+      idempotency_key: newId("run"),
+      label: "The first run in Outbound",
+    });
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+
+    return { ada, outbound, runId: String(started.body.id) };
+  }
+
+  /**
+   * Read it, follow it, stop it — with a credential that names no project, in
+   * an organization that holds two.
+   *
+   * The status codes are asserted rather than only the bodies, because the
+   * regression this holds is a **400**: not a narrower answer, not an absence,
+   * but a refusal telling a terminal to name a project it has no reason to
+   * know. `egma run` prints a `results_url` and nothing else.
+   */
+  it("reads, follows and cancels a run in the second project without naming one", async () => {
+    const { ada, runId } = await aRunInTheSecondProject(
+      "orgwide_key_run_elsewhere",
+      "chat",
+    );
+    const asTheOrganization = { authorization: `Bearer ${ada.secret}` };
+
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/api/runs/${runId}`,
+      headers: asTheOrganization,
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    expect((read.json() as { label: string }).label).toBe(
+      "The first run in Outbound",
+    );
+
+    const followed = await api.app.inject({
+      method: "GET",
+      url: `/api/runs/${runId}/events?after=0`,
+      headers: asTheOrganization,
+    });
+    expect(followed.statusCode, followed.body).toBe(200);
+
+    const stopped = await api.app.inject({
+      method: "POST",
+      url: `/api/runs/${runId}/cancel`,
+      headers: asTheOrganization,
+      payload: {},
+    });
+    expect(stopped.statusCode, stopped.body).toBe(200);
+    expect((stopped.json() as { status: string }).status).toBe("canceled");
+  });
+
+  /**
+   * The fourth route, on a conversation inside that same run.
+   *
+   * `no_object_store` is the marker that the lookup got **past** the
+   * conversation: this instance has no bucket configured, so a route that found
+   * the conversation says so, and a route that could not find it says there is
+   * no such conversation. Either of those is a different answer from *name a
+   * project*, which is what the refusal branch gives.
+   */
+  it("resolves a recording in the second project without naming one", async () => {
+    const { ada, outbound, runId } = await aRunInTheSecondProject(
+      "orgwide_key_recording_elsewhere",
+      "voice",
+    );
+
+    // Moved the way a simulator moves it, because no simulator runs here.
+    const inOutbound: AuthContext = {
+      userId: ada.userId,
+      organizationId: ada.organizationId,
+      projectId: outbound,
+      role: "admin",
+      via: "session",
+    };
+    const claimed = (
+      await claimSimulations({ claimant: "simulator-blue-1", capacity: 50 })
+    ).filter((claim) => claim.runId === runId);
+    const conversation = claimed[0]?.id ?? "";
+    expect(conversation, "the run wrote a conversation").not.toBe("");
+
+    await startSimulation(inOutbound, conversation, "simulator-blue-1");
+    await completeSimulation(inOutbound, conversation, "simulator-blue-1", {
+      endingReason: "agent_ended",
+      turnCount: 6,
+      recordingReference: `${conversation}/dual-channel.wav`,
+      measuredAudioBandHertz: 8000,
+    });
+
+    const asked = await api.app.inject({
+      method: "GET",
+      url: `/api/simulations/${conversation}/recording`,
+      headers: { authorization: `Bearer ${ada.secret}` },
+    });
+    expect(asked.statusCode, asked.body).toBe(503);
+    expect((asked.json() as { error: string }).error).toBe("no_object_store");
+  });
+});

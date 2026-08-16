@@ -2,7 +2,7 @@ import { getSimulation, NotPermittedError } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
-import { actingIn, refuseActing } from "../http/acting.ts";
+import { reachingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
@@ -136,8 +136,14 @@ export async function recordingRoutes(
      * run's evidence page is inside one and says so; a transcript may be a
      * production exchange nobody simulated, on an organization-wide page, and
      * naming none there is the same absent case every other route answers.
+     *
+     * **`reachingIn`, so that "optional" stays optional.** A simulation id is
+     * unique inside the organization; the project narrows the lookup and never
+     * chooses it. `actingIn` would turn a naming-none request from a key for
+     * the whole organization into *name the project* — a 400 in place of the
+     * audio, on the one surface whose whole point is that it need not know.
      */
-    const acting = await actingIn(auth, given(text(query.project)));
+    const acting = await reachingIn(auth, given(text(query.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const simulation = await getSimulation(acting.auth, simulationId);
