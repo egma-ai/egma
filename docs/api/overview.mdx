@@ -1,0 +1,176 @@
+---
+title: "egma REST API Overview: Base URL, Auth, and Conventions"
+sidebarTitle: "Overview"
+description: "Understand the egma REST API: base URL, authentication, JSON conventions, cursor pagination, error format, rate limits, and OTLP trace ingest."
+---
+
+The egma REST API gives you programmatic access to everything the platform manages — agents, tests, runs, graders, traces, and more. Every operation available in the egma web interface is backed by this API, so you can integrate egma into CI pipelines, build custom dashboards, or automate any part of your simulation workflow.
+
+## Base URL
+
+The API runs on port `3100` by default (controlled by the `PORT` environment variable). Point all requests at your egma instance:
+
+```
+http://your-egma-host:3100
+```
+
+For a local Docker Compose installation, that is `http://localhost:3100`. The web interface runs separately on port `3101`; use port `3100` for all API calls.
+
+<Note>
+  If you deploy egma behind a reverse proxy, the API and web interface share a
+  single origin. Use the origin your proxy exposes rather than a port-suffixed
+  address in that case.
+</Note>
+
+## Authentication
+
+Every request must carry an API key in the `Authorization` header:
+
+```
+Authorization: Bearer egma_sk_...
+```
+
+The key encodes your tenancy — organization and project scope — so you never include an organization ID or project ID in the URL path. egma resolves both from the credential itself. See [Authentication](/api/authentication) for how to create and manage keys.
+
+## Request and Response Format
+
+All request bodies and all responses are JSON. Set `Content-Type: application/json` on every request that sends a body.
+
+Here is a minimal example — fetching your API keys with `curl`:
+
+```bash
+curl http://localhost:3100/api/keys \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+```json
+{
+  "keys": [
+    {
+      "id": "key_01abc...",
+      "name": "ci-pipeline",
+      "scope": "project",
+      "organization_id": "org_01abc...",
+      "project_id": "proj_01abc...",
+      "looks_like": "egma_sk_…XyZw",
+      "created_by_user_id": "user_01abc...",
+      "created_at": "2025-01-15T10:00:00.000Z",
+      "last_used_at": "2025-01-20T08:32:11.000Z",
+      "revoked_at": null
+    }
+  ]
+}
+```
+
+## Pagination
+
+All list endpoints use cursor-based pagination. Responses include a top-level `data` array and a `next_cursor` field:
+
+```json
+{
+  "data": [...],
+  "next_cursor": "cursor_01abc..."
+}
+```
+
+When `next_cursor` is `null`, you have reached the last page. To fetch the next page, pass the cursor as a query parameter:
+
+```bash
+curl "http://localhost:3100/api/runs?cursor=cursor_01abc..." \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+<Tip>
+  Always check `next_cursor` rather than comparing the length of `data` to a
+  page size — the last page may be a full page, and the cursor is the only
+  reliable end-of-results signal.
+</Tip>
+
+## Errors
+
+All error responses follow a consistent shape:
+
+```json
+{
+  "error": "not_found",
+  "message": "no run of yours by that id was found"
+}
+```
+
+The `error` field is a stable snake_case code your code can branch on. The `message` field is a plain-English sentence meant for developers — it may improve across releases, so do not match against it programmatically.
+
+### HTTP Status Codes
+
+| Status | Meaning |
+| ------ | ------- |
+| `200` | Request succeeded |
+| `201` | Resource created |
+| `400` | Request body is malformed or logically invalid |
+| `401` | Missing or unrecognisable API key |
+| `403` | Key is valid but lacks permission for this action |
+| `404` | Resource does not exist, or is not visible to your credential |
+| `409` | Conflict — a resource with that name or identifier already exists |
+| `422` | Body was readable but cannot be acted on (e.g. phone setup not complete) |
+| `429` | Rate limit exceeded — see the `Retry-After` header |
+| `503` | egma is temporarily unavailable or a dependency is unreachable |
+
+## Rate Limiting
+
+egma applies a fixed-window rate limit of **600 requests per minute per organization** by default (configurable via `EGMA_RATE_LIMIT_PER_MINUTE`). The limit is keyed on your organization, not on the individual key — rotating a key does not reset your budget.
+
+When you exceed the limit, the API returns `429` with a `Retry-After` header indicating how many seconds remain until the window resets:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 12
+```
+
+```json
+{
+  "error": "too_many_requests",
+  "message": "this organization has made too many requests. The budget belongs to the organization, so a new key will not reset it."
+}
+```
+
+## OTLP Trace Ingest
+
+egma accepts OpenTelemetry traces at the standard OTLP/HTTP endpoint:
+
+```
+POST /v1/traces
+```
+
+This is how you connect a live voice agent to egma — configure your OpenTelemetry exporter to target your egma instance and egma picks up the spans automatically, with no custom integration code required.
+
+<CardGroup cols={2}>
+  <Card title="Protobuf encoding" icon="binary">
+    Send `Content-Type: application/x-protobuf` for the standard binary format used by most OpenTelemetry SDKs.
+  </Card>
+  <Card title="JSON encoding" icon="brackets-curly">
+    Send `Content-Type: application/json` for the OTLP JSON format, useful for debugging with `curl`.
+  </Card>
+</CardGroup>
+
+**Compression:** gzip is supported. Set `Content-Encoding: gzip` when sending a compressed body. The maximum body size is 20 MiB (matching the OpenTelemetry Collector default).
+
+**Authentication:** pass your project-scoped API key in the `Authorization: Bearer egma_sk_...` header, exactly as with every other API request. Trace ingest requires a project-scoped key — an org-wide key without a project association cannot file spans.
+
+The response follows the OTLP `ExportTraceServiceResponse` schema, including a `partialSuccess` field when some spans were rejected. Your exporter reads this natively.
+
+## Health Check
+
+```
+GET /health
+```
+
+Returns the reachability status of both egma's databases. Useful for container health checks and load balancer probes.
+
+```json
+{
+  "status": "ok",
+  "postgres": "reachable",
+  "clickhouse": "reachable"
+}
+```
+
+Returns `200` when healthy, `503` when either store is unreachable. The `status` field is either `"ok"` or `"unavailable"`. This endpoint does not require authentication.

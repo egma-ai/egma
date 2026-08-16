@@ -1,0 +1,115 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "egma",
+  "theme": "luma",
+  "colors": {
+    "primary": "#6B4FFF",
+    "light": "#EDE9FF",
+    "dark": "#3A2BAA"
+  },
+  "favicon": "/favicon.svg",
+  "seo": {
+    "metatags": {
+      "canonical": "https://docs.egma.ai"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "self-hosting"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/agents-and-connections",
+              "concepts/tests-and-runs",
+              "concepts/graders",
+              "concepts/telemetry"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/retell",
+              "integrations/livekit-testing",
+              "integrations/livekit-token-endpoint",
+              "integrations/livekit-telemetry",
+              "integrations/python-sdk"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "cli/overview",
+              "cli/commands",
+              "cli/test-files"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/platform-settings",
+              "configuration/authentication"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Agents & Tests",
+            "pages": [
+              "api/agents",
+              "api/tests",
+              "api/mock-tools",
+              "api/runs"
+            ]
+          },
+          {
+            "group": "Graders",
+            "pages": [
+              "api/graders",
+              "api/grader-library"
+            ]
+          },
+          {
+            "group": "Telemetry",
+            "pages": [
+              "api/traces"
+            ]
+          },
+          {
+            "group": "Account",
+            "pages": [
+              "api/api-keys",
+              "api/members"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/egma-ai/egma"
+    }
+  }
+}

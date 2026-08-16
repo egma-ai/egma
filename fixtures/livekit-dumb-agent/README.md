@@ -4,7 +4,7 @@ A deliberately boring LiveKit agent — a dental-office receptionist with
 two tools and one-sentence answers — so a simulation has something real on
 the other side of the room while the thing under test is egma.
 
-It is a genuine worker on `livekit-agents` 1.6.7 (the pin `docs/livekit.md`
+It is a genuine worker on `livekit-agents` 1.6.7 (the pin `docs/integrations/livekit-telemetry.mdx`
 uses): Silero VAD, OpenAI speech-to-text, `gpt-4o-mini`, OpenAI
 text-to-speech. One OpenAI key runs all three steps.
 

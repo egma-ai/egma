@@ -1,0 +1,124 @@
+---
+title: "Telemetry: Ingest OTLP Traces from Your Live Agents"
+sidebarTitle: "Telemetry"
+description: "Send OTLP traces from your production voice agents to egma, then read them as turn-by-turn transcripts and run graders against them."
+---
+
+egma ingests OpenTelemetry traces from your live production voice agents over OTLP/HTTP. Once you configure your agent to export spans to egma, every conversation shows up in the dashboard as a structured transcript — turns in order, tool calls expanded, latency measurements computed — exactly like a simulation trace, but filed by your own agent rather than egma's simulator.
+
+The same grading engine that evaluates simulations can also evaluate production traces. You control the scope on each grader.
+
+## How it works
+
+Your agent sends an OTLP export to `POST /v1/traces` on the egma API. egma stores the spans, assembles them into a transcript, and makes the conversation available at **/traces** in the dashboard. If any of your graders have `scope: production` or `scope: both`, the grader picks up the conversation and writes verdicts for it automatically.
+
+The ingest endpoint speaks standard OTLP/HTTP — both protobuf (`application/x-protobuf`) and JSON (`application/json`) encodings are accepted. Any standard OpenTelemetry SDK can send to it without modification.
+
+## Configuring your agent to export
+
+Set two environment variables in your agent's runtime:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://your-egma:3100
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20egma_your_project_key
+```
+
+<Warning>
+**Use `%20`, not a space, in the header value.** The `OTEL_EXPORTER_OTLP_HEADERS` environment variable uses URL encoding for the value separator. A literal space causes most SDKs to mis-parse the header and the export will be rejected as unauthenticated.
+</Warning>
+
+<Warning>
+**Use the API port (3100), not the web port (3101).** The web application and the API run on separate ports. The `/v1/traces` ingest endpoint is on the API (`3100`). Sending to `3101` will return a 404.
+</Warning>
+
+### LiveKit agent example
+
+For a Python LiveKit agent using the OpenTelemetry SDK:
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+exporter = OTLPSpanExporter(
+    endpoint="http://your-egma:3100/v1/traces",
+    headers={"Authorization": "Bearer egma_your_project_key"},
+)
+provider = TracerProvider()
+provider.add_span_processor(BatchSpanProcessor(exporter))
+trace.set_tracer_provider(provider)
+```
+
+Or configure entirely through environment variables — the SDK picks them up automatically:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://your-egma:3100
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20egma_your_project_key"
+export OTEL_SERVICE_NAME=your-agent-name
+```
+
+## API key requirements
+
+The API key you use for telemetry export must be **project-scoped**. An organization-wide key files spans under no project at all, and those traces will not appear in the dashboard.
+
+To mint a project-scoped key, open your project settings in the dashboard and create a key there. You can confirm a key's scope by checking the traces list — if traces are not appearing, verify the key was minted for the correct project.
+
+## Querying traces
+
+Retrieve traces programmatically with `GET /v1/traces`. A time window is always required:
+
+```bash
+curl "https://your-egma:3100/v1/traces?from=2024-01-15T00:00:00Z&to=2024-01-16T00:00:00Z" \
+  -H "Authorization: Bearer egma_your_project_key"
+```
+
+Query parameters:
+
+| Parameter | Required | Description |
+|---|---|---|
+| `from` | Yes | Start of the window, RFC 3339 to microsecond precision. |
+| `to` | Yes | End of the window (exclusive), RFC 3339 to microsecond precision. |
+| `project_id` | No | Narrow to a specific project. Leave out to query across your whole organization. |
+| `limit` | No | Maximum traces per page. Capped at the API's maximum; zero or non-numeric is refused. |
+| `cursor` | No | Paging token from the previous page's `next_cursor`. |
+
+Windows wider than 31 days are refused. There is no default window — every request must name one.
+
+To fetch a single trace, use `GET /v1/traces/:traceId`. The same `from`/`to` window is required:
+
+```bash
+curl "https://your-egma:3100/v1/traces/abc123...?from=2024-01-15T00:00:00Z&to=2024-01-16T00:00:00Z" \
+  -H "Authorization: Bearer egma_your_project_key"
+```
+
+The response includes `turns` (transcript-ordered turn spans), `spans` (top-level non-turn spans), `measures` (computed latency and other metrics), and `verdicts` if any graders have judged the conversation.
+
+## Reading traces in the dashboard
+
+Open **/traces** in the dashboard to see your project's recent conversations, newest first, defaulting to the last 24 hours. Each row shows when the exchange started, how long it ran, how many turns each speaker took, and the first thing the human said.
+
+Open a trace to read it as a transcript:
+
+- **Alternating `human:` and `agent:` turns** in the order they happened, each with its offset from the start of the conversation and its duration.
+- **Expand a turn** to see the timed steps inside it — model inference, speech synthesis, tool calls, turn detection, and speaking.
+- **Expand a step** to see exactly what was recorded about it, including any failures.
+
+Failed steps are marked on the turn before you open it, so you can scan for problems without expanding everything.
+
+## Simulation traces vs. production traces
+
+egma stores traces from two sources, and the dashboard distinguishes them:
+
+| Source | Filed by | `simulation_id` | Recording |
+|---|---|---|---|
+| **Simulation** | egma's own simulator | Present — links to the run | Available if voice modality |
+| **Production** | Your live agent | `null` | Not available |
+
+A simulation trace and a production trace are the same shape at rest and arrive over the same ingest path. The difference is who filed them: egma's own simulator files traces on behalf of a simulation it conducted, while your agent files them using your project API key.
+
+<Note>
+`simulation_id` is only returned for traces egma actually conducted. Your production traces will always show `simulation_id: null`.
+</Note>
+
+The recording player appears only on simulation traces that used a voice connection. Production traces are shown as text transcripts regardless of whether your agent used speech — egma did not conduct the call and has no access to the audio.

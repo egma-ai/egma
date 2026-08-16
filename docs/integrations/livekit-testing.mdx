@@ -1,0 +1,164 @@
+---
+title: "Test Your LiveKit Voice Agent with egma Simulations"
+sidebarTitle: "LiveKit Testing"
+description: "egma creates a LiveKit room in your own project, joins as a persona, and dispatches your worker — your agent never knows it is being tested."
+---
+
+A LiveKit agent is a worker waiting to be given a room. egma makes one — in **your** LiveKit project, not egma's — joins it as an ordinary participant, and speaks with whoever turns up. Your agent gets a room and a persona speaking to it, which is all it ever gets in production too.
+
+This is the testing path. If you want to watch an agent that is already talking to real people, the [LiveKit Telemetry](/integrations/livekit-telemetry) page covers that separately. Neither needs the other, and connecting a LiveKit agent for testing does not require exporting any telemetry.
+
+## What you need
+
+egma needs four values to run a simulation against a LiveKit agent:
+
+1. Your LiveKit project URL (`wss://` or `ws://`)
+2. A LiveKit API key for that project
+3. The corresponding API secret
+4. Optionally, the name your worker registers under — only if your worker uses named dispatch
+
+The first three are already in your agent's environment.
+
+## Setup
+
+<Steps>
+  <Step title="Locate your three LiveKit environment variables">
+    Every LiveKit agent reads the same three variables. Open the `.env` your worker reads — `.env.local` if you started from `lk agent init`:
+
+    ```bash
+    LIVEKIT_URL=wss://your-project.livekit.cloud
+    LIVEKIT_API_KEY=API...
+    LIVEKIT_API_SECRET=...
+    ```
+
+    Cloud and self-hosted are the same three values and the same URL field. A `wss://` project address and a `ws://127.0.0.1:7880` development server both go in the same field, and egma treats them identically.
+  </Step>
+
+  <Step title="Check whether your worker registers a name">
+    Look at how your worker starts. In the Python agents framework, the relevant setting is `agent_name` on `WorkerOptions`:
+
+    ```python
+    # No agent_name — automatic dispatch
+    agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint))
+
+    # Named worker — explicit dispatch
+    agents.cli.run_app(agents.WorkerOptions(
+        entrypoint_fnc=entrypoint,
+        agent_name="front-desk",
+    ))
+    ```
+
+    - **No name:** the worker is on automatic dispatch. LiveKit gives it every new room in the project, so egma creating the room *is* the dispatch request. Leave the agent name blank in egma.
+    - **A name:** the worker only joins rooms whose dispatch asks for it by that exact string. Give egma the same string, spelled identically.
+
+    <Warning>
+      Getting this wrong is the most common source of the `agent_never_joined` error. The room opens, nobody comes, and egma reports `agent_never_joined` with a sentence naming what it waited for. If you see that error, this is almost always the cause.
+    </Warning>
+  </Step>
+
+  <Step title="Register the agent with egma">
+    Send one `POST` request. Include `agentName` only if step 2 determined your worker uses named dispatch:
+
+    ```bash
+    curl -sX POST http://localhost:3101/api/agents \
+      -H 'content-type: application/json' \
+      -H 'authorization: Bearer egma_sk_...' \
+      -d '{
+        "name": "Front desk",
+        "connection": {
+          "type": "livekit",
+          "modality": "voice",
+          "config": { "url": "wss://your-project.livekit.cloud" },
+          "credentials": { "apiKey": "API...", "apiSecret": "..." }
+        }
+      }'
+    ```
+
+    The key pair is sealed on arrival and never comes back out — reading the agent later shows the last four characters of the key and no line for the secret.
+
+    Two optional fields inside `config`:
+
+    | Field | Purpose |
+    |---|---|
+    | `agentName` | The name your worker registers under (step 2). Omit for automatic dispatch. |
+    | `metadata` | A JSON object *written as a string*, e.g. `"{\"tenant\":\"acme\"}"`. Passed verbatim to your agent as the room's metadata. Use this for tenant IDs, locale flags, or any context your deployment reads off the room. |
+
+    egma sends nothing about the test itself to your agent. The dispatch carries the simulation's ID and the modality, and nothing else — an agent that could read its own script would stop being under test.
+  </Step>
+</Steps>
+
+## What a simulation does
+
+Every simulation runs these steps against your LiveKit project, in order:
+
+1. **Creates a room** named `egma-sim-` followed by a random hex string, carrying your configured metadata.
+2. **Joins as `egma-persona`**, with a token scoped to that one room.
+3. **Dispatches your agent** — by name, or not at all where automatic dispatch already applies.
+4. **Waits up to 30 seconds** for your worker to join *and* be heard. A participant that joins but publishes no audio is a worker that crashed on its first frame, not an agent that answered. Both halves must succeed.
+5. **Holds the conversation**, reading turn boundaries out of the audio, because a LiveKit room carries no end-of-turn signal.
+6. **Deletes the room**, however the conversation ends. Deleting the room is what ends everything it held, including your dispatched worker.
+
+### Cold worker startup time
+
+On a cold worker — one that has just started and has no warmed process ready — the gap between dispatch and the agent's first word is around **11 seconds** in egma's own runs: a second or so to start the job process, a few for the framework's warm-up, then the model and voice. That is well inside the 30-second wait, but it is why the wait is 30 and not 5. Start your worker before you start the run and give it a moment to register.
+
+## What comes back
+
+The same record any egma voice simulation produces:
+
+<CardGroup cols={2}>
+  <Card title="Transcript" icon="file-lines">
+    Turn-by-turn transcript with speaker identity and timing.
+  </Card>
+  <Card title="Per-turn timings" icon="stopwatch">
+    Time to first word, speaking durations, and latency around each answer — measured off the audio that actually arrived.
+  </Card>
+  <Card title="Dual-channel recording" icon="waveform">
+    The persona on one channel, your agent on the other, so either side can be heard alone when a transcript looks ambiguous.
+  </Card>
+  <Card title="Measured bandwidth" icon="signal">
+    Read off the audio the recorder saw — **16 kHz** (wideband) for a LiveKit room vs 8 kHz for a phone call. A measurement, not a declaration.
+  </Card>
+</CardGroup>
+
+The room name is stored as the **provider reference** on the simulation record. Paste it into LiveKit's own dashboard and you are looking at the same conversation from the other side.
+
+## Security: give egma its own key pair
+
+An API key and secret are project-admin power in LiveKit — they create rooms, dispatch agents, and delete rooms. That is exactly what egma needs to run simulations, but it may be more access than your team wants to hand over in one credential.
+
+<Accordion title="Token-endpoint mode: keep the key pair on your side">
+  If giving egma your project's key pair is not acceptable for production, egma supports a **token-endpoint mode**: you keep the key pair, and egma calls a small endpoint of yours to get one scoped token per simulation. Your endpoint mints the token for exactly one room, one participant, one conversation — and you decided to issue it.
+
+  The trade is explicit: because egma holds no key pair, dispatching your agent and deleting the room after the conversation both become your endpoint's job. Your endpoint receives a `POST` with the room name and participant name egma wants, mints a scoped token for exactly those values, dispatches the agent, and returns the token. egma joins with it. Six hardening steps matter for production: require an auth header on the endpoint, mint for exactly the identity asked for, allowlist the `egma-sim-` room prefix, give the token a short TTL, grant join permissions only, and set a short empty-room timeout so rooms close after egma leaves.
+
+  Follow the [LiveKit token endpoint guide](/integrations/livekit-token-endpoint) for the request contract, connection shape, and production hardening steps.
+</Accordion>
+
+Beyond the choice of mode, follow standard key hygiene: mint egma its own key pair rather than sharing the one your agent runs on, so revoking it costs you nothing else. egma never logs the secret, never puts it in an error message, and scrubs it out of anything your LiveKit server says back before quoting it in a reason.
+
+## Troubleshooting
+
+<Accordion title="agent_never_joined">
+  The room opened and egma waited the full 30 seconds, but your worker never joined (or joined and published no audio).
+
+  **Check first:** does the `agentName` you registered with egma match the `agent_name` on your worker's `WorkerOptions`, spelled identically? A mismatch is the most common cause. A worker on automatic dispatch registered with any agent name at all in egma will never be dispatched correctly.
+
+  **Check second:** is your worker running and connected to the same LiveKit project? A worker that is not running cannot receive a dispatch.
+
+  **Check third:** did your worker crash on startup? A worker that joins and then exits before publishing audio counts as never having answered.
+</Accordion>
+
+<Accordion title="The worker takes too long to join">
+  If your worker is cold — just started, with no warmed process — startup takes around 11 seconds. egma waits 30 seconds total. Start your worker before starting the run and let it register with LiveKit before the first simulation begins.
+</Accordion>
+
+<Accordion title="Simulations pass but recordings look wrong">
+  The dual-channel recording isolates each speaker. If the transcript looks garbled, open the recording and listen to each channel alone to determine whether the problem is in the persona's audio, your agent's audio, or the transcript alignment.
+</Accordion>
+
+## Try it with the fixture agent
+
+The egma repository includes a minimal LiveKit agent to test your credentials against before pointing egma at your real agent. It is a dental-office receptionist with no tools and one-sentence answers, running on a single OpenAI key. Its README gets it running against your project in one command and lets you switch between automatic and named dispatch with a single environment variable — useful for confirming your key pair and room path work before using your own agent.
+
+Find it at `fixtures/livekit-dumb-agent` in the egma repository.

@@ -1,0 +1,149 @@
+---
+title: "API Keys: Create, List, and Revoke API Credentials"
+sidebarTitle: "API Keys"
+description: "Create API keys for programmatic access, list your active keys, and revoke any key instantly. The secret is shown exactly once at creation time."
+---
+
+API keys let you authenticate programmatically against egma's API — from CI pipelines, agent SDKs, telemetry exporters, and automation scripts. Each key is scoped to either your whole organization or to a single project. Keys inherit the role of the user who minted them, so a `viewer`'s key reads but cannot write.
+
+Every role may mint and revoke their own keys. Admins can see and revoke all keys in the organization.
+
+---
+
+## Create a key
+
+Mints a new API key. Copy the `secret` field immediately — it is shown exactly once and cannot be retrieved again.
+
+**`POST /api/keys`**
+
+<ParamField body="name" type="string">
+  A label for this key, such as `"CI pipeline"` or `"LiveKit telemetry"`. Helps you identify it later in the key list.
+</ParamField>
+
+<ParamField body="project_id" type="string">
+  Scope the key to a specific project. Omit to create an organization-scoped key that can read and write across all projects. Pass a `prj_` identifier to restrict the key to one project area.
+</ParamField>
+
+Returns `201 Created` with the new key object including the plaintext secret.
+
+<ResponseField name="id" type="string">
+  The key's identifier. Use this to revoke the key later.
+</ResponseField>
+
+<ResponseField name="secret" type="string">
+  The full API key beginning with `egma_sk_`. This is the only time this value is returned. Copy it now.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The label you gave the key.
+</ResponseField>
+
+<ResponseField name="scope" type="string">
+  `"organization"` or `"project"`, depending on whether `project_id` was provided.
+</ResponseField>
+
+<ResponseField name="project_id" type="string | null">
+  The project this key is scoped to, or `null` for organization-scoped keys.
+</ResponseField>
+
+<ResponseField name="organization_id" type="string">
+  The organization this key belongs to.
+</ResponseField>
+
+<ResponseField name="looks_like" type="string">
+  A non-secret hint showing the key's prefix and last few characters — enough to identify which key is which without exposing the secret.
+</ResponseField>
+
+<ResponseField name="created_by_user_id" type="string">
+  The user ID of whoever minted this key.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  ISO 8601 timestamp of when the key was created.
+</ResponseField>
+
+<ResponseField name="last_used_at" type="string | null">
+  ISO 8601 timestamp of the last request authenticated with this key. `null` if the key has never been used.
+</ResponseField>
+
+<ResponseField name="revoked_at" type="string | null">
+  ISO 8601 timestamp of when the key was revoked. `null` for active keys.
+</ResponseField>
+
+```bash title="Create an organization-scoped key"
+curl -X POST https://your-egma-instance/api/keys \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "CI pipeline" }'
+```
+
+```bash title="Create a project-scoped key"
+curl -X POST https://your-egma-instance/api/keys \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "LiveKit telemetry", "project_id": "prj_abc123" }'
+```
+
+<Note>
+  The `secret` field is returned only once, at creation time. egma stores only a hash. If you lose the secret, revoke the key and mint a new one.
+</Note>
+
+---
+
+## List keys
+
+Returns all API keys you are allowed to see. Admins see every key in the organization. All other roles see only the keys they minted. Secrets are never included in list responses.
+
+**`GET /api/keys`**
+
+<ResponseField name="keys" type="array">
+  Array of key objects. The `secret` field is absent from every item.
+</ResponseField>
+
+```bash title="List your keys"
+curl https://your-egma-instance/api/keys \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+---
+
+## Revoke a key
+
+Permanently deactivates a key. The key stops working on the very next request — there is no grace period. You can revoke your own keys. Admins can revoke any key in the organization.
+
+**`POST /api/keys/:apiKeyId/revoke`**
+
+<ParamField path="apiKeyId" type="string" required>
+  The `id` of the key to revoke, from the list or the creation response.
+</ParamField>
+
+Returns the revoked key object with `revoked_at` set.
+
+```bash title="Revoke a key"
+curl -X POST https://your-egma-instance/api/keys/key_abc123/revoke \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+<Note>
+  Revocation is permanent and immediate. A revoked key cannot be re-activated. If you need the same scope again, mint a new key.
+</Note>
+
+---
+
+## Using a key
+
+Pass the key in the `Authorization` header on every request:
+
+```bash
+Authorization: Bearer egma_sk_...
+```
+
+For telemetry ingest (`POST /v1/traces`), use the same header. Configure your OpenTelemetry exporter's headers to include it:
+
+```bash title="Example: set key for telemetry exporter"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20egma_sk_..."
+```
+
+<Note>
+  When setting keys in environment variables passed to OpenTelemetry SDKs, encode the space between `Bearer` and the key value as `%20`. Many SDKs pass header values verbatim, and a literal space is not valid in an HTTP header value.
+</Note>

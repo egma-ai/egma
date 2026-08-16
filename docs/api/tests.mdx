@@ -1,0 +1,305 @@
+---
+title: "Create and Manage Versioned Test Scenarios via API"
+sidebarTitle: "Tests"
+description: "Create, edit, and list simulation test scenarios. Every edit mints an immutable version; optimistic locking prevents silent overwrites."
+---
+
+Tests are the simulation scenarios egma runs against your agents. Each test holds a natural-language scenario, a list of expected behaviors the agent should exhibit, and optional persona and mock-tool overrides. Every time you save changes to a test, egma mints a new immutable **test version** — a frozen snapshot identified by its own `version_id`. Runs always execute against pinned version ids, so the test you edited after a run started never touches that run's results.
+
+Editing a test requires you to supply the `expected_version_id` you last read. If another writer has moved the test forward in the meantime, egma refuses with `409 Conflict` and tells you both version ids, so you can read the current state before retrying. This check happens inside the write itself, not as a separate read-then-write, so there is no window for a second writer to slip through.
+
+---
+
+## Create a test
+
+`POST /api/tests`
+
+Create a new test. Returns `201 Created` with the full test object, including the first `version_id` to use in future edits and in run requests.
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  Display name for the test. Must be unique within the project.
+</ParamField>
+
+<ParamField body="scenario" type="string" required>
+  A natural-language description of the situation the simulated caller is in, e.g. `"A customer wants to reschedule a dentist appointment."`.
+</ParamField>
+
+<ParamField body="expected_behaviors" type="string[]" required>
+  The behaviors the agent must exhibit, as plain sentences, e.g. `["confirms the new time before hanging up", "does not ask for the same information twice"]`. The `{"behavior", "priority"}` object shape is no longer accepted.
+</ParamField>
+
+<ParamField body="personas" type="string[]">
+  Personas to assign to this test, by name or `prs_…` identifier. Each entry calls in separately when the test is run. Omit to use the project's default persona.
+</ParamField>
+
+<ParamField body="mock_tools" type="object[]">
+  Per-test mock-tool overrides. These version with the test and take precedence over the project-level mock tools during a run.
+
+  <Expandable title="mock tool override fields">
+    <ParamField body="tool" type="string" required>
+      The tool name this override answers for.
+    </ParamField>
+    <ParamField body="answer" type="any">
+      The value to return when the agent calls this tool. Provide either `answer` or `error`, not both.
+    </ParamField>
+    <ParamField body="error" type="string">
+      An error string to return instead of a value.
+    </ParamField>
+    <ParamField body="delay_ms" type="integer">
+      Milliseconds to wait before returning the answer. Useful for testing timeout-handling behavior.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="project" type="string">
+  Project id or name to create the test in. Defaults to the project your API key belongs to. In a single-project organization you never need this field.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="id" type="string">
+  Unique test identifier (`tst_…`).
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Display name.
+</ResponseField>
+
+<ResponseField name="version" type="integer">
+  Monotonically increasing version number. Starts at `1`.
+</ResponseField>
+
+<ResponseField name="version_id" type="string">
+  The immutable id of this version (`tstv_…`). Supply this as `expected_version_id` when editing, and as an entry in `test_versions` when starting a run.
+</ResponseField>
+
+<ResponseField name="scenario" type="string">
+  The scenario text.
+</ResponseField>
+
+<ResponseField name="expected_behaviors" type="string[]">
+  The list of expected behaviors.
+</ResponseField>
+
+<ResponseField name="personas" type="object[]">
+  Personas attached to this test.
+
+  <Expandable title="persona fields">
+    <ResponseField name="id" type="string">Persona identifier (`prs_…`).</ResponseField>
+    <ResponseField name="name" type="string">Persona display name.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="mock_tools" type="object[]">
+  Per-test mock-tool overrides. Each entry has `tool`, `answer` or `error`, and `delay_ms`.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  ISO 8601 timestamp.
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  ISO 8601 timestamp.
+</ResponseField>
+
+### Example
+
+```bash
+curl -X POST https://your-egma-host/api/tests \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "reschedule appointment",
+    "scenario": "A patient wants to move their 9 a.m. appointment to the afternoon.",
+    "expected_behaviors": [
+      "confirms the new time before ending the call",
+      "does not ask for the same information twice"
+    ],
+    "personas": ["impatient-caller"],
+    "mock_tools": [
+      { "tool": "check_availability", "answer": { "slots": ["2 p.m.", "4 p.m."] } }
+    ]
+  }'
+```
+
+---
+
+## Edit a test
+
+`PATCH /api/tests/:testId`
+
+Update one or more fields of an existing test. You must supply `expected_version_id` — the `version_id` you last read for this test. If the test has moved on since you read it, egma returns `409 Conflict` with both version ids.
+
+Fields you omit are kept as-is. An explicit empty `personas` array (`[]`) means the project's default persona; omitting `personas` entirely leaves the current persona list unchanged.
+
+Sending content byte-identical to the current version mints no new version and returns the current version unchanged. Changing only the `name` also mints no new version, because names are identity, not content.
+
+### Path parameters
+
+<ParamField path="testId" type="string" required>
+  The `tst_…` identifier of the test to edit.
+</ParamField>
+
+### Request body
+
+<ParamField body="expected_version_id" type="string" required>
+  The `version_id` you last read. The edit is refused if the test has moved on.
+</ParamField>
+
+<ParamField body="name" type="string">
+  New display name.
+</ParamField>
+
+<ParamField body="scenario" type="string">
+  New scenario text.
+</ParamField>
+
+<ParamField body="expected_behaviors" type="string[]">
+  Replacement list of expected behaviors. Replaces the whole list, not a single entry.
+</ParamField>
+
+<ParamField body="personas" type="string[]">
+  Replacement persona list, by name or identifier. An empty array assigns the project default.
+</ParamField>
+
+<ParamField body="mock_tools" type="object[]">
+  Replacement mock-tool overrides. Same shape as on create.
+</ParamField>
+
+<ParamField body="project" type="string">
+  Project id or name. Defaults to the project your API key belongs to.
+</ParamField>
+
+### Response fields
+
+Same shape as the create response: the full test object at its new (or unchanged) version.
+
+### Conflict response
+
+When the test has moved on, egma returns `409 Conflict`:
+
+```json
+{
+  "error": "conflict",
+  "message": "this edit was written against version tstv_old, and the test has moved on to tstv_new. Read the test again and send the edit with expected_version_id set to the version it names now.",
+  "test": { "id": "tst_01abc", "name": "reschedule appointment" },
+  "expected_version_id": "tstv_old",
+  "current_version_id": "tstv_new"
+}
+```
+
+### Example
+
+```bash
+curl -X PATCH "https://your-egma-host/api/tests/tst_01abc" \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "expected_version_id": "tstv_01xyz",
+    "expected_behaviors": [
+      "confirms the new time before ending the call",
+      "does not ask for the same information twice",
+      "offers a callback if no slots are available"
+    ]
+  }'
+```
+
+---
+
+## List tests
+
+`GET /api/tests`
+
+Return a paginated list of tests your credential can reach, ordered newest first. Each item includes the full test object with its current `version_id`.
+
+### Query parameters
+
+<ParamField query="project" type="string">
+  Filter to a specific project by id or name.
+</ParamField>
+
+<ParamField query="cursor" type="string">
+  The `next_cursor` value from the previous page. Omit to start from the newest test.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  Array of test objects. Each has the same shape as the create response.
+</ResponseField>
+
+<ResponseField name="next_cursor" type="string | null">
+  Pass as `?cursor` to fetch the next page. `null` means you are on the last page.
+</ResponseField>
+
+### Example
+
+```bash
+curl "https://your-egma-host/api/tests?project=my-project" \
+  -H "Authorization: Bearer <api-key>"
+```
+
+---
+
+## Get a test version
+
+`GET /api/test-versions/:versionId`
+
+Retrieve a single frozen version by its `tstv_…` identifier. This is the shape a run pins and executes; it never changes after creation. The response also tells you whether this version is still the test's current one, and which test it belongs to.
+
+### Path parameters
+
+<ParamField path="versionId" type="string" required>
+  The `tstv_…` version identifier.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="id" type="string">
+  The version's own identifier (`tstv_…`).
+</ResponseField>
+
+<ResponseField name="test_id" type="string">
+  The test this version belongs to.
+</ResponseField>
+
+<ResponseField name="test_name" type="string">
+  The test's current display name (names are not versioned).
+</ResponseField>
+
+<ResponseField name="version" type="integer">
+  The version number within the test's history.
+</ResponseField>
+
+<ResponseField name="current" type="boolean">
+  `true` if this is the test's current version. A pinned run whose version is no longer current has been superseded by a later edit.
+</ResponseField>
+
+<ResponseField name="scenario" type="string">
+  The frozen scenario text.
+</ResponseField>
+
+<ResponseField name="expected_behaviors" type="string[]">
+  The frozen list of expected behaviors.
+</ResponseField>
+
+<ResponseField name="personas" type="object[]">
+  The frozen persona list. Same shape as on the test object.
+</ResponseField>
+
+<ResponseField name="mock_tools" type="object[]">
+  The frozen mock-tool overrides.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  ISO 8601 timestamp of when this version was minted.
+</ResponseField>
+
+### Example
+
+```bash
+curl "https://your-egma-host/api/test-versions/tstv_01xyz" \
+  -H "Authorization: Bearer <api-key>"
+```

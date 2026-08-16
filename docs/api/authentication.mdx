@@ -1,0 +1,246 @@
+---
+title: "API Key Authentication and Key Management for egma"
+sidebarTitle: "Authentication"
+description: "Create, use, list, and revoke egma API keys. Learn about key scoping, the one-time secret display, key rotation, and authentication error codes."
+---
+
+The egma REST API authenticates every request with an API key. You send the key in an HTTP header, and egma resolves your organization, project, and permission level from the key itself — no separate login step, no session cookie, no organization or project ID in the URL.
+
+API keys also authenticate OTLP trace ingest at `POST /v1/traces`, so the same credential that calls the REST API is the one your voice agent's OpenTelemetry exporter uses.
+
+## Key Format
+
+Every egma API key begins with the prefix `egma_sk_` followed by 43 characters of base64url-encoded random data:
+
+```
+egma_sk_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v2W3
+```
+
+This fixed prefix lets secret-scanning tools (GitHub, GitLeaks, and others) detect a leaked egma key automatically. Never change or strip the prefix.
+
+## Creating a Key
+
+Send a `POST` request to `/api/keys`. You may optionally name the key and associate it with a specific project.
+
+```bash
+curl -X POST http://localhost:3100/api/keys \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "ci-pipeline",
+    "project_id": "proj_01abc..."
+  }'
+```
+
+### Request Body
+
+<ParamField body="name" type="string">
+  A human-readable label for this key. Useful for identifying keys in the list
+  view. Optional — omit to create an unnamed key.
+</ParamField>
+
+<ParamField body="project_id" type="string">
+  Scopes this key to a single project. Required for trace ingest — a key with
+  no project cannot file spans. Optional for keys that only call REST endpoints.
+</ParamField>
+
+### Response
+
+```json
+{
+  "id": "key_01abc...",
+  "secret": "egma_sk_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v2W3",
+  "name": "ci-pipeline",
+  "scope": "project",
+  "organization_id": "org_01abc...",
+  "project_id": "proj_01abc...",
+  "looks_like": "egma_sk_…W3",
+  "created_by_user_id": "user_01abc...",
+  "created_at": "2025-01-20T12:00:00.000Z",
+  "last_used_at": null,
+  "revoked_at": null
+}
+```
+
+<ResponseField name="id" type="string">
+  Stable identifier for the key. Use this when revoking.
+</ResponseField>
+
+<ResponseField name="secret" type="string">
+  The full API key secret. **This is the only time egma returns the secret.**
+  Copy it immediately — after this response it is gone.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The label you supplied, or `null` if you did not provide one.
+</ResponseField>
+
+<ResponseField name="scope" type="string">
+  Either `"project"` (when `project_id` was supplied) or `"organization"`.
+</ResponseField>
+
+<ResponseField name="organization_id" type="string">
+  The organization this key belongs to. Always derived from your credential,
+  never from the request body.
+</ResponseField>
+
+<ResponseField name="project_id" type="string">
+  The project this key is scoped to, or `null` for an org-wide key.
+</ResponseField>
+
+<ResponseField name="looks_like" type="string">
+  A display hint showing the prefix and the last four characters of the secret.
+  Used to identify a key without exposing it. All subsequent API responses use
+  this field instead of the secret.
+</ResponseField>
+
+<ResponseField name="created_by_user_id" type="string">
+  The user account that minted this key.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  ISO 8601 timestamp of when the key was created.
+</ResponseField>
+
+<ResponseField name="last_used_at" type="string | null">
+  ISO 8601 timestamp of the most recent successful request using this key,
+  or `null` if the key has never been used.
+</ResponseField>
+
+<ResponseField name="revoked_at" type="string | null">
+  ISO 8601 timestamp of when the key was revoked, or `null` if the key is
+  still active.
+</ResponseField>
+
+<Warning>
+  The `secret` field appears exactly once — in the `201` response at creation
+  time. egma stores only a SHA-256 hash of the secret, so it can never return
+  the plaintext again. If you lose the key, revoke it and create a new one.
+</Warning>
+
+## Using a Key
+
+Include the key in the `Authorization` header on every request:
+
+```bash
+curl http://localhost:3100/api/runs \
+  -H "Authorization: Bearer egma_sk_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v2W3"
+```
+
+The same header authenticates OTLP trace ingest:
+
+```bash
+curl -X POST http://localhost:3100/v1/traces \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "resourceSpans": [...] }'
+```
+
+For most use cases, configure your OpenTelemetry SDK's exporter endpoint and headers directly rather than constructing the request by hand.
+
+## Listing Keys
+
+Fetch all keys visible to your credential:
+
+```bash
+curl http://localhost:3100/api/keys \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+```json
+{
+  "keys": [
+    {
+      "id": "key_01abc...",
+      "name": "ci-pipeline",
+      "scope": "project",
+      "organization_id": "org_01abc...",
+      "project_id": "proj_01abc...",
+      "looks_like": "egma_sk_…W3",
+      "created_by_user_id": "user_01abc...",
+      "created_at": "2025-01-20T12:00:00.000Z",
+      "last_used_at": "2025-01-21T09:14:55.000Z",
+      "revoked_at": null
+    }
+  ]
+}
+```
+
+<Note>
+  The list response never includes the `secret` field — only the `looks_like`
+  hint. Admins see every key in the organization; other roles see only the keys
+  they created.
+</Note>
+
+## Revoking a Key
+
+Send a `POST` request to `/api/keys/:apiKeyId/revoke` using the key's `id`:
+
+```bash
+curl -X POST http://localhost:3100/api/keys/key_01abc.../revoke \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+The response returns the key's final state with `revoked_at` populated:
+
+```json
+{
+  "id": "key_01abc...",
+  "name": "ci-pipeline",
+  "scope": "project",
+  "organization_id": "org_01abc...",
+  "project_id": "proj_01abc...",
+  "looks_like": "egma_sk_…W3",
+  "created_by_user_id": "user_01abc...",
+  "created_at": "2025-01-20T12:00:00.000Z",
+  "last_used_at": "2025-01-21T09:14:55.000Z",
+  "revoked_at": "2025-01-22T15:30:00.000Z"
+}
+```
+
+Revocation takes effect immediately — the key stops working on the very next request. If you attempt to revoke a key that does not exist or is not visible to your credential, the API returns `404`.
+
+## Project-Scoped vs. Org-Wide Keys
+
+<CardGroup cols={2}>
+  <Card title="Project-scoped key" icon="folder">
+    Created with a `project_id`. Required for OTLP trace ingest — spans must
+    be filed under a specific project. Restricts all operations to that project.
+  </Card>
+  <Card title="Org-wide key" icon="building">
+    Created without a `project_id`. Can access resources across all projects
+    in the organization. Cannot ingest traces.
+  </Card>
+</CardGroup>
+
+When you set up an agent to send traces to egma, always use a project-scoped key. The project the key is scoped to is where the traces, runs, and verdicts appear.
+
+## Recommended Key Rotation Workflow
+
+<Steps>
+  <Step title="Create a replacement key">
+    Mint a new key with `POST /api/keys`, using the same `name` and `project_id` as the key you are replacing.
+  </Step>
+  <Step title="Copy the secret immediately">
+    The `secret` field in the response is shown only once. Store it in your secrets manager before the response window closes.
+  </Step>
+  <Step title="Deploy the new key">
+    Update your CI environment, agent configuration, or application secrets to use the new key.
+  </Step>
+  <Step title="Revoke the old key">
+    Once the new key is confirmed working, call `POST /api/keys/:oldKeyId/revoke`. The old key stops working immediately.
+  </Step>
+</Steps>
+
+<Tip>
+  Revoking a key does not reset your organization's rate limit budget — the
+  limit is keyed on the organization, not the individual key. A rotation
+  therefore carries no traffic-shaping side effects.
+</Tip>
+
+## Authentication Errors
+
+| Status | Error code | Cause |
+| ------ | ---------- | ----- |
+| `401` | `not_authenticated` | No `Authorization` header, or the bearer token is not a valid egma key |
+| `403` | `not_permitted` | The key is valid but does not have permission for this operation (e.g. a viewer-role key attempting a write) |

@@ -8,7 +8,7 @@ answers. It exists so a simulation has something on the other side of the
 room while the thing under test is egma, not the agent.
 
 All three model steps ride one OpenAI key, the same single-provider shape
-the docs recommend for local runs (`docs/livekit.md`).
+the docs recommend for local runs (`docs/integrations/livekit-telemetry.mdx`).
 
 ## The two tools, and why there are two
 

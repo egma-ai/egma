@@ -1,0 +1,261 @@
+---
+title: "Traces: Ingest and Query Conversation Telemetry via OTLP"
+sidebarTitle: "Traces"
+description: "Send OpenTelemetry spans from your voice agent to egma and query them back with time-windowed list and single-trace detail endpoints."
+---
+
+Traces are the raw telemetry record of a conversation — spans emitted by your voice agent as it processes audio, calls tools, and generates responses. egma accepts spans over the standard OTLP/HTTP protocol, so you connect your agent by pointing its OpenTelemetry exporter at egma's ingest endpoint. No custom SDK is required. Once spans arrive, use the read endpoints to list conversations by time window or fetch the full transcript and verdict details for a single trace.
+
+---
+
+## Ingest spans
+
+Sends an OTLP export to egma. Use this endpoint as the `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (or equivalent) in your agent's OpenTelemetry configuration.
+
+**`POST /v1/traces`**
+
+### Authentication
+
+Send a Bearer API key in the `Authorization` header. Use a key scoped to the project you want telemetry to appear under.
+
+```
+Authorization: Bearer egma_sk_...
+```
+
+### Content types
+
+Send one of the two standard OTLP/HTTP content types:
+
+| Format | `Content-Type` |
+|---|---|
+| Protobuf (recommended) | `application/x-protobuf` |
+| JSON | `application/json` |
+
+Gzip compression is supported. Add `Content-Encoding: gzip` when sending compressed bodies.
+
+### Request limits
+
+- Maximum body size: 20 MiB (matches the OpenTelemetry Collector default)
+- Maximum spans per request: 10,000
+- Maximum normalized row bytes per request: 64 MiB
+
+Spans that exceed these limits are reported in the OTLP partial-success field — they will not be retried automatically. Split large exports into smaller batches.
+
+### Response
+
+egma returns a standard `ExportTraceServiceResponse`. If any spans were rejected, the `partialSuccess` field contains a count and a reason. A `200` response with an empty body means all spans were accepted.
+
+```bash title="Send spans (protobuf)"
+curl -X POST https://your-egma-instance/v1/traces \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/x-protobuf" \
+  --data-binary @export.pb
+```
+
+```bash title="Send spans (JSON)"
+curl -X POST https://your-egma-instance/v1/traces \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"resourceSpans": [...]}'
+```
+
+<Note>
+  Use your egma instance's API port for telemetry ingest — port **3100** by default — not the web UI port (3101). These may differ in self-hosted deployments. Check your `EGMA_API_URL` environment variable or ask your administrator if you are unsure which port is which.
+</Note>
+
+<Note>
+  When setting the endpoint URL in environment variables or SDK configuration, encode spaces as `%20`, not as literal spaces. Many OpenTelemetry SDKs pass headers verbatim, and a literal space in an `Authorization` header value is not valid HTTP.
+</Note>
+
+<Note>
+  Telemetry sent with a project-scoped API key appears in the dashboard under that project. An organization-scoped key groups traces at the organization level. For traces to appear under a specific project, mint a key scoped to that project via `POST /api/keys` with `project_id` set.
+</Note>
+
+---
+
+## List traces
+
+Returns a paginated list of trace summaries within a time window, ordered newest first.
+
+**`GET /v1/traces`**
+
+<ParamField query="from" type="string" required>
+  Start of the query window as an RFC 3339 timestamp, e.g. `2026-08-02T00:00:00Z`. Microsecond precision is supported (six fractional digits); finer precision is rejected.
+</ParamField>
+
+<ParamField query="to" type="string" required>
+  End of the query window as an RFC 3339 timestamp. The bound is exclusive — a trace that ended exactly at `to` is not included. You can paste a trace's own `ended_at` value directly as `to` without losing it.
+</ParamField>
+
+<ParamField query="project_id" type="string">
+  Filter to a specific project. Omit to read across your whole organization. If your API key is already scoped to a project, this parameter must either match that project or be omitted.
+</ParamField>
+
+<ParamField query="limit" type="number">
+  Maximum traces per page. Clamped to the server maximum if higher. Must be a positive integer.
+</ParamField>
+
+<ParamField query="cursor" type="string">
+  Pagination cursor from a previous response's `next_cursor`. Omit to start at the newest trace in the window.
+</ParamField>
+
+<ResponseField name="traces" type="array">
+  Array of trace summary objects.
+</ResponseField>
+
+<ResponseField name="next_cursor" type="string | null">
+  Cursor for the next page. `null` when you have reached the last page.
+</ResponseField>
+
+<ResponseField name="window" type="object">
+  The time window as egma read it, formatted to microsecond precision. Use these values to paginate accurately.
+</ResponseField>
+
+```bash title="List traces in a time window"
+curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z" \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+```bash title="Filter by project"
+curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z&project_id=prj_abc123" \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+<Note>
+  Both `from` and `to` are required. There is no default window — a query without a time bound would scan the entire store, and egma rejects it with a descriptive error asking you to supply both parameters.
+</Note>
+
+### Trace summary fields
+
+<ResponseField name="trace_id" type="string">
+  The 32-character lowercase hex trace ID.
+</ResponseField>
+
+<ResponseField name="started_at" type="string">
+  ISO 8601 timestamp of when the root span opened.
+</ResponseField>
+
+<ResponseField name="ended_at" type="string">
+  ISO 8601 timestamp of when the root span closed.
+</ResponseField>
+
+<ResponseField name="duration_ns" type="string">
+  Total conversation duration in nanoseconds, as a decimal string. Sent as a string because nanosecond counts exceed the precision of a JSON number.
+</ResponseField>
+
+<ResponseField name="span_count" type="number">
+  Total number of spans in this trace.
+</ResponseField>
+
+<ResponseField name="turn_counts" type="object">
+  `{ human, agent }` — number of turns attributed to each party.
+</ResponseField>
+
+<ResponseField name="source" type="string">
+  `"simulation"` for runs egma conducted, `"production"` for live traffic from your agent.
+</ResponseField>
+
+<ResponseField name="tool_span_count" type="number">
+  Number of tool-call spans in this trace.
+</ResponseField>
+
+<ResponseField name="errored_span_count" type="number">
+  Number of spans that completed with an error status.
+</ResponseField>
+
+<ResponseField name="emitter" type="string">
+  The SDK or runtime that emitted this trace.
+</ResponseField>
+
+<ResponseField name="environment" type="string">
+  The deployment environment reported by the emitter, e.g. `"production"`.
+</ResponseField>
+
+<ResponseField name="connection_type" type="string">
+  The connection type used by the agent for this conversation.
+</ResponseField>
+
+<ResponseField name="provider_call_id" type="string">
+  The provider-assigned call identifier, if the emitter included one.
+</ResponseField>
+
+<ResponseField name="run_id" type="string">
+  The run this trace belongs to, if it came from a simulation.
+</ResponseField>
+
+<ResponseField name="agent_id" type="string">
+  The agent identifier, if the emitter included one.
+</ResponseField>
+
+<ResponseField name="preview" type="string">
+  A short excerpt from the conversation for display purposes.
+</ResponseField>
+
+---
+
+## Get a trace
+
+Returns the full transcript and judgment results for a single trace.
+
+**`GET /v1/traces/:traceId`**
+
+<ParamField path="traceId" type="string" required>
+  The 32-character lowercase hex trace ID.
+</ParamField>
+
+<ParamField query="from" type="string" required>
+  Start of the search window. Use the trace's own `started_at` value, or a window that contains it.
+</ParamField>
+
+<ParamField query="to" type="string" required>
+  End of the search window. Use the trace's own `ended_at` value, or a window that contains it.
+</ParamField>
+
+<ParamField query="project_id" type="string">
+  Project filter. Follow the same rules as the list endpoint.
+</ParamField>
+
+<ResponseField name="trace" type="object">
+  Full trace metadata. Same fields as the trace summary, without `preview`.
+</ResponseField>
+
+<ResponseField name="turns" type="array">
+  Conversation turns in chronological order. Each turn has `span_id`, `name`, `kind`, `started_at`, `duration_ns`, `text`, and `audio_url` (a pre-signed URL to the audio segment, if a recording is available).
+</ResponseField>
+
+<ResponseField name="spans" type="array">
+  All spans in the trace, nested under their parents. Each span includes `span_id`, `parent_span_id`, `name`, `kind`, `status`, `started_at`, `duration_ns`, `text`, `audio_url`, `tool_name`, `tool_arguments`, `tool_result`, and child `spans`.
+</ResponseField>
+
+<ResponseField name="spans_truncated" type="boolean">
+  `true` when the trace exceeded the store's span limit and only the first spans are returned. Measures computed from a truncated trace are partial.
+</ResponseField>
+
+<ResponseField name="measures" type="array">
+  Computed metrics for this conversation, such as turn response latency. Each entry has `measure`, `unit`, `samples`, `worst`, and `partial`.
+</ResponseField>
+
+<ResponseField name="simulation_id" type="string | null">
+  The egma simulation ID for this trace, if it was conducted by egma's simulator. `null` for production traces.
+</ResponseField>
+
+<ResponseField name="verdicts" type="array">
+  Grader verdicts for this trace. Each verdict includes the grader ID, the result, and any assertion details.
+</ResponseField>
+
+<ResponseField name="outcome" type="object | null">
+  The aggregate pass/fail result from required graders.
+</ResponseField>
+
+<ResponseField name="diagnostics" type="object | null">
+  The aggregate result from diagnostic-only (non-required) graders.
+</ResponseField>
+
+```bash title="Get a trace"
+curl "https://your-egma-instance/v1/traces/4bf92f3577b34da6a3ce929d0e0e4736?from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z" \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+<Note>
+  The `from` and `to` window is required for the detail endpoint too. The trace store is partitioned by time, and a lookup without a window must scan every partition. Pass the same window you used in the list query that found this trace — you already have those values in the list response.
+</Note>

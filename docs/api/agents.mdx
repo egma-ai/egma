@@ -1,0 +1,261 @@
+---
+title: "Register and Manage Voice Agents with the egma API"
+sidebarTitle: "Agents"
+description: "Register voice agents, attach provider connections, and list or retrieve agents by id. Connections are always reached through their agent."
+---
+
+Agents are the voice-agent identities egma tests and monitors. Each agent you register maps to one agent in your provider — Retell or LiveKit — and carries one or more **connections** that tell egma how to reach it. Registering is retry-safe: if you send the same agent name and provider id twice, egma reuses the existing agent and tells you so in the `result` field rather than minting a second identity. Credentials you supply are sealed before storage; only the last four characters come back in `credentials_hint`, so a serializer can never accidentally leak a key.
+
+---
+
+## Register an agent
+
+`POST /api/agents`
+
+Register a new agent and, optionally, attach the first connection to it in the same request. Both the agent row and the connection row are written in one transaction, so a connection payload the registry rejects leaves no partial agent behind.
+
+The `result` field in the response tells you exactly what happened:
+
+| Value | Meaning |
+|---|---|
+| `created` | A new agent and a new connection were written. |
+| `reused` | An agent with this provider id already existed; nothing was written. |
+| `connection_added` | The agent already existed; a new connection was attached to it. |
+
+`201 Created` is returned for `created` and `connection_added`. `200 OK` is returned for `reused`.
+
+### Request body
+
+<ParamField body="name" type="string">
+  Display name for the agent. Required unless you want egma to pick a numbered default. Must be unique within the project.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional free-text description.
+</ParamField>
+
+<ParamField body="project" type="string">
+  Project id or name to write this agent into. Defaults to the project your API key belongs to. In a single-project organization you never need this field.
+</ParamField>
+
+<ParamField body="connection" type="object">
+  The first connection to attach. Leave this out to register a bare agent and add connections later with `POST /api/agents/:agentId/connections`.
+
+  <Expandable title="connection fields">
+    <ParamField body="type" type="string" required>
+      Connection type. One of `retell` or `livekit`.
+    </ParamField>
+
+    <ParamField body="modality" type="string" required>
+      Always `voice` for the currently supported modalities.
+    </ParamField>
+
+    <ParamField body="name" type="string">
+      Display name for this connection. Defaults to a numbered name if omitted.
+    </ParamField>
+
+    <ParamField body="environment" type="string">
+      Optional environment label, e.g. `staging` or `production`.
+    </ParamField>
+
+    <ParamField body="config" type="object" required>
+      Provider-specific configuration.
+
+      **Retell** — `{ "agentId": "<retell_agent_id>" }`
+
+      **LiveKit** — `{ "url": "<livekit_server_url>", "agentName": "<optional>", "metadata": "<optional>" }`
+    </ParamField>
+
+    <ParamField body="credentials" type="object">
+      Provider credentials. Sealed before storage; never returned in full.
+
+      **Retell** — `{ "apiKey": "<retell_api_key>" }`
+
+      **LiveKit** — `{ "apiKey": "<livekit_api_key>", "apiSecret": "<livekit_api_secret>" }`
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Response fields
+
+<ResponseField name="result" type="string">
+  One of `created`, `reused`, or `connection_added`.
+</ResponseField>
+
+<ResponseField name="agent" type="object">
+  The agent record.
+
+  <Expandable title="agent fields">
+    <ResponseField name="id" type="string">Unique agent identifier (`agt_…`).</ResponseField>
+    <ResponseField name="project_id" type="string">The project this agent belongs to.</ResponseField>
+    <ResponseField name="name" type="string">Display name.</ResponseField>
+    <ResponseField name="description" type="string | null">Free-text description, or `null`.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 timestamp.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="connection" type="object">
+  The connection that was created or reused. Absent when `result` is `reused` and no new connection was written.
+
+  <Expandable title="connection fields">
+    <ResponseField name="id" type="string">Unique connection identifier.</ResponseField>
+    <ResponseField name="agent_id" type="string">The agent this connection belongs to.</ResponseField>
+    <ResponseField name="project_id" type="string">The project this connection belongs to.</ResponseField>
+    <ResponseField name="name" type="string">Display name.</ResponseField>
+    <ResponseField name="type" type="string">Provider type: `retell` or `livekit`.</ResponseField>
+    <ResponseField name="modality" type="string">Always `voice`.</ResponseField>
+    <ResponseField name="topology" type="string">Derived from the type; indicates who initiates the call.</ResponseField>
+    <ResponseField name="environment" type="string | null">Environment label, or `null`.</ResponseField>
+    <ResponseField name="config" type="object">Provider-specific configuration (opaque keys vary by type).</ResponseField>
+    <ResponseField name="credentials_hint" type="string">Last four characters of the sealed credential. Use this to confirm a rotation landed.</ResponseField>
+    <ResponseField name="capabilities" type="object">Provider capabilities detected at registration time.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 timestamp.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example — register a Retell agent
+
+```bash
+curl -X POST https://your-egma-host/api/agents \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "front-desk",
+    "connection": {
+      "type": "retell",
+      "modality": "voice",
+      "config": { "agentId": "retell_agent_abc123" },
+      "credentials": { "apiKey": "retell_sk_…" }
+    }
+  }'
+```
+
+### Example — register a LiveKit agent
+
+```bash
+curl -X POST https://your-egma-host/api/agents \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "support-bot",
+    "connection": {
+      "type": "livekit",
+      "modality": "voice",
+      "config": {
+        "url": "wss://my-livekit.example.com",
+        "agentName": "support-agent"
+      },
+      "credentials": {
+        "apiKey": "livekit_api_key",
+        "apiSecret": "livekit_api_secret"
+      }
+    }
+  }'
+```
+
+---
+
+## List agents
+
+`GET /api/agents`
+
+Return a paginated list of agents your credential can reach, ordered newest first. Filter by project with `?project`. Paginate using the `next_cursor` value from the previous page.
+
+### Query parameters
+
+<ParamField query="project" type="string">
+  Filter to a specific project by id or name. Omit to list agents across all projects your key can read.
+</ParamField>
+
+<ParamField query="cursor" type="string">
+  The `next_cursor` value from the previous page. Omit to start from the newest agent.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="items" type="array">
+  Array of agent objects. Each has the same shape as the `agent` field in the registration response.
+</ResponseField>
+
+<ResponseField name="next_cursor" type="string | null">
+  Pass this as `?cursor` to fetch the next page. `null` means you are on the last page.
+</ResponseField>
+
+### Example
+
+```bash
+curl "https://your-egma-host/api/agents?project=my-project&cursor=agt_prev" \
+  -H "Authorization: Bearer <api-key>"
+```
+
+---
+
+## Get an agent
+
+`GET /api/agents/:agentId`
+
+Retrieve a single agent and all of its connections. An agent you cannot see answers the same `not_found` sentence as an id that was never minted.
+
+### Path parameters
+
+<ParamField path="agentId" type="string" required>
+  The `agt_…` identifier of the agent.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="agent" type="object">
+  The agent record (same shape as in registration).
+</ResponseField>
+
+<ResponseField name="connections" type="array">
+  All connections currently attached to this agent. Each entry has the same shape as the `connection` field in the registration response.
+</ResponseField>
+
+### Example
+
+```bash
+curl "https://your-egma-host/api/agents/agt_01abc" \
+  -H "Authorization: Bearer <api-key>"
+```
+
+---
+
+## Add a connection
+
+`POST /api/agents/:agentId/connections`
+
+Attach another provider connection to an existing agent. The request body is identical in shape to the `connection` object on registration. Returns `201 Created` with the new connection.
+
+### Path parameters
+
+<ParamField path="agentId" type="string" required>
+  The `agt_…` identifier of the agent to attach the connection to.
+</ParamField>
+
+### Request body
+
+Same fields as the `connection` object on `POST /api/agents`. All fields (`type`, `modality`, `config`, `credentials`, etc.) apply identically.
+
+### Response fields
+
+<ResponseField name="connection" type="object">
+  The newly created connection record (same shape as the `connection` field in the registration response).
+</ResponseField>
+
+### Example
+
+```bash
+curl -X POST "https://your-egma-host/api/agents/agt_01abc/connections" \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "retell",
+    "modality": "voice",
+    "environment": "staging",
+    "config": { "agentId": "retell_agent_staging_xyz" },
+    "credentials": { "apiKey": "retell_sk_staging_…" }
+  }'
+```
