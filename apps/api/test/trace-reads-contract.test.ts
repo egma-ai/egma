@@ -16,6 +16,7 @@ import {
   listTracesAsSignedIn,
   listTracesOverHttp,
   mintKey,
+  readTraceAsSignedIn,
   readTraceOverHttp,
   signUp,
   syntheticExport,
@@ -568,9 +569,136 @@ describe("filtering a list to one project", () => {
       project_id: acme.projectId,
     });
     expect(response.statusCode).toBe(400);
+    expect((response.json() as { error: string }).error).toBe("invalid_request");
     expect((response.json() as { message: string }).message).toContain(
       "scoped to project",
     );
+
+    // And on the detail endpoint, which resolves the project the same way.
+    const detail = await readTraceOverHttp(
+      api.app,
+      outboundSecret,
+      "cc000000000000000000000000000002",
+      { ...OUTBOUND_WINDOW, project_id: acme.projectId },
+    );
+    expect(detail.statusCode).toBe(400);
+    expect((detail.json() as { message: string }).message).toContain(
+      "scoped to project",
+    );
+  });
+
+  /**
+   * **A session's project is a default; a key's is a scope**, and until this was
+   * written these reads could not tell the two apart.
+   *
+   * A browser session resolves to the first project its membership holds —
+   * `auth/session.ts` fills one in and throws rather than leaving it out, and
+   * every route depends on that. This surface then read it as though it were a
+   * key's scope: naming any other project was refused with the key's own
+   * sentence, so in an organization with two projects the Monitoring page
+   * answered 400 on every project except the first. The project is in the
+   * address on every page, and it is the *selector's* answer rather than the
+   * credential's.
+   *
+   * The rule is `acting.ts`'s `browserProject` and is not restated here: every
+   * member of an organization holds their organization role on every project in
+   * it, so the only project a session can come to name is one its own membership
+   * read already returned. The organization still comes off the credential, so
+   * nothing about this widens tenancy — which is what the last two cases hold.
+   */
+  describe("a browser naming one of them", () => {
+    it("reads the project the address named, not the one the session defaulted to", async () => {
+      const response = await listTracesAsSignedIn(api.app, acme.cookie, {
+        ...OUTBOUND_WINDOW,
+        project_id: outboundProjectId,
+        limit: 200,
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(
+        (response.json() as ListedPage).traces.map((trace) => trace.trace_id),
+      ).toEqual(["cc000000000000000000000000000001"]);
+    });
+
+    /** Only that project's, so naming one narrows rather than merely permitting. */
+    it("reads only that project's rows, on the detail endpoint too", async () => {
+      const inside = await readTraceAsSignedIn(
+        api.app,
+        acme.cookie,
+        "cc000000000000000000000000000001",
+        { ...OUTBOUND_WINDOW, project_id: outboundProjectId },
+      );
+      expect(inside.statusCode, inside.body).toBe(200);
+
+      // Filed by the organization-wide key, so it is under no project at all —
+      // and a read narrowed to Outbound does not reach it.
+      const outside = await readTraceAsSignedIn(
+        api.app,
+        acme.cookie,
+        "cc000000000000000000000000000002",
+        { ...OUTBOUND_WINDOW, project_id: outboundProjectId },
+      );
+      expect(outside.statusCode).toBe(404);
+    });
+
+    /**
+     * And naming none is untouched: the session still reads the project it
+     * resolved to, which in this window holds nothing.
+     */
+    it("keeps the project it resolved to when the request names none", async () => {
+      const response = await listTracesAsSignedIn(api.app, acme.cookie, {
+        ...OUTBOUND_WINDOW,
+        limit: 200,
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect((response.json() as ListedPage).traces).toEqual([]);
+    });
+
+    /**
+     * **Tenancy does not widen.** The project comes from the address and the
+     * organization comes from the credential, so a session naming a project of
+     * another customer is refused — by the membership read, before any store is
+     * asked anything.
+     */
+    it("is refused a project outside its own organization", async () => {
+      for (const named of [globex.projectId, "prj_00000000000000000000000000"]) {
+        const response = await listTracesAsSignedIn(api.app, acme.cookie, {
+          ...OUTBOUND_WINDOW,
+          project_id: named,
+          limit: 200,
+        });
+        expect(response.statusCode, named).toBe(400);
+
+        const body = response.json() as { error: string; message: string };
+        expect(body.error, named).toBe("invalid_request");
+        expect(body.message, named).toContain(named);
+
+        const detail = await readTraceAsSignedIn(
+          api.app,
+          acme.cookie,
+          "cc000000000000000000000000000001",
+          { ...OUTBOUND_WINDOW, project_id: named },
+        );
+        expect(detail.statusCode, named).toBe(400);
+      }
+    });
+
+    /**
+     * The other direction of the same claim, and the one that would matter
+     * most: Globex's own browser, naming Acme's project, reaches nothing of
+     * Acme's — it is refused, rather than answered with an empty list that
+     * could later become a full one.
+     */
+    it("does not let another organization's browser name this one's project", async () => {
+      const response = await listTracesAsSignedIn(api.app, globex.cookie, {
+        ...OUTBOUND_WINDOW,
+        project_id: outboundProjectId,
+        limit: 200,
+      });
+      expect(response.statusCode).toBe(400);
+      expect((response.json() as { message: string }).message).toContain(
+        outboundProjectId,
+      );
+    });
   });
 });
 

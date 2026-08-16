@@ -440,6 +440,20 @@ export function readTraceOverHttp(
   });
 }
 
+/** The same transcript, asked for by a browser. The credential is the only difference. */
+export function readTraceAsSignedIn(
+  app: FastifyInstance,
+  cookie: string,
+  traceId: string,
+  query: ReadQuery,
+) {
+  return app.inject({
+    method: "GET",
+    url: `/v1/traces/${traceId}${queryString(query)}`,
+    headers: { cookie },
+  });
+}
+
 /** Every span in a detail response, however deeply it is nested. */
 export function everySpan(spans: readonly DetailSpan[]): DetailSpan[] {
   return spans.flatMap((span) => [span, ...everySpan(span.spans)]);
