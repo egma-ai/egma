@@ -29,14 +29,24 @@ import { ProductStatePage } from "../../../ui/shell.tsx";
  *
  * **And the read is narrower than that design needs, which is written down here
  * rather than changed.** This address names no project and cannot, so the read
- * below names none — and a request naming none acts in the session's own
+ * below names none — and for a **session** that means the session's own
  * project, which is the organization's *first*. `getRun` narrows by it. So a
  * `results_url` for a run in any other project is answered as an absence, by
- * the one address a terminal prints. Widening it is a decision about what an
- * unnamed read means for **every** caller of that route, an API key included,
- * and the asymmetry between a session and a key is deliberate — so it is the
- * developer's to make. Held as it stands, with the reason, in
+ * the one address a terminal prints.
+ *
+ * **A terminal is not affected, and that is the asymmetry rather than an
+ * oversight.** A key minted for the whole organization names no project either,
+ * and for it the same unnamed read spans the organization — `reachingIn` in
+ * `apps/api/src/http/acting.ts` separates the two, on the one fact that
+ * separates them: a session always carries a project and such a key never does.
+ * What is left undecided is only the browser's half, and widening *that* means
+ * deciding that a page inside no project may read a run in any of them. The
+ * developer's call. Held as it stands, with the reason, in
  * `apps/api/test/project-context.test.ts`.
+ *
+ * **When the read does not end in a forward, this page stays on screen** — the
+ * shell, the selector and all — which is why `inProject` counts this address
+ * among the ones that reach it. `apps/web/test/components.test.tsx` walks that.
  *
  * `replace` rather than `push`: this address is a redirect and not a place, and
  * leaving it in the history would put Back on a page whose only behaviour is to

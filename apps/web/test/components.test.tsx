@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { useState } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
+import { Suspense, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import RunResultsAddress from "../app/runs/[runId]/page.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
 import { ButtonLink } from "../ui/controls.tsx";
@@ -28,15 +36,32 @@ import { AppShell } from "../ui/shell.tsx";
  * with a keyboard would, and reads what the DOM then says.
  */
 
-const routed = vi.hoisted(() => ({
-  push: vi.fn(),
-  pathname: "/projects/prj_1/agents",
-  projectId: "prj_1",
-}));
+/**
+ * The router, and **one** of it.
+ *
+ * `useRouter` is stable in Next: a component may depend on it in an effect and
+ * the effect runs once. Answering with a fresh object per call makes that
+ * effect run on every render, and a page whose effect sets state then reads,
+ * renders, reads again, for ever — a hang that says nothing about the page.
+ * So the object is made once here, the way the real one is.
+ */
+const routed = vi.hoisted(() => {
+  const push = vi.fn();
+  const replace = vi.fn();
+  const back = vi.fn();
+  return {
+    push,
+    replace,
+    back,
+    router: { push, replace, back },
+    pathname: "/projects/prj_1/agents",
+    projectId: "prj_1" as string | undefined,
+  };
+});
 
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
-  useRouter: () => ({ push: routed.push, replace: vi.fn(), back: vi.fn() }),
+  useRouter: () => routed.router,
   useParams: () => ({ projectId: routed.projectId }),
 }));
 
@@ -109,6 +134,8 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
 
 beforeEach(() => {
   routed.push.mockReset();
+  routed.replace.mockReset();
+  routed.back.mockReset();
   routed.pathname = "/projects/prj_1/agents";
   routed.projectId = "prj_1";
   // The shell returns to the top on every navigation; jsdom has no scrolling.
@@ -655,6 +682,78 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findAllByText("Session unavailable")).not.toHaveLength(0);
     expect(screen.queryByText(/view only/i)).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * **The address a terminal prints, when it does not forward.**
+ *
+ * `inProject` once said in a comment that `/runs/{runId}` and `/members` "never
+ * arrive here, because they forward before a selector is ever drawn". Both draw
+ * `ProductStatePage`, which is this same shell around a page, and `AppShell`
+ * draws the selector unconditionally — so the selector is on screen for as long
+ * as the read takes, and indefinitely when the read does not end in a forward.
+ *
+ * This is that case: a `results_url` for a run the session cannot reach settles
+ * into `missing` and stays there. It is not an exotic state — it is what a
+ * copied `results_url` for a run in another project does today — and one click
+ * on the selector goes straight into `inProject` from an address carrying no
+ * project. So of the five addresses that reach that function, these two are the
+ * likeliest, not the impossible ones.
+ */
+describe("the run address a terminal prints, stuck", () => {
+  it("still draws the selector, and one click on it reaches inProject", async () => {
+    routed.pathname = "/runs/run_9";
+    routed.projectId = undefined;
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/runs/run_9": {
+        status: 404,
+        body: {
+          error: "not_found",
+          message: "no run of yours has that id.",
+        },
+      },
+    });
+
+    // `act` around the render because this page reads its own route parameters
+    // through React's `use`, so its first paint is a suspension rather than a
+    // page. Nothing else in this file needs it; nothing else in this file
+    // suspends.
+    // Rendered inside an awaited `act`, because this page reads its own route
+    // parameters through React's `use`: its first paint is a suspension rather
+    // than a page, and `render`'s own synchronous act cannot wait for one.
+    // Nothing else in this file suspends, so nothing else needs it.
+    await act(async () => {
+      render(
+        <Suspense fallback={<p>waiting</p>}>
+          <RunResultsAddress params={Promise.resolve({ runId: "run_9" })} />
+        </Suspense>,
+      );
+    });
+
+    // The page has given up forwarding and is showing egma's absence.
+    expect(await screen.findByText(/no run of yours has that id/)).toBeDefined();
+
+    // And the shell around it is a whole shell: the selector, saying honestly
+    // that this address is inside no project.
+    // The shell draws the selector twice — the sidebar's and the narrow
+    // screen's — so both are read, and either one is a way in.
+    const triggers = screen.getAllByRole("button", {
+      name: /^Organization Acme/,
+    });
+    expect(triggers).not.toHaveLength(0);
+    for (const one of triggers) expect(one.textContent).toContain("No project");
+
+    fireEvent.click(triggers[0] as HTMLElement);
+    const panel = within(screen.getByRole("dialog"));
+    fireEvent.click(panel.getByText("Outbound"));
+
+    // `inProject`, reached from an address with no project in it: there is no
+    // area to carry across, so the answer is the picked project's landing page.
+    expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/agents");
   });
 });
 

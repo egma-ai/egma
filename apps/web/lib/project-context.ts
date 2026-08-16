@@ -71,18 +71,31 @@ export function sectionIn(pathname: string): string | null {
  * section is kept and everything under it is dropped.
  *
  * An address with no project in it at all becomes the new project's landing
- * page, because there is no area to carry across. **Three addresses reach this
- * function**, and each carries no project on purpose: `/new-project`, which an
- * organization holding none has to be able to reach, and `/traces` with
- * `/traces/{traceId}`, which are the organization-wide trace pages. All three
- * draw the shell, so the selector is on screen and this is what it does there.
+ * page, because there is no area to carry across. **Five addresses carry no
+ * project, and every one of them can reach this function**, because the only
+ * caller is the selector's click handler and `AppShell` draws the selector on
+ * every page it wraps, unconditionally, whatever the address says:
  *
- * Two more carry no project and never arrive here, because they forward before
- * a selector is ever drawn: `/runs/{runId}`, the address a terminal prints,
- * which reads the run's own project and redirects into it; and `/members`, the
- * kept legacy Settings address, which chooses the caller's first project on
- * purpose because People is the organization's and any project serves as its
- * frame.
+ * - `/new-project`, which an organization holding none has to be able to reach.
+ * - `/traces` and `/traces/{traceId}`, the organization-wide trace pages.
+ * - `/runs/{runId}`, the address a terminal prints, which reads the run's own
+ *   project and forwards into it.
+ * - `/members`, the kept legacy Settings address, which chooses the caller's
+ *   first project on purpose because People is the organization's and any
+ *   project serves as its frame.
+ *
+ * **The last two forward, and forwarding is not the same as never being here.**
+ * Both draw `ProductStatePage`, which is this shell around a page, so the
+ * selector is on screen for as long as the read takes — and longer than that
+ * when the read does not end in a forward at all. Open a `results_url` for a
+ * run in a project the session cannot reach and `/runs/{runId}` settles into
+ * its `missing` state and stays there, shell and selector included, with one
+ * click on the selector calling straight into this function. So the two that
+ * were once written down as unreachable are in fact the two most likely to
+ * arrive, because they are the two that can get stuck.
+ *
+ * All five land on the same answer, which is the right one for each: there is
+ * no area on any of these addresses to carry into the project just picked.
  */
 export function inProject(pathname: string, projectId: string): string {
   const address = addressIn(pathname);
