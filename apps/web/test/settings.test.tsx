@@ -200,17 +200,14 @@ afterEach(() => {
 
 /**
  * The three Settings pages whose subject is the organization rather than the
- * project the address names, and the sentence each one says about that.
- *
- * Every one of them is here rather than one standing in for the rest: the note
- * is written per page, in that page's own words about that page's own subject,
- * so a page that lost it would go on passing a test written against a sibling.
+ * project the address names, and the redundant callout each one no longer
+ * repeats. The grouped navigation already states the scope.
  */
 const ORGANIZATION_WIDE: readonly {
   readonly page: string;
   readonly answers: Record<string, Stubbed | readonly Stubbed[]>;
   readonly open: () => void;
-  readonly says: RegExp;
+  readonly removed: RegExp;
 }[] = [
   {
     page: "Organization",
@@ -219,7 +216,7 @@ const ORGANIZATION_WIDE: readonly {
       "/api/judge-credentials": { status: 200, body: { items: [] } },
     },
     open: () => render(<OrganizationSettingsPage />),
-    says: /Everything on this page belongs to the whole organization/,
+    removed: /Everything on this page belongs to the whole organization/,
   },
   {
     page: "People",
@@ -231,13 +228,13 @@ const ORGANIZATION_WIDE: readonly {
       "/api/invitations": { status: 200, body: { invitations: [] } },
     },
     open: () => render(<PeoplePage />),
-    says: /Membership belongs to the whole organization/,
+    removed: /Membership belongs to the whole organization/,
   },
   {
     page: "API keys",
     answers: { "/api/keys": { status: 200, body: { keys: [] } } },
     open: () => render(<ApiKeysPage />),
-    says: /Keys belong to the organization/,
+    removed: /Keys belong to the organization/,
   },
 ];
 
@@ -252,6 +249,8 @@ describe("the Settings navigation", () => {
     const nav = await screen.findByRole("navigation", { name: "Settings" });
     expect(nav.textContent).toContain("This project");
     expect(nav.textContent).toContain("Organization");
+    expect(within(nav).getByRole("group", { name: "This project" })).toBeTruthy();
+    expect(within(nav).getByRole("group", { name: "Organization" })).toBeTruthy();
 
     // Every address carries the project, including the organization-wide ones:
     // the shell reads the project out of the address, and Settings has to stay
@@ -272,31 +271,20 @@ describe("the Settings navigation", () => {
     ).toBeTruthy();
   });
 
-  /**
-   * The note is the whole reason an organization-wide page can live under a
-   * project's address. The selector is still on screen and still naming a
-   * project; without a sentence saying otherwise, that reads as a claim.
-   *
-   * Both halves of that are asserted here, because the arrangement only works
-   * if both are true at once: a selector with no note is a page making a claim
-   * about a project, and a note with no selector is a page nobody can leave.
-   */
   it.each(ORGANIZATION_WIDE)(
-    "keeps the selector on $page and says the project it names is not the subject",
-    async ({ answers, open, says }) => {
+    "keeps the selector on $page without repeating its organization scope",
+    async ({ page, answers, open, removed }) => {
       apiAnswers({
         "/api/me": { status: 200, body: meWith("admin") },
         ...answers,
       });
       open();
 
-      // The note is drawn only once the page's own read has answered, so
-      // finding it is also what says the page is showing itself rather than a
-      // loading or a failure state.
-      expect(await screen.findByText(says)).toBeTruthy();
+      expect(await screen.findByRole("heading", { name: page, level: 1 })).toBeTruthy();
+      expect(screen.queryByText(removed)).toBeNull();
 
-      // And the selector is still on screen, naming the project the address
-      // does. Waited for rather than read on sight: the shell draws the
+      // The selector stays on screen, naming the project the address does.
+      // Waited for rather than read on sight: the shell draws the
       // control before `/api/me` lands and it says "No organization" until
       // then, so an immediate read would pass on a session nobody had.
       const selectors = await screen.findAllByRole("button", {
@@ -417,7 +405,7 @@ describe("project settings", () => {
     judge.dispatchEvent(click);
     expect(click.defaultPrevented).toBe(true);
     expect(confirm).toHaveBeenCalledWith(
-      "Discard your unsaved Settings changes?",
+      "Discard your unsaved changes?",
     );
 
     const selectors = await screen.findAllByRole("button", {
@@ -1606,7 +1594,7 @@ describe("people and invitations", () => {
     vi.stubGlobal("confirm", confirm);
     fireEvent.click(screen.getByRole("radio", { name: "People" }));
     expect(confirm).toHaveBeenCalledWith(
-      "Discard your unsaved Settings changes?",
+      "Discard your unsaved changes?",
     );
     expect(document.body.textContent).toContain(
       "http://egma.test/invite?token=abc",
@@ -1997,7 +1985,7 @@ describe("API keys", () => {
 
     expect(click.defaultPrevented).toBe(true);
     expect(confirm).toHaveBeenCalledWith(
-      "Discard your unsaved Settings changes?",
+      "Discard your unsaved changes?",
     );
     expect(screen.getByRole("button", { name: "Creating…" })).toBeTruthy();
   });

@@ -8,7 +8,7 @@ import { inProject } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
 import { TextInput } from "./controls.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
-import { confirmUnsavedSettingsNavigation } from "./settings-read.ts";
+import { confirmUnsavedNavigation } from "./settings-read.ts";
 import styles from "./system.module.css";
 
 /**
@@ -76,7 +76,7 @@ export function ProjectSelector({
       setQuery("");
       return;
     }
-    if (!confirmUnsavedSettingsNavigation()) return;
+    if (!confirmUnsavedNavigation()) return;
     close();
     setQuery("");
     router.push(inProject(pathname, project.id));
@@ -143,12 +143,6 @@ export function ProjectSelector({
               ))
             )}
           </div>
-          <MenuDivider />
-          <MenuLabel>
-            {projects.length === 1
-              ? "One project in this organization"
-              : `${projects.length} projects in this organization`}
-          </MenuLabel>
           {mayCreateProject ? (
             <>
               <MenuDivider />

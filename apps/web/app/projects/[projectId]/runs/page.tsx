@@ -309,7 +309,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
   function plan() {
     return mayStart ? (
       <ButtonLink weight="strong" href={projectPath(projectId, "runs", "new")}>
-        Plan a run
+        Create a run
       </ButtonLink>
     ) : undefined;
   }

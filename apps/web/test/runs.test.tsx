@@ -160,7 +160,7 @@ function plannedTest(overrides: Record<string, unknown> = {}) {
         kind: "authored",
         grader_id: "grd_seeded",
         grader_version_id: "grv_1",
-        name: "Expected behaviors",
+        name: "expected_behaviors",
         library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
         required: true,
         scope: "simulations",
@@ -382,7 +382,7 @@ describe("the way into the builder", () => {
     apiAnswers({ "/api/me": { status: 200, body: meWith("member") } });
     render(<RunsPage />);
 
-    const into = await screen.findAllByRole("link", { name: "Plan a run" });
+    const into = await screen.findAllByRole("link", { name: "Create a run" });
     expect(into.length).toBeGreaterThan(0);
     expect(into[0]?.getAttribute("href")).toBe("/projects/prj_1/runs/new");
   });
@@ -392,7 +392,7 @@ describe("the way into the builder", () => {
     render(<RunsPage />);
 
     await screen.findByRole("heading", { name: "Runs" });
-    expect(screen.queryAllByRole("link", { name: "Plan a run" })).toEqual([]);
+    expect(screen.queryAllByRole("link", { name: "Create a run" })).toEqual([]);
   });
 });
 
@@ -479,6 +479,7 @@ describe("the review", () => {
     await screen.findByText("tstv_1");
     await screen.findByText("Impatient Rita (prsv_7)");
     await screen.findByText("Expected behaviors");
+    expect(screen.queryByText("expected_behaviors")).toBeNull();
     await screen.findByText("Never promises a price");
   });
 
@@ -512,7 +513,7 @@ describe("the review", () => {
                   kind: "authored",
                   grader_id: "grd_seeded",
                   grader_version_id: "grv_1",
-                  name: "Expected behaviors",
+                  name: "expected_behaviors",
                   library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
                   required: true,
                   scope: "simulations",

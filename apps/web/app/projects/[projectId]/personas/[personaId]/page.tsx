@@ -741,11 +741,6 @@ function PersonaDetail({
           persona === null ? undefined : (
             <span className={styles.rowName}>
               {persona.description ?? "Who calls, and how they behave."}
-              {persona.is_default ? (
-                <Badge title="A test that names nobody is given this persona">
-                  Default
-                </Badge>
-              ) : null}
               {archived ? <Badge tone="warn">Archived</Badge> : null}
             </span>
           )

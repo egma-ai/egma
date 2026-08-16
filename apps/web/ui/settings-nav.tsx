@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 import { projectPath } from "../lib/project-context.ts";
 import styles from "./settings-nav.module.css";
@@ -26,8 +26,8 @@ import styles from "./settings-nav.module.css";
  * They are not project settings, and they still have to be reachable without
  * leaving the product shell — the selector needs a project to show, and
  * switching project from Settings has to land back in Settings rather than
- * throwing somebody out to Agents. `ScopeNote` is how an organization-wide page
- * says in words what its address cannot.
+ * throwing somebody out to Agents. The grouped navigation states the scope
+ * once, without repeating a callout on every organization page.
  */
 
 export type SettingsSection =
@@ -73,25 +73,31 @@ export function SettingsNav({
   readonly projectId: string;
   readonly current: SettingsSection;
 }) {
-  const group = (label: string, items: readonly Item[]) => (
-    <div className={styles.group}>
-      <p className={styles.groupLabel}>{label}</p>
-      <div className={styles.items}>
-        {items.map((item) => (
-          <Link
-            key={item.id}
-            className={`${styles.item} ${
-              item.id === current ? styles.itemActive : ""
-            }`}
-            href={settingsPath(projectId, item.id)}
-            aria-current={item.id === current ? "page" : undefined}
-          >
-            {item.label}
-          </Link>
-        ))}
+  const id = useId();
+  const group = (label: string, items: readonly Item[]) => {
+    const labelId = `${id}-${items[0]?.id ?? "group"}`;
+    return (
+      <div className={styles.group} role="group" aria-labelledby={labelId}>
+        <p className={styles.groupLabel} id={labelId}>
+          {label}
+        </p>
+        <div className={styles.items}>
+          {items.map((item) => (
+            <Link
+              key={item.id}
+              className={`${styles.item} ${
+                item.id === current ? styles.itemActive : ""
+              }`}
+              href={settingsPath(projectId, item.id)}
+              aria-current={item.id === current ? "page" : undefined}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <nav className={styles.nav} aria-label="Settings">
@@ -125,16 +131,4 @@ export function SettingsLayout({
       <div className={styles.content}>{children}</div>
     </div>
   );
-}
-
-/**
- * What an organization-wide Settings page says under its heading.
- *
- * The selector is still on screen and still naming a project, because leaving
- * Settings has to be possible from every page in it. This is the sentence that
- * stops that being read as a claim: what is on this page applies to everybody
- * in the organization, in every project, whichever one the selector says.
- */
-export function ScopeNote({ children }: { readonly children: ReactNode }) {
-  return <p className={styles.scopeNote}>{children}</p>;
 }

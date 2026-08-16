@@ -149,6 +149,11 @@ describe("the organization and project selector", () => {
     const trigger = screen.getByRole("button", { name: /^Organization Acme/ });
     expect(trigger.textContent).toContain("Acme");
     expect(trigger.textContent).toContain("Default");
+
+    fireEvent.click(trigger);
+    expect(
+      within(screen.getByRole("dialog")).queryByText(/project in this organization/i),
+    ).toBeNull();
   });
 
   it("puts project creation with project selection for an admin", () => {
@@ -697,6 +702,20 @@ describe("the role the shell shows", () => {
     const agents = screen.getAllByRole("link", { name: "Agents" })[0];
     expect(agents?.textContent).toContain("Agents");
     expect(agents?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("keeps Settings in the account menu and out of product navigation", () => {
+    render(
+      <AppShell initialMe={meWith("admin")}>
+        <p>page</p>
+      </AppShell>,
+    );
+
+    const product = screen.getByRole("navigation", { name: "Product navigation" });
+    expect(within(product).queryByRole("link", { name: "Settings" })).toBeNull();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
+    expect(screen.getByRole("menuitem", { name: "Settings" })).toBeTruthy();
   });
 
   it("claims nothing at all while the session read is in flight", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   CONFIG,
@@ -23,6 +23,7 @@ import {
   type RunningPage,
 } from "../../../../../lib/graders.ts";
 import { firstProjectOf, roleOf } from "../../../../../lib/me.ts";
+import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import {
   projectLanding,
   projectPath,
@@ -32,7 +33,6 @@ import {
   Badge,
   Button,
   ButtonLink,
-  Section,
 } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
@@ -44,12 +44,17 @@ import {
 } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import {
+  confirmUnsavedNavigation,
+  useUnsavedChanges,
+} from "../../../../../ui/settings-read.ts";
+import {
   AppShell,
   PageBody,
   PageHeader,
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
+import styles from "../graders.module.css";
 import { GraderTabs } from "../tabs.tsx";
 import { EditForm, SwitchOffPanel } from "./edit-form.tsx";
 
@@ -141,6 +146,11 @@ type Open =
   | { readonly act: "switch-off"; readonly copy: RunningGrader }
   | null;
 
+/** The stable relationship between a row's Edit button and its editor. */
+function editorPanelId(copyId: string): string {
+  return `grader-editor-${copyId}`;
+}
+
 /**
  * The columns, in the order they are shown, each beside what fills it.
  *
@@ -149,8 +159,11 @@ type Open =
  * the widest, and the acts last where a reader's eye ends up.
  */
 function columnsFor(
-  open: (what: Open) => void,
+  show: (what: Open) => void,
+  open: Open,
   mayAct: boolean,
+  editorBusy: boolean,
+  editButtons: Map<string, HTMLButtonElement>,
   /**
    * Why it is not theirs — and nothing at all while egma has not identified
    * them yet, on the library screen's terms and for its reason: a sentence
@@ -164,7 +177,7 @@ function columnsFor(
       key: "name",
       header: RUNNING_COLUMNS.name,
       primary: true,
-      cell: (copy) => copy.name,
+      cell: (copy) => graderDisplayName(copy.name),
     },
     {
       key: "scope",
@@ -206,18 +219,24 @@ function columnsFor(
       cell: (copy) => (
         <>
           <Button
-            disabled={!mayAct}
+            disabled={!mayAct || editorBusy}
             {...(mayAct || whyNotEdit === undefined ? {} : { why: whyNotEdit })}
-            onClick={() => open({ act: "edit", copy })}
+            ariaExpanded={open?.act === "edit" && open.copy.id === copy.id}
+            ariaControls={editorPanelId(copy.id)}
+            buttonRef={(button) => {
+              if (button === null) editButtons.delete(copy.id);
+              else editButtons.set(copy.id, button);
+            }}
+            onClick={() => show({ act: "edit", copy })}
           >
             {EDIT.open}
           </Button>{" "}
           <Button
-            disabled={!mayAct}
+            disabled={!mayAct || editorBusy}
             {...(mayAct || whyNotSwitchOff === undefined
               ? {}
               : { why: whyNotSwitchOff })}
-            onClick={() => open({ act: "switch-off", copy })}
+            onClick={() => show({ act: "switch-off", copy })}
           >
             {SWITCH_OFF.open}
           </Button>
@@ -244,8 +263,33 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
 
   /** Which copy has a panel open, and nothing while none has. */
   const [open, setOpen] = useState<Open>(null);
+  /** What the open editor would lose if another act replaced it now. */
+  const [editorState, setEditorState] = useState({
+    atRisk: false,
+    busy: false,
+  });
   /** What the last act came to, kept until the list is asked again. */
   const [said, setSaid] = useState<string | null>(null);
+  const editorHeading = useRef<HTMLHeadingElement>(null);
+  const editButtons = useRef(new Map<string, HTMLButtonElement>());
+  const returnFocusTo = useRef<string | null>(null);
+
+  useUnsavedChanges(editorState.atRisk, editorState.busy);
+
+  // The panel appears beside the table on wide screens and before it on a
+  // narrow one. Put the reading position on its heading in either layout, so
+  // opening Edit never leaves a keyboard or screen reader back in the row.
+  useEffect(() => {
+    if (open?.act === "edit") {
+      editorHeading.current?.focus();
+      return;
+    }
+
+    const copyId = returnFocusTo.current;
+    if (copyId === null) return;
+    returnFocusTo.current = null;
+    editButtons.current.get(copyId)?.focus();
+  }, [open]);
 
   const mayAct = role !== null && canAuthor(role);
   const whyNotEdit = role === null ? undefined : EDIT.notYours(role);
@@ -266,7 +310,45 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
       : [],
   );
 
+  /**
+   * Replace the open act without silently throwing an editor away.
+   *
+   * The shared draft guard already owns links, project changes, reload and tab
+   * close. These row buttons are not navigation, so they ask here before they
+   * replace the editor with another grader or with the switch-off dialog.
+   */
+  function show(next: Open): void {
+    const sameEditor =
+      open?.act === "edit" &&
+      next?.act === "edit" &&
+      open.copy.id === next.copy.id;
+
+    if (sameEditor) {
+      editorHeading.current?.focus();
+      return;
+    }
+
+    // A row cannot replace an editor while its write is in flight. Its action
+    // buttons are disabled too; this guard keeps programmatic callers honest.
+    if (open?.act === "edit" && editorState.busy) return;
+
+    if (
+      open?.act === "edit" &&
+      editorState.atRisk &&
+      !confirmUnsavedNavigation()
+    ) {
+      return;
+    }
+
+    if (open?.act === "edit" && next === null) {
+      returnFocusTo.current = open.copy.id;
+    }
+    setEditorState({ atRisk: false, busy: false });
+    setOpen(next);
+  }
+
   function settled(sentence: string): void {
+    setEditorState({ atRisk: false, busy: false });
     setOpen(null);
     setSaid(sentence);
     // Read the list again rather than editing this page's copy of it. What is
@@ -344,7 +426,15 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
     return (
       <DataTable
         label="The graders running in this project"
-        columns={columnsFor(setOpen, mayAct, whyNotEdit, whyNotSwitchOff)}
+        columns={columnsFor(
+          show,
+          open,
+          mayAct,
+          editorState.busy,
+          editButtons.current,
+          whyNotEdit,
+          whyNotSwitchOff,
+        )}
         rows={rows}
         keyOf={(copy) => copy.id}
       />
@@ -352,64 +442,88 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
   }
 
   return (
-    <ProductPage>
+    <ProductPage wide>
       <PageHeader eyebrow="Project" title={RUNNING.title} lead={RUNNING.lead} />
       <PageBody>
         <GraderTabs projectId={projectId} active="running" />
+        <div className={styles.viewContent}>
+          {/*
+            What the last act came to, and it stays until the next one. Both
+            sentences say what changed *and* what did not, because the question
+            somebody has after saving a tighter bound or switching a grader off is
+            always about the runs they have already read.
+          */}
+          {said === null ? null : <p role="status">{said}</p>}
 
-        {/*
-          What the last act came to, and it stays until the next one. Both
-          sentences say what changed *and* what did not, because the question
-          somebody has after saving a tighter bound or switching a grader off is
-          always about the runs they have already read.
-        */}
-        {said === null ? null : <p role="status">{said}</p>}
-
-        {/*
-          The edit form, opened on one copy at a time and keyed by it — the Use
-          form's rule, for the Use form's reason. The form's state is *this*
-          copy's answers, and React keeps a component's state across a re-render
-          when only its props change, so opening a second row's form over the
-          first would draw the second grader's controls over the first grader's
-          values.
-        */}
-        {open?.act === "edit" ? (
-          <Section title={EDIT.title(open.copy.name)}>
-            <EditForm
-              key={open.copy.id}
-              copy={open.copy}
-              params={asks.get(open.copy.library_id) ?? []}
-              projectId={projectId}
-              onCancel={() => setOpen(null)}
-              onSaved={(name) => settled(EDIT.saved(name))}
-            />
-          </Section>
-        ) : null}
-
-        {body()}
-
-        {/*
-          Switching off asks first, because it is the one act here that cannot
-          be undone in place: pressing Use again makes a new copy rather than
-          bringing this one back.
-        */}
-        {open?.act === "switch-off" ? (
-          <Dialog
-            title={SWITCH_OFF.title(open.copy.name)}
-            onClose={() => setOpen(null)}
+          <div
+            className={styles.editorLayout}
+            data-editing={open?.act === "edit" ? "true" : "false"}
           >
-            {(dismiss) => (
-              <SwitchOffPanel
-                key={open.copy.id}
-                copy={open.copy}
-                projectId={projectId}
-                theLastOne={rows.length === 1}
-                onCancel={dismiss}
-                onSwitchedOff={(name) => settled(SWITCH_OFF.done(name))}
-              />
-            )}
-          </Dialog>
-        ) : null}
+            {/*
+              The editor comes first in the document because it comes first on
+              a narrow screen. The wide layout places it in the second column,
+              while this shared order keeps reading and focus aligned on mobile.
+              It is keyed by the running copy, so one copy's values cannot sit
+              under another copy's fields.
+            */}
+            {open?.act === "edit" ? (
+              <section
+                id={editorPanelId(open.copy.id)}
+                className={styles.editorPane}
+                aria-labelledby={`${editorPanelId(open.copy.id)}-title`}
+              >
+                <header className={styles.editorHead}>
+                  <h2
+                    ref={editorHeading}
+                    className={styles.editorTitle}
+                    id={`${editorPanelId(open.copy.id)}-title`}
+                    tabIndex={-1}
+                  >
+                    {EDIT.title(graderDisplayName(open.copy.name))}
+                  </h2>
+                </header>
+                <EditForm
+                  key={open.copy.id}
+                  copy={open.copy}
+                  params={asks.get(open.copy.library_id) ?? []}
+                  projectId={projectId}
+                  onProtectionChange={setEditorState}
+                  onCancel={() => show(null)}
+                  onSaved={(name) =>
+                    settled(EDIT.saved(graderDisplayName(name)))
+                  }
+                />
+              </section>
+            ) : null}
+
+            <div className={styles.listPane}>{body()}</div>
+          </div>
+
+          {/*
+            Switching off asks first, because it is the one act here that cannot
+            be undone in place: pressing Use again makes a new copy rather than
+            bringing this one back.
+          */}
+          {open?.act === "switch-off" ? (
+            <Dialog
+              title={SWITCH_OFF.title(graderDisplayName(open.copy.name))}
+              onClose={() => show(null)}
+            >
+              {(dismiss) => (
+                <SwitchOffPanel
+                  key={open.copy.id}
+                  copy={open.copy}
+                  projectId={projectId}
+                  theLastOne={rows.length === 1}
+                  onCancel={dismiss}
+                  onSwitchedOff={(name) =>
+                    settled(SWITCH_OFF.done(graderDisplayName(name)))
+                  }
+                />
+              )}
+            </Dialog>
+          ) : null}
+        </div>
       </PageBody>
     </ProductPage>
   );

@@ -12,6 +12,7 @@ import {
   type ListedConnection,
 } from "../../../../../lib/agents.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
@@ -152,7 +153,7 @@ function graderLine(grader: PlanGrader): {
         ? "no judge needed"
         : "no judge recorded";
   return {
-    name: grader.name,
+    name: graderDisplayName(grader.name),
     note: `${grader.required ? "blocks" : "reports only"} · ${judge}`,
   };
 }
@@ -373,7 +374,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
     <ProductPage>
       <PageHeader
         eyebrow="Runs"
-        title="Plan a run"
+        title="Create a run"
         lead="A run executes a selection of tests against one agent over one connection. Every simulation it produces is pinned to the exact test, persona and grader versions egma froze when it started."
         action={
           <ButtonLink href={projectPath(projectId, "runs")}>Cancel</ButtonLink>
@@ -397,7 +398,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
             {active.length === 0 ? (
               <Empty
                 title="This project has no active agent."
-                lead="Register an agent and give it a connection, then come back and plan a run."
+                lead="Register an agent and give it a connection, then come back and create a run."
               />
             ) : (
               <Field label="Agent" htmlFor="run-agent">
@@ -427,7 +428,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
             ) : detail.status === "signed-out" ? (
               <Failure
                 title="This session has ended."
-                message="Sign in again, then plan the run."
+                message="Sign in again, then create the run."
               />
             ) : detail.status !== "ready" ? (
               <Failure
@@ -437,7 +438,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
             ) : connections.length === 0 ? (
               <Empty
                 title="This agent has no active connection."
-                lead="Add a connection on the agent's page, then come back and plan a run."
+                lead="Add a connection on the agent's page, then come back and create a run."
               />
             ) : (
               <Field label="Connection" htmlFor="run-connection">
@@ -470,7 +471,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
             ) : tests.status === "signed-out" ? (
               <Failure
                 title="This session has ended."
-                message="Sign in again, then plan the run."
+                message="Sign in again, then create the run."
               />
             ) : tests.status !== "ready" ? (
               <Failure
@@ -480,7 +481,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
             ) : testRows.length === 0 ? (
               <Empty
                 title="No active test applies to this agent."
-                lead="Link a test to this agent on the Tests page, then come back and plan a run."
+                lead="Link a test to this agent on the Tests page, then come back and create a run."
               />
             ) : (
               <TestChoices
@@ -529,11 +530,11 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
             ) : plan.status === "signed-out" ? (
               <Failure
                 title="This session has ended."
-                message="Sign in again, then plan the run."
+                message="Sign in again, then create the run."
               />
             ) : plan.status !== "ready" ? (
               <Failure
-                title="Egma could not plan this run."
+                title="Egma could not create this run."
                 message={plan.refusal.message}
                 onRetry={replan}
               />

@@ -4,12 +4,17 @@ import { useCallback, useEffect, useState } from "react";
 
 import { readJson, type Answer } from "../lib/api.ts";
 
-const DISCARD_DRAFT = "Discard your unsaved Settings changes?";
+const DISCARD_DRAFT = "Discard your unsaved changes?";
 let protectedDrafts = 0;
+let busyDrafts = 0;
 let confirmedThisTurn = false;
 
 /** Ask once before an in-product control changes the current address. */
-export function confirmUnsavedSettingsNavigation(): boolean {
+export function confirmUnsavedNavigation(): boolean {
+  // A person may choose to discard a local draft. They cannot choose to make
+  // an unsettled write safe: leaving while it is in flight can hide whether
+  // the server accepted it, so in-product navigation waits without asking.
+  if (busyDrafts > 0) return false;
   if (protectedDrafts === 0) return true;
   const confirmed = globalThis.confirm(DISCARD_DRAFT);
   if (confirmed) {
@@ -25,7 +30,12 @@ export function confirmUnsavedSettingsNavigation(): boolean {
 }
 
 function protectUnload(event: BeforeUnloadEvent): void {
-  if (protectedDrafts === 0 || confirmedThisTurn) return;
+  if (
+    protectedDrafts === 0 ||
+    (confirmedThisTurn && busyDrafts === 0)
+  ) {
+    return;
+  }
   event.preventDefault();
   event.returnValue = "";
 }
@@ -60,13 +70,14 @@ function protectSameOriginLink(event: MouseEvent): void {
     return;
   }
 
-  if (confirmUnsavedSettingsNavigation()) return;
+  if (confirmUnsavedNavigation()) return;
   event.preventDefault();
   event.stopPropagation();
 }
 
-function beginProtectingDraft(): () => void {
+function beginProtectingDraft(busy: boolean): () => void {
   protectedDrafts += 1;
+  if (busy) busyDrafts += 1;
   if (protectedDrafts === 1) {
     globalThis.addEventListener("beforeunload", protectUnload);
     document.addEventListener("click", protectSameOriginLink, true);
@@ -74,6 +85,7 @@ function beginProtectingDraft(): () => void {
 
   return () => {
     protectedDrafts = Math.max(0, protectedDrafts - 1);
+    if (busy) busyDrafts = Math.max(0, busyDrafts - 1);
     if (protectedDrafts === 0) {
       globalThis.removeEventListener("beforeunload", protectUnload);
       document.removeEventListener("click", protectSameOriginLink, true);
@@ -126,16 +138,17 @@ export function useOrganizationRead<T>(path: string): {
 
 /**
  * Keep an in-product link, a project switch, a reload, or a closed tab from
- * silently throwing a Settings draft away.
+ * silently throwing an editable product draft away.
  *
  * Browsers own the warning text, so this does not promise wording that they do
  * not let a product control. In-product navigation uses one short product
- * question instead. Callers turn protection off while a save is in flight and
- * after the saved answer comes back.
+ * question for a local draft. A busy write blocks in-product navigation without
+ * asking because there is no safe discard decision while its result is unknown.
+ * Callers turn protection off after the draft or write is safe.
  */
-export function useUnsavedChanges(unsaved: boolean): void {
+export function useUnsavedChanges(unsaved: boolean, busy = false): void {
   useEffect(() => {
-    if (!unsaved) return;
-    return beginProtectingDraft();
-  }, [unsaved]);
+    if (!unsaved && !busy) return;
+    return beginProtectingDraft(busy);
+  }, [busy, unsaved]);
 }

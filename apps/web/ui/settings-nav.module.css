@@ -207,23 +207,3 @@
     width: 100%;
   }
 }
-
-/*
- * What an organization-wide page says under its heading.
- *
- * The project selector stays on screen throughout Settings — somebody has to be
- * able to see where they are and to leave — so a page whose subject is the
- * whole organization has to say so in words rather than rely on the selector
- * being absent.
- */
-.scopeNote {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--accent);
-  border-radius: var(--radius-md);
-  background: var(--surface-soft);
-  color: var(--muted);
-  font-size: var(--text-sm);
-  line-height: var(--line-normal);
-}

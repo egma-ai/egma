@@ -235,7 +235,7 @@ function evidence(overrides: Record<string, unknown> = {}) {
           kind: "authored",
           grader_id: "grd_1",
           grader_version_id: "grv_1",
-          name: "Expected behaviors",
+          name: "expected_behaviors",
           library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
           required: true,
           scope: "simulations",
@@ -373,6 +373,10 @@ describe("one simulation's evidence", () => {
     // The one join between egma's record and the agent's own telemetry.
     await screen.findByText("call_abc123");
     await screen.findByText("retell · voice · hosted-broker");
+    expect(
+      (await screen.findAllByText("Expected behaviors")).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("expected_behaviors")).toBeNull();
   });
 
   it("puts verdict evidence before technical detail and calls the unit a simulation", async () => {

@@ -15,7 +15,7 @@ import {
 } from "../../../../lib/personas.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import { Badge, ButtonLink, Choice } from "../../../../ui/controls.tsx";
+import { ButtonLink, Choice } from "../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
@@ -64,11 +64,6 @@ function columnsFor(projectId: string): readonly Column<Persona>[] {
           <Link href={projectPath(projectId, "personas", persona.id)}>
             {persona.name}
           </Link>
-          {persona.is_default ? (
-            <Badge title="A test that names nobody is given this persona">
-              Default
-            </Badge>
-          ) : null}
         </span>
       ),
     },

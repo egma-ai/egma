@@ -19,7 +19,6 @@ import {
 } from "../../../../../lib/settings.ts";
 import {
   Button,
-  Facts,
   Field,
   Form,
   FormActions,
@@ -32,10 +31,7 @@ import {
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
-import {
-  ScopeNote,
-  SettingsLayout,
-} from "../../../../../ui/settings-nav.tsx";
+import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
@@ -51,10 +47,8 @@ import {
 /**
  * The customer itself: what it is called, and the judge keys it holds.
  *
- * **Nothing on this page belongs to a project**, and the note under the heading
- * says so out loud. The project selector is still on screen — leaving Settings
- * has to be possible from every page in it — so an organization-wide page that
- * said nothing would be relying on somebody inferring from an absence.
+ * **Nothing on this page belongs to a project.** The grouped Settings
+ * navigation states that scope once and keeps this page focused on the work.
  *
  * **The keys are here rather than beside the judge that spends them.** A judge
  * credential belongs to the organization: one key can serve every project, and
@@ -178,8 +172,6 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
     );
   }
 
-  const organization = answer.value;
-
   return (
     <ProductPage>
       <PageHeader
@@ -189,11 +181,6 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="organization">
-          <ScopeNote>
-            Everything on this page belongs to the whole organization. It applies
-            in every project, whichever one the selector above is showing.
-          </ScopeNote>
-
           <Section title="Details">
             {refused === null ? null : <Refused message={refused.message} />}
 
@@ -233,19 +220,6 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                 </Button>
               </FormActions>
             </Form>
-
-            <Facts
-              facts={[
-                {
-                  label: "Short name",
-                  value: organization.slug,
-                },
-                {
-                  label: "Created",
-                  value: new Date(organization.created_at).toLocaleDateString(),
-                },
-              ]}
-            />
           </Section>
 
           <Credentials
@@ -506,7 +480,7 @@ function Credentials({
     <div role="region" aria-label="Judge credentials">
       <Section
         title="Organization keys"
-        lead="A key belongs to the organization, not to a project, so one key can serve every project. Egma shows the last four characters and never the key itself — not here, and not through any other page."
+        lead="Shared judge keys for every project. Egma shows only the last four characters, never the key itself."
       >
         {failed === null ? null : (
           <Failure

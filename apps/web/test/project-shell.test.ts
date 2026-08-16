@@ -131,12 +131,10 @@ describe("the product navigation", () => {
     ]);
   });
 
-  it("keeps Settings visible and active as a management area", () => {
-    expect(MANAGEMENT_NAVIGATION.map((item) => item.id)).toEqual(["settings"]);
-    expect(navigationFor("prj_2").management.map((link) => link.href)).toEqual([
-      "/projects/prj_2/settings",
-    ]);
-    expect(activeSectionIn("/projects/prj_2/settings/people")).toBe("settings");
+  it("keeps Settings in the account menu instead of the project navigation", () => {
+    expect(MANAGEMENT_NAVIGATION).toEqual([]);
+    expect(navigationFor("prj_2").management).toEqual([]);
+    expect(activeSectionIn("/projects/prj_2/settings/people")).toBeNull();
   });
 
   /**

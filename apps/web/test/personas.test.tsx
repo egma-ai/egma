@@ -180,9 +180,9 @@ describe("the Personas list", () => {
     expect(await screen.findAllByText("Impatient Rita")).toHaveLength(1);
     expect(asked.map((one) => one.path)).toContain("/api/personas?project=prj_1");
 
-    // The default persona is an ordinary row that says what it is, and it is
-    // the only one that says it.
-    expect(screen.getAllByTitle(/names nobody/)).toHaveLength(1);
+    // Default behavior matters while editing or archiving. It does not need a
+    // tag beside the persona's name in the browsing table.
+    expect(screen.queryByTitle(/names nobody/)).toBeNull();
   });
 
   it("shows the archive as a separate list, asked for separately", async () => {

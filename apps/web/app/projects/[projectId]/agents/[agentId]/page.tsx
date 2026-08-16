@@ -254,7 +254,7 @@ function AgentDetailView({
                 <ButtonLink
                   href={`${projectPath(projectId, "runs", "new")}?agent=${encodeURIComponent(agent.id)}`}
                 >
-                  Plan a run
+                  Create a run
                 </ButtonLink>
               )}
               <Button

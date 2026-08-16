@@ -6,6 +6,7 @@ import {
   useContext,
   useId,
   useRef,
+  type Ref,
   type ReactNode,
 } from "react";
 
@@ -53,6 +54,9 @@ export function Button({
   disabled,
   busy = false,
   why,
+  ariaExpanded,
+  ariaControls,
+  buttonRef,
   onClick,
   children,
 }: {
@@ -66,6 +70,12 @@ export function Button({
    * reaches a keyboard and a screen reader and not only a pointer.
    */
   readonly why?: string;
+  /** Whether this button's controlled region is open. */
+  readonly ariaExpanded?: boolean;
+  /** The id of the region this button opens or closes. */
+  readonly ariaControls?: string;
+  /** The native button, for focus restoration after a related surface closes. */
+  readonly buttonRef?: Ref<HTMLButtonElement>;
   readonly onClick?: () => void;
   readonly children: ReactNode;
 }) {
@@ -76,10 +86,13 @@ export function Button({
   return (
     <>
       <button
+        ref={buttonRef}
         className={weightClass(weight)}
         type={type}
         disabled={inert}
         aria-busy={busy ? "true" : undefined}
+        aria-expanded={ariaExpanded}
+        aria-controls={ariaControls}
         title={why}
         aria-describedby={explained ? said : undefined}
         onClick={onClick}

@@ -246,7 +246,7 @@ function runDetail(overrides: Record<string, unknown> = {}) {
               kind: "authored",
               grader_id: "grd_seeded",
               grader_version_id: "grv_1",
-              name: "Expected behaviors",
+              name: "expected_behaviors",
               library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
               required: true,
               scope: "simulations",
@@ -431,7 +431,7 @@ describe("the run list", () => {
 
     await screen.findAllByText("Nightly smoke");
     expect(screen.queryAllByRole("button", { name: "Cancel" })).toEqual([]);
-    expect(screen.queryAllByRole("link", { name: "Plan a run" })).toEqual([]);
+    expect(screen.queryAllByRole("link", { name: "Create a run" })).toEqual([]);
   });
 
   it("sends a cancel for the row it was opened on", async () => {
@@ -636,6 +636,7 @@ describe("one run's page", () => {
     render(<RunDetailPage />);
 
     await screen.findByText("Expected behaviors");
+    expect(screen.queryByText("expected_behaviors")).toBeNull();
     await screen.findByText(/Frozen when this run started/u);
     // A judge choice names a credential reference and never a key.
     await screen.findByText(/openai\/gpt-4\.1-mini · credential jcr_1/u);

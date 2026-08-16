@@ -15,7 +15,7 @@ The developer has locked three decisions now: the supplied color palette, the su
 
 ## Direction
 
-Egma uses the visual language of Mistral as its primary reference: warm parchment, near-black type, white paper surfaces, one ember-orange accent, generous space, restrained radii, and warm directional shadows.
+Egma uses the visual language of Mistral as its primary reference: neutral paper, near-black type, warm parchment accents, one ember-orange accent, generous space, restrained radii, and warm directional shadows.
 
 This is not permission to copy Mistral's name, mark, copy, or product structure. Egma keeps its own logo and domain language. The reference controls visual tone, typography, spacing, components, and motion.
 
@@ -62,19 +62,20 @@ The palette is locked to the supplied reference.
 
 | Token | Value | Use |
 | --- | --- | --- |
-| Parchment Canvas | `#fffaeb` | Page and application canvas |
-| Pure Card | `#ffffff` | Raised surfaces, menus, dialogs, and form groups |
+| Parchment | `#fffaeb` | Warm accent fields and rare branded surfaces |
+| Pure Paper | `#ffffff` | Application canvas, raised surfaces, menus, dialogs, and form groups |
 | Midnight Ink | `#1f1f1f` | Primary text and dark application surfaces |
 | Carbon | `#000000` | Primary filled actions and maximum contrast |
 | Graphite | `#3c3c3c` | Secondary text and stronger neutral states |
 | Ember | `#fa520f` | Small active marks, directional icons, focus, and rare emphasis |
 | Soft Butter | `#fff0c2` | Selected chips, soft callouts, and quiet hover fills |
-| Honeycomb | `#ecdaa2` | Dividers, borders, and warm hairlines |
+| Honeycomb | `#ecdaa2` | Rare warm dividers and accent hairlines |
 
 ### Color rules
 
-- The full page canvas is Parchment, never white.
-- White is a raised paper surface, not the page background.
+- The application canvas is neutral paper. It does not carry a yellow cast.
+- Parchment, Soft Butter, and Honeycomb are accents, not default page or border colors.
+- Ordinary borders use a neutral mix derived from Graphite and Pure Paper.
 - Ember is punctuation. It does not fill large product surfaces or primary buttons.
 - Carbon is the primary filled action.
 - Text is Midnight Ink or Graphite. Ember is not body text.
@@ -177,8 +178,8 @@ rgba(127, 99, 21, 0.02) -130px 256px 115px 0
 
 ### Shell
 
-- Parchment is the application canvas.
-- The sidebar is a quiet paper region separated by a Honeycomb hairline.
+- Neutral paper is the application canvas.
+- The sidebar is a quiet paper region separated by a neutral hairline.
 - The organization and project switcher is the topmost sidebar control.
 - The full Egma logo is absent from the signed-in sidebar.
 - Navigation uses text and small line icons. The active item uses Soft Butter and a small Ember mark.
@@ -214,7 +215,7 @@ rgba(127, 99, 21, 0.02) -130px 256px 115px 0
 
 - Use one semantic table tree on desktop and mobile.
 - Table text starts at 14px.
-- Honeycomb hairlines separate rows. Avoid boxed cards for every row.
+- Neutral hairlines separate rows. Avoid boxed cards for every row.
 - Headers are quiet, regular-weight labels.
 - Selected or active rows use Soft Butter.
 - Mobile may restyle the same DOM as rows, but it must not duplicate interactive content.
@@ -362,3 +363,4 @@ Every migration slice needs:
 | 2026-08-15 | Preserve the Egma logo | Product identity stays Egma while the interface adopts the reference language |
 | 2026-08-15 | Do not ship the supplied font yet | The file is malformed and has no public web-distribution proof |
 | 2026-08-15 | Treat motion as a system | Shared timings, easing, origin, input method, and reduced-motion behavior prevent route-level drift |
+| 2026-08-16 | Keep yellow to accents | The full warm canvas and warm borders made dense product pages read yellow; neutral paper now carries routine work while parchment, butter, honeycomb, and ember mark selected or important states |

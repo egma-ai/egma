@@ -194,7 +194,7 @@ export function skipExplanation(skip: PlanSkip): string {
   const named = skip.capabilities.join(", ");
   return skip.reason === "required_capability_unsupported"
     ? `This connection was measured and does not support ${named}. Egma will not conduct these simulations, and will say nothing about the agent. Choose a connection that supports it, or a test that does not require it.`
-    : `Nobody has measured whether this connection supports ${named}. Egma will not conduct these simulations, and will say nothing about the agent. Refresh the connection's capabilities, then plan the run again.`;
+    : `Nobody has measured whether this connection supports ${named}. Egma will not conduct these simulations, and will say nothing about the agent. Refresh the connection's capabilities, then create the run again.`;
 }
 
 /** How many conversations a plan would produce, conducted and skipped alike. */

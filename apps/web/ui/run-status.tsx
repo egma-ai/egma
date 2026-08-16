@@ -498,7 +498,7 @@ export function RecentRuns({
         answer.value.items.length === 0 ? (
           <Empty
             title="Nothing has been run here yet"
-            lead="Plan a run and its results appear here, with a link to each one."
+            lead="Create a run and its results appear here, with a link to each one."
           />
         ) : (
           <DataTable

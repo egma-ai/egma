@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import GraderLibraryPage from "../app/projects/[projectId]/graders/page.tsx";
@@ -125,7 +131,7 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): {
 /** egma's own expected-behaviors entry: its Use form asks for nothing at all. */
 const BEHAVIORS: LibraryEntry = {
   id: "grl_behaviors",
-  name: "Expected behaviors",
+  name: "expected_behaviors",
   description: "Judges a simulation against its test's expected behaviors.",
   type: "llm_as_judge",
   owner: "egma",
@@ -135,7 +141,7 @@ const BEHAVIORS: LibraryEntry = {
 /** egma's latency entry: a measure from the catalog, and a bound. */
 const LATENCY: LibraryEntry = {
   id: "grl_latency",
-  name: "Latency",
+  name: "latency",
   description: "Fails when a measured latency is over the bound.",
   type: "code",
   owner: "egma",
@@ -172,7 +178,7 @@ const LATENCY: LibraryEntry = {
 const SEEDED: RunningGrader = {
   id: "grd_1",
   library_id: "grl_behaviors",
-  name: "Expected behaviors",
+  name: "expected_behaviors",
   description: null,
   type: "llm_as_judge",
   required: true,
@@ -187,7 +193,7 @@ const DIAGNOSTIC: RunningGrader = {
   ...SEEDED,
   id: "grd_2",
   library_id: "grl_latency",
-  name: "Latency",
+  name: "latency",
   type: "code",
   required: false,
   scope: "both",
@@ -230,6 +236,7 @@ describe("the grader library, in one project", () => {
     expect(screen.getAllByText("Model judged")).not.toHaveLength(0);
     expect(screen.getAllByText("Computed")).not.toHaveLength(0);
     expect(screen.queryByText("llm_as_judge")).toBeNull();
+    expect(screen.queryByText("expected_behaviors")).toBeNull();
     expect(screen.getAllByText("egma")).not.toHaveLength(0);
   });
 
@@ -453,7 +460,7 @@ describe("the running graders of one project", () => {
         status: 200,
         body: {
           id: "grd_2",
-          name: "Latency",
+          name: "latency",
           deleted_at: "2026-08-15T12:00:00.000Z",
         },
       },
@@ -615,6 +622,38 @@ describe("the running graders of one project", () => {
  * update against Postgres.
  */
 describe("changing a running copy", () => {
+  it("connects each Edit button to the editor and moves focus to its heading", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+    });
+    render(<RunningGradersPage />);
+
+    const edits = await screen.findAllByRole("button", { name: "Edit" });
+    expect(edits[1]!.getAttribute("aria-expanded")).toBe("false");
+    expect(edits[1]!.getAttribute("aria-controls")).toBe(
+      "grader-editor-grd_2",
+    );
+
+    fireEvent.click(edits[1]!);
+
+    const editor = screen.getByRole("region", { name: "Edit Latency" });
+    const heading = within(editor).getByRole("heading", {
+      name: "Edit Latency",
+    });
+    expect(editor.id).toBe("grader-editor-grd_2");
+    expect(edits[1]!.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(heading);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(document.activeElement).toBe(edits[1]);
+    expect(edits[1]!.getAttribute("aria-expanded")).toBe("false");
+  });
+
   /**
    * **The edit form is the Use form's controls, filled in with what this copy
    * holds.** What a grader asks for is the library entry's own declaration, and
@@ -692,6 +731,169 @@ describe("changing a running copy", () => {
     );
   });
 
+  it("keeps a changed copy when another Edit or Cancel is declined", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+    });
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    render(<RunningGradersPage />);
+
+    const edits = await screen.findAllByRole("button", { name: "Edit" });
+    fireEvent.click(edits[0]!);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Draft behavior grader" },
+    });
+
+    fireEvent.click(edits[1]!);
+    expect(confirm).toHaveBeenLastCalledWith("Discard your unsaved changes?");
+    expect(screen.getByRole("region", {
+      name: "Edit Expected behaviors",
+    })).toBeTruthy();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Draft behavior grader",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Draft behavior grader",
+    );
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("region", {
+      name: "Edit Expected behaviors",
+    })).toBeNull();
+  });
+
+  it("protects a changed copy from grader links, product links, project changes, and unload", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+    });
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    render(<RunningGradersPage />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    fireEvent.change(screen.getByLabelText(runningCopy.EDIT.description), {
+      target: { value: "Keep this draft" },
+    });
+
+    const leaving = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(true);
+
+    const graderViews = screen.getByRole("navigation", {
+      name: "Grader views",
+    });
+    const library = within(graderViews).getByRole("link", { name: "Library" });
+    const tabClick = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    library.dispatchEvent(tabClick);
+    expect(tabClick.defaultPrevented).toBe(true);
+
+    const product = screen.getByRole("navigation", {
+      name: "Product navigation",
+    });
+    const agents = within(product).getByRole("link", { name: "Agents" });
+    const productClick = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    agents.dispatchEvent(productClick);
+    expect(productClick.defaultPrevented).toBe(true);
+
+    const selectors = await screen.findAllByRole("button", {
+      name: /^Organization Acme, project Default\./,
+    });
+    fireEvent.click(selectors[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Outbound" }));
+    expect(routed.push).not.toHaveBeenCalled();
+    expect(confirm).toHaveBeenCalledTimes(3);
+    expect(confirm).toHaveBeenLastCalledWith("Discard your unsaved changes?");
+    expect(
+      (screen.getByLabelText(
+        runningCopy.EDIT.description,
+      ) as HTMLInputElement).value,
+    ).toBe("Keep this draft");
+  });
+
+  it("keeps the editor and its navigation guard in place while Save is in flight", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+      "PATCH /api/graders/grd_1": "never",
+    });
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirm);
+    render(<RunningGradersPage />);
+
+    const edits = await screen.findAllByRole("button", { name: "Edit" });
+    fireEvent.click(edits[0]!);
+    fireEvent.change(screen.getByLabelText(runningCopy.EDIT.description), {
+      target: { value: "Saving this note" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByRole("button", { name: runningCopy.EDIT.submitting }),
+    ).toBeTruthy();
+    expect(screen.getByLabelText("Name").matches(":disabled")).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(edits.every((edit) => (edit as HTMLButtonElement).disabled)).toBe(
+      true,
+    );
+
+    const leaving = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(true);
+
+    const graderViews = screen.getByRole("navigation", {
+      name: "Grader views",
+    });
+    const library = within(graderViews).getByRole("link", { name: "Library" });
+    const linkClick = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    library.dispatchEvent(linkClick);
+    expect(linkClick.defaultPrevented).toBe(true);
+
+    const selectors = await screen.findAllByRole("button", {
+      name: /^Organization Acme, project Default\./,
+    });
+    fireEvent.click(selectors[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Outbound" }));
+    expect(routed.push).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("region", {
+      name: "Edit Expected behaviors",
+    })).toBeTruthy();
+  });
+
   /**
    * **A number is sent as a number**, at the edge that knows the control was
    * numeric — and the project rides in the body, because an edit lands on
@@ -724,7 +926,7 @@ describe("changing a running copy", () => {
     const written = asked.find((one) => one.method === "PATCH");
     expect(written?.path).toBe("/api/graders/grd_2");
     expect(written?.body).toEqual({
-      name: "Latency",
+      name: "latency",
       // Null rather than the empty string: emptying a note is a real intent and
       // the platform reads null as exactly that.
       description: null,
@@ -746,15 +948,18 @@ describe("changing a running copy", () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
       "GET /api/graders": [
-        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
-        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
+        { status: 200, body: { items: [SEEDED], next_cursor: null } },
+        { status: 200, body: { items: [SEEDED], next_cursor: null } },
       ],
       "GET /api/grader-library": SHELF,
-      "PATCH /api/graders/grd_2": { status: 200, body: DIAGNOSTIC },
+      "PATCH /api/graders/grd_1": { status: 200, body: SEEDED },
     });
     render(<RunningGradersPage />);
 
     fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Expected behaviors",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const said = (await screen.findByRole("status")).textContent ?? "";
@@ -763,6 +968,9 @@ describe("changing a running copy", () => {
     expect(
       asked.filter((one) => one.path === "/api/graders?project=prj_1"),
     ).toHaveLength(2);
+    expect(asked.find((one) => one.method === "PATCH")?.body).toMatchObject({
+      name: "expected_behaviors",
+    });
   });
 
   /**
@@ -787,6 +995,43 @@ describe("changing a running copy", () => {
     // And the live settings are still there, because they belong to the copy
     // rather than to what it asks for.
     expect(screen.getByLabelText("Applies to")).toBeTruthy();
+  });
+
+  it("keeps the running list beside a grouped editor and shows sampling only for live traffic", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [SEEDED], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+    });
+    render(<RunningGradersPage />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+
+    const editor = screen.getByRole("region", {
+      name: "Edit Expected behaviors",
+    });
+    expect(
+      screen.getByRole("table", {
+        name: "The graders running in this project",
+      }),
+    ).toBeTruthy();
+    for (const group of [
+      runningCopy.EDIT.groups.general,
+      runningCopy.EDIT.groups.logic,
+      runningCopy.EDIT.groups.applicability,
+      runningCopy.EDIT.groups.impact,
+    ]) {
+      expect(within(editor).getByRole("group", { name: group })).toBeTruthy();
+    }
+
+    expect(within(editor).queryByLabelText(runningCopy.EDIT.sampleRate)).toBeNull();
+    fireEvent.change(within(editor).getByLabelText(runningCopy.EDIT.scope), {
+      target: { value: "production" },
+    });
+    expect(within(editor).getByLabelText(runningCopy.EDIT.sampleRate)).toBeTruthy();
   });
 
   /**
@@ -916,6 +1161,29 @@ describe("the strip between the two screens", () => {
         href: "/projects/prj_7/graders/running",
       },
     ]);
+  });
+
+  it("is a compact route navigation with the current view named", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/grader-library": {
+        status: 200,
+        body: { items: [BEHAVIORS], next_cursor: null },
+      },
+    });
+    render(<GraderLibraryPage />);
+
+    const views = await screen.findByRole("navigation", {
+      name: "Grader views",
+    });
+    const library = within(views).getByRole("link", { name: "Library" });
+    const running = within(views).getByRole("link", { name: "Running" });
+    expect(library.getAttribute("aria-current")).toBe("page");
+    expect(running.getAttribute("aria-current")).toBeNull();
+    expect(library.getAttribute("href")).toBe("/projects/prj_1/graders");
+    expect(running.getAttribute("href")).toBe(
+      "/projects/prj_1/graders/running",
+    );
   });
 });
 

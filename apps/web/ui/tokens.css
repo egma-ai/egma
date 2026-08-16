@@ -17,14 +17,20 @@
   --color-butter: #fff0c2;
   --color-honeycomb: #ecdaa2;
 
-  /* Semantic product colors and compatibility aliases. */
-  --background: var(--color-parchment);
+  /*
+   * Semantic product colors and compatibility aliases.
+   *
+   * Warm yellow is an accent, not the product's default cast. The neutral
+   * canvas and hairline are derived from the locked paper and graphite values;
+   * no new palette color is introduced.
+   */
+  --background: color-mix(in srgb, var(--color-graphite) 3%, var(--color-paper));
   --surface: var(--color-paper);
   --surface-soft: var(--color-butter);
   --foreground: var(--color-midnight);
   --muted: var(--color-graphite);
-  --faint: color-mix(in srgb, var(--color-graphite) 72%, var(--color-parchment));
-  --border: var(--color-honeycomb);
+  --faint: color-mix(in srgb, var(--color-graphite) 76%, var(--color-paper));
+  --border: color-mix(in srgb, var(--color-graphite) 18%, var(--color-paper));
   --border-strong: var(--color-midnight);
   --focus: var(--color-ember);
   --accent: var(--color-ember);

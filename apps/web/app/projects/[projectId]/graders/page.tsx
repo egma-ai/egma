@@ -20,6 +20,7 @@ import {
   type LibraryPage,
 } from "../../../../lib/graders.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
+import { graderDisplayName } from "../../../../lib/presentation.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import { Button, ButtonLink, Section } from "../../../../ui/controls.tsx";
@@ -33,6 +34,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../ui/shell.tsx";
+import styles from "./graders.module.css";
 import { GraderTabs } from "./tabs.tsx";
 import { UseForm } from "./use-form.tsx";
 
@@ -112,7 +114,7 @@ function columnsFor(
       key: "name",
       header: COLUMNS.name,
       primary: true,
-      cell: (entry) => entry.name,
+      cell: (entry) => graderDisplayName(entry.name),
     },
     { key: "type", header: COLUMNS.type, width: "140px", cell: typeOf },
     {
@@ -215,60 +217,59 @@ function GraderLibrary({ projectId }: { readonly projectId: string }) {
   }
 
   return (
-    <ProductPage>
+    <ProductPage wide>
       <PageHeader eyebrow="Project" title={LIBRARY.title} lead={LIBRARY.lead} />
       <PageBody>
         <GraderTabs projectId={projectId} active="library" />
+        <div className={styles.viewContent}>
+          {/*
+            What the last press came to, and it stays until the next one. A copy
+            is judging from the moment it exists, so the sentence says that and
+            points at the screen where it now appears.
+          */}
+          {started === null ? null : (
+            <p role="status">
+              {USE.started(started)}{" "}
+              <Link
+                href={projectPath(
+                  projectId,
+                  GRADERS_SECTION,
+                  RUNNING_GRADERS_STEP,
+                )}
+              >
+                {USE.seeRunning}
+              </Link>
+            </p>
+          )}
 
-        {/*
-          What the last press came to, and it stays until the next one. A copy
-          is judging from the moment it exists, so the sentence says that and
-          points at the screen where it now appears.
-        */}
-        {started === null ? null : (
-          <p role="status">
-            {USE.started(started)}{" "}
-            <Link
-              href={projectPath(projectId, GRADERS_SECTION, RUNNING_GRADERS_STEP)}
-            >
-              {USE.seeRunning}
-            </Link>
-          </p>
-        )}
+          {/*
+            The form, opened on one entry at a time and drawn from that entry's
+            own declaration. Inline rather than in a dialog: the table stays
+            available, so pressing Use on another row can safely replace it.
 
-        {/*
-          The form, opened on one entry at a time and drawn from that entry's
-          own declaration. Inline rather than in a dialog: it is the one act on
-          this screen, and a modal over a two-row table hides the thing being
-          acted on for no benefit.
+            **Keyed by the entry, which is what makes switching between two of
+            them safe.** The form's state is the answers to *this* entry's
+            questions, and React keeps a component's state across a re-render when
+            only its props change. The key makes the two forms two components, so
+            the second starts from its own defaults.
+          */}
+          {using === null ? null : (
+            <Section title={USE.title(graderDisplayName(using.name))}>
+              <UseForm
+                key={using.id}
+                entry={using}
+                projectId={projectId}
+                onCancel={() => setUsing(null)}
+                onStarted={(name) => {
+                  setUsing(null);
+                  setStarted(graderDisplayName(name));
+                }}
+              />
+            </Section>
+          )}
 
-          **Keyed by the entry, which is what makes switching between two of
-          them safe.** The form's state is the answers to *this* entry's
-          questions, and React keeps a component's state across a re-render when
-          only its props change. So pressing Use on a second entry while the
-          first one's form was open would draw the second entry's controls over
-          the first entry's answers: the measure dropdown would exist with
-          nothing selected, and a bound typed under it would be submitted with
-          the measure missing — which the write door refuses with a message
-          about a field the person can see is filled in. The key makes the two
-          forms two components, so the second starts from its own defaults.
-        */}
-        {using === null ? null : (
-          <Section title={USE.title(using.name)}>
-            <UseForm
-              key={using.id}
-              entry={using}
-              projectId={projectId}
-              onCancel={() => setUsing(null)}
-              onStarted={(name) => {
-                setUsing(null);
-                setStarted(name);
-              }}
-            />
-          </Section>
-        )}
-
-        {body()}
+          {body()}
+        </div>
       </PageBody>
     </ProductPage>
   );

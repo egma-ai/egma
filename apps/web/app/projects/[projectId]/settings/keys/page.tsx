@@ -32,10 +32,7 @@ import {
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
-import {
-  ScopeNote,
-  SettingsLayout,
-} from "../../../../../ui/settings-nav.tsx";
+import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
@@ -249,11 +246,6 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="keys">
-          <ScopeNote>
-            Keys belong to the organization. A key can be scoped to one project or
-            to the whole organization, and every row below says which.
-          </ScopeNote>
-
           {refused === null ? null : <Refused message={refused.message} />}
 
           {minted === null ? null : (

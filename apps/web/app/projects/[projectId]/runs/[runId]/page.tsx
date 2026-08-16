@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { asMoment } from "../../../../../lib/instants.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
@@ -862,7 +863,9 @@ function PlanItemLine({ item }: { readonly item: FrozenPlanItem }) {
 
   return (
     <li className={styles.planItem}>
-      <span className={styles.planItemName}>{item.name}</span>
+      <span className={styles.planItemName}>
+        {graderDisplayName(item.name)}
+      </span>
       <span className={styles.planItemNote}>
         {/*
           What it is and how loudly it speaks. `required: false` is a

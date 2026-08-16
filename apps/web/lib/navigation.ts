@@ -21,10 +21,9 @@ import { projectPath, sectionIn } from "./project-context.ts";
  *   first in the viewer's list and pressing **Use** would have put a running
  *   copy on a project nobody was looking at. They are project-scoped now, so
  *   the item is back.
- * - **Settings has a visible management slot.** It remains separate from the
- *   daily product areas and the reusable library, but it is not hidden behind
- *   the account menu. Its active state therefore stays visible while somebody
- *   moves through any Settings page.
+ * - **Settings lives in the account menu.** It is administrative work rather
+ *   than a project destination, so it does not consume a permanent sidebar
+ *   slot beside Agents, Tests, Runs, Personas, and Graders.
  * - **A simulation has no navigation item at all.** It is evidence, reached
  *   from the run that produced it, and a top-level list of every simulation
  *   would be a different product.
@@ -59,9 +58,7 @@ export const SECONDARY_NAVIGATION: readonly NavigationItem[] = [
   { id: "graders", label: "Graders" },
 ];
 
-export const MANAGEMENT_NAVIGATION: readonly NavigationItem[] = [
-  { id: "settings", label: "Settings" },
-];
+export const MANAGEMENT_NAVIGATION: readonly NavigationItem[] = [];
 
 const EVERY_SECTION: readonly SectionId[] = [
   ...PRIMARY_NAVIGATION,

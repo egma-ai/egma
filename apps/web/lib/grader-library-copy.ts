@@ -30,8 +30,8 @@
  */
 
 export const LIBRARY = {
-  title: "Grader library",
-  lead: "The graders egma ships, and the ones your team writes. Every project starts with egma's.",
+  title: "Graders",
+  lead: "Choose a grader to use in this project.",
   /** What the page says it is waiting for, never merely that it is waiting. */
   loading: "the grader library",
   /**
@@ -82,8 +82,7 @@ export const USE = {
     "switched on.",
   /** An entry whose assertions come from the test asks for nothing at all. */
   asksNothing:
-    "This grader asks for nothing. Its assertions are each test's own expected " +
-    "behaviors, read at the moment it judges.",
+    "Uses each test's expected behaviors.",
   required: "Can fail a run",
   requiredOn:
     "A test cannot pass while this grader does not.",

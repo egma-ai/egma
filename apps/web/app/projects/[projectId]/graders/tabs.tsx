@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { graderTabsFor, type GraderTab } from "../../../../lib/presentation.ts";
-import styles from "../../../../ui/settings-nav.module.css";
+import styles from "./graders.module.css";
 
 /**
  * The strip that moves between the two grader screens of one project.
@@ -34,23 +34,19 @@ export function GraderTabs({
   readonly active: GraderTab;
 }) {
   return (
-    <nav className={styles.nav} aria-label="Graders">
-      <div className={styles.group}>
-        <div className={styles.items}>
-          {graderTabsFor(projectId).map((tab) => (
-            <Link
-              key={tab.id}
-              className={`${styles.item} ${
-                active === tab.id ? styles.itemActive : ""
-              }`}
-              href={tab.href}
-              aria-current={active === tab.id ? "page" : undefined}
-            >
-              {tab.label}
-            </Link>
-          ))}
-        </div>
-      </div>
+    <nav className={styles.tabs} aria-label="Grader views">
+      {graderTabsFor(projectId).map((tab) => (
+        <Link
+          key={tab.id}
+          className={`${styles.tab} ${
+            active === tab.id ? styles.tabActive : ""
+          }`}
+          href={tab.href}
+          aria-current={active === tab.id ? "page" : undefined}
+        >
+          {tab.label}
+        </Link>
+      ))}
     </nav>
   );
 }

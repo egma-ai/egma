@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { deleteJson, sendJson, type Refusal } from "../../../../../lib/api.ts";
 import {
@@ -15,6 +15,7 @@ import {
   type GraderParameter,
   type RunningGrader,
 } from "../../../../../lib/graders.ts";
+import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import {
   Actions,
   Button,
@@ -27,6 +28,7 @@ import {
   Select,
   TextInput,
 } from "../../../../../ui/controls.tsx";
+import styles from "../graders.module.css";
 import { EntryFields } from "../use-form.tsx";
 
 /**
@@ -101,6 +103,7 @@ export function EditForm({
   params,
   projectId,
   onSaved,
+  onProtectionChange,
   onCancel,
 }: {
   readonly copy: RunningGrader;
@@ -108,20 +111,58 @@ export function EditForm({
   readonly params: readonly GraderParameter[];
   readonly projectId: string;
   readonly onSaved: (name: string) => void;
+  /** Whether leaving now would lose a changed value or an active write. */
+  readonly onProtectionChange: (state: {
+    readonly atRisk: boolean;
+    readonly busy: boolean;
+  }) => void;
   readonly onCancel: () => void;
 }) {
-  const [filled, setFilled] = useState<Readonly<Record<string, string>>>(() =>
-    filledFrom(params, copy.config?.assertions?.[0]),
+  const originalName = graderDisplayName(copy.name);
+  const [initial] = useState(() => ({
+    filled: filledFrom(params, copy.config?.assertions?.[0]),
+    name: originalName,
+    description: copy.description ?? "",
+    scope: copy.scope,
+    required: copy.required,
+    sampleRate: String(copy.production_sample_rate),
+  }));
+  const [filled, setFilled] = useState<Readonly<Record<string, string>>>(
+    initial.filled,
   );
-  const [name, setName] = useState(copy.name);
-  const [description, setDescription] = useState(copy.description ?? "");
-  const [scope, setScope] = useState(copy.scope);
-  const [required, setRequired] = useState(copy.required);
-  const [sampleRate, setSampleRate] = useState(
-    String(copy.production_sample_rate),
-  );
+  const [name, setName] = useState(initial.name);
+  const [description, setDescription] = useState(initial.description);
+  const [scope, setScope] = useState(initial.scope);
+  const [required, setRequired] = useState(initial.required);
+  const [sampleRate, setSampleRate] = useState(initial.sampleRate);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
+
+  const changed =
+    name !== initial.name ||
+    description !== initial.description ||
+    scope !== initial.scope ||
+    required !== initial.required ||
+    sampleRate !== initial.sampleRate ||
+    params.some(
+      (parameter) =>
+        (filled[parameter.name] ?? "") !==
+        (initial.filled[parameter.name] ?? ""),
+    );
+
+  useEffect(() => {
+    onProtectionChange({ atRisk: changed || busy, busy });
+  }, [busy, changed, onProtectionChange]);
+
+  // Clear the page-owned guard when a save or confirmed discard unmounts this
+  // form. Without this cleanup, the next clean editor would inherit a warning
+  // for values that no longer exist.
+  useEffect(
+    () => () => {
+      onProtectionChange({ atRisk: false, busy: false });
+    },
+    [onProtectionChange],
+  );
 
   /** The share of live traffic, where the box actually states one. */
   const saidRate =
@@ -130,6 +171,7 @@ export function EditForm({
       : Number(sampleRate);
 
   async function save(): Promise<void> {
+    if (busy) return;
     setBusy(true);
     setRefused(null);
 
@@ -137,7 +179,10 @@ export function EditForm({
       method: "PATCH",
       project: projectId,
       body: {
-        name,
+        // A predefined grader is stored with a machine key but shown with a
+        // human name. Keeping that unchanged must not silently rename it when
+        // somebody saves a different setting.
+        name: name === originalName ? copy.name : name,
         // Null rather than an empty string, because emptying a note is a thing
         // somebody means to do and the platform reads null as exactly that.
         description: description.trim() === "" ? null : description,
@@ -180,81 +225,97 @@ export function EditForm({
       <Help>{EDIT.lead}</Help>
       {refused === null ? null : <Refused message={refused.message} />}
 
-      <Field label={EDIT.name} hint={EDIT.nameMeans} htmlFor="edit-name">
-        <TextInput id="edit-name" value={name} onChange={setName} />
-      </Field>
+      <fieldset className={styles.formGroup} disabled={busy}>
+        <legend className={styles.formGroupTitle}>{EDIT.groups.general}</legend>
+        <Field label={EDIT.name} hint={EDIT.nameMeans} htmlFor="edit-name">
+          <TextInput id="edit-name" value={name} onChange={setName} />
+        </Field>
 
-      <Field
-        label={EDIT.description}
-        hint={EDIT.descriptionMeans}
-        htmlFor="edit-description"
-      >
-        <TextInput
-          id="edit-description"
-          value={description}
-          onChange={setDescription}
+        <Field
+          label={EDIT.description}
+          hint={EDIT.descriptionMeans}
+          htmlFor="edit-description"
+        >
+          <TextInput
+            id="edit-description"
+            value={description}
+            onChange={setDescription}
+          />
+        </Field>
+      </fieldset>
+
+      <fieldset className={styles.formGroup} disabled={busy}>
+        <legend className={styles.formGroupTitle}>{EDIT.groups.logic}</legend>
+        {/*
+          The entry's own questions, rendered by the component the Use form
+          renders them with — one declaration, one reading of it.
+        */}
+        <EntryFields
+          params={params}
+          filled={filled}
+          onFilled={(parameter, value) =>
+            setFilled((was) => ({ ...was, [parameter]: value }))
+          }
+          named="edit"
+          sentence={EDIT.asksNothing}
         />
-      </Field>
+      </fieldset>
 
-      {/*
-        The entry's own questions, rendered by the component the Use form
-        renders them with — one declaration, one reading of it.
-      */}
-      <EntryFields
-        params={params}
-        filled={filled}
-        onFilled={(parameter, value) =>
-          setFilled((was) => ({ ...was, [parameter]: value }))
-        }
-        named="edit"
-        sentence={EDIT.asksNothing}
-      />
+      <fieldset className={styles.formGroup} disabled={busy}>
+        <legend className={styles.formGroupTitle}>
+          {EDIT.groups.applicability}
+        </legend>
+        <Field label={EDIT.scope} hint={EDIT.scopeMeans} htmlFor="edit-scope">
+          <Select
+            id="edit-scope"
+            value={scope}
+            options={Object.entries(SCOPES).map(([stored, said]) => ({
+              value: stored,
+              label: said,
+            }))}
+            onChange={setScope}
+          />
+        </Field>
 
-      <Field label={EDIT.scope} hint={EDIT.scopeMeans} htmlFor="edit-scope">
-        <Select
-          id="edit-scope"
-          value={scope}
-          options={Object.entries(SCOPES).map(([stored, said]) => ({
-            value: stored,
-            label: said,
-          }))}
-          onChange={setScope}
-        />
-      </Field>
+        {scope === "production" || scope === "both" ? (
+          <Field
+            label={EDIT.sampleRate}
+            hint={EDIT.sampleRateMeans}
+            htmlFor="edit-sample-rate"
+          >
+            <TextInput
+              id="edit-sample-rate"
+              value={sampleRate}
+              numeric
+              onChange={setSampleRate}
+            />
+          </Field>
+        ) : null}
+      </fieldset>
 
-      {/*
-        Both readings of `required` are spelled out beside the control, and both
-        carry the same warning: no verdict is rewritten, and every run already
-        read is counted again the next time somebody opens it.
-      */}
-      <Field
-        label={EDIT.required}
-        hint={required ? EDIT.requiredOn : EDIT.requiredOff}
-        htmlFor="edit-required"
-      >
-        <Checkbox
-          id="edit-required"
-          checked={required}
-          onChange={setRequired}
-        />
-      </Field>
-
-      <Field
-        label={EDIT.sampleRate}
-        hint={EDIT.sampleRateMeans}
-        htmlFor="edit-sample-rate"
-      >
-        <TextInput
-          id="edit-sample-rate"
-          value={sampleRate}
-          numeric
-          onChange={setSampleRate}
-        />
-      </Field>
+      <fieldset className={styles.formGroup} disabled={busy}>
+        <legend className={styles.formGroupTitle}>{EDIT.groups.impact}</legend>
+        {/*
+          Both readings of `required` are spelled out beside the control, and
+          both carry the same warning: no verdict is rewritten, and every run
+          already read is counted again the next time somebody opens it.
+        */}
+        <Field
+          label={EDIT.required}
+          hint={required ? EDIT.requiredOn : EDIT.requiredOff}
+          htmlFor="edit-required"
+        >
+          <Checkbox
+            id="edit-required"
+            checked={required}
+            onChange={setRequired}
+          />
+        </Field>
+      </fieldset>
 
       <FormActions>
-        <Button onClick={onCancel}>{EDIT.cancel}</Button>
-        <Button type="submit" weight="strong" disabled={busy}>
+        <Button onClick={onCancel} disabled={busy}>{EDIT.cancel}</Button>
+        <Button type="submit" weight="strong" busy={busy}>
           {busy ? EDIT.submitting : EDIT.submit}
         </Button>
       </FormActions>

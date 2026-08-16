@@ -22,6 +22,23 @@ export function nextTheme(theme: Theme): Theme {
 }
 
 /**
+ * Human labels for the machine names of predefined graders.
+ *
+ * The API keeps these stable keys because runs and frozen grading plans need
+ * durable names. Product surfaces pass the stored value through this one
+ * presentation seam instead of teaching each route how to title it. A team
+ * name that is not one of these keys is returned exactly as it was written.
+ */
+const PREDEFINED_GRADER_DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([
+  ["expected_behaviors", "Expected behaviors"],
+  ["latency", "Latency"],
+]);
+
+export function graderDisplayName(name: string): string {
+  return PREDEFINED_GRADER_DISPLAY_NAMES.get(name) ?? name;
+}
+
+/**
  * The two screens inside the Graders section, and the order they read in.
  *
  * **The library first, because that is where a grader comes from.** A running

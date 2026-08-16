@@ -26,8 +26,8 @@
  */
 
 export const RUNNING = {
-  title: "Running graders",
-  lead: "What this project judges with. Every one of them is a copy of something on the library shelf.",
+  title: "Graders",
+  lead: "The graders judging this project now.",
   /** What the page says it is waiting for, never merely that it is waiting. */
   loading: "running graders",
   /**
@@ -77,19 +77,22 @@ export const EDIT = {
   open: "Edit",
   title: (name: string): string => `Edit ${name}`,
   lead:
-    "What this grader judges by, and where it applies. Values are what a " +
-    "verdict is made of, so changing one starts the next version and leaves " +
-    "everything already judged saying exactly what it said.",
+    "Change how this grader judges and where it applies. Changing a grading " +
+    "value starts a new version; earlier verdicts stay unchanged.",
+  groups: {
+    general: "General",
+    logic: "Grading logic",
+    applicability: "Applicability",
+    impact: "Impact",
+  },
   /** An entry whose assertions come from the test has nothing to fill in. */
-  asksNothing:
-    "This grader has nothing to fill in. Its assertions are each test's own " +
-    "expected behaviors, read at the moment it judges.",
+  asksNothing: "Uses each test's expected behaviors.",
   name: "Name",
-  nameMeans: "What this project calls its copy.",
+  nameMeans: "The name shown in this project.",
   description: "Notes",
-  descriptionMeans: "Why your team switched it on. Leave it empty for none.",
+  descriptionMeans: "Optional context for your team.",
   scope: "Applies to",
-  scopeMeans: "Where this grader judges. Live traffic is sampled below.",
+  scopeMeans: "Choose tests, live traffic, or both.",
   required: "Can fail a run",
   /**
    * Both positions carry the same warning, because turning the flag either way
@@ -98,17 +101,13 @@ export const EDIT = {
    */
   requiredOn:
     "A test cannot pass while this grader does not. Turning this off rewrites " +
-    "no verdict, and it does change what past ones add up to: a run that " +
-    "failed on this grader alone reads as passed from then on.",
+    "no verdict, but it changes what past verdicts add up to.",
   requiredOff:
-    "A diagnostic: judged and shown with its fraction, and never able to fail " +
-    "anything. Turning this back on rewrites no verdict, and it does change " +
-    "what past ones add up to: a run this grader failed reads as failed again.",
+    "A diagnostic reports only. Turning this on rewrites no verdict, but it " +
+    "changes what past verdicts add up to.",
   sampleRate: "Share of live traffic judged",
   sampleRateMeans:
-    "A whole percentage from 0 to 100. It counts only where this grader " +
-    "reaches live traffic, and it moves forward: raising it judges sooner and " +
-    "lowering it judges later, and neither reaches back.",
+    "A whole percentage from 0 to 100. Changes apply only to future live traffic.",
   submit: "Save",
   submitting: "Saving…",
   cancel: "Cancel",

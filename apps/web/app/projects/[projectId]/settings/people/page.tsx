@@ -40,12 +40,9 @@ import {
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
+import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
-  ScopeNote,
-  SettingsLayout,
-} from "../../../../../ui/settings-nav.tsx";
-import {
-  confirmUnsavedSettingsNavigation,
+  confirmUnsavedNavigation,
   useOrganizationRead,
   useUnsavedChanges,
 } from "../../../../../ui/settings-read.ts";
@@ -60,10 +57,8 @@ import {
 /**
  * Who is in this organization, and the four things an admin may do about it.
  *
- * **Membership is the organization's and not a project's.** The selector stays
- * on screen throughout Settings, so the note under the heading says that
- * plainly: inviting somebody lets them into every project, and changing a role
- * changes it everywhere.
+ * **Membership is the organization's and not a project's.** The grouped local
+ * navigation says that once; this page can focus on people and invitations.
  *
  * **Inviting never depends on email.** With a transport configured the message
  * is posted; with none, the link comes straight back here and whoever created
@@ -132,7 +127,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       const next = tabInAddress(address);
       const current = tabRef.current;
       if (next === current) return;
-      if (!confirmUnsavedSettingsNavigation()) {
+      if (!confirmUnsavedNavigation()) {
         // Popstate already changed the address. Put the address for the tab
         // whose draft remains on screen back without firing another popstate.
         writeTabAddress(current);
@@ -172,7 +167,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
 
   function showTab(next: Tab): void {
     if (next === tabRef.current) return;
-    if (!confirmUnsavedSettingsNavigation()) return;
+    if (!confirmUnsavedNavigation()) return;
     const address = new URL(globalThis.location.href);
     if (next === "people") address.searchParams.delete("tab");
     else address.searchParams.set("tab", next);
@@ -306,12 +301,6 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="people">
-          <ScopeNote>
-            Membership belongs to the whole organization. Somebody invited here
-            can work in every project, and a role changed here changes it
-            everywhere.
-          </ScopeNote>
-
           {refused === null ? null : <Refused message={refused.message} />}
 
           {mayManage ? (

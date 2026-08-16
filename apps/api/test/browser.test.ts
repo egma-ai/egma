@@ -1702,23 +1702,23 @@ describe("pressing Use on a second grader while the first one's form is open", (
     async () => {
       await page.goto(await gradersUrl());
       // Both of egma's own graders, written onto the shelf at boot.
-      await page.waitForSelector("text=expected_behaviors");
-      await page.waitForSelector("text=latency");
+      await page.waitForSelector("text=Expected behaviors");
+      await page.waitForSelector("text=Latency");
 
       // The entry whose assertions are each test's own sentences: it asks for
       // nothing, so its form has no fields at all.
-      await useOn("expected_behaviors").click();
-      await page.waitForSelector("text=This grader asks for nothing");
+      await useOn("Expected behaviors").click();
+      await page.waitForSelector("text=Uses each test's expected behaviors");
       expect(await page.locator("form select").count()).toBe(0);
 
       // And now the other one, **without closing the first**.
-      await useOn("latency").click();
+      await useOn("Latency").click();
 
       // The heading followed, and the sentence belonging to the entry that asks
       // nothing is gone rather than sitting above fields that ask for two things.
-      await page.waitForSelector("text=Use latency");
+      await page.waitForSelector("text=Use Latency");
       expect(
-        await page.locator("text=This grader asks for nothing").count(),
+        await page.locator("text=Uses each test's expected behaviors").count(),
       ).toBe(0);
 
       // The measure dropdown is there, and so is the bound.
@@ -1758,15 +1758,15 @@ describe("pressing Use on a second grader while the first one's form is open", (
     async () => {
       // Type into the latency form, so there is something that could be left
       // behind, then go to the entry that asks nothing and come back.
-      await useOn("latency").click();
-      await page.waitForSelector("text=Use latency");
+      await useOn("Latency").click();
+      await page.waitForSelector("text=Use Latency");
       await page.locator('form input[type="number"]').fill("1234");
 
-      await useOn("expected_behaviors").click();
-      await page.waitForSelector("text=This grader asks for nothing");
+      await useOn("Expected behaviors").click();
+      await page.waitForSelector("text=Uses each test's expected behaviors");
 
-      await useOn("latency").click();
-      await page.waitForSelector("text=Use latency");
+      await useOn("Latency").click();
+      await page.waitForSelector("text=Use Latency");
 
       // Nothing survived the round trip. This is the assertion the DOM *can*
       // answer honestly: an input holds the string it was given, so a bound
@@ -1850,7 +1850,7 @@ describe("changing a running grader and switching it off", () => {
       // Blocking, as anything switched on is unless somebody said otherwise.
       await page.waitForSelector("text=Blocks");
 
-      await on("latency", "Edit").click();
+      await on("Latency", "Edit").click();
       await page.waitForSelector("text=Edit latency");
 
       // Filled in from the copy, which is the half a source scan cannot see:
@@ -1873,7 +1873,7 @@ describe("changing a running grader and switching it off", () => {
       // And opening it again shows the saved value rather than the old one —
       // which is the whole round trip: the browser wrote it, the API versioned
       // it, and the list handed it back.
-      await on("latency", "Edit").click();
+      await on("Latency", "Edit").click();
       await page.waitForSelector("text=Edit latency");
       expect(await page.locator(theEntrysNumber).inputValue()).toBe("1500");
     },
@@ -1886,7 +1886,7 @@ describe("changing a running grader and switching it off", () => {
       await page.goto(await gradersUrl("running"));
       await settlesAt(3);
 
-      await on("latency", "Switch off").click();
+      await on("Latency", "Switch off").click();
 
       // The sentence that makes the button pressable: what stops is obvious,
       // and what stays is the thing somebody is actually worried about.
@@ -1901,8 +1901,8 @@ describe("changing a running grader and switching it off", () => {
       // project is created with is still there — only the one that was named
       // stopped judging.
       await settlesAt(2);
-      expect(await on("latency", "Switch off").count()).toBe(0);
-      await page.waitForSelector("text=expected_behaviors");
+      expect(await on("Latency", "Switch off").count()).toBe(0);
+      await page.waitForSelector("text=Expected behaviors");
     },
     SETTLE,
   );

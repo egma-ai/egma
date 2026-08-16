@@ -165,7 +165,7 @@ function Navigation({
     <nav className={styles.nav} aria-label="Product navigation">
       {group(primary)}
       {group(secondary, "Library")}
-      {group(management, "Manage")}
+      {management.length === 0 ? null : group(management, "Manage")}
     </nav>
   );
 }

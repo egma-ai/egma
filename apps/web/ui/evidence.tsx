@@ -11,6 +11,7 @@ import {
   type EvidenceTranscript,
   type JudgedAssertion,
 } from "../lib/simulations.ts";
+import { graderDisplayName } from "../lib/presentation.ts";
 import { howFarIn, howLong, milliseconds } from "../lib/transcripts.ts";
 import { Badge, Help } from "./controls.tsx";
 import { Empty } from "./page-state.tsx";
@@ -534,7 +535,7 @@ export function PlanItems({
           className={styles.planItem}
           key={`${item.grader_id}:${item.grader_version_id}`}
         >
-          <strong>{item.name}</strong>
+          <strong>{graderDisplayName(item.name)}</strong>
           <span className={styles.planNote}>
             {`${item.required ? "blocks" : "reports only"} · ${item.grader_version_id}`}
             {" · "}
