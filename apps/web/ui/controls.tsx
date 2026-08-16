@@ -22,9 +22,16 @@ import styles from "./system.module.css";
  */
 
 export type Weight = "strong" | "quiet";
+export type ButtonTone = "default" | "destructive";
 
 function weightClass(weight: Weight): string {
   return weight === "strong" ? styles.button : styles.buttonQuiet;
+}
+
+function buttonClass(weight: Weight, tone: ButtonTone): string {
+  return tone === "destructive"
+    ? `${styles.button} ${styles.buttonDestructive}`
+    : weightClass(weight);
 }
 
 /**
@@ -50,6 +57,7 @@ function WhyNot({ id, why }: { readonly id: string; readonly why: string }) {
 
 export function Button({
   weight = "quiet",
+  tone = "default",
   type = "button",
   disabled,
   busy = false,
@@ -61,6 +69,8 @@ export function Button({
   children,
 }: {
   readonly weight?: Weight;
+  /** Failure-colored confirmation for an action that removes or stops something. */
+  readonly tone?: ButtonTone;
   readonly type?: "button" | "submit";
   readonly disabled?: boolean;
   /** A write is in flight. It remains visible, named, and inert until it settles. */
@@ -87,7 +97,7 @@ export function Button({
     <>
       <button
         ref={buttonRef}
-        className={weightClass(weight)}
+        className={buttonClass(weight, tone)}
         type={type}
         disabled={inert}
         aria-busy={busy ? "true" : undefined}

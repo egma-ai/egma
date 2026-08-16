@@ -19,6 +19,7 @@ import { expect, it, vi } from "vitest";
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
 import { signUp, type Customer } from "../../api/test/support/traces.ts";
 import { readCredentials } from "../src/platform/credentials.ts";
+import { DEVICE_CLIENT_ID } from "../src/platform/device-flow.ts";
 import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
@@ -99,13 +100,28 @@ async function keyWorks(instance: Instance, key: string): Promise<boolean> {
   return asked.statusCode === 200;
 }
 
+/** The real provider is still used; only its test platform's pace is zero. */
+async function expectImmediatePolling(instance: Instance): Promise<void> {
+  const started = await instance.api.inject({
+    method: "POST",
+    url: "/api/device/code",
+    payload: { client_id: DEVICE_CLIENT_ID },
+  });
+  expect(started.statusCode, started.body).toBe(200);
+  expect(started.json()).toMatchObject({ interval: 0 });
+}
+
 it("keeps one key per platform when a machine signs in to two of them", async () => {
   const workspace = await makeWorkspace();
   let first: Instance | undefined;
   let second: Instance | undefined;
 
   try {
-    first = await startInstance("cli_two_platform_credentials_first", { web: false });
+    first = await startInstance("cli_two_platform_credentials_first", {
+      web: false,
+      deviceAuthorizationInterval: "0s",
+    });
+    await expectImmediatePolling(first);
     const firstOrigin = first.origin;
     const onFirst = await signUp(first.api, "two-platforms@acme.example", "Acme First");
 
@@ -123,7 +139,10 @@ it("keeps one key per platform when a machine signs in to two of them", async ()
     await first.close();
     first = undefined;
 
-    second = await startInstance("cli_two_platform_credentials_second", { web: false });
+    second = await startInstance("cli_two_platform_credentials_second", {
+      web: false,
+      deviceAuthorizationInterval: "0s",
+    });
     const onSecond = await signUp(second.api, "two-platforms@beta.example", "Beta Second");
 
     const secondLogin = await logInThrough(second, onSecond, workspace);

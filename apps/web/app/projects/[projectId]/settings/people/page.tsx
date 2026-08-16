@@ -360,7 +360,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
               </p>
               <Button onClick={dismiss}>Cancel</Button>{" "}
               <Button
-                weight="strong"
+                tone="destructive"
                 disabled={busy}
                 onClick={() => {
                   const chosen = confirming;

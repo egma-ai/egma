@@ -9,6 +9,7 @@ import {
   MAINTENANCE_DATABASE_URL as MAINTENANCE_URL,
   TEST_DATABASE_PREFIX,
 } from "./store-urls.ts";
+import { MIGRATED_DATABASE_TEMPLATE_ENV } from "./database-template-context.ts";
 
 /**
  * Every guarantee under test is a Postgres-specific behaviour — `COLLATE "C"`,
@@ -16,15 +17,45 @@ import {
  * run against a real Postgres and never a substitute.
  *
  * Each test file owns a database of its own, created here and dropped
- * afterwards, so a file can migrate from empty without disturbing another.
+ * afterwards. Ordinary fast tests clone the prepared schema; migration tests
+ * start empty. Both stay isolated from every other file.
  */
 
 export const MAINTENANCE_DATABASE_URL = MAINTENANCE_URL;
 
+/**
+ * A migrated database prepared once by Vitest's fast-project setup.
+ *
+ * Ordinary tests still own a database each. They clone this closed template
+ * instead of replaying every migration, while migration tests continue to use
+ * `createEmptyDatabase` and prove the real empty-to-current path themselves.
+ */
 function urlFor(databaseName: string): string {
   const url = new URL(MAINTENANCE_DATABASE_URL);
   url.pathname = `/${databaseName}`;
   return url.toString();
+}
+
+function quotedIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function databaseName(label: string): string {
+  return `${TEST_DATABASE_PREFIX}${label}_${randomBytes(4).toString("hex")}`;
+}
+
+function emptyDatabase(name: string): EmptyDatabase {
+  return {
+    name,
+    url: urlFor(name),
+    async drop() {
+      await onMaintenanceConnection((client) =>
+        client.query(
+          `drop database if exists ${quotedIdentifier(name)} with (force)`,
+        ),
+      );
+    },
+  };
 }
 
 async function onMaintenanceConnection<T>(
@@ -58,20 +89,43 @@ export type EmptyDatabase = {
 };
 
 export async function createEmptyDatabase(label: string): Promise<EmptyDatabase> {
-  const name = `${TEST_DATABASE_PREFIX}${label}_${randomBytes(4).toString("hex")}`;
+  const name = databaseName(label);
   await onMaintenanceConnection((client) =>
-    client.query(`create database "${name}"`),
+    client.query(`create database ${quotedIdentifier(name)}`),
   );
+  return emptyDatabase(name);
+}
 
-  return {
-    name,
-    url: urlFor(name),
-    async drop() {
-      await onMaintenanceConnection((client) =>
-        client.query(`drop database if exists "${name}" with (force)`),
-      );
-    },
-  };
+/**
+ * Keep an otherwise idle database safe from the stale-database sweep.
+ *
+ * A schema template must have no connection to itself while Postgres clones
+ * it. This claim therefore connects to the maintenance database and names the
+ * database it protects as its application. The sweep treats that live process
+ * as ownership. If the process dies, the claim dies too and the next sweep can
+ * remove the abandoned database.
+ */
+export async function holdDatabaseClaim(
+  name: string,
+): Promise<() => Promise<void>> {
+  const url = new URL(MAINTENANCE_DATABASE_URL);
+  url.searchParams.set("application_name", name);
+  const client = new pg.Client({ connectionString: url.toString() });
+  await client.connect();
+  return () => client.end();
+}
+
+async function cloneMigratedDatabase(
+  label: string,
+  template: string,
+): Promise<EmptyDatabase> {
+  const name = databaseName(label);
+  await onMaintenanceConnection((client) =>
+    client.query(
+      `create database ${quotedIdentifier(name)} with template ${quotedIdentifier(template)}`,
+    ),
+  );
+  return emptyDatabase(name);
 }
 
 export type MigratedDatabase = EmptyDatabase & {
@@ -86,8 +140,12 @@ export type MigratedDatabase = EmptyDatabase & {
 export async function createMigratedDatabase(
   label: string,
 ): Promise<MigratedDatabase> {
-  const database = await createEmptyDatabase(label);
-  await runMigrations(database.url);
+  const template = process.env[MIGRATED_DATABASE_TEMPLATE_ENV];
+  const database =
+    template === undefined
+      ? await createEmptyDatabase(label)
+      : await cloneMigratedDatabase(label, template);
+  if (template === undefined) await runMigrations(database.url);
 
   const pool = new pg.Pool({ connectionString: database.url, max: 4 });
   // Same reason as the pool in `src/client.ts`: teardown drops databases

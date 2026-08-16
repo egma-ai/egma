@@ -616,7 +616,7 @@ function Credentials({
               </p>
               <Button onClick={dismiss}>Cancel</Button>{" "}
               <Button
-                weight="strong"
+                tone="destructive"
                 disabled={busy}
                 onClick={() => {
                   const credential = confirmingArchive;

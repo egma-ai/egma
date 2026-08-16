@@ -241,6 +241,7 @@ function text(value: unknown): string {
 export async function readPlatformIdentity(
   selected: string,
   fetchImpl: Fetch = fetch,
+  timeoutSignal: AbortSignal = AbortSignal.timeout(IDENTITY_TIMEOUT_MS),
 ): Promise<PlatformIdentity> {
   const selectedOrigin = normalizePlatformOrigin(selected);
   let response: Response;
@@ -252,7 +253,10 @@ export async function readPlatformIdentity(
       // this address that the developer needs told, and following it would
       // hide a sign-in wall behind a contract complaint.
       redirect: "manual",
-      signal: AbortSignal.timeout(IDENTITY_TIMEOUT_MS),
+      // A command uses the ten-second deadline above. The resolver can hand in
+      // the same signal already timed out in a test, so proving this refusal
+      // never makes the Fast Lane wait out a production clock.
+      signal: timeoutSignal,
     });
   } catch (cause) {
     const timedOut = cause instanceof Error && cause.name === "TimeoutError";

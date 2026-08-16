@@ -608,6 +608,7 @@ function TestDetail({
                 <Button onClick={dismiss}>Cancel</Button>
                 <Button
                   weight="strong"
+                  tone={confirmingLifecycle === "archive" ? "destructive" : "default"}
                   disabled={saving}
                   onClick={() =>
                     void setArchived(confirmingLifecycle === "archive")

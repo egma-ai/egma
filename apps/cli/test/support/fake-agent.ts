@@ -11,7 +11,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, watch, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { Readable, Writable } from "node:stream";
@@ -46,6 +46,8 @@ export type FakeStep =
   /** Noise on standard error, the way a real agent writes its own progress. */
   | { kind: "grumble"; text: string }
   | { kind: "wait"; ms: number }
+  /** Hold this scripted agent until the test creates a file in its workspace. */
+  | { kind: "wait-for-file"; path: string }
   | { kind: "stop"; reason: acp.StopReason };
 
 export type FakeScript = {
@@ -281,6 +283,34 @@ async function run(): Promise<void> {
         case "wait":
           await new Promise((resolve) => setTimeout(resolve, step.ms));
           break;
+
+        case "wait-for-file": {
+          const file = path.resolve(cwd, step.path);
+          if (existsSync(file)) break;
+
+          await new Promise<void>((resolve, reject) => {
+            let settled = false;
+            let observer: ReturnType<typeof watch> | undefined;
+            const onAbort = (): void => finish();
+            function finish(error?: Error): void {
+              if (settled) return;
+              settled = true;
+              observer?.close();
+              signal.removeEventListener("abort", onAbort);
+              if (error === undefined) resolve();
+              else reject(error);
+            }
+
+            observer = watch(path.dirname(file), () => {
+              if (existsSync(file)) finish();
+            });
+            observer.on("error", finish);
+            signal.addEventListener("abort", onAbort, { once: true });
+            // Close the race between the first check and starting the watcher.
+            if (existsSync(file) || signal.aborted) finish();
+          });
+          break;
+        }
 
         case "stop":
           return step.reason;

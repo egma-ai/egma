@@ -73,7 +73,10 @@ async function sweepPostgres(): Promise<Swept> {
   try {
     const stale = await client.query<{ datname: string; sessions: string }>(
       `select d.datname,
-              (select count(*) from pg_stat_activity a where a.datname = d.datname)::text
+              (select count(*)
+                 from pg_stat_activity a
+                where a.datname = d.datname
+                   or a.application_name = d.datname)::text
                 as sessions
          from pg_database d
         where d.datname like $1`,
