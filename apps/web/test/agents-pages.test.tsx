@@ -333,22 +333,23 @@ describe("registering an agent", () => {
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.method).toBe("POST");
     /*
-     * **The project is in the body, because that is where this door reads it**
-     * — and this assertion used to say the opposite, which is how the fault it
-     * now holds survived.
+     * **The project is in the address, which is the one spelling every write
+     * in the product uses** — and what this assertion is really holding is
+     * that the page names it *at all*.
      *
-     * `POST /api/agents` takes the project as a body key; every other write in
-     * the agents group reads it from the query. Named in the query it is not
-     * read at all: the door finds no project, falls back to the session's own —
-     * the organization's **first** — writes the agent there, and answers 201.
-     * So registering an agent from any project but the first wrote it into the
-     * first, and sent the browser to a detail page for an agent that is not in
-     * the project the address names. Only a real browser standing in a second
-     * project could see it, and one did.
+     * It named it in the query once before and that was right about the page
+     * and wrong about the door: `POST /api/agents` read a body key only, so
+     * the query was not refused, it was **ignored**. The door found no project,
+     * fell back to the session's own — the organization's **first** — wrote the
+     * agent there, and answered 201, sending the browser to a detail page for
+     * an agent that is not in the project the address names. Only a real
+     * browser standing in a second project could see that, and one did. The
+     * door now reads the address as well as the body, so the fault is closed
+     * where it was rather than in this caller alone, and this file no longer
+     * has to know which half a door happens to read.
      */
-    expect(sent[0]?.url).toBe("/api/agents");
+    expect(sent[0]?.url).toBe("/api/agents?project=prj_1");
     expect(sent[0]?.body).toEqual({
-      project: "prj_1",
       name: "Front desk",
       description: "Answers the main line.",
     });

@@ -157,9 +157,13 @@ export async function readJson<T>(
  * sentence is kept and never paraphrased: it names the next move, and the
  * conflict refusals name the revision to retry against.
  *
- * A write says where it lands, and the route decides where it reads that from:
- * a caller that names `project` here gets it in the query, and a caller whose
- * route reads it from the body puts it there itself.
+ * **`project` here means the address, and it is the only spelling a page should
+ * use.** Three pages used to put the project in the body instead, because three
+ * doors read only a body key — and a reader had nothing at the type level
+ * telling the two spellings apart, so the next page written from either
+ * neighbour had even odds of being ignored. The doors now read the address as
+ * well as the body, so there is one way to say it here and the CLI's body key
+ * still works where a terminal sends one.
  */
 export async function writeJson<T>(
   path: string,

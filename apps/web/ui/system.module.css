@@ -148,8 +148,24 @@
   max-width: var(--page-max-wide);
 }
 
+/*
+ * The heading, and whatever this page offers to do.
+ *
+ * **Both halves wrap**, and they have to. A run's page offers three controls —
+ * All runs, Cancel run and Retry — and on a phone they measured 517px on one
+ * unbreakable line inside a 390px screen, which pushed the whole document
+ * sideways: every page then scrolled horizontally, including the parts that fit
+ * perfectly. `flex: 0 0 auto` is what a strip of controls needs beside a
+ * heading that may be long, and it is also an instruction never to give way, so
+ * the wrapping is what makes it safe.
+ *
+ * Not behind the breakpoint: a header runs out of room when its own contents
+ * are wider than it, which is a narrow *window* rather than a phone, and a page
+ * with one control has nothing to wrap at any width.
+ */
 .pageHeader {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-5);
@@ -182,10 +198,25 @@
   line-height: var(--line-normal);
 }
 
+/*
+ * **`0 1 auto`, not `0 0 auto`.** Refusing to grow is right — a strip of
+ * controls should not stretch across a wide page — but refusing to *shrink*
+ * made this box as wide as its contents laid out on one line, whatever the
+ * screen was, and a box already at its preferred width has nothing to wrap. So
+ * the wrap above did nothing until this line changed with it: on a run's page
+ * the strip stayed 517px inside a 390px screen and took the whole document
+ * sideways with it.
+ *
+ * `min-width: 0` for the same reason one flex item in three needs it: `auto`
+ * floors a flex item at its content, and the sentence saying why a control is
+ * unavailable is a whole sentence.
+ */
 .pageActions {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   align-items: center;
+  min-width: 0;
   gap: var(--space-3);
 }
 

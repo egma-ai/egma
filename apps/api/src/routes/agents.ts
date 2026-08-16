@@ -42,6 +42,7 @@ import {
 } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
+import { given, text } from "../http/reading.ts";
 import {
   CODES,
   identityConflict,
@@ -718,6 +719,7 @@ export async function agentRoutes(
   app.post("/api/agents", async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Record<string, unknown>;
 
     const unknown = unknownKeyIn(body, AGENT_KEYS, "a registration");
     if (unknown !== undefined) return refused(reply, unknown);
@@ -726,7 +728,28 @@ export async function agentRoutes(
     if (isRefusal(name)) return refused(reply, name);
     const description = textWhenGiven(body.description, "an agent's description");
     if (isRefusal(description)) return refused(reply, description);
-    const project = textWhenGiven(body.project, "a project");
+    /*
+     * **The query and the body, because both are in honest use** — the same
+     * rule `POST /api/simulations/{id}/regrade` keeps, and for the same reason.
+     * A terminal posts a registration with the project beside everything else
+     * it is sending; a browser's write helper appends it to the address, which
+     * is where every other write in this group reads it.
+     *
+     * Reading only the body was a real fault rather than a tidiness one. The
+     * query was not refused, it was **ignored**: the door found no project,
+     * fell back to the session's own — which is the organization's *first* —
+     * and answered `201` about an agent in a project nobody had named. Moving
+     * the one caller that met it fixed that caller and left the door open for
+     * the next one, and the next one would have been written to this group's
+     * own pattern.
+     *
+     * The address wins where both are given, because the address is what a
+     * browser is looking at.
+     */
+    const project = textWhenGiven(
+      given(text(query.project)) ?? body.project,
+      "a project",
+    );
     if (isRefusal(project)) return refused(reply, project);
 
     const inline =

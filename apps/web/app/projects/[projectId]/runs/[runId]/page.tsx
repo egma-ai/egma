@@ -280,14 +280,14 @@ function RunDetailView({
     if (!mayControl || working) return;
     setRefused(null);
     setWorking(true);
-    // The project in the body, which is where both of this run's two write
-    // doors read one. Named in the query it is not read at all, and the write
-    // then narrows to the session's own project — the organization's first —
-    // so a run in any other project answers "no such run" to a page that is
-    // looking straight at it.
+    // The project named the one way every write in the product names it. Both
+    // of this run's write doors used to read a body key only, so naming it in
+    // the address was not read at all and the write narrowed to the session's
+    // own project — the organization's first — and a run in any other project
+    // answered "no such run" to a page that is looking straight at it.
     const answered = await writeJson<RunDetail>(runCancelPath(runId), {
       method: "POST",
-      body: { project: projectId },
+      project: projectId,
     });
     setWorking(false);
     setConfirming(null);
@@ -309,8 +309,8 @@ function RunDetailView({
     setWorking(true);
     const answered = await writeJson<RunDetail>(runRetryPath(runId), {
       method: "POST",
+      project: projectId,
       body: {
-        project: projectId,
         // **One key per run retried**, so a lost answer becomes the run that
         // already exists rather than a second conversation with a real agent.
         idempotency_key: retryKeyFor(runId),

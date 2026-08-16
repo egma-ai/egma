@@ -71,11 +71,18 @@ export function sectionIn(pathname: string): string | null {
  * section is kept and everything under it is dropped.
  *
  * An address with no project in it at all becomes the new project's landing
- * page, because there is no area to carry across. Three addresses are like
- * that and each on purpose: `/new-project`, which an organization holding none
- * has to be able to reach; `/runs/{runId}`, which a terminal prints and which
- * forwards by reading the run's own project; and `/traces`, which is
- * organization-wide.
+ * page, because there is no area to carry across. **Three addresses reach this
+ * function**, and each carries no project on purpose: `/new-project`, which an
+ * organization holding none has to be able to reach, and `/traces` with
+ * `/traces/{traceId}`, which are the organization-wide trace pages. All three
+ * draw the shell, so the selector is on screen and this is what it does there.
+ *
+ * Two more carry no project and never arrive here, because they forward before
+ * a selector is ever drawn: `/runs/{runId}`, the address a terminal prints,
+ * which reads the run's own project and redirects into it; and `/members`, the
+ * kept legacy Settings address, which chooses the caller's first project on
+ * purpose because People is the organization's and any project serves as its
+ * frame.
  */
 export function inProject(pathname: string, projectId: string): string {
   const address = addressIn(pathname);

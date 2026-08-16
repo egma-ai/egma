@@ -254,6 +254,40 @@ describe("a browser working in a project that is not the first", () => {
   });
 
   /**
+   * **The same door, with the project named in the query instead.**
+   *
+   * The case above proves the caller that exists today. This one proves the
+   * *door*, and it is the half that was missing: the first fix moved the
+   * register form to the body and left `POST /api/agents` reading nothing else,
+   * so a request naming the project the way every other write in this group
+   * names it — `?project=` — was still answered from the session's own project,
+   * with a 201 and an agent in the wrong place. The next caller written to the
+   * group's own pattern would have reproduced the fault exactly.
+   *
+   * Both spellings mean the same thing here, as they already do for a
+   * simulation's regrade, and a caller using either is right.
+   */
+  it("registers an agent into the project its query named, too", async () => {
+    const { ada, outbound } = await twoProjects("browser_registers_by_query");
+
+    const registered = await api.app.inject({
+      method: "POST",
+      url: `/api/agents?project=${outbound}`,
+      headers: { cookie: ada.cookie },
+      payload: { name: "Outbound desk" },
+    });
+    expect(registered.statusCode, registered.body).toBe(201);
+
+    const inOutbound = await listAgentsAs({ cookie: ada.cookie }, outbound);
+    expect(
+      (inOutbound.body.items as { name: string }[]).map((one) => one.name),
+    ).toEqual(["Outbound desk"]);
+
+    const inDefault = await listAgentsAs({ cookie: ada.cookie }, ada.projectId);
+    expect(inDefault.body.items).toEqual([]);
+  });
+
+  /**
    * A run in the second project, read, followed and stopped from a browser.
    *
    * One test rather than three, because it is one arrangement and the three
@@ -315,12 +349,16 @@ describe("a browser working in a project that is not the first", () => {
     });
     expect(followed.statusCode, followed.body).toBe(200);
 
-    // And the one control on that page that changes anything.
+    // And the one control on that page that changes anything, **named the way
+    // the page names it**: in the address. This door read only a body key
+    // until now, so the address was not refused — it was ignored, and the
+    // write narrowed to the session's own project, which is the organization's
+    // first.
     const stopped = await api.app.inject({
       method: "POST",
-      url: `/api/runs/${runId}/cancel`,
+      url: `/api/runs/${runId}/cancel?project=${outbound}`,
       headers: { cookie: ada.cookie },
-      payload: { project: outbound },
+      payload: {},
     });
     expect(stopped.statusCode, stopped.body).toBe(200);
     expect((stopped.json() as { status: string }).status).toBe("canceled");
@@ -530,6 +568,23 @@ describe("a browser working in a project that is not the first", () => {
     expect(again.statusCode, again.body).toBe(201);
     expect((again.json() as { retry_of_run_id: string }).retry_of_run_id).toBe(
       String(started.body.id),
+    );
+
+    // **And in the address, which is the other honest spelling.** A terminal
+    // posts the project in the body beside everything else it is sending; a
+    // page appends it to the address, the way every read in this group is
+    // asked. Reading only one of the two is not strictness — it is a silent
+    // fall back to the session's own project, which is the organization's
+    // first, and the answer is a confident 201 about the wrong place.
+    const byAddress = await api.app.inject({
+      method: "POST",
+      url: `/api/runs/${String(started.body.id)}/retry?project=${outbound}`,
+      headers: { cookie: ada.cookie },
+      payload: { idempotency_key: newId("run") },
+    });
+    expect(byAddress.statusCode, byAddress.body).toBe(201);
+    expect((byAddress.json() as { project_id: string }).project_id).toBe(
+      outbound,
     );
   });
 });

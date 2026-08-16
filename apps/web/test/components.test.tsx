@@ -435,15 +435,35 @@ describe("a dialog", () => {
   /**
    * And a dialog closed by an act that removed the control which opened it
    * leaves the focus alone rather than reaching for a detached element.
+   *
+   * **The premise has to be made, not assumed.** An earlier version of this
+   * case rendered the dialog already open, so the element the Dialog captured
+   * was `document.body` — still attached, still focusable — and the
+   * `isConnected` branch the case exists to walk was never reached. It was the
+   * same shape of empty case as the *Escape gives it back* one this file set
+   * out to fix. So the control is focused and pressed here, which is what makes
+   * it the captured opener, and the act inside the dialog is what removes it.
+   *
+   * **What this can and cannot distinguish.** Focusing a detached element is a
+   * no-op in jsdom and in Chrome alike, so dropping the `isConnected` guard
+   * would not change where the focus ends up — the guard is a statement of
+   * intent rather than a behaviour with two outcomes. What the assertions below
+   * do hold is that the cleanup runs without throwing over a removed control,
+   * and that the focus is left on something still in the document rather than
+   * on a node nobody can see.
    */
   it("leaves the focus where it is when what opened it has gone", () => {
     function Removing() {
-      const [open, setOpen] = useState(true);
+      const [open, setOpen] = useState(false);
       const [gone, setGone] = useState(false);
       return (
         <>
           <button type="button">Elsewhere</button>
-          {gone ? null : <button type="button">Remove</button>}
+          {gone ? null : (
+            <button type="button" onClick={() => setOpen(true)}>
+              Remove
+            </button>
+          )}
           {open ? (
             <Dialog
               title="Remove this member?"
@@ -459,7 +479,7 @@ describe("a dialog", () => {
                   setOpen(false);
                 }}
               >
-                Remove
+                Remove this member
               </button>
             </Dialog>
           ) : null}
@@ -468,14 +488,26 @@ describe("a dialog", () => {
     }
 
     render(<Removing />);
+    const opener = screen.getByRole("button", { name: "Remove" });
+    opener.focus();
+    fireEvent.click(opener);
+
+    // The premise, asserted rather than hoped for: this dialog was opened from
+    // that control, so that control is what its cleanup would reach for.
+    const panel = screen.getByRole("dialog", { name: "Remove this member?" });
+    expect(panel.contains(document.activeElement)).toBe(true);
+
     fireEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Remove" }),
+      within(panel).getByRole("button", { name: "Remove this member" }),
     );
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
-    // Nothing threw, and nothing was sent anywhere arbitrary.
-    expect(document.activeElement).not.toBeNull();
+    expect(opener.isConnected).toBe(false);
+    // Nothing threw, and the focus is on something a person can still reach
+    // rather than on a node that has left the page.
+    expect(document.activeElement).not.toBe(opener);
+    expect(document.contains(document.activeElement)).toBe(true);
   });
 });
 

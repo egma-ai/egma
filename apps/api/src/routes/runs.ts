@@ -167,6 +167,24 @@ export const RUN_RETRY_PATH = "/api/runs/:runId/retry";
 type Body = Record<string, unknown>;
 
 /**
+ * Which project a write acts in, wherever the caller put it.
+ *
+ * **The query and the body, because both are in honest use**, and the same rule
+ * the simulation routes keep. A terminal posts the project in the body beside
+ * everything else it is sending; a browser's write helper appends it to the
+ * address, and every *read* under this group is asked that way. A door that
+ * took only one of the two would not refuse the other — it would **ignore** it,
+ * fall back to the session's own project, which is the organization's *first*,
+ * and answer confidently about a run somebody else's page was looking at.
+ *
+ * The address wins where both are given, because the address is what a browser
+ * is looking at.
+ */
+function projectNamed(query: Body, body: Body): string | undefined {
+  return given(text(query.project)) ?? given(text(body.project));
+}
+
+/**
  * The largest page of history this list will serve.
  *
  * The same cap the data-access layer enforces, named here because a refusal has
@@ -1289,13 +1307,14 @@ export async function runRoutes(
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "start_and_cancel_runs", {
       organizationId: auth.organizationId,
       projectId: auth.projectId,
     });
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     // Required here for the reason it is required on a start: a retry dials a
@@ -1330,6 +1349,7 @@ export async function runRoutes(
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "start_and_cancel_runs", {
       organizationId: auth.organizationId,
@@ -1346,7 +1366,7 @@ export async function runRoutes(
      * still names nothing and still lands in its own project, which is the
      * absent case `actingIn` has always answered.
      */
-    const acting = await actingIn(auth, given(text(body.project)));
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     // The header comes back from the write itself rather than from a second

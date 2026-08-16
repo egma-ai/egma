@@ -258,11 +258,11 @@ function Runs({ projectId }: { readonly projectId: string }) {
     setRowRefused(null);
     setStopping(true);
 
-    // In the body, which is where the cancel door reads a project. See the
-    // same call on the run's own page.
+    // Named the one way every write in the product names it. See the same call
+    // on the run's own page.
     const answered = await writeJson<RunRow>(runCancelPath(runId), {
       method: "POST",
-      body: { project: projectId },
+      project: projectId,
     });
 
     setStopping(false);

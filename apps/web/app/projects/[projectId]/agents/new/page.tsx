@@ -94,25 +94,24 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
     setSaving(true);
 
     /**
-     * **The project is in the body, because that is where this door reads
-     * it.**
+     * **The project is named the one way every write in the product names
+     * it** — `writeJson`'s own option, which puts it in the address.
      *
-     * `POST /api/agents` takes the project as a body key — the same shape the
-     * CLI posts a registration in — while every other write in the agents
-     * group reads it from the query. Naming it in the query here was
-     * *accepted*: the door found no project named, fell back to the session's
-     * own, and that is the organization's **first** project. So registering an
-     * agent from any project but the first one wrote it into the first one,
+     * It was worth a comment when the door only read a body key. Naming it in
+     * the query then was not refused, it was *ignored*: the door found no
+     * project, fell back to the session's own — the organization's **first** —
      * answered 201, and sent the browser to a detail page for an agent that is
-     * not in the project the address names. Nothing could catch it below this
-     * line — the request is well formed and the answer is a real agent.
+     * not in the project the address names. Nothing below this line could
+     * catch it, because the request is well formed and the answer is a real
+     * agent. The door now reads the address as well as the body, so the fault
+     * is closed where it was rather than only in this caller.
      */
     const answer = await writeJson<{ readonly agent: ListedAgent }>(
       AGENTS_PATH,
       {
         method: "POST",
+        project: projectId,
         body: {
-          project: projectId,
           name: wanted,
           ...(description.trim() === ""
             ? {}
