@@ -3,7 +3,7 @@
 The simulator dials out and is never dialled into, so the only place it
 can prove it is allowed to claim work is on its own requests. A configured
 service token rides every one of them as a bearer — the same header an
-Egma key uses everywhere else — and no token means no header at all, which
+egma key uses everywhere else — and no token means no header at all, which
 is what the workbench and every local run want.
 
 A real server on loopback reads the headers back, because what is under

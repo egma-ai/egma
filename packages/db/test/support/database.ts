@@ -104,7 +104,7 @@ export const TEST_ENCRYPTION_KEY = "0123456789abcdef".repeat(4);
  * tests that go through it. The raw `sql` handle stays available so a test can
  * check what actually landed in the table without asking the module to tell it.
  *
- * **Egma's own graders are on the shelf before anything else happens**, exactly
+ * **egma's own graders are on the shelf before anything else happens**, exactly
  * as they are on a real deployment: the API writes them from the catalog in the
  * same breath as applying its migrations, and every project created afterwards
  * is seeded with a copy of one — so a harness that skipped this would refuse the

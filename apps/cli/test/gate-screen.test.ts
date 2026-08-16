@@ -10,7 +10,7 @@
  *
  * The editor here is a short shell script rather than a person in vim. It
  * writes down every argument it was handed and adds a line to the file, which
- * is exactly what the checks need to know: Egma split the command line the way
+ * is exactly what the checks need to know: egma split the command line the way
  * a shell would, it opened the right file, the developer's edit survived, and
  * the wizard came back. One of them takes the alternate screen the way vim
  * does, because "the wizard came back" is only worth checking against an editor
@@ -175,7 +175,7 @@ async function toTheGate(
   run.write(`${KEY}\r`);
 
   // Text or phone. Not this check's subject, and not skippable
-  // either: Egma never picks one of the two for a developer.
+  // either: egma never picks one of the two for a developer.
   await showing(run, "How should Egma reach this agent?");
   if (overThePhone) {
     run.write("\u001B[B");
@@ -201,7 +201,7 @@ const GATE_HINTS = ["[enter] run", "[e] edit first", "[q] quit"] as const;
  * judges what the run queues.
  *
  * No skill is offered on this walk, because the coding agent is a command
- * rather than an agent Egma has a skill convention for — which is why these
+ * rather than an agent egma has a skill convention for — which is why these
  * checks end at the run and not at a question about skills.
  */
 async function enterAndLeave(run: TerminalRun): Promise<void> {
@@ -240,7 +240,7 @@ describe("the files arriving", () => {
       `▶ ${TESTS[1]}`,
       "writing…",
       `◻ ${TESTS[2]}`,
-      // Twelve is what Egma asked this coding agent for, so twelve is what the
+      // Twelve is what egma asked this coding agent for, so twelve is what the
       // count is against. What really lands is what the gate shows.
       "Progress: 1/12",
     );
@@ -256,7 +256,7 @@ describe("the files arriving", () => {
     // Every file here arrives twice over: as a marker line the agent wrote,
     // and as a file the folder poller finds a moment later. Both are the same
     // file, so the count is five and never ten — a developer reading "10/12"
-    // off five files would be reading Egma's bookkeeping, not their folder.
+    // off five files would be reading egma's bookkeeping, not their folder.
     const run = await toTheGate();
 
     const pane = await showing(run, "5 tests generated", ...GATE_HINTS);
@@ -310,7 +310,7 @@ describe("the files arriving", () => {
     run.write(`${KEY}\r`);
 
     // Text or phone. Not this check's subject, and not skippable
-    // either: Egma never picks one of the two for a developer.
+    // either: egma never picks one of the two for a developer.
     await showing(run, "How should Egma reach this agent?");
     run.write("\r");
     await showing(run, "Do you already have test cases", "[n] none");
@@ -488,7 +488,7 @@ describe("the gate", () => {
   /**
    * Ctrl-C over the list is the same decision as `q`: nothing is running, the
    * files are written, and `q` is on the screen beside them. So it leaves the
-   * same files and the same sentence about where they are — a line saying Egma
+   * same files and the same sentence about where they are — a line saying egma
    * had stopped a task and shut a coding agent down would be describing a run
    * that was already over.
    */
@@ -559,7 +559,7 @@ describe("the gate", () => {
     await enterAndLeave(run);
     expect(await run.exited).toBe(0);
 
-    // What the developer's editor wrote is what Egma uploaded.
+    // What the developer's editor wrote is what egma uploaded.
     expect(platform.tests.tests.map((test) => test.name).sort()).toEqual(IN_ORDER);
     expect(await readFile(third, "utf8")).toContain(added);
   });
@@ -657,7 +657,7 @@ describe("the gate", () => {
   });
 
   /**
-   * A file Egma will not push is not a file Egma hides. Both reasons it holds
+   * A file egma will not push is not a file egma hides. Both reasons it holds
    * one back — nothing to check, and nothing it could read — are named on the
    * same screen, beside the tests that are going up.
    */
@@ -725,9 +725,9 @@ describe("the gate", () => {
   });
 
   /**
-   * The one refusal Egma cannot see coming, met on a real terminal.
+   * The one refusal egma cannot see coming, met on a real terminal.
    *
-   * A file naming a persona reads perfectly well; whether Egma holds a persona
+   * A file naming a persona reads perfectly well; whether egma holds a persona
    * of that name is the platform's own business. So the refusal lands after the
    * keystroke, and the list comes back rather than the run going ahead on a
    * list nobody agreed to. Every key it offers still does what it says: `e`
@@ -788,7 +788,7 @@ describe("the gate", () => {
     expect(platform.tests.tests.map((test) => test.name)).toEqual([TESTS[0]]);
 
     // Both files are the developer's. The refused one carries their own edit
-    // and no pin, because nothing on Egma was ever made from it.
+    // and no pin, because nothing on egma was ever made from it.
     expect(await testsInFolder()).toEqual([`${TESTS[0]}.md`, "wanted-it-by-friday.md"]);
     const kept = await readFile(refused, "utf8");
     expect(kept).toContain(added);

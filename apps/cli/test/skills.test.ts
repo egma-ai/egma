@@ -1,5 +1,5 @@
 /**
- * Egma's skills as a shipped artifact.
+ * egma's skills as a shipped artifact.
  *
  * A skill nobody can read is not a skill, and a skill that falls out of the
  * package on the way to npm is worse than none — it works on the machine it was
@@ -31,7 +31,7 @@ const run = promisify(execFile);
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-describe("Egma's skills", () => {
+describe("egma's skills", () => {
   it("are markdown content, shaped the way a skill file is", () => {
     for (const name of SKILL_NAMES) {
       const content = skill(name);
@@ -44,7 +44,7 @@ describe("Egma's skills", () => {
     }
   });
 
-  it("teach the marker lines Egma reads answers from", () => {
+  it("teach the marker lines egma reads answers from", () => {
     const finding = skill("context-finding");
     expect(finding).toContain("egma:found framework");
     expect(finding).toContain("egma:note");
@@ -59,7 +59,7 @@ describe("Egma's skills", () => {
     expect(writing).toContain("egma:wrote");
   });
 
-  it("say what a test file is made of, in the shape Egma writes one", () => {
+  it("say what a test file is made of, in the shape egma writes one", () => {
     const writing = skill("writing-tests");
     expect(writing).toContain("egma/tests/");
     expect(writing).toContain("## Expected behaviors");
@@ -78,7 +78,7 @@ describe("Egma's skills", () => {
    * code is the source of truth; this is what keeps the prose from drifting
    * away from it without anybody noticing.
    */
-  it("ask for the facts Egma reads back, in the words Egma reads them", () => {
+  it("ask for the facts egma reads back, in the words egma reads them", () => {
     // Prose is wrapped to a width, and a phrase does not stop meaning what it
     // means because a line ending landed in the middle of it.
     const unwrapped = (text: string): string => text.replace(/\s+/g, " ");
@@ -199,7 +199,7 @@ describe("Egma's skills", () => {
     expect(retell).toContain("llm_");
   });
 
-  it("use the words Egma uses, because a skill is user-facing text", () => {
+  it("use the words egma uses, because a skill is user-facing text", () => {
     for (const name of SKILL_NAMES) {
       const content = skill(name).replaceAll(SCENARIO_HEADING, "");
       for (const banned of BANNED) {

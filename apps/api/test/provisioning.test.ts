@@ -12,7 +12,7 @@ import { createApi, type TestApi } from "./support/api.ts";
 /**
  * The hooks, driven directly.
  *
- * They are registered with the provider rather than called by Egma, which is
+ * They are registered with the provider rather than called by egma, which is
  * what keeps signup from being a provider method. Reaching them without the
  * provider in the way is how the branches that a signup form cannot produce get
  * covered: an identity created some other way, and an identity that already
@@ -34,7 +34,7 @@ async function anIdentity(email: string): Promise<string> {
   return userId;
 }
 
-describe("an identity created without Egma's signup page", () => {
+describe("an identity created without egma's signup page", () => {
   it("still lands in an organization, named from its email domain", async () => {
     api = await createApi("hook_defaults");
     const userId = await anIdentity("ada@acme.example");

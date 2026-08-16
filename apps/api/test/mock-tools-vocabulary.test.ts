@@ -21,13 +21,13 @@ import { describe, expect, it } from "vitest";
  * into disagreeing about which words are banned, which is exactly the failure
  * a vocabulary guard exists to prevent happening to itself.
  *
- * The files are the whole of what somebody outside Egma can meet: the tables,
+ * The files are the whole of what somebody outside egma can meet: the tables,
  * the factory and its refusals, the shared resolver, the route groups that
  * carry mock tools across the wire, both directions of the simulation
  * contract, the simulator's own side of the exchange, the folder and sync
  * modules a developer's repository is written by — and the SDK a customer
  * installs in their own agent, which is the surface with the least chance of
- * anyone at Egma rereading it.
+ * anyone at egma rereading it.
  */
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));

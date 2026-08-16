@@ -547,7 +547,7 @@ def test_the_work_orders_reasoning_effort_reaches_the_model_call(
 def test_nobody_asking_for_reasoning_sends_no_such_field(a_container, env):
     """Absent has to stay absent on the wire. A model that has never heard
     of the field refuses a request carrying it, so a default here would
-    narrow which models a deployment can run to the ones Egma knew about."""
+    narrow which models a deployment can run to the ones egma knew about."""
     env.setenv("EGMA_SIMULATOR_MODEL_PROVIDER", "openai")
     env.setenv("EGMA_SIMULATOR_MODEL_NAME", "a-model")
     env.setenv("EGMA_SIMULATOR_MODEL_API_KEY", "a-key")

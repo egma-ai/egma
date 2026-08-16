@@ -21,7 +21,7 @@ import {
  * One test path exercises the credential, the protobuf decoding, the
  * normalisation, the tenancy stamp, the append, the turn-grain view and both
  * read contracts — because every one of those is a place the path can be right
- * on its own and wrong end to end. Nothing here is a fixture of what Egma
+ * on its own and wrong end to end. Nothing here is a fixture of what egma
  * believes telemetry looks like: the fourteen bodies are the ones an exporter
  * really sent, replayed byte for byte.
  *
@@ -387,13 +387,13 @@ describe("the captured trace, read as a transcript", () => {
   });
 
   /**
-   * This capture came off a customer's own agent, so Egma conducted nothing
+   * This capture came off a customer's own agent, so egma conducted nothing
    * here — and the answer says so by naming no simulation.
    *
    * The two identifiers are the same 128 bits written two ways, so *any* trace
    * id converts to a well-formed simulation id, including this one. Sending it
    * would be claiming a simulation exists, and the surface that reads this
-   * field would then go asking for a recording of a conversation Egma never
+   * field would then go asking for a recording of a conversation egma never
    * had. Which trace is a simulation is a fact the row carries — `source` — and
    * it is read here rather than guessed by the reader.
    */

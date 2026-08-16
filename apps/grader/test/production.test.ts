@@ -138,7 +138,7 @@ describe("a production trace whose root span closes", () => {
       graderId,
       source: "production",
       // Empty, honestly: a trace that arrived at the OTLP door was not started
-      // by Egma, so there is no run and no agent row behind it.
+      // by egma, so there is no run and no agent row behind it.
       runId: "",
       agentId: "",
       agentVersionId: "",
@@ -191,7 +191,7 @@ describe("a production trace whose root span closes", () => {
    * The read path itself, from real spans in a real store.
    *
    * Everything else in this file asserts verdict rows, which is the seam that
-   * matters — but nothing Egma executes on a production trace reads a
+   * matters — but nothing egma executes on a production trace reads a
    * *transcript*, so no row can show whether the conversation the engine
    * assembled is the one the spans describe. This asserts it where it can be
    * seen: the store's own read, through the constructor, exactly as the engine
@@ -221,7 +221,7 @@ describe("a production trace whose root span closes", () => {
     expect(conversation.source).toBe("production");
     expect(conversation.traceId).toBe(traceId);
     // There is something here to judge: spans exist, so somebody talked to
-    // something. `errored` is the answer to "did Egma's own runtime manage to
+    // something. `errored` is the answer to "did egma's own runtime manage to
     // conduct this", and a real caller's conversation was conducted by the
     // world.
     expect(conversation.nothingToJudgeBecause).toBeNull();
@@ -261,7 +261,7 @@ describe("a production trace whose root span closes", () => {
     expect(conversation.measures).toEqual([]);
 
     // Empty, and honestly so: a trace that arrived at the OTLP door was not
-    // started by Egma, so there is no run and no agent row behind it.
+    // started by egma, so there is no run and no agent row behind it.
     expect(conversation.runId).toBe("");
     expect(conversation.agentId).toBe("");
   });
@@ -318,7 +318,7 @@ describe("a production trace whose root span closes", () => {
   /**
    * **One source, both worlds — asserted where a customer would feel it.**
    *
-   * The same measurements are filed twice: once by Egma's own simulator as a
+   * The same measurements are filed twice: once by egma's own simulator as a
    * conversation it conducted, and once at the OTLP door as a real caller's.
    * The latency copies come back with the same verdict and the same rationale,
    * because the number they were decided by came out of one module that never
@@ -326,7 +326,7 @@ describe("a production trace whose root span closes", () => {
    *
    * That is what makes "passes in simulation, fails in production" a fact about
    * the agent rather than about two readers. If the two paths could disagree,
-   * the whole comparison the product is built on would be measuring Egma.
+   * the whole comparison the product is built on would be measuring egma.
    */
   it("measures a real caller's spans exactly as it measures a simulation's", async () => {
     const MEASURED = { turn_response_latency: [900, 1_100] };

@@ -156,7 +156,7 @@ describe("getting to the Running-graders screen", () => {
   /**
    * A path the page fetches and the config does not forward would be served by
    * this process, which has no such route, and the screen would show Next's own
-   * 404 as though Egma had answered it.
+   * 404 as though egma had answered it.
    */
   it("reaches the API at a path this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
@@ -216,7 +216,7 @@ describe("changing a running copy and switching one off", () => {
   /**
    * A path the page writes to and the config does not forward would be served
    * by this process, which has no such route, and the screen would read Next's
-   * own 404 as though Egma had refused the edit.
+   * own 404 as though egma had refused the edit.
    */
   it("writes at the copy's own address, which this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");

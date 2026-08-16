@@ -2,12 +2,12 @@
  * A scripted coding agent, for tests.
  *
  * It is a real subprocess speaking the real protocol over stdio — the same wire
- * Egma drives Claude Code and Codex over — and it does exactly what its script
+ * egma drives Claude Code and Codex over — and it does exactly what its script
  * says, in order, every time. No model, no network, no clock to wait on.
  *
  * Run it as `node fake-agent.ts <script.json>`. Everything it observes that a
  * test might want to assert on is written to a file in the working folder, so
- * tests assert on what landed rather than on what happened inside Egma.
+ * tests assert on what landed rather than on what happened inside egma.
  */
 
 import { spawn } from "node:child_process";
@@ -51,7 +51,7 @@ export type FakeStep =
 export type FakeScript = {
   /** Modes the agent claims to offer, so the mode belt has something to set. */
   modes?: acp.SessionModeState;
-  /** Start a long-running child, to prove Egma ends the whole tree. */
+  /** Start a long-running child, to prove egma ends the whole tree. */
   spawnChild?: boolean;
   /** Where the record of what happened is written, relative to the folder. */
   reportFile?: string;
@@ -74,7 +74,7 @@ export type FakeScript = {
    * One walk sends the same agent several tasks in the same folder — find the
    * voice agent, turn what the developer already had into files, write the
    * rest — and a scripted agent has to answer each of them differently. The
-   * fragment is matched against the task Egma actually sent, so a check says
+   * fragment is matched against the task egma actually sent, so a check says
    * which task it is scripting rather than counting turns.
    */
   stepsByTask?: { contains: string; steps: FakeStep[] }[];

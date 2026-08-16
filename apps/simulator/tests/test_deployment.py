@@ -359,7 +359,7 @@ REQUIRED_IN_THE_ENVIRONMENT = {
         "is what a simulator shows to claim work, and a claim answer carries a "
         "customer's live credentials to whoever holds it"
     ),
-    "EGMA_LIVEKIT_API_KEY": "is half the password Egma's own parts hold",
+    "EGMA_LIVEKIT_API_KEY": "is half the password egma's own parts hold",
     "EGMA_LIVEKIT_API_SECRET": "is the other half",
     "EGMA_S3_ACCESS_KEY_ID": (
         "opens the store every recording lives in, with rights to replace one"
@@ -451,11 +451,11 @@ MAY_BE_ABSENT = {
     "EGMA_GRADER_SWEEP_SECONDS": "per-container tuning",
     "EGMA_GRADER_TRACE_IDLE_SECONDS": "per-container tuning",
     # Facts about the network a container sits on rather than about the
-    # deployment, and each one's empty value is a real answer: Egma's own
-    # default endpoint, Egma's own default model, an address the server works
+    # deployment, and each one's empty value is a real answer: egma's own
+    # default endpoint, egma's own default model, an address the server works
     # out for itself.
     "EGMA_SIMULATOR_MODEL_BASE_URL": "a property of this container's network",
-    "EGMA_SIMULATOR_STT_MODEL": "empty means Egma's own default",
+    "EGMA_SIMULATOR_STT_MODEL": "empty means egma's own default",
     # These two are the platform's settings first — it seeds and holds
     # `speech_to_text_model` and `persona_model_reasoning_effort`, and what it
     # holds wins over anything written here. Empty is also a real answer on
@@ -653,7 +653,7 @@ def test_a_bootstrap_variable_refuses_to_start_the_platform_when_absent(name):
         )
         assert "openssl" in found.tail or "egma self-host" in found.tail, (
             f"{name} is required without saying how to come by a value. Name "
-            "the command that makes one, or the Egma command that generates it; "
+            "the command that makes one, or the egma command that generates it; "
             f"this one says {found.tail.strip()!r}"
         )
 

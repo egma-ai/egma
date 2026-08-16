@@ -530,7 +530,7 @@ describe("a span arriving twice", () => {
 
   /**
    * The writer owes non-duplication; this is the backstop under it, and it earns
-   * its keep on the production path Egma does not own, where an exporter's retry
+   * its keep on the production path egma does not own, where an exporter's retry
    * is byte-identical by design. The view is checked as well as the table: a
    * materialised view runs on the block that arrived, so a repeat the table drops
    * would otherwise still show the human saying the same thing twice.

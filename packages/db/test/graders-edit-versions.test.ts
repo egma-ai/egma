@@ -456,7 +456,7 @@ describe("changing where a grader applies and how loudly", () => {
     expect(edited?.version).toBe(2);
   });
 
-  it("refuses a setting Egma does not know, and changes nothing", async () => {
+  it("refuses a setting egma does not know, and changes nothing", async () => {
     const created = await useLibraryEntry(actingAsAcme(), latency);
 
     await expect(

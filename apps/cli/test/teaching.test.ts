@@ -1,9 +1,9 @@
 /**
- * The words Egma uses, taught while the files land — and never in the way.
+ * The words egma uses, taught while the files land — and never in the way.
  *
  * Two things have to be true of the pane and the second is the harder one. It
  * has to teach the glossary's own vocabulary, because a developer who leaves
- * the wizard calling a run a batch will not find anything Egma answers to. And
+ * the wizard calling a run a batch will not find anything egma answers to. And
  * it has to cost nothing: the flow must not wait on it, be paced by it, or end
  * differently because it was drawn. So the same suite is written twice — once
  * with the pane on a real terminal and once with no screen at all — and what
@@ -143,7 +143,7 @@ afterEach(async () => {
 });
 
 describe("the deck", () => {
-  it("says what Egma means, in Egma's own words", () => {
+  it("says what egma means, in egma's own words", () => {
     const said = LEARN_CARDS.flatMap((card) => [card.heading, ...card.lines]).join(" ");
 
     // The glossary's spine: a test is executed as simulations inside a run, a
@@ -158,7 +158,7 @@ describe("the deck", () => {
 
     // And none of the words the glossary bans, which is the half that matters:
     // a card teaching a near synonym teaches a developer to ask for something
-    // Egma does not answer to.
+    // egma does not answer to.
     //
     // It is the same list the skills are held to, and it is that list rather
     // than a shorter one written to fit the cards — a guard shaped around the
@@ -213,7 +213,7 @@ describe("the pane, while the files land", () => {
       // Wide, because the ending under check here is lines rather than
       // sentences. A terminal wraps whatever will not fit, and a check that
       // read a wrapped line as two would be checking the terminal's width and
-      // not Egma's output. It is wide enough for the pane either way.
+      // not egma's output. It is wide enough for the pane either way.
       cols: 200,
     });
 
@@ -225,7 +225,7 @@ describe("the pane, while the files land", () => {
       terminal.write(`${KEY}\r`);
 
       // Text or phone. Not this check's subject, and not skippable
-      // either: Egma never picks one of the two for a developer.
+      // either: egma never picks one of the two for a developer.
       await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 
@@ -281,7 +281,7 @@ describe("the pane, while the files land", () => {
         const written = exitLines(report).filter((line) => line !== "");
         expect(written[0]).toBe("✓ Your first run is live — 1 of 3 graded so far.");
 
-        // Line for line the same ending, and the same tests on Egma either way.
+        // Line for line the same ending, and the same tests on egma either way.
         const here = `${platform.url}/runs/${platform.running.runs[0]?.id ?? ""}`;
         expect(endingShape(scrollbackLines(terminal.scrollback()), here)).toEqual(
           endingShape(written, address),
@@ -330,7 +330,7 @@ describe("the pane, while the files land", () => {
       terminal.write(`${KEY}\r`);
 
       // Text or phone. Not this check's subject, and not skippable
-      // either: Egma never picks one of the two for a developer.
+      // either: egma never picks one of the two for a developer.
       await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
       await showing(terminal, "Do you already have test cases");

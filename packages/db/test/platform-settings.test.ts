@@ -287,7 +287,7 @@ describe("a deployment that serves more than one organization", () => {
    * simulations at an account nobody else agreed to.
    *
    * Whose settings these are on such a deployment is a real question and it is
-   * deliberately not answered yet. Until it is, Egma refuses everybody rather
+   * deliberately not answered yet. Until it is, egma refuses everybody rather
    * than picking one of them — the same guard the platform's own judge is
    * behind, which is only ever given away on a single-organization deployment.
    */

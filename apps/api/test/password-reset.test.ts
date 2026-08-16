@@ -230,9 +230,9 @@ describe("a link that is no longer worth following", () => {
   });
 
   /**
-   * And past the hour, Egma says what it knows, which is that the link is dead.
+   * And past the hour, egma says what it knows, which is that the link is dead.
    *
-   * There is one deadline and both systems have it, so the moment Egma stops
+   * There is one deadline and both systems have it, so the moment egma stops
    * honouring a link is the moment the provider forgets the token. Nothing is
    * left to ask, a link that ran out unused and one somebody spent look
    * identical from out here, and either of the other two sentences would be a
@@ -289,7 +289,7 @@ describe("a link that is no longer worth following", () => {
     expect((await signIn("ada@acme.example", FORGOTTEN)).status).not.toBe(200);
   });
 
-  it("refuses a link that was never one of Egma's, naming nothing", async () => {
+  it("refuses a link that was never one of egma's, naming nothing", async () => {
     api = await createApi("reset_forged", { emailDelivers: true });
     await signUp("ada@acme.example");
 
@@ -307,11 +307,11 @@ describe("a link that is no longer worth following", () => {
  * The seal is signed rather than encrypted, so the provider's own token reads
  * straight out of any link, and the provider's whole surface is served under
  * this instance's origin. **So the provider's own deadline is the one that has
- * to be true**, and it is: Egma states an hour and configures the provider with
+ * to be true**, and it is: egma states an hour and configures the provider with
  * that same hour, which is why there is now nothing to shut and nothing to
  * spell around.
  *
- * A route of Egma's own in front of that endpoint would only ever have been a
+ * A route of egma's own in front of that endpoint would only ever have been a
  * spelling of it. `POST /api/auth/x/../reset-password` reaches the same handler
  * — Fastify matches the target as it arrived, so an exact route never sees it,
  * while the URL the provider is handed is parsed with its dot segments removed
@@ -368,7 +368,7 @@ describe("asking for a link", () => {
   /**
    * The flow never says who holds an account here. An address nobody signed up
    * with and an address somebody did get the same status and the same sentence,
-   * so the form is not a way to ask Egma who its customers are.
+   * so the form is not a way to ask egma who its customers are.
    */
   it("answers an address with no account exactly as one with an account", async () => {
     api = await createApi("reset_no_account", { emailDelivers: true });
@@ -513,12 +513,12 @@ describe("asking for a link", () => {
   });
 
   /**
-   * **This door is open to the whole internet and it writes a message Egma
+   * **This door is open to the whole internet and it writes a message egma
    * signs its own name to**, so a return path that leaves the instance is an
    * open redirect somebody else gets to post. The tab is the one that mattered:
    * `/<TAB>/elsewhere.example` passed a rule written as a list of shapes, and a
    * browser reads it as `//elsewhere.example` because a URL parser strips the
-   * tab before it parses. A victim would have got a genuine Egma link, on the
+   * tab before it parses. A victim would have got a genuine egma link, on the
    * real origin, and landed off the instance the moment they signed in.
    */
   it("writes nothing that could send somebody off this instance", async () => {

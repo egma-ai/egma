@@ -34,7 +34,7 @@
  * - **An unknown key is refused by name.** That is what turns a typo into an
  *   answer a coding agent can act on, and it is what makes the dropped vendor
  *   payload loud: a client still sending what was pulled from the provider
- *   hears so, instead of watching Egma quietly keep nothing.
+ *   hears so, instead of watching egma quietly keep nothing.
  */
 
 import { given, isId, newId, NOT_AUTHENTICATED, PAGE_SIZE } from "./reading.ts";
@@ -195,10 +195,10 @@ function namesIn(field: string): CredentialHint {
   };
 }
 
-/** The two schemes something Egma POSTs to is written in. */
+/** The two schemes something egma POSTs to is written in. */
 const TOKEN_ENDPOINT_SCHEMES = ["http:", "https:"];
 
-/** Where Egma asks the customer for a token, per simulation. */
+/** Where egma asks the customer for a token, per simulation. */
 function tokenEndpointUrl(key: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
   let scheme: string | undefined;
@@ -219,7 +219,7 @@ function tokenEndpointUrl(key: string, value: unknown): string {
   return candidate;
 }
 
-/** The headers Egma sends when it asks for a token, checked at create. */
+/** The headers egma sends when it asks for a token, checked at create. */
 function authHeadersJson(what: string, field: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
   let parsed: unknown;
@@ -298,7 +298,7 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     variants: [
       {
         config: { phoneNumber: e164PhoneNumber },
-        // No reuse rule, deliberately: a number is where Egma dials, not who
+        // No reuse rule, deliberately: a number is where egma dials, not who
         // answers, and two agents can legitimately share one.
         credentials: {
           required: false,
@@ -325,7 +325,7 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
   livekit: {
     // Voice only, because voice is the lane that exists.
     modalities: ["voice"],
-    // Egma opens the room and the customer's agent joins it.
+    // egma opens the room and the customer's agent joins it.
     topology: "agent-dials-out",
     /**
      * Two shapes, and they are two answers to one question: who mints the
@@ -360,7 +360,7 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         chosenBy: "tokenEndpoint",
         config: { url: livekitServerUrl, tokenEndpoint: tokenEndpointUrl },
         credentials: {
-          // An endpoint on a private network can be open to Egma alone.
+          // An endpoint on a private network can be open to egma alone.
           required: "if-sent",
           fields: ["headers"],
           gate: authHeadersJson,
@@ -445,10 +445,10 @@ class Refusal extends Error {
  *
  * Refusing by name rather than ignoring is what turns a typo into an answer a
  * coding agent can act on. And it is what makes the dropped vendor payload
- * loud: Egma no longer keeps what was pulled from the provider — the agent's
+ * loud: egma no longer keeps what was pulled from the provider — the agent's
  * content stays where it lives and is read fresh through the sealed credential
  * — so a client still sending a copy of it is told, rather than left believing
- * Egma holds something it does not.
+ * egma holds something it does not.
  */
 function refuseUnknownKeyIn(
   body: Record<string, unknown>,
@@ -497,7 +497,7 @@ function validConfig(type: string, config: unknown): Record<string, string> {
   const what = nameOf(type, shape);
   const gates = shape.config;
   // Optional keys say so, so a caller reading a refusal is never left thinking
-  // Egma wants a value it is happy to do without.
+  // egma wants a value it is happy to do without.
   const held = Object.entries(gates)
     .map(([key, demand]) => (isDemanded(demand) ? key : `${key} (optional)`))
     .join(", ");
@@ -736,7 +736,7 @@ function credentialActsElsewhere(
 
 /**
  * One connection, as the run endpoints need it: which agent it reaches, and
- * what Egma would have to speak to conduct a simulation over it.
+ * what egma would have to speak to conduct a simulation over it.
  */
 export type ConnectionLookup = (connectionId: string) => {
   readonly id: string;
@@ -859,7 +859,7 @@ export function agentRoutes(options: {
    * before the outcome is decided. **Every path runs it, and runs all of it.**
    * A registration that turns out to be a reuse is held to exactly what a
    * registration that turns out to be a create is held to — otherwise a body
-   * Egma would refuse from a new customer would rotate a live credential for an
+   * egma would refuse from a new customer would rotate a live credential for an
    * old one, and the same client would work on one machine and fail on the
    * next.
    *
@@ -974,8 +974,8 @@ export function agentRoutes(options: {
             // contract: the envelopes first, because they are answerable
             // without knowing anything; then which project this is; then the
             // agent's name and the whole connection payload. Only after all of
-            // that does anything look at what is already there — so what Egma
-            // will take is decided before what Egma will do is.
+            // that does anything look at what is already there — so what egma
+            // will take is decided before what egma will do is.
             refuseUnknownKeyIn(body, AGENT_KEYS, "a registration");
             const envelope =
               body["connection"] === undefined ? undefined : connectionIn(body["connection"]);
@@ -996,7 +996,7 @@ export function agentRoutes(options: {
               if (same !== undefined) {
                 // Whole, never merged: what arrived replaces what is stored.
                 // Nothing about the body is checked here, because all of it was
-                // checked above — a registration Egma would refuse never gets
+                // checked above — a registration egma would refuse never gets
                 // as far as rotating a live credential.
                 const { credentials } = inline;
                 if (credentials !== null) sealed.push(...Object.values(credentials.sealed));

@@ -297,7 +297,7 @@ describe("a mock tool the folder authors", () => {
       agents: [],
     });
     expect(String(created.body.id)).toMatch(/^mck_/u);
-    // The one authored thing Egma does not version: there is no version to
+    // The one authored thing egma does not version: there is no version to
     // read, so a client cannot grow a pin it would then have to keep in step.
     expect(created.body).not.toHaveProperty("version");
     expect(created.body).not.toHaveProperty("version_id");
@@ -481,7 +481,7 @@ describe("a mock tool the folder authors", () => {
  *
  * Every gate a project's mock tool passes, an override passes — from the same
  * functions on the real side, so a fixture that checked one half and waved the
- * other through would let a client ship a folder Egma refuses.
+ * other through would let a client ship a folder egma refuses.
  */
 describe("the mock tools a test overrides", () => {
   it("rides the test, comes back on it, and versions with it", async () => {
@@ -723,7 +723,7 @@ describe("the list of tests", () => {
 });
 
 describe("one frozen version", () => {
-  it("is not found for a version this Egma never issued", async () => {
+  it("is not found for a version this egma never issued", async () => {
     const missing = "tstv_01JZZZZZZZZZZZZZZZZZZZZZZZ";
 
     const refused = await ask("GET", `/api/test-versions/${missing}`);
@@ -889,7 +889,7 @@ describe("registering an agent", () => {
 });
 
 describe("a connection payload its type will not take", () => {
-  it("names a type Egma has never heard of", async () => {
+  it("names a type egma has never heard of", async () => {
     const refused = await ask("POST", "/api/agents", {
       name: "Front desk",
       connection: connectionPayload({ type: "vapi" }),
@@ -1154,7 +1154,7 @@ describe("registering the same vendor agent again", () => {
    *
    * The whole payload is checked before anything looks at what is already
    * there — that is what the platform does, and it is the only order that is
-   * safe. The other way round, a body Egma would refuse outright from a new
+   * safe. The other way round, a body egma would refuse outright from a new
    * customer would rotate a live credential for an existing one, and the same
    * client would work on one machine and fail on the next.
    */
@@ -1246,7 +1246,7 @@ describe("registering the same vendor agent again", () => {
   });
 });
 
-describe("the vendor payload Egma no longer keeps", () => {
+describe("the vendor payload egma no longer keeps", () => {
   it("is refused as an unknown key on a registration, loudly rather than ignored", async () => {
     const refused = await ask("POST", "/api/agents", {
       ...registration(),
@@ -1304,7 +1304,7 @@ describe("the vendor payload Egma no longer keeps", () => {
     });
 
     // Topology is derived from the type, so a supplied one is the unknown key
-    // it is rather than a preference Egma weighs up.
+    // it is rather than a preference egma weighs up.
     const onTheConnection = await ask("POST", "/api/agents", {
       name: "Front desk",
       connection: connectionPayload({ topology: "hosted-broker" }),

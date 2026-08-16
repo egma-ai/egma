@@ -183,7 +183,7 @@ afterAll(async () => {
 });
 
 describe("the contract's golden flushes, posted with the service token", () => {
-  it("land under the simulation's own customer and run, marked as simulation traffic from Egma's runtime", async () => {
+  it("land under the simulation's own customer and run, marked as simulation traffic from egma's runtime", async () => {
     const flush = await post(await fixture("valid", "chat-flush-1-turns.json"));
     expect(flush.statusCode, flush.body).toBe(200);
     expect(flush.json()).toEqual({});
@@ -446,9 +446,9 @@ describe("the contract's golden flushes, posted with the service token", () => {
   });
 
   /**
-   * The answer Egma served, kept as an answer. The simulator authors it from
+   * The answer egma served, kept as an answer. The simulator authors it from
    * inside the exchange it conducted, so unlike the return values of a call
-   * Egma only watched go past, there is nothing invented in writing it down —
+   * egma only watched go past, there is nothing invented in writing it down —
    * and the vocabulary only lets it be written beside the stamp saying where
    * it came from. The stamp, the mock tool that answered and the late-attached
    * flag have no columns of their own and are not given one: they ride the
@@ -480,7 +480,7 @@ describe("the contract's golden flushes, posted with the service token", () => {
       // A call served for a tool the agent had not reported having. Its
       // arguments never arrived, and an absent fact stays absent.
       ["send_confirmation_sms", "", '{"delivered":true}'],
-      // A call Egma would not answer: the arguments are what the agent tried
+      // A call egma would not answer: the arguments are what the agent tried
       // to do, and there is no result because nothing served it.
       ["charge_card", '{"amount_cents":4200}', ""],
     ]);
@@ -490,7 +490,7 @@ describe("the contract's golden flushes, posted with the service token", () => {
     expect(rows[1]?.payload).toContain('"egma.tool.late_attached"');
     expect(rows[1]?.payload).toContain('"boolValue":true');
     // The refusal's own stamp survives the door whole. Without it the row
-    // would read exactly like a call Egma was never in the path of, which is
+    // would read exactly like a call egma was never in the path of, which is
     // the opposite fact about whether the agent's backend ran.
     expect(rows[2]?.payload).toContain('"refused"');
   });
@@ -617,7 +617,7 @@ describe("the same path in the other encoding", () => {
   });
 });
 
-describe("a resource that names no simulation, or one Egma never conducted", () => {
+describe("a resource that names no simulation, or one egma never conducted", () => {
   it("is refused whole, with a body saying what to send", async () => {
     const before = await countOf("select count() as n from spans");
 
@@ -658,7 +658,7 @@ describe("a resource that names no simulation, or one Egma never conducted", () 
    * one conversation's turns on screen beside another's audio — inside one
    * organization, with nothing anywhere saying the two disagree.
    *
-   * Nothing Egma ships can produce it: the simulator derives the trace from the
+   * Nothing egma ships can produce it: the simulator derives the trace from the
    * id it was handed. Which is why it is asserted rather than assumed — the
    * emitter taking a trace id from a provider instead would be a small change
    * over there and a wrong recording over here.

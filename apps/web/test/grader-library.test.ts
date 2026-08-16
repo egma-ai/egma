@@ -110,7 +110,7 @@ describe("getting to the Library screen", () => {
   /**
    * A path the page fetches and the config does not forward would be served by
    * this process, which has no such route, and the screen would show Next's own
-   * 404 as though Egma had answered it.
+   * 404 as though egma had answered it.
    */
   it("reaches the API at a path this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
@@ -154,7 +154,7 @@ describe("getting to the Library screen", () => {
  *
  * What is checked here is the property the whole arrangement exists for — that
  * this page holds **no list of measures of its own**. A dropdown typed into a
- * browser page would be a second copy of Egma's measure catalog: stale the first
+ * browser page would be a second copy of egma's measure catalog: stale the first
  * time a measure joined or left, and its first symptom a write refused for
  * offering exactly what the form offered. The options ride the entry, the write
  * door checks the catalog they were built from, and neither can drift.
@@ -162,7 +162,7 @@ describe("getting to the Library screen", () => {
 describe("pressing Use", () => {
   /**
    * The `fetch` itself moved into `lib/write.ts` when a second and third form
-   * on this section needed the same four steps — post, read Egma's own refusal
+   * on this section needed the same four steps — post, read egma's own refusal
    * off the body, fall back to a sentence of its own where the body carried
    * none, and treat a thrown request as the platform being out of reach. What
    * this case is about is unchanged: the address and the verb, which is what

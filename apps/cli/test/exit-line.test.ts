@@ -149,7 +149,7 @@ describe("the exit line", () => {
 
   /**
    * A coding agent that stopped is not a folder that held nothing. Telling the
-   * second story for the first says Egma looked and found no voice agent, when
+   * second story for the first says egma looked and found no voice agent, when
    * what happened is that nobody ever looked.
    */
   it("says a stop was a stop, and whose it was", () => {
@@ -302,7 +302,7 @@ describe("the exit line", () => {
       }),
     ).toBe("Nothing was installed. Codex can still drive Egma — tell it to run egma --help.");
 
-    // A coding agent Egma has no skill convention for was never offered one,
+    // A coding agent egma has no skill convention for was never offered one,
     // so there is nothing to report either way.
     expect(
       buildExitNotice({
@@ -325,7 +325,7 @@ describe("the exit line", () => {
   /**
    * A reason that arrived carrying a block keeps the block.
    *
-   * One refusal in Egma is more than a sentence: the one that keeps a
+   * One refusal in egma is more than a sentence: the one that keeps a
    * repository on the platform it is bound to ends with every line a developer
    * deletes to move it, and a coding agent is meant to act on those lines
    * without a person reading them out. Squashed into the exit line they are

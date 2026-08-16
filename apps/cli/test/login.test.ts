@@ -1,5 +1,5 @@
 /**
- * Login, end to end, against a fixture of Egma's public HTTP API.
+ * Login, end to end, against a fixture of egma's public HTTP API.
  *
  * No platform, no database and no browser: the CLI speaks the public API and
  * the fixture answers it, including which refusal goes with which state. What
@@ -124,7 +124,7 @@ describe("signing a machine in", () => {
     expect(shown.browserOpened).toBe(true);
     expect(watched.opened).toEqual([shown.url]);
 
-    // The key landed, against the Egma that minted it.
+    // The key landed, against the egma that minted it.
     const held = await readCredentials(workspace.credentialsFile, platform.url);
     expect(held?.url).toBe(platform.url);
     expect(held?.key).toMatch(/^egma_sk_/u);
@@ -202,7 +202,7 @@ describe("signing a machine in", () => {
   });
 
   it("does not ask for a key again because somebody pasted the wrong thing", async () => {
-    // A wrong paste must not be a way to make Egma poll: a developer holding a
+    // A wrong paste must not be a way to make egma poll: a developer holding a
     // paste key would otherwise ask for a key as fast as they could type.
     platform.device.pollEvery(30);
 
@@ -233,7 +233,7 @@ describe("signing a machine in", () => {
     expect(watched.said).toHaveLength(flood.length);
   });
 
-  it("names an Egma that never answered, rather than reporting a broken thing", async () => {
+  it("names an egma that never answered, rather than reporting a broken thing", async () => {
     const result = await logIn({
       // Nothing listens here: the port is reserved and the address is not routed.
       url: "http://127.0.0.1:1",
@@ -296,7 +296,7 @@ describe("a machine that is already signed in", () => {
     expect(held?.key).toBe(platform.device.keys.at(-1));
   });
 
-  it("signs in again for a different Egma, because a key is only good at one", async () => {
+  it("signs in again for a different egma, because a key is only good at one", async () => {
     await workspace.signIn("https://somewhere.else.example", "egma_sk_for-somewhere-else");
 
     const watched = watch();
@@ -420,12 +420,12 @@ describe("reading a code out of whatever was pasted", () => {
   });
 });
 
-describe("which Egma a command talks to", () => {
-  // The address Egma falls back to, stood in for so that reading this test
+describe("which egma a command talks to", () => {
+  // The address egma falls back to, stood in for so that reading this test
   // never says which address ships. That is asserted in one place, on its own.
   const BUILT_IN = "http://built-in.example";
 
-  /** The published package, whose every written word is Egma's to a reader. */
+  /** The published package, whose every written word is egma's to a reader. */
   const CLI_PACKAGE = fileURLToPath(new URL("..", import.meta.url));
 
   /** Every file under a folder, as full paths. */
@@ -436,7 +436,7 @@ describe("which Egma a command talks to", () => {
       .map((entry) => path.join(entry.parentPath, entry.name));
   }
 
-  it("takes the flag, then the binding, then Egma's own", () => {
+  it("takes the flag, then the binding, then egma's own", () => {
     expect(
       resolvePlatformUrl({
         flag: "http://flag.example/",
@@ -451,8 +451,8 @@ describe("which Egma a command talks to", () => {
       resolvePlatformUrl({ flag: null, binding: "http://bound.example/", fallback: BUILT_IN }),
     ).toBe("http://bound.example");
 
-    // Nothing names a platform, so Egma uses its own. This is the step ADR-0008
-    // always had and the tree could not have while there was no hosted Egma to
+    // Nothing names a platform, so egma uses its own. This is the step ADR-0008
+    // always had and the tree could not have while there was no hosted egma to
     // point at.
     expect(resolvePlatformUrl({ flag: null, binding: null, fallback: BUILT_IN })).toBe(
       BUILT_IN,
@@ -481,7 +481,7 @@ describe("which Egma a command talks to", () => {
       resolvePlatformUrl({ flag: "ftp://egma.example", fallback: BUILT_IN }),
     ).toThrow(/--url/u);
 
-    // A committed binding is never stepped over in favour of Egma's own.
+    // A committed binding is never stepped over in favour of egma's own.
     expect(() =>
       resolvePlatformUrl({ flag: null, binding: "javascript:alert(1)", fallback: BUILT_IN }),
     ).toThrow(/repository platform binding/u);
@@ -493,12 +493,12 @@ describe("which Egma a command talks to", () => {
    * `EGMA_URL` was a whole-shell name for `--url`, and taking the rung out of
    * resolution is only half of taking it out: a `--help` line, a README
    * paragraph or a refusal that still tells somebody to set it is a setting
-   * Egma no longer has, offered by Egma. The one that would have survived a
+   * egma no longer has, offered by egma. The one that would have survived a
    * careful edit is the refusal — "Remove --url or EGMA_URL" is the sentence a
    * developer meets at the exact moment they are least able to tell that half
    * of it is fiction.
    *
-   * So the whole of what Egma ships is scanned rather than the places anybody
+   * So the whole of what egma ships is scanned rather than the places anybody
    * remembered — the help text and every refusal are inside `src/`, so both are
    * covered by reading it. The checks themselves are not scanned: proving the
    * variable is inert means naming it.
@@ -528,7 +528,7 @@ describe("which Egma a command talks to", () => {
 });
 
 /**
- * What Egma will start a browser on.
+ * What egma will start a browser on.
  *
  * The address comes back from the instance, and handing a string to a browser
  * opener is handing it to a program. What fails here is not a failed login: the
@@ -537,7 +537,7 @@ describe("which Egma a command talks to", () => {
 describe("what an instance can put on this terminal's screen", () => {
   it("draws no instruction, whatever the instance sent", async () => {
     // A terminal reads a control character as an instruction rather than as
-    // text. An address carrying one could clear the screen or redraw what Egma
+    // text. An address carrying one could clear the screen or redraw what egma
     // just said, so they are taken out where the wire is read.
     const ESCAPE = "\u001b";
     const BELL = "\u0007";
@@ -565,14 +565,14 @@ describe("what an instance can put on this terminal's screen", () => {
   });
 });
 
-describe("the addresses Egma hands to a browser", () => {
+describe("the addresses egma hands to a browser", () => {
   const instance = "https://app.egma.example";
   const opens = (url: string): Promise<boolean> =>
     // A browser that opens nothing, because a check that opened a real one on
     // the machine running the suite would be intolerable.
     openInBrowser(url, { instanceUrl: instance, env: { BROWSER: NO_BROWSER } });
 
-  it("opens the approval address on the Egma this login is against", async () => {
+  it("opens the approval address on the egma this login is against", async () => {
     expect(await opens(`${instance}/device?user_code=ABCD1234`)).toBe(true);
   });
 
@@ -636,12 +636,12 @@ describe("writing the key down", () => {
   });
 
   /**
-   * A file Egma cannot make sense of is not an empty file.
+   * A file egma cannot make sense of is not an empty file.
    *
    * Reading a damaged file as "no keys at all" reads harmlessly and then does
    * the worst thing in the package: the next login merges into nothing and
    * renames itself over the file, and every other platform's key is gone. A
-   * truncated file can be repaired by whoever damaged it; one Egma has already
+   * truncated file can be repaired by whoever damaged it; one egma has already
    * overwritten cannot.
    */
   it("refuses a damaged file rather than starting from empty and writing over it", async () => {
@@ -667,7 +667,7 @@ describe("writing the key down", () => {
   });
 
   /**
-   * A file Egma cannot open is not a file that is not there.
+   * A file egma cannot open is not a file that is not there.
    *
    * Only `ENOENT` means nobody has signed in yet. Everything else — a
    * permission change, a directory standing where the file goes — means the
@@ -743,7 +743,7 @@ describe("writing the key down", () => {
   });
 
   it("locks the folder down too, and says nothing when it could", async () => {
-    // The other half of this — a folder Egma cannot narrow — is a filesystem
+    // The other half of this — a folder egma cannot narrow — is a filesystem
     // refusing its own owner, which no check can stage. What is proved here is
     // that the ordinary run really does narrow it, and that the line about
     // failing to is not said when nothing failed.

@@ -31,7 +31,7 @@ import { NEUTRAL_TRAITS } from "./support/traces.ts";
  * → running → completed, with every lifecycle column read back and checked
  * for truth.
  *
- * Nothing here is a stand-in for Egma's own halves: the API listens on a
+ * Nothing here is a stand-in for egma's own halves: the API listens on a
  * real port, the database is a real Postgres, the trace store is a real
  * ClickHouse, and the simulator is the same process `docker compose up`
  * starts. The one fake is the platform on the far side of the conversation —
@@ -187,7 +187,7 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
  * cite. It is not a grader of its own any more — there is one grader on this
  * project and it is the copy of `expected_behaviors` every project is created
  * with — so what it proves now is where the cited turn came from: the judge was
- * shown a transcript Egma assembled out of the spans the simulator streamed,
+ * shown a transcript egma assembled out of the spans the simulator streamed,
  * and the turn it pointed at is the turn holding these words.
  */
 const THE_PHRASE = "Wednesday afternoon";
@@ -517,7 +517,7 @@ describe("the shipped simulator against the real API", () => {
         traits: NEUTRAL_TRAITS,
       });
       // No grader is authored here, and that is the point of the change this
-      // walk now covers: the project was created with an active copy of Egma's
+      // walk now covers: the project was created with an active copy of egma's
       // `expected_behaviors` grader, so a first run is judged with nothing set
       // up at all. What is authored is the judge it speaks with.
       await setJudgeConfiguration(
@@ -696,7 +696,7 @@ describe("the shipped simulator against the real API", () => {
         ["human_turn", "That covers everything I needed. Thank you, goodbye."],
       ]);
 
-      // Filed under the customer's own row, from Egma's own side of the
+      // Filed under the customer's own row, from egma's own side of the
       // conversation, and never from anything the payload claimed.
       const root = spans.find((span) => span.name === "simulation");
       expect(root?.kind).toBe("root");
@@ -772,7 +772,7 @@ describe("the shipped simulator against the real API", () => {
       // The assertion is the behavior's position in the test, which is how a
       // page lines a run's checks up whatever each one says.
       expect(behavior).toMatchObject({ verdict: "passed", assertion: "behavior_1" });
-      // The judge was shown the conversation Egma assembled, not a report:
+      // The judge was shown the conversation egma assembled, not a report:
       // four turns, the ending the row records, and no tool call, because the
       // counterpart made none.
       const [asked] = judge.asked;

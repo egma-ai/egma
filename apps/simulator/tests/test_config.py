@@ -822,7 +822,7 @@ def test_an_endpoint_with_no_scheme_is_refused_by_name(env):
 
 
 @pytest.mark.parametrize(
-    "bucket", ["egma-Recordings", "Egma recordings", "egma/recordings", "no"]
+    "bucket", ["egma-Recordings", "egma recordings", "egma/recordings", "no"]
 )
 def test_a_bucket_name_no_store_would_take_is_refused_by_name(env, bucket):
     """A bucket is not a free-text field, and a name with a separator in it

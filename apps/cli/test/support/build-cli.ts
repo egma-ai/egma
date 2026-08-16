@@ -1,7 +1,7 @@
 /**
  * Builds the CLI before the tests that drive it as a real command.
  *
- * The tests that prove what `npx Egma` does have to run what `npx Egma` runs —
+ * The tests that prove what `npx egma` does have to run what `npx egma` runs —
  * the built entry point, not the sources beside it — so the suite builds it
  * once up front. The build is incremental, so this is nearly free after the
  * first run.

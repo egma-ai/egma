@@ -10,7 +10,7 @@ import {
 } from "../src/acp/registry.ts";
 
 describe("the mirrored agent registry", () => {
-  it("carries the agents Egma drives, so no launch table is written by hand", () => {
+  it("carries the agents egma drives, so no launch table is written by hand", () => {
     expect(findDrivenAgent(DEFAULT_DRIVEN_AGENT_ID)).not.toBeNull();
     expect(findDrivenAgent("codex-acp")).not.toBeNull();
     expect(registry().agents.length).toBeGreaterThan(10);

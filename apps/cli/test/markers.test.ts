@@ -3,7 +3,7 @@
  *
  * A model told to write a bare line writes a bullet, or wraps it in backticks,
  * or breaks it across two pieces of a stream. None of that changes what it
- * meant, so none of it may change what Egma reads — and nothing that is not a
+ * meant, so none of it may change what egma reads — and nothing that is not a
  * marker may ever become one.
  */
 

@@ -27,7 +27,7 @@ import {
 } from "./support/traces.ts";
 
 /**
- * `egma run`'s own seam — the client Egma actually ships — against the real
+ * `egma run`'s own seam — the client egma actually ships — against the real
  * API and a real Postgres.
  *
  * The rest of this suite drives the routes directly and asserts what a caller
@@ -107,7 +107,7 @@ const PHONE_IS_SET_UP = {
   text_to_speech_provider: "openai",
 } as const;
 
-/** A number Egma dials, registered the way the wizard registers one. */
+/** A number egma dials, registered the way the wizard registers one. */
 const PHONE_CONNECTION = {
   type: "phone",
   modality: "voice",
@@ -264,7 +264,7 @@ describe("starting a run from the terminal's own code", () => {
 
     // This was the `no_adapter` refusal until the phone adapter shipped. The
     // terminal's own code now gets a run back over a number, the same way it
-    // does over any other type Egma conducts.
+    // does over any other type egma conducts.
     expect(answer.kind).toBe("started");
     if (answer.kind !== "started") return;
     expect(answer.run.connectionType).toBe("phone");
@@ -278,7 +278,7 @@ describe("starting a run from the terminal's own code", () => {
    * client knows about — it is a 422 like any other, and the client's whole
    * job is to carry the sentence up unread. That is worth pinning here rather
    * than only at the route: a client that started branching on codes would
-   * pass the route's test and still leave a developer with Egma's paraphrase
+   * pass the route's test and still leave a developer with egma's paraphrase
    * of somebody else's decision.
    */
   it("carries a platform-with-no-carrier's refusal up as an answer, word for word", async () => {
@@ -330,7 +330,7 @@ describe("starting a run from the terminal's own code", () => {
     );
 
     // A refusal, not an exception: the terminal prints the sentence as it
-    // stands, because paraphrasing a decision it did not make would be Egma
+    // stands, because paraphrasing a decision it did not make would be egma
     // inventing an explanation.
     expect(answer).toEqual({
       kind: "refused",

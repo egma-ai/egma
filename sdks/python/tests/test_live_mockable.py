@@ -16,7 +16,7 @@ test is what says the mechanism is still there before the pin is raised.
 ## What is real here
 
 The room, the session, the wire, and the interception. A room is made in
-a real LiveKit project; a participant joins it under Egma's name and
+a real LiveKit project; a participant joins it under egma's name and
 registers the two methods of the exchange; the agent joins it, is made
 mockable, and is started with a real ``session.start(room=…)``; a real
 model is asked a question and calls the tool.
@@ -149,7 +149,7 @@ class ReceptionAgent(Agent):
 
 
 class EgmaInTheRoom:
-    """Egma's participant: the two methods, and what they were asked.
+    """egma's participant: the two methods, and what they were asked.
 
     Small on purpose. What this stands in for is a participant that
     registers the exchange and answers it — the same two method names
@@ -165,7 +165,7 @@ class EgmaInTheRoom:
     async def join(self, room_name: str) -> None:
         # Connected first, then the methods. A room has no local
         # participant to register anything on until it is in one — and
-        # Egma's own driver registers in this same order, the moment the
+        # egma's own driver registers in this same order, the moment the
         # room is joined, which is still before the agent's worker is
         # asked for and so still before any census could arrive.
         await self.room.connect(LIVEKIT_URL, _token(room_name, EGMA_IDENTITY))
@@ -223,7 +223,7 @@ async def _each(*teardowns: Coroutine) -> None:
 
 
 def _metadata() -> str:
-    """The dispatch metadata Egma really sends, byte for byte in shape."""
+    """The dispatch metadata egma really sends, byte for byte in shape."""
     return json.dumps(
         {
             "simulationId": A_SIMULATION,
@@ -257,7 +257,7 @@ async def test_livekit_still_honours_the_couriers_this_sdk_registers():
 
     try:
         await lkapi.room.create_room(api.CreateRoomRequest(name=room_name))
-        # Egma first, and that ordering is the real one: the participant
+        # egma first, and that ordering is the real one: the participant
         # registers the exchange before the agent's worker is dispatched,
         # so a census sent at session start always has somebody to reach.
         await egma.join(room_name)
@@ -298,11 +298,11 @@ async def test_livekit_still_honours_the_couriers_this_sdk_registers():
             lkapi.aclose(),
         )
 
-    # The call reached Egma over the room, with the arguments the model
+    # The call reached egma over the room, with the arguments the model
     # sent — which is the copied signature surviving the framework's own
     # trimming, on the real path this time.
     calls = egma.asked_for(seam.TOOL_METHOD)
-    assert calls, "no tool call reached Egma; the courier was never consulted"
+    assert calls, "no tool call reached egma; the courier was never consulted"
     assert calls[0]["name"] == "check_calendar"
     assert "day" in calls[0].get("arguments", {})
 

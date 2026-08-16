@@ -2,13 +2,13 @@
  * Where the Retell key is, and everywhere it is not.
  *
  * The promise made at the moment a developer pastes it is one sentence long:
- * it is sent to Egma, stored encrypted, and never lands in a file here. This
+ * it is sent to egma, stored encrypted, and never lands in a file here. This
  * file is that sentence held against a whole run — every file the run touched,
  * every line it printed, every request it made, and the machine's own process
  * table while it was running.
  *
  * The two places the key is allowed to be are named on purpose: a header to
- * Retell, and a body to Egma that seals it. Anywhere else is a leak, and a leak
+ * Retell, and a body to egma that seals it. Anywhere else is a leak, and a leak
  * of a live provider credential is not the kind of bug you find later.
  */
 
@@ -173,22 +173,22 @@ describe("a whole run, swept afterwards", () => {
     expect(JSON.stringify(ui.record)).not.toContain(KEY);
     expect(JSON.stringify(report)).not.toContain(KEY);
 
-    // No file anywhere under the folder Egma worked in — the repository, the
-    // Egma folder, the coding agent's own report.
+    // No file anywhere under the folder egma worked in — the repository, the
+    // egma folder, the coding agent's own report.
     for (const name of await filesUnder(workspace.dir)) {
       const held = await readFile(path.join(workspace.dir, name), "utf8").catch(() => "");
       expect(held, `${name} holds the key`).not.toContain(KEY);
     }
 
-    // Not in what this machine holds for Egma, which is a different key.
+    // Not in what this machine holds for egma, which is a different key.
     expect(await readFile(workspace.credentialsFile, "utf8")).not.toContain(KEY);
 
-    // Not in the coding agent's own output, which Egma keeps whole.
+    // Not in the coding agent's own output, which egma keeps whole.
     const logFile = ui.record.drivenAgentLog as string;
     try {
       const kept = await readFile(logFile, "utf8").catch(() => "");
       expect(kept).not.toContain(KEY);
-      // The task Egma sent the coding agent never mentioned it either.
+      // The task egma sent the coding agent never mentioned it either.
       const sent = JSON.parse(
         await readFile(path.join(workspace.dir, "fake-agent-report.json"), "utf8"),
       ) as { instructions: string[] };
@@ -209,12 +209,12 @@ describe("a whole run, swept afterwards", () => {
       expect(asked.path).not.toContain(KEY);
     }
 
-    // At Egma it is in one body, which is sealed, and in no address.
+    // At egma it is in one body, which is sealed, and in no address.
     for (const record of platform.records) {
       expect(record.path).not.toContain(KEY);
     }
 
-    // And nothing that comes back out of Egma carries it.
+    // And nothing that comes back out of egma carries it.
     const key = platform.device.keys[0] as string;
     const read = await fetch(
       `${platform.url}/api/agents/${platform.registered.agents[0]?.id ?? ""}`,

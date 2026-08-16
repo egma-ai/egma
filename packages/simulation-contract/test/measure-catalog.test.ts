@@ -200,7 +200,7 @@ describe("how each measure is computed from the spans", () => {
   });
 
   /**
-   * **Narrower than the catalog, deliberately.** A measure Egma records
+   * **Narrower than the catalog, deliberately.** A measure egma records
    * somewhere other than the trace is a real number in the wrong place for a
    * grader: reading a conversation would never find it, so a copy naming one
    * would be `skipped` forever — green, silent and wrong.
@@ -253,7 +253,7 @@ describe("the aggregations a threshold may ask", () => {
     }
   });
 
-  it("refuse a reduction Egma does not know, whatever the measure", () => {
+  it("refuse a reduction egma does not know, whatever the measure", () => {
     expect(measureAccepts("turn_response_latency", "p42")).toBe(false);
   });
 });

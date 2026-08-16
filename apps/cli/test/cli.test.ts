@@ -1,5 +1,5 @@
 /**
- * `Egma` as a developer runs it: the built entry point, in a real subprocess.
+ * `egma` as a developer runs it: the built entry point, in a real subprocess.
  */
 
 import { execFile, spawn } from "node:child_process";
@@ -30,7 +30,7 @@ let platform: Platform;
  *
  * `--url` on every invocation rather than a shell that names one once: a flag
  * on the command is the only way to name a platform, so a check that reached
- * this one any other way would be checking something Egma does not offer.
+ * this one any other way would be checking something egma does not offer.
  */
 async function egma(
   args: readonly string[],
@@ -49,7 +49,7 @@ async function egma(
   }
 }
 
-describe("the Egma command", () => {
+describe("the egma command", () => {
   let workspace: Workspace;
 
   beforeEach(async () => {
@@ -108,12 +108,12 @@ describe("the Egma command", () => {
 
     // The test seams are not product surface, so neither is offered: not the
     // one that starts a scripted coding agent, and not the one that stands an
-    // address in for Egma's own.
+    // address in for egma's own.
     expect(help.stdout).not.toContain("-- <command>");
     expect(help.stdout).not.toContain("EGMA_TEST_DEFAULT_URL");
 
     // One explicit way to name a platform, and it is offered as one. The
-    // whole-shell variable that used to sit beside it is a setting Egma no
+    // whole-shell variable that used to sit beside it is a setting egma no
     // longer has, and offering a setting that does nothing is worse than
     // offering none.
     expect(help.stdout).toContain("--url <address>");
@@ -138,7 +138,7 @@ describe("the Egma command", () => {
   });
 
   it("refuses to run the wizard where there is no terminal to agree in", async () => {
-    // Not a terminal: this is `npx Egma | tee log`, where the keystroke that
+    // Not a terminal: this is `npx egma | tee log`, where the keystroke that
     // means yes can never be pressed.
     const result = await egma(["--cwd", workspace.dir], workspace);
 

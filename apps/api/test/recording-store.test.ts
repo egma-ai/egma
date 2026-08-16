@@ -28,7 +28,7 @@ import { request as ask, signUp } from "./support/traces.ts";
  * - a link signed for a different address is refused, which is the failure the
  *   browser-address setting exists to prevent and the reason it exists at all;
  * - a link whose moment has passed is refused, so "the link expires" is the
- *   store's promise rather than Egma's claim about it;
+ *   store's promise rather than egma's claim about it;
  * - and the control plane's credential **cannot write**, which is why it is a
  *   separate credential from the simulator's in the first place.
  *

@@ -1,7 +1,7 @@
 /**
  * The folder and the file format, checked where they are decided.
  *
- * Everything here is about bytes. The folder is committed, so what Egma writes
+ * Everything here is about bytes. The folder is committed, so what egma writes
  * into it turns up in somebody's diff; and `pull` straight after `push` has to
  * change nothing, which is a promise about the serializer rather than about the
  * two verbs. Both are cheaper to hold here than through a subprocess.
@@ -143,14 +143,14 @@ describe("the test file format", () => {
       "The agent never promises a date.",
     ]);
 
-    // And once Egma has written it, it is in Egma's shape and stays there.
+    // And once egma has written it, it is in egma's shape and stays there.
     const written = serializeTestFile(test);
     expect(written).toContain("## Scenario");
     expect(written).toContain("## Expected behaviors");
     expect(serializeTestFile(parseTestFile(written, "refund.md", "x"))).toBe(written);
   });
 
-  it("reads a test with nothing to check, so that Egma can be the one to refuse it", () => {
+  it("reads a test with nothing to check, so that egma can be the one to refuse it", () => {
     const empty = ["---", "name: unfalsifiable", "---", "## Scenario", "Something happens.", "## Expected behaviors", ""].join(
       "\n",
     );
@@ -184,13 +184,13 @@ describe("the test file format", () => {
    * word in a script that is not this one. Two promises are held for every one
    * of them, and they are different promises:
    *
-   * - **what Egma writes reads back as what Egma wrote.** Whatever shape the
-   *   value arrived in, the file Egma wrote is a fixed point — writing it,
+   * - **what egma writes reads back as what egma wrote.** Whatever shape the
+   *   value arrived in, the file egma wrote is a fixed point — writing it,
    *   reading it and writing it again changes nothing. This is the promise
    *   `pull` straight after `push` depends on.
    * - **content survives the trip**, wherever the format has room for it.
    *   Where it has none — a statement with a line break in it, when the list
-   *   holds one statement per line — Egma writes the nearest shape the format
+   *   holds one statement per line — egma writes the nearest shape the format
    *   does have rather than bytes that would read as something else.
    */
   describe("content that is awkward and entirely allowed", () => {
@@ -307,11 +307,11 @@ describe("the test file format", () => {
     });
 
     /**
-     * Values the format has no room for, and the shape Egma writes instead.
+     * Values the format has no room for, and the shape egma writes instead.
      *
      * The list holds one statement per line and the prose is the block between
      * two headings, so a statement carrying a line break and prose wrapped in
-     * blank space cannot be written as they stand. What Egma writes is the
+     * blank space cannot be written as they stand. What egma writes is the
      * nearest shape the format has, and reading it gives that shape back.
      */
     const shaped: readonly (readonly [string, TestFile, TestFile])[] = [
@@ -425,7 +425,7 @@ describe("the egma folder", () => {
     expect(deletions).toHaveLength(5);
 
     // **And in that order.** Deleting the platform block is what unbinds the
-    // repository, and an unbound repository falls back to Egma's own platform
+    // repository, and an unbound repository falls back to egma's own platform
     // — so a list that named it first would have somebody working top-down
     // arrive, one line in, at a repository still holding another platform's
     // identifiers and nothing left to keep them there. Identifiers and pins
@@ -505,7 +505,7 @@ describe("the egma folder", () => {
     );
   });
 
-  it("names all three even when Egma has registered none of them", async () => {
+  it("names all three even when egma has registered none of them", async () => {
     const folder = await createEgmaFolder({ repository: workspace.dir });
     const written = await readFile(folder.paths.config, "utf8");
 
@@ -565,7 +565,7 @@ describe("the egma folder", () => {
     expect(await readFile(again.paths.config, "utf8")).toBe(before);
   });
 
-  it("writes an id beside a name once Egma has registered one", async () => {
+  it("writes an id beside a name once egma has registered one", async () => {
     const folder = await createEgmaFolder({
       repository: workspace.dir,
       config: {
@@ -598,7 +598,7 @@ describe("the egma folder", () => {
 
   /**
    * A person edits this file, and a person does not spell an origin the way
-   * Egma spells one.
+   * egma spells one.
    *
    * Every one of these names the same platform. Read as written, they name a
    * platform that disagrees with itself — and the refusal a developer then
@@ -620,7 +620,7 @@ describe("the egma folder", () => {
       expect(config.platform?.origin, written).toBe("https://egma.acme.example");
     }
 
-    // And a line Egma cannot make sense of is left exactly as it was written:
+    // And a line egma cannot make sense of is left exactly as it was written:
     // it is refused by name at the edge that takes addresses, and rewriting it
     // here would hide which line in the file is the wrong one.
     expect(
@@ -687,7 +687,7 @@ describe("the egma folder", () => {
       "---\nname: half-written\npersonas: [never-closed\n---\n## Scenario\nx\n",
       "utf8",
     );
-    // A directory that happens to end in `.md` is a file Egma cannot read too.
+    // A directory that happens to end in `.md` is a file egma cannot read too.
     await mkdir(path.join(folder.paths.tests, "a-folder.md"), { recursive: true });
 
     const read = await readFolder(folder.paths);

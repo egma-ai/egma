@@ -149,7 +149,7 @@ describe("who may hear a recording", () => {
       String(RECORDING_LINK_SECONDS),
     );
 
-    // And Egma's copy of it, which is what lets a page tell "the link went
+    // And egma's copy of it, which is what lets a page tell "the link went
     // stale" from "the recording is gone" and ask again rather than leaving
     // somebody looking at a scrubber that stopped working.
     const expiresAt = Date.parse(String(resolved.body.expires_at));

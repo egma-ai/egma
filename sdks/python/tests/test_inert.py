@@ -7,9 +7,9 @@ can install it and have their production behavior be literally
 unchanged, so this file comes first and is read as the whole safety
 argument.
 
-Every way of not finding Egma ends here the same way, and that is on
+Every way of not finding egma ends here the same way, and that is on
 purpose: metadata that is absent, empty, somebody else's, unparseable, or
-Egma's own in a version this SDK does not speak. The differences between
+egma's own in a version this SDK does not speak. The differences between
 those are differences about the *room*; about what this SDK should do
 they all say one thing.
 """
@@ -28,8 +28,8 @@ NO_EGMA = [
     pytest.param('{"tenant":"acme","shift":"nights"}', id="the customer's own"),
     pytest.param("not json at all", id="metadata that is not json"),
     pytest.param('"a string"', id="json that is not an object"),
-    pytest.param('{"egmaIdentity":""}', id="an Egma name that names nobody"),
-    pytest.param('{"egmaIdentity":42}', id="an Egma name that is not a name"),
+    pytest.param('{"egmaIdentity":""}', id="an egma name that names nobody"),
+    pytest.param('{"egmaIdentity":42}', id="an egma name that is not a name"),
 ]
 
 
@@ -52,7 +52,7 @@ async def test_a_room_with_no_egma_in_it_is_left_alone(metadata, session):
     assert couriers_on(session, agent) == {}
 
     # And nothing was said. This is the assertion that would catch an SDK
-    # which discovered Egma's absence by asking — a call that costs a
+    # which discovered egma's absence by asking — a call that costs a
     # production room a round trip on every session start.
     assert room.asked == []
 
@@ -85,11 +85,11 @@ async def test_a_version_this_sdk_cannot_read_wraps_nothing(session, declared):
 
 
 async def test_a_version_neither_side_speaks_wraps_nothing(session, caplog):
-    """Egma is there, and this SDK does not speak its exchange.
+    """egma is there, and this SDK does not speak its exchange.
 
     Nothing is wrapped, so every tool runs its own implementation — the
-    same place the absent-Egma path lands, reached from the other
-    direction. It is said at error level because, unlike an absent Egma,
+    same place the absent-egma path lands, reached from the other
+    direction. It is said at error level because, unlike an absent egma,
     this one is a fault somebody must fix: a simulation ran unisolated.
     """
     agent = ReceptionAgent()
@@ -110,7 +110,7 @@ async def test_a_version_neither_side_speaks_wraps_nothing(session, caplog):
 async def test_an_agent_with_no_tools_still_reports_and_wraps_nothing(session):
     """The census is sent even when it is empty.
 
-    An agent with no tools is a fact Egma wants on the record — it is how
+    An agent with no tools is a fact egma wants on the record — it is how
     the coverage stamp can say "nothing was covered because there was
     nothing to cover" rather than staying silent.
     """

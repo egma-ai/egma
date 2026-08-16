@@ -290,10 +290,10 @@ describe("one conversation's measures", () => {
   });
 
   /**
-   * The door recognises Egma's vocabulary by the emitting scope and files those
+   * The door recognises egma's vocabulary by the emitting scope and files those
    * spans as `timing`. A provider's own span that happens to share a measure's
    * name is not a measurement, and reading the name alone would let another
-   * framework's bookkeeping become a number Egma judges an agent against.
+   * framework's bookkeeping become a number egma judges an agent against.
    */
   it("ignores a span named for a measure that the door did not file as timing", async () => {
     const id = traceId();
@@ -316,7 +316,7 @@ describe("one conversation's measures", () => {
 
 /**
  * **The claim the whole module exists for.** The same spans are filed twice —
- * once as a conversation Egma conducted, once as a real caller's — and the
+ * once as a conversation egma conducted, once as a real caller's — and the
  * numbers come out identical, because nothing in the computation can see which
  * is which.
  */

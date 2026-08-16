@@ -47,7 +47,7 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   connection: "con",
   grader: "grd",
   // The shelf of grader definitions. The one table below the tenancy tables
-  // whose organization and project are both nullable — null means Egma owns
+  // whose organization and project are both nullable — null means egma owns
   // the entry — so its identity is its own rather than somebody's key, and the
   // nullable pair is asserted on its own below.
   grader_library: "grl",
@@ -201,7 +201,7 @@ describe("every table", () => {
     }
   });
 
-  it("pins a prefix that is one of the ones Egma mints", () => {
+  it("pins a prefix that is one of the ones egma mints", () => {
     const pinned = checks
       .map((check) => /\^([a-z]+)_\[0-9A-HJKMNP-TV-Z\]\{26\}\$/.exec(check.definition))
       .filter((match) => match !== null)
@@ -289,7 +289,7 @@ describe("the simulation's test pin", () => {
  * Every other table below the tenancy tables carries a `not null`
  * `organization_id`, because a row belonging to nobody is a row no permission
  * can describe. On the grader library, belonging to nobody is a real state:
- * **null tenancy means Egma owns the entry**, which is what a predefined grader
+ * **null tenancy means egma owns the entry**, which is what a predefined grader
  * is, and it is where the Owner label is derived from. It is asserted here
  * rather than only in that table's own tests because it is a structural claim
  * about the whole schema — and because an exception nothing watches is an
@@ -302,7 +302,7 @@ describe("the grader library's nullable tenancy", () => {
         column.table_name === "grader_library" && column.column_name === name,
     );
 
-  it("is two identifier columns, both nullable, because Egma owns entries too", () => {
+  it("is two identifier columns, both nullable, because egma owns entries too", () => {
     for (const name of ["organization_id", "project_id"]) {
       const live = tenancy(name);
       expect(live, `grader_library.${name}`).toBeDefined();
@@ -317,7 +317,7 @@ describe("the grader library's nullable tenancy", () => {
    *
    * A device code's null is **not yet**: a terminal that has not been aimed at
    * anything, filled in the moment somebody approves it. The library's is
-   * **never**, and permanently — the entry belongs to Egma, and that is the
+   * **never**, and permanently — the entry belongs to egma, and that is the
    * state the Owner column reads. A third table appearing in this list is
    * somebody choosing one of those two meanings, which is a decision worth
    * making on purpose rather than by leaving a `notNull` off.

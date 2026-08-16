@@ -95,7 +95,7 @@ describe("a project that configured no judge", () => {
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       // `errored`, deliberately not `skipped`: the check applies perfectly well
-      // and Egma did not make it. A page going green because a judge was never
+      // and egma did not make it. A page going green because a judge was never
       // configured is the exact false trust this product exists to kill.
       expect(row.verdict).toBe("errored");
       expect(row.rationale).toContain("configured no judge");

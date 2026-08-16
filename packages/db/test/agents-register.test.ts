@@ -82,7 +82,7 @@ describe("two identical registrations arriving together", () => {
    * The retry a coding agent makes after an uncertain network failure, in its
    * worst shape: the first request is still in flight when the second starts.
    * Both transactions are real and both run at once — the guarantee under test
-   * is the lock and the read behind it, not Egma's arithmetic.
+   * is the lock and the read behind it, not egma's arithmetic.
    */
   it("settle to one agent, and none of them loses to the name index", async () => {
     const racing = await Promise.all(
@@ -150,7 +150,7 @@ describe("a registration naming no connection", () => {
 
 describe("a connection type with no reuse key", () => {
   /**
-   * A phone number is where Egma dials, not who answers, and two agents may
+   * A phone number is where egma dials, not who answers, and two agents may
    * share one — so the type declares no reuse key and registering the same
    * number twice registers twice. The name check is what catches the duplicate
    * that was a mistake.

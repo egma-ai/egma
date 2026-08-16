@@ -15,11 +15,11 @@
  * number this check can name.
  *
  * **What is asserted is what a developer could check afterwards** — which agent
- * and which connection are on Egma, which tests are there and at which frozen
+ * and which connection are on egma, which tests are there and at which frozen
  * versions, which files are in the repository and what they pin, which run is
  * going and over what, what the offer wrote (nothing), and the block left in
- * the terminal. Nothing here asserts the order Egma did any of it in: that is
- * Egma's business, and a check that pinned it would have to be rewritten every
+ * the terminal. Nothing here asserts the order egma did any of it in: that is
+ * egma's business, and a check that pinned it would have to be rewritten every
  * time a step moved.
  */
 
@@ -264,13 +264,13 @@ describe("the whole walk, offline", () => {
       "Nothing was installed. Claude Code can still drive Egma — tell it to run egma --help.",
     );
 
-    /* this machine is signed in, and to this Egma */
+    /* this machine is signed in, and to this egma */
 
     const held = await readCredentials(workspace.credentialsFile, platform.url);
     expect(held?.url).toBe(platform.url);
     expect(platform.device.keys).toContain(held?.key ?? "");
 
-    /* the agent and the way to reach it are on Egma */
+    /* the agent and the way to reach it are on egma */
 
     expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
     const connection = platform.registered.connections[0];
@@ -285,14 +285,14 @@ describe("the whole walk, offline", () => {
       name: "retell-1",
       config: { retellAgentId: RETELL_AGENT_ID },
     });
-    // The key reached Egma, and only its last characters ever came back.
+    // The key reached egma, and only its last characters ever came back.
     expect(connection?.credentialsHint).toBe(KEY.slice(-4));
     expect(platform.registered.sealed).toContain(KEY);
-    // And what Retell is running stayed at Retell: nothing Egma wrote holds a
+    // And what Retell is running stayed at Retell: nothing egma wrote holds a
     // copy of it, because a copy would go stale from the moment it landed.
     expect(platform.registered.agents[0]).not.toHaveProperty("pulled");
 
-    /* the tests are on Egma, every one of them a frozen version */
+    /* the tests are on egma, every one of them a frozen version */
 
     expect(platform.tests.tests).toHaveLength(SUITE_SIZE);
     expect(platform.tests.tests.map((test) => test.name).sort()).toEqual([...names].sort());
@@ -359,7 +359,7 @@ describe("the whole walk, offline", () => {
       expect(test.expectedBehaviors.length, name).toBeGreaterThan(0);
     }
 
-    // The folder's config names what Egma registered, so a second developer
+    // The folder's config names what egma registered, so a second developer
     // cloning this repository lands on the same agent.
     const config = await readConfig(path.join(workspace.dir, "egma", "config.yaml"));
     expect(config.platform).toEqual({
@@ -378,7 +378,7 @@ describe("the whole walk, offline", () => {
 
     /* nobody was asked anything they had not already answered */
 
-    // What Egma worked out for itself before it asked anything, which is what
+    // What egma worked out for itself before it asked anything, which is what
     // fills the screen while the developer is away in a browser.
     expect(ui.record.detection).toEqual({
       drivenAgentName: "Fake Agent",
@@ -391,7 +391,7 @@ describe("the whole walk, offline", () => {
     expect(ui.record.gate?.rows).toHaveLength(SUITE_SIZE);
     // One agent on the account is not a choice, so the choice never opened.
     expect(ui.record.agentChoices).toEqual([]);
-    // And the repository is otherwise exactly as it was: Egma wrote its own
+    // And the repository is otherwise exactly as it was: egma wrote its own
     // folder and touched nothing else the fixture repository ships.
     expect(await filesUnder(path.join(workspace.dir, "src"))).toEqual([
       "config.ts",

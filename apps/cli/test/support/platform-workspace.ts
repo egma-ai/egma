@@ -210,7 +210,7 @@ export type PlatformWorkspace = {
   dockerCalls(): Promise<string>;
   /** The workspace's bootstrap variables, whether or not the file exists yet. */
   readonly configFile: string;
-  /** What Egma wrote there, as names and values. */
+  /** What egma wrote there, as names and values. */
   storedConfig(): Promise<Record<string, string>>;
   /**
    * Where this run's keys live, so that a check never reads or writes the

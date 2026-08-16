@@ -265,7 +265,7 @@ describe("what a stored kind is called where somebody reads it", () => {
 
   /**
    * Named ahead of a provider that emits it. LiveKit puts what was heard on the
-   * turn itself, so nothing Egma has met sends this kind — and the first
+   * turn itself, so nothing egma has met sends this kind — and the first
    * framework that does should meet a word rather than **Other**.
    */
   it("already has a word for the recognition step nobody sends yet", () => {
@@ -275,7 +275,7 @@ describe("what a stored kind is called where somebody reads it", () => {
   /**
    * Span coverage is not uniform across providers, and the vocabulary grows one
    * framework at a time. A page that hid what it could not classify would
-   * under-report exactly the frameworks Egma has not met yet, so an unknown
+   * under-report exactly the frameworks egma has not met yet, so an unknown
    * kind renders as something rather than as nothing.
    */
   it("still names a kind it has never seen", () => {
@@ -302,7 +302,7 @@ describe("what a stored kind is called where somebody reads it", () => {
  * the version the conversation was executed against. So the heading is the
  * sentence somebody wrote wherever there is one — and the key itself wherever
  * there is not, because a key that could not be placed says exactly as much as
- * Egma knows, and a plausible wrong sentence would say more than it knows.
+ * egma knows, and a plausible wrong sentence would say more than it knows.
  */
 describe("the heading a judgment carries", () => {
   function judged(overrides: Partial<Judgment> = {}): Judgment {
@@ -341,8 +341,8 @@ describe("the heading a judgment carries", () => {
  *
  * A step on this page can carry audio the agent's **own telemetry** attached to
  * it — somebody else's file, at somebody else's address. Beside it now sits
- * Egma's own recording of the exchange, both channels, measured off the line
- * Egma drove. Hearing one while believing it is the other is a wrong conclusion
+ * egma's own recording of the exchange, both channels, measured off the line
+ * egma drove. Hearing one while believing it is the other is a wrong conclusion
  * about a production agent, so the rule is that neither is ever called just
  * "audio": every label that names audio names whose it is.
  */

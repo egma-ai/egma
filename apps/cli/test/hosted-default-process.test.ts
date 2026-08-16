@@ -2,7 +2,7 @@
  * The bare command, as a developer with nothing configured really types it.
  *
  * No `--url` and no platform in the committed folder: the last step of
- * resolution is Egma's own platform, and this is the check that proves it
+ * resolution is egma's own platform, and this is the check that proves it
  * the way it is run — the built CLI as its own process, against a platform
  * standing where the built-in address is. Proving it only inside the resolver
  * would leave the one thing a developer meets — typing `npx @egma/cli` and
@@ -48,7 +48,7 @@ vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 type Ended = { readonly stdout: string; readonly stderr: string; readonly code: number };
 
 describe("a repository that names no platform", () => {
-  /** The platform standing where Egma's own address is. */
+  /** The platform standing where egma's own address is. */
   let own: Platform;
   /** A second platform, which must never see a request. */
   let elsewhere: Platform;
@@ -124,7 +124,7 @@ describe("a repository that names no platform", () => {
    * The whole walk, from a folder with nothing in it, on the platform nobody
    * named. It is the claim the published package's front page makes.
    */
-  it("takes the bare command through the whole walk on Egma's own platform", async () => {
+  it("takes the bare command through the whole walk on egma's own platform", async () => {
     const workspace = await makeWorkspace();
     try {
       await workspace.signIn(own.url, PLATFORM_KEY);
@@ -176,7 +176,7 @@ describe("a repository that names no platform", () => {
       expect(walked.code, walked.stderr).toBe(0);
       expect(walked.stdout).toMatch(/^first-verdict: /mu);
 
-      // Which Egma, said as one plain line in the same place in the walk the
+      // Which egma, said as one plain line in the same place in the walk the
       // wizard's first screen says it: before the login, and before anything
       // this repository owns has moved.
       const named = walked.stdout.indexOf(`url: ${own.url}`);
@@ -257,13 +257,13 @@ describe("a repository that names no platform", () => {
       // `run` is the one verb that cannot be asked this question with nothing
       // in the folder: it needs the agent and connection ids, and those are
       // only ever written by `connect`, which binds before it writes them. So
-      // an unbound repository that `run` could run in is not a state Egma can
+      // an unbound repository that `run` could run in is not a state egma can
       // produce — taking the platform block back out here would leave the
       // half-moved folder, which is refused on purpose by the check below.
       //
       // What is proven instead is the same claim from the other side: `connect`
       // reached the built-in address with nothing naming one, and bound this
-      // repository to what answered there, so `run` goes to that same Egma.
+      // repository to what answered there, so `run` goes to that same egma.
       expect((await readConfig(paths.config)).platform).toEqual({
         origin: own.url,
         instance: own.instanceId,
@@ -284,7 +284,7 @@ describe("a repository that names no platform", () => {
    * refusal names it, says nothing was sent, and answers with the number every
    * other unreachable platform answers with.
    */
-  it("refuses by name when Egma's own platform does not answer", async () => {
+  it("refuses by name when egma's own platform does not answer", async () => {
     const workspace = await makeWorkspace();
     try {
       // The stand-in every workspace uses by default is a closed port.
@@ -318,7 +318,7 @@ describe("a repository that names no platform", () => {
     }
   });
 
-  /** Both deliberate places still win, in their order, over Egma's own. */
+  /** Both deliberate places still win, in their order, over egma's own. */
   it("keeps every step above it winning", async () => {
     const workspace = await makeWorkspace();
     try {
@@ -404,7 +404,7 @@ describe("a repository that names no platform", () => {
   });
 
   /**
-   * Egma's own instructions, followed the way they are written.
+   * egma's own instructions, followed the way they are written.
    *
    * The refusal that keeps a bound repository where it belongs ends with a list
    * of lines to delete, and a developer — or the coding agent reading it out of
@@ -412,10 +412,10 @@ describe("a repository that names no platform", () => {
    * down is a real repository somebody runs a command in.
    *
    * Deleting the platform block is the line that unbinds the repository, and an
-   * unbound repository falls back to Egma's own platform. So if that line came
-   * first, applying Egma's own list top-down would leave, after one edit, a
+   * unbound repository falls back to egma's own platform. So if that line came
+   * first, applying egma's own list top-down would leave, after one edit, a
    * repository with no binding and every other platform's identifiers still
-   * committed — and the next command would carry them to hosted Egma. That is
+   * committed — and the next command would carry them to hosted egma. That is
    * why it is last, and this is the check that keeps it there: the list is
    * driven in its own order, and nothing may reach the built-in address until
    * the last line has been applied and there is nothing left to leak.
@@ -446,7 +446,7 @@ describe("a repository that names no platform", () => {
         mockTools: [],
       });
 
-      /** One line of Egma's list, and the edit it asks for. */
+      /** One line of egma's list, and the edit it asks for. */
       const deletions: readonly {
         readonly mentions: string;
         readonly apply: () => Promise<void>;
@@ -516,13 +516,13 @@ describe("a repository that names no platform", () => {
         expect(pulled.code, `${line}: ${pulled.stderr}`).toBe(0);
         if (last) {
           // The list is applied. Nothing in the folder belongs to the old
-          // platform any more, so the repository is free to reach Egma's own —
+          // platform any more, so the repository is free to reach egma's own —
           // which is the whole point of doing the deletions.
           expect(pulled.stdout).toContain(`url: ${own.url}`);
           expect(reached.map((request) => request.path)).toContain("/api/platform");
         } else {
           // Part way down the list, and still bound. Every command still goes
-          // to the platform that issued these identifiers, and Egma's own
+          // to the platform that issued these identifiers, and egma's own
           // address is not asked so much as who it is.
           expect(pulled.stdout, line).toContain(`url: ${elsewhere.url}`);
           expect(reached, line).toEqual([]);
@@ -539,14 +539,14 @@ describe("a repository that names no platform", () => {
    * Deleting the platform block is one edit; deleting the identifiers it was
    * keeping in place is four more. In between, the repository names no platform
    * and still holds every identifier the old one issued — and the step below
-   * "names nothing" is now Egma's own platform. Without this refusal the next
-   * command carries somebody else's identifiers to hosted Egma, which is the
+   * "names nothing" is now egma's own platform. Without this refusal the next
+   * command carries somebody else's identifiers to hosted egma, which is the
    * one thing ADR-0008 exists to stop.
    *
    * It is refused on what is already on this machine, so no address is asked so
    * much as who it is — and it is refused **whichever of the three places named
    * that address.** The deleted line is the one that said which platform these
-   * identifiers belong to, so once it is gone there is nowhere Egma can safely
+   * identifiers belong to, so once it is gone there is nowhere egma can safely
    * send them, including somewhere a developer typed. `--url` is not an escape
    * from this; it is the flag somebody reaches for in the middle of the move.
    */
@@ -599,7 +599,7 @@ describe("a repository that names no platform", () => {
           "To move this repository to another platform, delete these in this order and run egma again:",
         );
 
-        // Nothing reached the address Egma would have used, and nothing reached
+        // Nothing reached the address egma would have used, and nothing reached
         // the platform the identifiers came from either.
         expect(own.records.slice(before), how).toEqual([]);
         expect(elsewhere.records.slice(elsewhereBefore), how).toEqual([]);
@@ -609,7 +609,7 @@ describe("a repository that names no platform", () => {
     }
 
     // The first way out: the block put back. It is a committed line, so this is
-    // recovering a file from history rather than knowing something Egma hid.
+    // recovering a file from history rather than knowing something egma hid.
     const restored = await halfMoved();
     try {
       await updateConfig(folderPathsIn(restored.dir).config, {
@@ -644,9 +644,9 @@ describe("a repository that names no platform", () => {
   /**
    * The rule the whole binding exists for, now that there is something to fall
    * back to: a repository that named its platform is never quietly moved to
-   * Egma's own, whatever is wrong with the one it named.
+   * egma's own, whatever is wrong with the one it named.
    */
-  it("never falls back to Egma's own from a repository that is bound", async () => {
+  it("never falls back to egma's own from a repository that is bound", async () => {
     const workspace = await makeWorkspace();
     try {
       await workspace.signIn(own.url, PLATFORM_KEY);
@@ -668,7 +668,7 @@ describe("a repository that names no platform", () => {
       expect(refused.stdout).toContain("status: unreachable");
       expect(refused.stderr).toContain(closed);
       expect(refused.stderr).toContain("no repository identifiers were sent");
-      // The platform standing where Egma's own address is saw nothing at all.
+      // The platform standing where egma's own address is saw nothing at all.
       expect(own.records.slice(before)).toEqual([]);
     } finally {
       await workspace.remove();

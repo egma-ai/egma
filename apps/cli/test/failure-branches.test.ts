@@ -3,12 +3,12 @@
  *
  * They are first-class here rather than an afterthought, because a wizard is
  * judged on what it does when the machine is cold, the key is wrong, the
- * repository is the wrong one, or Egma cannot do the thing the developer is
+ * repository is the wrong one, or egma cannot do the thing the developer is
  * about to be charged for.
  *
  * What is asserted is what the developer is left with — the line in their
  * scrollback, the number the shell gets, and whether they were asked the same
- * question twice. Not the order Egma tried things in.
+ * question twice. Not the order egma tried things in.
  */
 
 import { spawn } from "node:child_process";
@@ -168,8 +168,8 @@ describe("no coding agent on this machine", () => {
       child.on("close", (code) => resolve({ stdout, code: code ?? 1 }));
     });
 
-    // Egma did everything it could, so this is the run finishing rather than
-    // failing — and the developer has words that work without Egma at all.
+    // egma did everything it could, so this is the run finishing rather than
+    // failing — and the developer has words that work without egma at all.
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Open the coding agent you use, and paste this into it:");
     expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(
@@ -219,14 +219,14 @@ describe("no voice agent anywhere", () => {
 
     const { ui, report } = await walkWith({ script });
 
-    // Asked once, and only once: a second question would be Egma hoping.
+    // Asked once, and only once: a second question would be egma hoping.
     expect(ui.record.asked).toEqual(["prompts-pointer"]);
     expect(report).toEqual({ kind: "no-agent-context" });
     expect(buildExitLine(report)).toBe(
       "Egma found no voice agent to test. Run egma again where your agent is defined.",
     );
 
-    // Nothing was registered and no folder was made, because Egma never got as
+    // Nothing was registered and no folder was made, because egma never got as
     // far as knowing what it would have been for. The platform binding is
     // written at the last moment before this repository owns its first
     // platform-issued identifier, and that moment never arrived — so a walk
@@ -261,7 +261,7 @@ describe("a Retell key Retell will not take", () => {
   });
 });
 
-describe("a connection Egma has no adapter for", () => {
+describe("a connection egma has no adapter for", () => {
   it("prints the platform's refusal in the platform's own words", async () => {
     // The platform refuses the *run*, at creation, before a single simulation
     // is written: a run nothing can conduct must never be queued. Everything

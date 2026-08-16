@@ -5,14 +5,14 @@
  * platform, and that is where the branches of this behaviour are covered.
  * Fixture tests cover branches; this proves the one thing they cannot — that a
  * repository naming no platform, in a shell naming none either, reaches an
- * actual Egma platform with its own database and leaves real rows in it.
+ * actual egma platform with its own database and leaves real rows in it.
  *
  * That rule belongs to the platform-binding effort and applies here for the
  * same reason: the step being added is the one nobody typed, so the only honest
  * proof is the whole real thing, run the way a developer runs it.
  *
  * The address it reaches is a local instance, put in the built-in address's
- * place through `EGMA_TEST_DEFAULT_URL`. Nothing here dials hosted Egma.
+ * place through `EGMA_TEST_DEFAULT_URL`. Nothing here dials hosted egma.
  */
 
 import { spawn } from "node:child_process";

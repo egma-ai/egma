@@ -1,8 +1,8 @@
 /**
  * What every command does when this machine's keys file cannot be used.
  *
- * Egma refuses to write over a keys file it cannot read, which is right — a
- * damaged file can be repaired and one Egma has overwritten cannot. But a
+ * egma refuses to write over a keys file it cannot read, which is right — a
+ * damaged file can be repaired and one egma has overwritten cannot. But a
  * refusal only counts as a refusal if it reaches the developer. Reaching them
  * as an unhandled exception means a Node stack trace, a `[cause]` dump of the
  * JSON parser's own words, and exit 1 in place of the verb's own answer, which

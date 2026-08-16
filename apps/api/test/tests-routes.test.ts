@@ -537,7 +537,7 @@ describe("one frozen version", () => {
     });
   });
 
-  it("is not found for a version this Egma never issued", async () => {
+  it("is not found for a version this egma never issued", async () => {
     api = await createApi("tests_version_unknown");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const missing = newId("tstv");

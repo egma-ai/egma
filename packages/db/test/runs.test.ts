@@ -759,7 +759,7 @@ describe("resolving what a simulation was executed against", () => {
 
     /**
      * Every way a key cannot be placed comes back absent, and a reader shows
-     * the key. Inventing a sentence for any of these would be Egma being
+     * the key. Inventing a sentence for any of these would be egma being
      * confidently wrong about what it judged.
      */
     it("answers nothing rather than guessing, wherever it cannot say", async () => {
@@ -810,7 +810,7 @@ describe("resolving what a simulation was executed against", () => {
      * here.**
      *
      * Its keys are the measures its checks bound — `turn_response_latency` — and
-     * not the whole-grader key above, which is what an entry Egma cannot execute
+     * not the whole-grader key above, which is what an entry egma cannot execute
      * files under. A measure is already the name of the thing the judgment is
      * about, so there is nothing to resolve and this answers absent, which a
      * reader renders as the key itself: "Turn response latency".
@@ -1032,7 +1032,7 @@ describe("the lifecycle, conducted by a claimant", () => {
   });
 
   it("answers a heartbeat for a simulation beyond help with nothing under it", async () => {
-    // Unknown: an id this Egma never issued a row for.
+    // Unknown: an id this egma never issued a row for.
     expect(
       await recordSimulationHeartbeat({
         simulationId: newId("sim"),

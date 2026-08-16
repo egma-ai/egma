@@ -1,5 +1,5 @@
 /**
- * The fixture platform: Egma's public HTTP API, faked, for tests to run against.
+ * The fixture platform: egma's public HTTP API, faked, for tests to run against.
  *
  * The CLI speaks the public API and nothing else. That is the seam this stands
  * in at — so the whole of a flow runs in CI with no database, no browser and no

@@ -1,6 +1,6 @@
 /**
  * `egma login` as a coding agent runs it: the built command, in a real
- * subprocess, against a fixture of Egma's public HTTP API.
+ * subprocess, against a fixture of egma's public HTTP API.
  *
  * Nothing here is a terminal and nothing here answers a question, because the
  * whole promise of the verb is that neither is needed. What is asserted is the
@@ -81,7 +81,7 @@ describe("egma login", () => {
     expect(said.status).toBe("stored");
     expect(said.credentials).toBe(workspace.credentialsFile);
 
-    // The address Egma handed the browser is the address it printed.
+    // The address egma handed the browser is the address it printed.
     expect((await readFile(browser.opened, "utf8")).trim()).toBe(said.approve_url);
 
     // The key is on disk, and nobody else on the machine can read it.
@@ -179,7 +179,7 @@ describe("egma login", () => {
     await expect(readFile(workspace.credentialsFile, "utf8")).rejects.toThrow();
   });
 
-  it("answers 4 and names the address when Egma does not answer", async () => {
+  it("answers 4 and names the address when egma does not answer", async () => {
     // Nothing listens here, and the address is in the message rather than in a
     // stack trace.
     const result = await egma(["login", "--url", "http://127.0.0.1:1"]);
@@ -191,7 +191,7 @@ describe("egma login", () => {
     expect(result.stderr).toContain("127.0.0.1:1");
   });
 
-  it("answers 4 and says so in Egma's own words when Egma refuses", async () => {
+  it("answers 4 and says so in egma's own words when egma refuses", async () => {
     // A refusal is not a silence, and the help says so: 4 is both.
     platform.device.answerTokenWith(
       "invalid_grant",
@@ -213,7 +213,7 @@ describe("egma login", () => {
    * The words a terminal never says, held against every way a login can end.
    *
    * A new account is signed up in the browser page and gets everything it needs
-   * there. What Egma set up is never named out here — locked rule. The real
+   * there. What egma set up is never named out here — locked rule. The real
    * instance's own `error_description` says both words, so each refusal it can
    * answer with is played back through the fixture in its own words, and none
    * of them may reach a screen.
@@ -271,7 +271,7 @@ describe("egma login", () => {
     });
 
     for (const refusal of refusals) {
-      it(`when Egma answers ${refusal.named}`, async () => {
+      it(`when egma answers ${refusal.named}`, async () => {
         platform.device.answerTokenWith(refusal.error, refusal.said);
 
         const result = await egma(["login", "--url", platform.url]);
@@ -298,7 +298,7 @@ describe("egma login", () => {
     expect(help.stdout).toContain("--url <address>");
     expect(help.stdout).toContain("approve_url");
     expect(help.stdout).toContain("2 denied");
-    // 4 is both an Egma that never answered and one that said no, and the help
+    // 4 is both an egma that never answered and one that said no, and the help
     // says both rather than only the one that reads better.
     expect(help.stdout).toContain("4 Egma did not answer, or refused");
   });
@@ -306,7 +306,7 @@ describe("egma login", () => {
   it("names what a self-hoster sets, in the help", async () => {
     const help = await egma(["--help"]);
 
-    // Which Egma is said on the command and nowhere else, so the flag is the
+    // Which egma is said on the command and nowhere else, so the flag is the
     // whole of that half. What is left in the environment is where the key it
     // brings back is kept.
     expect(help.stdout).toContain("--url <address>");

@@ -64,7 +64,7 @@ export type TestApiOptions = {
    * real table.
    *
    * Absent by default, and absent is the honest default: a deployment nobody
-   * has configured is what every Egma is on its first morning, and a suite that
+   * has configured is what every egma is on its first morning, and a suite that
    * quietly started every instance phone-ready would never have noticed the run
    * door letting a phone run through.
    *
@@ -77,8 +77,8 @@ export type TestApiOptions = {
   readonly platformSettings?: Config["platformSettings"];
   /**
    * The object store recordings are resolved against. Absent by default, and
-   * absent is the honest default: an Egma nobody has pointed at a store is
-   * every Egma before somebody sets one up, and a suite that quietly configured
+   * absent is the honest default: an egma nobody has pointed at a store is
+   * every egma before somebody sets one up, and a suite that quietly configured
    * one everywhere would never notice the route failing to say which variable
    * is missing.
    */
@@ -177,11 +177,11 @@ export async function createApi(
     await seedPlatformSettings(options.platformSettings);
   }
 
-  // Egma's own graders, unconditionally — no option and no default, because
+  // egma's own graders, unconditionally — no option and no default, because
   // there is none in a real deployment either: the library is written from
-  // Egma's catalog on every boot, before the first request, with nothing for an
+  // egma's catalog on every boot, before the first request, with nothing for an
   // operator to configure. A test instance whose shelf were empty would be a
-  // shape no Egma is ever in.
+  // shape no egma is ever in.
   await seedGraderLibrary();
 
   const { app, identity } = buildApi({

@@ -373,7 +373,7 @@ describe("a persona that fails validation", () => {
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("is refused for a voice provider Egma does not know", async () => {
+  it("is refused for a voice provider egma does not know", async () => {
     const before = await rowCounts();
 
     await expect(

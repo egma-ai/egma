@@ -6,7 +6,7 @@ tests against the bytes rather than by an import. This is that test.
 The bytes are
 ``packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json``:
 the protocol version, both method names, the four refusal codes, both
-caps, and a canonical message for every shape either side sends. Egma's
+caps, and a canonical message for every shape either side sends. egma's
 own simulator suite reads the same file and asserts its own constants and
 handlers against it. So a version, a method name, a code, a shape or a
 cap that moves on one side fails a hermetic test on that side — which is
@@ -54,7 +54,7 @@ def message(name: str) -> str:
 
 def test_the_version_and_the_two_method_names_are_the_contracts():
     """The three strings the whole exchange starts from. A method name
-    that moved here would leave this side knocking on a door Egma does
+    that moved here would leave this side knocking on a door egma does
     not answer, and nothing about that failure would say why."""
     assert seam.PROTOCOL_VERSION == GOLDEN["protocol_version"]
     assert seam.HELLO_METHOD == GOLDEN["methods"]["hello"]
@@ -70,7 +70,7 @@ def test_the_refusal_codes_are_the_contracts():
         seam.ANSWER_TOO_LARGE,
         seam.UNSUPPORTED_PROTOCOL_VERSION,
     }
-    # Egma's block and the transport's cannot overlap, which is what lets a
+    # egma's block and the transport's cannot overlap, which is what lets a
     # code say whose complaint it is — and this side reads that distinction
     # to decide whether being refused means the real tool may run.
     reserved = GOLDEN["reserved_for_the_transport"]
@@ -83,7 +83,7 @@ def test_the_refusal_codes_are_the_contracts():
 
 def test_both_caps_are_the_contracts():
     """The payload cap this side names, and the delay cap the timeout
-    below is derived from. Both are Egma's numbers; both are restated
+    below is derived from. Both are egma's numbers; both are restated
     here because this package cannot import them."""
     assert seam.LARGEST_PAYLOAD_BYTES == GOLDEN["limits"]["largest_payload_bytes"]
     assert (
@@ -98,7 +98,7 @@ def test_the_wait_is_the_arithmetic_it_claims_against_the_real_cap():
     The delay comes from the contract rather than from a number restated
     here, which is the whole difference: an arithmetic checked against
     its own copy of the input cannot notice the input moving. Raise the
-    cap Egma admits and this fails until the timeout is raised with it,
+    cap egma admits and this fails until the timeout is raised with it,
     which is the only thing standing between a legal 30-second delay and
     a call this side gives up on.
     """
@@ -126,7 +126,7 @@ def test_the_census_this_side_builds_is_the_golden_bytes():
 
 def test_the_names_egma_answers_for_are_read_off_the_golden_reply():
     """The reply decides which tools get a courier. A shape misread here
-    is an agent that either wraps nothing or wraps something Egma will
+    is an agent that either wraps nothing or wraps something egma will
     refuse."""
     assert seam.mocked_tools_in(message("hello_reply")) == ("check_calendar",)
 

@@ -29,7 +29,7 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  * finds it already failed, and matches nothing — and the ordered after-work,
  * which takes rows and runs in one order so racing sweeps cannot deadlock.
  * These tests race real transactions rather than mocking, because the
- * guarantee under test is Postgres's, not Egma's code.
+ * guarantee under test is Postgres's, not egma's code.
  */
 
 let database: MigratedDatabase;

@@ -6,7 +6,7 @@ stand-ins a job context is when nothing is really running.
 
 Nothing here talks to LiveKit, to OpenAI, or to a room. That is the point
 of the suite: what it proves is what this agent does when there is no
-Egma anywhere near it, and a test that needed a server could not prove
+egma anywhere near it, and a test that needed a server could not prove
 that on the developer's machine.
 """
 
@@ -36,7 +36,7 @@ class StubJob:
 
 @dataclass
 class StubRoom:
-    """A room with a willing Egma in it, which nothing should ever ask.
+    """A room with a willing egma in it, which nothing should ever ask.
 
     Every message the SDK could send goes through ``perform_rpc``, and
     this one **answers** rather than refusing — with a well-formed reply
@@ -69,7 +69,7 @@ class StubContext:
 
 
 def outside_egma(metadata: str = "") -> StubContext:
-    """A job dispatched by anybody but Egma, which is every production one."""
+    """A job dispatched by anybody but egma, which is every production one."""
     return StubContext(room=StubRoom(), job=StubJob(metadata=metadata))
 
 

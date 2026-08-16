@@ -14,7 +14,7 @@ for its token really asks, over a socket, of the endpoint in
 Everything else is the real driver's own code, and deliberately so. The
 requests recorded below are the very protobuf messages that would have
 gone on the wire, built by the driver: the room's name and the metadata
-the connection configured, the agent's name and the context Egma
+the connection configured, the agent's name and the context egma
 dispatches with. So are the waits, the endings, the sentences a person
 reads and the scrubbing of the key pair. What this suite proves about a
 refusal or an ending is therefore proved about the code a customer's
@@ -25,10 +25,10 @@ written beside the driver would drift from it, and the first anybody
 would know is a live call.
 
 The room carries two channels and this one carries both. Beside the
-audio, a room is where the agent's side asks Egma to answer for its
+audio, a room is where the agent's side asks egma to answer for its
 tools — so the room here registers the methods the driver registers,
 refuses what the transport refuses, and lets a test say the two things a
-session says: hello, and one tool call. What answers them is Egma's own
+session says: hello, and one tool call. What answers them is egma's own
 code, unchanged, with no LiveKit and no network anywhere.
 
 The script it is built with:
@@ -79,7 +79,7 @@ AGENT_IDENTITY = "agent-under-test"
 class RpcAsk:
     """One incoming call, in the shape a handler is handed by the room.
 
-    Only the payload matters to anything Egma registers — room membership
+    Only the payload matters to anything egma registers — room membership
     is the authorisation, so who called and how long they will wait decide
     nothing on this side.
     """
@@ -156,8 +156,8 @@ class StubRoom:
             answered_by=self._backend.answer_to,
         )
         self._backend.stub.sessions.append(self._session)
-        # Where Egma minted its own token, the worker is on its way because
-        # Egma asked for it. Where it did not, nobody asked and nobody
+        # Where egma minted its own token, the worker is on its way because
+        # egma asked for it. Where it did not, nobody asked and nobody
         # could: the endpoint that minted the token is what dispatches, so
         # from the room's side the agent simply turns up — or does not.
         if self._backend.endpoint_dispatches:
@@ -174,7 +174,7 @@ class StubRoom:
     # -- The room's other channel: what can be called in it -------------------
 
     def register_rpc(self, method: str, handler: object) -> None:
-        """Offer one method on Egma's participant, the driver's own way.
+        """Offer one method on egma's participant, the driver's own way.
 
         The handler is wrapped by :func:`egma_simulator.media.room.answering`
         — the very wrapper the real room registers — so what a refusal
@@ -189,9 +189,9 @@ class StubRoom:
         self._backend.stub.standing_ready.set()
 
     async def perform_rpc(self, method: str, payload: str) -> str:
-        """Call a method on Egma's participant, the way the transport does.
+        """Call a method on egma's participant, the way the transport does.
 
-        Everything the transport would refuse before Egma ever sees it is
+        Everything the transport would refuse before egma ever sees it is
         refused here for the same reasons and with the same codes: a
         method nobody registered, a request too large to carry, and a
         reply too large to carry back. What is left is the handler's own
@@ -238,7 +238,7 @@ class RoomStubBackend(LiveKitRoomBackend):
     The token request is deliberately not among them: a connection that
     asks an endpoint for one really asks, over a socket, of the fake
     endpoint in :mod:`token_endpoint_stub`. So what CI proves about the
-    request Egma sends and the answers it will take is proved about the
+    request egma sends and the answers it will take is proved about the
     driver's own HTTP code rather than about a stand-in for it.
     """
 
@@ -267,7 +267,7 @@ class RoomStubBackend(LiveKitRoomBackend):
     def _joined_room(self, way_in: object) -> StubRoom:
         # Recorded rather than used: what a real join would have been
         # handed is the only way to see that a token fetched from an
-        # endpoint, and the server URL that answer named, are what Egma
+        # endpoint, and the server URL that answer named, are what egma
         # really went to the room with.
         self.stub.joined_with.append(way_in)
         room = StubRoom(self, band_hz=self._band_hz)
@@ -365,10 +365,10 @@ class RoomStub:
     deleted: list[str] = field(default_factory=list)
     """Every room it was asked to delete, in order. Empty is what a
     connection with no power to delete looks like from the server's side:
-    Egma left, and the room's own empty timeout closes it."""
+    egma left, and the room's own empty timeout closes it."""
 
     joined_with: list[object] = field(default_factory=list)
-    """The token and server URL Egma really went into each room with."""
+    """The token and server URL egma really went into each room with."""
 
     sessions: list[StubSession] = field(default_factory=list)
     """The audio of every room that was joined — what a test asks when it
@@ -378,14 +378,14 @@ class RoomStub:
     backends: list[RoomStubBackend] = field(default_factory=list)
 
     joined_rooms: list[StubRoom] = field(default_factory=list)
-    """Every room Egma joined, in order — where the exchange's other side
+    """Every room egma joined, in order — where the exchange's other side
     knocks."""
 
     standing_ready: asyncio.Event = field(default_factory=asyncio.Event)
-    """Set once Egma has offered the exchange in the room.
+    """Set once egma has offered the exchange in the room.
 
     What a session waits for before it says hello — the same thing that
-    really decides it on a live room, where an agent's side finds Egma by
+    really decides it on a live room, where an agent's side finds egma by
     the identity in its dispatch metadata or finds nobody at all."""
 
     def driver(self, **built: object) -> RoomStubBackend:
@@ -396,14 +396,14 @@ class RoomStub:
 
     # -- The agent's side of the mock-tool exchange ---------------------------
     #
-    # What a session in this room would say to Egma, said in a line. It is
+    # What a session in this room would say to egma, said in a line. It is
     # deliberately thin: everything below builds the payload the exchange
     # documents and hands it to the room, so what a test proves is proved
-    # about Egma's answers rather than about a helper's cleverness.
+    # about egma's answers rather than about a helper's cleverness.
 
     @property
     def room(self) -> StubRoom:
-        """The room Egma joined. One simulation joins exactly one."""
+        """The room egma joined. One simulation joins exactly one."""
         return self.joined_rooms[-1]
 
     async def says_hello(
@@ -412,7 +412,7 @@ class RoomStub:
         schemas: dict[str, object] | None = None,
         protocol_version: int = PROTOCOL_VERSION,
     ) -> dict:
-        """The census: every tool the agent has, and what Egma answers for."""
+        """The census: every tool the agent has, and what egma answers for."""
         return json.loads(
             await self.room.perform_rpc(
                 HELLO_METHOD,
@@ -429,7 +429,7 @@ class RoomStub:
         )
 
     async def calls(self, name: str, arguments: dict | None = None) -> dict:
-        """One tool call, asked of Egma and answered by it."""
+        """One tool call, asked of egma and answered by it."""
         asked: dict = {"name": name}
         if arguments is not None:
             asked["arguments"] = arguments

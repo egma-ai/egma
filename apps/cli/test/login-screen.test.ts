@@ -92,7 +92,7 @@ async function wizard(options: {
 /**
  * The code the terminal is showing, read off its screen.
  *
- * Whatever is on that line is the code. What shape Egma issues codes in is the
+ * Whatever is on that line is the code. What shape egma issues codes in is the
  * instance's business and is asserted where the instance is — baking it in here
  * would make this screen check fail the day the codes get a character longer.
  */
@@ -260,7 +260,7 @@ describe("the login screen", () => {
 
       await declineTheKey(terminal);
 
-      // A key was minted and kept, and it is the one this Egma issued.
+      // A key was minted and kept, and it is the one this egma issued.
       expect(platform.device.keys).toHaveLength(1);
     } finally {
       await terminal.kill();

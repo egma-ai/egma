@@ -118,8 +118,8 @@ function writes(name: string): FakeStep[] {
  * The wizard, walked all the way through the gate, with the run created and
  * every simulation queued on the platform.
  *
- * The coding agent is named as well as commanded: the command is what Egma
- * starts, and the name is what Egma calls it — which is what decides where a
+ * The coding agent is named as well as commanded: the command is what egma
+ * starts, and the name is what egma calls it — which is what decides where a
  * skill for it would go.
  */
 async function toTheRun(cols = 100): Promise<TerminalRun> {
@@ -175,7 +175,7 @@ async function toTheRun(cols = 100): Promise<TerminalRun> {
   run.write(`${KEY}\r`);
 
   // Text or phone. Not this check's subject, and not skippable
-  // either: Egma never picks one of the two for a developer.
+  // either: egma never picks one of the two for a developer.
   await showing(run, "How should Egma reach this agent?");
   run.write("\r");
 
@@ -236,7 +236,7 @@ describe("the run screen", () => {
 
   /**
    * The glossary rule, on the screen a developer actually reads: four verdicts,
-   * four words. A test Egma could not run is never drawn as a test that failed.
+   * four words. A test egma could not run is never drawn as a test that failed.
    */
   it("draws skipped and errored as themselves, never as failed", async () => {
     const run = await toTheRun();
@@ -302,7 +302,7 @@ describe("the skill offer and what is left behind", () => {
   /**
    * Wide, because the lines under check here are lines rather than sentences.
    * A terminal wraps whatever will not fit, and a check that read a wrapped
-   * line as two would be checking the terminal's width and not Egma's output.
+   * line as two would be checking the terminal's width and not egma's output.
    */
   const WIDE = 200;
 

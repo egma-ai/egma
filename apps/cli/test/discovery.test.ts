@@ -4,7 +4,7 @@
  * No model, no network, no human. What is checked is what a developer could
  * check afterwards: what the wizard said on screen, what the summary card holds,
  * what the coding agent was handed, what landed on disk, and the one line left
- * behind. Never the order Egma did things in.
+ * behind. Never the order egma did things in.
  */
 
 import { readFile } from "node:fs/promises";
@@ -58,7 +58,7 @@ const REPORTS_THE_FIXTURE: FakeStep[] = [
   { kind: "stop", reason: "end_turn" },
 ];
 
-/** A folder with nothing in it that Egma could test. */
+/** A folder with nothing in it that egma could test. */
 const REPORTS_NOTHING: FakeStep[] = [
   says("egma:note Reading the folder"),
   says("egma:none There is no voice agent in this folder."),
@@ -272,7 +272,7 @@ describe("finding the voice agent", () => {
       signal: new AbortController().signal,
     });
 
-    // It was the agent's own login that ran, and Egma carried straight on.
+    // It was the agent's own login that ran, and egma carried straight on.
     expect((await observed()).loggedInWith).toBe("own-login");
     expect(ui.record.statuses).toContain(
       "◆ Fake Agent needs you to log in. Handing you to its own login.",
@@ -300,12 +300,12 @@ describe("finding the voice agent", () => {
       signal: new AbortController().signal,
     });
 
-    // Egma did not wait out the minute, and the step after the abort never ran.
+    // egma did not wait out the minute, and the step after the abort never ran.
     expect(await filesUnder(repo.dir)).not.toContain("never-written.txt");
     expect((await observed()).observations["afterAbort"]).toBeUndefined();
 
     // A stop is a stop. It is never told as an empty folder, so nobody is
-    // asked to point Egma somewhere else and nobody is told there is no voice
+    // asked to point egma somewhere else and nobody is told there is no voice
     // agent here — neither of which the agent said.
     expect(report).toEqual({
       kind: "coding-agent-stopped",

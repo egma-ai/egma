@@ -38,7 +38,7 @@ from room_stub import StubContext, StubRoom, egma_metadata
 
 
 class ReceptionAgent(Agent):
-    """A small agent with two tools: one Egma will answer for, one it
+    """A small agent with two tools: one egma will answer for, one it
     will not, so every test can say what happened to each."""
 
     def __init__(self) -> None:
@@ -80,7 +80,7 @@ async def session() -> AgentSession:
 
 
 def in_a_simulation(room: StubRoom, **metadata: Any) -> StubContext:
-    """A job dispatched by Egma into that room."""
+    """A job dispatched by egma into that room."""
     return StubContext(room, egma_metadata(**metadata))
 
 

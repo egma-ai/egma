@@ -28,7 +28,7 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * The run events record, at the seam the rest of Egma reaches it through.
+ * The run events record, at the seam the rest of egma reaches it through.
  *
  * This is the effort's one new seam, and it exists because HTTP cannot prove
  * what matters most about it: **the lifecycle change and its event land

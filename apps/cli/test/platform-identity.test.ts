@@ -39,7 +39,7 @@ async function refusalFrom(work: Promise<unknown>): Promise<Error> {
 /**
  * The whole move, under a refusal a developer meets while trying to make it.
  *
- * These two refusals are what somebody pointing Egma at the platform they want
+ * These two refusals are what somebody pointing egma at the platform they want
  * is answered with, so each has to end where `bindRepositoryPlatform` ends: the
  * five lines to delete, and what moving costs. Each line is checked in
  * `egma-folder.test.ts`, which owns the wording; what is checked here is that
@@ -53,8 +53,8 @@ function expectTheWholeMove(said: string): void {
   expect(deletions).toHaveLength(5);
   // And the platform block last, wherever this refusal is raised from. It is
   // the line that unbinds the repository, and an unbound repository falls back
-  // to Egma's own platform — so a list that named it first would send every
-  // other identifier in the folder to hosted Egma on the very next command.
+  // to egma's own platform — so a list that named it first would send every
+  // other identifier in the folder to hosted egma on the very next command.
   expect(deletions.at(-1)).toContain("the whole platform: block");
   expect(said).toContain("Your tests move with you");
   expect(said).toContain("stay on the platform that ran them");
@@ -62,7 +62,7 @@ function expectTheWholeMove(said: string): void {
   expect(said).not.toMatch(/egma rebind|--rebind|Egma move/u);
 }
 
-describe("verifying an Egma platform", () => {
+describe("verifying an egma platform", () => {
   let platform: Platform;
   let workspace: Workspace;
 
@@ -257,7 +257,7 @@ describe("verifying an Egma platform", () => {
     ]);
   });
 
-  it("takes the explicit URL before Egma's own, then verifies the selected instance", async () => {
+  it("takes the explicit URL before egma's own, then verifies the selected instance", async () => {
     const built = await startPlatform();
     try {
       const access = await resolvePlatformAccess({
@@ -286,7 +286,7 @@ describe("verifying an Egma platform", () => {
    * platform's own host and it is worse: the committed file says `localhost`,
    * and every teammate who clones it targets their own machine.
    *
-   * So the address the developer gave is the address Egma uses, and a platform
+   * So the address the developer gave is the address egma uses, and a platform
    * that calls itself something else is a misconfiguration to be told about.
    */
   it("refuses a platform that answers to a different address than it was asked at", async () => {
@@ -362,8 +362,8 @@ describe("verifying an Egma platform", () => {
   });
 
   /**
-   * Nobody typed Egma's built-in address, nobody but egma runs what is at it,
-   * and nobody outside Egma can fix it. So the **advice** is suppressed — go
+   * Nobody typed egma's built-in address, nobody but egma runs what is at it,
+   * and nobody outside egma can fix it. So the **advice** is suppressed — go
    * and look at that address, reconfigure that deployment — because every word
    * of it is addressed to somebody who is not reading.
    *
@@ -422,7 +422,7 @@ describe("verifying an Egma platform", () => {
       )) as DefaultPlatformUnusableError;
 
       expect(refusal, shape.what).toBeInstanceOf(DefaultPlatformUnusableError);
-      // The address Egma tried, so "hosted Egma is down" can be told apart from
+      // The address egma tried, so "hosted egma is down" can be told apart from
       // "I typed something wrong" — and there was nothing to type.
       expect(refusal.message, shape.what).toContain("https://built-in.example");
       // What happened there, said rather than flattened into "it did not
@@ -530,7 +530,7 @@ describe("verifying an Egma platform", () => {
     await expect(stalled).rejects.toThrow("did not answer within");
   });
 
-  it("asks Egma's own platform, and only that, when nothing names another", async () => {
+  it("asks egma's own platform, and only that, when nothing names another", async () => {
     const requested: string[] = [];
     const access = await resolvePlatformAccess({
       env: workspace.env({ EGMA_TEST_DEFAULT_URL: platform.url }),
@@ -543,7 +543,7 @@ describe("verifying an Egma platform", () => {
     });
 
     // The last step of the order, and the only one nobody typed: a repository
-    // with nothing configured reaches Egma's own platform.
+    // with nothing configured reaches egma's own platform.
     expect(access.url).toBe(platform.url);
     expect(access.instanceId).toBe(platform.instanceId);
 
@@ -584,7 +584,7 @@ describe("verifying an Egma platform", () => {
     expect(platform.records).toEqual([]);
   });
 
-  it("refuses an unavailable bound platform and does not try Egma's own", async () => {
+  it("refuses an unavailable bound platform and does not try egma's own", async () => {
     // A closed port, and deliberately not the one standing in for the built-in
     // address: the request list below is the proof that the fall-back step was
     // never taken, and two identical addresses would make it prove nothing.

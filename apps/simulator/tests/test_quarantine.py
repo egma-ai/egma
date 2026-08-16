@@ -1,7 +1,7 @@
 """The quarantine, enforced rather than promised.
 
 The simulator's whole licence to be Python inside a TypeScript monorepo is
-that it reaches the rest of Egma through one versioned JSON contract and
+that it reaches the rest of egma through one versioned JSON contract and
 nothing else: no shared code, no database, no imports from anywhere above
 this directory. That is the sort of boundary a README claims and a codebase
 quietly loses, so it is checked here instead — the same reasoning the
@@ -155,7 +155,7 @@ def test_no_module_imports_anything_from_outside_the_app():
 
     assert not offenders, (
         f"the simulator imported something outside its quarantine: {offenders}. "
-        "It reaches the rest of Egma through the simulation contract only."
+        "It reaches the rest of egma through the simulation contract only."
     )
 
 

@@ -18,7 +18,7 @@
  *   nothing on the CLI's side can see coming — the file is perfectly readable
  *   and only the platform knows the answer — so it is the one this fixture has
  *   to be able to make.
- * - **Identifiers are Egma's.** `tst_` and `tstv_`, minted by the same
+ * - **Identifiers are egma's.** `tst_` and `tstv_`, minted by the same
  *   generator every table uses, so a pinned version id in a committed file is
  *   the same string it would be against a real instance.
  *

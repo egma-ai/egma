@@ -69,7 +69,7 @@ describe("the trace a simulation's spans belong to", () => {
     expect(new Set(derived).size).toBe(ids.length);
   });
 
-  it("names no trace for a string that is not one of Egma's simulation ids", () => {
+  it("names no trace for a string that is not one of egma's simulation ids", () => {
     // Not a refusal a caller has to catch: the platform mints every simulation
     // id it reads, so this is unreachable there — and answering `undefined`
     // rather than a made-up trace is what keeps it that way.
@@ -78,7 +78,7 @@ describe("the trace a simulation's spans belong to", () => {
     expect(traceIdOfSimulation("01K3XQ7M4E8YB2FVN0H9TZQWER")).toBeUndefined();
     expect(traceIdOfSimulation("")).toBeUndefined();
     // Twenty-six Crockford characters hold 130 bits and a trace id holds 128.
-    // Egma's own ids never reach the top two — a UUIDv7's millisecond field
+    // egma's own ids never reach the top two — a UUIDv7's millisecond field
     // does not — and one that somehow did would be truncated into somebody
     // else's trace.
     expect(traceIdOfSimulation("sim_ZZZZZZZZZZZZZZZZZZZZZZZZZZ")).toBeUndefined();

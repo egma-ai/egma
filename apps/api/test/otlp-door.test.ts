@@ -255,7 +255,7 @@ describe("the environment a span was recorded in", () => {
    * The specification is explicit that rejected data must not be retried, and
    * an exporter told "500" will retry it forever.
    */
-  it("cannot start with the prefix Egma keeps for itself, and says so in the export response", async () => {
+  it("cannot start with the prefix egma keeps for itself, and says so in the export response", async () => {
     const traceId = "99998888777766665555444433332222";
     const response = await post(
       jsonExport(
@@ -285,7 +285,7 @@ describe("the environment a span was recorded in", () => {
 });
 
 describe("a span that named itself nothing", () => {
-  it("is rejected rather than given an id Egma made up", async () => {
+  it("is rejected rather than given an id egma made up", async () => {
     const good = jsonSpan({
       traceId: "12121212121212121212121212121212",
       spanId: "1212121212121212",
@@ -400,7 +400,7 @@ describe("a body the door cannot read", () => {
       "content-type": "text/csv",
     });
     expect(response.statusCode).toBe(415);
-    // No encoding was named that Egma could answer in, so the refusal is JSON,
+    // No encoding was named that egma could answer in, so the refusal is JSON,
     // which is what somebody reading a `curl` sees.
     expect(response.json()).toEqual({
       code: 3,
@@ -454,7 +454,7 @@ describe("a compressed export", () => {
     expect(row?.kind).toBe("turn:human");
   });
 
-  it("is refused when the compression is one Egma cannot undo", async () => {
+  it("is refused when the compression is one egma cannot undo", async () => {
     const response = await post(jsonExport([jsonSpan()]), {
       "content-encoding": "br",
     });
@@ -480,7 +480,7 @@ describe("an export carrying nothing", () => {
 });
 
 /**
- * What a client sends and what Egma has to hold are not the same size.
+ * What a client sends and what egma has to hold are not the same size.
  *
  * Every row carries its resource and its scope verbatim, which is what makes a
  * span readable on its own — and it means one enormous resource shared by two
@@ -489,7 +489,7 @@ describe("an export carrying nothing", () => {
  * exporter is told how much was refused rather than left to believe all of it
  * landed.
  */
-describe("an export asking for more than Egma turns into rows", () => {
+describe("an export asking for more than egma turns into rows", () => {
   it("stores what fits and reports the rest, when one fat resource rides every span", async () => {
     const traceId = "cafe0000cafe0000cafe0000cafe0000";
     const spans = 100;
@@ -653,7 +653,7 @@ describe("an id shouted in uppercase hex", () => {
    * hand-written client that writes its hex in capitals means the same trace —
    * and storing the two spellings apart would cut one conversation in half.
    */
-  it("is the same id, stored the one way Egma writes them", async () => {
+  it("is the same id, stored the one way egma writes them", async () => {
     const response = await post(
       jsonExport([
         jsonSpan({

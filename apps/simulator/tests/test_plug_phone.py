@@ -376,7 +376,7 @@ def test_a_carrier_refusal_carries_its_words_and_not_a_secret():
     refusal = sip_refusal(
         401,
         "Unauthorized",
-        told=secrets.redact("auth failed for Egma with password SENTINEL-trunk-abc"),
+        told=secrets.redact("auth failed for egma with password SENTINEL-trunk-abc"),
     )
     assert "401" in str(refusal)
     assert "SENTINEL-trunk-abc" not in str(refusal)

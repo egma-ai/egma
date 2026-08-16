@@ -57,7 +57,7 @@ import { scriptedJudge, type Scripted, type ScriptedJudge } from "./scripted-jud
  * Both stores are real, because everything worth asserting here is one of their
  * behaviours — the notification a transaction raises, the lock that keeps two
  * copies off one conversation, the replace semantics of a re-grade. A substitute
- * would confirm the calls Egma makes and nothing about what they do.
+ * would confirm the calls egma makes and nothing about what they do.
  *
  * Beside the world, what every file in this suite waits on: the verdicts of one
  * conversation, the job behind it, and one running copy of the service. They are
@@ -109,7 +109,7 @@ export async function makeWorld(label: string): Promise<World> {
   });
   connectClickHouse({ clickhouseUrl: store.url, maxOpenConnections: 4 });
 
-  // Egma's own graders, on the shelf before anything points at one — what a
+  // egma's own graders, on the shelf before anything points at one — what a
   // real deployment writes in the same breath as applying its migrations.
   await seedGraderLibrary();
 
@@ -267,7 +267,7 @@ export async function seedJudge(
  * measures 900 and 1100 milliseconds, and the worst of those is what a bound is
  * held against — a case that wants a failure lowers it and says so.
  *
- * It is the one entry v0 ships that Egma computes rather than asks a model, so
+ * It is the one entry v0 ships that egma computes rather than asks a model, so
  * it is also how these files put a second grader on a project without a second
  * scripted judge answer.
  */
@@ -320,7 +320,7 @@ export async function conductSimulation(
      *
      * Absent is a conversation that happened, in the default shape below.
      * `null` is the other thing a case can mean: a conversation that happened
-     * and whose evidence never reached Egma at all, which a reader has to be
+     * and whose evidence never reached egma at all, which a reader has to be
      * able to tell from one that never happened.
      */
     readonly spans?: StreamedConversation | null | undefined;
@@ -439,7 +439,7 @@ const A_CONVERSATION_HAPPENED: StreamedConversation = {
  */
 export type StreamedConversation = {
   /**
-   * Absent leaves the root span unsent — a trace Egma holds part of, which is
+   * Absent leaves the root span unsent — a trace egma holds part of, which is
    * what a simulator killed mid-conversation leaves behind.
    */
   readonly rootCloses?: boolean | undefined;
@@ -480,7 +480,7 @@ export type StreamedTurn = {
  * tests, and repeating them here would test Fastify rather than grading. What
  * matters on this side is that the rows land under the trace the simulation id
  * derives, stamped `simulation` and `egma-runtime`, carrying the run and the
- * agent the door resolves from Egma's own row.
+ * agent the door resolves from egma's own row.
  *
  * **No queue row, deliberately.** A simulation's grading work is minted by the
  * transaction that lands it terminal, so a span arriving has nothing to add —
@@ -613,12 +613,12 @@ function simulationSpan(
     toolResult: "",
     providerCallId: "",
     // Empty, as the door writes it here: the type is read off the emitting
-    // instrumentation's scope name, and only LiveKit's is one Egma knows —
+    // instrumentation's scope name, and only LiveKit's is one egma knows —
     // this world reaches its agent over a Retell chat connection.
     connectionType: "",
     audioSampleRateHz: 0,
     audioEncoding: "",
-    // Resolved by the door from Egma's own row, never from the payload.
+    // Resolved by the door from egma's own row, never from the payload.
     runId: simulation.runId,
     agentId: simulation.agentId,
     agentVersionId: "",
@@ -690,7 +690,7 @@ export async function conductProductionTrace(
      * `other` and it is not a measurement — the reason a real production trace
      * carries no measures is the door's scope gate, not the frameworks. What is
      * being exercised here is everything *after* the door: given identical rows
-     * from either source, Egma computes identical numbers. Normalising a
+     * from either source, egma computes identical numbers. Normalising a
      * provider's own timing attribute into this kind is the ingest door's
      * decision to take, and the day it does, these rows are what arrive.
      */
@@ -789,7 +789,7 @@ async function exportFlush(world: World, spans: readonly NewSpan[]): Promise<voi
 }
 
 /**
- * One more flush of a conversation Egma has already dealt with — a root span at
+ * One more flush of a conversation egma has already dealt with — a root span at
  * that, so it says as loudly as telemetry can that the conversation is over.
  */
 export async function exportALateFlush(
@@ -831,7 +831,7 @@ function productionSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
     audioSampleRateHz: 0,
     audioEncoding: "",
     // Empty, as the door writes them: a trace arriving there was not started by
-    // Egma, so there is no run and no agent behind it.
+    // egma, so there is no run and no agent behind it.
     runId: "",
     agentId: "",
     agentVersionId: "",

@@ -7,7 +7,7 @@ import path from "node:path";
  *
  * Bodies are read as bytes and posted unchanged, because the whole worth of a
  * capture is that it is evidence: re-encoding one would turn a test about real
- * telemetry into a test about what Egma believes real telemetry looks like.
+ * telemetry into a test about what egma believes real telemetry looks like.
  */
 
 export const FIXTURE_DIRECTORY = path.join(

@@ -145,7 +145,7 @@ describe("the wizard on a real terminal", () => {
         "[esc] nowhere else",
       );
 
-      // The developer has nowhere to point Egma at, and says so.
+      // The developer has nowhere to point egma at, and says so.
       terminal.write("");
 
       expect(await terminal.exited).toBe(1);

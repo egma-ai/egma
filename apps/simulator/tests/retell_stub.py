@@ -58,7 +58,7 @@ class RetellStub:
     """Invocations the agent makes while producing its first answer, each
     ``{"name": …}`` with an optional ``"arguments"`` string. Retell reports
     these inline with the words, which is what makes a tool call visible
-    from Egma's side at all."""
+    from egma's side at all."""
 
     turn_seconds: float = 0.0
     """How long a completion takes, the way a real agent takes time."""

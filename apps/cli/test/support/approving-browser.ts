@@ -1,9 +1,9 @@
 /**
- * A browser that never opens: the stand-in Egma starts in place of a real one.
+ * A browser that never opens: the stand-in egma starts in place of a real one.
  *
- * Egma starts whatever `BROWSER` names, handing it the address to open. A check
+ * egma starts whatever `BROWSER` names, handing it the address to open. A check
  * points `BROWSER` at this, so the whole of login runs with no window on the
- * screen of whoever is running the suite — and the address Egma really passed
+ * screen of whoever is running the suite — and the address egma really passed
  * is written down where the check can read it.
  *
  * What it then does is what a person would have done in the window: approve,

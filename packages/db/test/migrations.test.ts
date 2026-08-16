@@ -615,7 +615,7 @@ describe("the re-grade's narrowing (0013)", () => {
     database = await createEmptyDatabase("regrade_narrowing");
 
     // The world as it was: every migration before the narrowing, in a directory
-    // of its own, so a conversation Egma has already judged is sitting in the
+    // of its own, so a conversation egma has already judged is sitting in the
     // queue when 0013 arrives on top of it.
     beforeTheNarrowing = await mkdtemp(
       path.join(os.tmpdir(), "egma-before-0013-"),
@@ -1501,7 +1501,7 @@ describe("the livekit connection type (0018)", () => {
   beforeAll(async () => {
     database = await createEmptyDatabase("livekit_type");
 
-    // The world as it was: a customer already reaching an agent the ways Egma
+    // The world as it was: a customer already reaching an agent the ways egma
     // knew, so the widening lands on a table that is not empty.
     beforeLiveKit = await mkdtemp(path.join(os.tmpdir(), "egma-before-0018-"));
     for (const migration of await readMigrations()) {

@@ -8,7 +8,7 @@
  * the real thing anywhere:
  *
  * - **An edit overwrites.** There is no `expected_version_id` here and there is
- *   no version to name: a mock tool is the one authored thing Egma does not
+ *   no version to name: a mock tool is the one authored thing egma does not
  *   version. So a second push of the same file is a write that changes nothing
  *   rather than a conflict.
  * - **One answer per tool name.** A create naming a tool this project already

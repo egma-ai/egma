@@ -80,7 +80,7 @@ export type FiledTranscript = {
  * to show and no transcript to open. This is the other half: two turns and the
  * span they happened inside, posted at the real door with the service token and
  * a resource naming the simulation, which is the only way spans are ever filed
- * as Egma's own rather than as a customer's production telemetry.
+ * as egma's own rather than as a customer's production telemetry.
  *
  * **The trace id is derived and never chosen.** A simulation id and the trace
  * its spans are filed under are the same 128 bits written two ways, and the

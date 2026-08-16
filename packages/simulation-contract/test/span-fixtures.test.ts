@@ -61,12 +61,12 @@ const SPAN_ATTRIBUTE_KEYS = [
 ] as const;
 
 /**
- * How a recorded tool call was answered — the two things Egma can honestly
- * claim about a call that reached it. `mocked` says Egma itself served the
+ * How a recorded tool call was answered — the two things egma can honestly
+ * claim about a call that reached it. `mocked` says egma itself served the
  * answer, so the result beside it is not a guess about somebody else's return.
- * `refused` says Egma was asked and would not answer, so nothing ran at all.
+ * `refused` says egma was asked and would not answer, so nothing ran at all.
  *
- * An absent stamp is neither of them and is the third fact: Egma was not in
+ * An absent stamp is neither of them and is the third fact: egma was not in
  * the path, and the agent's own backend ran unobserved.
  */
 const TOOL_PROVENANCES = ["mocked", "refused"] as const;
@@ -348,12 +348,12 @@ describe("the golden span fixtures", () => {
   });
 
   /**
-   * The distinction this stamp exists for. A refused call and a call Egma
+   * The distinction this stamp exists for. A refused call and a call egma
    * never stood in the path of are opposite facts — the backend did not run,
-   * versus the backend ran and Egma saw only that it was called — and written
+   * versus the backend ran and egma saw only that it was called — and written
    * the same way a reader could not tell them apart.
    */
-  it("tell a refused call apart from one Egma was never in the path of", () => {
+  it("tell a refused call apart from one egma was never in the path of", () => {
     const calls = valid
       .flatMap((fixture) => spansOf(fixture))
       .filter((span) => span.name === "tool_call");
@@ -392,7 +392,7 @@ describe("the golden span fixtures", () => {
     }
   });
 
-  it("show a mocked call carrying the answer Egma served and the mock tool that served it", () => {
+  it("show a mocked call carrying the answer egma served and the mock tool that served it", () => {
     const mocked = valid
       .flatMap((fixture) => spansOf(fixture))
       .filter(
@@ -404,14 +404,14 @@ describe("the golden span fixtures", () => {
     expect(mocked.length).toBeGreaterThan(0);
 
     for (const span of mocked) {
-      // The answer is Egma's own, so recording it invents nothing — and a
+      // The answer is egma's own, so recording it invents nothing — and a
       // mocked call that recorded no answer would be a served call with the
       // served half missing.
       expect(attributeOf(span.attributes, "egma.tool.result")).toBeTypeOf(
         "string",
       );
       expect(attributeOf(span.attributes, "egma.tool.mock_tool")).toBeTruthy();
-      // Egma stood between the agent and the answer, so the span brackets the
+      // egma stood between the agent and the answer, so the span brackets the
       // exchange it conducted rather than being the instant an observer sees.
       expect(
         BigInt(span.endTimeUnixNano ?? "0") -
@@ -475,7 +475,7 @@ describe("the golden span fixtures", () => {
     }
   });
 
-  it("still carry a call Egma only observed, with neither answer nor stamp, so the expand breaks nobody", () => {
+  it("still carry a call egma only observed, with neither answer nor stamp, so the expand breaks nobody", () => {
     const bare = valid
       .flatMap((fixture) => spansOf(fixture))
       .filter(

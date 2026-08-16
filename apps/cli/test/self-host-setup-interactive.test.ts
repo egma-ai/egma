@@ -114,7 +114,7 @@ describe("egma self-host setup, with somebody watching", () => {
     terminal.write("\r");
     await showing(terminal, "the persona's model key (not shown as you type)");
     terminal.write(`${MODEL_KEY}\r`);
-    // The one model setting Egma does suggest a value for, because it is a
+    // The one model setting egma does suggest a value for, because it is a
     // behavior rather than a provider's model name: a caller on a live line
     // does not pause to reason, so the suggestion turns it off.
     await showing(terminal, "the persona's reasoning effort [none]");
@@ -127,7 +127,7 @@ describe("egma self-host setup, with somebody watching", () => {
     terminal.write("\r");
     await showing(terminal, "the speech-to-text key");
     terminal.write(`${LISTENING_KEY}\r`);
-    // The three model-and-voice names are offered with no suggestion of Egma's
+    // The three model-and-voice names are offered with no suggestion of egma's
     // own, because a name invented here would be a second opinion about a
     // provider's catalogue, stored, and wrong the week one is retired. An
     // empty answer leaves the platform holding none of them, and each built
@@ -154,7 +154,7 @@ describe("egma self-host setup, with somebody watching", () => {
     await showing(terminal, "Twilio Account SID");
     terminal.write(`${ACCOUNT_SID}\r`);
     // The number question says the thing a person most needs to know about it
-    // before they answer, which is that Egma will not go and buy one.
+    // before they answer, which is that egma will not go and buy one.
     await showing(terminal, "already owns", "Egma never buys one");
     terminal.write(`${SOURCE_NUMBER}\r`);
     await showing(terminal, "Twilio Auth Token", "never kept");
@@ -222,7 +222,7 @@ describe("egma self-host setup, with somebody watching", () => {
     async ({ answerFirst, showing: prompt }) => {
       // The single most likely first-run interaction in the whole command is
       // "I do not have my key to hand", and it used to end in a Node stack
-      // trace and `Node.js v24.16.0` — which reads as a bug in Egma at the exact
+      // trace and `Node.js v24.16.0` — which reads as a bug in egma at the exact
       // moment somebody was being careful with a credential.
       terminal = start();
 

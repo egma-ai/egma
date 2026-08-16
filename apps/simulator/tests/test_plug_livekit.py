@@ -13,7 +13,7 @@ the second one: a connection that names a customer's own token endpoint
 rather than carrying their key pair. That endpoint is not stood in for at
 all — it is a real HTTP server on loopback serving the contract the public
 docs publish (:mod:`token_endpoint_stub`), so what is proved about the
-request Egma sends and the answers it takes is proved over a socket.
+request egma sends and the answers it takes is proved over a socket.
 
 The failure paths get the same treatment, because a room where nothing
 turned up is the outcome this plug has to be most honest about: it is
@@ -309,7 +309,7 @@ async def test_a_livekit_spec_conducts_a_whole_simulation_in_a_room(
     assert conducted.ending == "persona_concluded"
 
     # The room this was held in is the provider reference — one room, one
-    # simulation, and the one join between Egma's record and LiveKit's.
+    # simulation, and the one join between egma's record and LiveKit's.
     assert conducted.provider_reference == stub.rooms[0].name
     assert conducted.provider_reference.startswith(f"{ROOM_PREFIX}-")
 
@@ -517,7 +517,7 @@ async def test_agent_speech_arriving_while_the_persona_speaks_is_heard():
 async def test_a_named_agent_is_dispatched_by_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The explicit path: the connection names an agent, so Egma asks the
+    """The explicit path: the connection names an agent, so egma asks the
     project for that agent by name."""
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     await room_walk(
@@ -536,7 +536,7 @@ async def test_an_unnamed_agent_takes_the_automatic_path(
 ):
     """The automatic path: a worker registered without a name is given
     every new room in the project, so making the room *was* the request
-    and Egma asks for nothing more."""
+    and egma asks for nothing more."""
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     conducted, turns, _measures, _assembled = await room_walk(
         tmp_path,
@@ -645,8 +645,8 @@ async def test_the_room_carries_the_connections_own_json(
     configured: object,
     carried: str,
 ):
-    """The customer's metadata channel: theirs to write, Egma's to pass
-    through untouched, and it never carries anything of Egma's.
+    """The customer's metadata channel: theirs to write, egma's to pass
+    through untouched, and it never carries anything of egma's.
 
     The door only ever stores metadata as a JSON object in a string, so a
     string is the whole product shape: it rides byte for byte."""
@@ -1170,9 +1170,9 @@ async def test_the_golden_livekit_fixture_is_a_connection_the_plug_accepts(
 #
 # A connection that names a token endpoint keeps the secret that signs
 # tokens for the customer's whole LiveKit project on the customer's side.
-# Egma invents a room and an identity, asks for a token scoped to exactly
+# egma invents a room and an identity, asks for a token scoped to exactly
 # those, joins, and waits — and dispatching is the endpoint's job, because
-# Egma holds no power to do it.
+# egma holds no power to do it.
 #
 # The endpoint below is not a fake in the sense the room is: it is a real
 # HTTP server on loopback, and the driver really posts to it. What is
@@ -1186,7 +1186,7 @@ async def test_a_token_endpoint_spec_conducts_a_whole_simulation(
     """The whole story, end to end, with no LiveKit and no network.
 
     A spec whose connection names an endpoint becomes a conversation: the
-    endpoint is asked, the token comes back, Egma joins with it, the agent
+    endpoint is asked, the token comes back, egma joins with it, the agent
     somebody else dispatched turns up, and the record carries the room.
     """
     stub = RoomStub(
@@ -1217,11 +1217,11 @@ async def test_a_token_endpoint_spec_conducts_a_whole_simulation(
     assert conducted.status == "completed"
     assert conducted.ending == "persona_concluded"
 
-    # One request, and the token it answered is what Egma joined with.
+    # One request, and the token it answered is what egma joined with.
     assert len(endpoint.asked) == 1
     assert stub.joined_with[0].token == "minted.by.the.customer"
 
-    # Nothing was created and nothing was dispatched: Egma has no power to
+    # Nothing was created and nothing was dispatched: egma has no power to
     # do either, and the room it joined is the one it asked for a token
     # into.
     assert stub.rooms == []
@@ -1240,8 +1240,8 @@ async def test_the_endpoint_is_asked_for_the_room_and_identity_egma_will_use(
 ):
     """The request, exactly as the published contract spells it.
 
-    Both names are Egma's own invention and both carry the simulation's
-    id, so the endpoint can mint a token for exactly the identity Egma
+    Both names are egma's own invention and both carry the simulation's
+    id, so the endpoint can mint a token for exactly the identity egma
     will join as and exactly the room it will join — and refuse anything
     else. The room's prefix is fixed and recognisable on purpose: it is
     what an endpoint allowlists so that nobody can ask it for a token into
@@ -1266,7 +1266,7 @@ async def test_the_endpoint_is_asked_for_the_room_and_identity_egma_will_use(
     assert asked.body["room_name"].startswith(f"{ROOM_PREFIX}-")
     assert asked.header("content-type") == "application/json"
 
-    # The identity Egma joins with is the one it asked a token for, and it
+    # The identity egma joins with is the one it asked a token for, and it
     # is never the agent's.
     assert asked.body["participant_name"] != AGENT_IDENTITY
 
@@ -1292,7 +1292,7 @@ async def test_the_endpoints_auth_headers_are_sent_and_go_nowhere_else(
 async def test_an_endpoint_that_wants_no_credential_is_asked_without_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """An endpoint on a private network can be open to Egma alone. The
+    """An endpoint on a private network can be open to egma alone. The
     docs say not to leave it that way; the driver does not refuse to work
     with what it is given."""
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
@@ -1315,7 +1315,7 @@ async def test_an_endpoint_that_wants_no_credential_is_asked_without_one(
 async def test_a_token_under_any_of_the_three_names_is_taken(alias: str):
     """Accepting the spread is what makes the endpoints already out there
     reusable as they are, rather than each team writing a second handler
-    for Egma."""
+    for egma."""
     stub = RoomStub(greeting="Front desk.")
     with serving(token="under.this.name", alias=alias) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
@@ -1327,7 +1327,7 @@ async def test_a_token_under_any_of_the_three_names_is_taken(alias: str):
 
 async def test_the_endpoints_own_server_url_is_where_egma_joins():
     """The override: an endpoint that knows which of several LiveKit
-    projects this agent lives in says so, and Egma goes there."""
+    projects this agent lives in says so, and egma goes there."""
     stub = RoomStub(greeting="Front desk.")
     with serving(server_url="wss://elsewhere.livekit.cloud") as endpoint:
         plug = endpoint_room(stub, endpoint.url)
@@ -1390,7 +1390,7 @@ async def test_the_connections_own_url_is_where_egma_joins_without_one():
             "serverUrl",
         ),
         (
-            "a serverUrl Egma cannot join",
+            "a serverUrl egma cannot join",
             {"body": {"token": "fine.token.here", "serverUrl": "sip:acme.example"}},
             "serverUrl",
         ),
@@ -1421,7 +1421,7 @@ async def test_a_token_the_endpoint_minted_is_never_quoted_back():
     """The leak that lives between a good token and a bad answer.
 
     An endpoint may hand over a working token and still say something
-    Egma cannot use — here a ``serverUrl`` that is not a string. The
+    egma cannot use — here a ``serverUrl`` that is not a string. The
     refusal quotes the whole answer back, because that is what makes a
     handler's own mistake fixable, and the whole answer contains the
     token. A token registered only after that quoting would reach a
@@ -1478,7 +1478,7 @@ async def test_an_endpoint_that_redirects_is_answered_rather_than_followed():
     """A redirect is an answer, not an instruction.
 
     Following one would carry the customer's own auth headers to a host
-    they never configured, chosen by whoever answered — so Egma reads the
+    they never configured, chosen by whoever answered — so egma reads the
     status and stops, and says so in the same words it uses for any other
     status it cannot work with.
     """
@@ -1556,7 +1556,7 @@ async def test_the_agent_nobody_dispatched_is_the_endpoints_duty(
     """The room opened, the token was minted, and nobody came.
 
     Nothing was tested, so nothing is graded — and the reason says whose
-    job the missing half was, because on this shape it was never Egma's.
+    job the missing half was, because on this shape it was never egma's.
     """
     monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
     stub = RoomStub(agent_joins=False)
@@ -1583,7 +1583,7 @@ async def test_the_agent_nobody_dispatched_is_the_endpoints_duty(
     assert "automatic dispatch" not in told
 
 
-# -- A room Egma cannot delete is left, not deleted --------------------------
+# -- A room egma cannot delete is left, not deleted --------------------------
 
 
 async def test_a_room_egma_cannot_delete_is_left_however_the_simulation_ends(
@@ -1591,7 +1591,7 @@ async def test_a_room_egma_cannot_delete_is_left_however_the_simulation_ends(
 ):
     """A token minted to join one room carries no power to delete it.
 
-    So Egma leaves and the room stands empty for a moment, and the
+    So egma leaves and the room stands empty for a moment, and the
     customer's own empty timeout on ``egma-sim-`` rooms closes it. Trying
     the delete anyway would spend a request to be refused and write a log
     line about a failure that was never one — on every path out, which is
@@ -1731,7 +1731,7 @@ def test_the_settings_never_show_the_endpoints_headers_when_printed():
 @pytest.mark.parametrize(
     "connection",
     [
-        # An endpoint Egma cannot post to: the two url keys the wrong way
+        # An endpoint egma cannot post to: the two url keys the wrong way
         # round, which is the mistake this shape invites.
         ({"url": A_URL, "tokenEndpoint": "wss://acme.livekit.cloud"}, None),
         ({"url": A_URL, "tokenEndpoint": "acme.example/token"}, None),
@@ -1755,7 +1755,7 @@ def test_the_settings_never_show_the_endpoints_headers_when_printed():
             },
             None,
         ),
-        # A key pair has no place on it, and headers that Egma cannot send
+        # A key pair has no place on it, and headers that egma cannot send
         # are a connection nobody can use.
         (
             {"url": A_URL, "tokenEndpoint": "https://acme.example/token"},

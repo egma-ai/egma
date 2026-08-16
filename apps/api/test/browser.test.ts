@@ -53,7 +53,7 @@ import {
  * The narrative is continuous and each part depends on the one above it. Ada
  * signs up on the way to authorizing a terminal; she is already signed in when
  * she adds a colleague; and she is still signed in when she points an agent at
- * Egma and goes to read what it did. That is the order somebody meets the
+ * egma and goes to read what it did. That is the order somebody meets the
  * product in.
  */
 
@@ -68,7 +68,7 @@ let origin: string;
  * Started at collection rather than in `beforeAll`, because the flow that uses
  * it has to **skip visibly** where no container can be started and a `describe`
  * decides that before any hook runs. Everything else in this file is unaffected
- * either way: an instance with no store configured is exactly the Egma every
+ * either way: an instance with no store configured is exactly the egma every
  * other test here is about.
  */
 const storage: ObjectStorage = await startObjectStorage("browser");
@@ -429,7 +429,7 @@ function cookiesFrom(header: string | null): string {
 
 /**
  * A key for the project an organization already has, and the exporter pointed
- * at Egma with it.
+ * at egma with it.
  *
  * **The key names a project, and that is load-bearing rather than
  * incidental.** A key minted for a whole organization files its spans under no
@@ -626,7 +626,7 @@ function saysNothingBanned(shown: string): void {
  * the developer who owns it opens the dashboard and reads the exchange.
  *
  * This is the spec's own demo sentence executed rather than described — *run
- * compose, point an agent's export at Egma, open the dashboard, read the
+ * compose, point an agent's export at egma, open the dashboard, read the
  * exchange with its timings*. The fourteen captured bodies are the ones an
  * exporter really sent, replayed byte for byte, and they arrive **through the
  * same origin the dashboard is served from**, which is the deployment a
@@ -939,7 +939,7 @@ describe("one exchange, read as a transcript", () => {
       expect(shown).toContain("Everything else recorded");
       expect(shown).not.toContain("Overview");
 
-      // One click in, it is there, under Egma's word for it rather than the
+      // One click in, it is there, under egma's word for it rather than the
       // provider's. `agent_session` is the name LiveKit gave it and it is shown
       // beside — the two carry different information.
       const around = page.locator("details", { hasText: "Everything else recorded" }).last();
@@ -1191,7 +1191,7 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       const player = heard.locator("audio[data-recording]");
       await player.waitFor({ timeout: 30_000 });
 
-      // The link points at the **store**, and never at Egma. The bytes do not
+      // The link points at the **store**, and never at egma. The bytes do not
       // pass through the control plane; only the decision did.
       const source = await player.getAttribute("src");
       expect(new URL(source ?? "").origin).toBe(running.store.publicUrl);
@@ -1414,7 +1414,7 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
       const player = page.locator("audio[data-recording]");
       await player.waitFor({ timeout: 30_000 });
 
-      // The bytes come from the store and never through Egma, exactly as they
+      // The bytes come from the store and never through egma, exactly as they
       // do on the other surface — one route served both.
       const source = await player.getAttribute("src");
       expect(new URL(source ?? "").origin).toBe(running.store.publicUrl);
@@ -1450,7 +1450,7 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
         )
         .toBe(5);
 
-      // Said beside it, so nobody mistakes Egma's own audio for the audio a
+      // Said beside it, so nobody mistakes egma's own audio for the audio a
       // framework's telemetry attached to a step of this same exchange.
       expect(await page.innerText("main")).toContain("Egma's own audio");
       saysNothingBanned(await page.innerText("main"));
@@ -1518,7 +1518,7 @@ describe("pressing Use on a second grader while the first one's form is open", (
     "draws the second grader's form, with its own fields and nothing left over",
     async () => {
       await page.goto(`${origin}/graders`);
-      // Both of Egma's own graders, written onto the shelf at boot.
+      // Both of egma's own graders, written onto the shelf at boot.
       await page.waitForSelector("text=expected_behaviors");
       await page.waitForSelector("text=latency");
 
@@ -1609,7 +1609,7 @@ describe("pressing Use on a second grader while the first one's form is open", (
  * It is also the only place the **forwarding rule** for a copy's own address is
  * exercised. `/api/graders/:path*` is a rewrite this Next process resolves at
  * build time; without it the edit would post into this app's own file routing
- * and read Next's 404 page as though Egma had refused it — and every other test
+ * and read Next's 404 page as though egma had refused it — and every other test
  * in the repository would still pass, because they all speak to the API
  * directly.
  *
@@ -1653,7 +1653,7 @@ describe("changing a running grader and switching it off", () => {
   /**
    * The bound, which is the entry's own question — named by what it is not,
    * because what a grader asks for is the library entry's business and a test
-   * spelling the parameter would be the copy of Egma's catalog this screen
+   * spelling the parameter would be the copy of egma's catalog this screen
    * exists without.
    */
   const theEntrysNumber = 'form input[type="number"]:not(#edit-sample-rate)';

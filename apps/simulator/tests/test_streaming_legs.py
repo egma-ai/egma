@@ -182,7 +182,7 @@ def test_the_realtime_ears_leave_the_turn_boundary_to_the_detector_in_the_pipeli
     ended, arriving on a different clock from the ear that stamps the
     record's sample positions — and the transcript and the timings would
     then disagree. False is this service's word for "the detector is in
-    the pipeline", which is where Egma's is.
+    the pipeline", which is where egma's is.
     """
     leg, _ = _ears(
         SpeechProviders(stt="openai_realtime", stt_key=A_KEY), TELEPHONY_BAND_HZ

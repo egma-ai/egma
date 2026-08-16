@@ -20,8 +20,8 @@ import {
  *
  * The fact worth defending here is **owner**. It is the only field on the
  * answer that nothing stores — it is derived from who the entry belongs to, and
- * an entry belonging to nobody is Egma's. A door that computed it any other way
- * could show a team's own grader as Egma's, or Egma's as theirs, and neither
+ * an entry belonging to nobody is egma's. A door that computed it any other way
+ * could show a team's own grader as egma's, or egma's as theirs, and neither
  * would fail anything else.
  */
 
@@ -50,7 +50,7 @@ function itemsOf(answer: Answer): readonly Listed[] {
 }
 
 describe("reading the grader library", () => {
-  it("answers Egma's own graders, owned by Egma", async () => {
+  it("answers egma's own graders, owned by egma", async () => {
     api = await createApi("grader_library_list");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
@@ -62,7 +62,7 @@ describe("reading the grader library", () => {
       GRADER_LIBRARY_CATALOG.map((entry) => entry.name).sort(),
     );
     for (const entry of itemsOf(listed)) {
-      // Derived from tenancy, and the tenancy of Egma's own entries is nothing
+      // Derived from tenancy, and the tenancy of egma's own entries is nothing
       // at all — which is why there is no project on them either.
       expect(entry.owner, entry.name).toBe("egma");
       expect(entry.project_id, entry.name).toBeNull();
@@ -118,7 +118,7 @@ describe("reading the grader library", () => {
     expect(String(listed.body.message)).toContain("next_cursor");
   });
 
-  it("shows each customer the same shelf, because it is Egma's", async () => {
+  it("shows each customer the same shelf, because it is egma's", async () => {
     api = await createApi("grader_library_tenants");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
@@ -130,7 +130,7 @@ describe("reading the grader library", () => {
       await request("/api/grader-library", await projectKeyFor(api.app, grace)),
     );
 
-    // The same identifiers on both, which is what "Egma ships this" means: one
+    // The same identifiers on both, which is what "egma ships this" means: one
     // row, on every customer's shelf, upgraded by one release.
     expect(theirs.map((entry) => entry.id).sort()).toEqual(
       others.map((entry) => entry.id).sort(),

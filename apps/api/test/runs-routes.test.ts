@@ -107,7 +107,7 @@ const RETELL = {
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
-/** A number Egma dials: the shipped phone adapter's own connection shape. */
+/** A number egma dials: the shipped phone adapter's own connection shape. */
 const PHONE = {
   type: "phone",
   modality: "voice",
@@ -119,7 +119,7 @@ const PHONE = {
  * trunk, a number its calls come from, and a voice to speak with.
  *
  * Non-secret, all three of it — see `phone-readiness.ts`. What it stands for
- * here is the difference between an Egma that can dial and one that has never
+ * here is the difference between an egma that can dial and one that has never
  * been given a carrier, which is the only thing the run door asks about.
  */
 const PHONE_IS_SET_UP = {
@@ -610,8 +610,8 @@ describe("starting a run", () => {
   });
 
   it("lets a run over a connection that does not use the platform's carrier through a platform with none", async () => {
-    // The whole point of two readiness facts rather than one: an Egma nobody
-    // has given a carrier is a working Egma for everything that is not a
+    // The whole point of two readiness facts rather than one: an egma nobody
+    // has given a carrier is a working egma for everything that is not a
     // phone call, and a gate that refused chat work would make the first-run
     // story impossible to tell.
     const { key, connectionId, oneCaller } = await aCustomerReadyToRun(

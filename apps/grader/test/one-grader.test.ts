@@ -15,7 +15,7 @@ import { noJudgeWanted } from "./support/scripted-judge.ts";
  * What one grader says about one conversation, before anything is written down.
  *
  * The seam between the engine and a library entry's executor is where unknown
- * code runs — every entry Egma ships after these two arrives through it — so
+ * code runs — every entry egma ships after these two arrives through it — so
  * the promises the engine makes about that seam are asserted here rather than
  * inferred from whichever entries happen to be executable today.
  */
@@ -108,12 +108,12 @@ function judging(conversationOverrides: Partial<Conversation> = {}) {
   };
 }
 
-describe("a copy of an entry Egma cannot execute yet", () => {
+describe("a copy of an entry egma cannot execute yet", () => {
   /**
    * **`errored`, and deliberately not `skipped`.** `skipped` means the check
    * did not apply to this conversation and leaves the score's denominator,
    * which is right for a measure a conversation could never produce and wrong
-   * here: this check applies perfectly well and Egma did not make it. Saying so
+   * here: this check applies perfectly well and egma did not make it. Saying so
    * out loud is what keeps a project's page from going green because a grader
    * quietly judged nothing.
    *
@@ -154,8 +154,8 @@ describe("a copy of an entry Egma cannot execute yet", () => {
 
 describe("a simulation that never ran", () => {
   /**
-   * Either it never happened or Egma cannot read it, and both are things that
-   * went wrong on Egma's side of the glass. The one thing a test product must
+   * Either it never happened or egma cannot read it, and both are things that
+   * went wrong on egma's side of the glass. The one thing a test product must
    * never do is score them as the agent behaving badly, so the reason the
    * conversation carries is the reason the row carries.
    */
@@ -225,7 +225,7 @@ describe("a grader whose execution falls over", () => {
    * escapes.** That is what this file can see. The expected-behaviors grader
    * reads its assertions off the test — a store call — and nothing here connects
    * a store, so both the execution and the question "what would you have
-   * checked" fail. A grader Egma cannot describe is one it must stay silent
+   * checked" fail. A grader egma cannot describe is one it must stay silent
    * about rather than file a row it can never correct; the job is released and
    * judged again from the beginning, which is what the attempt count is for.
    */
@@ -246,7 +246,7 @@ describe("a grader whose execution falls over", () => {
   });
 
   it("never says failed, because nothing is being said about the agent", async () => {
-    // The two a conversation can reach without a store behind it: an entry Egma
+    // The two a conversation can reach without a store behind it: an entry egma
     // does not execute yet, and a copy whose entry could not be read at all.
     const unbuilt = {
       ...definition(PREDEFINED_GRADERS.latency),
