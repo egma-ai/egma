@@ -84,6 +84,15 @@ const COUNTERPART_KEY = "retell-secret-A1B2C3D4WXYZ";
 const REFUSED_KEY = "retell-secret-NOBODY0000000";
 
 /**
+ * The Retell plug gives one platform request 60 seconds. Node otherwise closes
+ * an idle pooled socket after 5 seconds, so a worker paused under suite load
+ * can wake up holding a stale connection before its next POST. Keep the test
+ * counterpart alive beyond that request window, with longer room for headers.
+ */
+const COUNTERPART_KEEP_ALIVE_MILLISECONDS = 65_000;
+const COUNTERPART_HEADERS_TIMEOUT_MILLISECONDS = 70_000;
+
+/**
  * A Retell-shaped chat platform on loopback: the three endpoints the shipped
  * plug speaks — create-chat, create-chat-completion, end-chat — with
  * Retell's own field names, bearer-key auth, and a scripted agent behind
@@ -111,6 +120,8 @@ class RetellCounterpart {
         this.answer(request, response, body);
       });
     });
+    this.server.keepAliveTimeout = COUNTERPART_KEEP_ALIVE_MILLISECONDS;
+    this.server.headersTimeout = COUNTERPART_HEADERS_TIMEOUT_MILLISECONDS;
     await new Promise<void>((resolve) => {
       this.server?.listen(0, "127.0.0.1", resolve);
     });
@@ -179,6 +190,34 @@ class RetellCounterpart {
     });
   }
 }
+
+describe("the Retell-shaped counterpart", () => {
+  it("keeps an idle connection beyond the simulator's Retell request window", async () => {
+    const server = new RetellCounterpart();
+    await server.start();
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${server.port}/create-chat`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${COUNTERPART_KEY}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ agent_id: "agent_under_walk" }),
+        },
+      );
+      await response.body?.cancel();
+
+      // The simulator allows one Retell request 60 seconds. The counterpart
+      // must keep a pooled socket alive longer than that, including when this
+      // worker pauses under load between two non-idempotent POST requests.
+      expect(response.headers.get("keep-alive")).toBe("timeout=65");
+    } finally {
+      await server.stop();
+    }
+  });
+});
 
 /** What the team wrote down, in their own words, for the judge to answer. */
 const THE_BEHAVIOR = "confirms the new time back before finishing";
@@ -654,7 +693,12 @@ describe("the shipped simulator against the real API", () => {
       // The conversation that happened: completed, concluded by the persona,
       // and every lifecycle column telling the truth about it.
       const row = await rowOf(conducted.simulationId);
-      expect(row.status).toBe("completed");
+      if (row.status !== "completed") {
+        throw new Error(
+          `the conducted simulation ended ${String(row.ending_reason)}; ` +
+            `the simulator said:\n${simulatorSaid}`,
+        );
+      }
       expect(row.ending_reason).toBe("persona_concluded");
       expect(row.claimed_by).toBe("walking-simulator-1");
       // Greeting, the scenario's one sentence, the scripted answer, and the
