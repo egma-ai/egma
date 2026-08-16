@@ -102,7 +102,7 @@ export default function RunResultsAddress({
 
   if (state.status === "missing") {
     return (
-      <ProductStatePage eyebrow="Runs" title="Run">
+      <ProductStatePage eyebrow="Simulation runs" title="Run">
         <NotFound
           message={state.why}
           action={<ButtonLink href="/">Go to your projects</ButtonLink>}
@@ -113,14 +113,14 @@ export default function RunResultsAddress({
 
   if (state.status === "failed") {
     return (
-      <ProductStatePage eyebrow="Runs" title="Run">
+      <ProductStatePage eyebrow="Simulation runs" title="Run">
         <Failure message={state.why} />
       </ProductStatePage>
     );
   }
 
   return (
-    <ProductStatePage eyebrow="Runs" title="Run">
+    <ProductStatePage eyebrow="Simulation runs" title="Run">
       <Loading what="this run" />
     </ProductStatePage>
   );

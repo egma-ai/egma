@@ -1,3 +1,4 @@
+import { projectPath } from "./project-context.ts";
 import { DEFAULT_WINDOW, WINDOWS, type WindowChoice } from "./transcript-copy.ts";
 
 /**
@@ -321,11 +322,171 @@ export function windowAround(facts: {
   };
 }
 
-/** Where a row in the list leads, window and all. */
-export function transcriptPath(facts: Facts): string {
+/* ------------------------------------------------------------------ *
+ * The monitoring section: where its pages are, and what they ask for.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The product area production traffic is read in, and the page inside it.
+ *
+ * **Both segments are glossary words.** The store files a trace made of spans
+ * and the API's own paths say so; what a person navigates is *monitoring*, and
+ * what they open is a *transcript*. `dashboard` is reserved beside this one and
+ * nothing claims it — there is no constant for it here on purpose, because a
+ * name in this file is a name something links to.
+ */
+export const MONITORING_SECTION = "monitoring";
+export const TRANSCRIPTS_STEP = "transcripts";
+
+/** The area's own address, which lands on the list below. */
+export function monitoringPath(projectId: string): string {
+  return projectPath(projectId, MONITORING_SECTION);
+}
+
+/** Every production conversation this project recorded. */
+export function transcriptsPath(projectId: string): string {
+  return projectPath(projectId, MONITORING_SECTION, TRANSCRIPTS_STEP);
+}
+
+/** Where a row in the list leads, project and window and all. */
+export function transcriptPath(projectId: string, facts: Facts): string {
   const window = windowAround(facts);
   const query = new URLSearchParams({ from: window.from, to: window.to });
-  return `/traces/${encodeURIComponent(facts.trace_id)}?${query.toString()}`;
+  return `${transcriptsPath(projectId)}/${encodeURIComponent(facts.trace_id)}?${query.toString()}`;
+}
+
+/**
+ * What the store calls the two kinds of traffic, and the one this surface asks
+ * for.
+ *
+ * **Monitoring is production and nothing else.** A simulation has a richer page
+ * of its own inside the run that produced it — the frozen test, the persona, the
+ * graders, the mock tools — so drawing it a second time and poorer, in a mixed
+ * list, is a wrong door. The filter is the server's, in the address of the
+ * request: narrowing what came back would answer differently depending on what
+ * had already been fetched, and would quietly break paging.
+ */
+export const SOURCE_PARAMETER = "source";
+export const PRODUCTION = "production";
+
+/** Which project a read is about, as the v1 contract spells it. */
+export const PROJECT_PARAMETER = "project_id";
+
+const TRACES_ENDPOINT = "/v1/traces";
+
+/**
+ * One page of this project's production conversations.
+ *
+ * Three things ride in the address and each is load-bearing: the **window**,
+ * because the store is filed by time and refuses a read that bounded nothing;
+ * the **project**, read from the page's own address rather than assumed from
+ * whoever is signed in, so that a copied link opens the project it names; and
+ * the **source**, because this surface is production traffic only.
+ */
+export function productionListPath(asking: {
+  readonly window: Window;
+  readonly projectId: string;
+  readonly cursor?: string | null;
+}): string {
+  const asked = new URLSearchParams({
+    from: asking.window.from,
+    to: asking.window.to,
+    [SOURCE_PARAMETER]: PRODUCTION,
+    [PROJECT_PARAMETER]: asking.projectId,
+  });
+  if (asking.cursor != null && asking.cursor !== "") {
+    asked.set("cursor", asking.cursor);
+  }
+  return `${TRACES_ENDPOINT}?${asked.toString()}`;
+}
+
+/**
+ * One conversation, in the window it happened in and the project it belongs to.
+ *
+ * No source here, and deliberately: the name already picks out one row, and a
+ * filter on a lookup could only ever turn a transcript somebody was sent into a
+ * page that says it is not there.
+ */
+export function transcriptReadPath(asking: {
+  readonly traceId: string;
+  readonly window: Window;
+  readonly projectId: string;
+}): string {
+  const asked = new URLSearchParams({
+    from: asking.window.from,
+    to: asking.window.to,
+    [PROJECT_PARAMETER]: asking.projectId,
+  });
+  return `${TRACES_ENDPOINT}/${encodeURIComponent(asking.traceId)}?${asked.toString()}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * What to say when the page is quiet.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Which guidance a quiet Monitoring page owes its reader — one of three, and
+ * never two at once.
+ *
+ * Each answers a different question, and showing the wrong one sends somebody
+ * the wrong way for an afternoon:
+ *
+ * - `set-up-capture` — nothing has arrived. The reader has an agent and no
+ *   export, so what they need is the address, the two variables and a key.
+ * - `key-names-the-organization` — nothing has arrived **and** this
+ *   organization holds a key that names no project. That key is the one thing
+ *   on the setup path that fails silently: everything is accepted and stored,
+ *   and none of it is in any project, so a correct-looking exporter shows
+ *   nothing here. Saying "point an export at Egma" to somebody who already did
+ *   is the unhelpful answer.
+ * - `nothing-watches-production` — traffic is arriving and no grader is scoped
+ *   to it, so verdicts will stay absent. Every new grader defaults to
+ *   simulations, and the seeded expected-behaviors copy is structurally
+ *   simulations-only, so this is the ordinary state rather than the odd one.
+ *
+ * Nothing at all is the fourth answer, and it is the one a healthy project
+ * gets: traffic arriving, something judging it.
+ *
+ * The order is the point. With no traffic, telling somebody that no grader
+ * watches production is noise about a problem they do not have yet.
+ */
+export type Quiet =
+  | "set-up-capture"
+  | "key-names-the-organization"
+  | "nothing-watches-production";
+
+export function quietState(seen: {
+  /** How many production conversations this window holds. */
+  readonly listed: number;
+  /** Keys this organization holds that name no project. */
+  readonly organizationWideKeys: number;
+  /** Running graders whose scope reaches production. */
+  readonly watchingProduction: number;
+}): Quiet | null {
+  if (seen.listed === 0) {
+    return seen.organizationWideKeys > 0
+      ? "key-names-the-organization"
+      : "set-up-capture";
+  }
+  return seen.watchingProduction === 0 ? "nothing-watches-production" : null;
+}
+
+/**
+ * Whether a running grader's verdicts can ever appear beside production
+ * traffic.
+ *
+ * `both` counts, because a copy scoped to both judges production as well as
+ * simulations. `simulations` does not, whatever its sampling rate says.
+ */
+export function watchesProduction(grader: { readonly scope: string }): boolean {
+  return grader.scope === PRODUCTION || grader.scope === "both";
+}
+
+/** Keys minted against the whole organization, which file outside every project. */
+export function namesWholeOrganization(key: {
+  readonly project_id: string | null;
+}): boolean {
+  return key.project_id === null;
 }
 
 /* ------------------------------------------------------------------ *

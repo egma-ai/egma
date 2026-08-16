@@ -72,19 +72,22 @@ export function sectionIn(pathname: string): string | null {
  * section is kept and everything under it is dropped.
  *
  * An address with no project in it at all becomes the new project's landing
- * page, because there is no area to carry across. **Five addresses carry no
+ * page, because there is no area to carry across. **Three addresses carry no
  * project, and every one of them can reach this function**, because the only
  * caller is the selector's click handler and `AppShell` draws the selector on
  * every page it wraps, unconditionally, whatever the address says:
  *
  * - `/new-project`, which an organization holding none has to be able to reach.
- * - `/traces` and `/traces/{traceId}`, whose browser reads use the project on
- *   the session even though their addresses do not name it.
  * - `/runs/{runId}`, the address a terminal prints, which reads the run's own
  *   project and forwards into it.
  * - `/members`, the kept legacy Settings address, which chooses the caller's
  *   first project on purpose because People is the organization's and any
  *   project serves as its frame.
+ *
+ * The two transcript addresses used to be on that list. They are inside the
+ * project now — `/projects/{projectId}/monitoring/transcripts` and one
+ * conversation beneath it — so switching project from Monitoring lands on the
+ * other project's Monitoring rather than throwing somebody out to Agents.
  *
  * **The last two forward, and forwarding is not the same as never being here.**
  * Both draw `ProductStatePage`, which is this shell around a page, so the
@@ -96,7 +99,7 @@ export function sectionIn(pathname: string): string | null {
  * were once written down as unreachable are in fact the two most likely to
  * arrive, because they are the two that can get stuck.
  *
- * All five land on the same answer, which is the right one for each: there is
+ * All three land on the same answer, which is the right one for each: there is
  * no area on any of these addresses to carry into the project just picked.
  */
 export function inProject(pathname: string, projectId: string): string {
