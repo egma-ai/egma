@@ -1,4 +1,5 @@
 .brand { display: block; width: 151px; height: auto; }
+:global(:root[data-theme="dark"]) .brand { filter: invert(1); }
 .eyebrow { margin: 0 0 var(--space-3); color: var(--muted); font-family: var(--mono); font-size: var(--text-caption); letter-spacing: .08em; line-height: var(--line-caption); text-transform: uppercase; }
 .themeToggle { display: grid; width: var(--tap-target); height: var(--tap-target); flex: 0 0 auto; padding: 0; place-items: center; border: 1px solid var(--foreground); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
 
