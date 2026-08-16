@@ -7,7 +7,15 @@ requires-python = ">=3.11"
 # this repository, so the fixture always exercises the seam as it stands
 # on this branch rather than whatever was last published — which is the
 # only way the live proof means anything.
-dependencies = ["egma", "livekit-agents[openai,silero]==1.6.7"]
+# The two OpenTelemetry packages are named here rather than left to arrive
+# under `livekit-agents`, because this file exports telemetry itself: a
+# transitive dependency is a dependency somebody else may drop.
+dependencies = [
+    "egma",
+    "livekit-agents[openai,silero]==1.6.7",
+    "opentelemetry-exporter-otlp-proto-http",
+    "opentelemetry-sdk",
+]
 
 [tool.uv.sources]
 egma = { path = "../../sdks/python", editable = true }
