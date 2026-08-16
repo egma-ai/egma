@@ -1,0 +1,162 @@
+---
+title: "Authentication, API Keys, and Member Roles in egma"
+sidebarTitle: "Authentication"
+description: "Sign up, sign in, get an API key via the CLI or dashboard, understand key scoping, revoke keys, and manage team members and roles in egma."
+---
+
+egma uses two credential types: browser sessions for the web dashboard, and API keys for the CLI, exporters, and direct API access. Both work on the same routes — you do not need a separate login for each. This page covers how to get in, how to get a key, how to use it, and how to manage who else has access.
+
+---
+
+## Signing up
+
+Open your egma instance in a browser — `http://localhost:3101` for a default local deployment — and sign up. On a fresh instance the first person to sign up claims it: your account is created, your organization is created, and you become its admin in one step. Open signup closes immediately after — everyone who joins after you arrives by invitation.
+
+If the instance requires email verification (configured via `EGMA_SMTP_URL`), confirm your address before proceeding.
+
+---
+
+## Signing in
+
+Navigate to your egma instance and enter your email and password. Your session is valid for the browser you signed in on. The session cookie is scoped to the instance's origin, so it is not shared with any other service.
+
+---
+
+## Getting an API key
+
+### Via the CLI (recommended)
+
+Run `egma login` in your terminal. The CLI initiates a device code flow: it prints a short code, opens your browser to the approval page with the code pre-filled, and waits. Approve the request in your browser, select which project the terminal is acting for, and the CLI exchanges the code for an API key.
+
+```bash
+npx @egma/cli login --url http://localhost:3101
+```
+
+The key is stored at `~/.egma/credentials` by default. See [Credential storage location](#credential-storage-location) to change this with `EGMA_HOME`.
+
+<Tip>
+  The CLI's `login` command is also the final step of `egma` (the first-run onboarding command). If you have already run that, you have a key stored and do not need to run `login` separately.
+</Tip>
+
+### Via the web dashboard
+
+1. Sign in to your egma instance.
+2. Navigate to **Settings → API Keys**.
+3. Click **Create**.
+4. Copy the key immediately — it is shown in full only once.
+
+### Via the API
+
+Send a `POST` request to `/api/keys`. You must authenticate this request with an existing session cookie or API key.
+
+```bash
+curl -sX POST http://localhost:3101/api/keys \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"projectId": "proj_..."}'
+```
+
+---
+
+## API key format
+
+Every egma API key begins with the prefix `egma_sk_`, followed by 32 random bytes. The full key is shown only at creation time. The platform stores a SHA-256 hash of the key alongside the last four characters — enough to identify which key is in use, but never enough to reconstruct it.
+
+```
+egma_sk_a1b2c3d4e5f6...
+```
+
+---
+
+## Using an API key
+
+Pass your API key as a Bearer token in the `Authorization` header of every request:
+
+```bash
+curl -H "Authorization: Bearer egma_sk_..." \
+  http://localhost:3101/api/keys
+```
+
+The same header format applies to the OpenTelemetry exporter endpoint, the REST API, and any direct `curl` calls.
+
+---
+
+## Key scoping and trace ingestion
+
+<Warning>
+  **A key minted for the whole organization cannot file telemetry spans to the dashboard.** Keys are scoped when they are created: a project-scoped key routes incoming spans to that project, where the dashboard can find them. An org-wide key files spans under no project at all, and those spans are invisible in the dashboard.
+
+  Always mint the key your agent's exporter uses against a specific project.
+</Warning>
+
+The distinction matters in two places:
+
+- **Trace ingestion** (`POST /v1/traces`): use a project-scoped key. Org-wide keys at `member` or `admin` role are not refused, but the spans they carry are filed under no project at all — invisible in the dashboard. A key held by a `viewer` is refused for trace ingestion regardless of scope, because sending spans is a write.
+- **Management operations** (creating projects, reading members, calling `PATCH /api/platform/settings`): an org-wide key works fine.
+
+---
+
+## Revoking a key
+
+### Via the dashboard
+
+1. Navigate to **Settings → API Keys**.
+2. Find the key you want to revoke.
+3. Click **Revoke**.
+
+The key stops working on the very next request that presents it.
+
+### Via the API
+
+```bash
+curl -sX POST http://localhost:3101/api/keys/:id/revoke \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+Replace `:id` with the key's identifier (visible in the key list).
+
+<Note>
+  Removing a team member revokes all keys they minted, automatically and immediately. You do not need to revoke their keys separately.
+</Note>
+
+---
+
+## Inviting team members
+
+Only admins can invite new members. Open the **Members** page, type the invitee's email address, choose a role, and send the invitation.
+
+If your instance has no email transport configured (`EGMA_SMTP_URL` is not set), the invitation link is returned directly to you rather than sent by email. Pass it to your colleague however you like — the link works once and expires after seven days.
+
+The invitation is accepted by the address it was sent to only. An expired invitation and an already-accepted one return different messages so you know whether to resend or tell the person they are already in.
+
+---
+
+## Roles
+
+egma has three roles. Every role may create an API key for themselves — the login flow mints one as its last step.
+
+| Role | What they can do |
+|---|---|
+| **viewer** | Read traces, transcripts, simulation results, and project configuration. Cannot write, push, or export spans. |
+| **member** | Everything a viewer can do, plus: run simulations, push test suites, export telemetry spans, and manage project resources. |
+| **admin** | Everything a member can do, plus: invite and remove members, change roles, and manage platform settings. |
+
+<Note>
+  An organization always keeps at least one admin. The last admin cannot be demoted, removed, or deactivated.
+</Note>
+
+Role changes take effect on the next request — there is no grace period. Demoting a member stops their exporters' ability to ingest spans immediately, with no key touched.
+
+---
+
+## Credential storage location
+
+The CLI stores your credentials at `~/.egma/credentials` by default. Override this by setting `EGMA_HOME`:
+
+```bash
+export EGMA_HOME=/path/to/custom/dir
+npx @egma/cli login --url http://localhost:3101
+# credentials now stored at /path/to/custom/dir/credentials
+```
+
+This is useful in CI environments or when running multiple egma instances side by side.

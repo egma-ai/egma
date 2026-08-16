@@ -1,0 +1,404 @@
+---
+title: "egma CLI Command Reference — All Commands and Flags"
+sidebarTitle: "Commands"
+description: "Full reference for every egma CLI command: usage syntax, key flags, exit codes, and environment variables for scripting and CI pipelines."
+---
+
+Every egma command prints one fact per line and exits with a numeric code you can branch on. This makes every command safe to call from a CI pipeline, a shell script, or a coding agent — no screen-scraping required. Commands that need a real terminal (the interactive wizard) refuse piped or redirected input and tell you to pass `--headless` instead.
+
+## Global flags
+
+These flags work with every command.
+
+| Flag | Description |
+|---|---|
+| `--coding-agent <id>` | Which coding agent to drive, using the name from the agent registry. Default: `claude-acp` |
+| `--cwd <path>` | The folder to operate in. Default: the current directory |
+| `--url <address>` | Which egma instance this command talks to. Overrides any value in `egma/config.yaml` |
+| `--force` | With `login`: sign in again even when this machine already holds a key |
+| `--no-follow` | With `run`: start the run and return immediately, without waiting for a verdict |
+| `--headless` | Run with no terminal interaction: plain output, and the coding-agent task treated as already agreed |
+| `-h`, `--help` | Print the help text |
+| `-v`, `--version` | Print the package version |
+
+## Environment variables
+
+Set these in your shell or CI environment to avoid repeating flags on every command.
+
+| Variable | Description |
+|---|---|
+| `EGMA_HOME` | The folder egma stores this machine's credentials in. Default: `~/.egma` |
+| `EGMA_RETELL_API_KEY` | Your Retell API key for `egma connect`. `RETELL_API_KEY` is also accepted, so an environment that already exports it needs no change |
+| `EGMA_RETELL_AGENT_ID` | Which Retell agent to register, equivalent to `--retell-agent` |
+| `EGMA_REACH` | `text` or `phone`, equivalent to `--reach` |
+| `EGMA_PHONE_NUMBER` | Which phone number to dial, equivalent to `--phone-number` |
+| `EGMA_RETELL_URL` | The Retell API base URL. Default: `https://api.retellai.com` |
+| `EGMA_EXISTING_TESTS` | Path to your existing test cases, equivalent to `--existing-tests` |
+| `VISUAL`, `EDITOR` | The editor opened when you press `[e]` at the test-review gate |
+
+---
+
+## Commands
+
+<AccordionGroup>
+  <Accordion title="egma — interactive wizard">
+    Opens the full interactive wizard. It signs you in, discovers your voice agent using your coding agent, connects the agent to egma, generates a first test suite, and starts a run — all in one guided flow.
+
+    The wizard draws on your terminal's alternate screen. When it closes it leaves a single results URL and a plain summary in your normal terminal buffer, each item on its own line so a triple-click selects it whole.
+
+    **Usage**
+
+    ```bash
+    npx @egma/cli [options]
+    ```
+
+    **Key flags**
+
+    | Flag | Description |
+    |---|---|
+    | `--url <address>` | Which egma instance to use for this run |
+    | `--coding-agent <id>` | Which coding agent to drive. Default: `claude-acp` |
+    | `--headless` | Run non-interactively; treats the task as already agreed |
+    | `--existing-tests <path>` | Path to your existing test cases inside this folder. Your coding agent converts them to test files before generating new ones |
+    | `--reach <text\|phone>` | Required in headless mode: how egma should reach the agent |
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | Completed successfully |
+    | `130` | Stopped partway through (Ctrl-C) |
+
+    <Note>
+      The wizard requires a real terminal to display the consent keystroke. Pass
+      `--headless` to run it in CI or from a script — this treats the coding-agent
+      task as already agreed and produces plain line output.
+    </Note>
+  </Accordion>
+
+  <Accordion title="egma login — sign this machine in">
+    Signs this machine in to egma. Opens a browser to a device-approval page pre-filled with a short code. Once you approve it, egma stores a credential at `~/.egma/credentials` (or `$EGMA_HOME/credentials`), readable only by you.
+
+    No secret is ever typed into the terminal. If the machine already holds a valid credential, `egma login` says so and exits without changing anything.
+
+    **Usage**
+
+    ```bash
+    egma login [options]
+    ```
+
+    **Key flags**
+
+    | Flag | Description |
+    |---|---|
+    | `--url <address>` | Sign in to a specific egma instance |
+    | `--force` | Sign in again even when this machine already holds a key, replacing it |
+
+    **Example output**
+
+    ```
+    url: http://localhost:3101
+    code: WDJBMJHT
+    approve_url: http://localhost:3101/device?user_code=WDJBMJHT
+    browser: opened
+    waiting: for this code to be approved in a browser
+    status: stored
+    credentials: /home/you/.egma/credentials
+    ```
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | Signed in successfully |
+    | `2` | Approval was denied |
+    | `3` | The device code expired before approval |
+    | `4` | egma did not answer, or refused the request |
+    | `130` | Stopped partway through |
+
+    <Tip>
+      On a machine without a browser (SSH, devbox, container), press `[c]` during
+      the wait and egma copies the approval URL to your local clipboard. Approve it
+      in a browser, then paste the full URL, the `?user_code=…` portion, or just
+      the code — all three work.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="egma connect — register your voice agent">
+    Registers your voice agent with egma and creates a connection for running simulations. Reads a Retell API key from standard input or from the environment — never as a command-line argument, because arguments appear in process lists and shell history.
+
+    Running `egma connect` twice against the same agent is safe. egma detects the existing registration and reports whether it `created`, `reused`, or `connection_added` on the `registration:` line.
+
+    **Usage**
+
+    ```bash
+    # Key on standard input
+    cat retell-key.txt | egma connect [options]
+
+    # Key from environment
+    EGMA_RETELL_API_KEY=your_key egma connect [options]
+    ```
+
+    **Key flags**
+
+    | Flag | Description |
+    |---|---|
+    | `--reach <text\|phone>` | **Required** in non-interactive mode. `text` for message-based simulation; `phone` to dial a real number. egma creates exactly one connection and never both |
+    | `--retell-agent <id>` | Which Retell agent to register when the account holds more than one |
+    | `--phone-number <e164>` | Which number to dial when `--reach phone` and the agent has more than one number |
+    | `--repo-prompt <path>` | The prompt file in your repository, so egma can report whether it and Retell have drifted apart |
+
+    **Environment variables**
+
+    | Variable | Equivalent flag |
+    |---|---|
+    | `EGMA_RETELL_API_KEY` | Retell API key (also `RETELL_API_KEY`) |
+    | `EGMA_RETELL_AGENT_ID` | `--retell-agent` |
+    | `EGMA_REACH` | `--reach` |
+    | `EGMA_PHONE_NUMBER` | `--phone-number` |
+
+    **Example output**
+
+    ```
+    url: http://localhost:3101
+    retell_agents: 1
+    retell_agent_id: agent_…
+    retell_response_engine: retell-llm
+    prompt_characters: 2140
+    tools: 7
+    reach: phone
+    phone_number: +14155550111
+    agent_id: agt_01K…
+    agent_name: order-line
+    connection_id: con_01K…
+    connection_name: phone-1
+    connection_type: phone
+    connection_modality: voice
+    registration: created
+    agent_registration: created
+    connection_registration: created
+    drift: no
+    grounded_in: retell
+    status: connected
+    ```
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | Connected successfully |
+    | `2` | The Retell API key was refused |
+    | `3` | No agents found on the Retell account |
+    | `4` | Retell or egma did not answer, or refused |
+    | `5` | A required choice was not made: which agent, `text` or `phone`, or which number |
+    | `6` | No API key was provided |
+    | `7` | Not signed in to egma |
+    | `8` | Retell routes no phone number to that agent |
+    | `130` | Stopped partway through |
+  </Accordion>
+
+  <Accordion title="egma init — create the egma/ folder">
+    Creates the `egma/` folder structure in your repository. Everything `init` creates is safe to commit — nothing secret ever lands in the folder. Run it again safely at any time; it will not overwrite files that already exist.
+
+    When you pass `--url`, `init` contacts that egma instance, verifies its identity, and records the result in `egma/config.yaml`. Every subsequent command run from this repository then finds the instance address automatically, with no `--url` flag required.
+
+    **Usage**
+
+    ```bash
+    egma init [options]
+    ```
+
+    **Key flags**
+
+    | Flag | Description |
+    |---|---|
+    | `--url <address>` | Which egma instance to bind this repository to. egma verifies the instance's identity and writes it to `egma/config.yaml` |
+    | `--agent <name>` | What to call the voice agent this folder's tests are for |
+    | `--connection <name>` | What to call the connection egma uses to reach it |
+    | `--suite <name>` | What to call this folder's test suite |
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | Folder created or already in good shape |
+    | `4` | egma did not answer, or refused (only when `--url` is passed) |
+  </Accordion>
+
+  <Accordion title="egma pull — fetch egma's test versions">
+    Writes egma's current versions of every test in the `egma/` folder into your local files, updating the `version:` field in each file's front matter. Use `pull` to get changes made by teammates in the egma dashboard before you start editing locally.
+
+    **Usage**
+
+    ```bash
+    egma pull [options]
+    ```
+
+    **Example output**
+
+    ```
+    url: http://localhost:3101
+    folder: /repo/egma
+    test: missed-appointment-reschedule
+    file: egma/tests/missed-appointment-reschedule.md
+    version: tstv_01K…
+    status: updated
+    ```
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | All tests pulled successfully |
+    | `1` | No `egma/` folder found |
+    | `2` | Not signed in to egma |
+    | `4` | egma did not answer, or refused |
+    | `130` | Stopped partway through |
+  </Accordion>
+
+  <Accordion title="egma push — upload your tests">
+    Uploads the tests in your `egma/` folder to egma, creating a new version of each test and writing the new version ID back into the file's front matter. A successful push never overwrites previous versions — results from last week still reference exactly what they ran.
+
+    `push` refuses when egma holds a version newer than the one your file last synced at. It names every conflicting file on a `conflict:` line, uploads nothing, and exits `5`. Run `egma pull` first, review what changed, then push again.
+
+    **Usage**
+
+    ```bash
+    egma push [options]
+    ```
+
+    **Example output (conflict)**
+
+    ```
+    conflict: missed-appointment-reschedule
+    file: egma/tests/missed-appointment-reschedule.md
+    uploaded: nothing
+    status: refused
+    ```
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | All tests pushed successfully |
+    | `1` | No `egma/` folder found |
+    | `2` | Not signed in to egma |
+    | `4` | egma did not answer, or refused |
+    | `5` | Push refused: egma has moved on — run `egma pull` first |
+    | `6` | egma rejected a test (e.g. no expected behaviors) |
+    | `130` | Stopped partway through |
+
+    <Warning>
+      egma will not store a test with no expected behaviors — a test with none can
+      never fail, which makes it meaningless. Fix the file and push again. egma's
+      refusal reason is printed verbatim.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="egma run — run your test suite">
+    Runs every test in your `egma/` folder against your connected voice agent. Each test is pinned to its current version before the run starts, so the run record is an exact snapshot of what executed. The command follows the run, printing every change as it arrives.
+
+    Before starting, `egma run` checks that your local folder and egma agree on every test file's content. Any file egma has never seen is listed on an `unknown:` line; any file whose content differs from egma's version appears on a `not-pushed:` line. Either condition refuses the whole run — the fix is `egma push`.
+
+    **Usage**
+
+    ```bash
+    egma run [options]
+    ```
+
+    **Key flags**
+
+    | Flag | Description |
+    |---|---|
+    | `--no-follow` | Start the run and return immediately, without waiting for a verdict. The run continues on egma |
+
+    **Example output**
+
+    ```
+    url: http://localhost:3101
+    folder: /repo/egma
+    agent: agt_01K…
+    connection: con_01K…
+    pin: quoted-a-price tstv_01K…
+    pin: lost-the-order-number tstv_01K…
+    run: run_01K…
+    tests: 2
+    simulations: 2
+    results: http://localhost:3101/runs/run_01K…
+    simulation: quoted-a-price default-persona running
+    verdict: quoted-a-price default-persona passed
+    first-verdict: quoted-a-price default-persona passed
+    passed: 1
+    failed: 0
+    skipped: 1
+    errored: 0
+    pending: 0
+    simulations: 2
+    status: completed
+    ```
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | Run finished; nothing failed or errored |
+    | `1` | No tests found in the `egma/` folder |
+    | `2` | Not signed in to egma |
+    | `3` | At least one test failed |
+    | `4` | egma did not answer, or refused |
+    | `5` | egma refused to start the run (reason printed) |
+    | `6` | At least one simulation errored — no conclusion possible |
+    | `130` | Stopped partway through |
+
+    <Note>
+      A `skipped` result is not a failure. It means the test required something
+      the connection cannot do (e.g. DTMF on a text connection). A `failed` result
+      means the agent did not meet an expected behavior. Only `errored` means
+      something went wrong with the simulation infrastructure itself.
+    </Note>
+  </Accordion>
+
+  <Accordion title="egma self-host up — start a local egma instance">
+    Starts a full local egma instance using Docker Compose: Postgres, ClickHouse, the API, the web UI, the simulator, the grader, and (for phone simulations) a LiveKit server, SIP gateway, and Redis. Run this from your egma platform checkout, not from your agent repository.
+
+    After the stack is up, the command prints the address to point your agent repository at, and lists any platform configuration still missing.
+
+    **Usage**
+
+    ```bash
+    # From your egma platform checkout
+    npx @egma/cli self-host up
+    ```
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | Instance started successfully |
+    | `4` | Docker or a required service did not start |
+  </Accordion>
+
+  <Accordion title="egma self-host setup — configure a running instance">
+    Configures a running egma instance by asking for provider credentials and writing them through the platform API. Run this after `egma self-host up` and after signing in with `egma login --url <address>`.
+
+    The command asks the platform what it is missing, then prompts you for exactly that — in a fixed order: the model provider (for persona reasoning), the speech provider (TTS and STT), and the telephony carrier (for phone simulations). A setting the platform already holds is never asked for again, so a second run only asks about what is still missing, and on a fully configured platform it changes nothing and says so.
+
+    For the phone setup, egma asks for a Twilio account, an existing voice number on that account, and the account's Auth Token. It shows a plan before writing anything to your carrier, and it never buys, ports, or registers a number. The Auth Token is used once and stored nowhere — what runs afterward holds a SIP credential for one trunk.
+
+    **Usage**
+
+    ```bash
+    # Sign in first, then configure
+    egma login --url http://localhost:3101
+    egma self-host setup
+    ```
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | Configuration complete (or already complete) |
+    | `2` | Not signed in as an organization owner |
+    | `4` | The platform API did not answer, or refused |
+  </Accordion>
+</AccordionGroup>

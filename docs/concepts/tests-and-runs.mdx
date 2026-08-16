@@ -1,0 +1,182 @@
+---
+title: "Tests and Runs: Simulate and Evaluate Voice Agents"
+sidebarTitle: "Tests & Runs"
+description: "Understand how egma test files are structured, how runs execute them as live simulations, and what each of the four verdicts means."
+---
+
+A **Test** describes one situation your voice agent should handle: who the caller is, what they want, and what the agent should do in response. A **Run** executes a set of tests against a connection, sending each one to your live agent as a real simulated conversation. Tests live as Markdown files in your repository. Runs are created in egma and tracked through to a final verdict.
+
+## Test anatomy
+
+Each test is a single Markdown file inside your `egma/tests/` folder. The file combines a YAML frontmatter block with prose sections that the simulator and grader read:
+
+```markdown
+---
+name: missed-appointment-reschedule
+personas: [impatient-caller]
+version: tstv_01K…
+---
+## Scenario
+The caller missed yesterday's appointment and wants to
+reschedule this week. They are short on time and irritated.
+
+## Expected behaviors
+1. The agent acknowledges the missed appointment without blame.
+2. The agent offers at least two concrete alternative slots.
+3. The agent confirms the new booking before ending the call.
+```
+
+<Accordion title="Field reference">
+
+**YAML frontmatter fields**
+
+| Field | Required | Description |
+|---|---|---|
+| `name` | Yes | A slug that identifies this test. Used as the filename and displayed in run results. |
+| `personas` | No | Which simulated caller persona(s) to use. Each persona produces one simulation per run. Leave it out to use the default persona. |
+| `version` | No | Written by `egma push` or `egma pull`. Do not edit by hand. |
+
+**Markdown sections**
+
+| Section | Required | Description |
+|---|---|---|
+| `## Scenario` | Yes | Natural-language description of what the call is about. The simulator reads this prose to drive the conversation. |
+| `## Expected behaviors` | Yes | A numbered list of assertions. Each one becomes a judgment target for the grader. A test with no expected behaviors can never fail, so egma will not accept one. |
+
+</Accordion>
+
+### Mock tool overrides
+
+Your `egma/mock-tools.md` file defines the global mocked world: how egma answers your agent's tool calls during simulations. This prevents tests from hitting your real backend and lets you control what branch the agent sees — an empty calendar, a failing service, a specific order state.
+
+```markdown
+## Mock tools
+
+### check_availability
+```json
+{
+  "answer": { "slots": [] },
+  "delay_ms": 250
+}
+```
+```
+
+A test can override the project-level mock tools by adding the same section at the bottom of its own file. That override belongs to the test and is versioned with it. Use `error` instead of `answer` to simulate a tool that raises an exception:
+
+```json
+{
+  "error": "service_unavailable",
+  "delay_ms": 500
+}
+```
+
+## Test versioning
+
+Every time you push a changed test to egma, egma mints a new `version_id` (`tstv_…`) and writes it back into your file's frontmatter. The previous version is never overwritten — it remains readable and is still referenced by any run that pinned it.
+
+This versioning guarantee means: **results from last week still say exactly what ran**. A green run from before a test change is still green, and it still names the scenario and expected behaviors that were green.
+
+<Note>
+`egma push` refuses to upload a test if egma holds a newer version than your file knows about. Run `egma pull` first, review what changed, then push.
+</Note>
+
+## Runs
+
+A Run starts a batch of simulations. You name the connection to use and the exact test versions to execute. egma creates the run, queues one simulation per test-version × persona combination, and begins dispatching them to the simulator.
+
+### Starting a run
+
+<Steps>
+  <Step title="Push your tests">
+    Make sure your local tests are uploaded and version IDs are in sync:
+    ```bash
+    egma push
+    ```
+  </Step>
+  <Step title="Start the run">
+    From your repository folder:
+    ```bash
+    egma run
+    ```
+    This pins the current version of every test, creates the run, and follows it live until the first verdict arrives.
+  </Step>
+  <Step title="Read your results">
+    The terminal prints a `results_url` you can open immediately. The run continues after the CLI exits — closing your terminal never stops a run.
+  </Step>
+</Steps>
+
+To start a run non-interactively (for CI pipelines):
+
+```bash
+egma run --headless --no-follow
+```
+
+You can also use the API directly:
+
+```bash
+curl -X POST https://your-egma/api/runs \
+  -H "Authorization: Bearer egma_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connection": "con_01K…",
+    "test_versions": ["tstv_01K…", "tstv_01K…"]
+  }'
+```
+
+### Simulation lifecycle
+
+Each simulation inside a run moves through a defined set of states:
+
+```
+queued → claimed → running → completed
+                           ↘ failed
+                           ↘ canceled
+```
+
+| Status | Meaning |
+|---|---|
+| `queued` | Waiting for the simulator to claim it. |
+| `claimed` | A simulator has taken the simulation and is preparing to start. |
+| `running` | The simulator is actively conducting the conversation. |
+| `completed` | The conversation finished normally. Awaiting grader judgment. |
+| `failed` | The simulator could not complete the conversation — the agent was unreachable or an unrecoverable error occurred. The grader still runs and writes `errored` verdicts. |
+| `canceled` | The run was stopped before this simulation reached a terminal state. |
+
+<Note>
+Execution and grading are two distinct phases. A simulation can be `completed` while judgment is still `pending`. The run results page shows both states separately so you always know which one you are waiting on.
+</Note>
+
+### Verdicts
+
+After a simulation finishes, the grader reads the conversation and writes one verdict per expected behavior. Each verdict is one of four values — and egma never collapses them:
+
+<CardGroup cols={2}>
+  <Card title="passed" icon="circle-check">
+    The agent did what the test expected. The behavior was observed in the conversation.
+  </Card>
+  <Card title="failed" icon="circle-xmark">
+    The agent did not meet the expectation. Something in the agent's behavior needs attention.
+  </Card>
+  <Card title="skipped" icon="circle-minus">
+    Nothing was judged. The test required a capability this connection does not have (for example, DTMF tones on a text connection), or the grader had nothing scoreable.
+  </Card>
+  <Card title="errored" icon="triangle-exclamation">
+    The conversation could not be conducted — the agent was unreachable or egma encountered a fault. The simulation attempted to run but did not complete successfully.
+  </Card>
+</CardGroup>
+
+<Warning>
+`skipped` is not a pass. A test that could not run is reported honestly as skipped rather than silently counted as passing. Reporting it otherwise would send you hunting a bug that is not there.
+</Warning>
+
+Each verdict carries its own rationale, the conversation turns it cites, and the grader that wrote it.
+
+## Recordings
+
+Every voice simulation produces a **dual-channel audio recording** — the simulated caller on the left channel, your agent on the right. Recordings are stored in egma's object store and are accessible from the run results page.
+
+The recording player appears directly beside the conversation transcript, so when a turn looks wrong you can listen to exactly what was spoken and heard — and confirm whether the agent misbehaved or the transcription did.
+
+<Note>
+Chat simulations and calls that never connected produce no recording. The player is shown only where a recording exists.
+</Note>
