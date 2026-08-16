@@ -514,16 +514,18 @@ describe("verifying an egma platform", () => {
   });
 
   it("gives up on a platform that takes the connection and says nothing", async () => {
+    const timeoutSignal = AbortSignal.abort(
+      new DOMException("the platform identity deadline passed", "TimeoutError"),
+    );
     const stalled = resolvePlatformAccess({
       env: workspace.env(),
       flag: "https://accepts-and-waits.example",
       cwd: workspace.dir,
-      fetchImpl: async (_input, init) =>
-        new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () => {
-            reject(init.signal?.reason ?? new Error("aborted"));
-          });
-        }),
+      identityTimeoutSignal: timeoutSignal,
+      fetchImpl: async (_input, init) => {
+        expect(init?.signal).toBe(timeoutSignal);
+        throw init?.signal?.reason ?? new Error("aborted");
+      },
     });
 
     await expect(stalled).rejects.toBeInstanceOf(PlatformTimedOutError);

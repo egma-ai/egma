@@ -696,11 +696,16 @@ export async function choosePlatform(choice: {
 export async function verifyPlatform(
   chosen: ChosenPlatform,
   fetchImpl?: Fetch,
+  identityTimeoutSignal?: AbortSignal,
 ): Promise<VerifiedPlatformAccess> {
   const { binding } = chosen;
   let identity: PlatformIdentity;
   try {
-    identity = await readPlatformIdentity(chosen.url, fetchImpl);
+    identity = await readPlatformIdentity(
+      chosen.url,
+      fetchImpl,
+      identityTimeoutSignal,
+    );
   } catch (cause) {
     // Safe to name the binding here, and only here: any address that is not the
     // bound one was already refused above, so a bound repository that got this
@@ -739,6 +744,15 @@ export async function resolvePlatformAccess(choice: {
   /** The agent repository whose binding is part of resolution. */
   readonly cwd: string;
   readonly fetchImpl?: Fetch;
+  /**
+   * The platform-identity deadline. Commands use the production default; a
+   * test supplies a signal whose deadline has already passed.
+   */
+  readonly identityTimeoutSignal?: AbortSignal;
 }): Promise<VerifiedPlatformAccess> {
-  return verifyPlatform(await choosePlatform(choice), choice.fetchImpl);
+  return verifyPlatform(
+    await choosePlatform(choice),
+    choice.fetchImpl,
+    choice.identityTimeoutSignal,
+  );
 }

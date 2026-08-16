@@ -12,7 +12,7 @@ import {
 import type { FastifyInstance } from "fastify";
 
 import { loadConfig, type Config } from "../../src/config.ts";
-import { buildApi } from "../../src/server.ts";
+import { buildApi, type ServerOptions } from "../../src/server.ts";
 import {
   holdWebOutputLock,
   releaseAfter,
@@ -109,6 +109,11 @@ export type InstanceOptions = {
    * Test evidence only: this listener changes no production server.
    */
   readonly observeRequest?: (request: ObservedInstanceRequest) => void;
+  /**
+   * A test that drives the real CLI can remove RFC 8628's wall-clock wait. The
+   * provider, routes, approval, token exchange, and stored key stay real.
+   */
+  readonly deviceAuthorizationInterval?: ServerOptions["deviceAuthorizationInterval"];
 };
 
 export type ObservedInstanceRequest = {
@@ -209,6 +214,9 @@ export async function startInstance(
       }),
       ...(options.blob === undefined ? {} : { blob: options.blob }),
     },
+    ...(options.deviceAuthorizationInterval === undefined
+      ? {}
+      : { deviceAuthorizationInterval: options.deviceAuthorizationInterval }),
   });
   if (options.observeRequest !== undefined) {
     // `prependListener` puts this before Fastify's own request listener. A
