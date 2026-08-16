@@ -64,24 +64,24 @@ curl http://localhost:3100/api/keys \
 
 ## Pagination
 
-All list endpoints use cursor-based pagination. Responses include a top-level `data` array and a `next_cursor` field:
+All paginated list endpoints return a top-level `items` array and a `next_cursor` field. The cursor is the ID of the last item in the page:
 
 ```json
 {
-  "data": [...],
-  "next_cursor": "cursor_01abc..."
+  "items": [...],
+  "next_cursor": "tst_01abc..."
 }
 ```
 
 When `next_cursor` is `null`, you have reached the last page. To fetch the next page, pass the cursor as a query parameter:
 
 ```bash
-curl "http://localhost:3100/api/runs?cursor=cursor_01abc..." \
+curl "http://localhost:3100/api/tests?cursor=tst_01abc..." \
   -H "Authorization: Bearer egma_sk_..."
 ```
 
 <Tip>
-  Always check `next_cursor` rather than comparing the length of `data` to a
+  Always check `next_cursor` rather than comparing the length of `items` to a
   page size — the last page may be a full page, and the cursor is the only
   reliable end-of-results signal.
 </Tip>
