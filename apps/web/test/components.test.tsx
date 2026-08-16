@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
@@ -371,7 +372,7 @@ describe("a page of rows", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("a dialog", () => {
-  it("takes focus, and Escape gives it back without changing anything", () => {
+  it("takes focus, and Escape asks to close without changing anything", () => {
     const onClose = vi.fn();
     render(
       <Dialog title="Navigation" onClose={onClose}>
@@ -387,6 +388,94 @@ describe("a dialog", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * **Where the keyboard is put back**, which this file used to claim in a test
+   * name and never assert.
+   *
+   * Closing a dialog and leaving the focus on nothing sends the next Tab back
+   * to the top of the document, several presses from the control somebody was
+   * just on. A pointer never meets it, so it only shows up to a person driving
+   * the product with a keyboard — and it went unnoticed behind a case called
+   * *Escape gives it back* that asserted only that the close handler ran.
+   */
+  it("puts the focus back on whatever opened it", () => {
+    function Opening() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Archive
+          </button>
+          {open ? (
+            <Dialog title="Archive this agent?" onClose={() => setOpen(false)}>
+              <button type="button" onClick={() => setOpen(false)}>
+                Cancel
+              </button>
+            </Dialog>
+          ) : null}
+        </>
+      );
+    }
+
+    render(<Opening />);
+    const opener = screen.getByRole("button", { name: "Archive" });
+    opener.focus();
+    fireEvent.click(opener);
+
+    const panel = screen.getByRole("dialog", { name: "Archive this agent?" });
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  /**
+   * And a dialog closed by an act that removed the control which opened it
+   * leaves the focus alone rather than reaching for a detached element.
+   */
+  it("leaves the focus where it is when what opened it has gone", () => {
+    function Removing() {
+      const [open, setOpen] = useState(true);
+      const [gone, setGone] = useState(false);
+      return (
+        <>
+          <button type="button">Elsewhere</button>
+          {gone ? null : <button type="button">Remove</button>}
+          {open ? (
+            <Dialog
+              title="Remove this member?"
+              onClose={() => {
+                setGone(true);
+                setOpen(false);
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setGone(true);
+                  setOpen(false);
+                }}
+              >
+                Remove
+              </button>
+            </Dialog>
+          ) : null}
+        </>
+      );
+    }
+
+    render(<Removing />);
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Remove" }),
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    // Nothing threw, and nothing was sent anywhere arbitrary.
+    expect(document.activeElement).not.toBeNull();
   });
 });
 

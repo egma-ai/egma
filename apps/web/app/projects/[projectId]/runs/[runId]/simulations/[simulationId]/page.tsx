@@ -503,6 +503,7 @@ function EvidenceView({
               simulationId={read.id}
               words={RECORDING}
               knownToExist
+              project={projectId}
             />
           </Section>
         ) : null}

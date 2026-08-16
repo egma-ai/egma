@@ -2151,7 +2151,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.waitForURL(new RegExp(`/projects/${second}/agents/new$`));
       await reactHasTakenOver(walk, "form");
 
-      await walk.fill("#agent-name", "Front desk");
+      await walk.fill("#agent-name", "The Support line");
       await walk.fill(
         "#agent-description",
         "The one that answers the phone at the front desk.",
@@ -2266,7 +2266,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.waitForURL(new RegExp(`/projects/${second}/tests/new$`));
       // The agents and personas this form offers are read, so waiting for the
       // agent to be on offer is waiting for both reads.
-      await saysWithin(walk, "Front desk");
+      await saysWithin(walk, "The Support line");
 
       await walk.fill("#test-name", "Reschedules a booked appointment");
       await walk.fill(
@@ -2276,7 +2276,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk
         .getByRole("textbox", { name: "Expected behavior 1" })
         .fill("confirms the new time back before finishing");
-      await walk.getByRole("checkbox", { name: "Front desk" }).check();
+      await walk.getByRole("checkbox", { name: "The Support line" }).check();
       await walk.getByRole("checkbox", { name: "Impatient Rita" }).check();
       await walk.getByRole("button", { name: "Write the test" }).click();
 
@@ -2303,7 +2303,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.waitForURL(new RegExp(`/projects/${second}/runs/new$`));
 
       await walk.waitForSelector("#run-agent");
-      await walk.selectOption("#run-agent", { label: "Front desk" });
+      await walk.selectOption("#run-agent", { label: "The Support line" });
       await walk.waitForSelector("#run-connection");
       await walk.selectOption("#run-connection", { index: 1 });
 
@@ -2344,7 +2344,7 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).toContain("Impatient Rita");
       // What the run was against, as it now stands — the agent, and the
       // connection exactly as this run went over it.
-      expect(shown).toContain("Front desk");
+      expect(shown).toContain("The Support line");
       expect(shown).toContain("retell");
       expect(shown).toContain("staging");
 
@@ -2598,12 +2598,12 @@ describe("the complete product, walked in order in a second project", () => {
           // in Support and in no other project, and the other tab says so by
           // not having it.
           await walk.goto(at("agents"));
-          await saysWithin(walk, "Front desk");
+          await saysWithin(walk, "The Support line");
           await other.goto(`${origin}/projects/${first}/agents`);
           await expect
             .poll(() => other.innerText("main"), { timeout: 30_000 })
-            .not.toContain("Front desk");
-          expect(await walk.innerText("main")).toContain("Front desk");
+            .not.toContain("The Support line");
+          expect(await walk.innerText("main")).toContain("The Support line");
         } finally {
           await theirs.close();
         }
@@ -2679,21 +2679,55 @@ describe("the complete product, walked in order in a second project", () => {
           at("runs"),
         ];
 
+        /** One cell's own measurements, which content cannot move. */
+        const cellStyle = () =>
+          walk
+            .locator("table tbody td")
+            .first()
+            .evaluate((element) => {
+              const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
+                target: unknown,
+              ) => {
+                readonly paddingLeft: string;
+                readonly paddingRight: string;
+                readonly fontSize: string;
+              };
+              const read = styleOf(element);
+              return `${read.paddingLeft}/${read.paddingRight}/${read.fontSize}`;
+            });
+
         const sidebars: number[] = [];
+        const headings: number[] = [];
+        const cells: string[] = [];
         const rows: number[] = [];
 
         for (const address of lists) {
           await walk.goto(address);
           await walk.locator("table tbody tr").first().waitFor({ timeout: 30_000 });
           sidebars.push(Math.round(await widthOf(walk, "aside")));
+          headings.push(Math.round(await heightOf(walk, "table thead tr")));
+          cells.push(await cellStyle());
           rows.push(Math.round(await heightOf(walk, "table tbody tr")));
         }
 
         expect(new Set(sidebars).size, sidebars.join(", ")).toBe(1);
-        expect(new Set(rows).size, rows.join(", ")).toBe(1);
+        expect(new Set(headings).size, headings.join(", ")).toBe(1);
+        expect(new Set(cells).size, cells.join(" | ")).toBe(1);
 
-        // And the numbers are the tokens' own, rather than five pages happening
-        // to agree on a hand-typed one.
+        /*
+         * **A row is measured as a floor rather than as an equality**, and the
+         * distinction is the honest one.
+         *
+         * `--row-height` is a `height` on a table cell, which a browser treats
+         * as a minimum: a row carrying two controls is taller than a row
+         * carrying a sentence, on the same table, from the same definition. So
+         * five lists legitimately measure 36, 37 and 41, and a test demanding
+         * one number would be a test demanding that no list ever hold a button.
+         *
+         * What a copied implementation would break is the three above — the
+         * shell, the heading row that holds no controls, and the cell's own
+         * padding and type — and the floor here, which no page may sink below.
+         */
         const tokens = await walk.evaluate(() => {
           const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
             target: unknown,
@@ -2705,12 +2739,26 @@ describe("the complete product, walked in order in a second project", () => {
           ).documentElement;
           const read = styleOf(root);
           return {
-            sidebar: read.getPropertyValue("--sidebar-width").trim(),
-            row: read.getPropertyValue("--row-height").trim(),
+            sidebar: Number.parseInt(
+              read.getPropertyValue("--sidebar-width"),
+              10,
+            ),
+            row: Number.parseInt(read.getPropertyValue("--row-height"), 10),
+            control: Number.parseInt(read.getPropertyValue("--control-md"), 10),
           };
         });
-        expect(`${String(sidebars[0])}px`).toBe(tokens.sidebar);
-        expect(`${String(rows[0])}px`).toBe(tokens.row);
+
+        // The shell's width is the token's own, rather than five pages
+        // happening to agree on a hand-typed number.
+        expect(sidebars[0]).toBe(tokens.sidebar);
+        // No list sinks below the row token, and none rises above it by more
+        // than one control — which is the whole of what a row may hold.
+        expect(Math.min(...rows), rows.join(", ")).toBeGreaterThanOrEqual(
+          tokens.row,
+        );
+        expect(Math.max(...rows), rows.join(", ")).toBeLessThanOrEqual(
+          tokens.row + tokens.control,
+        );
       },
       SETTLE,
     );
@@ -2864,7 +2912,7 @@ describe("the complete product, walked in order in a second project", () => {
       async () => {
         await walk.setViewportSize({ width: 390, height: 844 });
         await walk.goto(at("agents"));
-        await saysWithin(walk, "Front desk");
+        await saysWithin(walk, "The Support line");
 
         // The same rows, and only one of the two shapes on screen at a time.
         expect(await walk.locator("table").isVisible()).toBe(false);
@@ -2883,7 +2931,7 @@ describe("the complete product, walked in order in a second project", () => {
       async () => {
         await walk.setViewportSize({ width: 390, height: 844 });
         await walk.goto(at("agents"));
-        await saysWithin(walk, "Front desk");
+        await saysWithin(walk, "The Support line");
 
         const opener = walk.getByRole("button", {
           name: "Open product navigation",
@@ -2920,7 +2968,7 @@ describe("the complete product, walked in order in a second project", () => {
       async () => {
         await walk.setViewportSize({ width: 1280, height: 900 });
         await walk.goto(at("agents"));
-        await saysWithin(walk, "Front desk");
+        await saysWithin(walk, "The Support line");
 
         /** What has the focus, said the way a person would name it. */
         const focused = () =>
@@ -2944,7 +2992,9 @@ describe("the complete product, walked in order in a second project", () => {
             );
           });
 
-        await walk.locator("body").click({ position: { x: 2, y: 2 } });
+        // No click first: a fresh document starts with the focus on nothing, so
+        // the first Tab is the first focusable thing on the page. Clicking a
+        // corner would make the answer depend on what is drawn there.
         await walk.keyboard.press("Tab");
         expect(await focused()).toBe("egma");
         await walk.keyboard.press("Tab");
@@ -2961,7 +3011,7 @@ describe("the complete product, walked in order in a second project", () => {
       "opens the account menu, chooses in it, and gives the focus back on Escape",
       async () => {
         await walk.goto(at("agents"));
-        await saysWithin(walk, "Front desk");
+        await saysWithin(walk, "The Support line");
 
         const account = walk.locator('aside button[aria-label^="Account"]');
         await account.focus();
@@ -3034,7 +3084,7 @@ describe("the complete product, walked in order in a second project", () => {
       "opens a confirmation, and closes it with the keyboard without doing anything",
       async () => {
         await walk.goto(agentAddress);
-        await saysWithin(walk, "Front desk");
+        await saysWithin(walk, "The Support line");
 
         const archive = walk.getByRole("button", { name: "Archive" }).first();
         await archive.focus();

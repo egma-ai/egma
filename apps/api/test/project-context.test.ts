@@ -1,4 +1,10 @@
-import { createProject } from "@egma/db";
+import {
+  claimSimulations,
+  completeSimulation,
+  createProject,
+  startSimulation,
+  type AuthContext,
+} from "@egma/db";
 import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -329,6 +335,93 @@ describe("a browser working in a project that is not the first", () => {
       headers: { cookie: grace.cookie },
     });
     expect(foreign.statusCode).toBe(404);
+  });
+
+  /**
+   * The audio on a conversation's evidence page.
+   *
+   * **The evidence page reads its project and the recording beside it did
+   * not**, which is the hardest shape of this fault to notice: the page loads,
+   * the transcript is there, the verdicts are there, and the player is simply
+   * absent — which is exactly what an honest *this conversation recorded
+   * nothing* looks like.
+   *
+   * No object store is needed to hold it. The store is consulted after the
+   * conversation has been found, so the two answers are already different by
+   * then: named, the route gets past the lookup and says this deployment has no
+   * store; unnamed, it says there is no such conversation at all.
+   */
+  it("resolves a recording for a conversation in the project it named", async () => {
+    const { ada, outbound, keyForOutbound } = await twoProjects(
+      "browser_recording_elsewhere",
+    );
+
+    const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
+      name: "Outbound desk",
+      connection: {
+        type: "retell",
+        // Voice, because a chat has no audio and would be refused for that
+        // reason instead — which is a different sentence and would not say
+        // whether the conversation was found.
+        modality: "voice",
+        config: { retellAgentId: "agent_in_retell_recording" },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    });
+    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+
+    const pushed = await ask(api.app, "POST", "/api/tests", keyForOutbound, {
+      name: "Reschedules a booked appointment",
+      scenario: "Their cleaning has to move to any afternoon next week.",
+      expected_behaviors: ["confirms the new time back before finishing"],
+    });
+    const started = await ask(api.app, "POST", "/api/runs", keyForOutbound, {
+      connection: (registered.body.connection as { id: string }).id,
+      test_versions: [String(pushed.body.version_id)],
+      idempotency_key: newId("run"),
+    });
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+    const runId = String(started.body.id);
+
+    // Moved the way a simulator moves it, because no simulator runs here.
+    const inOutbound: AuthContext = {
+      userId: ada.userId,
+      organizationId: ada.organizationId,
+      projectId: outbound,
+      role: "admin",
+      via: "session",
+    };
+    const claimed = (
+      await claimSimulations({ claimant: "simulator-blue-1", capacity: 50 })
+    ).filter((claim) => claim.runId === runId);
+    const conversation = claimed[0]?.id ?? "";
+    expect(conversation, "the run wrote a conversation").not.toBe("");
+
+    await startSimulation(inOutbound, conversation, "simulator-blue-1");
+    await completeSimulation(inOutbound, conversation, "simulator-blue-1", {
+      endingReason: "agent_ended",
+      turnCount: 6,
+      recordingReference: `${conversation}/dual-channel.wav`,
+      measuredAudioBandHertz: 8000,
+    });
+
+    const asked = await api.app.inject({
+      method: "GET",
+      url: `/api/simulations/${conversation}/recording?project=${outbound}`,
+      headers: { cookie: ada.cookie },
+    });
+    expect((asked.json() as { error: string }).error, asked.body).toBe(
+      "no_object_store",
+    );
+
+    // And the contrast that makes the line above mean something: naming no
+    // project is still the session's own, where this conversation is not.
+    const unnamed = await api.app.inject({
+      method: "GET",
+      url: `/api/simulations/${conversation}/recording`,
+      headers: { cookie: ada.cookie },
+    });
+    expect(unnamed.statusCode).toBe(404);
   });
 
   /**
