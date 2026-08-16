@@ -18,6 +18,7 @@ import {
 import {
   aConductedRun,
   fileTranscriptOf,
+  landOneConversationOf,
   standingOf,
 } from "./support/recordings.ts";
 
@@ -1930,4 +1931,1307 @@ describe("recovering when a page cannot load", () => {
     },
     SETTLE,
   );
+});
+
+/* ==================================================================== *
+ * The complete product, walked once, in order, in a second project.
+ * ==================================================================== */
+
+/**
+ * One journey rather than a collection of pages.
+ *
+ * **This is the thing the product UI effort is finally judged by**, and it is
+ * ordered on purpose: a person meets egma by making somewhere to work, putting
+ * the agent they want to test into it, telling egma how to reach that agent,
+ * describing who calls, switching judging on, writing what should happen,
+ * running it, and reading what came back. Every step below is the previous
+ * step's output, so a break anywhere in the chain shows up as the step that
+ * could not start rather than as a page that rendered oddly.
+ *
+ * **It is in a project that is not the first one, throughout.** The first
+ * project is where a fallback would hide: a page that reached for `projects[0]`
+ * some other way, or a request that named no project and let the server pick,
+ * looks perfectly correct in the default project and wrong nowhere else. So the
+ * journey makes a second project through the product's own page, switches into
+ * it with the control a person uses, and never leaves it.
+ *
+ * **Everything under it is real.** The real Next process with its real
+ * rewrites, the real API, a real Postgres, a real ClickHouse, a real Chrome —
+ * `support/instance.ts` stands all of it up and this file has one instance. The
+ * only thing standing in for something is the simulator, which does not exist
+ * in this lane: the run is planned and started through the screens, and its
+ * conversation is then moved by the same data-access calls a simulator makes.
+ * A fake feed would have proved that a page can render invented rows.
+ *
+ * **And it resists growing, the way the flows above it do.** Permissions,
+ * archive matrices, refusals, revisions, Retry, idempotency, migration and
+ * repository synchronization are all proved in the fast lane, where each costs
+ * milliseconds. If a case here starts being about one of those, it belongs
+ * there instead.
+ */
+describe("the complete product, walked in order in a second project", () => {
+  /**
+   * Ada's own browser for the walk, and a second page rather than the one
+   * above.
+   *
+   * The page above has a clock pinned to the day the captured telemetry was
+   * recorded, because the transcript list asks about the last twenty-four
+   * hours. Nothing in this journey reads a fixed capture, and a run started
+   * today under a clock set to a fortnight ago would be a run whose own page
+   * says it started in the future. So this walk keeps the real clock and takes
+   * Ada's session across as cookies.
+   */
+  let walk: Page;
+
+  /** The first project, which this journey deliberately does not work in. */
+  let first = "";
+  /** The project it makes and then stays in. */
+  let second = "";
+
+  /** What each step leaves for the next one. */
+  let agentAddress = "";
+  let personaAddress = "";
+  let testAddress = "";
+  let runAddress = "";
+  let conversation = "";
+
+  /** Where the walk stands, for the one thing no browser can do. */
+  let auth: {
+    readonly userId: string;
+    readonly organizationId: string;
+    readonly projectId: string;
+    readonly role: "admin";
+    readonly via: "session";
+  };
+
+  /** One address inside the project this journey is in. */
+  function at(...rest: readonly string[]): string {
+    return [`${origin}/projects/${second}`, ...rest].join("/");
+  }
+
+  /** The run an address names, read off the address rather than remembered. */
+  function runIdOf(address: string): string {
+    const found = /\/runs\/(run_[0-9A-HJKMNP-TV-Z]{26})/u.exec(address)?.[1];
+    expect(found, `${address} names a run`).toBeDefined();
+    return found ?? "";
+  }
+
+  /** The conversation an address names, the same way. */
+  function simulationIdOf(address: string): string {
+    const found = /\/simulations\/(sim_[0-9A-HJKMNP-TV-Z]{26})/u.exec(
+      address,
+    )?.[1];
+    expect(found, `${address} names a conversation`).toBeDefined();
+    return found ?? "";
+  }
+
+  /** The project this control says the browser is standing in. */
+  function selectorOf(which: Page) {
+    return which.locator('aside button[aria-label^="Organization"]');
+  }
+
+  /**
+   * What the page says, waited for.
+   *
+   * `waitForSelector` on a text engine is the shorter spelling and it is the
+   * wrong one here: when a step of this journey goes wrong the page usually
+   * says exactly why — a refusal, an absence, a project that is not this one —
+   * and a timeout naming the string that never appeared throws that sentence
+   * away. Polling the page's own text keeps it, and prints it with the failure.
+   */
+  async function saysWithin(which: Page, said: string): Promise<void> {
+    await expect
+      .poll(() => which.innerText("main").catch(() => ""), { timeout: 30_000 })
+      .toContain(said);
+  }
+
+  beforeAll(async () => {
+    const context = await browser.newContext();
+    await context.addCookies(await page.context().cookies());
+    walk = await context.newPage();
+    walk.setDefaultTimeout(30_000);
+    walk.on("pageerror", (cause) => {
+      process.stderr.write(`the page threw: ${cause.message}\n`);
+    });
+    walk.on("response", (response) => {
+      if (response.status() >= 500) {
+        process.stderr.write(
+          `the page got ${response.status()} from ${response.url()}\n`,
+        );
+      }
+    });
+  }, SETTLE);
+
+  afterAll(async () => {
+    await walk.context().close();
+  });
+
+  it(
+    "makes a second project, and switches into it with the control a person uses",
+    async () => {
+      // The entrance picks a door, once, in the open — and the address it lands
+      // on names the project it picked.
+      await walk.goto(`${origin}/`);
+      await walk.waitForURL(/\/projects\/prj_[^/]+\/agents$/);
+      first = /\/projects\/(prj_[^/]+)\//.exec(walk.url())?.[1] ?? "";
+      expect(first).not.toBe("");
+
+      // The one page deliberately outside every project. It draws no product
+      // navigation and it says so rather than naming the first project.
+      await walk.goto(`${origin}/new-project`);
+      await reactHasTakenOver(walk, "form");
+      await expect.poll(() => selectorOf(walk).innerText()).toContain("No project");
+      expect(await walk.locator("aside nav").count()).toBe(0);
+
+      await walk.fill("#new-project-name", "Support");
+      await walk.fill(
+        "#new-project-description",
+        "The inbound queue, which is not where anybody's first project is.",
+      );
+      await walk.getByRole("button", { name: "Create project" }).click();
+
+      await walk.waitForURL(/\/projects\/prj_[^/]+\/agents$/);
+      second = /\/projects\/(prj_[^/]+)\//.exec(walk.url())?.[1] ?? "";
+      expect(second).not.toBe("");
+      expect(second, "the new project is not the first one").not.toBe(first);
+
+      // Back to the first project, and then across with the selector rather
+      // than by typing an address — which is the move this whole change was
+      // about, and the only one that can silently decide for somebody.
+      await walk.goto(`${origin}/projects/${first}/agents`);
+      await expect.poll(() => selectorOf(walk).innerText()).toContain("Default");
+
+      await selectorOf(walk).click();
+      await walk.fill("#project-search", "Supp");
+      await walk.keyboard.press("Enter");
+
+      await walk.waitForURL(`${origin}/projects/${second}/agents`);
+      await expect.poll(() => selectorOf(walk).innerText()).toContain("Support");
+
+      // Where the walk stands, for the one step below no browser can perform.
+      const me = await instance.api.inject({
+        method: "GET",
+        url: "/api/me",
+        headers: {
+          cookie: (await walk.context().cookies(origin))
+            .map((cookie) => `${cookie.name}=${cookie.value}`)
+            .join("; "),
+        },
+      });
+      expect(me.statusCode, me.body).toBe(200);
+      const who = me.json() as {
+        user: { id: string };
+        organizations: { id: string }[];
+        projects: { id: string }[];
+      };
+      expect(
+        who.projects.map((one) => one.id),
+        "the new project is on this session's own list",
+      ).toContain(second);
+      auth = {
+        userId: who.user.id,
+        organizationId: who.organizations[0]?.id ?? "",
+        projectId: second,
+        role: "admin",
+        via: "session",
+      };
+    },
+    SETTLE,
+  );
+
+  it(
+    "registers an agent, and gives egma a way to reach it",
+    async () => {
+      // A project nobody has put anything in says it is empty, which is a
+      // different sentence from a page that failed to load.
+      await walk.goto(at("agents"));
+      await saysWithin(walk, "No agents in this project yet");
+
+      await walk.getByRole("link", { name: "Register agent" }).first().click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/agents/new$`));
+      await reactHasTakenOver(walk, "form");
+
+      await walk.fill("#agent-name", "Front desk");
+      await walk.fill(
+        "#agent-description",
+        "The one that answers the phone at the front desk.",
+      );
+      await walk.getByRole("button", { name: "Register agent" }).click();
+
+      await walk.waitForURL(
+        new RegExp(`/projects/${second}/agents/agt_[^/]+$`),
+      );
+      agentAddress = walk.url();
+      await saysWithin(walk, "No active connections");
+
+      await walk.getByRole("link", { name: "Add connection" }).click();
+      await walk.waitForURL(/\/connections\/new$/);
+      // The form is drawn from the registry rather than from a list in the
+      // browser, so waiting for the first field is waiting for that read.
+      await walk.waitForSelector("#connection-type");
+
+      await walk.selectOption("#connection-modality", "voice");
+      await walk.fill("#connection-name", "Retell staging");
+      await walk.fill("#connection-environment", "staging");
+      await walk.fill("#config-retellAgentId", "agent_in_retell_journey");
+      await walk.fill("#credential-apiKey", "retell-secret-A1B2C3D4WXYZ");
+      await walk.getByRole("button", { name: "Add connection" }).click();
+
+      await walk.waitForURL(/\/connections\/con_[^/]+$/);
+      await saysWithin(walk, "Retell staging");
+      // The secret is never handed back, and the page says which key it is
+      // holding rather than pretending it has forgotten.
+      expect(await walk.innerText("main")).not.toContain(
+        "retell-secret-A1B2C3D4WXYZ",
+      );
+    },
+    SETTLE,
+  );
+
+  it(
+    "authors a persona for this project",
+    async () => {
+      await walk.goto(at("agents"));
+      await walk.getByRole("link", { name: "Personas", exact: true }).first().click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/personas$`));
+
+      await walk.getByRole("link", { name: "New persona" }).first().click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/personas/new$`));
+      await reactHasTakenOver(walk, "form");
+
+      await walk.fill("#persona-name", "Impatient Rita");
+      await walk.fill(
+        "#persona-description",
+        "Somebody in a hurry, calling from a busy place.",
+      );
+      // Who they are, which is the whole of a persona — never what they want,
+      // which is the test's. The voice is what the simulator brings them to
+      // life with, and the form asks for both because egma refuses a caller
+      // with no personality and no voice rather than inventing one.
+      await walk.fill(
+        "#persona-personality",
+        "Speaks quickly, interrupts, and wants the answer before the greeting is over.",
+      );
+      await walk.fill("#persona-voice-id", "EXAVITQu4vr4xnSDxMaL");
+      await walk.getByRole("button", { name: "Create persona" }).click();
+
+      await walk.waitForURL(
+        new RegExp(`/projects/${second}/personas/prs_[^/]+$`),
+      );
+      personaAddress = walk.url();
+      await saysWithin(walk, "Impatient Rita");
+    },
+    SETTLE,
+  );
+
+  it(
+    "switches a grader on, in this project and not in the first",
+    async () => {
+      await walk.goto(at("graders"));
+      // Both of egma's own entries, written onto the shelf at boot.
+      await walk.waitForSelector("text=expected_behaviors");
+      await walk.waitForSelector("text=latency");
+
+      await walk
+        .locator("table")
+        .getByRole("row")
+        .filter({ hasText: "latency" })
+        .getByRole("button", { name: "Use" })
+        .click();
+      await walk.waitForSelector("text=Use latency");
+
+      await walk.locator("form select").first().selectOption({ index: 1 });
+      await walk.locator('form input[type="number"]').fill("2500");
+      await walk.getByRole("button", { name: "Start judging" }).click();
+      await walk.waitForSelector("text=is running on this project now");
+
+      // On this project's own list, beside the copy every project is created
+      // with — and the request that made it named this project in its body.
+      await walk.goto(at("graders", "running"));
+      await expect
+        .poll(() => walk.locator("table").getByRole("row").count(), {
+          timeout: 30_000,
+        })
+        .toBe(3);
+      expect(await walk.innerText("main")).toContain("latency");
+    },
+    SETTLE,
+  );
+
+  it(
+    "writes a test against that agent, with the persona who calls about it",
+    async () => {
+      await walk.goto(at("tests"));
+      await walk.getByRole("link", { name: "Write a test" }).first().click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/tests/new$`));
+      // The agents and personas this form offers are read, so waiting for the
+      // agent to be on offer is waiting for both reads.
+      await saysWithin(walk, "Front desk");
+
+      await walk.fill("#test-name", "Reschedules a booked appointment");
+      await walk.fill(
+        "#test-scenario",
+        "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+      );
+      await walk
+        .getByRole("textbox", { name: "Expected behavior 1" })
+        .fill("confirms the new time back before finishing");
+      await walk.getByRole("checkbox", { name: "Front desk" }).check();
+      await walk.getByRole("checkbox", { name: "Impatient Rita" }).check();
+      await walk.getByRole("button", { name: "Write the test" }).click();
+
+      await walk.waitForURL(new RegExp(`/projects/${second}/tests/tst_[^/]+$`));
+      testAddress = walk.url();
+      await saysWithin(walk, "Reschedules a booked appointment");
+      // Read off the control rather than the page's text: the behavior is in a
+      // box somebody can edit, and a textarea's value is not part of what a
+      // page says.
+      expect(
+        await walk
+          .getByRole("textbox", { name: "Expected behavior 1" })
+          .inputValue(),
+      ).toBe("confirms the new time back before finishing");
+    },
+    SETTLE,
+  );
+
+  it(
+    "plans a run over that connection and starts it",
+    async () => {
+      await walk.goto(at("runs"));
+      await walk.getByRole("link", { name: "Plan a run" }).first().click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/runs/new$`));
+
+      await walk.waitForSelector("#run-agent");
+      await walk.selectOption("#run-agent", { label: "Front desk" });
+      await walk.waitForSelector("#run-connection");
+      await walk.selectOption("#run-connection", { index: 1 });
+
+      await walk
+        .getByRole("checkbox", { name: "Include Reschedules a booked appointment" })
+        .check();
+
+      // The review is the same resolution the start performs, so waiting for it
+      // is waiting for egma to have said what it would freeze.
+      await walk.waitForSelector("#run-label");
+      await walk.fill("#run-label", "The first run in Support");
+      // Nothing here is a run that judges nothing: a grader was switched on two
+      // steps ago and every project is created holding another.
+      expect(
+        await walk.locator("text=No grader is running in this project").count(),
+      ).toBe(0);
+
+      await walk.getByRole("button", { name: "Start run" }).click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/runs$`));
+
+      await walk.getByRole("link", { name: "The first run in Support" }).click();
+      await walk.waitForURL(
+        new RegExp(`/projects/${second}/runs/run_[^/]+$`),
+      );
+      runAddress = walk.url();
+    },
+    SETTLE,
+  );
+
+  it(
+    "opens the run, which lists the conversation it wrote",
+    async () => {
+      await walk.goto(runAddress);
+      await saysWithin(walk, "Conversations");
+
+      const shown = await walk.innerText("main");
+      expect(shown).toContain("Reschedules a booked appointment");
+      expect(shown).toContain("Impatient Rita");
+      // What the run was against, as it now stands — the agent, and the
+      // connection exactly as this run went over it.
+      expect(shown).toContain("Front desk");
+      expect(shown).toContain("retell");
+      expect(shown).toContain("staging");
+
+      const row = walk
+        .getByRole("link", { name: "Reschedules a booked appointment" })
+        .first();
+      await row.waitFor();
+      conversation = (await row.getAttribute("href")) ?? "";
+      expect(conversation).toMatch(/\/simulations\/sim_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    },
+    SETTLE,
+  );
+
+  it(
+    "opens that conversation's own evidence, before anything has conducted it",
+    async () => {
+      await walk.goto(`${origin}${conversation}`);
+      await walk
+        .getByRole("heading", { name: "Transcript", exact: true })
+        .waitFor({ timeout: 30_000 });
+
+      const shown = await walk.innerText("main");
+      // It is the conversation it says it is: the test it will execute, and
+      // who will call about it.
+      expect(shown).toContain("Reschedules a booked appointment");
+      expect(shown).toContain("Impatient Rita");
+      // And nothing has happened yet, said as an absence rather than as a
+      // failure or as an empty space that could mean either.
+      expect(shown).toContain("No transcript was filed");
+      expect(await walk.locator("audio").count()).toBe(0);
+    },
+    SETTLE,
+  );
+
+  it(
+    "shows what the conversation left behind, once it has been conducted",
+    async () => {
+      // The one step in this journey no browser can take. A simulator would
+      // claim it, hold the conversation and report; none runs in this lane, so
+      // the same data-access calls a simulator makes are made here and the
+      // telemetry goes in at the door a simulator's exporter posts to.
+      const landed = await landOneConversationOf(auth, runIdOf(runAddress), {
+        ...(storage.available
+          ? { reference: `${simulationIdOf(conversation)}/dual-channel.wav` }
+          : {}),
+      });
+      expect(landed.landed).toBe(simulationIdOf(conversation));
+      if (storage.available) {
+        await (storage as Extract<ObjectStorage, { available: true }>).put(
+          `${landed.landed}/dual-channel.wav`,
+          aRecording(),
+        );
+      }
+      await fileTranscriptOf(
+        instance.api,
+        landed.landed,
+        {
+          human: "I need to move my cleaning to next week.",
+          agent: "Of course — which afternoon suits you?",
+        },
+        new Date(),
+      );
+
+      await walk.goto(`${origin}${conversation}`);
+      await walk
+        .getByRole("heading", { name: "Transcript", exact: true })
+        .waitFor({ timeout: 30_000 });
+
+      await expect
+        .poll(() => walk.innerText("main"), { timeout: 30_000 })
+        .toContain("I need to move my cleaning to next week.");
+      const shown = await walk.innerText("main");
+      expect(shown).toContain("Of course — which afternoon suits you?");
+      expect(shown).not.toContain("No transcript was filed");
+
+      // And the run it belongs to has caught up with it, on the page somebody
+      // would go back to.
+      await walk.goto(runAddress);
+      await expect
+        .poll(() => walk.innerText("main"), { timeout: 30_000 })
+        .toMatch(/completed/iu);
+    },
+    SETTLE,
+  );
+
+  /* ------------------------------------------------------------------ *
+   * The same project, revisited: the address is the whole of the state.
+   * ------------------------------------------------------------------ */
+
+  /**
+   * Every product route this project now has something on, named once.
+   *
+   * Written out rather than derived, because a list a test computes from the
+   * application's own routing would go green about whatever that routing
+   * happens to say — including about a route that stopped existing. Each entry
+   * is a page a person can be sent a link to.
+   */
+  function everyProductRoute(): readonly { readonly what: string; readonly address: string }[] {
+    return [
+      { what: "Agents", address: at("agents") },
+      { what: "Register an agent", address: at("agents", "new") },
+      { what: "one agent", address: agentAddress },
+      { what: "Tests", address: at("tests") },
+      { what: "Write a test", address: at("tests", "new") },
+      { what: "one test", address: testAddress },
+      { what: "Personas", address: at("personas") },
+      { what: "New persona", address: at("personas", "new") },
+      { what: "one persona", address: personaAddress },
+      { what: "Graders", address: at("graders") },
+      { what: "the running graders", address: at("graders", "running") },
+      { what: "Runs", address: at("runs") },
+      { what: "Plan a run", address: at("runs", "new") },
+      { what: "one run", address: runAddress },
+      { what: "one conversation", address: `${origin}${conversation}` },
+      { what: "Settings", address: at("settings") },
+      { what: "People", address: at("settings", "people") },
+      { what: "Keys", address: at("settings", "keys") },
+      { what: "Judge", address: at("settings", "judge") },
+      { what: "Organization", address: at("settings", "organization") },
+    ];
+  }
+
+  describe("reload, a copied link, Back and Forward", () => {
+    /**
+     * Every one of them, opened cold and then reloaded.
+     *
+     * **A cold open is what a copied link is.** The context below has no
+     * history in this application and has never followed a link inside it, so
+     * each address is arrived at the way somebody arrives who was sent it —
+     * and what is asserted is that they land on that page, in *this* project,
+     * rather than on the entrance, on a sign-in page, or on the first project's
+     * copy of the same area.
+     *
+     * The reload is the other half of the same promise and is asserted in the
+     * same loop, because it is the same claim: the address holds all the state
+     * there is, so pressing F5 changes nothing.
+     */
+    it(
+      "opens every product route cold, and again after a reload",
+      async () => {
+        const sent = await browser.newContext();
+        await sent.addCookies(await walk.context().cookies());
+        const opened = await sent.newPage();
+        opened.setDefaultTimeout(30_000);
+
+        try {
+          for (const route of everyProductRoute()) {
+            await opened.goto(route.address);
+            await expect
+              .poll(() => selectorOf(opened).innerText(), { timeout: 30_000 })
+              .toContain("Support");
+            expect(opened.url(), route.what).toBe(route.address);
+
+            await opened.reload();
+            await expect
+              .poll(() => selectorOf(opened).innerText(), { timeout: 30_000 })
+              .toContain("Support");
+            expect(opened.url(), `${route.what}, reloaded`).toBe(route.address);
+          }
+        } finally {
+          await sent.close();
+        }
+      },
+      SETTLE,
+    );
+
+    it(
+      "undoes a move between areas, and a change of project, with Back",
+      async () => {
+        await walk.goto(at("agents"));
+        await expect
+          .poll(() => selectorOf(walk).innerText(), { timeout: 30_000 })
+          .toContain("Support");
+
+        await walk.getByRole("link", { name: "Tests", exact: true }).first().click();
+        await walk.waitForURL(at("tests"));
+        await walk.getByRole("link", { name: "Runs", exact: true }).first().click();
+        await walk.waitForURL(at("runs"));
+
+        await walk.goBack();
+        await walk.waitForURL(at("tests"));
+        await walk.goBack();
+        await walk.waitForURL(at("agents"));
+        await walk.goForward();
+        await walk.waitForURL(at("tests"));
+
+        /*
+         * And the change of project itself, which is the one that has to be a
+         * push rather than a replace. Choosing a project is a move somebody can
+         * be wrong about — it is one click and it changes every list on the
+         * screen — so Back has to undo it.
+         */
+        await selectorOf(walk).click();
+        await walk.fill("#project-search", "Default");
+        await walk.keyboard.press("Enter");
+        await walk.waitForURL(`${origin}/projects/${first}/tests`);
+
+        await walk.goBack();
+        await walk.waitForURL(at("tests"));
+        await expect
+          .poll(() => selectorOf(walk).innerText(), { timeout: 30_000 })
+          .toContain("Support");
+      },
+      SETTLE,
+    );
+
+    /**
+     * Two tabs, two projects, every area — and this is the half of the
+     * project-context change that genuinely cannot be proved anywhere else.
+     *
+     * There is a smaller version of this above, on the shell alone. What it
+     * cannot say is whether the *pages* keep their tabs apart: the shell reads
+     * the project out of the address, and a page that read it from anywhere
+     * else — a module-level variable, a store, the session's own default —
+     * would pass that test and fail this one. So both tabs walk the same five
+     * areas, and each is held to reading its own project's data, with the reads
+     * interleaved so that one tab's request cannot be what settles the other's.
+     */
+    it(
+      "keeps two tabs on two projects across every area, each reading its own",
+      async () => {
+        const theirs = await browser.newContext();
+        await theirs.addCookies(await walk.context().cookies());
+        const other = await theirs.newPage();
+        other.setDefaultTimeout(30_000);
+
+        try {
+          for (const area of ["agents", "tests", "personas", "graders", "runs"]) {
+            // The second tab first, so that if a page did keep one chosen
+            // project anywhere, the first tab is the one that would have been
+            // moved by it.
+            await other.goto(`${origin}/projects/${first}/${area}`);
+            await expect
+              .poll(() => selectorOf(other).innerText(), { timeout: 30_000 })
+              .toContain("Default");
+
+            await walk.goto(at(area));
+            await expect
+              .poll(() => selectorOf(walk).innerText(), { timeout: 30_000 })
+              .toContain("Support");
+
+            // Interleaved: the second tab is read again, after the first has
+            // asked its own questions.
+            expect(other.url(), area).toBe(`${origin}/projects/${first}/${area}`);
+            await expect
+              .poll(() => selectorOf(other).innerText(), { timeout: 30_000 })
+              .toContain("Default");
+          }
+
+          // And the data, not only the shell's label. What this journey made is
+          // in Support and in no other project, and the other tab says so by
+          // not having it.
+          await walk.goto(at("agents"));
+          await saysWithin(walk, "Front desk");
+          await other.goto(`${origin}/projects/${first}/agents`);
+          await expect
+            .poll(() => other.innerText("main"), { timeout: 30_000 })
+            .not.toContain("Front desk");
+          expect(await walk.innerText("main")).toContain("Front desk");
+        } finally {
+          await theirs.close();
+        }
+      },
+      SETTLE,
+    );
+  });
+
+  /* ------------------------------------------------------------------ *
+   * One visual system: shared components, and tokens that reach them.
+   * ------------------------------------------------------------------ */
+
+  /**
+   * What a measurement is, read from a real browser.
+   *
+   * A rule in a stylesheet is not a measurement — a browser decides whether it
+   * applied, which is the whole reason these two live here rather than in a
+   * regex over `system.module.css`.
+   */
+  async function heightOf(which: Page, selector: string): Promise<number> {
+    return which
+      .locator(selector)
+      .first()
+      .evaluate((element) => element.getBoundingClientRect().height);
+  }
+
+  async function widthOf(which: Page, selector: string): Promise<number> {
+    return which
+      .locator(selector)
+      .first()
+      .evaluate((element) => element.getBoundingClientRect().width);
+  }
+
+  /** One token's value, set on the document and taken back afterwards. */
+  async function retuned(
+    which: Page,
+    token: string,
+    value: string,
+  ): Promise<void> {
+    await which.evaluate(
+      ([name, next]) => {
+        const root = (
+          Reflect.get(globalThis, "document") as {
+            readonly documentElement: {
+              readonly style: { setProperty(key: string, val: string): void };
+            };
+          }
+        ).documentElement;
+        root.style.setProperty(String(name), String(next));
+      },
+      [token, value],
+    );
+  }
+
+  describe("one visual system rather than a page's own", () => {
+    /**
+     * The same measurement on pages that were written at different times.
+     *
+     * **This is the readable form of "equivalent pages do not carry copied
+     * visual implementations."** A page that had its own table, its own row
+     * padding or its own sidebar would measure differently, and no amount of
+     * looking at imports would say whether the difference is real — only a
+     * browser can, because only a browser resolves the cascade.
+     */
+    it(
+      "measures the same shell and the same row on every list in the product",
+      async () => {
+        const lists = [
+          at("agents"),
+          at("tests"),
+          at("personas"),
+          at("graders", "running"),
+          at("runs"),
+        ];
+
+        const sidebars: number[] = [];
+        const rows: number[] = [];
+
+        for (const address of lists) {
+          await walk.goto(address);
+          await walk.locator("table tbody tr").first().waitFor({ timeout: 30_000 });
+          sidebars.push(Math.round(await widthOf(walk, "aside")));
+          rows.push(Math.round(await heightOf(walk, "table tbody tr")));
+        }
+
+        expect(new Set(sidebars).size, sidebars.join(", ")).toBe(1);
+        expect(new Set(rows).size, rows.join(", ")).toBe(1);
+
+        // And the numbers are the tokens' own, rather than five pages happening
+        // to agree on a hand-typed one.
+        const tokens = await walk.evaluate(() => {
+          const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
+            target: unknown,
+          ) => { getPropertyValue(name: string): string };
+          const root = (
+            Reflect.get(globalThis, "document") as {
+              readonly documentElement: unknown;
+            }
+          ).documentElement;
+          const read = styleOf(root);
+          return {
+            sidebar: read.getPropertyValue("--sidebar-width").trim(),
+            row: read.getPropertyValue("--row-height").trim(),
+          };
+        });
+        expect(`${String(sidebars[0])}px`).toBe(tokens.sidebar);
+        expect(`${String(rows[0])}px`).toBe(tokens.row);
+      },
+      SETTLE,
+    );
+
+    /**
+     * A change of visual direction, applied without touching a page.
+     *
+     * The developer's hands-on pass is an edit to `tokens.css` and nothing
+     * else, and that promise is only worth making if a token really does reach
+     * every page. So one is moved here, at runtime, and two pages that share
+     * nothing but the components are held to following it — which they cannot
+     * do if either of them drew its own.
+     */
+    it(
+      "carries a retuned token into pages that share only their components",
+      async () => {
+        for (const address of [at("agents"), at("runs")]) {
+          await walk.goto(address);
+          await walk.locator("table tbody tr").first().waitFor({ timeout: 30_000 });
+
+          const before = {
+            sidebar: Math.round(await widthOf(walk, "aside")),
+            row: Math.round(await heightOf(walk, "table tbody tr")),
+          };
+
+          await retuned(walk, "--sidebar-width", "260px");
+          await retuned(walk, "--row-height", "56px");
+
+          await expect
+            .poll(async () => Math.round(await widthOf(walk, "aside")))
+            .toBe(260);
+          await expect
+            .poll(async () => Math.round(await heightOf(walk, "table tbody tr")))
+            .toBe(56);
+
+          expect(before.sidebar, address).not.toBe(260);
+          expect(before.row, address).not.toBe(56);
+        }
+      },
+      SETTLE,
+    );
+
+    /**
+     * Compact, and measurably so.
+     *
+     * The direction is written down in `tokens.css` — a sidebar narrow enough
+     * to leave the screen to the data, a row that is one line of reading, a
+     * control that sits in a toolbar rather than becoming it. What is held here
+     * is the direction and not the numbers: the final art direction and the
+     * tuning of every one of these is the developer's own pass, and a test that
+     * pinned 208px would have to be edited by that pass rather than survive it.
+     */
+    it(
+      "is compact where the direction says compact, on the shell, a list and a form",
+      async () => {
+        await walk.goto(at("agents"));
+        await walk.locator("table tbody tr").first().waitFor({ timeout: 30_000 });
+
+        // A sidebar is navigation, not a column of the product.
+        expect(Math.round(await widthOf(walk, "aside"))).toBeLessThanOrEqual(260);
+        // A row is a line of reading rather than a card.
+        expect(
+          Math.round(await heightOf(walk, "table tbody tr")),
+        ).toBeLessThanOrEqual(48);
+
+        // A form's controls are the same height as the ones in a toolbar, which
+        // is what stops an editor from becoming a different product.
+        await walk.goto(at("agents", "new"));
+        await reactHasTakenOver(walk, "form");
+        const field = Math.round(await heightOf(walk, "#agent-name"));
+        expect(field).toBeLessThanOrEqual(40);
+
+        await walk.goto(at("tests", "new"));
+        await reactHasTakenOver(walk, "form");
+        expect(Math.round(await heightOf(walk, "#test-name"))).toBe(field);
+
+        // And a transcript is dense: its turns are lines rather than cards.
+        await walk.goto(`${origin}${conversation}`);
+        await walk
+          .getByRole("heading", { name: "Transcript", exact: true })
+          .waitFor({ timeout: 30_000 });
+        await expect
+          .poll(() => walk.innerText("main"), { timeout: 30_000 })
+          .toContain("I need to move my cleaning to next week.");
+      },
+      SETTLE,
+    );
+  });
+
+  /* ------------------------------------------------------------------ *
+   * A narrow screen, and no pointer at all.
+   * ------------------------------------------------------------------ */
+
+  describe("a narrow screen", () => {
+    afterAll(async () => {
+      await walk.setViewportSize({ width: 1280, height: 900 });
+    });
+
+    /**
+     * Every surface, at a phone's width, held to the two things a narrow screen
+     * can get wrong: something that has to be scrolled sideways to read, and a
+     * navigation that is simply gone.
+     *
+     * **Sideways scrolling is the one that cannot be seen from a component
+     * test.** A table wider than the screen, an unbreakable identifier, a
+     * fixed-width panel — each of them lays out perfectly in jsdom, which has
+     * no layout at all, and each of them makes a page unusable on a phone.
+     */
+    it(
+      "fits every product page, and puts the navigation behind a control",
+      async () => {
+        await walk.setViewportSize({ width: 390, height: 844 });
+
+        for (const route of everyProductRoute()) {
+          await walk.goto(route.address);
+          await expect
+            .poll(() => selectorOf(walk).count(), { timeout: 30_000 })
+            .toBeGreaterThan(0);
+
+          // The sidebar gives way to a top bar, and the way into the product's
+          // areas is a control rather than nothing.
+          expect(await walk.locator("aside").isVisible(), route.what).toBe(false);
+          expect(
+            await walk
+              .getByRole("button", { name: "Open product navigation" })
+              .isVisible(),
+            route.what,
+          ).toBe(true);
+
+          // Nothing overflows the width of the screen. One pixel of slack,
+          // because a browser rounds.
+          const overflow = await walk.evaluate(() => {
+            const root = (
+              Reflect.get(globalThis, "document") as {
+                readonly documentElement: {
+                  readonly scrollWidth: number;
+                  readonly clientWidth: number;
+                };
+              }
+            ).documentElement;
+            return root.scrollWidth - root.clientWidth;
+          });
+          expect(overflow, `${route.what} is wider than the screen`).toBeLessThanOrEqual(1);
+        }
+      },
+      SETTLE,
+    );
+
+    it(
+      "draws a list where a wide screen draws a table, from the one definition",
+      async () => {
+        await walk.setViewportSize({ width: 390, height: 844 });
+        await walk.goto(at("agents"));
+        await saysWithin(walk, "Front desk");
+
+        // The same rows, and only one of the two shapes on screen at a time.
+        expect(await walk.locator("table").isVisible()).toBe(false);
+        expect(
+          await walk.locator('ul[aria-label="Agents in this project"]').isVisible(),
+        ).toBe(true);
+
+        await walk.setViewportSize({ width: 1280, height: 900 });
+        await expect.poll(() => walk.locator("table").isVisible()).toBe(true);
+      },
+      SETTLE,
+    );
+
+    it(
+      "opens and closes the navigation drawer from the keyboard alone",
+      async () => {
+        await walk.setViewportSize({ width: 390, height: 844 });
+        await walk.goto(at("agents"));
+        await saysWithin(walk, "Front desk");
+
+        const opener = walk.getByRole("button", {
+          name: "Open product navigation",
+        });
+        await opener.focus();
+        await walk.keyboard.press("Enter");
+
+        const drawer = walk.getByRole("dialog");
+        await drawer.waitFor();
+        expect(await drawer.getByRole("link", { name: "Tests", exact: true }).count()).toBe(1);
+
+        await walk.keyboard.press("Escape");
+        await expect.poll(() => walk.getByRole("dialog").count()).toBe(0);
+        // And the control that opened it has the focus back, so the next key
+        // press goes somewhere a person expects.
+        expect(
+          await walk.evaluate(() => {
+            const active = (
+              Reflect.get(globalThis, "document") as {
+                readonly activeElement: { getAttribute(name: string): string | null } | null;
+              }
+            ).activeElement;
+            return active?.getAttribute("aria-label") ?? "";
+          }),
+        ).toBe("Open product navigation");
+      },
+      SETTLE,
+    );
+  });
+
+  describe("no pointer at all", () => {
+    it(
+      "reaches the shell's controls in the order they are drawn in",
+      async () => {
+        await walk.setViewportSize({ width: 1280, height: 900 });
+        await walk.goto(at("agents"));
+        await saysWithin(walk, "Front desk");
+
+        /** What has the focus, said the way a person would name it. */
+        const focused = () =>
+          walk.evaluate(() => {
+            const active = (
+              Reflect.get(globalThis, "document") as {
+                readonly activeElement:
+                  | {
+                      getAttribute(name: string): string | null;
+                      readonly textContent: string | null;
+                      readonly tagName: string;
+                    }
+                  | null;
+              }
+            ).activeElement;
+            if (active === null) return "";
+            return (
+              active.getAttribute("aria-label") ??
+              (active.textContent ?? "").trim() ??
+              active.tagName
+            );
+          });
+
+        await walk.locator("body").click({ position: { x: 2, y: 2 } });
+        await walk.keyboard.press("Tab");
+        expect(await focused()).toBe("egma");
+        await walk.keyboard.press("Tab");
+        expect(await focused()).toMatch(/^Organization/u);
+        await walk.keyboard.press("Tab");
+        expect(await focused()).toBe("Agents");
+        await walk.keyboard.press("Tab");
+        expect(await focused()).toBe("Tests");
+      },
+      SETTLE,
+    );
+
+    it(
+      "opens the account menu, chooses in it, and gives the focus back on Escape",
+      async () => {
+        await walk.goto(at("agents"));
+        await saysWithin(walk, "Front desk");
+
+        const account = walk.locator('aside button[aria-label^="Account"]');
+        await account.focus();
+        await walk.keyboard.press("Enter");
+        await walk.getByRole("menuitem", { name: "Settings" }).first().waitFor();
+
+        await walk.keyboard.press("Escape");
+        await expect
+          .poll(() => walk.getByRole("menuitem", { name: "Settings" }).count())
+          .toBe(0);
+        expect(
+          await walk.evaluate(() => {
+            const active = (
+              Reflect.get(globalThis, "document") as {
+                readonly activeElement: { getAttribute(name: string): string | null } | null;
+              }
+            ).activeElement;
+            return (active?.getAttribute("aria-label") ?? "").slice(0, 7);
+          }),
+        ).toBe("Account");
+      },
+      SETTLE,
+    );
+
+    it(
+      "fills in and submits a form without a pointer, and labels every field it asks for",
+      async () => {
+        await walk.goto(at("personas", "new"));
+        await reactHasTakenOver(walk, "form");
+
+        // Every control this form asks for has a name a screen reader can say.
+        const unnamed = await walk
+          .locator("main input, main textarea, main select")
+          .evaluateAll((controls) =>
+            controls
+              .filter((control) => {
+                const named =
+                  control.getAttribute("aria-label") ??
+                  control.getAttribute("aria-labelledby");
+                if (named !== null && named !== "") return false;
+                const id = control.getAttribute("id") ?? "";
+                if (id === "") return true;
+                const root = control.ownerDocument;
+                return root.querySelector(`label[for="${id}"]`) === null;
+              })
+              .map((control) => control.getAttribute("id") ?? control.tagName),
+          );
+        expect(unnamed).toEqual([]);
+
+        // And it is usable with the keyboard alone: reach the name, type, and
+        // press Enter, which submits rather than doing nothing.
+        await walk.locator("#persona-name").focus();
+        await walk.keyboard.type("Deliberate Sam");
+        await walk.locator("#persona-personality").focus();
+        await walk.keyboard.type("Takes their time and repeats things back.");
+        await walk.locator("#persona-voice-id").focus();
+        await walk.keyboard.type("EXAVITQu4vr4xnSDxMaL");
+        await walk.locator("#persona-name").focus();
+        await walk.keyboard.press("Enter");
+
+        await walk.waitForURL(
+          new RegExp(`/projects/${second}/personas/prs_[^/]+$`),
+        );
+        await saysWithin(walk, "Deliberate Sam");
+      },
+      SETTLE,
+    );
+
+    it(
+      "opens a confirmation, and closes it with the keyboard without doing anything",
+      async () => {
+        await walk.goto(agentAddress);
+        await saysWithin(walk, "Front desk");
+
+        const archive = walk.getByRole("button", { name: "Archive" }).first();
+        await archive.focus();
+        await walk.keyboard.press("Enter");
+
+        const dialog = walk.getByRole("dialog");
+        await dialog.waitFor();
+        // The dialog takes the focus, so the next key press is answered by it.
+        expect(
+          await walk.evaluate(() => {
+            // The DOM library is deliberately not compiled into these tests, so
+            // the shape this needs is named here rather than imported.
+            const root = Reflect.get(globalThis, "document") as {
+              readonly activeElement: {
+                closest(selector: string): unknown;
+              } | null;
+            };
+            const active = root.activeElement;
+            return active === null
+              ? false
+              : active.closest('[role="dialog"]') !== null;
+          }),
+        ).toBe(true);
+
+        await walk.keyboard.press("Escape");
+        await expect.poll(() => walk.getByRole("dialog").count()).toBe(0);
+        // Nothing happened: the agent is still active, so the control still
+        // offers to archive it rather than to bring it back.
+        expect(
+          await walk.getByRole("button", { name: "Archive", exact: true }).count(),
+        ).toBe(1);
+        expect(
+          await walk.getByRole("button", { name: "Restore", exact: true }).count(),
+        ).toBe(0);
+      },
+      SETTLE,
+    );
+
+    /**
+     * The recording controls, which are the browser's own.
+     *
+     * Egma does not draw a scrubber; it renders `<audio controls>` and Chrome
+     * draws one that is already keyboard-operable. What egma can get wrong is
+     * putting it somewhere the keyboard cannot reach, so what is asserted is
+     * that it is in the tab order and takes the focus.
+     */
+    it.skipIf(!storage.available)(
+      "reaches the recording controls with the keyboard",
+      async () => {
+        await walk.goto(`${origin}${conversation}`);
+        const player = walk.locator("audio[data-recording]");
+        await player.waitFor({ timeout: 30_000 });
+
+        expect(await player.getAttribute("controls")).not.toBeNull();
+        await player.focus();
+        expect(
+          await walk.evaluate(() => {
+            const root = Reflect.get(globalThis, "document") as {
+              readonly activeElement: { readonly tagName: string } | null;
+            };
+            return root.activeElement?.tagName ?? "";
+          }),
+        ).toBe("AUDIO");
+      },
+      SETTLE,
+    );
+  });
+
+  /* ------------------------------------------------------------------ *
+   * What the product deliberately has not got.
+   * ------------------------------------------------------------------ */
+
+  /**
+   * The exclusions, proved rather than assumed.
+   *
+   * Each of these was decided out of this version, and each is the kind of
+   * thing that arrives by accident: a nav item somebody adds because the page
+   * exists, a field somebody adds because the API takes it. A list of them
+   * checked against what a person can actually see is the cheapest way to keep
+   * a decision from eroding — and it is checked against the *rendered* pages,
+   * so a control that is present but hidden still counts as absent, exactly as
+   * it does to somebody using the product.
+   */
+  describe("what this version deliberately does not have", () => {
+    it(
+      "offers no production monitoring, no tags, no suites and no Simulations area",
+      async () => {
+        const sidebar = walk.locator("aside");
+
+        for (const route of everyProductRoute()) {
+          await walk.goto(route.address);
+          await expect
+            .poll(() => selectorOf(walk).innerText(), { timeout: 30_000 })
+            .toContain("Support");
+
+          const navigation = await sidebar.innerText();
+          expect(navigation, route.what).not.toMatch(/monitoring/iu);
+          expect(navigation, route.what).not.toMatch(/simulations/iu);
+          expect(
+            await sidebar.getByRole("link", { name: "Simulations" }).count(),
+            route.what,
+          ).toBe(0);
+
+          const shown = await walk.innerText("main");
+          // A suite is a saved selector over tests and this version has none —
+          // so no page offers one, and no page asks which one a run is from.
+          expect(shown, route.what).not.toMatch(/\bsuite/iu);
+          // A purge. Archive is reversible and says so; nothing here deletes
+          // evidence for good.
+          expect(shown, route.what).not.toMatch(/purge|delete permanently/iu);
+
+          /*
+           * Tags and an exact replay, asked as controls rather than as words.
+           *
+           * Both words appear legitimately in copy — a persona's language is a
+           * BCP 47 *tag*, and Retry says in as many words that it is **not** an
+           * exact *replay* of the original conditions. A test that banned the
+           * strings would be a test that fails on the sentence proving the
+           * exclusion, so what is asked instead is whether anything on the page
+           * offers to do either.
+           */
+          for (const absent of ["Tags", "Add tag", "New tag", "Replay"]) {
+            expect(
+              await walk.getByRole("button", { name: absent }).count(),
+              `${route.what} offers ${absent}`,
+            ).toBe(0);
+            expect(
+              await walk.getByRole("link", { name: absent }).count(),
+              `${route.what} links ${absent}`,
+            ).toBe(0);
+            expect(
+              await walk.getByLabel(absent, { exact: true }).count(),
+              `${route.what} asks for ${absent}`,
+            ).toBe(0);
+          }
+        }
+      },
+      SETTLE,
+    );
+
+    it(
+      "keeps an agent's prompt, model and tools where the customer configures them",
+      async () => {
+        for (const address of [agentAddress, at("agents", "new")]) {
+          await walk.goto(address);
+          await expect
+            .poll(() => selectorOf(walk).innerText(), { timeout: 30_000 })
+            .toContain("Support");
+
+          for (const provider of ["Prompt", "Model", "Tools"]) {
+            expect(
+              await walk.getByLabel(provider, { exact: true }).count(),
+              `${address} asks for a ${provider}`,
+            ).toBe(0);
+          }
+        }
+      },
+      SETTLE,
+    );
+
+    it(
+      "offers no way to author a mock tool, and no repository sync to press",
+      async () => {
+        // Mock tools are read on the evidence of a conversation — what was
+        // covered and what was not — and are authored in the repository folder
+        // rather than here.
+        for (const address of [
+          `${origin}${conversation}`,
+          runAddress,
+          at("tests"),
+          at("settings"),
+        ]) {
+          await walk.goto(address);
+          await expect
+            .poll(() => selectorOf(walk).innerText(), { timeout: 30_000 })
+            .toContain("Support");
+
+          for (const control of [
+            "New mock tool",
+            "Add mock tool",
+            "Sync",
+            "Sync now",
+            "Pull",
+            "Push",
+          ]) {
+            expect(
+              await walk.getByRole("button", { name: control }).count(),
+              `${address} offers ${control}`,
+            ).toBe(0);
+            expect(
+              await walk.getByRole("link", { name: control }).count(),
+              `${address} links ${control}`,
+            ).toBe(0);
+          }
+        }
+      },
+      SETTLE,
+    );
+  });
 });

@@ -280,10 +280,14 @@ function RunDetailView({
     if (!mayControl || working) return;
     setRefused(null);
     setWorking(true);
+    // The project in the body, which is where both of this run's two write
+    // doors read one. Named in the query it is not read at all, and the write
+    // then narrows to the session's own project — the organization's first —
+    // so a run in any other project answers "no such run" to a page that is
+    // looking straight at it.
     const answered = await writeJson<RunDetail>(runCancelPath(runId), {
       method: "POST",
-      project: projectId,
-      body: {},
+      body: { project: projectId },
     });
     setWorking(false);
     setConfirming(null);
@@ -305,10 +309,12 @@ function RunDetailView({
     setWorking(true);
     const answered = await writeJson<RunDetail>(runRetryPath(runId), {
       method: "POST",
-      project: projectId,
-      // **One key per run retried**, so a lost answer becomes the run that
-      // already exists rather than a second conversation with a real agent.
-      body: { idempotency_key: retryKeyFor(runId) },
+      body: {
+        project: projectId,
+        // **One key per run retried**, so a lost answer becomes the run that
+        // already exists rather than a second conversation with a real agent.
+        idempotency_key: retryKeyFor(runId),
+      },
     });
     setWorking(false);
     setConfirming(null);

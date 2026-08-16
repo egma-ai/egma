@@ -239,6 +239,60 @@ export async function standingOf(
   };
 }
 
+/**
+ * One conversation of a run somebody already started, moved the way a simulator
+ * moves it: claimed, started, landed.
+ *
+ * `aConductedRun` below builds the whole arrangement — agent, test, run — for a
+ * caller who only wants the finished state. This is the other half of that, for
+ * a caller who started the run *itself* and now needs it to have happened: the
+ * browser journey plans and starts a run through the product's own screens, and
+ * then has to land a conversation to have any evidence to open.
+ *
+ * **Only the movement is at this seam, and deliberately.** No simulator runs in
+ * these suites, so the alternative is not a real conversation — it is a fake
+ * feed, which would prove that a page can render invented rows. What lands here
+ * is what a real report lands, through the same data-access functions the
+ * simulator calls.
+ */
+export async function landOneConversationOf(
+  auth: AuthContext,
+  runId: string,
+  options: { readonly reference?: string } = {},
+): Promise<{
+  /** The conversation that was conducted. */
+  readonly landed: string;
+  /** The ones still waiting, which is what the rest of a run looks like. */
+  readonly waiting: readonly string[];
+}> {
+  const claimed = (
+    await claimSimulations({ claimant: CLAIMANT, capacity: 50 })
+  ).filter((claim) => claim.runId === runId);
+  expect(
+    claimed.length,
+    "this run wrote conversations to claim",
+  ).toBeGreaterThan(0);
+
+  const [first, ...rest] = claimed as [
+    (typeof claimed)[number],
+    ...(typeof claimed)[number][],
+  ];
+
+  await startSimulation(auth, first.id, CLAIMANT);
+  await completeSimulation(auth, first.id, CLAIMANT, {
+    endingReason: "agent_ended",
+    turnCount: 6,
+    ...(options.reference === undefined
+      ? {}
+      : {
+          recordingReference: options.reference,
+          measuredAudioBandHertz: 8000,
+        }),
+  });
+
+  return { landed: first.id, waiting: rest.map((one) => one.id) };
+}
+
 export type ConductedRunOptions = {
   /** What the recorded conversation reports as its recording. */
   readonly reference: string;

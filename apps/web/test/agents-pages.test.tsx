@@ -332,8 +332,23 @@ describe("registering an agent", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.method).toBe("POST");
-    expect(sent[0]?.url).toBe("/api/agents?project=prj_1");
+    /*
+     * **The project is in the body, because that is where this door reads it**
+     * — and this assertion used to say the opposite, which is how the fault it
+     * now holds survived.
+     *
+     * `POST /api/agents` takes the project as a body key; every other write in
+     * the agents group reads it from the query. Named in the query it is not
+     * read at all: the door finds no project, falls back to the session's own —
+     * the organization's **first** — writes the agent there, and answers 201.
+     * So registering an agent from any project but the first wrote it into the
+     * first, and sent the browser to a detail page for an agent that is not in
+     * the project the address names. Only a real browser standing in a second
+     * project could see it, and one did.
+     */
+    expect(sent[0]?.url).toBe("/api/agents");
     expect(sent[0]?.body).toEqual({
+      project: "prj_1",
       name: "Front desk",
       description: "Answers the main line.",
     });
