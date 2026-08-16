@@ -30,6 +30,8 @@ import {
 } from "@egma/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { REFUSALS } from "../../api/src/http/refusals.ts";
+import { agentNotApplicable } from "../src/sync/refusals.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 
 let platform: Platform;
@@ -118,6 +120,23 @@ function connectionOf(answer: Answer): Record<string, unknown> {
   return answer.body.connection as Record<string, unknown>;
 }
 
+/**
+ * The one sentence both ends of the repository seam say.
+ *
+ * `push` preflights the whole folder against the tests its bound agent still
+ * has, so the ordinary path never sends the request — the client says this
+ * sentence itself. The platform's door says it in the race after that check.
+ * Two wordings for one fact would teach a client to read neither, so they are
+ * held to each other here rather than kept in step by hand.
+ */
+describe("the repository refusal both ends make", () => {
+  it("is one wording, in the client and at the door", () => {
+    expect(agentNotApplicable("tst_one", "agt_two")).toBe(
+      REFUSALS.repositoryAgentNotApplicable("tst_one", "agt_two"),
+    );
+  });
+});
+
 describe("creating a test", () => {
   it("answers the whole test, with the version a file will pin", async () => {
     const created = await ask("POST", "/api/tests", { ...RESCHEDULING });
@@ -127,13 +146,15 @@ describe("creating a test", () => {
       name: RESCHEDULING.name,
       version: 1,
       scenario: RESCHEDULING.scenario,
+      // Sentences in, sentences out. What a body sends is what comes back:
+      // an expected behavior carries no metadata, and the retired
+      // `{behavior, priority}` shape is refused by name on the way in.
       expected_behaviors: [...RESCHEDULING.expected_behaviors],
     });
     expect(String(created.body.id)).toMatch(/^tst_/u);
     expect(String(created.body.version_id)).toMatch(/^tstv_/u);
+    expect(String(created.body.revision)).toMatch(/^rev_/u);
     expect(created.body.created_at).toBeTypeOf("string");
-    // The wire deliberately does not say which project a test landed in.
-    expect(created.body).not.toHaveProperty("project_id");
   });
 
   it("takes the project's default persona when the file names nobody", async () => {
@@ -142,7 +163,9 @@ describe("creating a test", () => {
 
     for (const created of [named, absent]) {
       expect(created.status).toBe(201);
-      expect(created.body.personas).toEqual([{ id: expect.any(String), name: expect.any(String) }]);
+      expect(created.body.personas).toEqual([
+        { id: expect.any(String), name: expect.any(String), archived_at: null },
+      ]);
     }
   });
 
@@ -157,8 +180,8 @@ describe("creating a test", () => {
 
     expect(created.status).toBe(201);
     expect(created.body.personas).toEqual([
-      { id: rita, name: "Impatient Rita" },
-      { id: omar, name: "Omar" },
+      { id: rita, name: "Impatient Rita", archived_at: null },
+      { id: omar, name: "Omar", archived_at: null },
     ]);
   });
 
@@ -168,7 +191,9 @@ describe("creating a test", () => {
     const created = await ask("POST", "/api/tests", { ...RESCHEDULING, personas: [omar] });
 
     expect(created.status).toBe(201);
-    expect(created.body.personas).toEqual([{ id: omar, name: "Omar" }]);
+    expect(created.body.personas).toEqual([
+      { id: omar, name: "Omar", archived_at: null },
+    ]);
   });
 
   it("refuses a persona nobody in this project answers to", async () => {
@@ -451,7 +476,7 @@ describe("a mock tool the folder authors", () => {
     expect(refused.body).toEqual({
       error: "not_found",
       message:
-        `there is no mock tool ${theirs} on this Egma. List the mock tools to ` +
+        `there is no mock tool ${theirs} on this Egma instance. List the mock tools to ` +
         `see what this project answers for.`,
     });
   });
@@ -731,7 +756,7 @@ describe("one frozen version", () => {
     expect(refused.status).toBe(404);
     expect(refused.body).toEqual({
       error: "not_found",
-      message: `there is no test version ${missing} on this Egma. List the tests to see the version each of them stands on now.`,
+      message: `there is no test version ${missing} on this Egma instance. List the tests to see the version each of them stands on now.`,
     });
   });
 });
@@ -803,7 +828,7 @@ describe("editing a test", () => {
     expect(refused.status).toBe(404);
     expect(refused.body).toEqual({
       error: "not_found",
-      message: `there is no test ${theirs} on this Egma. List the tests to see what this project holds, or create this one instead of editing it.`,
+      message: REFUSALS.notFound("test", theirs),
     });
   });
 
@@ -1508,7 +1533,7 @@ describe("starting a run", () => {
     expect(unknown.body).toEqual({
       error: "unprocessable",
       message:
-        `there is no test version ${missing} on this Egma. Push the test ` +
+        `there is no test version ${missing} on this Egma instance. Push the test ` +
         `first, or read the test and pin the version_id it names now.`,
     });
 

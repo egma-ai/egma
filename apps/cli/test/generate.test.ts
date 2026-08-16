@@ -572,7 +572,7 @@ describe("the whole generate step", () => {
     expect(ui.record.gate?.rows[0]?.persona).toBe("default persona");
     // And the platform gave it the one every project is seeded with.
     expect(await readTest("price-question.md")).toMatchObject({
-      personas: ["default-persona"],
+      personas: [{ id: expect.any(String), name: "default-persona" }],
     });
   });
 });
@@ -1066,7 +1066,9 @@ describe("a test the platform's own door turns away", () => {
     expect(await filesInFolder()).toHaveLength(3);
     expect(await readTest(`${NAMED}.md`)).toMatchObject({
       version: null,
-      personas: [UNHELD],
+      // No identity, because nothing has ever pulled this file: a name is all
+      // a draft the coding agent wrote has to give.
+      personas: [{ id: "", name: UNHELD }],
     });
   });
 
@@ -1097,7 +1099,9 @@ describe("a test the platform's own door turns away", () => {
     );
 
     // And the fixed file came back pinned, naming the persona every project has.
-    expect(await readTest(`${NAMED}.md`)).toMatchObject({ personas: ["default-persona"] });
+    expect(await readTest(`${NAMED}.md`)).toMatchObject({
+      personas: [{ id: expect.any(String), name: "default-persona" }],
+    });
     expect((await readTest(`${NAMED}.md`)).version).toMatch(/^tstv_/u);
   });
 

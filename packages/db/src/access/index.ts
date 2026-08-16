@@ -109,22 +109,45 @@ export { ROLES, VIA } from "./context.ts";
 export {
   AgentWriteRefusedError,
   AlreadyBelongsToAnOrganizationError,
+  ApplicabilityConflictError,
+  CapabilityCheckFailedError,
+  ConnectionRestoreRefusedError,
+  DefaultPersonaReplacementError,
   GraderLibraryEntryInUseError,
+  IdempotencyConflictError,
+  IdentityConflictError,
+  JudgeCredentialInUseError,
+  JudgeNotConfiguredError,
+  JudgeProviderMismatchError,
   LastAdminError,
   MockToolTakenError,
+  NoCapabilityAdapterError,
   NotPermittedError,
+  PersonaNameAmbiguousError,
   PersonaNamedByTestsError,
   PredefinedGraderError,
   ProjectOutsideOrganizationError,
+  ProjectSlugTakenError,
+  RunRetryRefusedError,
   RunWriteRefusedError,
+  TestAgentRefusedError,
+  TestDependencyInactiveError,
   TestMovedOnError,
   TraceStoreRefusedError,
+  UnknownCapabilityError,
   UnknownGraderLibraryEntryError,
   UnprocessableInputError,
   UnreadableTraceQueryError,
+  VersionConflictError,
+  WriteAbortedError,
   type AgentWriteRefusal,
+  type ArchivedDependency,
+  type ConnectionRestoreRefusal,
   type GraderUsingLibraryEntry,
+  type JudgeCredentialUse,
+  type RetryBlocker,
   type RunWriteRefusal,
+  type TestAgentRefusal,
   type TestNamingPersona,
 } from "./errors.ts";
 
@@ -206,6 +229,7 @@ export {
 export {
   readOrganization,
   readOrganizationSettings,
+  updateOrganization,
   updateOrganizationSettings,
   type Organization,
   type OrganizationSettings,
@@ -217,8 +241,10 @@ export {
   projectsOf,
   readProject,
   createProject,
+  updateProject,
   type NewProject,
   type Project,
+  type ProjectChanges,
 } from "./projects.ts";
 
 export {
@@ -227,6 +253,7 @@ export {
   revokeApiKey,
   resolveApiKey,
   type ApiKey,
+  type ListedApiKey,
   type NewApiKey,
   type ResolvedApiKey,
 } from "./api-keys.ts";
@@ -288,53 +315,65 @@ export {
 
 export {
   addConnection,
+  archiveAgent,
+  archiveConnection,
   connectionTypeOf,
   createAgent,
-  deleteAgent,
   getAgent,
   getConnection,
   listAgents,
   listConnections,
+  refreshConnectionCapabilities,
   registerAgent,
-  removeConnection,
+  restoreAgent,
+  restoreConnection,
   updateAgent,
   updateConnection,
   type Agent,
   type AgentChanges,
   type AgentPage,
+  type ArchivedAgent,
+  type ArchivedConnection,
   type Connection,
   type ConnectionChanges,
   type CreatedAgent,
-  type DeletedAgent,
   type NewAgent,
   type NewConnection,
   type Registration,
   type RegistrationResult,
-  type RemovedConnection,
+  type RestoreCredential,
 } from "./agents.ts";
 export type {
+  CapabilityState,
   ConnectionType,
   Modality,
   Topology,
 } from "../schema/agents.ts";
 
+
 export {
+  archivePersona,
   clonePersona,
   createPersona,
-  deletePersona,
   editPersona,
   getPersona,
   getPersonaVersion,
   listPersonas,
+  listPersonaVersions,
   resolvePersonaNames,
+  restorePersona,
+  testsUsingPersona,
   VOICE_PROVIDERS,
-  type DeletedPersona,
+  type ArchiveRequest,
   type NewPersona,
   type Persona,
   type PersonaChanges,
+  type PersonaListRequest,
   type PersonaPage,
   type PersonaTraits,
   type PersonaVersion,
+  type PersonaVersionPage,
+  type RestoreRequest,
   type VoiceProvider,
 } from "./personas.ts";
 
@@ -367,23 +406,31 @@ export {
 } from "../schema/mock-tools.ts";
 
 export {
+  archiveTest,
   cloneTest,
   createTest,
-  deleteTest,
   editTest,
   getTest,
   getTestVersion,
   listTests,
-  type DeletedTest,
+  listTestVersions,
+  restoreTest,
+  setTestAgents,
+  type ApplicabilityChange,
+  type ArchiveTestRequest,
   type ExpectedBehavior,
   type MockOverride,
   type MockOverrideInput,
   type NewTest,
+  type RestoreTestRequest,
   type Test,
+  type TestAgent,
   type TestChanges,
+  type TestListRequest,
   type TestPage,
   type TestPersona,
   type TestVersion,
+  type TestVersionPage,
 } from "./tests.ts";
 
 /**
@@ -468,6 +515,11 @@ export {
   type SeededGraderCopy,
 } from "./seeded-graders.ts";
 export type { GraderScope } from "../schema/graders.ts";
+export {
+  GRADER_SCOPES,
+  JUDGE_PROVIDERS,
+  JUDGE_SOURCES,
+} from "../schema/graders.ts";
 
 /**
  * The project's default judge. `resolveJudgeKey` is the one door to the
@@ -477,12 +529,35 @@ export type { GraderScope } from "../schema/graders.ts";
  */
 export {
   getJudgeConfiguration,
+  getProjectJudge,
   resolveJudgeKey,
   seedDefaultJudge,
   setJudgeConfiguration,
+  setProjectJudge,
+  PLATFORM_JUDGE,
   type JudgeConfiguration,
   type NewJudgeConfiguration,
+  type ProjectJudge,
+  type ProjectJudgeChoice,
 } from "./judges.ts";
+
+/**
+ * The organization's judge credentials. Write-only by construction: nothing
+ * exported here can answer with a stored key, and the one door to a plaintext
+ * one lives behind the grading engine's own context.
+ */
+export {
+  archiveJudgeCredential,
+  createJudgeCredential,
+  editJudgeCredential,
+  getJudgeCredential,
+  judgeCredentialUses,
+  listJudgeCredentials,
+  type JudgeCredential,
+  type JudgeCredentialChanges,
+  type NewJudgeCredential,
+} from "./judge-credentials.ts";
+export type { JudgeSource } from "../schema/graders.ts";
 
 export {
   cancelRun,
@@ -530,9 +605,60 @@ export type {
   RunStatus,
   RunTrigger,
   SimulationEndingReason,
+  SimulationSkipReason,
   SimulationStatus,
   Verdict,
 } from "../schema/runs.ts";
+/**
+ * The four words a run's machinery can be in, exported because the door that
+ * filters a history by one has to refuse anything else by name — and a list
+ * written a second time at that door is a list that will one day disagree with
+ * the check on the table.
+ */
+export { RUN_STATUSES } from "../schema/runs.ts";
+
+/**
+ * A project's run history, and Retry.
+ *
+ * The history is where a run's machinery and its judgment are read together —
+ * two stores, one answer, and the fold below is what keeps the four facts apart
+ * inside it. Retry is here rather than beside `startRun` because it must never
+ * become a second way to start one: it derives everything from an earlier run
+ * and then goes through `startRun` like every other caller.
+ */
+export {
+  listRunHistory,
+  readRunFold,
+  retryRun,
+  type RetryRequest,
+  type RunHistoryEntry,
+  type RunHistoryPage,
+  type RunHistoryRequest,
+} from "./run-history.ts";
+export type { RunFilter } from "./runs.ts";
+
+/**
+ * What a run would freeze, and what one already froze.
+ *
+ * `planRun` is the review step's read and `startRun`'s own resolver, which is
+ * the whole point of it being one function: what the review showed is what
+ * starts. `getGradingPlan` answers with what a run actually froze, including
+ * the honest `not_recorded` state for history that predates plans.
+ */
+export {
+  getGradingPlan,
+  planRun,
+  type CapabilityDecision,
+  type GradingPlan,
+  type JudgeChoice,
+  type PlanGroup,
+  type PlanItem,
+  type PlanJudge,
+  type PlannedSimulationGroup,
+  type RunPlan,
+  type RunPlanRequest,
+} from "./run-plans.ts";
+export type { GradingPlanState } from "../schema/plans.ts";
 
 export {
   claimGradingJobs,

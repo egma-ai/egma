@@ -31,9 +31,16 @@ import { projectJudge, NoJudge } from "../src/judge/index.ts";
  * Which judge answers, where its key comes from, and where the key never goes.
  *
  * **The order of this file matters and is deliberate.** The first case is a
- * project that has configured no judge at all, and it has to run before
- * anything sets one — a project's judge is one row, and there is no way to
- * un-set it once it is there. Everything after seeds the judge first.
+ * project with no judge behind its grading, and it has to run before anything
+ * re-seeds one — a project's judge is one row, and nothing in the product
+ * un-sets it. Everything after seeds the judge first.
+ *
+ * The run itself is started under a judge, because it has to be: a run carries
+ * the judge-backed built-in and a project in `needs_setup` is refused before
+ * anything is conducted. The row is then cleared, which is what the state
+ * actually looks like when it reaches grading — a plan captured during an
+ * upgrade with no judge behind it, or an operator who removed the row — and it
+ * is the state the engine must never let go green.
  *
  * A grading `AuthContext` is built by the queue and never by a caller, so where
  * a case needs one it is written out here exactly as `claimGradingJobs` builds
@@ -86,6 +93,13 @@ describe("a project that configured no judge", () => {
       testId,
       spans: aConversation(),
     });
+
+    // Cleared after the conversation exists and before anything judges it.
+    // Raw SQL because no product verb removes a judge — which is exactly why
+    // this state is reached by an upgrade or an operator rather than by a form.
+    await world.database.sql("delete from judge_configuration where project_id = $1", [
+      world.projectId,
+    ]);
 
     const rows = await eventually("the behaviors to be errored", async () => {
       const read = await readVerdicts(world.auth, simulationId);

@@ -19,30 +19,27 @@
  * The URL is deliberately not copy. `/api/graders` is a machine surface — it is
  * the endpoint's own path, and matching it is how somebody reading the network
  * tab finds the request — and no page ever prints it as a word.
+ *
+ * **Nothing here is a sentence the screen cannot reach**, for the reason its
+ * sibling gives: a copy file holding words nobody renders reads as a screen
+ * whose whole vocabulary is checked, and is not one.
  */
 
 export const RUNNING = {
-  title: "Running graders",
-  lead: "What this project judges with. Every one of them is a copy of something on the library shelf.",
-  loading: "Loading…",
-  signedOut: "Sign in first",
-  signedOutLead: "This page is about your project.",
-  signIn: "Sign in",
-  setUp: "Set up Egma",
-  unreachable: "Egma could not be reached. Is the API running?",
+  title: "Graders",
+  lead: "The graders judging this project now.",
+  /** What the page says it is waiting for, never merely that it is waiting. */
+  loading: "running graders",
   /**
    * An empty list is a real state and a bad one: every project is given the
    * expected-behaviors grader when it is created, so nothing here means a run
-   * would be reported with nothing checked. Saying so is the whole value of the
+   * would be reported with nothing judged. Saying so is the whole value of the
    * sentence.
    */
   empty:
     "Nothing is judging this project, so a run would finish with nothing " +
     "judged. Every project is given Egma's expected-behaviors grader when it " +
     "is created — if it is gone, pick it from the library and press Use.",
-  counted: (howMany: number): string =>
-    `${howMany} ${howMany === 1 ? "grader" : "graders"}`,
-  order: "Newest first",
 } as const;
 
 /** The table's headings. The last one is blank, because it holds the buttons. */
@@ -80,19 +77,22 @@ export const EDIT = {
   open: "Edit",
   title: (name: string): string => `Edit ${name}`,
   lead:
-    "What this grader judges by, and where it applies. Values are what a " +
-    "verdict is made of, so changing one starts the next version and leaves " +
-    "everything already judged saying exactly what it said.",
+    "Change how this grader judges and where it applies. Changing a grading " +
+    "value starts a new version; earlier verdicts stay unchanged.",
+  groups: {
+    general: "General",
+    logic: "Grading logic",
+    applicability: "Applicability",
+    impact: "Impact",
+  },
   /** An entry whose assertions come from the test has nothing to fill in. */
-  asksNothing:
-    "This grader has nothing to fill in. Its assertions are each test's own " +
-    "expected behaviors, read at the moment it judges.",
+  asksNothing: "Uses each test's expected behaviors.",
   name: "Name",
-  nameMeans: "What this project calls its copy.",
+  nameMeans: "The name shown in this project.",
   description: "Notes",
-  descriptionMeans: "Why your team switched it on. Leave it empty for none.",
+  descriptionMeans: "Optional context for your team.",
   scope: "Applies to",
-  scopeMeans: "Where this grader judges. Live traffic is sampled below.",
+  scopeMeans: "Choose tests, live traffic, or both.",
   required: "Can fail a run",
   /**
    * Both positions carry the same warning, because turning the flag either way
@@ -101,17 +101,13 @@ export const EDIT = {
    */
   requiredOn:
     "A test cannot pass while this grader does not. Turning this off rewrites " +
-    "no verdict, and it does change what past ones add up to: a run that " +
-    "failed on this grader alone reads as passed from then on.",
+    "no verdict, but it changes what past verdicts add up to.",
   requiredOff:
-    "A diagnostic: judged and shown with its fraction, and never able to fail " +
-    "anything. Turning this back on rewrites no verdict, and it does change " +
-    "what past ones add up to: a run this grader failed reads as failed again.",
+    "A diagnostic reports only. Turning this on rewrites no verdict, but it " +
+    "changes what past verdicts add up to.",
   sampleRate: "Share of live traffic judged",
   sampleRateMeans:
-    "A whole percentage from 0 to 100. It counts only where this grader " +
-    "reaches live traffic, and it moves forward: raising it judges sooner and " +
-    "lowering it judges later, and neither reaches back.",
+    "A whole percentage from 0 to 100. Changes apply only to future live traffic.",
   submit: "Save",
   submitting: "Saving…",
   cancel: "Cancel",
@@ -124,8 +120,9 @@ export const EDIT = {
    */
   saved: (name: string): string =>
     `${name} is saved. It judges everything in its scope from here on, and no verdict it has already written was rewritten.`,
-  unreachable:
-    "Egma could not be reached, so nothing was saved. Is the API running?",
+  /** Why the control is not this person's, in their own role's words. */
+  notYours: (role: string): string =>
+    `Your ${role} role cannot change a grader. Ask an organization admin.`,
 } as const;
 
 /**
@@ -142,6 +139,12 @@ export const EDIT = {
  * judged by outlive it — so a result somebody read last week reads the same
  * today. Without that sentence a person weighing this button is being asked to
  * choose between a grader they cannot live with and a history they cannot lose.
+ *
+ * **The last one gets a sentence of its own.** A project may judge with nothing
+ * at all — that is a decision it is allowed to take, and the run door lets it
+ * through rather than refusing — so nothing stops somebody switching off the
+ * last copy. What a page owes them is the consequence in advance: the run still
+ * happens, and it comes back with nothing judged.
  */
 export const SWITCH_OFF = {
   open: "Switch off",
@@ -154,14 +157,18 @@ export const SWITCH_OFF = {
   again:
     "There is no switching it back on. Pick the same grader from the library " +
     "and press Use, which starts a fresh copy with its own settings.",
+  /** Said above the two buttons when this copy is the only one left. */
+  theLastOne:
+    "This is the only grader running here. Switch it off and runs still " +
+    "happen, and come back with nothing judged.",
   confirm: "Switch it off",
   confirming: "Switching off…",
   cancel: "Keep it",
   done: (name: string): string =>
     `${name} is switched off. Nothing new is judged by it, and everything it already judged reads exactly as it did.`,
-  unreachable:
-    "Egma could not be reached, so nothing was switched off. Is the API " +
-    "running?",
+  /** Why the control is not this person's, in their own role's words. */
+  notYours: (role: string): string =>
+    `Your ${role} role cannot switch a grader off. Ask an organization admin.`,
 } as const;
 
 /**

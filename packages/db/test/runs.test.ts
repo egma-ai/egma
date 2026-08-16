@@ -9,8 +9,8 @@ import {
   createAgent,
   createPersona,
   createTest,
-  deletePersona,
-  deleteTest,
+  archivePersona,
+  archiveTest,
   editPersona,
   editTest,
   failSimulation,
@@ -27,6 +27,7 @@ import {
   readAssertionWords,
   recordSimulationHeartbeat,
   resolveSimulationStanding,
+  setTestAgents,
   startRun,
   startSimulation,
   sweepOrphanedSimulations,
@@ -43,7 +44,12 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+import {
+  seedGraderCopies,
+  seedJudge,
+  seedOrganization,
+  seedUser,
+} from "./support/tenancy.ts";
 
 /**
  * The whole lifecycle at the db seam, through the module: a run and its
@@ -192,6 +198,19 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
+  // A judge, as provisioning gives a real project one. These fixtures build
+  // their tenants by raw SQL and skip that transaction.
+  await seedJudge(actingAsAcme("admin"));
+  await seedJudge({ ...actingAsAcme("admin"), projectId: acme.outbound });
+  await seedJudge({ ...actingAsGlobex(), role: "admin" });
+  // And the copy of the predefined expected-behaviors grader a real project is
+  // born with, for the same reason: every run started in this file freezes a
+  // grading plan, and a fixture with no copy would freeze an empty one. Nothing
+  // here asserts what is in that plan — `run-planning.test.ts` does — but every
+  // run in this file is meant to be an ordinary run, and an ordinary run judges
+  // something. It is also what makes the judge above load-bearing: with no copy
+  // asking a model, the run door demands no judge at all.
+  await seedGraderCopies();
 
   const created = await createAgent(actingAsAcme(), {
     name: "Front desk",
@@ -219,6 +238,9 @@ beforeAll(async () => {
     rita,
     sam,
   ]);
+  // Globex needs an agent of its own before it can hold a test: a test always
+  // applies to at least one active agent of its project.
+  await createAgent(actingAsGlobex(), { name: "Globex front desk" });
   globexOwn = await seedTestVersion(actingAsGlobex(), "Reschedules", [graceOwn]);
 });
 
@@ -335,15 +357,42 @@ describe("starting a run", () => {
     expect(simulations?.[0]?.testVersionId).toBe(moving);
   });
 
-  it("executes a version whose test has since been deleted, because the version is what was pinned", async () => {
+  it("refuses a version whose test has since been archived, because Archive stops new work", async () => {
     const abandoned = await seedTestVersion(actingAsAcme(), "Abandoned", [rita]);
-    await deleteTest(actingAsAcme(), await testOf(abandoned));
+    await archiveTest(actingAsAcme(), await testOf(abandoned));
 
-    const started = await startRun(
-      actingAsAcme(),
-      aRun({ testVersionIds: [abandoned] }),
-    );
-    expect(started.simulations[0]?.testVersionId).toBe(abandoned);
+    // Archive is exactly the statement "stop starting new work with this", and
+    // it would say nothing at all if a pinned version could walk around it. The
+    // version stays readable and every run that already pinned one stays
+    // interpretable — that is the difference from a delete.
+    await expect(
+      startRun(actingAsAcme(), aRun({ testVersionIds: [abandoned] })),
+    ).rejects.toThrow(/is archived/);
+  });
+
+  it("refuses a test that does not apply to the agent the connection is on", async () => {
+    const elsewhere = await createAgent(actingAsAcme(), {
+      name: "Front desk, second opinion",
+      connection: {
+        type: "retell",
+        modality: "chat",
+        config: { retellAgentId: "agent_unlinked_1" },
+        credentials: { apiKey: "retell-secret-UNLINKED1234" },
+      },
+    });
+
+    // `oneCaller` was authored when this agent did not exist, so nobody has
+    // said it is worth running against it — and a run over an agent a test does
+    // not apply to is a comparison nobody asked for.
+    await expect(
+      startRun(
+        actingAsAcme(),
+        aRun({
+          agentId: elsewhere.id,
+          connectionId: elsewhere.connection?.id ?? "",
+        }),
+      ),
+    ).rejects.toThrow(/does not apply to agent/);
   });
 
   it("stamps the connection's shape at start, so editing the connection rewrites nothing", async () => {
@@ -400,6 +449,12 @@ describe("starting a run", () => {
           headers: '{"Authorization":"Bearer SENTINEL-endpoint-token-b3f1"}',
         },
       },
+    });
+
+    // Authored before this agent existed, so it has to be linked before a run
+    // may pair the two.
+    await setTestAgents(actingAsAcme(), await testOf(oneCaller), {
+      agentIds: [agentId, atEndpoint.id],
     });
 
     const started = await startRun(
@@ -485,20 +540,20 @@ describe("starting a run", () => {
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("refuses a version whose persona has since been deleted, rather than conducting one fewer", async () => {
+  it("refuses a version whose persona has since been archived, rather than conducting one fewer", async () => {
     const leaving = await seedPersona(actingAsAcme(), "Departing Dara");
     const pinned = await seedTestVersion(actingAsAcme(), "Asks twice", [leaving]);
 
-    // The test moves off them first: a live test naming somebody is what
-    // refuses their delete, and the old version goes on naming them.
+    // The test moves off them first: an active test naming somebody is what
+    // refuses their Archive, and the old version goes on naming them.
     await editTest(actingAsAcme(), await testOf(pinned), {
       personaIds: [rita],
     });
-    await deletePersona(actingAsAcme(), leaving);
+    await archivePersona(actingAsAcme(), leaving);
 
     await expect(
       startRun(actingAsAcme(), aRun({ testVersionIds: [pinned] })),
-    ).rejects.toThrow(`persona ${leaving} is deleted`);
+    ).rejects.toThrow(`persona ${leaving} is archived`);
   });
 
   it("refuses a connection that is not the named agent's", async () => {
@@ -639,8 +694,12 @@ describe("resolving what a simulation was executed against", () => {
     const pinned = await getTest(actingAsAcme(), testId);
     const simulationId = await conducted(versionId);
 
-    await deleteTest(actingAsAcme(), testId);
-    expect(await getTest(actingAsAcme(), testId)).toBeUndefined();
+    await archiveTest(actingAsAcme(), testId);
+    // Archived, not gone: the detail page is where Restore lives, so the read
+    // still answers and says plainly that it is archived.
+    expect((await getTest(actingAsAcme(), testId))?.archivedAt).toBeInstanceOf(
+      Date,
+    );
 
     const version = await getSimulationTestVersion(actingAsAcme(), simulationId);
     expect(version?.id).toBe(pinned?.versionId);

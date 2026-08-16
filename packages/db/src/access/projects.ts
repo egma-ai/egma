@@ -1,11 +1,27 @@
 import { newId } from "@egma/ids";
-import { and, eq, isNull, type SQL } from "drizzle-orm";
+import { and, eq, isNull, like, or, type SQL } from "drizzle-orm";
 
 import { db } from "../client.ts";
 import { project } from "../schema/tenancy.ts";
 import type { AuthContext } from "./context.ts";
+import {
+  IdentityConflictError,
+  ProjectSlugTakenError,
+  UnprocessableInputError,
+} from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
-import { insertSeededGrader } from "./seeded-graders.ts";
+/**
+ * The one project factory, shared with signup.
+ *
+ * **This import closes a cycle — `projects` → `provisioning` → `judges` →
+ * `projects` — and it is safe on the one condition that keeps any such cycle
+ * safe: nothing on either side is read while the other is still being
+ * evaluated.** `insertProject` is called from inside a function here, and
+ * `isProjectOfOrganization` is called from inside a function there, so both
+ * bindings exist long before either is reached. Move either use to module scope
+ * and the cycle stops being safe.
+ */
+import { insertProject, type NewPlatformJudge } from "./provisioning.ts";
 import { theProject, within } from "./within.ts";
 
 /**
@@ -19,6 +35,10 @@ export type Project = {
   readonly organizationId: string;
   readonly name: string;
   readonly slug: string;
+  /** What it is for, in somebody's own words, or nothing when nobody said. */
+  readonly description: string | null;
+  /** The opaque token an edit to any of the three above has to name. */
+  readonly revision: string;
   readonly createdBy: string | null;
   readonly createdAt: Date;
 };
@@ -28,6 +48,8 @@ const COLUMNS = {
   organizationId: project.organizationId,
   name: project.name,
   slug: project.slug,
+  description: project.description,
+  revision: project.revision,
   createdBy: project.createdBy,
   createdAt: project.createdAt,
 } as const;
@@ -104,26 +126,156 @@ export async function readProject(
   return row;
 }
 
+/**
+ * The word a project is known by in a URL, worked out from its name.
+ *
+ * **Deterministic, and deliberately dull.** The same name always produces the
+ * same candidate, so two people creating "Outbound sales" in two organizations
+ * get `outbound-sales` in both — and an admin who never thinks about slugs
+ * never has to. Everything outside the small alphabet becomes a separator, runs
+ * of separators collapse, and a name made entirely of punctuation still has to
+ * produce something, so it falls back to a word rather than to an empty string.
+ */
+export function slugFrom(name: string): string {
+  const shaped = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return shaped === "" ? "project" : shaped.slice(0, SLUG_LIMIT);
+}
+
+/**
+ * How long a slug may be. Long enough for a sentence-shaped project name and
+ * short enough to read in an address bar; the suffix a collision adds is
+ * counted outside it, so the numbered form never truncates differently from the
+ * unnumbered one and starts colliding with itself.
+ */
+const SLUG_LIMIT = 48;
+
+/**
+ * The first free slug in the numbered series a name produces: `outbound`, then
+ * `outbound-2`, then `outbound-3`.
+ *
+ * **Deterministic under collision, which is the property that matters**: the
+ * answer depends only on the name and on what the organization already holds,
+ * never on a clock or on randomness. Two admins creating "Outbound" a second
+ * apart both compute `outbound-2`, one of them loses the unique index, and the
+ * loser recomputes and gets `outbound-3` — rather than both ending up with
+ * `outbound-8f3c` and nobody able to guess either.
+ */
+export function nextFreeSlug(
+  wanted: string,
+  taken: readonly string[],
+): string {
+  const held = new Set(taken);
+  if (!held.has(wanted)) return wanted;
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${wanted}-${suffix}`;
+    if (!held.has(candidate)) return candidate;
+  }
+}
+
+/** Every slug in this organization that could collide with the wanted one. */
+async function slugsLike(
+  auth: AuthContext,
+  wanted: string,
+): Promise<readonly string[]> {
+  const rows = await db()
+    .select({ slug: project.slug })
+    .from(project)
+    .where(
+      within(
+        auth,
+        project,
+        and(
+          notDeleted,
+          or(eq(project.slug, wanted), like(project.slug, `${wanted}-%`)),
+        ),
+      ),
+    );
+  return rows.map((row) => row.slug);
+}
+
 export type NewProject = {
   readonly name: string;
-  readonly slug: string;
+  /**
+   * The slug an admin typed, when they typed one. Absent means egma works one
+   * out from the name and numbers it past whatever is already there.
+   *
+   * The two are answered differently on collision and that is the whole reason
+   * this is optional rather than always supplied by the caller: a slug somebody
+   * chose is refused out loud, because silently giving them `outbound-2` when
+   * they asked for `outbound` is egma deciding something they came to decide.
+   * A slug egma derived is renumbered, because nobody asked for it.
+   */
+  readonly slug?: string | undefined;
+  readonly description?: string | null | undefined;
+  /**
+   * The deployment's own judge, when it has one. Handed in rather than read,
+   * for the reason `provisionOrganization` states: it lives in the process's
+   * configuration and nowhere in the database a new project could look.
+   */
+  readonly defaultJudge?: NewPlatformJudge | undefined;
 };
 
 /**
+ * How many times a derived slug is recomputed after losing the unique index to
+ * a project created between the read and the insert. Three, because the second
+ * attempt already sees the row that beat the first one; anything past that is a
+ * pathological burst and is answered as the collision it is rather than looped
+ * on forever.
+ */
+const SLUG_ATTEMPTS = 3;
+
+/** Postgres's unique-violation code, which the slug index raises. */
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * The driver's error is wrapped by the query layer before it reaches here, so
+ * the chain is walked rather than the top read. A check that looked only at
+ * what was thrown would find no code, decide this was not a collision, and let
+ * a wrapped constraint violation escape as an internal failure — which is the
+ * shape of bug that looks like it works, because the refusal is rare.
+ */
+function isSlugCollision(thrown: unknown): boolean {
+  for (let held = thrown; held != null; held = (held as { cause?: unknown }).cause) {
+    const { code, constraint } = held as {
+      code?: unknown;
+      constraint?: unknown;
+    };
+    if (
+      code === UNIQUE_VIOLATION &&
+      constraint === "project_organization_id_slug_unique"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * A whole project, in one transaction.
+ *
  * The new project belongs to the caller's customer. There is no other option.
  *
- * **Only an `admin` creates one.** The check is here rather than at a route
- * because there is no route: nothing in the product creates a project except
- * signup, which provisions one before anybody has a context at all. A row of
- * the permission table with no call site is a row that reads as coverage and
- * refuses nobody, which is worse than not having written it.
+ * **Only an `admin` creates one**, on the row of the permission table that says
+ * so. The check is here as well as at the route, because signup provisions a
+ * project before anybody has a context at all and the two paths must not be
+ * able to drift apart on who may.
  *
- * **A project and its mandatory grading are one transaction**, exactly as they
- * are inside provisioning: the row and the active copy of egma's
- * `expected_behaviors` grader land together or neither lands. A project that
- * existed for even a moment with no grader in it would be a project whose first
- * run could come back green having judged nothing, and "it depends when you
- * looked" is not an answer a trust product may give.
+ * What it writes is `insertProject`'s business and deliberately not this
+ * function's: the project, its starter persona, the pointer that makes them the
+ * default, its copy of egma's `expected_behaviors` grader, and the deployment's
+ * judge where there is one. A project created here is therefore
+ * indistinguishable from the one signup makes, which is the point — anything
+ * less is a project that refuses the first test written in it, or one whose
+ * first run comes back green having judged nothing.
+ *
+ * **The project and its mandatory grading are one transaction**, which is the
+ * factory's doing rather than this function's: a project that existed for even
+ * a moment with no grader in it would be a project whose suite could go green
+ * having judged nothing, and "it depends when you looked" is not an answer a
+ * trust product may give.
  */
 export async function createProject(
   auth: AuthContext,
@@ -131,32 +283,155 @@ export async function createProject(
 ): Promise<Project> {
   authorize(auth, "manage_projects", here(auth));
 
-  const projectId = newId("prj");
+  const name = input.name.trim();
+  if (name === "") {
+    throw new UnprocessableInputError("a project needs a name");
+  }
 
-  const row = await db().transaction(async (tx) => {
-    const [written] = await tx
-      .insert(project)
-      .values({
-        id: projectId,
-        organizationId: auth.organizationId,
-        name: input.name,
-        slug: input.slug,
-        createdBy: auth.userId,
-      })
-      .returning(COLUMNS);
+  const chosen = input.slug?.trim();
+  const asked = chosen === undefined || chosen === "" ? undefined : slugFrom(chosen);
+  const description = normalizedDescription(input.description);
 
-    if (written === undefined) throw new Error("the project was not written");
+  for (let attempt = 1; ; attempt += 1) {
+    const slug =
+      asked ?? nextFreeSlug(slugFrom(name), await slugsLike(auth, slugFrom(name)));
 
-    await insertSeededGrader(tx, {
-      organizationId: auth.organizationId,
-      projectId,
-      createdBy: auth.userId ?? null,
+    try {
+      return await db().transaction(async (tx) => {
+        const projectId = newId("prj");
+        await insertProject(tx, {
+          projectId,
+          organizationId: auth.organizationId,
+          name,
+          slug,
+          description,
+          revision: newId("rev"),
+          createdBy: auth.userId,
+          ...(input.defaultJudge === undefined
+            ? {}
+            : { defaultJudge: input.defaultJudge }),
+        });
+
+        const [row] = await tx
+          .select(COLUMNS)
+          .from(project)
+          .where(eq(project.id, projectId))
+          .limit(1);
+        if (row === undefined) throw new Error("the project was not written");
+        return row;
+      });
+    } catch (thrown) {
+      if (!isSlugCollision(thrown)) throw thrown;
+      // A slug somebody typed is theirs to change; a slug egma derived is
+      // egma's to renumber, and it recomputes from a list that now includes
+      // whatever beat it.
+      if (asked !== undefined) throw new ProjectSlugTakenError(slug);
+      if (attempt >= SLUG_ATTEMPTS) throw new ProjectSlugTakenError(slug);
+    }
+  }
+}
+
+/** A description stored trimmed, or not stored at all when it says nothing. */
+function normalizedDescription(
+  description: string | null | undefined,
+): string | null {
+  if (description === undefined || description === null) return null;
+  const trimmed = description.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+export type ProjectChanges = {
+  readonly name?: string | undefined;
+  readonly slug?: string | undefined;
+  readonly description?: string | null | undefined;
+  /**
+   * The revision this edit was written against. **Required at the browser's
+   * door and optional here**, on the terms every other identity write in this
+   * codebase uses: an internal caller that has just read and written in one
+   * transaction has nothing to race with, and a person with a form open in two
+   * tabs has everything to.
+   */
+  readonly expectedRevision?: string | undefined;
+};
+
+/**
+ * A project's live fields, edited.
+ *
+ * **Only an `admin`**, because a project's name and slug are what every link
+ * anybody has sent is written against, and a slug change is felt by everybody
+ * in the organization at once.
+ *
+ * The row is locked, the expected revision is checked against the locked row,
+ * and the revision moves on every write — so two admins editing one project in
+ * two tabs are told, rather than the second silently overwriting the first.
+ * Editing a project the caller cannot see returns what reading it would:
+ * nothing, with nothing disturbed.
+ */
+export async function updateProject(
+  auth: AuthContext,
+  projectId: string,
+  changes: ProjectChanges,
+): Promise<Project | undefined> {
+  authorize(auth, "manage_projects", here(auth));
+
+  const name = changes.name?.trim();
+  if (changes.name !== undefined && name === "") {
+    throw new UnprocessableInputError("a project needs a name");
+  }
+
+  const slug =
+    changes.slug === undefined ? undefined : slugFrom(changes.slug.trim());
+  if (changes.slug !== undefined && changes.slug.trim() === "") {
+    throw new UnprocessableInputError("a project needs a slug");
+  }
+
+  try {
+    return await db().transaction(async (tx) => {
+      const [locked] = await tx
+        .select(COLUMNS)
+        .from(project)
+        .where(within(auth, project, and(eq(project.id, projectId), notDeleted)))
+        .limit(1)
+        .for("update");
+
+      if (locked === undefined) return undefined;
+
+      if (
+        changes.expectedRevision !== undefined &&
+        changes.expectedRevision !== locked.revision
+      ) {
+        throw new IdentityConflictError("Project", locked.id, {
+          expected: changes.expectedRevision,
+          current: locked.revision,
+        });
+      }
+
+      const [updated] = await tx
+        .update(project)
+        .set({
+          ...(name === undefined ? {} : { name }),
+          ...(slug === undefined ? {} : { slug }),
+          ...(changes.description === undefined
+            ? {}
+            : { description: normalizedDescription(changes.description) }),
+          // The identity moved, so the token that names it moves too. A caller
+          // still holding the old one is holding a read taken before this
+          // write, which is exactly what it is for.
+          revision: newId("rev"),
+          updatedAt: new Date(),
+        })
+        .where(eq(project.id, locked.id))
+        .returning(COLUMNS);
+
+      if (updated === undefined) throw new Error("the project was not written");
+      return updated;
     });
-
-    return written;
-  });
-
-  return row;
+  } catch (thrown) {
+    if (isSlugCollision(thrown) && slug !== undefined) {
+      throw new ProjectSlugTakenError(slug);
+    }
+    throw thrown;
+  }
 }
 
 /**

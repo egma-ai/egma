@@ -30,6 +30,14 @@ MODEL_PROVIDERS = ("scripted", "openai")
 DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1"
 LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
 
+DEFAULT_CAPACITY = 2
+"""The one default for how many simulations this process conducts at once.
+
+Compose passes an unset value through instead of restating this number, so a
+bare simulator and a container use the same limit unless an operator supplies
+``EGMA_SIMULATOR_CAPACITY`` explicitly.
+"""
+
 STT_PROVIDERS = ("scripted", "deepgram", "openai", "openai_realtime")
 """What the persona hears with. ``scripted`` needs no account and no network.
 
@@ -864,7 +872,7 @@ class SimulatorConfig:
                 f"https://, got {url!r}"
             )
 
-        capacity = _whole("EGMA_SIMULATOR_CAPACITY", 2)
+        capacity = _whole("EGMA_SIMULATOR_CAPACITY", DEFAULT_CAPACITY)
         if capacity < 1:
             raise ValueError(
                 f"EGMA_SIMULATOR_CAPACITY must be at least 1, got {capacity}"

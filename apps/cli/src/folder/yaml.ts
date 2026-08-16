@@ -4,9 +4,11 @@
  *
  * Two files need it: the folder's `config.yaml`, which is a mapping of mappings
  * two levels deep, and the frontmatter of a test file, which is a mapping of
- * scalars and one list. That is the whole language — no anchors, no multi-line
- * scalars, no lists of mappings — and this reads exactly that and refuses the
- * rest by name and line number.
+ * scalars, one flow list, and one block sequence of small mappings — the
+ * personas, which carry a stable identifier and the display name a reviewer
+ * reads beside it. That is the whole language — no anchors, no multi-line
+ * scalars, nothing nested inside a sequence item — and this reads exactly that
+ * and refuses the rest by name and line number.
  *
  * It is written rather than depended on for two reasons. The first is that
  * `npx egma` is the first thing a developer runs, so every dependency is
@@ -16,8 +18,14 @@
  * kept, because nothing between the value and the file is free to reformat.
  */
 
+/**
+ * A list, however it was written: `[a, b]` gives text, and a block of `- `
+ * lines gives text or a small mapping depending on what each item says.
+ */
+export type YamlSequence = readonly (string | YamlMapping)[];
+
 /** Everything a value in one of egma's files can be. */
-export type YamlValue = string | readonly string[] | YamlMapping | null;
+export type YamlValue = string | YamlSequence | YamlMapping | null;
 
 export type YamlMapping = { readonly [key: string]: YamlValue };
 
@@ -147,6 +155,89 @@ function valueOf(raw: string, where: string, line: number): YamlValue {
   return scalar(trimmed, where, line);
 }
 
+/** Whether a line opens an item of a block sequence. */
+function opensAnItem(text: string): boolean {
+  return text === "-" || text.startsWith("- ");
+}
+
+/**
+ * A block of `- ` items under a key that named nothing on its own line.
+ *
+ * Each item is either one scalar — `- impatient-caller`, which is what somebody
+ * types by hand — or a small mapping written on the `- ` line and continued on
+ * the lines indented under it:
+ *
+ * ```yaml
+ * personas:
+ *   - id: prs_01EXAMPLE
+ *     name: Impatient customer
+ * ```
+ *
+ * Nothing nests inside an item. That is the whole shape the folder needs, and
+ * reading no more than it is what keeps this module something a person can hold
+ * in their head beside the files it reads.
+ */
+function blockSequenceAt(
+  lines: readonly Line[],
+  from: number,
+  indent: number,
+  where: string,
+): { readonly sequence: YamlSequence; readonly next: number } {
+  const sequence: (string | YamlMapping)[] = [];
+  let at = from;
+
+  while (at < lines.length) {
+    const line = lines[at] as Line;
+    if (line.indent !== indent || !opensAnItem(line.text)) break;
+    at += 1;
+
+    const opening = line.text.slice(1).trim();
+    // Everything indented past the dash belongs to this item, up to the next
+    // one. A line that opens an item at a deeper indent would be a sequence
+    // inside a sequence, which these files never hold.
+    const under: Line[] = [];
+    while (at < lines.length) {
+      const next = lines[at] as Line;
+      if (next.indent <= indent) break;
+      if (opensAnItem(next.text)) {
+        throw new YamlProblem(
+          where,
+          next.number,
+          "Egma reads a list of plain name: value lines, and this line opens a list inside one",
+        );
+      }
+      under.push(next);
+      at += 1;
+    }
+
+    const separator = opening.indexOf(":");
+    if (separator <= 0) {
+      if (under.length > 0) {
+        throw new YamlProblem(
+          where,
+          line.number,
+          "Egma reads these files as plain name: value lines, and this line is not one",
+        );
+      }
+      sequence.push(valueOf(opening, where, line.number) === null ? "" : opening);
+      continue;
+    }
+
+    // The dash line and whatever is under it are one mapping. It is read by
+    // the same function every other mapping goes through, so a quoted value or
+    // a comment on one of these lines means exactly what it means everywhere
+    // else in the file.
+    const first: Line = {
+      indent: under[0]?.indent ?? indent + 2,
+      text: opening,
+      number: line.number,
+    };
+    sequence.push(mappingAt([first, ...under], 0, first.indent, where).mapping);
+  }
+
+  return { sequence, next: at };
+}
+
 /**
  * One block of `key: value` lines at one indentation, and whatever is indented
  * under a key that names nothing on its own line.
@@ -185,6 +276,17 @@ function mappingAt(
     at += 1;
 
     const nested = lines[at];
+    if (rest.trim() === "" && nested !== undefined && opensAnItem(nested.text)) {
+      // A `- ` block may be written under the key or level with it — both are
+      // YAML and both are what somebody types — so the sequence is recognised
+      // by the dash rather than by how far it is indented.
+      if (nested.indent >= indent) {
+        const items = blockSequenceAt(lines, at, nested.indent, where);
+        mapping[key] = items.sequence;
+        at = items.next;
+        continue;
+      }
+    }
     if (rest.trim() === "" && nested !== undefined && nested.indent > indent) {
       const under = mappingAt(lines, at, nested.indent, where);
       mapping[key] = under.mapping;
@@ -263,11 +365,23 @@ export function textAt(mapping: YamlMapping, key: string): string | null {
   return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
+/**
+ * A mapping's value as a list, however it was written, with each item left as
+ * the text or the small mapping it is. A key naming nothing reads as empty.
+ */
+export function sequenceAt(mapping: YamlMapping, key: string): YamlSequence {
+  const value = mapping[key];
+  if (Array.isArray(value)) return value as YamlSequence;
+  return typeof value === "string" && value.trim() !== "" ? [value] : [];
+}
+
 /** A mapping's value as a list of strings; anything else reads as empty. */
 export function listAt(mapping: YamlMapping, key: string): readonly string[] {
   const value = mapping[key];
   if (Array.isArray(value)) {
-    return (value as readonly string[]).filter((item) => item.trim() !== "");
+    return (value as YamlSequence).filter(
+      (item): item is string => typeof item === "string" && item.trim() !== "",
+    );
   }
   // One name written bare is what a person types when there is only one, and
   // reading it as that one name is kinder than refusing the file.

@@ -6,6 +6,7 @@ import {
   ProjectOutsideOrganizationError,
   revokeApiKey,
   type ApiKey,
+  type ListedApiKey,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -58,6 +59,14 @@ function described(key: ApiKey): Record<string, unknown> {
   };
 }
 
+/** A listed key also names its creator in a form a person can recognize. */
+function describedForList(key: ListedApiKey): Record<string, unknown> {
+  return {
+    ...described(key),
+    created_by_email: key.createdByEmail,
+  };
+}
+
 export async function apiKeyRoutes(
   app: FastifyInstance,
   options: ApiKeyRoutesOptions,
@@ -70,7 +79,7 @@ export async function apiKeyRoutes(
   app.get("/api/keys", async (request, reply) => {
     const { auth } = requesterOf(request);
     const keys = await listApiKeys(auth);
-    return reply.send({ keys: keys.map(described) });
+    return reply.send({ keys: keys.map(describedForList) });
   });
 
   /**

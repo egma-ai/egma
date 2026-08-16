@@ -24,6 +24,7 @@ import {
   FAKE_AGENT,
   makeWorkspace,
 } from "./support/workspace.ts";
+import { aTestFile, blocking } from "./support/test-file.ts";
 
 const PLATFORM_KEY = "egma_sk_for-first-repository-onboarding";
 const PROVIDER_KEY = "synthetic-retell-key-for-first-onboarding";
@@ -62,14 +63,14 @@ it("verifies an explicitly selected platform and commits its identity on first o
     await mkdir(paths.tests, { recursive: true });
     for (let number = 1; number <= DEFAULT_TEST_COUNT; number += 1) {
       const name = `first-onboarding-${number}`;
-      await writeTestFile(path.join(paths.tests, `${name}.md`), {
+      await writeTestFile(path.join(paths.tests, `${name}.md`), aTestFile({
         name,
         personas: [],
         version: null,
         scenario: `The persona needs a different appointment time in case ${number}.`,
-        expectedBehaviors: ["The agent confirms the new time."],
+        expectedBehaviors: blocking("The agent confirms the new time."),
         mockTools: [],
-      });
+      }));
     }
     await expect(readConfig(paths.config)).rejects.toMatchObject({ code: "ENOENT" });
 

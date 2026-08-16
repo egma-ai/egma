@@ -5,6 +5,7 @@ import {
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
+import { hasCapabilityDiscovery } from "./capabilities.ts";
 import { AgentWriteRefusedError } from "./errors.ts";
 
 /**
@@ -51,6 +52,58 @@ type OptionalGate = { readonly optional: true; readonly gate: ConfigGate };
 
 /** What a descriptor holds against one config key. */
 type ConfigDemand = ConfigGate | OptionalGate;
+
+/**
+ * What a config field *is*, for whoever has to fill it in — never how it is
+ * checked.
+ *
+ * `kind` is a hint about the control a form draws and about nothing else. The
+ * gate beside it is still the only thing that decides whether a value is
+ * admitted, so a browser that drew a plain box for a `url` cannot get a bad URL
+ * past anything.
+ */
+export const CONFIG_FIELD_KINDS = ["text", "url", "e164", "json"] as const;
+export type ConfigFieldKind = (typeof CONFIG_FIELD_KINDS)[number];
+
+export type ConfigFieldMetadata = {
+  readonly key: string;
+  readonly label: string;
+  readonly kind: ConfigFieldKind;
+  /** One sentence a person can act on. Never names a validator or a rule id. */
+  readonly help: string;
+};
+
+/**
+ * The two shapes a credential field comes in.
+ *
+ * `secret` is a value with no public half at all; `json` is an object of names
+ * to values, where the names are ordinary and the values are the secret. The
+ * distinction reaches a form — one draws a password box, the other a text area
+ * — and it reaches the hint a read shows, which is why it is described rather
+ * than guessed from the field's name.
+ */
+export const CREDENTIAL_FIELD_KINDS = ["secret", "json"] as const;
+export type CredentialFieldKind = (typeof CREDENTIAL_FIELD_KINDS)[number];
+
+export type CredentialFieldMetadata = {
+  readonly field: string;
+  readonly label: string;
+  readonly kind: CredentialFieldKind;
+  readonly help: string;
+};
+
+/**
+ * The three answers to "does the customer supply a secret for this shape",
+ * said in the words the product uses everywhere else.
+ *
+ * The registry's own `required` field says the same thing in the words the
+ * gates are written in (`true`, `false`, `"if-sent"`). This is the translation,
+ * and it exists because a Restore is held to exactly this rule and its three
+ * refusals are named after these three words — so the word a refusal uses and
+ * the word a form shows come from one place.
+ */
+export const CREDENTIAL_RULES = ["required", "forbidden", "optional"] as const;
+export type CredentialRuleName = (typeof CREDENTIAL_RULES)[number];
 
 /** Marks a gate optional: absence is admitted, a value still faces the gate. */
 export function optional(gate: ConfigGate): OptionalGate {
@@ -138,8 +191,40 @@ export type ConnectionVariant = {
    * shape always is.
    */
   readonly chosenBy?: string;
+  /**
+   * The stable name of this shape, stored on every connection written in it
+   * and never rewritten. It is contract twice over: a row carries it, and a
+   * browser form is drawn from the entry it points at. Renaming one is a
+   * migration, exactly as renaming a column would be.
+   */
+  readonly id: string;
+  /** What a person choosing between shapes reads. Safe to send to a browser. */
+  readonly label: string;
   readonly config: Readonly<Record<string, ConfigDemand>>;
+  /**
+   * The same keys as `config`, in the order a form asks for them, with the
+   * words a person needs to answer each one.
+   *
+   * Two lists rather than one because they answer two questions that must not
+   * be allowed to become one: `config` is what a write is *gated* by, and this
+   * is what a browser is *told*. Merging them would put presentation strings
+   * inside the gate and would make the safe projection a filtered view of the
+   * gate rather than a thing of its own — one forgotten spread away from
+   * shipping a validator to a browser. They are held level by
+   * `connectionTypeMetadata`, which refuses to describe a shape whose two
+   * lists disagree, so drift is a failure at the door rather than a field
+   * missing from a form.
+   */
+  readonly fields: readonly ConfigFieldMetadata[];
   readonly credentials: CredentialRule;
+  /**
+   * What a person is told about this shape's credential, in words safe to put
+   * on a screen. Never the refusal sentences: those name egma's internals and
+   * are written for a terminal.
+   */
+  readonly credentialHelp: string;
+  /** The credential's fields, in the order a form asks for them. */
+  readonly credentialFields: readonly CredentialFieldMetadata[];
   /**
    * What a caller is told when the credentials they sent are the type's *other*
    * shape's — the pair where an endpoint's headers belong, or the other way
@@ -151,6 +236,8 @@ export type ConnectionVariant = {
 };
 
 export type ConnectionDescriptor = {
+  /** What a person choosing a type reads. Safe to send to a browser. */
+  readonly label: string;
   readonly modalities: readonly Modality[];
   readonly topology: Topology;
   /**
@@ -185,6 +272,173 @@ export type ConnectionDescriptor = {
    */
   readonly reuseKey?: string | undefined;
 };
+
+/**
+ * The credential rule of one shape, in the product's three words.
+ *
+ * `"if-sent"` is `optional` and that is not a softening: it is the shape that
+ * genuinely works either way, and Restore holds it to an explicit choice rather
+ * than to a guess, because "left out" cannot be told from "meant to clear it".
+ */
+export function credentialRuleOf(
+  variant: ConnectionVariant,
+): CredentialRuleName {
+  const { required } = variant.credentials;
+  if (required === false) return "forbidden";
+  return required === true ? "required" : "optional";
+}
+
+/**
+ * The shape a stored connection is in, by the id its row carries.
+ *
+ * This is the read every rule about an existing connection goes through, and
+ * it is deliberately not `shapeOf`: that one reads today's discriminator out of
+ * a config, which answers correctly for a row written under today's registry
+ * and can quietly answer differently for one written under an older one. A
+ * stored id cannot drift.
+ *
+ * An id no entry claims is this deployment running against rows a later
+ * release wrote. It is a fault rather than a refusal — nothing the caller sent
+ * is wrong — and it says which id and which type, because that is the whole of
+ * what somebody needs to find it.
+ */
+export function variantById(
+  type: ConnectionType,
+  variantId: string,
+): ConnectionVariant {
+  const found = descriptorOf(type).variants.find(
+    (variant) => variant.id === variantId,
+  );
+  if (found === undefined) {
+    throw new Error(
+      `connection variant "${variantId}" is not one this Egma instance knows for a ` +
+        `${type} connection; the shapes it holds are ` +
+        descriptorOf(type)
+          .variants.map((variant) => variant.id)
+          .join(", "),
+    );
+  }
+  return found;
+}
+
+/** The stable id of the shape a config lands in — what a create stores. */
+export function variantIdOf(type: ConnectionType, config: unknown): string {
+  return shapeOf(type, config).id;
+}
+
+/**
+ * Every connection type, as a browser may be told about it.
+ *
+ * **What is not here is the point.** No gate, no hint function, no refusal
+ * sentence, no credential value — the whole of what crosses is labels, field
+ * shapes, the credential rule, and the two adapter facts. It is built by
+ * reading the registry rather than by copying it, so a type added to the
+ * registry appears in a form with nothing else edited, and a web application
+ * that kept its own copy of any of this would be a second opinion able to
+ * disagree with the gate.
+ *
+ * **A shape whose two field lists disagree is refused here**, loudly and for
+ * every caller at once. A gated key nobody described would be a field a form
+ * never asks for and a create that then refuses for missing it; a described key
+ * nothing gates would be a box whose answer is silently dropped. Both are
+ * caught the first time anything asks for the catalog.
+ */
+export type ConnectionTypeMetadata = {
+  readonly type: ConnectionType;
+  readonly label: string;
+  readonly modalities: readonly Modality[];
+  readonly topology: Topology;
+  /** Whether egma can conduct a simulation over this type today. */
+  readonly simulatorAdapter: boolean;
+  /** Whether egma ships something that can measure this type's targets. */
+  readonly capabilityDiscovery: boolean;
+  readonly variants: readonly VariantMetadata[];
+};
+
+export type VariantMetadata = {
+  readonly id: string;
+  readonly label: string;
+  /** The config key whose presence chooses this shape, or null for the first. */
+  readonly chosenBy: string | null;
+  readonly fields: readonly (ConfigFieldMetadata & {
+    readonly required: boolean;
+  })[];
+  readonly credentialRule: CredentialRuleName;
+  readonly credentialHelp: string;
+  readonly credentialFields: readonly (CredentialFieldMetadata & {
+    readonly required: boolean;
+  })[];
+};
+
+function variantMetadata(variant: ConnectionVariant): VariantMetadata {
+  const gated = Object.keys(variant.config);
+  const described = variant.fields.map((field) => field.key);
+
+  const missing = gated.filter((key) => !described.includes(key));
+  const invented = described.filter((key) => !gated.includes(key));
+  if (missing.length > 0 || invented.length > 0) {
+    throw new Error(
+      `connection shape ${variant.id} describes ${described.length} config ` +
+        `fields and gates ${gated.length}: ` +
+        (missing.length > 0 ? `${missing.join(", ")} is gated and undescribed` : "") +
+        (missing.length > 0 && invented.length > 0 ? "; " : "") +
+        (invented.length > 0 ? `${invented.join(", ")} is described and ungated` : ""),
+    );
+  }
+
+  const rule = credentialRuleOf(variant);
+  const credentialFields =
+    variant.credentials.required === false ? [] : variant.credentials.fields;
+  const describedCredentials = variant.credentialFields.map(
+    (field) => field.field,
+  );
+  if (
+    credentialFields.length !== describedCredentials.length ||
+    credentialFields.some((field) => !describedCredentials.includes(field))
+  ) {
+    throw new Error(
+      `connection shape ${variant.id} gates credential fields ` +
+        `${credentialFields.join(", ") || "(none)"} and describes ` +
+        `${describedCredentials.join(", ") || "(none)"}`,
+    );
+  }
+
+  return {
+    id: variant.id,
+    label: variant.label,
+    chosenBy: variant.chosenBy ?? null,
+    fields: variant.fields.map((field) => ({
+      ...field,
+      required: isDemanded(
+        variant.config[field.key] as ConfigDemand,
+      ),
+    })),
+    credentialRule: rule,
+    credentialHelp: variant.credentialHelp,
+    credentialFields: variant.credentialFields.map((field) => ({
+      ...field,
+      // A field of an optional credential is demanded once the credential is
+      // being supplied at all — the choice is whether to send one, never which
+      // half of one.
+      required: rule !== "forbidden",
+    })),
+  };
+}
+
+export function connectionTypeMetadata(): readonly ConnectionTypeMetadata[] {
+  return CONNECTION_TYPES.map((type) => {
+    const descriptor = CONNECTION_REGISTRY[type];
+    return {
+      type,
+      label: descriptor.label,
+      modalities: descriptor.modalities,
+      topology: descriptor.topology,
+      simulatorAdapter: descriptor.simulatorAdapter,
+      capabilityDiscovery: hasCapabilityDiscovery(type),
+      variants: descriptor.variants.map(variantMetadata),
+    };
+  });
+}
 
 function nonEmptyString(key: string, value: unknown): string {
   if (typeof value !== "string" || value.trim() === "") {
@@ -437,16 +691,39 @@ export const CONNECTION_REGISTRY: Readonly<
   Record<ConnectionType, ConnectionDescriptor>
 > = {
   retell: {
+    label: "Retell",
     modalities: ["chat", "voice"],
     topology: "hosted-broker",
     variants: [
       {
+        id: "retell.api_key",
+        label: "Retell agent",
         config: { retellAgentId: nonEmptyString },
+        fields: [
+          {
+            key: "retellAgentId",
+            label: "Retell agent ID",
+            kind: "text",
+            help: "The agent's own identifier in Retell, which starts with agent_.",
+          },
+        ],
         credentials: {
           required: true,
           fields: ["apiKey"],
           hint: lastFourOf("apiKey"),
         },
+        credentialHelp:
+          "Egma stores your Retell API key sealed and never shows it again. " +
+          "A read gives back its last four characters, so you can tell two " +
+          "keys apart.",
+        credentialFields: [
+          {
+            field: "apiKey",
+            label: "Retell API key",
+            kind: "secret",
+            help: "Copied from your Retell dashboard.",
+          },
+        ],
       },
     ],
     // The provider's own agent id: the first vendor to carry a reuse rule.
@@ -454,11 +731,26 @@ export const CONNECTION_REGISTRY: Readonly<
     simulatorAdapter: true,
   },
   phone: {
+    label: "Phone number",
     modalities: ["voice"],
     topology: "egma-dials-in",
     variants: [
       {
+        id: "phone.number",
+        label: "Public phone number",
         config: { phoneNumber: e164PhoneNumber },
+        fields: [
+          {
+            key: "phoneNumber",
+            label: "Phone number",
+            kind: "e164",
+            help: "In international form, like +15551234567.",
+          },
+        ],
+        credentialHelp:
+          "A phone connection takes no credential. Egma dials the number " +
+          "with its own telephony configuration.",
+        credentialFields: [],
         // No reuse rule, deliberately: a number is where egma dials, not who
         // answers, and two agents can legitimately share one. Registering the
         // same number twice creates twice, and the name check is what stops a
@@ -492,6 +784,7 @@ export const CONNECTION_REGISTRY: Readonly<
     simulatorAdapter: true,
   },
   livekit: {
+    label: "LiveKit",
     // Voice only, and only because voice is the lane that exists. The registry
     // may not claim what no code can run, so `chat` arrives here in the same
     // commit as the code that conducts a livekit chat.
@@ -517,6 +810,8 @@ export const CONNECTION_REGISTRY: Readonly<
      */
     variants: [
       {
+        id: "livekit.key_pair",
+        label: "LiveKit project key pair",
         config: {
           // The LiveKit server: a customer's cloud project, or the one they
           // run.
@@ -529,6 +824,44 @@ export const CONNECTION_REGISTRY: Readonly<
           // Handed to the agent as the room's metadata, exactly as written.
           metadata: optional(jsonObjectText),
         },
+        fields: [
+          {
+            key: "url",
+            label: "LiveKit server URL",
+            kind: "url",
+            help: "Your LiveKit project or self-hosted server, like wss://example.livekit.cloud.",
+          },
+          {
+            key: "agentName",
+            label: "Agent name",
+            kind: "text",
+            help: "Which worker to dispatch. Leave it empty for automatic dispatch, where whichever worker is listening takes the room.",
+          },
+          {
+            key: "metadata",
+            label: "Room metadata",
+            kind: "json",
+            help: 'A JSON object handed to the agent as the room metadata, exactly as written, like {"tenant":"acme"}.',
+          },
+        ],
+        credentialHelp:
+          "Egma mints its own room tokens from this pair and stores it " +
+          "sealed. A read gives back the last four characters of the key, " +
+          "never the secret.",
+        credentialFields: [
+          {
+            field: "apiKey",
+            label: "API key",
+            kind: "secret",
+            help: "The LiveKit project's API key.",
+          },
+          {
+            field: "apiSecret",
+            label: "API secret",
+            kind: "secret",
+            help: "The LiveKit project's API secret.",
+          },
+        ],
         credentials: {
           required: true,
           fields: ["apiKey", "apiSecret"],
@@ -546,12 +879,41 @@ export const CONNECTION_REGISTRY: Readonly<
       {
         named: "a token-endpoint livekit connection",
         chosenBy: "tokenEndpoint",
+        id: "livekit.token_endpoint",
+        label: "LiveKit token endpoint",
         config: {
           // Where the join goes, unless the endpoint's answer names another.
           url: livekitServerUrl,
           // Where egma asks for a token, once per simulation.
           tokenEndpoint: tokenEndpointUrl,
         },
+        fields: [
+          {
+            key: "url",
+            label: "LiveKit server URL",
+            kind: "url",
+            help: "Your LiveKit project or self-hosted server, like wss://example.livekit.cloud.",
+          },
+          {
+            key: "tokenEndpoint",
+            label: "Token endpoint",
+            kind: "url",
+            help: "Where Egma asks for a room token, once per simulation. Your project's signing secret never leaves you.",
+          },
+        ],
+        credentialHelp:
+          "Auth headers Egma sends when it asks your endpoint for a token. " +
+          "They are optional, because an endpoint reachable only from Egma " +
+          "can be open to it. A read gives back the header names and never " +
+          "their values.",
+        credentialFields: [
+          {
+            field: "headers",
+            label: "Auth headers",
+            kind: "json",
+            help: 'A JSON object of header name to header value, like {"Authorization":"Bearer …"}.',
+          },
+        ],
         credentials: {
           // Left out on purpose is a real deployment: an endpoint on a private
           // network can be reachable only from egma and open to it. The docs

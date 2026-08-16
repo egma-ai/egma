@@ -3,8 +3,8 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import {
+  graderDisplayName,
   nextTheme,
-  PRODUCT_NAVIGATION,
   themeFromStored,
 } from "../lib/presentation.ts";
 
@@ -21,6 +21,16 @@ describe("the visual theme", () => {
   });
 });
 
+describe("predefined grader names", () => {
+  it("shows machine keys as human labels without changing team names", () => {
+    expect(graderDisplayName("expected_behaviors")).toBe("Expected behaviors");
+    expect(graderDisplayName("latency")).toBe("Latency");
+    expect(graderDisplayName("Never promises a price")).toBe(
+      "Never promises a price",
+    );
+  });
+});
+
 describe("the shared form controls", () => {
   it("centers every enhanced select instead of relying on the browser default", async () => {
     const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
@@ -28,14 +38,5 @@ describe("the shared form controls", () => {
     expect(css).toMatch(
       /select, ::picker\(select\) \{ appearance: base-select; align-items: center; \}/,
     );
-  });
-});
-
-describe("the product navigation", () => {
-  it("names only pages that exist", () => {
-    expect(PRODUCT_NAVIGATION).toEqual([
-      { id: "transcripts", label: "Transcripts", href: "/traces" },
-      { id: "graders", label: "Graders", href: "/graders" },
-    ]);
   });
 });

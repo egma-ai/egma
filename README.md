@@ -367,9 +367,10 @@ default. Three are worth knowing about before anything else:
   voice and hears real words. Each leg is chosen on its own, and
   `EGMA_SIMULATOR_VAD_PROVIDER=silero` is the third: what hears a real
   agent start and stop speaking, keyless and bundled.
-- **`EGMA_SIMULATOR_CAPACITY` is how many conversations happen at once.** The
-  simulator claims only what it can hold, so a big run degrades into a queue
-  rather than into overload.
+- **`EGMA_SIMULATOR_CAPACITY` is how many simulations happen at once.** The
+  default is two. The simulator claims only what it can hold, so a big run
+  degrades into a queue rather than into overload. Compose passes this setting
+  through without keeping a second default of its own.
 
 Anything set to something it cannot use stops the container on its first line,
 naming the variable. A wrongly mounted volume is caught the same way, rather
@@ -491,7 +492,7 @@ you in under a minute. If yours does not latch, use LiveKit Cloud — same API, 
 one URL.
 
 The RTP range is 21 ports by default, not LiveKit's own 10000-20000: that is
-about ten calls at once, more than the simulator's default capacity of four can
+about ten calls at once, more than the simulator's default capacity of two can
 use, and a range published to the internet is a range to justify. Widen both
 ends together if you raise capacity, and widen your firewall by the same
 amount.
@@ -619,11 +620,28 @@ installs — so install uv too, and `pnpm test` covers all three worlds.
 ```bash
 pnpm install
 pnpm db:up        # Postgres on 5433 and ClickHouse on 8124, which the tests need
-pnpm test
+pnpm test         # everything: both lanes, then the three Python suites
+pnpm test:fast    # the loop you work in: no Chrome, no web application
+pnpm test:browser # the real-browser proof, on its own
 pnpm lint
 pnpm typecheck
 pnpm build
 ```
+
+**The suite has two lanes, because its two halves cost very different
+amounts.** Almost all of it is unit, database, API, grader, CLI and web tests,
+measured in milliseconds each; one file drives a real Chrome against a real web
+application and costs about a minute before it asserts anything. Paying that
+minute after every small edit is how a suite stops being run, so `test:fast`
+leaves it out and `test:browser` is the only thing that runs it. Nothing falls
+between the two — `pnpm test` runs both, then the simulator, SDK and fixture
+suites, and fails if any part failed. Every run prints which lane it chose
+before it starts, so a green run can be read back to the proof it stands for.
+[`vitest.config.ts`](vitest.config.ts) is where a lane is defined, as two Vitest
+projects. A lane is described by what it leaves out rather than by a list of
+what it holds: the fast lane declares no `include` at all, so it is Vitest's own
+search minus the one real-browser file, and a new test file joins it by
+existing.
 
 Tests run against a real Postgres and a real ClickHouse — never a substitute,
 because every guarantee under test is one of theirs. Each test file creates a
@@ -666,6 +684,12 @@ Chrome already on your machine, and failing that any Chromium under
 downloads no browser of its own, so **install Google Chrome or point that
 variable at one** if you have neither. Every branch of those flows other than
 the happy one is covered against the API instead, where it costs milliseconds.
+
+That test and `pnpm --filter @egma/web build` both write `apps/web/.next`, so
+they cannot run at once in one checkout: whichever starts second is refused with
+a sentence naming the one already there, rather than each quietly serving half
+of the other's build. Two worktrees have two output directories and never
+collide.
 
 ## Layout
 

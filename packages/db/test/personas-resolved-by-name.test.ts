@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createPersona,
-  deletePersona,
+  archivePersona,
+  PersonaNameAmbiguousError,
   resolvePersonaNames,
   type AuthContext,
   type Role,
@@ -21,7 +22,7 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  *
  * What is checked here is only what this function decides: which persona a
  * written name means, and how it refuses when the answer is none, somebody
- * deleted, more than one, or the same one twice. Whether an empty list becomes
+ * archived, more than one, or the same one twice. Whether an empty list becomes
  * the project's default is the test factory's rule and is tested there.
  */
 
@@ -145,7 +146,7 @@ describe("a name this project cannot answer", () => {
 
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Outbound Only"]),
-    ).rejects.toThrow(/egma has no persona called "Outbound Only"/u);
+    ).rejects.toThrow(/Egma has no persona called "Outbound Only"/u);
   });
 
   it("is a name that belongs to another customer", async () => {
@@ -153,12 +154,12 @@ describe("a name this project cannot answer", () => {
 
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Careful Grace"]),
-    ).rejects.toThrow(/egma has no persona called "Careful Grace"/u);
+    ).rejects.toThrow(/Egma has no persona called "Careful Grace"/u);
   });
 
 });
 
-describe("a name only a deleted persona answers to", () => {
+describe("a name only an archived persona answers to", () => {
   /**
    * A different problem from a name nothing answers to, and it gets different
    * words. The name was right when somebody wrote it, so reporting it as never
@@ -166,9 +167,9 @@ describe("a name only a deleted persona answers to", () => {
    */
   it("is refused in the factory's own words, by name and by identifier alike", async () => {
     const leaving = await seedPersona(actingIn(acme.project), "Leaving Soon");
-    await deletePersona(actingIn(acme.project), leaving);
+    await archivePersona(actingIn(acme.project), leaving);
 
-    const gone = `persona ${leaving} is deleted, and a test cannot name a deleted persona`;
+    const gone = `persona ${leaving} is archived, and a test cannot name an archived persona`;
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Leaving Soon"]),
     ).rejects.toThrow(gone);
@@ -179,16 +180,16 @@ describe("a name only a deleted persona answers to", () => {
 
   it("is still a persona nobody has, once another customer asks by that name", async () => {
     const leaving = await seedPersona(actingIn(acme.project), "Also Leaving");
-    await deletePersona(actingIn(acme.project), leaving);
+    await archivePersona(actingIn(acme.project), leaving);
 
     await expect(
       resolvePersonaNames(actingAsGlobex(), ["Also Leaving"]),
-    ).rejects.toThrow(/egma has no persona called "Also Leaving"/u);
+    ).rejects.toThrow(/Egma has no persona called "Also Leaving"/u);
   });
 
   it("does not shadow a living persona of the same name", async () => {
     const gone = await seedPersona(actingIn(acme.project), "Two Of Them");
-    await deletePersona(actingIn(acme.project), gone);
+    await archivePersona(actingIn(acme.project), gone);
     const living = await seedPersona(actingIn(acme.project), "Two Of Them");
 
     expect(
@@ -198,15 +199,45 @@ describe("a name only a deleted persona answers to", () => {
 });
 
 describe("a name that is not one persona", () => {
+  /**
+   * Its own class, and the sentence that says where the identifier goes.
+   *
+   * The usual reader is a repository file rather than a form: a version-1 test
+   * file carries persona *names* and nothing else, and the fix is to put the
+   * stable identifier in the file — an instruction no browser would be given.
+   * Nothing picks one of the two, ever: there is no uniqueness rule on a
+   * persona's name, so choosing by list order would put somebody in a test that
+   * nobody chose and the run would be about a caller the author never named.
+   */
   it("is refused when two personas answer to it, rather than one being picked", async () => {
-    await seedPersona(actingIn(acme.project), "Twice Over");
-    await seedPersona(actingIn(acme.project), "Twice Over");
+    const first = await seedPersona(actingIn(acme.project), "Twice Over");
+    const second = await seedPersona(actingIn(acme.project), "Twice Over");
 
-    await expect(
-      resolvePersonaNames(actingIn(acme.project), ["Twice Over"]),
-    ).rejects.toThrow(
-      'this project has more than one persona called "Twice Over", so Egma cannot tell which one this test means. Name the one you want by its prs_ identifier.',
+    const refused = await resolvePersonaNames(actingIn(acme.project), [
+      "Twice Over",
+    ]).then(
+      (resolved) => ({ resolved }),
+      (thrown: unknown) => ({ thrown }),
     );
+
+    expect(refused, `resolved to ${JSON.stringify(refused)}`).not.toHaveProperty(
+      "resolved",
+    );
+    const thrown = (refused as { thrown: unknown }).thrown;
+    expect(thrown).toBeInstanceOf(PersonaNameAmbiguousError);
+    expect((thrown as PersonaNameAmbiguousError).personaName).toBe("Twice Over");
+    expect((thrown as Error).message).toBe(
+      "Persona name Twice Over matches more than one active persona in this " +
+        "project. Put the intended persona's stable ID in the file and try " +
+        "again; for a pinned file, egma pull can write the IDs after the file " +
+        "is safe to migrate.",
+    );
+
+    // Either identifier still resolves, which is what the sentence tells the
+    // writer to reach for.
+    for (const id of [first, second]) {
+      expect(await resolvePersonaNames(actingIn(acme.project), [id])).toEqual([id]);
+    }
   });
 
   it("is refused when one persona is named twice, however they were spelled", async () => {

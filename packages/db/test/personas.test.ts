@@ -131,8 +131,8 @@ describe("creating a persona", () => {
       await connection.sql("begin");
       await connection.sql(
         `insert into persona
-           (id, organization_id, project_id, name, current_version_id)
-         values ($1, $2, $3, 'Halfway', $4)`,
+           (id, organization_id, project_id, name, current_version_id, revision)
+         values ($1, $2, $3, 'Halfway', $4, 'a-revision')`,
         [orphan, acme.organization, acme.project, newId("prsv")],
       );
 
@@ -496,8 +496,8 @@ describe("tenancy", () => {
     await expect(
       database.sql(
         `insert into persona
-           (id, organization_id, project_id, name, current_version_id)
-         values ($1, $2, $3, 'Smuggled', $4)`,
+           (id, organization_id, project_id, name, current_version_id, revision)
+         values ($1, $2, $3, 'Smuggled', $4, 'a-revision')`,
         [newId("prs"), acme.organization, globex.project, newId("prsv")],
       ),
     ).rejects.toSatisfy(

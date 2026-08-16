@@ -117,6 +117,19 @@ export type RecordingPlayerProps = {
    * so is a refusal of a link that had already worked — see `hidden` below.
    */
   readonly knownToExist: boolean;
+  /**
+   * The project this conversation is in, where the surface is inside one.
+   *
+   * **A run's evidence page names it and a transcript does not**, which is the
+   * same split `knownToExist` draws and for the same reason: one surface is a
+   * page inside a project and the other is the organization's. The recording
+   * route narrows by the acting project, and a session's acting project is the
+   * organization's *first* — so a run in any other project asked for its audio,
+   * was told there is no such conversation, and showed a page with a transcript
+   * on it and no player. The evidence page had loaded perfectly, because its
+   * own read does name the project.
+   */
+  readonly project?: string | undefined;
 };
 
 /**
@@ -135,6 +148,7 @@ export function RecordingPlayer({
   simulationId,
   words,
   knownToExist,
+  project,
 }: RecordingPlayerProps) {
   const [playable, setPlayable] = useState<Playable>({ status: "resolving" });
   // Counts how many times the link has been asked for. Bumping it re-runs the
@@ -152,7 +166,10 @@ export function RecordingPlayer({
     const resolve = async (): Promise<void> => {
       try {
         const answer = await fetch(
-          `/api/simulations/${encodeURIComponent(simulationId)}/recording`,
+          `/api/simulations/${encodeURIComponent(simulationId)}/recording` +
+            (project === undefined
+              ? ""
+              : `?project=${encodeURIComponent(project)}`),
           { headers: { accept: "application/json" }, cache: "no-store" },
         );
         if (stopped) return;
@@ -210,7 +227,7 @@ export function RecordingPlayer({
     // `words` is deliberately not a dependency. It is one constant per surface,
     // and depending on an object would make a caller that built it inline
     // re-ask for a link on every render — a fetch loop dressed as correctness.
-  }, [simulationId, asked]);
+  }, [simulationId, project, asked]);
 
   /**
    * A replacement link is loaded because it is a replacement, not because it

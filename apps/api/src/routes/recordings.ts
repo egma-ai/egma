@@ -2,8 +2,10 @@ import { getSimulation, NotPermittedError } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
+import { reachingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
+import { given, text } from "../http/reading.ts";
 import {
   noObjectStore,
   notFound,
@@ -118,8 +120,33 @@ export async function recordingRoutes(
   app.get(SIMULATION_RECORDING_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { simulationId } = request.params as { simulationId: string };
+    const query = (request.query ?? {}) as Record<string, unknown>;
 
-    const simulation = await getSimulation(auth, simulationId);
+    /**
+     * **The project the caller named, where it named one.**
+     *
+     * `getSimulation` narrows by the acting project, and a session's acting
+     * project is the organization's first — so this route read the recording of
+     * a conversation in the first project and answered *no such conversation*
+     * about every other one. The evidence page beside it reads its project and
+     * loaded perfectly; only the audio on it went missing, which is the shape
+     * that is hardest to notice.
+     *
+     * **Optional, because one of the two surfaces has no project to name.** A
+     * run's evidence page is inside one and says so; a transcript may be a
+     * production exchange nobody simulated, on an organization-wide page, and
+     * naming none there is the same absent case every other route answers.
+     *
+     * **`reachingIn`, so that "optional" stays optional.** A simulation id is
+     * unique inside the organization; the project narrows the lookup and never
+     * chooses it. `actingIn` would turn a naming-none request from a key for
+     * the whole organization into *name the project* — a 400 in place of the
+     * audio, on the one surface whose whole point is that it need not know.
+     */
+    const acting = await reachingIn(auth, given(text(query.project)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    const simulation = await getSimulation(acting.auth, simulationId);
     if (simulation === undefined) return notFound(reply, NO_SUCH_SIMULATION);
 
     if (simulation.modality === "chat") {

@@ -249,7 +249,7 @@ function takenBy(toolName: string, mockToolId: string): string {
 
 function noSuchMockTool(mockToolId: string): string {
   return (
-    `there is no mock tool ${mockToolId} on this Egma. List the mock tools ` +
+    `there is no mock tool ${mockToolId} on this Egma instance. List the mock tools ` +
     `to see what this project answers for.`
   );
 }

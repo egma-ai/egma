@@ -1,3 +1,5 @@
+import { roleFrom, type Role } from "./roles.ts";
+
 /**
  * Where the person holding this session is, and what the pages should offer
  * them a choice between. What `/api/me` answers, as the pages read it.
@@ -9,11 +11,18 @@
  * and something inside it in another, and a word that means two things is one
  * nobody can read a permission with.
  *
- * **Hide any level whose cardinality is one.** Somebody with a single
- * organization and a single project sees neither picker, because a level of
- * hierarchy they are not using is clutter rather than information. A solo
- * self-hoster therefore never learns that egma is multi-tenant, which is
- * exactly right — it is, and it does not concern them.
+ * **This read names no chosen project, and never will.** Which project a tab is
+ * working in lives in that tab's address; a mutable browser-wide "current
+ * project" would make two tabs on two projects impossible and would make a
+ * pasted link mean something different to whoever opened it. So this answers
+ * the *choices* — every project the membership reaches, in stable creation
+ * order — and the address answers the choice.
+ *
+ * **The organization and project control stays on screen even with one
+ * project.** An earlier rule hid any level whose cardinality was one, on the
+ * grounds that a level you are not using is clutter. It is not: it is where you
+ * are, and somebody who cannot see where they are working cannot tell that a
+ * page is empty because the project is empty.
  */
 
 /** The customer, and the role you hold in it. */
@@ -38,19 +47,45 @@ export type Me = {
   readonly projects: readonly Project[];
 };
 
-export type Pickers = {
-  readonly organization: boolean;
-  readonly project: boolean;
-};
+/**
+ * The organization this session acts in.
+ *
+ * A list of one in this version, and read through a function anyway, so that
+ * nothing is written as though *the* organization is a fact rather than a
+ * lookup. It can be absent: somebody whose provisioning failed is signed in
+ * and is nowhere, and the pages say so rather than pretending.
+ */
+export function organizationOf(me: Me): Organization | undefined {
+  return me.organizations[0];
+}
+
+/** The role this session holds, or the least of them when there is none. */
+export function roleOf(me: Me): Role {
+  return roleFrom(organizationOf(me)?.role);
+}
+
+/** The project an entry address with none in it opens. */
+export function firstProjectOf(me: Me): Project | undefined {
+  return me.projects[0];
+}
 
 /**
- * Which pickers a page should render. Nothing to choose between is nothing to
- * show, at either level, and the two are decided the same way rather than one
- * being a special case of the other.
+ * The projects a typed query leaves. Name and slug both, because a person who
+ * knows a project by the word in its address should not have to know its
+ * display name to find it.
+ *
+ * Order is never rearranged by relevance: the list is in stable creation order
+ * and a menu whose items move under the keyboard is a menu that mis-selects.
  */
-export function pickers(me: Me): Pickers {
-  return {
-    organization: me.organizations.length > 1,
-    project: me.projects.length > 1,
-  };
+export function projectsMatching(
+  projects: readonly Project[],
+  query: string,
+): readonly Project[] {
+  const wanted = query.trim().toLowerCase();
+  if (wanted === "") return projects;
+  return projects.filter(
+    (project) =>
+      project.name.toLowerCase().includes(wanted) ||
+      project.slug.toLowerCase().includes(wanted),
+  );
 }

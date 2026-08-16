@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createTest,
-  deletePersona,
+  archivePersona,
   getTest,
   NotPermittedError,
   ProjectOutsideOrganizationError,
@@ -74,7 +74,7 @@ describe("creating a test", () => {
     );
     expect(fetched?.projectId).toBe(acme.project);
     expect(fetched?.personas).toEqual([
-      { id: rita, name: STARTER_PERSONA, deletedAt: null },
+      { id: rita, name: STARTER_PERSONA, archivedAt: null },
     ]);
   });
 
@@ -127,9 +127,17 @@ describe("creating a test", () => {
       await connection.sql("begin");
       await connection.sql(
         `insert into test
-           (id, organization_id, project_id, name, current_version_id)
-         values ($1, $2, $3, 'Halfway', $4)`,
-        [orphan, acme.organization, acme.project, newId("tstv")],
+           (id, organization_id, project_id, name, current_version_id,
+            revision, applicability_revision)
+         values ($1, $2, $3, 'Halfway', $4, $5, $6)`,
+        [
+          orphan,
+          acme.organization,
+          acme.project,
+          newId("tstv"),
+          newId("rev"),
+          newId("rev"),
+        ],
       );
 
       await expect(connection.sql("commit")).rejects.toSatisfy(
@@ -235,9 +243,9 @@ describe("a test naming a persona it may not have", () => {
     ).rejects.toThrow(/persona id/);
   });
 
-  it("is refused when the persona is deleted, and leaves nothing", async () => {
+  it("is refused when the persona is archived, and leaves nothing", async () => {
     const retired = await seedPersona(actingAsAcme(), "Retired Rex");
-    await deletePersona(actingAsAcme(), retired);
+    await archivePersona(actingAsAcme(), retired);
 
     const before = await rowCounts();
 
@@ -246,7 +254,7 @@ describe("a test naming a persona it may not have", () => {
         ...rescheduling,
         personaIds: [retired],
       }),
-    ).rejects.toThrow(/deleted/);
+    ).rejects.toThrow(/archived/);
 
     expect(await rowCounts()).toEqual(before);
   });
@@ -281,7 +289,7 @@ describe("a test naming no persona", () => {
 
     const fetched = await getTest(actingAsAcme(), created.id);
     expect(fetched?.personas).toEqual([
-      { id: rita, name: STARTER_PERSONA, deletedAt: null },
+      { id: rita, name: STARTER_PERSONA, archivedAt: null },
     ]);
   });
 
@@ -306,15 +314,22 @@ describe("a test naming no persona", () => {
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("errors clearly when the default has been deleted, and creates nothing", async () => {
+  it("errors clearly when the default has been archived, and creates nothing", async () => {
     const stale = await seedPersona(actingAsGlobex(), "Stale Default");
+    const replacing = await seedPersona(actingAsGlobex(), "Replacing Them");
     await pointProjectAt(globex.project, stale);
-    await deletePersona(actingAsGlobex(), stale);
+    // Archiving the persona a project points at moves the pointer, so the
+    // pointer is put back at the archived row by hand: the state this proves
+    // is one the product refuses to create and the database still allows.
+    await archivePersona(actingAsGlobex(), stale, {
+      replacementPersonaId: replacing,
+    });
+    await pointProjectAt(globex.project, stale);
 
     const before = await rowCounts();
 
     await expect(createTest(actingAsGlobex(), rescheduling)).rejects.toThrow(
-      /is deleted/,
+      /is archived/,
     );
 
     expect(await rowCounts()).toEqual(before);
@@ -322,7 +337,7 @@ describe("a test naming no persona", () => {
     await pointProjectAt(globex.project, null);
   });
 
-  it("says the default is not this project's, not that it is deleted, when it points elsewhere", async () => {
+  it("says the default is not this project's, not that it is archived, when it points elsewhere", async () => {
     // The column's foreign key only says the row exists, so a pointer at a
     // living persona of another project is a state the database allows and the
     // developer has to be told the truth about.
@@ -335,7 +350,7 @@ describe("a test naming no persona", () => {
       /no persona .* in this project/,
     );
     await expect(createTest(inOutbound, rescheduling)).rejects.not.toThrow(
-      /is deleted/,
+      /is archived/,
     );
 
     expect(await rowCounts()).toEqual(before);
@@ -395,9 +410,17 @@ describe("tenancy", () => {
     await expect(
       database.sql(
         `insert into test
-           (id, organization_id, project_id, name, current_version_id)
-         values ($1, $2, $3, 'Smuggled', $4)`,
-        [newId("tst"), acme.organization, globex.project, newId("tstv")],
+           (id, organization_id, project_id, name, current_version_id,
+            revision, applicability_revision)
+         values ($1, $2, $3, 'Smuggled', $4, $5, $6)`,
+        [
+          newId("tst"),
+          acme.organization,
+          globex.project,
+          newId("tstv"),
+          newId("rev"),
+          newId("rev"),
+        ],
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,

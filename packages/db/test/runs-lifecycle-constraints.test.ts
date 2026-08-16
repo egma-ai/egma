@@ -57,8 +57,8 @@ async function seedTenancy(): Promise<void> {
     [globex.project, globex.organization, "default"],
   ] as const) {
     await db.sql(
-      "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $3)",
-      [project, organization, slug],
+      "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $3, $4)",
+      [project, organization, slug, newId("rev")],
     );
   }
 }
@@ -69,13 +69,14 @@ async function seedAgent(
   connection: string,
 ): Promise<void> {
   await db.sql(
-    "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, $1)",
+    `insert into agent (id, organization_id, project_id, name, revision)
+     values ($1, $2, $3, $1, 'rev_00000000000000000000000001')`,
     [id, acme.organization, projectId],
   );
   await db.sql(
     `insert into connection
-       (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
-     values ($1, $2, $3, $4, $1, 'retell', 'chat', 'hosted-broker', '{}'::jsonb)`,
+       (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
+     values ($1, $2, $3, $4, $1, 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}'::jsonb, 'rev_00000000000000000000000001')`,
     [connection, acme.organization, projectId, id],
   );
 }
@@ -90,8 +91,8 @@ async function seedPersona(
   // transaction exactly as the application writes it.
   await db.sql("begin");
   await db.sql(
-    `insert into persona (id, organization_id, project_id, name, current_version_id)
-     values ($1, $2, $3, 'Impatient Rita', $4)`,
+    `insert into persona (id, organization_id, project_id, name, current_version_id, revision)
+     values ($1, $2, $3, 'Impatient Rita', $4, 'a-revision')`,
     [persona, organization, project, version],
   );
   await db.sql(
@@ -110,9 +111,10 @@ async function seedTest(
   // The current-version pointer is deferred here too, for the same reason.
   await db.sql("begin");
   await db.sql(
-    `insert into test (id, organization_id, project_id, name, current_version_id)
-     values ($1, $2, $3, 'Reschedules a booked appointment', $4)`,
-    [id, organization, project, version],
+    `insert into test (id, organization_id, project_id, name, current_version_id,
+                       revision, applicability_revision)
+     values ($1, $2, $3, 'Reschedules a booked appointment', $4, $5, $6)`,
+    [id, organization, project, version, newId("rev"), newId("rev")],
   );
   await db.sql(
     `insert into test_version (id, test_id, version, content)
@@ -622,6 +624,7 @@ describe("the run header", () => {
       completed_count: 0,
       failed_count: 0,
       canceled_count: 1,
+      skipped_count: 0,
     });
 
     await expect(

@@ -99,9 +99,14 @@ async function anOldProject(
   slug: string,
 ): Promise<string> {
   const projectId = newId("prj");
+  // The revision is stated because a project carries a live one now — the
+  // token an edit to its name or description is written against — and the
+  // column is `NOT NULL`. It is beside the point of this file and is only here
+  // so the row can exist at all.
   await database.sql(
-    "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $3)",
-    [projectId, organizationId, slug],
+    `insert into project (id, organization_id, name, slug, revision)
+     values ($1, $2, $3, $3, $4)`,
+    [projectId, organizationId, slug, newId("rev")],
   );
   return projectId;
 }

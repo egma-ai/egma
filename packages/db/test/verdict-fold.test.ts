@@ -1,5 +1,4 @@
 import {
-  foldVerdicts,
   foldVerdictsByGrader,
   speakingVerdicts,
   verdictLanes,
@@ -8,6 +7,10 @@ import {
   type Verdict,
   type VerdictSource,
 } from "@egma/db";
+// `foldVerdicts` is deliberately not on the package's surface — see the note
+// beside its neighbours in `src/index.ts`. This file is the algebra's own unit
+// test and lives in the same package, so it reaches the module directly.
+import { foldVerdicts } from "../src/verdicts/fold.ts";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -475,7 +478,7 @@ describe("whatever pile of rows it is handed", () => {
     for (let sweep = 0; sweep < 300; sweep += 1) {
       const rows = someRows(draw, 1 + Math.floor(draw() * 30));
       const whole = foldVerdicts(rows);
-      const byGrader = foldVerdictsByGrader(rows);
+      const byGrader = foldVerdictsByGrader(rows, new Set<string>());
 
       expect(byGrader.map((one) => one.graderId)).toEqual(
         [...new Set(rows.map((one) => one.graderId))].sort(),
@@ -555,17 +558,25 @@ describe("the lane a verdict is in", () => {
   const REQUIRED = "grader-1";
   const DIAGNOSTIC = "grader-2";
   const onlyReports = new Set([DIAGNOSTIC]);
+  /**
+   * A caller that genuinely knows of no diagnostic copy, said out loud.
+   *
+   * It was the default value of the argument and is a named constant here
+   * instead, because the answer it gives — *everything gates* — is the one a
+   * caller must never receive for having forgotten to ask.
+   */
+  const NOTHING_ONLY_REPORTS: ReadonlySet<string> = new Set<string>();
 
   /** Everything decides when nothing was named a diagnostic. */
   it("is required for every grader when no diagnostic is named", () => {
     const draw = randomly(0x5b11);
     for (let sweep = 0; sweep < 200; sweep += 1) {
       const rows = someRows(draw, 1 + Math.floor(draw() * 20));
-      const lanes = verdictLanes(rows);
+      const lanes = verdictLanes(rows, NOTHING_ONLY_REPORTS);
 
       expect(lanes.required).toEqual(rows);
       expect(lanes.diagnostic).toEqual([]);
-      // And the default keeps `foldVerdicts` meaning exactly what it meant.
+      // And an empty set keeps `foldVerdicts` meaning exactly what it meant.
       expect(foldVerdicts(lanes.required)).toEqual(foldVerdicts(rows));
     }
   });

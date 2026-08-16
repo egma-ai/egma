@@ -547,7 +547,7 @@ export function runRoutes(options: {
         return refuse(
           422,
           "unprocessable",
-          `there is no test version ${versionId} on this Egma. Push the test ` +
+          `there is no test version ${versionId} on this Egma instance. Push the test ` +
             `first, or read the test and pin the version_id it names now.`,
         );
       }

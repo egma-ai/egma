@@ -1188,7 +1188,7 @@ describe("a sealed credential", () => {
     for (const held of one.body.connections as Record<string, unknown>[]) {
       expect(
         Object.keys(held).filter((named) => /credential/.test(named)),
-      ).toEqual(["credentials_hint"]);
+      ).toEqual(["credential_present", "credentials_hint"]);
       expect(held.credentials_hint).toBe("WXYZ");
     }
 
@@ -1356,9 +1356,14 @@ describe("what each role may do here", () => {
       registration(),
     );
 
+    // The product's own sentence: the role somebody holds, what it cannot do
+    // in ordinary words, and the one person who can change it. The code is what
+    // a client branches on and it has not moved.
     const refusal = {
       error: "not_permitted",
-      message: "a viewer may not configure_agents",
+      message:
+        "Your viewer role cannot create or change agents and connections. " +
+        "Ask an organization admin to change your role, then try again.",
     };
 
     const registering = await post(

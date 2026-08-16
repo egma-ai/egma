@@ -33,9 +33,17 @@ export {
  * A second implementation anywhere — in a query, in a page, in the grading
  * service — is a second answer that can disagree with this one, and no row is
  * ever written that a disagreement could be settled against.
+ *
+ * **`foldVerdicts` itself is deliberately not on this list.** It answers about
+ * whatever pile of rows it is handed and never asks whose they are, which is
+ * exactly right inside `verdicts/` and a loaded gun outside it: a caller that
+ * hands it every row of a run has folded a diagnostic's failure into the
+ * headline, and nothing about the call says so. What crosses this boundary is
+ * `verdictLanes`, which cannot be called without answering which copies only
+ * report, and `foldVerdictsByGrader`, which takes the same answer. Everything
+ * beyond the package folds a lane it was given by the read that produced it.
  */
 export {
-  foldVerdicts,
   foldVerdictsByGrader,
   speakingVerdicts,
   verdictLanes,
@@ -66,6 +74,29 @@ export {
   behaviorAssertionAt,
   behaviorAssertionKey,
 } from "./grader-library/assertion-keys.ts";
+/**
+ * The fold one grain up, where execution meets judgment — and where the two are
+ * kept apart.
+ *
+ * It is here beside `foldVerdicts` and for exactly its reason: it reaches no
+ * store, takes no context, and is handed what two stores already answered. And
+ * it is exported for the fold's other reason, more sharply. A run holds four
+ * separate facts — the run's machinery, each conversation's machinery, whether
+ * anybody has judged yet, and what they decided — and every surface that shows
+ * one of them has to show it as itself. A page working that out for itself is a
+ * second opinion, and the way it goes wrong is always the same: an execution
+ * failure drawn as a failed verdict tells a team their agent is broken when egma
+ * is, and pending grading drawn as a failure tells them something failed when
+ * nobody has looked.
+ */
+export {
+  foldRun,
+  foldSimulation,
+  type GradingStanding,
+  type RunFold,
+  type SimulationFold,
+  type SimulationStatusCounts,
+} from "./verdicts/read-fold.ts";
 /**
  * The mocked world a simulation runs in, worked out from what its run froze.
  * It is here beside the verdict fold and for the fold's reason: it reaches no
@@ -104,5 +135,56 @@ export {
   type SpannedConversation,
 } from "./measures/from-spans.ts";
 
+/**
+ * The two catalogs a form is drawn from, and the readers that hold a key to
+ * them.
+ *
+ * They are here beside the verdict fold and for the fold's reason: they reach
+ * no store, take no context, and have no tenancy to stamp. The connection
+ * registry decides what a connection type is made of and the capability catalog
+ * decides which capability names exist; both are code rather than tables,
+ * because a table could claim a type no adapter can run or a capability no test
+ * could require.
+ *
+ * Exported all the same, and from this entry point, because a browser form has
+ * to be drawn from them. **What crosses is labels, field shapes, the credential
+ * rule and the adapter facts** — never a gate, a hint function, a refusal
+ * sentence or a credential. A second handwritten copy of any of it in a web
+ * application would be a second opinion able to disagree with the gate.
+ */
+export {
+  connectionTypeMetadata,
+  credentialRuleOf,
+  variantById,
+  variantIdOf,
+  type ConfigFieldKind,
+  type ConfigFieldMetadata,
+  type ConnectionTypeMetadata,
+  type CredentialFieldKind,
+  type CredentialFieldMetadata,
+  type CredentialRuleName,
+  type VariantMetadata,
+} from "./access/connection-registry.ts";
+export {
+  admittedCapabilities,
+  capabilityStanding,
+  measuredCapabilities,
+  CAPABILITY_STANDINGS,
+  capabilityCheckFailedMessage,
+  CAPABILITY_CATALOG,
+  CAPABILITY_KEYS,
+  hasCapabilityDiscovery,
+  isCapabilityKey,
+  noCapabilityAdapterMessage,
+  registerCapabilityDiscovery,
+  transportCapabilities,
+  unknownCapabilityMessage,
+  type CapabilityDiscovery,
+  type CapabilityEntry,
+  type CapabilityStanding,
+  type ConnectionCapabilities,
+  type Discovered,
+  type DiscoveryTarget,
+} from "./access/capabilities.ts";
 export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";

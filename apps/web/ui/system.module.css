@@ -1,0 +1,1494 @@
+/*
+ * The shared product surface: shell, selector, navigation, page states, lists,
+ * tables, forms, dialogs and status.
+ *
+ * Every measurement here comes from `tokens.css`. A component that types its
+ * own number is a component the developer's tuning pass cannot reach.
+ */
+
+/* ------------------------------------------------------------------ shell */
+
+.shell {
+  display: grid;
+  min-height: 100svh;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  background: var(--background);
+}
+
+.sidebar {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  display: flex;
+  height: 100svh;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-4);
+  overflow: visible;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.nav {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow-y: auto;
+}
+
+.navGroup + .navGroup {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.navLabel {
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-2);
+  color: var(--faint);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.navItem {
+  position: relative;
+  display: flex;
+  min-height: var(--control-lg);
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--text-md);
+  text-decoration: none;
+}
+
+.navIcon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.35;
+}
+
+.navItemActive {
+  background: var(--surface-soft);
+  color: var(--foreground);
+}
+
+.navItemActive::before {
+  position: absolute;
+  top: var(--space-3);
+  bottom: var(--space-3);
+  left: 0;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  content: "";
+}
+
+.navItemActive .navIcon {
+  color: var(--accent);
+}
+
+.sidebarFoot {
+  display: flex;
+  margin-top: auto;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  background: var(--background);
+}
+
+/* ------------------------------------------------------------ mobile shell */
+
+.topbar {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: none;
+  height: var(--topbar-height);
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.topbarSpacer {
+  flex: 1;
+}
+
+.iconButton {
+  display: grid;
+  width: var(--control-md);
+  height: var(--control-md);
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+/* ------------------------------------------------------------------- page */
+
+.page {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding: var(--space-8) var(--page-gutter) var(--space-8);
+}
+
+.pageWide {
+  max-width: var(--page-max-wide);
+}
+
+/*
+ * The heading, and whatever this page offers to do.
+ *
+ * **Both halves wrap**, and they have to. A run's page offers three controls —
+ * All runs, Cancel run and Retry — and on a phone they measured 517px on one
+ * unbreakable line inside a 390px screen, which pushed the whole document
+ * sideways: every page then scrolled horizontally, including the parts that fit
+ * perfectly. `flex: 0 0 auto` is what a strip of controls needs beside a
+ * heading that may be long, and it is also an instruction never to give way, so
+ * the wrapping is what makes it safe.
+ *
+ * Not behind the breakpoint: a header runs out of room when its own contents
+ * are wider than it, which is a narrow *window* rather than a phone, and a page
+ * with one control has nothing to wrap at any width.
+ */
+.pageHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.eyebrow {
+  margin: 0 0 var(--space-1);
+  color: var(--faint);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.pageHeader h1 {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: var(--line-tight);
+}
+
+.pageLead {
+  max-width: 62ch;
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
+/*
+ * **`0 1 auto`, not `0 0 auto`.** Refusing to grow is right — a strip of
+ * controls should not stretch across a wide page — but refusing to *shrink*
+ * made this box as wide as its contents laid out on one line, whatever the
+ * screen was, and a box already at its preferred width has nothing to wrap. So
+ * the wrap above did nothing until this line changed with it: on a run's page
+ * the strip stayed 517px inside a 390px screen and took the whole document
+ * sideways with it.
+ *
+ * `min-width: 0` for the same reason one flex item in three needs it: `auto`
+ * floors a flex item at its content, and the sentence saying why a control is
+ * unavailable is a whole sentence.
+ */
+.pageActions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.pageBody {
+  margin-top: var(--space-5);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+/* ------------------------------------------------------------- page states */
+
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-7);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: left;
+}
+
+.stateTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 500;
+}
+
+.stateLead {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
+.stateBad .stateTitle {
+  color: var(--bad);
+}
+
+.stateQuiet {
+  border-style: dashed;
+  background: transparent;
+}
+
+/* ---------------------------------------------------------------- controls */
+
+.button,
+.buttonQuiet {
+  display: inline-flex;
+  min-height: var(--control-lg);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.button {
+  border: 1px solid var(--inverse);
+  background: var(--inverse);
+  color: var(--inverse-text);
+}
+
+.buttonQuiet {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--foreground);
+}
+
+.button:disabled,
+.buttonQuiet:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fieldLabel {
+  color: var(--foreground);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.input {
+  width: 100%;
+  min-height: var(--control-lg);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--text-md);
+}
+
+.input::placeholder {
+  color: var(--faint);
+}
+
+.input:read-only {
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+
+.textarea {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+  resize: vertical;
+}
+
+.textarea::placeholder {
+  color: var(--faint);
+}
+
+.textarea:disabled,
+.input:disabled,
+.select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.select {
+  width: 100%;
+  min-height: var(--control-lg);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--text-md);
+}
+
+.checkboxTarget {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  cursor: pointer;
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin: 0;
+  border-radius: var(--radius-sm);
+  accent-color: var(--foreground);
+  cursor: pointer;
+}
+
+.checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.checkboxTarget:has(.checkbox:disabled) {
+  cursor: not-allowed;
+}
+
+/* One choice among a small closed set: two lists, never one mixed list. */
+.choice {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.choiceItem {
+  display: inline-flex;
+  height: calc(var(--control-md) - 6px);
+  align-items: center;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.choiceItemOn {
+  background: var(--surface-soft);
+  color: var(--foreground);
+}
+
+/* The form layouts every editor is built from. */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 72ch;
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.form > .section:first-child {
+  margin-top: 0;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+}
+
+.fieldHint {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+/* Why a control is not available, said where a keyboard can reach it. */
+.whyNot {
+  max-width: 56ch;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+.refused {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--bad);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.refusedText {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--bad);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
+/* A labelled group of facts about one thing. */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.fact dt {
+  margin-bottom: var(--space-1);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.fact,
+.fact dd {
+  min-width: 0;
+}
+
+.fact dd {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+  overflow-wrap: anywhere;
+}
+
+/* A titled block of one page: traits, history, what uses this. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-7);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 500;
+}
+
+.sectionLead {
+  max-width: 72ch;
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+/* A row's name, and whatever small state belongs beside it. */
+.rowName {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.rowName a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.statedTraits {
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.plainList {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--foreground);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
+/* ---------------------------------------------------------------- status */
+
+.badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.badgeGood {
+  border-color: color-mix(in srgb, var(--good) 38%, var(--border));
+  color: var(--good);
+}
+
+.badgeBad {
+  border-color: color-mix(in srgb, var(--bad) 38%, var(--border));
+  color: var(--bad);
+}
+
+.badgeWarn {
+  border-color: color-mix(in srgb, var(--warn) 38%, var(--border));
+  color: var(--warn);
+}
+
+/* ------------------------------------------------------------------ menus */
+
+.menu {
+  position: relative;
+}
+
+.menuPanel {
+  position: absolute;
+  z-index: 20;
+  width: max-content;
+  min-width: min(240px, calc(100vw - var(--space-8)));
+  max-width: min(320px, calc(100vw - var(--space-8)));
+  max-height: calc(100svh - var(--space-8));
+  overflow-y: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+  opacity: 1;
+  transform: scale(1);
+}
+
+.menu[data-input="pointer"] .menuPanel {
+  transition:
+    opacity var(--duration-popover-in) var(--ease-out),
+    transform var(--duration-popover-in) var(--ease-out);
+}
+
+.menu[data-input="pointer"][data-closing="true"] .menuPanel {
+  opacity: 0;
+  transform: scale(0.97);
+  transition-duration: var(--duration-popover-out);
+}
+
+.menuBelowStart {
+  top: calc(100% + var(--space-2));
+  left: 0;
+  transform-origin: top left;
+}
+
+.menuBelowEnd {
+  top: calc(100% + var(--space-2));
+  right: 0;
+  transform-origin: top right;
+}
+
+.menuBelowStart,
+.menuBelowEnd {
+  max-height: calc(100svh - var(--tap-target) - var(--space-8));
+}
+
+.menuAboveStart {
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  transform-origin: bottom left;
+}
+
+.menuAboveEnd {
+  right: 0;
+  bottom: calc(100% + var(--space-2));
+  transform-origin: bottom right;
+}
+
+.menuRightStart {
+  top: 0;
+  left: calc(100% + var(--space-2));
+  transform-origin: top left;
+}
+
+.menuRightEnd {
+  bottom: 0;
+  left: calc(100% + var(--space-2));
+  transform-origin: bottom left;
+}
+
+.menuItem {
+  display: flex;
+  width: 100%;
+  min-height: var(--control-md);
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  text-align: left;
+  text-decoration: none;
+}
+
+.menuItem:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.menuLabel {
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  color: var(--faint);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.menuDivider {
+  height: 1px;
+  margin: var(--space-2) 0;
+  background: var(--border);
+}
+
+.menuList {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.menuSearch {
+  padding: var(--space-1) var(--space-1) var(--space-2);
+}
+
+.menuEmpty {
+  margin: 0;
+  padding: var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.menuCheck {
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.menuItem[aria-current="true"] {
+  background: var(--surface-soft);
+}
+
+/* --------------------------------------------------------------- selector */
+
+.selector {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) 12px;
+  gap: var(--space-2);
+  min-height: calc(var(--control-lg) + var(--space-5));
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+}
+
+.selectorOpen {
+  border-color: var(--accent);
+  background: var(--surface-soft);
+}
+
+.selectorText {
+  min-width: 0;
+}
+
+.selectorOrganization {
+  display: block;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: var(--line-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selectorProject {
+  display: block;
+  margin-top: var(--space-1);
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  line-height: var(--line-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selectorChevron {
+  display: block;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+  color: var(--muted);
+}
+
+.selectorCompact {
+  min-height: var(--control-lg);
+  max-width: 220px;
+  padding-block: var(--space-1);
+}
+
+/* ---------------------------------------------------------------- account */
+
+.account {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  grid-template-columns: var(--control-md) minmax(0, 1fr);
+  gap: var(--space-3);
+  min-height: var(--control-lg);
+  padding: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.accountOpen {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.avatar {
+  display: grid;
+  width: var(--control-md);
+  height: var(--control-md);
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-soft);
+  font-size: var(--text-sm);
+}
+
+.accountText {
+  min-width: 0;
+}
+
+.accountEmail {
+  display: block;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountRole {
+  display: block;
+  color: var(--faint);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.themeItem {
+  justify-content: space-between;
+}
+
+.themeSwitch {
+  position: relative;
+  display: block;
+  width: 26px;
+  height: 15px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-soft);
+}
+
+.themeSwitchThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  display: block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform var(--duration-press) var(--ease-out);
+}
+
+.themeItem:focus-visible .themeSwitchThumb {
+  transition: none;
+}
+
+.themeItem[aria-checked="true"] .themeSwitch {
+  border-color: var(--foreground);
+  background: var(--foreground);
+}
+
+.themeItem[aria-checked="true"] .themeSwitchThumb {
+  background: var(--background);
+  transform: translateX(11px);
+}
+
+/* ----------------------------------------------------------------- dialog */
+
+.scrim {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  overflow-y: auto;
+  border: 0;
+  color: var(--foreground);
+  background: transparent;
+}
+
+.scrim[open] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+}
+
+.scrim::backdrop {
+  background: color-mix(in srgb, var(--foreground) 32%, transparent);
+  opacity: 1;
+}
+
+.scrim[data-input="pointer"]::backdrop {
+  transition: opacity var(--duration-dialog-in) var(--ease-out);
+}
+
+.dialog {
+  width: min(420px, 100%);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-dialog);
+  opacity: 1;
+  transform: scale(1);
+  transform-origin: center;
+}
+
+.scrim[data-input="pointer"] .dialog {
+  transition:
+    opacity var(--duration-dialog-in) var(--ease-out),
+    transform var(--duration-dialog-in) var(--ease-out);
+}
+
+.scrim[data-input="pointer"][data-closing="true"]::backdrop {
+  opacity: 0;
+  transition-duration: var(--duration-dialog-out);
+}
+
+.scrim[data-input="pointer"][data-closing="true"] .dialog {
+  opacity: 0;
+  transform: scale(0.98);
+  transition-duration: var(--duration-dialog-out);
+}
+
+.scrimDrawer[open] {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+}
+
+.dialogDrawer {
+  width: min(340px, calc(100% - var(--space-7)));
+  min-height: 100%;
+  border-block: 0;
+  border-left: 0;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  transform: translateX(0);
+  transform-origin: left center;
+}
+
+.scrim[data-input="pointer"] .dialogDrawer {
+  transition:
+    opacity var(--duration-drawer-in) var(--ease-drawer),
+    transform var(--duration-drawer-in) var(--ease-drawer);
+}
+
+.scrimDrawer[data-input="pointer"][data-closing="true"] .dialogDrawer {
+  transform: translateX(-100%);
+  transition-duration: var(--duration-drawer-out);
+}
+
+.dialogHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.dialogTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 500;
+}
+
+@starting-style {
+  .menu[data-input="pointer"] .menuPanel {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+
+  .scrim[data-input="pointer"][open] .dialog {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+
+
+  .scrim[data-input="pointer"][open]::backdrop {
+    opacity: 0;
+  }
+
+  .scrimDrawer[data-input="pointer"][open] .dialogDrawer {
+    opacity: 1;
+    transform: translateX(-100%);
+  }
+}
+
+/* ------------------------------------------------------------ list, table */
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  padding: var(--space-2) var(--row-padding-x);
+  border-bottom: 1px solid var(--border);
+  color: var(--faint);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table td {
+  height: var(--row-height);
+  padding: var(--row-padding-y) var(--row-padding-x);
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  vertical-align: middle;
+}
+
+.table tbody tr:first-child td {
+  border-top: 0;
+}
+
+.tableRowInteractive {
+  position: relative;
+}
+
+/* Real row controls stay above the primary link's stretched pointer target. */
+.tableRowInteractive td
+  :is(
+    a,
+    button,
+    input,
+    select,
+    textarea,
+    label,
+    summary,
+    [role="button"],
+    [role="link"],
+    [role="checkbox"],
+    [role="switch"]
+  ) {
+  position: relative;
+  z-index: 2;
+}
+
+.tableRowInteractive .tableCellPrimary a:first-of-type {
+  position: static;
+}
+
+.tableRowInteractive .tableCellPrimary a:first-of-type::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  cursor: pointer;
+  content: "";
+}
+
+.cell {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cellPrimary {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.cellMono {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+}
+
+/* Pointer feedback is brief and never runs for a keyboard activation. */
+:is(
+  .navItem,
+  .iconButton,
+  .button,
+  .buttonQuiet,
+  .choiceItem,
+  .menuItem,
+  .selector,
+  .account,
+  .rowName a
+) {
+  transition: transform var(--duration-press) var(--ease-out);
+}
+
+:is(.input, .textarea, .select) {
+  transition:
+    background-color var(--duration-hover) var(--ease-out),
+    border-color var(--duration-hover) var(--ease-out);
+}
+
+:is(
+  .navItem,
+  .iconButton,
+  .button,
+  .buttonQuiet,
+  .choiceItem,
+  .menuItem,
+  .selector,
+  .account,
+  .rowName a
+):active:not(:focus-visible):not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Touch browsers must not leave a hover colour behind after a tap. */
+@media (hover: hover) and (pointer: fine) {
+  .input:hover:not(:disabled):not(:read-only),
+  .textarea:hover:not(:disabled):not(:read-only),
+  .select:hover:not(:disabled) {
+    border-color: var(--border-strong);
+  }
+
+  .navItem:hover {
+    background: var(--surface-soft);
+    color: var(--foreground);
+  }
+
+  .iconButton:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-soft);
+  }
+
+  .button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--inverse) 90%, var(--accent));
+  }
+
+  .buttonQuiet:hover:not(:disabled) {
+    border-color: var(--foreground);
+    background: var(--surface-soft);
+  }
+
+  .choiceItem:hover {
+    color: var(--foreground);
+  }
+
+  .rowName a:hover {
+    text-decoration: underline;
+  }
+
+  .menuItem:hover:not(:disabled) {
+    background: var(--surface-soft);
+  }
+
+  .selector:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-soft);
+  }
+
+  .account:hover {
+    border-color: var(--border);
+    background: var(--surface);
+  }
+
+  .tableRowInteractive:hover td {
+    background: var(--surface-soft);
+  }
+}
+
+/* Dense controls keep their visual size for a mouse and gain a real touch target. */
+@media (pointer: coarse) {
+  :is(
+    .navItem,
+    .iconButton,
+    .button,
+    .buttonQuiet,
+    .choiceItem,
+    .menuItem,
+    .selector,
+    .account,
+    .input,
+    .select,
+    .textarea,
+    .rowName a
+  ) {
+    min-height: var(--tap-target);
+  }
+
+  .iconButton {
+    width: var(--tap-target);
+    height: var(--tap-target);
+  }
+
+  .rowName a {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .input,
+  .select,
+  .button,
+  .buttonQuiet,
+  .choiceItem {
+    height: var(--tap-target);
+  }
+
+  .checkboxTarget {
+    width: var(--tap-target);
+    height: var(--tap-target);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .themeSwitchThumb {
+    transition: none;
+  }
+
+  :is(
+    .navItem,
+    .iconButton,
+    .button,
+    .buttonQuiet,
+    .choiceItem,
+    .menuItem,
+    .selector,
+    .account,
+    .rowName a
+  ) {
+    transition: none;
+  }
+
+  :is(.input, .textarea, .select) {
+    transition:
+      background-color var(--duration-hover) linear,
+      border-color var(--duration-hover) linear;
+  }
+
+  :is(
+    .navItem,
+    .iconButton,
+    .button,
+    .buttonQuiet,
+    .choiceItem,
+    .menuItem,
+    .selector,
+    .account,
+    .rowName a
+  ):active:not(:focus-visible):not(:disabled) {
+    transform: none;
+  }
+
+  .menu[data-input="pointer"] .menuPanel,
+  .scrim[data-input="pointer"] .dialog,
+  .scrim[data-input="pointer"] .dialogDrawer {
+    transform: none;
+    transition: opacity var(--duration-popover-out) linear;
+  }
+
+  .scrim[data-input="pointer"]::backdrop {
+    transition: opacity var(--duration-popover-out) linear;
+  }
+
+  @starting-style {
+    .menu[data-input="pointer"] .menuPanel,
+    .scrim[data-input="pointer"][open] .dialog,
+    .scrimDrawer[data-input="pointer"][open] .dialogDrawer {
+      opacity: 0;
+      transform: none;
+    }
+  }
+}
+
+/*
+ * The one layout breakpoint in this file.
+ *
+ * It cannot be a token — custom properties do not exist when a media query is
+ * evaluated — so it is a constant, written once. Everything that changes when
+ * the shell stops being two columns changes here: the sidebar gives way to a
+ * top bar and a drawer, and the semantic table becomes labelled rows without
+ * drawing a second set of controls.
+ */
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .topbar {
+    display: flex;
+  }
+
+  .topbar .selectorCompact {
+    min-width: 0;
+    max-width: min(220px, 56vw);
+  }
+
+  .topbar .account {
+    width: var(--tap-target);
+    min-height: var(--tap-target);
+    padding: 0;
+    grid-template-columns: var(--tap-target);
+  }
+
+  .topbar .accountText {
+    display: none;
+  }
+
+  .topbar .avatar {
+    width: var(--tap-target);
+    height: var(--tap-target);
+  }
+
+  .pageHeader {
+    flex-direction: column;
+  }
+
+  .pageActions,
+  .toolbar,
+  .formActions {
+    flex-wrap: wrap;
+  }
+
+  .form {
+    padding: var(--space-5);
+  }
+
+  .state {
+    padding: var(--space-7) var(--space-5);
+  }
+
+  .tableWrap {
+    overflow: visible;
+  }
+
+  .table,
+  .table tbody {
+    display: block;
+  }
+
+  .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .table tbody tr {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-3) var(--row-padding-x);
+    border-top: 1px solid var(--border);
+  }
+
+  .table tbody tr:first-child {
+    border-top: 0;
+  }
+
+  .table td {
+    display: flex;
+    height: auto;
+    min-height: 0;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: 0;
+    border: 0;
+    font-size: var(--text-sm);
+  }
+
+  .table [data-mobile-hidden="true"] {
+    display: none;
+  }
+
+  .table td:not(.tableCellPrimary)::before {
+    flex: 0 0 auto;
+    color: var(--faint);
+    content: attr(data-label);
+    font-size: var(--text-2xs);
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+  }
+
+  .table td:not(.tableCellPrimary) .cell {
+    min-width: 0;
+    max-width: 70%;
+    text-align: right;
+  }
+
+  .tableCellPrimary {
+    margin-bottom: var(--space-1);
+  }
+
+  .page {
+    padding: var(--space-5) var(--space-4) var(--space-7);
+  }
+}
+
+.more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+/* ------------------------------------------------------------------ forms */
+
+.problem {
+  margin: 0;
+  color: var(--bad);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* --------------------------------------------------------- detail pages */
+
+.help {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}

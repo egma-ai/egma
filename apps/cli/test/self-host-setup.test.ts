@@ -406,7 +406,7 @@ describe("egma self-host setup", () => {
     // role they hold, and the kind of deployment this is.
     const refusal =
       "the settings of this platform are read and changed by an organization owner, " +
-      "and only while this Egma serves one organization.";
+      "and only while this Egma instance serves one organization.";
     platform = await startPlatform({ refuses: { status: 403, message: refusal } });
     await workspace.signIn(platform);
 

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { isId, newId } from "@egma/ids";
 import {
   and,
@@ -6,6 +8,7 @@ import {
   desc,
   eq,
   gt,
+  gte,
   inArray,
   isNull,
   isNotNull,
@@ -25,6 +28,7 @@ import {
 import { persona } from "../schema/personas.ts";
 import { openCredentials } from "../sealing.ts";
 import { test, testVersion, testPersona } from "../schema/tests.ts";
+import { idempotentOperation } from "../schema/plans.ts";
 import {
   COMPLETED_ENDING_REASONS,
   FAILED_ENDING_REASONS,
@@ -35,6 +39,7 @@ import {
   type RunStatus,
   type RunTrigger,
   type SimulationEndingReason,
+  type SimulationSkipReason,
   type SimulationStatus,
   type Verdict,
 } from "../schema/runs.ts";
@@ -48,8 +53,23 @@ import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import { descriptorOf, noSimulatorAdapterMessage } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
-import { RunWriteRefusedError, type RunWriteRefusal } from "./errors.ts";
+import {
+  IdempotencyConflictError,
+  refuseRetry,
+  RunWriteRefusedError,
+} from "./errors.ts";
 import { enqueueGradingJob } from "./grading.ts";
+import {
+  admitTestsForAgent,
+  capabilitiesFromRow,
+  capabilityDecision,
+  refuseRun,
+  resolvePersonaVersions,
+  resolvePinnedVersions,
+  resolveRunPlan,
+  validPinnedVersions,
+  writeGradingPlan,
+} from "./run-plans.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { mockToolsApplyingTo } from "./mock-tools.ts";
@@ -133,6 +153,24 @@ export type NewRun = {
   readonly label?: string | undefined;
   /** The run this one retries, when it retries one. */
   readonly retryOfRunId?: string | undefined;
+  /**
+   * The caller's own word for this attempt, so that sending it twice starts one
+   * run.
+   *
+   * **Optional here and required at the product door.** This seam is also
+   * reached by egma's own fixtures and by the grader's own world, which start a
+   * run once inside a process they control and have no retry to protect against.
+   * Every path a person or a client comes in on — the browser, the CLI, the
+   * public API — carries one, and `POST /api/runs` refuses without it, because
+   * a run is the expensive write and a lost answer must never become a second
+   * conversation with a real agent.
+   *
+   * The scope is the organization, the project, the actor and this operation.
+   * The same key with the same body answers the original run; the same key with
+   * a different body is refused out loud rather than quietly answered with
+   * somebody else's run.
+   */
+  readonly idempotencyKey?: string | undefined;
 };
 
 /** The connection's non-secret shape as the run executed over it. */
@@ -169,6 +207,12 @@ export type Run = {
   readonly completedCount: number | null;
   readonly failedCount: number | null;
   readonly canceledCount: number | null;
+  /**
+   * How many conversations egma declined to conduct, because a test required
+   * something this connection could not be shown to do. Its own number, never
+   * folded into the failures: nothing about the agent is being said.
+   */
+  readonly skippedCount: number | null;
   readonly retryOfRunId: string | null;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
@@ -221,6 +265,18 @@ export type Simulation = {
    * claimed — which is what every row written before the stamp existed says.
    */
   readonly mockToolCoverage: MockToolCoverage | null;
+  /**
+   * Why this conversation was never conducted, on the one status written
+   * terminal at birth. Null everywhere else, including on a failure — a failed
+   * simulation tried and could not, and this one was never tried.
+   */
+  readonly skipReason: SimulationSkipReason | null;
+  /**
+   * The catalog keys that decided the skip, exactly as they were decided. Null
+   * wherever the reason is; kept on the row rather than re-derived, because the
+   * connection's measurements move and this answer must not.
+   */
+  readonly skippedCapabilities: readonly string[] | null;
   readonly createdAt: Date;
 };
 
@@ -340,6 +396,7 @@ const RUN_COLUMNS = {
   completedCount: run.completedCount,
   failedCount: run.failedCount,
   canceledCount: run.canceledCount,
+  skippedCount: run.skippedCount,
   retryOfRunId: run.retryOfRunId,
   startedAt: run.startedAt,
   finishedAt: run.finishedAt,
@@ -371,6 +428,8 @@ const SIMULATION_COLUMNS = {
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
   mockToolCoverage: simulation.mockToolCoverage,
+  skipReason: simulation.skipReason,
+  skippedCapabilities: simulation.skippedCapabilities,
   createdAt: simulation.createdAt,
 } as const;
 
@@ -392,6 +451,7 @@ type RunRow = {
   readonly completedCount: number | null;
   readonly failedCount: number | null;
   readonly canceledCount: number | null;
+  readonly skippedCount: number | null;
   readonly retryOfRunId: string | null;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
@@ -660,12 +720,19 @@ function runFromRow(row: RunRow): Run {
  * inside the vocabulary, so reading one back is a narrowing, not a guess. */
 type SimulationRow = Omit<
   Simulation,
-  "status" | "endingReason" | "modality" | "mockToolCoverage"
+  | "status"
+  | "endingReason"
+  | "modality"
+  | "mockToolCoverage"
+  | "skipReason"
+  | "skippedCapabilities"
 > & {
   readonly status: string;
   readonly endingReason: string | null;
   readonly modality: string;
   readonly mockToolCoverage: unknown;
+  readonly skipReason: string | null;
+  readonly skippedCapabilities: unknown;
 };
 
 function simulationFromRow(row: SimulationRow): Simulation {
@@ -675,6 +742,16 @@ function simulationFromRow(row: SimulationRow): Simulation {
     endingReason: row.endingReason as SimulationEndingReason | null,
     modality: row.modality as Modality,
     mockToolCoverage: mockToolCoverageFromRow(row.mockToolCoverage, row.id),
+    skipReason: row.skipReason as SimulationSkipReason | null,
+    // Null and an empty list mean different things and both are writable: null
+    // is every conversation that was actually conducted, and a list is the one
+    // that was not. Anything else on the row is a hand edit, and it reads as
+    // no keys rather than as a shape a caller could act on.
+    skippedCapabilities: Array.isArray(row.skippedCapabilities)
+      ? row.skippedCapabilities.filter(
+          (one): one is string => typeof one === "string",
+        )
+      : null,
   };
 }
 
@@ -829,6 +906,11 @@ function theRun(auth: AuthContext, id: string): SQL {
  * whether there are any — a simulation that never ran gets `errored` verdicts,
  * because a broken test is never a broken agent. A `canceled` simulation is
  * neither: nobody was told to stop conducting it and then judged for stopping.
+ * Nor is a `skipped` one, and for the strongest reason of the four — there is
+ * no conversation. Egma declined to conduct it, so there is nothing for a
+ * grader to read and a job filed for it would be judged against an empty
+ * record and come back errored, turning egma's own capability gap into a red
+ * mark against somebody's agent.
  */
 function isGradable(status: SimulationStatus): boolean {
   return status === "completed" || status === "failed";
@@ -870,17 +952,15 @@ async function makeGradable(
 }
 
 /**
- * Every refusal this file makes, in the one shape a layer above branches on.
+ * Every refusal this file makes goes through `refuseRun`, which lives in
+ * `run-plans.ts` beside the admission rules it raises for.
  *
  * The reason is the whole `RunWriteRefusal` rather than a hand-copied subset:
  * a copy would go stale the first time the vocabulary grew, and it would go
- * stale silently. The sentence is whole here too — a layer above relays it
- * word for word, so a half-sentence finished somewhere else would be a
- * contract that exists nowhere as one string.
+ * stale silently. The sentence is whole too — a layer above relays it word for
+ * word, so a half-sentence finished somewhere else would be a contract that
+ * exists nowhere as one string.
  */
-function refuseRun(reason: RunWriteRefusal, message: string): never {
-  throw new RunWriteRefusedError(reason, message);
-}
 
 /** What a caller does instead, when a run named the wrong agent. */
 const NAME_THE_RIGHT_AGENT =
@@ -900,182 +980,6 @@ function nothingLeftToCancel(runId: string): string {
     `cancel. Its counts are final; start a fresh run to conduct those tests ` +
     `again.`
   );
-}
-
-/**
- * Everything about the named versions that is answerable without the database:
- * there is at least one, and each is named once.
- *
- * Naming one twice is refused rather than folded, because the two readings —
- * "you meant it once" and "run it twice" — are both plausible and only the
- * caller knows which; a repeat count is a decision nobody has made yet. The
- * whole creation goes, so nothing half-written is left behind to explain.
- */
-function validPinnedVersions(ids: readonly string[]): void {
-  if (ids.length === 0) {
-    refuseRun(
-      "not_admitted",
-      "a run needs at least one test version, because a run with no " +
-        "simulations checks nothing. Pin the version_id of each test this " +
-        "run should execute.",
-    );
-  }
-  const seen = new Set<string>();
-  for (const id of ids) {
-    if (seen.has(id)) {
-      refuseRun(
-        "not_admitted",
-        `test version ${id} is pinned twice on one run. Pin each version ` +
-          `once; a run already conducts one simulation per test per persona.`,
-      );
-    }
-    seen.add(id);
-  }
-}
-
-/** What one pinned version turns into: its test, and who calls about it. */
-type PinnedVersion = {
-  readonly versionId: string;
-  readonly testId: string;
-  readonly testName: string;
-  readonly personaIds: readonly string[];
-};
-
-/**
- * Every named version resolved to the test it belongs to and the personas it
- * names, in the order they were authored — before anything at all is written.
- *
- * A version this egma never issued, or one belonging to another customer or
- * another project, is refused in the same words as one that never existed:
- * confirming that somebody else's row is there is itself a leak. And **one bad
- * id refuses the whole creation**, because a run that quietly executed eleven
- * of the twelve versions somebody named would be a green result about a suite
- * that did not run.
- *
- * A version of a *deleted* test still resolves. The version is frozen content
- * and a run that pins one is saying "execute exactly this"; deleting the test
- * decides it should stop appearing in a folder, which is a different question.
- */
-async function resolvePinnedVersions(
-  on: Queryable,
-  auth: AuthContext,
-  projectId: string,
-  ids: readonly string[],
-): Promise<readonly PinnedVersion[]> {
-  const rows = await on
-    .select({
-      id: testVersion.id,
-      testId: testVersion.testId,
-      testName: test.name,
-    })
-    .from(testVersion)
-    .innerJoin(test, eq(testVersion.testId, test.id))
-    .where(
-      within(
-        auth,
-        test,
-        and(inArray(testVersion.id, [...ids]), eq(test.projectId, projectId)),
-      ),
-    );
-
-  const found = new Map(rows.map((row) => [row.id, row] as const));
-
-  const named = new Map<string, string[]>();
-  for (const entry of await on
-    .select({
-      testVersionId: testPersona.testVersionId,
-      personaId: testPersona.personaId,
-      position: testPersona.position,
-    })
-    .from(testPersona)
-    .where(inArray(testPersona.testVersionId, [...found.keys()]))
-    .orderBy(asc(testPersona.position))) {
-    const held = named.get(entry.testVersionId);
-    if (held === undefined) named.set(entry.testVersionId, [entry.personaId]);
-    else held.push(entry.personaId);
-  }
-
-  return ids.map((id) => {
-    const row = found.get(id);
-    if (row === undefined) {
-      refuseRun(
-        "not_admitted",
-        `there is no test version ${id} on this Egma instance. Push the test first, ` +
-          `or read the test and pin the version_id it names now.`,
-      );
-    }
-    const personaIds = named.get(id) ?? [];
-    if (personaIds.length === 0) {
-      // Unreachable through the test factory, which gives a version with no
-      // named persona the project's default one. A version that got here
-      // holding nobody would conduct nothing, so it is an instance fault.
-      throw new Error(
-        `test version ${id} names nobody who calls, so it can produce no simulation`,
-      );
-    }
-    return { versionId: id, ...row, personaIds };
-  });
-}
-
-/**
- * Each requested persona resolved to the version this run will pin: alive,
- * this project's, in the order they were named. A persona of another customer
- * or another project is refused in the same words as one that never existed,
- * because confirming that somebody else's row exists is itself a leak.
- *
- * The read takes a shared lock on every row it finds, held to commit — the
- * same terms a test's write names personas on — so a concurrent delete either
- * lands first and is seen here, or waits and sees the pin this run wrote.
- */
-async function resolvePersonaVersions(
-  on: Queryable,
-  auth: AuthContext,
-  projectId: string,
-  ids: readonly string[],
-): Promise<readonly { personaId: string; personaVersionId: string }[]> {
-  const found = new Map(
-    (
-      await on
-        .select({
-          id: persona.id,
-          deletedAt: persona.deletedAt,
-          currentVersionId: persona.currentVersionId,
-        })
-        .from(persona)
-        .where(
-          within(
-            auth,
-            persona,
-            and(
-              inArray(persona.id, [...ids]),
-              eq(persona.projectId, projectId),
-            ),
-          ),
-        )
-        .for("share")
-    ).map((row) => [row.id, row] as const),
-  );
-
-  return ids.map((id) => {
-    const row = found.get(id);
-    if (row === undefined) {
-      refuseRun(
-        "not_admitted",
-        `there is no persona ${id} in this project. A test that names ` +
-          `somebody who is not here can produce no simulation; edit the test ` +
-          `to name somebody who is.`,
-      );
-    }
-    if (row.deletedAt !== null) {
-      refuseRun(
-        "not_admitted",
-        `persona ${id} is deleted, and a run cannot conduct a simulation ` +
-          `with a deleted persona. Edit the tests that name them, then pin ` +
-          `the versions those edits mint.`,
-      );
-    }
-    return { personaId: id, personaVersionId: row.currentVersionId };
-  });
 }
 
 /**
@@ -1206,201 +1110,363 @@ export async function startRun(
     throw new Error(`"${retryOfRunId}" is not a run id`);
   }
 
+  const idempotencyKey = input.idempotencyKey?.trim() || undefined;
+  const requestDigest =
+    idempotencyKey === undefined ? undefined : digestOfStart(input);
+
+  // Asked before the transaction, because the common repeat is a client that
+  // never learned its first attempt succeeded: the answer is a read, and there
+  // is nothing to write. The insert inside the transaction is what catches the
+  // two attempts that arrive at the same instant.
+  const remembered = await runAlreadyStartedFor(auth, input);
+  if (remembered !== undefined) return remembered;
+
   const runId = newId("run");
   const now = new Date();
 
-  const written = await db().transaction(async (tx) => {
-    const [reached] = await tx
-      .select({
-        agentId: connection.agentId,
-        type: connection.type,
-        modality: connection.modality,
-        topology: connection.topology,
-        environment: connection.environment,
-        config: connection.config,
-      })
-      .from(connection)
-      .innerJoin(agent, eq(connection.agentId, agent.id))
-      .where(
-        within(
-          auth,
-          connection,
-          and(
-            eq(connection.id, input.connectionId),
-            eq(connection.projectId, projectId),
-            isNull(connection.deletedAt),
-            isNull(agent.deletedAt),
+  let written;
+  try {
+    written = await db().transaction(async (tx) => {
+      const [reached] = await tx
+        .select({
+          agentId: connection.agentId,
+          type: connection.type,
+          modality: connection.modality,
+          topology: connection.topology,
+          environment: connection.environment,
+          config: connection.config,
+          capabilityState: connection.capabilityState,
+          capabilitiesMeasured: connection.capabilitiesMeasured,
+          capabilitiesSupported: connection.capabilitiesSupported,
+          capabilitiesCheckedAt: connection.capabilitiesCheckedAt,
+          capabilitySource: connection.capabilitySource,
+        })
+        .from(connection)
+        .innerJoin(agent, eq(connection.agentId, agent.id))
+        .where(
+          within(
+            auth,
+            connection,
+            and(
+              eq(connection.id, input.connectionId),
+              eq(connection.projectId, projectId),
+              isNull(connection.archivedAt),
+              isNull(agent.archivedAt),
+            ),
           ),
-        ),
-      )
-      .limit(1);
-
-    if (reached === undefined) {
-      refuseRun(
-        "no_such_connection",
-        `there is no connection ${input.connectionId} in this project. ` +
-          `Check the id, or read your agents to see how each one is reached.`,
-      );
-    }
-    // Named, and it has to be the one the connection is actually on. The
-    // caller asked for that check; answering it quietly the other way would be
-    // egma deciding which of the two ids they meant.
-    if (onAgentId !== undefined && reached.agentId !== onAgentId) {
-      refuseRun(
-        "connection_not_on_agent",
-        `connection ${input.connectionId} is not on agent ${onAgentId}. ` +
-          NAME_THE_RIGHT_AGENT,
-      );
-    }
-    if (!descriptorOf(reached.type).simulatorAdapter) {
-      refuseRun("no_adapter", noSimulatorAdapterMessage(reached.type));
-    }
-
-    if (retryOfRunId !== null) {
-      const [retried] = await tx
-        .select({ id: run.id })
-        .from(run)
-        .where(theRun(auth, retryOfRunId))
+        )
         .limit(1);
-      if (retried === undefined) {
+
+      if (reached === undefined) {
+        refuseRun(
+          "no_such_connection",
+          `there is no connection ${input.connectionId} in this project. ` +
+            `Check the id, or read your agents to see how each one is reached.`,
+        );
+      }
+      // Named, and it has to be the one the connection is actually on. The
+      // caller asked for that check; answering it quietly the other way would be
+      // egma deciding which of the two ids they meant.
+      if (onAgentId !== undefined && reached.agentId !== onAgentId) {
+        refuseRun(
+          "connection_not_on_agent",
+          `connection ${input.connectionId} is not on agent ${onAgentId}. ` +
+            NAME_THE_RIGHT_AGENT,
+        );
+      }
+      if (!descriptorOf(reached.type).simulatorAdapter) {
+        refuseRun("no_adapter", noSimulatorAdapterMessage(reached.type));
+      }
+
+      if (retryOfRunId !== null) {
+        const [retried] = await tx
+          .select({ id: run.id })
+          .from(run)
+          .where(theRun(auth, retryOfRunId))
+          .limit(1);
+        if (retried === undefined) {
+          refuseRun(
+            "not_admitted",
+            `there is no run ${retryOfRunId} in this project, so this run ` +
+              `retries nothing. Leave the retry out, or name a run this ` +
+              `credential can read.`,
+          );
+        }
+      }
+
+      const versions = await resolvePinnedVersions(
+        tx,
+        auth,
+        projectId,
+        input.testVersionIds,
+      );
+      // Inside the transaction, and after the connection has settled which agent
+      // this run reaches: applicability is a fact about that agent, and a check
+      // taken before it would have been about an agent the caller only guessed.
+      await admitTestsForAgent(tx, reached.agentId, versions);
+
+      /**
+       * What will judge this run, and whose account pays — resolved before a row
+       * is written, because a run that would ask a model this project has not
+       * configured is refused here.
+       *
+       * **A run whose plan asks a model, in a project holding none, would dial
+       * real simulations and then write `errored` against every assertion** —
+       * egma's own configuration reported as an agent's failure. Refusing before
+       * the money is spent is the whole point.
+       *
+       * It is the plan that decides, not the project: the expected-behaviors
+       * copy is an ordinary deletable row now, so a project judging only with
+       * `latency` — or with nothing at all — asks no model and is refused
+       * nothing. `demandJudge` holds that rule in one place, beside the plan it
+       * reads.
+       */
+      const { groups } = await resolveRunPlan(tx, auth, projectId, versions);
+
+      /*
+       * **A Retry has no grader recheck here any more, and it had one.** It
+       * asked the plan about to be frozen whether a grader the selection named
+       * *directly* had been archived in the gap, and refused rather than
+       * produce a run judged by less than the one it copies. A test names no
+       * graders now: what judges a run is the project's live copies, so a copy
+       * switched off between two runs is a decision about the project and not
+       * something a Retry may overrule. Every other resource a Retry rechecks
+       * is still re-read inside this transaction by the reads above — an
+       * archived agent or connection, an archived or unlinked test, an
+       * archived persona all refuse in here on their own.
+       */
+
+      /**
+       * Which of these conversations egma can honestly have, decided once against
+       * the connection's own measurements and carried onto each row.
+       *
+       * A version whose requirement this connection was measured not to meet — or
+       * that nobody has measured — produces a terminal `skipped` simulation with
+       * its reason and the capabilities that decided it. It is never claimed,
+       * never conducted, and never enqueued for grading, and the rest of the run
+       * continues around it.
+       */
+      const capabilities = capabilitiesFromRow(reached);
+      const decisions = new Map(
+        versions.map(
+          (version) =>
+            [
+              version.versionId,
+              capabilityDecision(version.requiredCapabilities, capabilities),
+            ] as const,
+        ),
+      );
+
+      // The conversations this selection adds up to, in the order they will sit:
+      // each version in turn, and inside it each persona in the order the test
+      // named them.
+      const wanted = versions.flatMap((version) =>
+        version.personaIds.map((personaId) => ({ version, personaId })),
+      );
+      if (wanted.length > MOST_SIMULATIONS_PER_RUN) {
         refuseRun(
           "not_admitted",
-          `there is no run ${retryOfRunId} in this project, so this run ` +
-            `retries nothing. Leave the retry out, or name a run this ` +
-            `credential can read.`,
+          `a run conducts at most ${MOST_SIMULATIONS_PER_RUN} simulations, and ` +
+            `these ${versions.length} versions ask for ${wanted.length}. Split ` +
+            `the selection across runs.`,
         );
       }
-    }
 
-    const versions = await resolvePinnedVersions(
-      tx,
-      auth,
-      projectId,
-      input.testVersionIds,
-    );
-
-    // The conversations this selection adds up to, in the order they will sit:
-    // each version in turn, and inside it each persona in the order the test
-    // named them.
-    const wanted = versions.flatMap((version) =>
-      version.personaIds.map((personaId) => ({ version, personaId })),
-    );
-    if (wanted.length > MOST_SIMULATIONS_PER_RUN) {
-      refuseRun(
-        "not_admitted",
-        `a run conducts at most ${MOST_SIMULATIONS_PER_RUN} simulations, and ` +
-          `these ${versions.length} versions ask for ${wanted.length}. Split ` +
-          `the selection across runs.`,
+      // Each distinct persona resolved once, in the order they were first met.
+      const distinctPersonaIds = [
+        ...new Set(wanted.map((one) => one.personaId)),
+      ];
+      const pinnedPersonas = new Map(
+        (
+          await resolvePersonaVersions(tx, auth, projectId, distinctPersonaIds)
+        ).map((one) => [one.personaId, one.personaVersionId] as const),
       );
-    }
+      /**
+       * The version pinned for one of the personas just resolved.
+       *
+       * `resolvePersonaVersions` answers one entry per id or refuses, so a miss
+       * here is this file having lost track of its own input rather than
+       * anything a caller did — and it says so instead of writing a row with a
+       * pin nobody chose.
+       */
+      const versionOf = (personaId: string): string => {
+        const pinned = pinnedPersonas.get(personaId);
+        if (pinned === undefined) {
+          throw new Error(
+            `persona ${personaId} was resolved for this run and then lost before the simulation was written`,
+          );
+        }
+        return pinned;
+      };
 
-    // Each distinct persona resolved once, in the order they were first met.
-    const distinctPersonaIds = [
-      ...new Set(wanted.map((one) => one.personaId)),
-    ];
-    const pinnedPersonas = new Map(
-      (
-        await resolvePersonaVersions(tx, auth, projectId, distinctPersonaIds)
-      ).map((one) => [one.personaId, one.personaVersionId] as const),
-    );
-    /**
-     * The version pinned for one of the personas just resolved.
-     *
-     * `resolvePersonaVersions` answers one entry per id or refuses, so a miss
-     * here is this file having lost track of its own input rather than
-     * anything a caller did — and it says so instead of writing a row with a
-     * pin nobody chose.
-     */
-    const versionOf = (personaId: string): string => {
-      const pinned = pinnedPersonas.get(personaId);
-      if (pinned === undefined) {
-        throw new Error(
-          `persona ${personaId} was resolved for this run and then lost before the simulation was written`,
-        );
-      }
-      return pinned;
-    };
-
-    // Frozen inside the same transaction that writes the header, so an edit
-    // landing between the read and the write cannot reach the row: it either
-    // committed before this read and is in the snapshot, or waits behind it and
-    // changes only the runs started afterwards.
-    const mockToolSnapshot = await freezeMockTools(
-      tx,
-      auth,
-      projectId,
-      reached.agentId,
-      versions.map((one) => one.versionId),
-    );
-
-    const [header] = await tx
-      .insert(run)
-      .values({
-        id: runId,
-        organizationId: auth.organizationId,
+      // Frozen inside the same transaction that writes the header, so an edit
+      // landing between the read and the write cannot reach the row: it either
+      // committed before this read and is in the snapshot, or waits behind it and
+      // changes only the runs started afterwards.
+      const mockToolSnapshot = await freezeMockTools(
+        tx,
+        auth,
         projectId,
-        agentId: reached.agentId,
-        connectionId: input.connectionId,
-        label,
-        status: "pending",
-        triggeredVia: "manual",
-        triggeredBy: auth.userId,
-        pinnedTestVersions: { testVersionIds: input.testVersionIds },
-        requestedPersonas: { personaIds: distinctPersonaIds },
-        connectionSnapshot: {
-          type: reached.type,
-          modality: reached.modality,
-          topology: reached.topology,
-          environment: reached.environment,
-          config: reached.config,
-        },
-        mockToolSnapshot,
-        expectedSimulationCount: wanted.length,
-        retryOfRunId,
-        createdAt: now,
-      })
-      .returning(RUN_COLUMNS);
+        reached.agentId,
+        versions.map((one) => one.versionId),
+      );
 
-    if (header === undefined) throw new Error("the run was not written");
+      const skippedCount = wanted.filter(
+        ({ version }) => decisions.get(version.versionId)?.runnable === false,
+      ).length;
 
-    const simulations = await tx
-      .insert(simulation)
-      .values(
-        wanted.map(({ version, personaId }, index) => ({
-          id: newId("sim"),
-          runId,
+      /**
+       * A run with nothing left to conduct is finished here, in this transaction.
+       *
+       * **And it completes with no passing headline.** The three conducted counts
+       * are zero and the skipped count is everything, so nothing was judged and
+       * nothing can read as green — which is the whole reason `skipped` is a
+       * count of its own. Leaving such a run `pending` would be worse in both
+       * directions: nothing would ever claim it, and a progress page would show a
+       * run that never moves.
+       *
+       * `started_at` is stamped with `finished_at` because the run genuinely did
+       * begin and end — here, in one transaction, having conducted nothing.
+       */
+      const everythingSkipped = skippedCount === wanted.length;
+
+      const [header] = await tx
+        .insert(run)
+        .values({
+          id: runId,
           organizationId: auth.organizationId,
           projectId,
           agentId: reached.agentId,
           connectionId: input.connectionId,
-          personaId,
-          personaVersionId: versionOf(personaId),
-          testId: version.testId,
-          testVersionId: version.versionId,
-          position: index + 1,
-          modality: reached.modality,
-          status: "queued",
+          label,
+          status: everythingSkipped ? "completed" : "pending",
+          triggeredVia: "manual",
+          triggeredBy: auth.userId,
+          pinnedTestVersions: { testVersionIds: input.testVersionIds },
+          requestedPersonas: { personaIds: distinctPersonaIds },
+          connectionSnapshot: {
+            type: reached.type,
+            modality: reached.modality,
+            topology: reached.topology,
+            environment: reached.environment,
+            config: reached.config,
+          },
+          mockToolSnapshot,
+          expectedSimulationCount: wanted.length,
+          retryOfRunId,
           createdAt: now,
-        })),
-      )
-      .returning(SIMULATION_COLUMNS);
+          ...(everythingSkipped
+            ? {
+                completedCount: 0,
+                failedCount: 0,
+                canceledCount: 0,
+                skippedCount,
+                startedAt: now,
+                finishedAt: now,
+              }
+            : {}),
+        })
+        .returning(RUN_COLUMNS);
 
-    // The names come from what was just read rather than from a second query:
-    // this transaction already knows what every one of these is called.
-    const testNames = new Map(
-      versions.map((one) => [one.versionId, one.testName] as const),
-    );
-    const personaNames = new Map(
-      (
-        await tx
-          .select({ id: persona.id, name: persona.name })
-          .from(persona)
-          .where(inArray(persona.id, distinctPersonaIds))
-      ).map((row) => [row.id, row.name] as const),
-    );
+      if (header === undefined) throw new Error("the run was not written");
 
-    return { header, simulations, testNames, personaNames };
-  });
+      const simulations = await tx
+        .insert(simulation)
+        .values(
+          wanted.map(({ version, personaId }, index) => {
+            const decision = decisions.get(version.versionId);
+            const skipped = decision !== undefined && !decision.runnable;
+            return {
+              id: newId("sim"),
+              runId,
+              organizationId: auth.organizationId,
+              projectId,
+              agentId: reached.agentId,
+              connectionId: input.connectionId,
+              personaId,
+              personaVersionId: versionOf(personaId),
+              testId: version.testId,
+              testVersionId: version.versionId,
+              position: index + 1,
+              modality: reached.modality,
+              status: skipped ? ("skipped" as const) : ("queued" as const),
+              createdAt: now,
+              ...(skipped && decision !== undefined && !decision.runnable
+                ? {
+                    endedAt: now,
+                    skipReason: decision.reason,
+                    skippedCapabilities: [...decision.capabilities],
+                  }
+                : {}),
+            };
+          }),
+        )
+        .returning(SIMULATION_COLUMNS);
+
+      // The plan is written in the same transaction as the run and its
+      // conversations, so a run can never exist with nothing to judge it by.
+      await writeGradingPlan(tx, {
+        runId,
+        organizationId: auth.organizationId,
+        projectId,
+        state: "run_start",
+        capturedAt: now,
+        groups,
+      });
+
+      // And the key, last, so that losing the race to another attempt rolls this
+      // whole creation back rather than leaving a second run behind it.
+      if (idempotencyKey !== undefined && requestDigest !== undefined) {
+        await tx.insert(idempotentOperation).values({
+          organizationId: auth.organizationId,
+          projectId,
+          actorId: auth.userId,
+          operation: "start_run",
+          idempotencyKey,
+          requestDigest,
+          resultId: runId,
+        });
+      }
+
+      // The names come from what was just read rather than from a second query:
+      // this transaction already knows what every one of these is called.
+      const testNames = new Map(
+        versions.map((one) => [one.versionId, one.testName] as const),
+      );
+      const personaNames = new Map(
+        (
+          await tx
+            .select({ id: persona.id, name: persona.name })
+            .from(persona)
+            .where(inArray(persona.id, distinctPersonaIds))
+        ).map((row) => [row.id, row.name] as const),
+      );
+
+      return { header, simulations, testNames, personaNames };
+    });
+  } catch (cause) {
+    // Two attempts arrived at once and this one lost the primary key. The
+    // winner's run is the answer both were promised, so the loser reads it
+    // back rather than reporting a collision nobody caused. Its own whole
+    // creation rolled back with the failed insert, so there is no second run
+    // anywhere.
+    if (
+      idempotencyKey === undefined ||
+      requestDigest === undefined ||
+      !lostToIdempotencyKey(cause)
+    ) {
+      throw cause;
+    }
+    const already = await originalRunFor(
+      db(),
+      auth,
+      projectId,
+      idempotencyKey,
+      requestDigest,
+    );
+    if (already === undefined) throw cause;
+    return already;
+  }
 
   return {
     ...runFromRow(written.header),
@@ -1418,6 +1484,131 @@ export async function startRun(
       }))
       .sort((a, b) => a.position - b.position),
   };
+}
+
+/**
+ * The run this start has already produced under its own idempotency key, if it
+ * has produced one.
+ *
+ * **It exists so that a caller with work to do in front of `startRun` can ask
+ * the shield first.** `retryRun` has six rechecks to make, every one of which
+ * can refuse — and a repeat under a key whose first attempt succeeded must be
+ * answered with that run rather than refused, because by then the retry it is
+ * asking about is already dialing a real agent. Asking here, off the very input
+ * `startRun` will be handed, is the only way the two digests cannot drift: a
+ * recall computed from a second object that merely looks the same would miss
+ * every time and nothing would show it.
+ *
+ * `startRun` asks it too, so there is one recall and not two.
+ *
+ * A key remembered against a *different* body throws `IdempotencyConflictError`
+ * from in here rather than answering, on the terms `originalRunFor` sets out.
+ * The caller is expected to have authorized already; this reads only what the
+ * context's own organization, project and actor remembered.
+ */
+export async function runAlreadyStartedFor(
+  auth: AuthContext,
+  input: NewRun,
+): Promise<StartedRun | undefined> {
+  const { projectId } = auth;
+  if (projectId === undefined) return undefined;
+  const idempotencyKey = input.idempotencyKey?.trim() || undefined;
+  if (idempotencyKey === undefined) return undefined;
+  return originalRunFor(
+    db(),
+    auth,
+    projectId,
+    idempotencyKey,
+    digestOfStart(input),
+  );
+}
+
+/**
+ * The request this key is being remembered for, as one short string.
+ *
+ * **The selection, the connection and the agent — and deliberately not the
+ * label.** What must never differ between two attempts under one key is what
+ * egma would actually do: which agent, over which connection, executing which
+ * versions in which order. Two clients that agreed on all of that and disagreed
+ * about a display name have not asked for two runs.
+ *
+ * The order of the versions is kept rather than sorted, because it is the order
+ * the conversations will sit in and a caller who reordered them asked for
+ * something different.
+ */
+function digestOfStart(input: NewRun): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        agent: input.agentId ?? null,
+        connection: input.connectionId,
+        testVersions: [...input.testVersionIds],
+        retryOf: input.retryOfRunId ?? null,
+      }),
+    )
+    .digest("hex");
+}
+
+/**
+ * Whether a write failed because another attempt under the same key had already
+ * landed.
+ *
+ * Read off the constraint's own name rather than off the message, so the check
+ * survives a driver upgrade rewording its prose — the same shape the agent
+ * factory's name collision uses.
+ */
+function lostToIdempotencyKey(cause: unknown): boolean {
+  const held = cause as { constraint?: unknown; cause?: unknown };
+  if (held?.constraint === "idempotent_operation_pk") return true;
+  const beneath = held?.cause as { constraint?: unknown } | undefined;
+  return beneath?.constraint === "idempotent_operation_pk";
+}
+
+/**
+ * The run a key already started, when this request is the one it started.
+ *
+ * A key with a different body behind it is refused out loud rather than
+ * answered: telling somebody their new selection had started when it had not is
+ * the one failure an idempotency key exists to prevent, and it would be
+ * invisible — they would go and read a run full of the tests they replaced.
+ */
+async function originalRunFor(
+  on: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  idempotencyKey: string,
+  requestDigest: string,
+): Promise<StartedRun | undefined> {
+  const [remembered] = await on
+    .select({
+      resultId: idempotentOperation.resultId,
+      requestDigest: idempotentOperation.requestDigest,
+    })
+    .from(idempotentOperation)
+    .where(
+      and(
+        eq(idempotentOperation.organizationId, auth.organizationId),
+        eq(idempotentOperation.projectId, projectId),
+        eq(idempotentOperation.actorId, auth.userId),
+        eq(idempotentOperation.operation, "start_run"),
+        eq(idempotentOperation.idempotencyKey, idempotencyKey),
+      ),
+    )
+    .limit(1);
+
+  if (remembered === undefined) return undefined;
+  if (remembered.requestDigest !== requestDigest) {
+    throw new IdempotencyConflictError(idempotencyKey, remembered.resultId);
+  }
+
+  const header = await getRun(auth, remembered.resultId);
+  if (header === undefined) {
+    // The run was deleted after the key remembered it. There is nothing to
+    // answer with and nothing honest to invent, so the key stops shielding.
+    throw new IdempotencyConflictError(idempotencyKey, remembered.resultId);
+  }
+  const conducted = await listSimulations(auth, remembered.resultId);
+  return { ...header, simulations: conducted ?? [] };
 }
 
 /** One run as it stands — the header; its conversations are `listSimulations`. */
@@ -1447,9 +1638,38 @@ export type RunPage = {
   readonly nextCursor: string | undefined;
 };
 
+/**
+ * How a run history narrows — every one of these a fact the run table already
+ * holds, and each of them optional.
+ *
+ * **The verdict is deliberately not here.** A verdict is folded at read time
+ * from rows in another store, so narrowing by one is a question this query
+ * cannot answer; `listRunHistory` in `run-history.ts` does it, over what this
+ * one hands back.
+ *
+ * `testId` is the one filter that is not a column of the run header: a run does
+ * not record which tests it executed as identities, only as frozen version ids,
+ * so this asks whether any conversation of the run pinned that test. It is the
+ * question a test's own page asks — *what has this been run against* — and
+ * answering it off the pinned versions in the header would go wrong the moment a
+ * test gained a second version.
+ */
+export type RunFilter = {
+  readonly agentId?: string | undefined;
+  readonly connectionId?: string | undefined;
+  /** Runs holding at least one conversation that pinned this test. */
+  readonly testId?: string | undefined;
+  readonly status?: RunStatus | undefined;
+  /** Runs created at or after this moment. */
+  readonly since?: Date | undefined;
+  /** Runs created strictly before this moment. */
+  readonly until?: Date | undefined;
+};
+
 export async function listRuns(
   auth: AuthContext,
   page?: PageRequest,
+  filter?: RunFilter,
 ): Promise<RunPage> {
   authorize(auth, "read", here(auth));
 
@@ -1460,15 +1680,112 @@ export async function listRuns(
   });
   const olderThanCursor = cursor === undefined ? undefined : lt(run.id, cursor);
 
+  // A test is asked for by whether any conversation of the run pinned it, so
+  // the narrowing is a subquery on the simulations rather than a join — a join
+  // would return one row per matching conversation and quietly break the page
+  // size and the cursor with it.
+  const pinnedTheTest =
+    filter?.testId === undefined
+      ? undefined
+      : inArray(
+          run.id,
+          db()
+            .select({ runId: simulation.runId })
+            .from(simulation)
+            .where(
+              within(auth, simulation, eq(simulation.testId, filter.testId)),
+            ),
+        );
+
   const rows = await db()
     .select(RUN_COLUMNS)
     .from(run)
-    .where(within(auth, run, and(inActingProject(auth, run), olderThanCursor)))
+    .where(
+      within(
+        auth,
+        run,
+        and(
+          inActingProject(auth, run),
+          olderThanCursor,
+          filter?.agentId === undefined
+            ? undefined
+            : eq(run.agentId, filter.agentId),
+          filter?.connectionId === undefined
+            ? undefined
+            : eq(run.connectionId, filter.connectionId),
+          filter?.status === undefined
+            ? undefined
+            : eq(run.status, filter.status),
+          filter?.since === undefined
+            ? undefined
+            : gte(run.createdAt, filter.since),
+          filter?.until === undefined
+            ? undefined
+            : lt(run.createdAt, filter.until),
+          pinnedTheTest,
+        ),
+      ),
+    )
     .orderBy(desc(run.id))
     .limit(limit + 1);
 
   const { items, nextCursor } = pageOf(rows, limit);
   return { items: items.map(runFromRow), nextCursor };
+}
+
+/**
+ * Where every conversation of these runs stands, in one query.
+ *
+ * The run list needs each row's machinery counts and each row's verdict, and
+ * both are per conversation. Asking per run would be a query per row on the one
+ * surface somebody scrolls, so the page is asked for at once and grouped here.
+ *
+ * Ordered by run and then by position, so a caller can rely on the conversations
+ * of one run arriving in the order the run pinned them.
+ */
+export async function simulationStatusesOfRuns(
+  auth: AuthContext,
+  runIds: readonly string[],
+): Promise<
+  ReadonlyMap<
+    string,
+    readonly { readonly id: string; readonly status: SimulationStatus }[]
+  >
+> {
+  authorize(auth, "read", here(auth));
+
+  const byRun = new Map<
+    string,
+    { readonly id: string; readonly status: SimulationStatus }[]
+  >();
+  if (runIds.length === 0) return byRun;
+
+  const rows = await db()
+    .select({
+      runId: simulation.runId,
+      id: simulation.id,
+      status: simulation.status,
+    })
+    .from(simulation)
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          inArray(simulation.runId, [...runIds]),
+          inActingProject(auth, simulation),
+        ),
+      ),
+    )
+    .orderBy(asc(simulation.runId), asc(simulation.position));
+
+  for (const row of rows) {
+    const held = byRun.get(row.runId) ?? [];
+    byRun.set(row.runId, held);
+    held.push({ id: row.id, status: row.status as SimulationStatus });
+  }
+
+  return byRun;
 }
 
 /**
@@ -1621,6 +1938,10 @@ async function finalizeRunIfDone(
       completedCount: byStatus.get("completed") ?? 0,
       failedCount: byStatus.get("failed") ?? 0,
       canceledCount: byStatus.get("canceled") ?? 0,
+      // Terminal from birth, so it is already in this tally — and it lands in
+      // its own column rather than any of the three above, because nothing was
+      // conducted, nothing failed and nobody stopped anything.
+      skippedCount: byStatus.get("skipped") ?? 0,
       finishedAt: now,
     })
     .where(eq(run.id, runId));
@@ -2145,7 +2466,7 @@ export async function resolveSimulationConnection(
         and(
           eq(simulation.id, simulationId),
           eq(simulation.status, "claimed"),
-          isNull(connection.deletedAt),
+          isNull(connection.archivedAt),
           inActingProject(auth, simulation),
         ),
       ),
@@ -2686,4 +3007,117 @@ export async function listRunEvents(
     next: events.at(-1)?.seq ?? after,
     done: header.finishedAt !== null,
   };
+}
+
+/**
+ * Stop every piece of work that would have gone over these connections.
+ *
+ * **Archiving how egma reaches an agent is not an edit to a list; it is a
+ * decision about work in flight.** A queued simulation over an archived
+ * connection would sit in the claim queue for a target the simulator can no
+ * longer resolve a credential for, and would eventually fail — putting an
+ * operational failure on the record dressed as something the agent did. So the
+ * queue is settled in the same transaction as the Archive.
+ *
+ * Where each simulation stands decides what happens to it, and the two answers
+ * are the ones `cancelRun` already gives for the same three states:
+ *
+ * - **queued** ends here and now. Nothing dispatched it, so nothing has to
+ *   agree to stop.
+ * - **claimed or running** gets the intent stamped and honors it at its next
+ *   heartbeat. Egma does not reach into a conversation already happening, and
+ *   whatever it produced before it stops stays on the record — evidence is
+ *   never erased to make a state tidy.
+ *
+ * Every run left holding one of those and not already terminal is set
+ * `canceled` in the same operation, with its run event written, so a run
+ * cannot later report itself `completed` over a target that was taken away
+ * mid-flight. Counts settle exactly as a cancel's do: at once where everything
+ * was queued, and when the stragglers land where they were not.
+ *
+ * It takes a transaction rather than opening one, because the whole point is
+ * that it happens with the Archive and not beside it.
+ */
+export async function stopWorkOverConnections(
+  tx: Transaction,
+  auth: AuthContext,
+  connectionIds: readonly string[],
+  now: Date,
+): Promise<readonly string[]> {
+  if (connectionIds.length === 0) return [];
+
+  const touched = await tx
+    .select({ id: simulation.id, runId: simulation.runId, status: simulation.status })
+    .from(simulation)
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          inArray(simulation.connectionId, [...connectionIds]),
+          inArray(simulation.status, ["queued", "claimed", "running"]),
+        ),
+      ),
+    );
+
+  if (touched.length === 0) return [];
+
+  const endedHere = touched.filter((row) => row.status === "queued");
+  const asked = touched.filter((row) => row.status !== "queued");
+
+  if (endedHere.length > 0) {
+    await tx
+      .update(simulation)
+      .set({ status: "canceled", cancelRequestedAt: now, endedAt: now })
+      .where(
+        inArray(
+          simulation.id,
+          endedHere.map((row) => row.id),
+        ),
+      );
+  }
+
+  if (asked.length > 0) {
+    await tx
+      .update(simulation)
+      .set({ cancelRequestedAt: now })
+      .where(
+        and(
+          inArray(
+            simulation.id,
+            asked.map((row) => row.id),
+          ),
+          isNull(simulation.cancelRequestedAt),
+        ),
+      );
+  }
+
+  const runIds = [...new Set(touched.map((row) => row.runId))].sort();
+  const canceled: string[] = [];
+
+  for (const runId of runIds) {
+    const [header] = await tx
+      .update(run)
+      .set({ status: "canceled" })
+      .where(and(eq(run.id, runId), inArray(run.status, ["pending", "running"])))
+      .returning({ id: run.id });
+
+    const ended = endedHere.filter((row) => row.runId === runId);
+    await appendRunEvents(tx, runId, now, [
+      ...ended.map(
+        (row) =>
+          ({ kind: "simulation", simulationId: row.id, status: "canceled" }) as const,
+      ),
+      ...(header === undefined
+        ? []
+        : [{ kind: "run", status: "canceled" } as const]),
+    ]);
+
+    if (header !== undefined) {
+      canceled.push(runId);
+      await finalizeRunIfDone(tx, runId, now);
+    }
+  }
+
+  return canceled;
 }

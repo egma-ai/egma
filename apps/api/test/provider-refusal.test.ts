@@ -212,7 +212,7 @@ describe("a provider that is refusing what was typed", () => {
       refusesWith(
         403,
         "invitation_required",
-        "this Egma has been claimed. Ask an admin for an invitation.",
+        "this Egma instance has been claimed. Ask an admin for an invitation.",
       ),
     );
 

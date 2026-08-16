@@ -351,8 +351,8 @@ describe("an edit naming no persona", () => {
       rescheduling.expectedBehaviors,
     );
     expect(edited?.personas).toEqual([
-      { id: nadia, name: "Nadia", deletedAt: null },
-      { id: omar, name: "Omar", deletedAt: null },
+      { id: nadia, name: "Nadia", archivedAt: null },
+      { id: omar, name: "Omar", archivedAt: null },
     ]);
 
     // The set carried forward, and the new version holds rows of its own that
@@ -425,9 +425,9 @@ describe("one frozen version", () => {
       rescheduling.expectedBehaviors,
     );
     expect(frozen?.personas).toEqual([
-      { id: omar, name: "Omar", deletedAt: null },
-      { id: rita, name: STARTER_PERSONA, deletedAt: null },
-      { id: nadia, name: "Nadia", deletedAt: null },
+      { id: omar, name: "Omar", archivedAt: null },
+      { id: rita, name: STARTER_PERSONA, archivedAt: null },
+      { id: nadia, name: "Nadia", archivedAt: null },
     ]);
     expect(frozen?.createdAt).toBeInstanceOf(Date);
   });

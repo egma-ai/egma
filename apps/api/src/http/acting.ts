@@ -1,7 +1,11 @@
 import { listProjects, type AuthContext } from "@egma/db";
 import type { FastifyReply } from "fastify";
 
-import { invalid, notPermitted } from "./refusals.ts";
+import {
+  projectOutsideOrganization,
+  sendRefusal,
+  type RefusalCode,
+} from "./refusals.ts";
 
 /**
  * Which project a request acts in, resolved from the credential and from what
@@ -58,7 +62,7 @@ export const NAME_THE_PROJECT =
  */
 export type ActingRefusal = {
   readonly refusal: string;
-  readonly code: "not_permitted" | "invalid_request";
+  readonly code: RefusalCode;
 };
 
 export type Acting = { readonly auth: AuthContext } | ActingRefusal;
@@ -109,6 +113,12 @@ export async function resolveNamedProject(
   named: string,
   wording: ProjectWording,
 ): Promise<Acting> {
+  // A browser is answered by `browserProject` below, whose rule is the
+  // membership's rather than the credential's. The branch is here rather than
+  // at each call site so that every route group a page reaches gets the one
+  // rule, and a group added later cannot get the other one by omission.
+  if (auth.via === "session") return browserProject(auth, named);
+
   if (auth.projectId !== undefined) {
     return named === auth.projectId
       ? { auth }
@@ -122,6 +132,41 @@ export async function resolveNamedProject(
   return projects.some((project) => project.id === named)
     ? { auth: { ...auth, projectId: named } }
     : { refusal: wording.outsideOrganization(named), code: "not_permitted" };
+}
+
+/**
+ * The project a **browser** request works in: the one its address names,
+ * checked against the organization the session resolved to.
+ *
+ * **A session's project is a default, not a scope**, and that is the whole
+ * distinction from a key. Every member of an organization holds their
+ * organization role on every project in it, so naming a sibling project is
+ * what the selector does on every click — while a key minted for one project
+ * is bounded by it, and reaching a sibling with one is the refusal above.
+ * Widening a key by reusing this rule is the one thing that must never
+ * happen, so the two rules are two functions and the caller cannot pass a flag
+ * to swap them.
+ *
+ * **The project comes off the address on every request, and nothing here
+ * remembers one.** Two tabs on two projects are ordinary, and neither can be
+ * right if the server keeps a chosen project per session. The organization
+ * still comes from the credential and from nowhere else, so naming a project
+ * can only ever pick among what this membership already reaches.
+ *
+ * A project outside the organization is an absence rather than a denial —
+ * `projectOutsideOrganization` says why.
+ */
+export async function browserProject(
+  auth: AuthContext,
+  named: string,
+): Promise<Acting> {
+  const projects = await listProjects(auth);
+  return projects.some((project) => project.id === named)
+    ? { auth: { ...auth, projectId: named } }
+    : {
+        refusal: projectOutsideOrganization(named),
+        code: "project_outside_organization",
+      };
 }
 
 /**
@@ -153,6 +198,12 @@ export async function resolveAbsentProject(auth: AuthContext): Promise<Acting> {
  * the project the credential is authorized for, or the organization's single
  * project for a key minted for the whole customer. Named, it has to be one this
  * credential may act in.
+ *
+ * **Use this where the request has to land in one project**: a create, or a
+ * list of a project's things. There the absent case has to *choose*, and
+ * `NAME_THE_PROJECT` is the honest answer when there is more than one to choose
+ * from. Where the address already carries the id of the one row being asked
+ * about, `reachingIn` below is the one to use instead.
  */
 export async function actingIn(
   auth: AuthContext,
@@ -163,12 +214,57 @@ export async function actingIn(
     : resolveNamedProject(auth, named, ACTING_WORDING);
 }
 
-/** The two ways a project can fail to resolve, each answered as what it is. */
+/**
+ * The acting context for a route addressed by **one resource's own id**, where
+ * the project is a filter rather than a destination.
+ *
+ * Named, it is exactly `actingIn`'s rule and the same wording: a session may
+ * name any project of its organization, a key minted for one project may not
+ * name a sibling.
+ *
+ * **Absent, it is whatever the credential itself reaches, and the two callers
+ * that arrive here are told apart by `AuthContext.projectId` alone.**
+ *
+ * - A **session** always carries a project. `apps/api/src/auth/session.ts`
+ *   fills it from the membership and throws rather than leaving it out, so
+ *   `{ auth }` here is the session's own project. That is the case ticket 12
+ *   asked for: a browser naming no project is still answered from the project
+ *   it is standing in, not from the whole organization.
+ * - A **key minted for the whole organization** carries none, deliberately —
+ *   `AuthContext.projectId` is `string | undefined` so that this absence is a
+ *   case every reader has to answer rather than a value that defaults. `{ auth }`
+ *   here leaves it absent, `inActingProject` returns no predicate for it, and
+ *   the read spans the customer. That is the first-class case for such a key,
+ *   in the agents group's own words: *"reading across a whole customer is the
+ *   first-class case, because two projects of one customer are always readable
+ *   together."*
+ *
+ * One expression answers both because `projectId` is precisely the fact that
+ * separates them, and neither answer is a guess: the session's project was
+ * chosen by a person, and the organization-wide one narrows by nothing.
+ *
+ * **Why not `actingIn`.** It resolves an absent project by *choosing* one, and
+ * refuses with `NAME_THE_PROJECT` where an organization holds more than one.
+ * On a route addressed by a run id or a simulation id there is nothing to
+ * choose: the id is unique inside the organization, and the caller — `egma run`
+ * following a `results_url`, a terminal holding an id egma printed — has no
+ * reason to know which project it belongs to. Sending it there turns an
+ * organization-wide read into a 400. This function exists so that the two
+ * meanings of "no project named" cannot be swapped by picking the shorter name.
+ */
+export async function reachingIn(
+  auth: AuthContext,
+  named: string | undefined,
+): Promise<Acting> {
+  return named === undefined
+    ? { auth }
+    : resolveNamedProject(auth, named, ACTING_WORDING);
+}
+
+/** However a project failed to resolve, answered as what it is. */
 export function refuseActing(
   reply: FastifyReply,
   acting: ActingRefusal,
 ): FastifyReply {
-  return acting.code === "not_permitted"
-    ? notPermitted(reply, acting.refusal)
-    : invalid(reply, acting.refusal);
+  return sendRefusal(reply, acting.code, acting.refusal);
 }

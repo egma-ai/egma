@@ -1,3 +1,4 @@
+import { newId } from "@egma/ids";
 import { claimSimulations, createPersona, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -95,6 +96,7 @@ async function anOrphan(
   const started = await ask(api.app, "POST", "/api/runs", key, {
     connection: connectionId,
     test_versions: [String(pushed.body.version_id)],
+    idempotency_key: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const simulations = started.body.simulations as { id: string }[];

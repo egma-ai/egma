@@ -1,0 +1,319 @@
+name: Tests
+
+# What runs, and when.
+#
+# Every pull request gets the cheap lane: lint, typecheck, and `test:fast` —
+# the unit, database, API, grader, CLI and web tests, with no Chrome and no web
+# application. That is the loop a change is written in, and it is what a review
+# needs to see.
+#
+# A pull request **into `main`** gets everything: the cheap lane plus the
+# real-browser proof, the simulator tests, the Python SDK tests and the fixture
+# tests. That is the handoff gate, and nothing in it is allowed to skip.
+#
+# The split is deliberate rather than thrifty. An effort lands as a dozen pull
+# requests into one integration branch and then one pull request from that
+# branch into `main`. Running the browser proof and three Python suites on each
+# of the dozen would pay for the complete proof twelve times and gate on it
+# once — which is the wrong way round. So the trigger is broad and the scope
+# depends on the branch being merged into: `github.base_ref`, which on a pull
+# request is the branch the change is going to.
+#
+# `vitest.config.ts` owns what each lane selects, as two Vitest projects. The
+# fast lane declares no `include` — it is Vitest's own default search minus the
+# one real-browser file — so a new test file joins it by existing. Every run
+# prints its lane and Vitest labels each file with the project it came from, so
+# a green tick can always be read back to the proof it stands for.
+#
+# Every job runs on a Blacksmith runner, which the organization already pays
+# for and which carries GitHub's own runner image — so docker, the compose
+# services and the official cache actions all behave as they did. One thing it
+# does not carry is `node-gyp`, which this repository needs to install at all;
+# `.github/native-toolchain.sh` is that gap and nothing else. The release
+# workflow beside this one stays on `ubuntu-latest` on purpose: it holds npm
+# publishing authority, and moving that is a separate decision.
+
+on:
+  pull_request:
+
+concurrency:
+  # A newer push to the same pull request makes the run underway pointless.
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint and typecheck
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Say which lanes this pull request runs
+        # So the tick on a pull request can be read back to the proof it stands
+        # for, rather than to whichever jobs happened to be enabled that day.
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "$BASE" = "main" ]; then
+            echo "Into main — the complete proof: lint, typecheck, the fast lane, the browser lane, the simulator, SDK and fixture tests."
+          else
+            echo "Into $BASE — the cheap lane: lint, typecheck and the fast lane."
+            echo "The browser lane and the Python suites run at the gate into main."
+          fi
+
+      # Actions are pinned to a commit rather than a tag, the way
+      # `release-cli.yml` pins them: a tag can be moved, and a workflow that
+      # decides whether a change may merge must not change under it. The
+      # trailing comment is the human-readable version each SHA is.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        # Version comes from "packageManager" in the root package.json.
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        # The data-access boundary rules. `pnpm typecheck` runs these too, but
+        # a boundary violation reported on its own line is read in a second.
+        run: pnpm lint
+
+      - name: Typecheck
+        # Builds the workspace, then the tests against it, then the web app.
+        run: pnpm typecheck
+
+  fast:
+    name: Fast lane
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install uv and sync the simulator
+        # The fast lane is not all TypeScript. `apps/api/test/simulator-walk.
+        # test.ts` spawns the real shipped simulator — `uv run --frozen
+        # egma-simulator`, in `apps/simulator` — and walks a run through it to a
+        # verdict. Without uv that child never starts, and the walk waits sixty
+        # seconds for a simulation nothing was ever going to conduct.
+        #
+        # The sync is separate so the Python install is paid here rather than
+        # inside that sixty-second window. It is the same pair of steps
+        # `egma-dev-setup` runs on a developer's machine.
+        run: pipx install uv && uv sync --frozen
+        working-directory: apps/simulator
+
+      - name: Warm the object-store image
+        # Only where a skip is not allowed. The recording suites start a MinIO
+        # of their own from the image the compose file deploys, so pulling it
+        # through compose keeps one version in one place.
+        if: github.base_ref == 'main'
+        # **Compose interpolates every service before it pulls one**, and the
+        # self-hosted phone platform declares ten variables with no default —
+        # the LiveKit pair, the recording store's four credentials, the auth
+        # secret. So `docker compose pull minio` fails on a variable that has
+        # nothing to do with MinIO, before any network call happens.
+        #
+        # Those guards are right where they are: a self-hoster who has not run
+        # `egma self-host up` should be told which variable by name rather than
+        # handed a half-started platform. CI is not that person and starts none
+        # of those services. Placeholders would work today and break on the
+        # eleventh variable, so this does not use them.
+        #
+        # The tag still lives in one place. This reads it out of the compose
+        # file rather than repeating it, so the image CI warms stays the image
+        # the compose file deploys.
+        run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
+
+      - name: Run the fast lane
+        # PostgreSQL and ClickHouse come up inside `test:fast`, which is also
+        # what a developer runs, so CI and a laptop prove the same thing.
+        env:
+          # At the gate, a recording suite that quietly skipped because no
+          # object store could be started would report the opposite of what
+          # happened. Everywhere else the skip is the promise that contributing
+          # costs no new infrastructure.
+          EGMA_REQUIRE_OBJECT_STORAGE: ${{ github.base_ref == 'main' && '1' || '' }}
+        run: pnpm test:fast
+
+  browser:
+    # **One job, and never sharded.** The real-browser proof is one ordered
+    # file on purpose: two Next development servers compile into one
+    # `apps/web/.next` and each ends up serving half of the other's build. A
+    # matrix here would not make it faster, it would make it wrong — see
+    # `apps/api/test/support/instance.ts` and `apps/web/tools/output-lock.ts`.
+    name: Browser lane (one job, never sharded)
+    if: github.base_ref == 'main'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Report the browser
+        # This repository depends on `playwright-core` and downloads no
+        # browser, so the proof runs against the Chrome the runner image
+        # already has. Printed here so a runner without one fails on this line
+        # rather than a minute later inside a launcher.
+        run: google-chrome --version
+
+      - name: Warm the object-store image
+        # The recording flows start a MinIO of their own from the image the
+        # compose file deploys. Pulling it first keeps a cold registry out of
+        # the suite's own timeout.
+        #
+        # Pulled by tag rather than through compose, for the reason the fast
+        # lane's own step gives: compose interpolates every service before it
+        # pulls one, and the self-host platform's variables have no defaults.
+        run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
+
+      - name: Run the browser lane
+        env:
+          # The whole reason this job exists is to prove that a recording can
+          # be signed, fetched and played. A run that went green because no
+          # object store started would prove the opposite, so a missing store
+          # is a failure here rather than a skip.
+          EGMA_REQUIRE_OBJECT_STORAGE: "1"
+        run: pnpm test:browser
+
+  simulator:
+    name: Simulator tests
+    if: github.base_ref == 'main'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install uv
+        # The real toolchain of every Python part of this repository. `uv run
+        # --frozen` brings its own interpreter and installs the locked
+        # dependencies, so nothing here sets up Python separately.
+        run: pipx install uv
+
+      - name: Run the simulator tests
+        run: pnpm test:simulator
+
+  sdk:
+    name: Python SDK tests
+    if: github.base_ref == 'main'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install uv
+        run: pipx install uv
+
+      - name: Run the SDK tests
+        run: pnpm test:sdk
+
+  fixture:
+    name: Fixture agent tests
+    if: github.base_ref == 'main'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install uv
+        run: pipx install uv
+
+      - name: Run the fixture agent tests
+        run: pnpm test:fixture

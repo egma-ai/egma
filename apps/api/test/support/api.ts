@@ -50,14 +50,43 @@ export type TestApi = {
   close(): Promise<void>;
 };
 
+/**
+ * The judge a test deployment has, unless the test says it has none.
+ *
+ * The key is nonsense and never reaches a provider: nothing in these tests asks
+ * a model anything, and the one door to a plaintext judge key opens only for
+ * egma's own grading engine.
+ */
+const THE_TEST_DEPLOYMENTS_JUDGE = {
+  provider: "openai",
+  model: "gpt-4o-mini",
+  key: "sk-test-deployment-judge",
+} as const;
+
 export type TestApiOptions = {
   readonly singleOrganization?: boolean;
   /**
    * The judge this deployment gives a project that has configured none, as
-   * `egma self-host setup` supplies one. Absent by default, because most
-   * tests are not about grading configuration at all.
+   * `egma self-host setup` supplies one.
+   *
+   * **A deployment has one unless a test says otherwise**, and that default
+   * moved when runs began requiring a judge. Every project is created holding
+   * the predefined expected-behaviors copy, which judges by asking a model, so
+   * a run planned in a project with no judge is refused before anything is
+   * dialed — which would make every test that starts a run fail on a
+   * configuration nobody in it is writing about. A real self-hosted deployment
+   * is set up with one key that covers the persona's brain, its voice and the
+   * default judge, so the configured deployment is the ordinary one and this
+   * default says so.
+   *
+   * Pass `null` for a deployment that configured none. That is the state a
+   * project lands in `needs_setup` from, and it is what the run door's refusal
+   * is proved against. The refusal is about the plan rather than the project:
+   * a project that deleted every grader asking a model starts its runs with no
+   * judge at all, which `run-planning.test.ts` in the data-access package
+   * proves.
    */
-  readonly defaultJudge?: Config["defaultJudge"];
+  readonly defaultJudge?: Config["defaultJudge"] | null;
   /**
    * Settings this instance starts holding, seeded exactly as a deployment's own
    * environment seeds them — through `seedPlatformSettings`, sealed, into the
@@ -164,9 +193,9 @@ export async function createApi(
     singleOrganization: options.singleOrganization ?? false,
     trustProxy: options.trustProxy ?? false,
     ...(options.blob === undefined ? {} : { blob: options.blob }),
-    ...(options.defaultJudge === undefined
+    ...(options.defaultJudge === null
       ? {}
-      : { defaultJudge: options.defaultJudge }),
+      : { defaultJudge: options.defaultJudge ?? THE_TEST_DEPLOYMENTS_JUDGE }),
   });
 
   // Through the deployment's own seeding door rather than written straight

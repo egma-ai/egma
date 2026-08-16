@@ -16,7 +16,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The standing resolver's telemetry duty: where a simulation's arriving spans
@@ -144,6 +144,10 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
+  await seedJudge({ ...actingAsAcme(), role: "admin" });
+  await seedJudge({ ...actingAsGlobex(), role: "admin" });
+  // No running graders: this is about where an arriving span files, which is
+  // decided by the simulation's own pins long before anything judges it.
 
   ours = await oneQueuedSimulation(actingAsAcme(), "ours");
   elsewhere = await oneQueuedSimulation(actingAsGlobex(), "elsewhere");

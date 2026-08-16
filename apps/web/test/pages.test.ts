@@ -13,17 +13,21 @@ import {
   NOTHING_TO_HEAR,
   offersNothing,
 } from "../lib/recording-refusals.ts";
-import { runProgress } from "../lib/run-progress.ts";
 import {
   DEFAULT_SIGNED_IN_PATH,
   returnPathIn,
   safeReturnPath,
 } from "../lib/return-to.ts";
 import {
+  citedTurnPositions,
+  judgedAssertions,
+  type EvidenceStep,
+  type EvidenceVerdict,
+} from "../lib/simulations.ts";
+import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
 } from "../lib/signup-defaults.ts";
-import { pickers } from "../lib/me.ts";
 
 /**
  * The two things the pages decide for themselves, and one thing about where
@@ -63,46 +67,6 @@ describe("the names the signup form offers", () => {
       );
     }
     expect(DEFAULT_PROJECT_NAME).toBe(API_DEFAULT_PROJECT_NAME);
-  });
-});
-
-describe("a level with one thing in it", () => {
-  const one = {
-    user: { id: "usr_1", email: "ada@acme.example" },
-    organizations: [
-      { id: "org_1", name: "Acme", slug: "acme", role: "admin" },
-    ],
-    projects: [{ id: "prj_1", name: "Default", slug: "default" }],
-  };
-
-  it("is not a choice, so neither picker is shown", () => {
-    expect(pickers(one)).toEqual({ organization: false, project: false });
-  });
-
-  it("becomes a choice the moment there are two", () => {
-    expect(
-      pickers({
-        ...one,
-        projects: [...one.projects, { id: "prj_2", name: "Outbound", slug: "outbound" }],
-      }),
-    ).toEqual({ organization: false, project: true });
-
-    expect(
-      pickers({
-        ...one,
-        organizations: [
-          ...one.organizations,
-          { id: "org_2", name: "Globex", slug: "globex", role: "admin" },
-        ],
-      }),
-    ).toEqual({ organization: true, project: false });
-  });
-
-  it("shows nothing at all when somebody has landed nowhere", () => {
-    expect(pickers({ ...one, organizations: [], projects: [] })).toEqual({
-      organization: false,
-      project: false,
-    });
   });
 });
 
@@ -236,16 +200,20 @@ describe("the pages", () => {
    * The link that comes back when nothing was emailed is the whole ticket. A
    * page that quietly dropped it would leave a self-hoster with an invitation
    * that exists and cannot be delivered, which is worse than a refusal.
+   *
+   * Organization settings moved into the product shell, so this reads the page
+   * that now holds it. `settings.test.tsx` drives the behaviour; this only
+   * holds the file to carrying the branch at all.
    */
   it("hand the invitation link back when there was nowhere to post it", async () => {
-    const members = await readFile(
-      path.join(WEB, "app/members/page.tsx"),
+    const people = await readFile(
+      path.join(WEB, "app/projects/[projectId]/settings/people/page.tsx"),
       "utf8",
     );
 
-    expect(members).toContain("accept_url");
-    expect(members).toContain("delivered");
-    expect(members).toMatch(/no mail transport is configured/i);
+    expect(people).toContain("accept_url");
+    expect(people).toContain("delivered");
+    expect(people).toMatch(/no mail transport is configured/i);
   });
 
   /**
@@ -401,10 +369,7 @@ describe("the pages", () => {
   it("reach the API for invitations at paths this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
-    const members = await readFile(
-      path.join(WEB, "app/members/page.tsx"),
-      "utf8",
-    );
+    const settings = await readFile(path.join(WEB, "lib/settings.ts"), "utf8");
 
     // A path a page fetches and the config does not forward would be served by
     // this process, which has no such route, and the flow would 404.
@@ -412,7 +377,139 @@ describe("the pages", () => {
     expect(rewrites).toContain("/api/members/:path*");
     expect(invite).toContain("/api/invitations/lookup");
     expect(invite).toContain("/api/invitations/accept");
-    expect(members).toContain('fetch("/api/members")');
+    expect(settings).toContain('"/api/members"');
+    expect(settings).toContain('"/api/invitations"');
+  });
+
+  /**
+   * The Settings pages reach four more of the API's paths, and none of them is
+   * served by this process. Without the rules the pages would post at Next and
+   * read its 404 page as egma's refusal.
+   */
+  it("reach the API for settings at paths this instance rewrites", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+
+    expect(rewrites).toContain("/api/organization");
+    expect(rewrites).toContain("/api/projects/:path*");
+    expect(rewrites).toContain("/api/judge/:path*");
+    expect(rewrites).toContain("/api/judge-credentials/:path*");
+  });
+
+  /**
+   * Every API path the browser client names, held to a rewrite rule — read from
+   * the client rather than listed here.
+   *
+   * The tests above are the same claim written one feature at a time, and that
+   * is exactly how six paths came to be missing. `beforeFiles` is an allowlist
+   * with no catch-all, so a path with no rule is served by this process, which
+   * has no such route: the page reads Next's 404 **page** — HTML, not JSON,
+   * carrying no sentence — as though egma had refused it.
+   *
+   * Nothing else can catch this. Every component test stubs `fetch`, so it
+   * never meets a rewrite; the real-browser file drives the app under `next
+   * dev`, where a missing rule looks the same as a page nobody visits. It only
+   * appears in a deployment, as a working page that cannot load its own data.
+   *
+   * That is what happened: `/api/personas` and `/api/persona-form` shipped with
+   * ticket 04, `/api/graders` and `/api/grader-registry` with ticket 05, and
+   * `/api/connection-types` and `/api/capabilities` with ticket 03 — all merged,
+   * all unreachable outside a test. This reads the paths out of `lib/` so the
+   * list cannot go stale again, and so the next ticket's path is covered on the
+   * day it is written rather than when somebody remembers to add a line here.
+   */
+  it("rewrites every API path the browser client names", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const lib = await readdir(path.join(WEB, "lib"));
+
+    const named = new Set<string>();
+    for (const file of lib.filter((one) => one.endsWith(".ts"))) {
+      const source = await readFile(path.join(WEB, "lib", file), "utf8");
+      for (const [, named_] of source.matchAll(
+        /(?:_PATH|_ROUTE)\s*=\s*"(\/api\/[^"]+)"/g,
+      )) {
+        named.add(named_);
+      }
+    }
+
+    // A guard on the guard: if the constants are ever renamed out of this
+    // shape, the loop above finds nothing and every assertion below passes
+    // vacuously. Better to fail here and be rewritten.
+    expect(named.size).toBeGreaterThan(8);
+
+    const unforwarded = [...named]
+      .filter((one) => {
+        // A rule for the collection, or a `:path*` rule on any parent segment,
+        // covers it. `/api/judge/registry` rides `/api/judge/:path*`.
+        if (rewrites.includes(`source: "${one}"`)) return false;
+        const segments = one.split("/").filter(Boolean);
+        for (let depth = segments.length - 1; depth >= 2; depth -= 1) {
+          const parent = `/${segments.slice(0, depth).join("/")}`;
+          if (rewrites.includes(`source: "${parent}/:path*"`)) return false;
+        }
+        return true;
+      })
+      .sort();
+
+    // Named rather than counted: the fix is one rule per path, and a bare count
+    // sends somebody reading a config file to work out which.
+    expect(unforwarded).toEqual([]);
+  });
+
+  /**
+   * **And every path the client *builds*, which the guard above cannot see.**
+   *
+   * That one reads `_PATH` constants, so it covers a collection and nothing
+   * under it. A page reaching one row asks at an address built by a function —
+   * `` `${GRADERS_PATH}/${graderId}` `` — and the collection's own rule does not
+   * forward it: `beforeFiles` matches a rule against the whole path, so
+   * `source: "/api/graders"` forwards `/api/graders` and stops there.
+   *
+   * That is not hypothetical. `DELETE /api/graders/:graderId` shipped on this
+   * branch with the screen calling it and no `:path*` rule beside it, and every
+   * test passed: the component tests stub `fetch`, so a rewrite is never in the
+   * path, and the API tests call the route directly. In a deployment the delete
+   * would have reached this process, which has no such route, and the screen
+   * would have shown Next's 404 **page** — HTML, no sentence — as egma refusing
+   * to switch a grader off.
+   *
+   * So the rule is read from the same place: a function under `lib/` that
+   * builds an address beneath a collection means that collection needs a
+   * `:path*` rule, and the day somebody writes the next such function it is
+   * covered without anybody remembering this file.
+   */
+  it("rewrites every path the browser client builds beneath a collection", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const lib = await readdir(path.join(WEB, "lib"));
+
+    /** Every collection a `lib/` function builds an address underneath. */
+    const beneath = new Set<string>();
+    for (const file of lib.filter((one) => one.endsWith(".ts"))) {
+      const source = await readFile(path.join(WEB, "lib", file), "utf8");
+
+      const collections = new Map<string, string>();
+      for (const [, named, at] of source.matchAll(
+        /(\w+_PATH)\s*=\s*"(\/api\/[^"]+)"/g,
+      )) {
+        if (named !== undefined && at !== undefined) collections.set(named, at);
+      }
+
+      for (const [, named] of source.matchAll(/`\$\{(\w+_PATH)\}\/\$\{/g)) {
+        const at = named === undefined ? undefined : collections.get(named);
+        if (at !== undefined) beneath.add(at);
+      }
+    }
+
+    // A guard on the guard, the neighbour's: if these functions are ever
+    // written another way the loop finds nothing and this passes vacuously.
+    expect(beneath.size).toBeGreaterThan(4);
+
+    const unforwarded = [...beneath]
+      .filter((one) => !rewrites.includes(`source: "${one}/:path*"`))
+      .sort();
+
+    // Named rather than counted: the fix is one rule per collection, and a bare
+    // count sends somebody reading a config file to work out which.
+    expect(unforwarded).toEqual([]);
   });
 
   /**
@@ -423,7 +520,7 @@ describe("the pages", () => {
   it("give a signed-in person somewhere to sign out, at a path this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const home = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
-    const shell = await readFile(path.join(WEB, "app/ui.tsx"), "utf8");
+    const shell = await readFile(path.join(WEB, "ui/shell.tsx"), "utf8");
 
     expect(rewrites).toContain("/api/sign-out");
     expect(shell).toContain('fetch("/api/sign-out"');
@@ -439,40 +536,96 @@ describe("the pages", () => {
    * has explicitly said that the session is gone.
    */
   it("keep the application shell while signed-in page data settles", async () => {
-    const shell = await readFile(path.join(WEB, "app/ui.tsx"), "utf8");
+    const shell = await readFile(path.join(WEB, "ui/shell.tsx"), "utf8");
     const members = await readFile(
-      path.join(WEB, "app/members/page.tsx"),
+      path.join(WEB, "app/projects/[projectId]/settings/people/page.tsx"),
       "utf8",
     );
     const transcript = await readFile(
       path.join(WEB, "app/traces/[traceId]/page.tsx"),
       "utf8",
     );
-    const run = await readFile(
+    // The address a terminal prints. It draws no run of its own any more — see
+    // the guard below — so what it has to keep is the shell while it works out
+    // where the run belongs.
+    const forwarder = await readFile(
       path.join(WEB, "app/runs/[runId]/page.tsx"),
+      "utf8",
+    );
+    const run = await readFile(
+      path.join(WEB, "app/projects/[projectId]/runs/[runId]/page.tsx"),
+      "utf8",
+    );
+    const simulation = await readFile(
+      path.join(
+        WEB,
+        "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
+      ),
       "utf8",
     );
     const root = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
     expect(shell).toContain("export function ProductStatePage");
-    expect(members).toContain("<ProductStatePage");
-    expect(transcript).toContain('<ProductStatePage active="transcripts"');
-    expect(run).toContain('<ProductStatePage active="transcripts"');
+    // The Settings pages keep the shell a stronger way than the state page
+    // does: they draw `AppShell` themselves and put loading, failure and
+    // not-found states inside it, so the navigation, selector and account menu
+    // never leave the screen while a read is in flight. The run and the
+    // simulation inside it do the same.
+    for (const page of [members, run, simulation]) {
+      expect(page).toContain("<AppShell>");
+      expect(page).toContain("<Loading ");
+      expect(page).not.toContain("<StatePage");
+    }
+    expect(transcript).toContain("<ProductStatePage");
+    expect(forwarder).toContain("<ProductStatePage");
     expect(root).toContain('<ProductStatePage');
     expect(root).not.toContain("<StatePage");
-    expect(members).not.toContain(
-      'return <StatePage title="Loading organization settings"',
-    );
     expect(transcript).not.toMatch(
       /state\.status === "loading"[\s\S]*?return <StatePage/,
     );
-    expect(run).not.toMatch(
+    expect(forwarder).not.toMatch(
       /state\.status === "loading"[\s\S]*?return <StatePage/,
     );
   });
 
+  /**
+   * **One run has one page.** The address a terminal prints carries no project,
+   * and the product's own pages are all project-scoped — so for a while there
+   * were two pages drawing one run, free to disagree about whether a skipped
+   * conversation is a failure and only one of them kept in step as the product
+   * moved. The terminal's address now reads the run for the project it belongs
+   * to and forwards.
+   *
+   * The guard is on the forwarder rather than on the run page, because the
+   * mistake it catches is a second run page growing back here.
+   */
+  it("send the address a terminal prints to the run inside its project", async () => {
+    const forwarder = await readFile(
+      path.join(WEB, "app/runs/[runId]/page.tsx"),
+      "utf8",
+    );
+
+    // The project comes off the run read. A browser holding only a run id
+    // cannot know it, and an organization with two projects makes any default
+    // wrong.
+    expect(forwarder).toContain("runPath(runId)");
+    expect(forwarder).toContain("answer.value.project_id");
+    expect(forwarder).toContain("router.replace(");
+    // And it draws no run: no conversations, no verdicts, no grading counts.
+    expect(forwarder).not.toContain("simulations");
+    expect(forwarder).not.toContain("verdict");
+    expect(forwarder).not.toContain("graded_count");
+  });
+
   it("show real run verdicts without folding execution failures into grader failures", async () => {
     const run = await readFile(
-      path.join(WEB, "app/runs/[runId]/page.tsx"),
+      path.join(WEB, "app/projects/[projectId]/runs/[runId]/page.tsx"),
+      "utf8",
+    );
+    const simulation = await readFile(
+      path.join(
+        WEB,
+        "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
+      ),
       "utf8",
     );
     const judgment = await readFile(
@@ -480,14 +633,23 @@ describe("the pages", () => {
       "utf8",
     );
 
-    expect(run).toContain("/api/runs/");
-    expect(run).toContain("runProgress(run)");
-    expect(run).toContain("run.graded_count");
-    expect(run).toContain("simulation.verdicts.map");
-    expect(run).toContain("This is an execution problem, not a failed grader verdict.");
-    expect(run).toContain("<JudgmentCard");
+    // A simulation egma could not conduct is egma's own failure, and both
+    // surfaces say so in the same sentence rather than colouring it like a
+    // grader's verdict.
+    for (const page of [run, simulation]) {
+      expect(page).toContain("Egma could not conduct this simulation.");
+      expect(page).toContain("not a failed grader verdict");
+    }
+    // Grading progress is reported apart from execution progress on both.
+    expect(run).toContain("read.graded_count");
+    expect(simulation).toContain("evidence.grading_jobs.some");
+    // And the rationale and the turns it cites are what a judgement is worth
+    // reading for, wherever one is drawn.
     expect(judgment).toContain("judgment.rationale");
     expect(judgment).toContain("judgment.cited_turns");
+    // `assertion`, never `dimension`: the verdict store renamed its column
+    // with the grader redesign and the word is banned at every layer.
+    expect(simulation).toContain("judgedAssertions(read.verdicts)");
   });
 
   it("shows the aggregate trace outcome", async () => {
@@ -577,14 +739,19 @@ describe("the pages", () => {
 });
 
 describe("coming back after signing in", () => {
-  it("opens the transcript list by default", async () => {
+  it("goes to the entrance, which opens Agents under the first project", async () => {
     const signIn = await readFile(path.join(WEB, "app/sign-in/page.tsx"), "utf8");
     const signup = await readFile(path.join(WEB, "app/signup/page.tsx"), "utf8");
     const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
 
-    expect(DEFAULT_SIGNED_IN_PATH).toBe("/traces");
+    // The root, because none of these three pages can know which project
+    // somebody is in — an invitation link and a fresh sign-in both arrive with
+    // nothing. The entrance chooses it once and puts it in the address.
+    expect(DEFAULT_SIGNED_IN_PATH).toBe("/");
     for (const page of [signIn, signup, invite]) {
       expect(page).toContain("DEFAULT_SIGNED_IN_PATH");
+      // Through the constant, never by typing the address. The entrance is
+      // going to stop being the root the day somebody gives it a better one.
       expect(page).not.toContain('window.location.assign("/")');
     }
   });
@@ -743,24 +910,105 @@ describe("a refusal of a recording", () => {
   });
 });
 
-describe("run progress", () => {
-  it("uses the simulation rows while aggregate counters are still empty", () => {
-    expect(runProgress({
-      expected_simulation_count: 3,
-      graded_count: 1,
-      simulations: [
-        { status: "completed" },
-        { status: "failed" },
-        { status: "running" },
-      ],
-    })).toEqual({ finished: 2, gradable: 2, failed: 1, moving: true });
+/**
+ * Which judgement counts, once a grader has judged the same assertion twice.
+ *
+ * The page shows the working — which row counts and which are superseded — so
+ * the fold is a decision this module makes rather than a shape the server hands
+ * over. The rule is the store's: the newest judgement speaks and the earlier
+ * ones stay readable underneath it.
+ *
+ * **There were three proofs here about a person's correction outranking the
+ * machine's word, and they go with the endpoint.** ADR-0009 takes corrections
+ * out of v0; they return as the reserved `human` grader type, writing rows
+ * under a grader id of their own — at which point they are simply another
+ * grader's rows and nothing here has a second author to prefer.
+ */
+describe("which verdict speaks", () => {
+  function row(overrides: Partial<EvidenceVerdict> = {}): EvidenceVerdict {
+    return {
+      grader_id: "grd_1",
+      assertion: "behavior_1",
+      assertion_text: "confirms the new time back",
+      required: true,
+      verdict: "failed",
+      score: 0,
+      rationale: "the agent never said it back",
+      cited_turns: [],
+      judged_at: "2026-08-15T10:00:00.000000Z",
+      ...overrides,
+    };
+  }
+
+  it("lets the newest judgement speak, with the older one kept as evidence", () => {
+    const [only] = judgedAssertions([
+      row({ verdict: "passed", score: 1 }),
+      row({
+        verdict: "failed",
+        rationale: "the tightened grader disagrees",
+        judged_at: "2026-08-15T12:00:00.000000Z",
+      }),
+    ]);
+
+    expect(only?.speaking.verdict).toBe("failed");
+    expect(only?.superseded.map((its) => its.verdict)).toEqual(["passed"]);
   });
 
-  it("does not wait for a canceled simulation to be graded", () => {
-    expect(runProgress({
-      expected_simulation_count: 2,
-      graded_count: 1,
-      simulations: [{ status: "completed" }, { status: "canceled" }],
-    })).toEqual({ finished: 2, gradable: 1, failed: 0, moving: false });
+  it("keeps two assertions of one grader apart", () => {
+    const folded = judgedAssertions([
+      row({ assertion: "behavior_1" }),
+      row({ assertion: "behavior_2" }),
+    ]);
+    expect(folded).toHaveLength(2);
+  });
+
+  /**
+   * A key nothing could place is shown as itself. A page that fell back to a
+   * plausible sentence would be unfalsifiable; `behavior_3` is merely terse.
+   */
+  it("carries the key through when nothing could resolve its words", () => {
+    const [only] = judgedAssertions([row({ assertion_text: null })]);
+    expect(only?.assertionText).toBeNull();
+    expect(only?.assertion).toBe("behavior_1");
+  });
+
+  /** A diagnostic copy's row says so, so a card can mark it. */
+  it("carries whether the copy that wrote it can fail anything", () => {
+    const [only] = judgedAssertions([row({ required: false })]);
+    expect(only?.required).toBe(false);
+  });
+});
+
+describe("the turns a judgement points at", () => {
+  function step(id: string, children: EvidenceStep[] = []): EvidenceStep {
+    return {
+      span_id: id,
+      parent_span_id: "",
+      name: id,
+      kind: "turn:agent",
+      status: "ok",
+      started_at: "2026-08-15T10:00:00.000000Z",
+      duration_ns: "1000",
+      text: "",
+      audio_url: "",
+      tool_name: "",
+      tool_arguments: "",
+      tool_result: "",
+      spans: children,
+    };
+  }
+
+  const turns = [step("one"), step("two", [step("tool-inside-two")]), step("three")];
+
+  it("names them by their position in the transcript", () => {
+    expect(citedTurnPositions(["three", "one"], turns)).toEqual([1, 3]);
+  });
+
+  it("sends a cited step to the turn it happened inside", () => {
+    expect(citedTurnPositions(["tool-inside-two"], turns)).toEqual([2]);
+  });
+
+  it("drops an id that is nowhere in the transcript rather than inventing a turn", () => {
+    expect(citedTurnPositions(["nothing-here"], turns)).toEqual([]);
   });
 });

@@ -2,6 +2,7 @@ import { newId } from "@egma/ids";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
+import { user } from "../schema/identity.ts";
 import { apiKey } from "../schema/tenancy.ts";
 import type { ApiKeyScope } from "../schema/columns.ts";
 import type { AuthContext } from "./context.ts";
@@ -27,6 +28,11 @@ export type ApiKey = {
   readonly revokedAt: Date | null;
   readonly createdByUserId: string;
   readonly createdAt: Date;
+};
+
+/** A listed key with the human identity of the member who created it. */
+export type ListedApiKey = ApiKey & {
+  readonly createdByEmail: string;
 };
 
 const COLUMNS = {
@@ -59,12 +65,18 @@ const COLUMNS = {
  * Organization-scoped keys that name no project are included: an owner has to
  * be able to see every key, not only the ones for the project they are in.
  */
-export async function listApiKeys(auth: AuthContext): Promise<readonly ApiKey[]> {
+export async function listApiKeys(
+  auth: AuthContext,
+): Promise<readonly ListedApiKey[]> {
   authorize(auth, "read", here(auth));
 
   const rows = await db()
-    .select(COLUMNS)
+    .select({
+      ...COLUMNS,
+      createdByEmail: user.email,
+    })
     .from(apiKey)
+    .innerJoin(user, eq(apiKey.createdByUserId, user.id))
     .where(within(auth, apiKey))
     .orderBy(apiKey.id);
 

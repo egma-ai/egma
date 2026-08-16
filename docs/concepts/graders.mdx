@@ -8,7 +8,7 @@ A **Grader** is an LLM-based judge that reads a completed conversation and evalu
 
 ## The Grader Library
 
-Egma ships a library of built-in graders, accessible at **/graders** in your dashboard. Each library entry defines a type of judgment — behavioral evaluation, latency measurement, tool-call checking, and so on — along with the form of parameters it accepts.
+Egma ships a library of predefined graders, accessible at **Graders** in your dashboard, under the project you are working in (`/projects/:projectId/graders`). Each library entry defines a type of judgment — expected behaviors, latency, tool calls, and so on — along with the form of parameters it accepts.
 
 You activate a grader for your project by pressing **Use** on a library entry. This creates a **project grader**: a copy of that library entry with your chosen parameters, scope, and settings. Your project can have multiple copies of the same library entry, each configured differently.
 
@@ -64,7 +64,7 @@ Every verdict row references the specific grader `version_id` that produced it, 
 
 ### Via the dashboard
 
-Navigate to **/graders**, find the library entry you want, and click **Use**. Fill in the params form, set the scope, and choose whether the grader is required or diagnostic.
+Open **Graders** in the project you are configuring (`/projects/:projectId/graders`), find the library entry you want, and click **Use**. Fill in the params form, set the scope, and choose whether the grader is required or diagnostic.
 
 ### Via the API
 

@@ -1,3 +1,14 @@
+/**
+ * Light or dark, and where the choice is kept.
+ *
+ * The product navigation used to live here too. It is `lib/navigation.ts` now,
+ * because navigation is a project's — every item carries the project it belongs
+ * to — and a flat list of hrefs could not say that.
+ */
+
+import { GRADERS_SECTION } from "./graders.ts";
+import { projectPath } from "./project-context.ts";
+
 export type Theme = "light" | "dark";
 
 export const THEME_STORAGE_KEY = "egma-theme";
@@ -10,16 +21,22 @@ export function nextTheme(theme: Theme): Theme {
   return theme === "light" ? "dark" : "light";
 }
 
-export const PRODUCT_NAVIGATION = [
-  { id: "transcripts", label: "Transcripts", href: "/traces" },
-  // One section for both grader screens: the shelf of definitions, and the
-  // copies a project is judging with. Its label is the plain word for what is
-  // in it rather than "Library", which says where something is kept and not
-  // what it is.
-  { id: "graders", label: "Graders", href: "/graders" },
-] as const;
+/**
+ * Human labels for the machine names of predefined graders.
+ *
+ * The API keeps these stable keys because runs and frozen grading plans need
+ * durable names. Product surfaces pass the stored value through this one
+ * presentation seam instead of teaching each route how to title it. A team
+ * name that is not one of these keys is returned exactly as it was written.
+ */
+const PREDEFINED_GRADER_DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([
+  ["expected_behaviors", "Expected behaviors"],
+  ["latency", "Latency"],
+]);
 
-export type ProductSection = (typeof PRODUCT_NAVIGATION)[number]["id"];
+export function graderDisplayName(name: string): string {
+  return PREDEFINED_GRADER_DISPLAY_NAMES.get(name) ?? name;
+}
 
 /**
  * The two screens inside the Graders section, and the order they read in.
@@ -30,14 +47,38 @@ export type ProductSection = (typeof PRODUCT_NAVIGATION)[number]["id"];
  * reverse order would show a list of copies before anything explained what they
  * were copies of.
  *
- * Here beside the main navigation rather than in either screen's copy file,
- * because a strip whose labels lived in one of the two pages would be a page
- * naming its sibling — and the tab that is not current has to be named by
- * something neither page owns.
+ * Here rather than in either screen's copy file, because a strip whose labels
+ * lived in one of the two pages would be a page naming its sibling — and the
+ * tab that is not current has to be named by something neither page owns.
+ *
+ * **Both addresses carry the project, and that is a function rather than a
+ * constant for exactly that reason.** The pair that arrived from `main` sat at
+ * `/graders` and `/graders/running` with no project in either address, while
+ * this shell reads the project out of the path — so the selector fell back to
+ * whichever project came first in the viewer's list, and pressing Use put a
+ * running copy on a project nobody was looking at. A constant href cannot say
+ * which project it means; this asks.
  */
-export const GRADER_TABS = [
-  { id: "library", label: "Library", href: "/graders" },
-  { id: "running", label: "Running", href: "/graders/running" },
-] as const;
+const GRADER_TABS = [
+  { id: "library", label: "Library", rest: [] },
+  { id: "running", label: "Running", rest: ["running"] },
+] as const satisfies readonly {
+  readonly id: string;
+  readonly label: string;
+  readonly rest: readonly string[];
+}[];
 
 export type GraderTab = (typeof GRADER_TABS)[number]["id"];
+
+/** The two tabs of one project's Graders section, in reading order. */
+export function graderTabsFor(projectId: string): readonly {
+  readonly id: GraderTab;
+  readonly label: string;
+  readonly href: string;
+}[] {
+  return GRADER_TABS.map((tab) => ({
+    id: tab.id,
+    label: tab.label,
+    href: projectPath(projectId, GRADERS_SECTION, ...tab.rest),
+  }));
+}

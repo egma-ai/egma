@@ -91,7 +91,7 @@ describe("setting a project's judge", () => {
     expect(JSON.stringify(set)).not.toContain("sk-judge-secret");
   });
 
-  it("lands in the row as a v1. envelope, not as the key", async () => {
+  it("lands on the organization's credential as a v1. envelope, not as the key", async () => {
     await setJudgeConfiguration(actingAsAcme(), {
       provider: "openai",
       model: "gpt-4.1-mini",
@@ -102,7 +102,10 @@ describe("setting a project's judge", () => {
       credentials: string;
       credentials_hint: string;
     }>(
-      "select credentials, credentials_hint from judge_configuration where project_id = $1",
+      `select c.credentials, c.credentials_hint
+         from judge_configuration jc
+         join judge_credential c on c.id = jc.credential_id
+        where jc.project_id = $1`,
       [acme.project],
     );
 

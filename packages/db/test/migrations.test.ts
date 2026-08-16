@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { newId } from "@egma/ids";
+import { is } from "drizzle-orm";
+import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -13,7 +15,9 @@ import {
   readMigrations,
   runMigrations,
 } from "../src/migrate.ts";
+import * as schema from "../src/schema/index.ts";
 import { createEmptyDatabase, type EmptyDatabase } from "./support/database.ts";
+import { repeatedMigrationNumbers } from "./support/migration-numbers.ts";
 
 describe("the migration files", () => {
   it("are numbered plain SQL, applied in that order", async () => {
@@ -49,6 +53,18 @@ describe("the migration files", () => {
   });
 
   /**
+   * The same rule again, said the way the failure reads: which number was used
+   * twice. The density check above already refuses a repeat, but it reports it
+   * as two long lists of integers that differ somewhere in the middle, and the
+   * person reading that has a merge of six renumbered migrations in front of
+   * them. Both directories are held by `repeatedMigrationNumbers`, so the two
+   * stores cannot drift into two answers about what a number means.
+   */
+  it("use each number once, and say which if not", async () => {
+    expect(repeatedMigrationNumbers(await readMigrations())).toEqual([]);
+  });
+
+  /**
    * The journal is drizzle's own bookkeeping — nothing applies from it, the
    * plain SQL above is what boot reads — and it is what the generator diffs the
    * next migration against. A journal that disagrees with the files is a
@@ -70,6 +86,235 @@ describe("the migration files", () => {
     expect(journal.entries.map((entry) => entry.idx)).toEqual(
       files.map((_, index) => index),
     );
+  });
+});
+
+/**
+ * The newest snapshot, held to the schema it claims to be a snapshot of.
+ *
+ * **The snapshot is the baseline every future `db:generate` diffs against, and
+ * a wrong baseline does not stay one wrong migration.** Whatever it
+ * misremembers is reported as still pending, so the next person to add a column
+ * gets a statement about somebody else's column bundled into their unrelated
+ * migration — and it travels forward with every generate after that.
+ *
+ * The journal test above holds the *files* to one story. This holds the
+ * *schema* to it, which is the half that had no check: the drift that produced
+ * this test was a column recorded as `text` where the schema says
+ * `text COLLATE "C"`, and nothing failed. Every migration ran correctly, every
+ * database ended up right, and only `drizzle-kit generate` knew.
+ *
+ * It reads files and nothing else, so it costs milliseconds and needs no
+ * database. `schema-shape.test.ts` asks the other question — whether a *live*
+ * migrated database matches the schema — and the two together are what make a
+ * hand-edited snapshot loud.
+ */
+describe("the newest snapshot", () => {
+  /** Every column the schema declares, by table, as its SQL type. */
+  const declared = new Map<string, Map<string, string>>(
+    (Object.values(schema) as unknown[])
+      .filter((value): value is PgTable => is(value, PgTable))
+      .map((table) => {
+        const config = getTableConfig(table);
+        return [
+          config.name,
+          new Map(
+            config.columns.map((column) => [column.name, column.getSQLType()]),
+          ),
+        ] as const;
+      }),
+  );
+
+  type Snapshot = {
+    readonly tables: Readonly<
+      Record<
+        string,
+        { readonly columns: Readonly<Record<string, { readonly type: string }>> }
+      >
+    >;
+  };
+
+  async function newest(): Promise<Snapshot> {
+    const journal = JSON.parse(
+      await readFile(
+        path.join(MIGRATIONS_DIRECTORY, "meta", "_journal.json"),
+        "utf8",
+      ),
+    ) as { entries: readonly { idx: number }[] };
+    const last = journal.entries.at(-1);
+    if (last === undefined) throw new Error("the journal holds no entries");
+
+    return JSON.parse(
+      await readFile(
+        path.join(
+          MIGRATIONS_DIRECTORY,
+          "meta",
+          `${String(last.idx).padStart(4, "0")}_snapshot.json`,
+        ),
+        "utf8",
+      ),
+    ) as Snapshot;
+  }
+
+  it("records every table the schema declares", async () => {
+    const snapshot = await newest();
+    expect(declared.size).toBeGreaterThan(0);
+    for (const table of declared.keys()) {
+      expect(snapshot.tables[`public.${table}`], table).toBeDefined();
+    }
+  });
+
+  it("records every column as the type the schema says it is", async () => {
+    const snapshot = await newest();
+    const disagreements: string[] = [];
+
+    for (const [table, columns] of declared) {
+      const recorded = snapshot.tables[`public.${table}`]?.columns ?? {};
+      for (const [column, type] of columns) {
+        const held = recorded[column]?.type;
+        if (held !== type) {
+          disagreements.push(
+            `${table}.${column}: the schema says ${type}, the snapshot says ${String(held)}`,
+          );
+        }
+      }
+    }
+
+    // Named rather than counted, because the fix is per column and a bare
+    // count would send somebody hunting through three thousand lines of JSON.
+    expect(disagreements).toEqual([]);
+  });
+});
+
+/**
+ * The newest snapshot, held to the database the migrations actually build.
+ *
+ * **The two tests above cost nothing because they read files, and that is also
+ * their limit: a snapshot is generated, but a migration's SQL body is not
+ * always.** Drizzle writes the naive diff — `ADD COLUMN … NOT NULL` — which
+ * fails outright on a table that already holds rows and moves no data, so a
+ * migration that has to backfill is authored by hand: add nullable, fill every
+ * row, then `SET NOT NULL`. That is correct and it is what `0030` does.
+ *
+ * It leaves a gap nothing else covers. Drizzle never reads the `.sql` when it
+ * diffs, so an authored body and its generated snapshot can disagree and no
+ * tool notices — and the next `generate` would then plan against a schema that
+ * does not exist. The file tests cannot see it, because both files can be
+ * internally consistent while the SQL between them builds something else.
+ *
+ * Nullability is where they come apart, and it is the one thing nothing checked:
+ * the type test above compares types only, and `schema-shape.test.ts` pins
+ * nullability for exactly two columns of `simulation` as a structural claim
+ * about runs. A column left nullable by an authored body while the snapshot
+ * claims otherwise passed every test in this repository until this one.
+ *
+ * So: build from empty, ask Postgres what it ended up with, and hold every
+ * column to what the snapshot claims.
+ */
+describe("the newest snapshot, against what the migrations build", () => {
+  let database: EmptyDatabase;
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("snapshot_agreement");
+    await runMigrations(database.url);
+  });
+
+  afterAll(async () => {
+    await database.drop();
+  });
+
+  it("claims every column the migrations build, and no other", async () => {
+    const journal = JSON.parse(
+      await readFile(
+        path.join(MIGRATIONS_DIRECTORY, "meta", "_journal.json"),
+        "utf8",
+      ),
+    ) as { entries: readonly { idx: number }[] };
+    const last = journal.entries.at(-1);
+    if (last === undefined) throw new Error("the journal holds no entries");
+
+    const snapshot = JSON.parse(
+      await readFile(
+        path.join(
+          MIGRATIONS_DIRECTORY,
+          "meta",
+          `${String(last.idx).padStart(4, "0")}_snapshot.json`,
+        ),
+        "utf8",
+      ),
+    ) as {
+      readonly tables: Readonly<
+        Record<
+          string,
+          {
+            readonly name: string;
+            readonly columns: Readonly<
+              Record<string, { readonly name: string; readonly notNull: boolean }>
+            >;
+          }
+        >
+      >;
+    };
+
+    const client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    let built: Map<string, boolean>;
+    try {
+      const { rows } = await client.query<{
+        table_name: string;
+        column_name: string;
+        is_nullable: string;
+      }>(
+        `select table_name, column_name, is_nullable
+           from information_schema.columns
+          where table_schema = 'public'`,
+      );
+      built = new Map(
+        rows.map((row) => [
+          `${row.table_name}.${row.column_name}`,
+          row.is_nullable === "NO",
+        ]),
+      );
+    } finally {
+      await client.end();
+    }
+
+    const disagreements: string[] = [];
+    let compared = 0;
+
+    for (const table of Object.values(snapshot.tables)) {
+      for (const column of Object.values(table.columns)) {
+        const key = `${table.name}.${column.name}`;
+        const inDatabase = built.get(key);
+        if (inDatabase === undefined) {
+          disagreements.push(
+            `${key}: the snapshot claims it, the migrations build no such column`,
+          );
+          continue;
+        }
+        compared += 1;
+        if (inDatabase !== column.notNull) {
+          disagreements.push(
+            `${key}: the snapshot says notNull=${column.notNull}, the migrations build notNull=${inDatabase}`,
+          );
+        }
+        built.delete(key);
+      }
+    }
+
+    for (const key of built.keys()) {
+      // Drizzle's own bookkeeping is not part of the schema it describes.
+      if (key.startsWith("__drizzle")) continue;
+      disagreements.push(
+        `${key}: the migrations build it, the snapshot claims no such column`,
+      );
+    }
+
+    // Named rather than counted, for the same reason as the type test above:
+    // the fix is per column, and a count sends somebody hunting through
+    // thousands of lines of JSON to find which one.
+    expect(disagreements).toEqual([]);
+    expect(compared).toBeGreaterThan(0);
   });
 });
 
@@ -292,8 +537,8 @@ describe("the persona rename (0005)", () => {
   it("pins the new prefixes: a dh_ id no longer fits the check", async () => {
     await expect(
       client.query(
-        `insert into persona (id, organization_id, project_id, name, current_version_id)
-         values ($1, $2, $3, 'Old Format', $4)`,
+        `insert into persona (id, organization_id, project_id, name, current_version_id, revision)
+         values ($1, $2, $3, 'Old Format', $4, 'a-revision')`,
         [
           `dh_${newId("prs").slice("prs_".length)}`,
           organizationId,
@@ -1748,3 +1993,798 @@ describe("the connection type leaving the simulation row (0019)", () => {
     expect(rows).toHaveLength(1);
   });
 });
+
+/**
+ * Archive, live revisions, the stored variant and the capability record, over a
+ * database that already holds agents and connections (0029).
+ *
+ * Four changes in one migration because they are one change to what an agent
+ * and a connection *are*, and every one of them has to land without changing
+ * what an installed row means. The sharp cases are the two backfills: a
+ * revision every row has to have before anybody can edit one, and a variant
+ * that has to be the shape the code would have derived from that row's config
+ * the moment before the upgrade ran.
+ */
+describe("the agent and connection lifecycle over installed data (0029)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const liveAgent = newId("agt");
+  const goneAgent = newId("agt");
+  const retellConnection = newId("con");
+  const keyPairConnection = newId("con");
+  const endpointConnection = newId("con");
+  const phoneConnection = newId("con");
+  /**
+   * The sharp row, and the one the first version of this test could not have
+   * caught because every connection it wrote hung off the *live* agent: a
+   * connection still active under an agent the old release had already
+   * soft-deleted. Nothing was wrong with it then — the parent's marker hid it
+   * from every read — and everything is wrong with it after Restore exists,
+   * because restoring the parent would bring it back live, carrying the
+   * provider credential it was sealed with.
+   */
+  const orphanedChild = newId("con");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("agent_lifecycle");
+
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0029-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0029") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    await client.query(
+      "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+      [projectId, organizationId],
+    );
+    await client.query(
+      "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, 'Front desk')",
+      [liveAgent, organizationId, projectId],
+    );
+    // An agent the old release had soft-deleted. Archive is what that always
+    // was, so the rename has to carry it across as an archived row rather than
+    // leave it behind.
+    await client.query(
+      `insert into agent (id, organization_id, project_id, name, deleted_at)
+       values ($1, $2, $3, 'Retired', now())`,
+      [goneAgent, organizationId, projectId],
+    );
+
+    const connection = async (
+      id: string,
+      name: string,
+      type: string,
+      modality: string,
+      topology: string,
+      config: string,
+      owner: string = liveAgent,
+    ) =>
+      client.query(
+        `insert into connection
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+        [id, organizationId, projectId, owner, name, type, modality, topology, config],
+      );
+
+    await connection(
+      retellConnection,
+      "retell-1",
+      "retell",
+      "chat",
+      "hosted-broker",
+      '{"retellAgentId":"agent_abc"}',
+    );
+    await connection(
+      keyPairConnection,
+      "livekit-1",
+      "livekit",
+      "voice",
+      "agent-dials-out",
+      '{"url":"wss://acme.livekit.cloud"}',
+    );
+    await connection(
+      endpointConnection,
+      "livekit-2",
+      "livekit",
+      "voice",
+      "agent-dials-out",
+      '{"url":"wss://acme.livekit.cloud","tokenEndpoint":"https://acme.example/token"}',
+    );
+    await connection(
+      phoneConnection,
+      "phone-1",
+      "phone",
+      "voice",
+      "egma-dials-in",
+      '{"phoneNumber":"+15551234567"}',
+    );
+    await connection(
+      orphanedChild,
+      "retell-1",
+      "retell",
+      "chat",
+      "hosted-broker",
+      '{"retellAgentId":"agent_orphan"}',
+      goneAgent,
+    );
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds agents", async () => {
+    const upgrade = (await readMigrations()).find((migration) =>
+      migration.name.startsWith("0029_"),
+    );
+    if (upgrade === undefined) throw new Error("0029 is missing");
+    await writeFile(path.join(before, upgrade.name), upgrade.sql);
+
+    const { applied } = await runMigrations(database.url, before);
+    expect(applied).toEqual([upgrade.name]);
+  });
+
+  it("carries a soft-deleted agent across as the archived agent it always was", async () => {
+    const { rows } = await client.query<{ id: string; archived_at: Date | null }>(
+      "select id, archived_at from agent order by id",
+    );
+    const byId = new Map(rows.map((row) => [row.id, row.archived_at]));
+
+    expect(byId.get(liveAgent)).toBeNull();
+    // The row is still there and still readable, which is the whole difference
+    // between Archive and the deletion this replaced.
+    expect(byId.get(goneAgent)).toBeInstanceOf(Date);
+  });
+
+  it("archives the live children of an agent that was already archived", async () => {
+    const { rows } = await client.query<{ archived_at: Date | null }>(
+      "select archived_at from connection where id = $1",
+      [orphanedChild],
+    );
+
+    // Under the old rule this row was harmless: the parent's marker hid it from
+    // every read. Under the new one, Restore brings the parent back — and a
+    // child nobody archived would come back live, carrying the provider
+    // credential it was sealed with. That is the one thing agent Restore
+    // promises cannot happen.
+    expect(rows[0]?.archived_at).toBeInstanceOf(Date);
+  });
+
+  it("leaves no active connection anywhere under an archived agent", async () => {
+    // The property rather than the row: whatever installed data holds, after
+    // this migration there is no way to reach an archived agent.
+    const { rows } = await client.query<{ id: string }>(
+      `select c.id from connection c
+         join agent a on a.id = c.agent_id
+        where a.archived_at is not null and c.archived_at is null`,
+    );
+    expect(rows.map((row) => row.id)).toEqual([]);
+  });
+
+  it("keeps that child archived when the agent is restored", async () => {
+    // Restore writes the agent row and only the agent row, so the child stays
+    // where the migration put it. This is the same promise the access-layer
+    // tests make for agents archived after the upgrade; asserting it here is
+    // what says it also holds for the ones archived before it.
+    await client.query(
+      "update agent set archived_at = null where id = $1",
+      [goneAgent],
+    );
+
+    const { rows } = await client.query<{ archived_at: Date | null }>(
+      "select archived_at from connection where id = $1",
+      [orphanedChild],
+    );
+    expect(rows[0]?.archived_at).toBeInstanceOf(Date);
+
+    // Put it back, so the assertions after this one still meet the world the
+    // migration left behind.
+    await client.query(
+      "update agent set archived_at = now() where id = $1",
+      [goneAgent],
+    );
+  });
+
+  it("gives every row already there a revision, so the first edit has one to name", async () => {
+    for (const table of ["agent", "connection"]) {
+      const { rows } = await client.query<{ revision: string }>(
+        `select revision from ${table}`,
+      );
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        // Opaque, and wearing the same shape the code mints, so nothing
+        // downstream has two formats to read.
+        expect(row.revision).toMatch(/^rev_[0-9A-HJKMNP-TV-Z]{26}$/);
+      }
+      // Each row's own, never one value shared out.
+      const distinct = new Set(rows.map((row) => row.revision));
+      expect(distinct.size).toBe(rows.length);
+    }
+  });
+
+  it("freezes each connection's shape as the discriminator would have read it", async () => {
+    const { rows } = await client.query<{ id: string; variant_id: string }>(
+      "select id, variant_id from connection",
+    );
+    const byId = new Map(rows.map((row) => [row.id, row.variant_id]));
+
+    expect(byId.get(retellConnection)).toBe("retell.api_key");
+    expect(byId.get(phoneConnection)).toBe("phone.number");
+    // The one type that comes in two shapes, told apart exactly as the registry
+    // tells them apart: a config naming tokenEndpoint is the endpoint shape and
+    // every other livekit config is the key pair. No connection changes
+    // meaning; the derivation is simply written down.
+    expect(byId.get(keyPairConnection)).toBe("livekit.key_pair");
+    expect(byId.get(endpointConnection)).toBe("livekit.token_endpoint");
+  });
+
+  it("says of every installed connection that nobody has measured it", async () => {
+    const { rows } = await client.query<{
+      capability_state: string;
+      capabilities_measured: unknown;
+      capabilities_supported: unknown;
+      capabilities_checked_at: Date | null;
+      capability_source: string | null;
+    }>(
+      "select capability_state, capabilities_measured, capabilities_supported, capabilities_checked_at, capability_source from connection",
+    );
+
+    for (const row of rows) {
+      // The truth: nothing had ever measured any of them. An empty measured
+      // list would have claimed each was checked and every capability found
+      // absent, which is a fact about targets nobody has ever reached.
+      expect(row.capability_state).toBe("unknown");
+      expect(row.capabilities_measured).toBeNull();
+      expect(row.capabilities_supported).toBeNull();
+      expect(row.capabilities_checked_at).toBeNull();
+      expect(row.capability_source).toBeNull();
+    }
+  });
+
+  it("brings the check that keeps a known state whole", async () => {
+    await expect(
+      client.query(
+        `update connection set capability_state = 'known' where id = $1`,
+        [retellConnection],
+      ),
+    ).rejects.toThrow(/connection_capability_evidence_agrees/u);
+  });
+
+  it("keeps the name rules, now released by Archive rather than by deletion", async () => {
+    const second = async (id: string) =>
+      client.query(
+        `insert into connection
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
+         values ($1, $2, $3, $4, 'retell-1', 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}'::jsonb, 'rev_00000000000000000000000001')`,
+        [id, organizationId, projectId, liveAgent],
+      );
+
+    await expect(second(newId("con"))).rejects.toThrow(
+      /connection_agent_id_name_unique/u,
+    );
+
+    await client.query("update connection set archived_at = now() where id = $1", [
+      retellConnection,
+    ]);
+    await expect(second(newId("con"))).resolves.toBeDefined();
+  });
+});
+
+/**
+ * A test says which agents it applies to, over a database that already holds
+ * tests (0032).
+ *
+ * **This is the migration whose generated body would have been wrong**, and the
+ * two ways it would have been wrong are what this block is for. `ADD COLUMN …
+ * NOT NULL` fails outright on a table that holds rows, and a diff moves no
+ * data — so every installed test would have arrived at the new schema with no
+ * applicable agent, which is the one state the relation exists to rule out.
+ *
+ * So the seeding here is deliberately awkward: two projects, one with agents
+ * and one without, an agent already archived, and a test somebody had already
+ * archived themselves. Every one of those is a row the backfill has to treat
+ * differently, and an empty database can prove none of it.
+ */
+describe("tests gaining applicable agents over installed data (0032)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  /** The project that has agents to be linked to. */
+  const staffed = newId("prj");
+  /** And the one that has none, whose tests have nowhere to run. */
+  const bare = newId("prj");
+
+  const liveAgent = newId("agt");
+  const secondAgent = newId("agt");
+  /** Archived before the upgrade: it must receive no link at all. */
+  const goneAgent = newId("agt");
+
+  const rescheduling = newId("tst");
+  const reschedulingVersion = newId("tstv");
+  /** Somebody archived this one themselves, before any of this existed. */
+  const retired = newId("tst");
+  const retiredVersion = newId("tstv");
+  /** In the project with no agent, so the upgrade has to archive it. */
+  const stranded = newId("tst");
+  const strandedVersion = newId("tstv");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("tests_apply_to_agents");
+
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0032-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0032") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    for (const [id, slug] of [
+      [staffed, "staffed"],
+      [bare, "bare"],
+    ] as const) {
+      // 0031 has already run, so a project carries a live revision of its own.
+      await client.query(
+        `insert into project (id, organization_id, name, slug, revision)
+         values ($1, $2, $3, $3, $4)`,
+        [id, organizationId, slug, newId("rev")],
+      );
+    }
+
+    // 0029 has already run, so agents carry a revision and an archive marker.
+    const agent = async (id: string, name: string, project: string, archived: boolean) =>
+      client.query(
+        `insert into agent (id, organization_id, project_id, name, revision, archived_at)
+         values ($1, $2, $3, $4, $5, ${archived ? "now()" : "null"})`,
+        [id, organizationId, project, name, newId("rev")],
+      );
+
+    await agent(liveAgent, "Front desk", staffed, false);
+    await agent(secondAgent, "Front desk v2", staffed, false);
+    await agent(goneAgent, "Retired desk", staffed, true);
+
+    const test = async (
+      id: string,
+      versionId: string,
+      name: string,
+      project: string,
+      archived: boolean,
+    ) => {
+      await client.query("begin");
+      await client.query(
+        `insert into test (id, organization_id, project_id, name, current_version_id, deleted_at)
+         values ($1, $2, $3, $4, $5, ${archived ? "now()" : "null"})`,
+        [id, organizationId, project, name, versionId],
+      );
+      await client.query(
+        `insert into test_version (id, test_id, version, content)
+         values ($1, $2, 1, '{"scenario": "Moves a booking", "expectedBehaviors": ["confirms the new time"]}'::jsonb)`,
+        [versionId, id],
+      );
+      await client.query("commit");
+    };
+
+    await test(rescheduling, reschedulingVersion, "Reschedules", staffed, false);
+    await test(retired, retiredVersion, "An old idea", staffed, true);
+    await test(stranded, strandedVersion, "Nowhere to run", bare, false);
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds tests", async () => {
+    const upgrade = (await readMigrations()).find((migration) =>
+      migration.name.startsWith("0032_"),
+    );
+    if (upgrade === undefined) throw new Error("0032 is missing");
+    await writeFile(path.join(before, upgrade.name), upgrade.sql);
+
+    const { applied } = await runMigrations(database.url, before);
+    expect(applied).toEqual([upgrade.name]);
+  });
+
+  it("links every existing test to every active agent in its own project", async () => {
+    const { rows } = await client.query<{ agent_id: string }>(
+      "select agent_id from test_agent where test_id = $1 order by agent_id",
+      [rescheduling],
+    );
+    // Both active agents and neither of them chosen: before this migration any
+    // test of a project could be run against any agent of that project, and
+    // picking one would be egma authoring somebody's coverage on no evidence.
+    expect(rows.map((row) => row.agent_id).sort()).toEqual(
+      [liveAgent, secondAgent].sort(),
+    );
+  });
+
+  it("links no test to an agent that was already archived", async () => {
+    const { rows } = await client.query<{ test_id: string }>(
+      "select test_id from test_agent where agent_id = $1",
+      [goneAgent],
+    );
+    // A link a run can never use is a promise egma cannot keep, and writing one
+    // would make Archive mean nothing on the day the relation arrived.
+    expect(rows).toEqual([]);
+  });
+
+  it("links an archived test too, so restoring it finds the coverage it would have had", async () => {
+    const { rows } = await client.query<{ agent_id: string }>(
+      "select agent_id from test_agent where test_id = $1 order by agent_id",
+      [retired],
+    );
+    expect(rows.map((row) => row.agent_id).sort()).toEqual(
+      [liveAgent, secondAgent].sort(),
+    );
+  });
+
+  it("archives the test whose project has no active agent, and says why", async () => {
+    const { rows } = await client.query<{
+      archived_at: Date | null;
+      archive_reason: string | null;
+    }>("select archived_at, archive_reason from test where id = $1", [stranded]);
+
+    expect(rows[0]?.archived_at).toBeInstanceOf(Date);
+    // The reason is owed to whoever finds it in the archive: they did not do
+    // this, and the fix is to link an agent rather than to wonder who removed
+    // it.
+    expect(rows[0]?.archive_reason).toBe("needs_agent");
+  });
+
+  it("keeps that test's history, which is the whole difference from a delete", async () => {
+    const { rows } = await client.query<{ id: string; version: number }>(
+      "select id, version from test_version where test_id = $1",
+      [stranded],
+    );
+    expect(rows).toEqual([{ id: strandedVersion, version: 1 }]);
+  });
+
+  it("leaves a test somebody archived themselves carrying no reason", async () => {
+    const { rows } = await client.query<{
+      archived_at: Date | null;
+      archive_reason: string | null;
+    }>("select archived_at, archive_reason from test where id = $1", [retired]);
+
+    expect(rows[0]?.archived_at).toBeInstanceOf(Date);
+    // They know why. A reason invented for them would say the upgrade did this.
+    expect(rows[0]?.archive_reason).toBeNull();
+  });
+
+  it("leaves the test that had a target active", async () => {
+    const { rows } = await client.query<{ archived_at: Date | null }>(
+      "select archived_at from test where id = $1",
+      [rescheduling],
+    );
+    expect(rows[0]?.archived_at).toBeNull();
+  });
+
+  it("gives every test two revisions, each its own, and never the same one twice", async () => {
+    const { rows } = await client.query<{
+      revision: string;
+      applicability_revision: string;
+    }>("select revision, applicability_revision from test");
+
+    expect(rows.length).toBe(3);
+    for (const row of rows) {
+      expect(row.revision).toMatch(/^rev_[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(row.applicability_revision).toMatch(/^rev_[0-9A-HJKMNP-TV-Z]{26}$/);
+      // A test whose two tokens matched would accept an edit written against
+      // one in place of the other, which is the confusion two tokens exist to
+      // prevent.
+      expect(row.revision).not.toBe(row.applicability_revision);
+    }
+    const minted = new Set(
+      rows.flatMap((row) => [row.revision, row.applicability_revision]),
+    );
+    expect(minted.size).toBe(rows.length * 2);
+  });
+
+  it("refuses a link between a test and an agent of another project", async () => {
+    // The tenancy triangle, one level across: the composite key means a
+    // cross-project link cannot be written at all, whatever writes it.
+    await expect(
+      client.query(
+        "insert into test_agent (test_id, agent_id, project_id) values ($1, $2, $3)",
+        [stranded, liveAgent, bare],
+      ),
+    ).rejects.toThrow(/test_agent_agent_project_fk/u);
+  });
+
+  it("refuses an archive reason on a test nothing archived", async () => {
+    await expect(
+      client.query(
+        "update test set archive_reason = 'needs_agent' where id = $1",
+        [rescheduling],
+      ),
+    ).rejects.toThrow(/test_archive_reason_needs_an_archive/u);
+  });
+});
+
+/**
+ * Runs written before egma froze a grading plan, and what the upgrade may say
+ * about them.
+ *
+ * **The rule is that nothing is invented, and after the grader redesign that
+ * rule swallows the whole file.** This migration used to capture a
+ * `migration_snapshot` for every run with work still outstanding, built out of
+ * the project's authored graders, their priorities, what each version read and
+ * which modalities it scored, the graders a test named directly, and the
+ * expected-behaviors built-in as a rowless item with a reserved key. Every one
+ * of those retired: `grader.priority` is dropped by `0025`, `test_grader` by
+ * `0027`, `reads` and `modalities` never exist, and the built-in is an ordinary
+ * running copy. There is nothing left to read and no shape left to write it in
+ * — and `0026` deletes every grader row on an upgraded instance in any case, so
+ * a snapshot taken here would name graders that are gone.
+ *
+ * So **every old run says `not_recorded`**, which is exactly what that state is
+ * for: this run predates frozen plans, and egma will not reconstruct one from
+ * today's graders. What is under test is that the row lands for every run,
+ * whatever state it is in, and that an unrecorded plan holds nothing — no
+ * groups, no credentials, and no moment, because a plan and the moment it was
+ * captured are one fact.
+ */
+describe("grading plans over installed runs (0033)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const agentId = newId("agt");
+  const connectionId = newId("con");
+  const personaId = newId("prs");
+  const personaVersionId = newId("prsv");
+  const testId = newId("tst");
+  const testVersionId = newId("tstv");
+
+  /** Still conducting when the upgrade landed. */
+  const movingRun = newId("run");
+  const movingSimulation = newId("sim");
+  /** Finished long ago, with nothing left to judge. */
+  const settledRun = newId("run");
+  const settledSimulation = newId("sim");
+  /** Conducted before a simulation could pin a test at all. */
+  const testlessRun = newId("run");
+  const testlessSimulation = newId("sim");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("grading_plans");
+
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0033-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0033") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    await client.query(
+      `insert into project (id, organization_id, name, slug, revision)
+       values ($1, $2, 'Default', 'default', $3)`,
+      [projectId, organizationId, newId("rev")],
+    );
+    await client.query(
+      `insert into agent (id, organization_id, project_id, name, revision)
+       values ($1, $2, $3, 'Front desk', $4)`,
+      [agentId, organizationId, projectId, newId("rev")],
+    );
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
+       values ($1, $2, $3, $4, 'retell-1', 'retell', 'chat', 'hosted-broker', 'retell', '{"retellAgentId":"agent_abc"}'::jsonb, $5)`,
+      [connectionId, organizationId, projectId, agentId, newId("rev")],
+    );
+
+    // The project's judge, migrated into its own credential by 0030 — which is
+    // what a plan may point at, and the reason this migration comes after it.
+    const credentialId = newId("jcr");
+    await client.query(
+      `insert into judge_credential
+         (id, organization_id, label, provider, credentials, credentials_hint, revision)
+       values ($1, $2, 'Acme default', 'openai', 'sealed', 'WXYZ', $3)`,
+      [credentialId, organizationId, newId("rev")],
+    );
+    await client.query(
+      `insert into judge_configuration
+         (project_id, organization_id, provider, model, source, credential_id)
+       values ($1, $2, 'openai', 'gpt-4.1-mini', 'credential', $3)`,
+      [projectId, organizationId, credentialId],
+    );
+
+    await client.query("begin");
+    await client.query(
+      `insert into persona (id, organization_id, project_id, name, current_version_id, revision)
+       values ($1, $2, $3, 'Impatient Rita', $4, $5)`,
+      [personaId, organizationId, projectId, personaVersionId, newId("rev")],
+    );
+    await client.query(
+      `insert into persona_version (id, persona_id, version, traits)
+       values ($1, $2, 1, '{"personality":"Plain","language":"en-US"}'::jsonb)`,
+      [personaVersionId, personaId],
+    );
+    await client.query("commit");
+
+    await client.query("begin");
+    await client.query(
+      `insert into test (id, organization_id, project_id, name, current_version_id, revision, applicability_revision)
+       values ($1, $2, $3, 'Reschedules', $4, $5, $6)`,
+      [testId, organizationId, projectId, testVersionId, newId("rev"), newId("rev")],
+    );
+    await client.query(
+      `insert into test_version (id, test_id, version, content)
+       values ($1, $2, 1, '{"scenario":"Moves a booking","expectedBehaviors":["confirms the new time"]}'::jsonb)`,
+      [testVersionId, testId],
+    );
+    await client.query("commit");
+
+    const run = async (
+      id: string,
+      status: string,
+      finished: boolean,
+    ): Promise<void> => {
+      await client.query(
+        `insert into run
+           (id, organization_id, project_id, agent_id, connection_id, status, triggered_via,
+            pinned_test_versions, requested_personas, connection_snapshot, mock_tool_snapshot,
+            expected_simulation_count, completed_count, failed_count, canceled_count,
+            started_at, finished_at)
+         values ($1, $2, $3, $4, $5, $6, 'manual',
+                 '{"testVersionIds":[]}'::jsonb, '{"personaIds":[]}'::jsonb,
+                 '{"type":"retell","modality":"chat","topology":"hosted-broker","environment":null,"config":{}}'::jsonb,
+                 '{"defaults":[],"overrides":{}}'::jsonb,
+                 1, ${finished ? "1" : "null"}, ${finished ? "0" : "null"},
+                 ${finished ? "0" : "null"}, now(), ${finished ? "now()" : "null"})`,
+        [id, organizationId, projectId, agentId, connectionId, status],
+      );
+    };
+
+    const simulation = async (
+      id: string,
+      runId: string,
+      status: string,
+      pinned: boolean,
+    ): Promise<void> => {
+      await client.query(
+        `insert into simulation
+           (id, run_id, organization_id, project_id, agent_id, connection_id,
+            persona_id, persona_version_id, test_id, test_version_id,
+            position, modality, status, started_at, ended_at, ending_reason)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9::text, $10::text,
+                 1, 'chat', $11,
+                 ${status === "queued" ? "null" : "now()"},
+                 ${status === "completed" ? "now()" : "null"},
+                 ${status === "completed" ? "'persona_concluded'" : "null"})`,
+        [
+          id,
+          runId,
+          organizationId,
+          projectId,
+          agentId,
+          connectionId,
+          personaId,
+          personaVersionId,
+          // A conversation written before a simulation could pin a test at all
+          // carries neither half of the pin, which is the row the testless
+          // group exists for.
+          pinned ? testId : null,
+          pinned ? testVersionId : null,
+          status,
+        ],
+      );
+    };
+
+    await run(movingRun, "running", false);
+    await simulation(movingSimulation, movingRun, "queued", true);
+
+    await run(settledRun, "completed", true);
+    await simulation(settledSimulation, settledRun, "completed", true);
+
+    await run(testlessRun, "running", false);
+    await simulation(testlessSimulation, testlessRun, "queued", false);
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds runs", async () => {
+    const upgrade = (await readMigrations()).find((migration) =>
+      migration.name.startsWith("0033_"),
+    );
+    if (upgrade === undefined) throw new Error("0033 is missing");
+    await writeFile(path.join(before, upgrade.name), upgrade.sql);
+
+    const { applied } = await runMigrations(database.url, before);
+    expect(applied).toEqual([upgrade.name]);
+  });
+
+  it("records no plan for any old run, whatever state it is in", async () => {
+    const { rows } = await client.query<{ run_id: string; state: string }>(
+      "select run_id, state from grading_plan order by run_id",
+    );
+    const byRun = new Map(rows.map((row) => [row.run_id, row.state]));
+
+    // A run still conducting, a run finished long ago, and a run conducted
+    // before a simulation could pin a test at all. Nothing separates them here:
+    // none of the three was judged against a plan anybody wrote down, and
+    // reconstructing one would put a sentence on an old run claiming it was
+    // judged by things that may not have existed when it ran.
+    expect(byRun.get(movingRun)).toBe("not_recorded");
+    expect(byRun.get(testlessRun)).toBe("not_recorded");
+    expect(byRun.get(settledRun)).toBe("not_recorded");
+    // Every run gets a row. A run with no row at all would be a page unable to
+    // tell "nobody wrote this down" from "nobody has looked yet".
+    expect(rows).toHaveLength(3);
+  });
+
+  it("leaves every unrecorded plan holding nothing at all", async () => {
+    const { rows } = await client.query<{
+      groups: unknown;
+      credentials: unknown;
+      captured_at: string | null;
+    }>(
+      `select groups, judge_credential_ids as credentials, captured_at
+       from grading_plan order by run_id`,
+    );
+    for (const row of rows) {
+      expect(row.groups).toEqual([]);
+      expect(row.credentials).toEqual([]);
+      // No plan, and therefore no moment: the two are one fact, and
+      // `grading_plan_recorded_plans_carry_their_moment` holds them together.
+      expect(row.captured_at).toBeNull();
+    }
+  });
+
+  /**
+   * **Three proofs about a captured snapshot's shape used to stand here.** They
+   * held that a pinned simulation got a `version` group carrying the
+   * expected-behaviors built-in beside the project's authored graders, that a
+   * simulation with no test version got the one `legacy_testless` group, and
+   * that a captured plan indexed the judge credentials it needed so an archive
+   * could refuse. The migration captures nothing now, so all three describe a
+   * row this file can no longer produce. The shapes they proved are proved
+   * where plans are still written — at run start, by the run routes' own tests
+   * — and a `legacy_testless` group is not written anywhere any more.
+   */
+
+  it("gives every finished run a skipped count of zero, because nothing was skipped before it could be", async () => {
+    const { rows } = await client.query<{ skipped_count: number | null }>(
+      "select skipped_count from run where id = $1",
+      [settledRun],
+    );
+    expect(rows[0]?.skipped_count).toBe(0);
+  });
+});
+

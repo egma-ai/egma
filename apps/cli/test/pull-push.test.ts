@@ -466,17 +466,25 @@ describe("egma pull", () => {
     ]);
     expect(valuesOf(result.stdout, "version")).toEqual([first.versionId, second.versionId]);
 
-    // The files are the format, and each one is pinned to the version it holds.
+    // The files are the format, and each one pins both halves of the test: the
+    // content a run is judged by, and the live name and description beside it.
+    // A persona is written by identity with the display name for the reader.
     expect(await readTest("missed-appointment-reschedule.md")).toBe(
       [
         "---",
+        "format: 3",
         "name: missed-appointment-reschedule",
-        "personas: [impatient-caller]",
         `version: ${first.versionId}`,
+        `identity_revision: ${first.revision}`,
+        "personas:",
+        `  - id: ${platform.tests.addPersona("impatient-caller")}`,
+        "    name: impatient-caller",
         "---",
         "## Scenario",
         "The caller missed yesterday's appointment and wants to reschedule.",
         "## Expected behaviors",
+        // No priority marker on any line: format 3 writes the sentence and
+        // nothing else, because every expected behavior has to hold.
         "1. The agent acknowledges the missed appointment without blame.",
         "2. The agent offers at least two concrete alternative slots.",
         "",
@@ -485,7 +493,7 @@ describe("egma pull", () => {
     // A test that named nobody takes the default persona, and the file says so
     // rather than saying nothing.
     expect(await readTest("new-patient-insurance-question.md")).toContain(
-      "personas: [default-persona]",
+      "    name: default-persona",
     );
   });
 
@@ -643,7 +651,12 @@ describe("egma push", () => {
     expect(old.status).toBe(200);
     const held = (await old.json()) as { current: boolean; expected_behaviors: string[] };
     expect(held.current).toBe(false);
-    expect(held.expected_behaviors).toEqual(["The agent acknowledges it without blame."]);
+    // Sentences both ways. A frozen version is read past rather than
+    // rewritten, so a version stored before the ladder retired still holds the
+    // priority beside each sentence — but the wire answers the sentence.
+    expect(held.expected_behaviors).toEqual([
+      "The agent acknowledges it without blame.",
+    ]);
   });
 
   it("uploads nothing when the files say what egma already holds", async () => {
@@ -1315,6 +1328,9 @@ describe("both verbs, run with nobody watching", () => {
     expect(help.stdout).toContain("egma push");
     expect(help.stdout).toContain("5 push refused: Egma has moved on, pull first");
     expect(help.stdout).toContain("6 Egma turned a test or a mock tool away at its door");
+    expect(help.stdout).toContain(
+      "7 this Egma instance and this platform read different shapes: upgrade one of them",
+    );
   });
 
   /**

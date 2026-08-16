@@ -48,12 +48,34 @@ export const ID_PREFIXES = [
   "grl",
   "grd",
   "grv",
+  /**
+   * An organization's judge credential: the label, the provider and the sealed
+   * key an LLM judge is asked with. Its own identity because one organization
+   * may hold several, and because a project's judge setting stores a
+   * *reference* to one rather than a second copy of the secret.
+   */
+  "jcr",
   "mck",
   "ste",
   "run",
   "sim",
   "gjb",
+  /**
+   * One run's frozen grading plan: which graders will judge each pinned test
+   * version, at which versions, with which judge behind them. Its own identity
+   * because it is written once beside the run and read long afterwards by the
+   * grader service, and because an archive refusal has to be able to name the
+   * plan that still needs a credential.
+   */
+  "gpl",
   "del",
+  /**
+   * A live resource's revision: what an edit says it was written against, and
+   * a fresh one after every change that lands. It is an identifier rather than
+   * a counter so that nothing can guess the next one and so that it is opaque
+   * on its face — a caller who read `3` would sooner or later send `4`.
+   */
+  "rev",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

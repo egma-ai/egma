@@ -17,6 +17,7 @@ import {
   writeTestFile,
 } from "../src/folder/egma-folder.ts";
 import { CLI_ENTRY, makeWorkspace } from "./support/workspace.ts";
+import { aTestFile, blocking } from "./support/test-file.ts";
 
 const run = promisify(execFile);
 
@@ -141,14 +142,14 @@ it("refuses a repository bound to another real local platform before sending its
         suite: { name: "first-suite", id: null },
       },
     });
-    await writeTestFile(path.join(workspace.dir, "egma", "tests", "boundary.md"), {
+    await writeTestFile(path.join(workspace.dir, "egma", "tests", "boundary.md"), aTestFile({
       name: "Real boundary test",
       personas: [],
       version: testResource.version_id,
       scenario: "The persona asks to move an appointment.",
-      expectedBehaviors: ["The agent confirms the new time."],
+      expectedBehaviors: blocking("The agent confirms the new time."),
       mockTools: [],
-    });
+    }));
 
     // Prove the observer is in front of authentication. Platform A's key is
     // unknown on B, so the old preHandler observer missed this request when B
@@ -319,14 +320,14 @@ it("refuses when the bound real platform is down, and reaches no other platform"
         suite: { name: "down-suite", id: null },
       },
     });
-    await writeTestFile(path.join(workspace.dir, "egma", "tests", "unavailable.md"), {
+    await writeTestFile(path.join(workspace.dir, "egma", "tests", "unavailable.md"), aTestFile({
       name: "Real unavailable-platform test",
       personas: [],
       version: testResource.version_id,
       scenario: "The persona asks to move an appointment.",
-      expectedBehaviors: ["The agent confirms the new time."],
+      expectedBehaviors: blocking("The agent confirms the new time."),
       mockTools: [],
-    });
+    }));
     const repositoryIds = [
       resources.agent.id,
       resources.connection.id,

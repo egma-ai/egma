@@ -79,6 +79,21 @@ export const project = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     /**
+     * What this product area is for, in the words of whoever set it up.
+     *
+     * Optional, and nullable rather than defaulted to the empty string: a
+     * project nobody has described yet is *undescribed*, and a page can say so
+     * — where an empty string is a description somebody wrote and left blank.
+     */
+    description: text("description"),
+    /**
+     * The opaque token an edit has to name to be allowed to land — see
+     * `revisions.ts`. A project's name, slug and description are live fields
+     * that two admins can be looking at in two tabs, and the last write must
+     * not silently win.
+     */
+    revision: idText("revision").notNull(),
+    /**
      * The persona a test created naming none receives, so authoring a
      * first test never waits on authoring a persona. An ordinary row the
      * project points at, editable like any other. Nullable because the pointer
@@ -116,6 +131,7 @@ export const project = pgTable(
   },
   (table) => [
     prefixCheck("project_id_prefix", table.id, "prj"),
+    prefixCheck("project_revision_prefix", table.revision, "rev"),
     // Uniqueness follows scope, and the tenant column is always in the
     // constraint. There is deliberately no unique on organization_id alone:
     // one project per organization is a provisioning default, not a schema

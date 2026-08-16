@@ -1,7 +1,7 @@
+import { newId } from "@egma/ids";
 import {
   createPersona,
   getSimulation,
-  removeConnection,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
 import { afterEach, describe, expect, it } from "vitest";
@@ -121,6 +121,36 @@ async function aCustomerReadyToRun(
   };
 }
 
+/**
+ * Which agents a pinned version's test applies to, set through the door that
+ * owns that relation.
+ *
+ * A run may only pair an agent with a test linked to it, and a test authored
+ * before a second agent existed applies only to the first. Nothing here is
+ * under test — it is the world a claim needs before it can be asked for.
+ */
+async function applyTo(
+  key: string,
+  versionId: string,
+  agentIds: readonly string[],
+): Promise<void> {
+  const version = await ask(
+    api.app,
+    "GET",
+    `/api/test-versions/${versionId}`,
+    key,
+  );
+  expect(version.statusCode, JSON.stringify(version.body)).toBe(200);
+  const linked = await ask(
+    api.app,
+    "POST",
+    `/api/tests/${String(version.body.test_id)}/agents`,
+    key,
+    { agents: [...agentIds] },
+  );
+  expect(linked.statusCode, JSON.stringify(linked.body)).toBe(200);
+}
+
 /** A run over the customer's connection, whose simulation lands queued. */
 async function aQueuedRun(
   key: string,
@@ -130,6 +160,7 @@ async function aQueuedRun(
   const started = await ask(api.app, "POST", "/api/runs", key, {
     connection: connectionId,
     test_versions: [versionId],
+    idempotency_key: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const simulations = started.body.simulations as { id: string }[];
@@ -530,17 +561,30 @@ describe("a simulation the platform cannot hand over", () => {
     const { ada, key, agentId, connectionId, versionId } =
       await aCustomerReadyToRun("claims_skip");
 
-    // Two runs over two connections; one connection disappears before the
+    // Two runs over two connections; one connection stops resolving before the
     // claim, so one spec can be assembled and one cannot.
     const doomed = await aQueuedRun(key, connectionId, versionId);
     const registered = await ask(api.app, "POST", "/api/agents", key, {
       name: "Second desk",
       connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
     });
+    const secondAgent = (registered.body.agent as { id: string }).id;
     const secondConnection = (registered.body.connection as { id: string }).id;
+    // The test was authored before this agent existed, so nothing yet says it
+    // is worth running against it — and a run may only pair the two once
+    // somebody has.
+    await applyTo(key, versionId, [agentId, secondAgent]);
     const healthy = await aQueuedRun(key, secondConnection, versionId);
 
-    await removeConnection(contextFor(ada, "member"), agentId, connectionId);
+    // Marked archived in the row rather than through the Archive verb, on
+    // purpose: Archive settles the queue in the same transaction, so going
+    // through it would cancel the very simulation this test needs to reach the
+    // claim. What is under test is the claim door meeting a spec it cannot
+    // assemble, whatever left it that way.
+    await api.database.sql(
+      "update connection set archived_at = now() where id = $1",
+      [connectionId],
+    );
 
     const answered = await claim(api.config.simulatorServiceToken, {
       claimant: "sim-under-test",
@@ -580,7 +624,7 @@ describe("a simulation the platform cannot hand over", () => {
   });
 
   it("lands a credential that will not unseal the same way, and the batch dispatches whole", async () => {
-    const { ada, key, connectionId, versionId } =
+    const { ada, key, agentId, connectionId, versionId } =
       await aCustomerReadyToRun("claims_corrupt");
 
     const doomed = await aQueuedRun(key, connectionId, versionId);
@@ -588,7 +632,12 @@ describe("a simulation the platform cannot hand over", () => {
       name: "Second desk",
       connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
     });
+    const secondAgent = (registered.body.agent as { id: string }).id;
     const secondConnection = (registered.body.connection as { id: string }).id;
+    // The test was authored before this agent existed, so nothing yet says it
+    // is worth running against it — and a run may only pair the two once
+    // somebody has.
+    await applyTo(key, versionId, [agentId, secondAgent]);
     const healthy = await aQueuedRun(key, secondConnection, versionId);
 
     // The one write no seam should offer: a sealed envelope replaced with

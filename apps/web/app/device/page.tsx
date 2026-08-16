@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import { AuthShell, Field, styles } from "../ui.tsx";
+import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
+import { AuthShell, styles } from "../ui.tsx";
 
 /**
  * The code from your terminal.
@@ -29,8 +30,7 @@ export default function DeviceCodePage() {
     }
   }, []);
 
-  function submit(event: React.FormEvent): void {
-    event.preventDefault();
+  function submit(): void {
     const tidied = code.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
     if (tidied === "") return;
     window.location.assign(`/device/approve?user_code=${tidied}`);
@@ -46,25 +46,26 @@ export default function DeviceCodePage() {
           : "Type the code your terminal is showing."
       }
     >
-      <form className={styles.form} onSubmit={submit}>
+      <Form onSubmit={submit}>
         <Field label="Code" htmlFor="user_code">
-          <input
-            className={`${styles.input} ${styles.codeInput}`}
-            id="user_code"
-            name="user_code"
-            autoComplete="off"
-            autoCapitalize="characters"
-            spellCheck={false}
-            required
-            value={code}
-            onChange={(event) => setCode(event.target.value)}
-          />
+          <div className={styles.codeInput}>
+            <TextInput
+              id="user_code"
+              name="user_code"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              required
+              value={code}
+              onChange={setCode}
+            />
+          </div>
         </Field>
 
-        <button className={styles.button} type="submit">
+        <Button weight="strong" type="submit">
           Continue
-        </button>
-      </form>
+        </Button>
+      </Form>
     </AuthShell>
   );
 }

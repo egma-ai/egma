@@ -19,18 +19,21 @@
  * The URL is deliberately not copy. `/api/grader-library` is a machine surface
  * — it is the endpoint's own path, and matching it is how somebody reading the
  * network tab finds the request — and no page ever prints it as a word.
+ *
+ * **Nothing here is a sentence the screen cannot reach.** The sign-in, count and
+ * unreachable lines this file used to carry belonged to the organization-wide
+ * page it was written for: the shell answers an expired session for every page
+ * at once, the shared table says how many rows it has, and a refusal keeps the
+ * API's own sentence. Words nobody renders would still be read by the test
+ * below, which is worse than having none — it reads as a screen whose whole
+ * vocabulary is checked.
  */
 
 export const LIBRARY = {
-  navigation: "Graders",
-  title: "Grader library",
-  lead: "The graders Egma ships, and the ones your team writes. Every project starts with Egma's.",
-  loading: "Loading…",
-  signedOut: "Sign in first",
-  signedOutLead: "This page is about your project.",
-  signIn: "Sign in",
-  setUp: "Set up Egma",
-  unreachable: "Egma could not be reached. Is the API running?",
+  title: "Graders",
+  lead: "Choose a grader to use in this project.",
+  /** What the page says it is waiting for, never merely that it is waiting. */
+  loading: "the grader library",
   /**
    * An empty shelf is a deployment that has not finished starting, not a team
    * with nothing set up: egma writes its own graders on every boot. Saying so
@@ -40,9 +43,6 @@ export const LIBRARY = {
     "The library is empty, which Egma never leaves it. Its own graders are " +
     "written at start-up, so a platform still booting shows nothing here for " +
     "a moment. Reload in a few seconds.",
-  counted: (howMany: number): string =>
-    `${howMany} ${howMany === 1 ? "entry" : "entries"}`,
-  order: "Newest first",
 } as const;
 
 /** The table's headings. */
@@ -82,8 +82,7 @@ export const USE = {
     "switched on.",
   /** An entry whose assertions come from the test asks for nothing at all. */
   asksNothing:
-    "This grader asks for nothing. Its assertions are each test's own expected " +
-    "behaviors, read at the moment it judges.",
+    "Uses each test's expected behaviors.",
   required: "Can fail a run",
   requiredOn:
     "A test cannot pass while this grader does not.",
@@ -96,9 +95,16 @@ export const USE = {
   started: (name: string): string =>
     `${name} is running on this project now. It judges everything in its scope from here on; what has already been judged is unchanged.`,
   seeRunning: "See the running graders",
-  /** A refusal the platform did not explain — the network, or a proxy. */
-  unreachable:
-    "Egma could not be reached, so nothing was switched on. Is the API running?",
+  /**
+   * Why the control is not this person's, in their own role's words.
+   *
+   * The control stays on the page and goes inert rather than disappearing: a
+   * viewer is told plainly that switching a grader on is not theirs, instead of
+   * being quietly shown a product that has no such act in it. The server
+   * refuses their write either way, which is where the boundary actually is.
+   */
+  notYours: (role: string): string =>
+    `Your ${role} role cannot start a grader. Ask an organization admin.`,
 } as const;
 
 /**

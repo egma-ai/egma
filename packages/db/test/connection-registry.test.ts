@@ -114,16 +114,31 @@ describe("a config gate marked optional", () => {
  */
 describe("choosing which shape a connection is in", () => {
   const PLAIN = {
+    id: "made_up.plain",
+    label: "Made up",
     named: "a made-up connection",
     config: { room: shouted },
+    fields: [
+      { key: "room", label: "Room", kind: "text", help: "Which room." },
+    ],
     credentials: { required: false, refusal: "no" },
+    credentialHelp: "None needed.",
+    credentialFields: [],
   } as const;
 
   const BY_ENDPOINT = {
+    id: "made_up.endpoint",
+    label: "Made up, with an endpoint",
     named: "a made-up connection with an endpoint",
     chosenBy: "endpoint",
     config: { room: shouted, endpoint: shouted },
+    fields: [
+      { key: "room", label: "Room", kind: "text", help: "Which room." },
+      { key: "endpoint", label: "Endpoint", kind: "url", help: "Where to ask." },
+    ],
     credentials: { required: false, refusal: "no" },
+    credentialHelp: "None needed.",
+    credentialFields: [],
   } as const;
 
   const SHAPES = [PLAIN, BY_ENDPOINT] as const;

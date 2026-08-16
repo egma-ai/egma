@@ -1,5 +1,6 @@
 import { newId } from "@egma/ids";
 import {
+  createAgent,
   createPersona,
   createTest,
   editPersona,
@@ -228,6 +229,10 @@ describe("the project provisioning creates", () => {
       "current_version_id",
       "name",
       "description",
+      // Two rows are two identities, so their revisions are two opaque tokens
+      // and are never equal. That both are *filled* is the claim worth making,
+      // and the filled-columns half above makes it.
+      "revision",
       "created_at",
       "updated_at",
     ]);
@@ -266,6 +271,9 @@ describe("the project provisioning creates", () => {
 describe("a first test in a freshly provisioned project", () => {
   it("is created naming no persona, and receives the starter", async () => {
     const wayne = await signUp("wayne", "lucius@wayne.example");
+    // A new project has a starter persona and no agent, so registering one is
+    // the step before authoring a test: a test always applies to a target.
+    await createAgent(wayne.auth, { name: "Front desk" });
 
     const created = await createTest(wayne.auth, {
       name: "Reschedules a booked appointment",
@@ -277,7 +285,7 @@ describe("a first test in a freshly provisioned project", () => {
     expect(created.personas.map((named) => named.id)).toEqual([
       await starterOf(wayne.projectId),
     ]);
-    expect(created.personas[0]?.deletedAt).toBeNull();
+    expect(created.personas[0]?.archivedAt).toBeNull();
   });
 });
 

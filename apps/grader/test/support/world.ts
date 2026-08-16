@@ -124,8 +124,8 @@ export async function makeWorld(label: string): Promise<World> {
     organizationId.slice(-8),
   ]);
   await database.sql(
-    "insert into project (id, organization_id, name, slug) values ($1, $2, 'default', 'default')",
-    [projectId, organizationId],
+    "insert into project (id, organization_id, name, slug, revision) values ($1, $2, 'default', 'default', $3)",
+    [projectId, organizationId, newId("rev")],
   );
   await database.sql('insert into "user" (id, email) values ($1, $2)', [
     ada,
@@ -169,6 +169,22 @@ export async function makeWorld(label: string): Promise<World> {
       },
     },
   });
+
+  /**
+   * A judge, because a run in this world cannot start without one.
+   *
+   * The world above seeds the project's expected-behaviors copy, which judges by
+   * asking a model — so a run planned here in `needs_setup` is refused before
+   * anything is conducted, and "a provisioned project" and "a project with a
+   * judge" are the same thing for these files. A test about the *absence* of a
+   * judge clears the row after its run exists, which is also the only way that
+   * state can arise now: a project that deleted the copy needs no judge, and is
+   * refused nothing.
+   */
+  await setJudgeConfiguration(
+    { ...auth, role: "admin" },
+    { provider: "openai", model: "gpt-4.1-mini", key: THE_JUDGE_KEY },
+  );
 
   const bare = await createTest(auth, {
     name: "A conversation with nothing named about it",

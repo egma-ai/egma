@@ -515,7 +515,7 @@ describe("editing a mock tool", () => {
     expect(refused.body).toEqual({
       error: "not_found",
       message:
-        `there is no mock tool ${theirs} on this Egma. List the mock tools ` +
+        `there is no mock tool ${theirs} on this Egma instance. List the mock tools ` +
         `to see what this project answers for.`,
     });
   });
@@ -575,7 +575,7 @@ describe("removing a mock tool", () => {
     expect(refused.body).toEqual({
       error: "not_found",
       message:
-        `there is no mock tool ${theirs} on this Egma. List the mock tools ` +
+        `there is no mock tool ${theirs} on this Egma instance. List the mock tools ` +
         `to see what this project answers for.`,
     });
     expect(await rowCount()).toBe(1);

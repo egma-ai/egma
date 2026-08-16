@@ -84,15 +84,24 @@ describe("the platform's default judge", () => {
       [acme.project, acme.second, globex.project].sort(),
     );
 
-    // An ordinary row, indistinguishable afterwards from one a project set for
-    // itself — and readable by the grading engine through the one door that
-    // opens a judge key.
+    // The deployment's own judge, named as such — and readable by the grading
+    // engine through the one door that opens a judge key.
+    //
+    // **It offers no hint, and that is the point of naming the source.** The
+    // key belongs to whoever runs the deployment: a project holding it cannot
+    // rotate it, cannot choose which one it is, and has nothing to tell apart,
+    // so four characters of an operator's secret would be handed over to no
+    // purpose. A customer who wants a key of their own adds an organization
+    // credential and points the project at it, and the hint they then see is
+    // their own.
     const configured = await getJudgeConfiguration(actingAsAcme(acme.project));
     expect(configured).toMatchObject({
       projectId: acme.project,
       provider: "openai",
       model: "gpt-4o",
-      keyHint: "WXYZ",
+      source: "platform",
+      credentialId: null,
+      keyHint: null,
     });
     expect(
       await resolveJudgeKey(theEngineIn(acme.organization, acme.project), acme.project),
@@ -139,8 +148,8 @@ describe("the platform's default judge", () => {
     // of one: a project made later gets a judge at the next start.
     const later = newId("prj");
     await database.sql(
-      "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $3)",
-      [later, acme.organization, "made-later"],
+      "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $3, $4)",
+      [later, acme.organization, "made-later", newId("rev")],
     );
 
     const given = await seedDefaultJudge({

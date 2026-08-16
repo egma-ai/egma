@@ -912,6 +912,36 @@ describe("switching a running copy off", () => {
     expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(0);
   });
 
+  /**
+   * **Pressing Use again is the way back, and it makes a new copy rather than
+   * reviving the old one** — a new identity, because the old id is what a
+   * verdict already written still names.
+   *
+   * It is also where the start-up backfill would show if it were wrong. That
+   * backfill asks whether a project has *ever* held a copy, deleted rows
+   * included, precisely so a restarting container cannot write the seeded
+   * grader back and overrule the person who switched it off. A project sitting
+   * at zero has to be able to stay at zero, and to come back only when somebody
+   * asks it to.
+   */
+  it("leaves Use as the way back, with a new copy", async () => {
+    api = await createApi("graders_delete_then_use");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const [seeded] = itemsOf(await request("GET", "/api/graders", key));
+    if (seeded === undefined) throw new Error("the project has no graders");
+    await request("DELETE", `/api/graders/${seeded.id}`, key);
+
+    const used = await request("POST", "/api/graders", key, {
+      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+    });
+
+    expect(used.statusCode, JSON.stringify(used.body)).toBe(201);
+    expect(used.body.id).not.toBe(seeded.id);
+    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(1);
+  });
+
   it("answers a second delete as a grader that is not there", async () => {
     api = await createApi("graders_delete_twice");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");

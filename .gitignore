@@ -4,6 +4,8 @@ node_modules/
 
 dist/
 .next/
+# Who is writing .next right now. See apps/web/tools/output-lock.ts.
+.next.lock
 *.tsbuildinfo
 coverage/
 

@@ -30,7 +30,7 @@ import {
   POSTGRES_ERROR,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The grading queue: how a finished conversation becomes work, and how the
@@ -137,6 +137,14 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, gene, "gene@globex.example");
+  await seedJudge({ ...actingAsAcme(), role: "admin" });
+  await seedJudge({ ...actingAsGlobex(), role: "admin" });
+  // **No running graders here, and the claim under test is why that is right.**
+  // A grading job is written for every conversation that lands terminal, in the
+  // same commit that lands it, whatever the project happens to judge with — one
+  // job per conversation, never one per grader. So a project judging with
+  // nothing still enqueues, which is exactly the shape these tests assert and
+  // is worth having a fixture that shows it.
 
   const created = await createAgent(auth, {
     name: "Front desk",

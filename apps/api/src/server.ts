@@ -16,8 +16,12 @@ import { graderLibraryRoutes } from "./routes/grader-library.ts";
 import { graderRoutes } from "./routes/graders.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
+import { judgeRoutes } from "./routes/judge.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { organizationRoutes } from "./routes/organization.ts";
+import { personaRoutes } from "./routes/personas.ts";
+import { projectRoutes } from "./routes/projects.ts";
 import { mockToolRoutes } from "./routes/mock-tools.ts";
 import { passwordResetRoutes } from "./routes/password-reset.ts";
 import { platformRoutes } from "./routes/platform.ts";
@@ -27,6 +31,7 @@ import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
+import { simulationRoutes } from "./routes/simulations.ts";
 import { testRoutes } from "./routes/tests.ts";
 import { traceReadRoutes } from "./routes/trace-reads.ts";
 import { traceRoutes } from "./routes/traces.ts";
@@ -246,6 +251,26 @@ export function buildApi(options: ServerOptions): Api {
     baseUrl: config.baseUrl,
   });
 
+  // The customer itself, and the product areas inside it. Two groups rather
+  // than one because they answer different questions — which organization am I
+  // in, and which projects does it hold — and because a project is addressed in
+  // the path here while every product resource names one beside itself.
+  void app.register(organizationRoutes, {
+    provider: identity.provider,
+    rateLimit,
+  });
+
+  void app.register(projectRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    // A project made from Settings is born on the same terms as the one signup
+    // makes: with this deployment's judge where there is one, and in the
+    // explicit `needs_setup` state where there is not.
+    ...(config.defaultJudge === undefined
+      ? {}
+      : { defaultJudge: config.defaultJudge }),
+  });
+
   // What this deployment has been configured with, as an owner reads and
   // changes it. Its own credentialed scope, like every other group, so its one
   // refusal — the settings of a platform are not everybody's to see — never
@@ -267,6 +292,11 @@ export function buildApi(options: ServerOptions): Api {
   // What a developer's folder syncs against. Its own scope, like every other
   // group here, so the credentialed hook and the routes it protects cannot come
   // apart and one group's error handler never answers another's refusals.
+  void app.register(personaRoutes, {
+    provider: identity.provider,
+    rateLimit,
+  });
+
   void app.register(testRoutes, { provider: identity.provider, rateLimit });
 
   // The shelf of grader definitions a developer picks from — egma's own two,
@@ -279,11 +309,13 @@ export function buildApi(options: ServerOptions): Api {
     rateLimit,
   });
 
-  // The graders a project actually judges with, and the one act that makes
-  // another: pressing Use on an entry from the shelf above. Its own scope like
-  // every other group. Two verbs and no third — there is no create taking a
-  // type and criteria, because a grader is always a copy of a definition
-  // somebody can read.
+  // The graders a project actually judges with, the one act that makes another
+  // — pressing Use on an entry from the shelf above — and the one act that
+  // stops one, which is deleting it, because a copy that exists judges and
+  // there is no other switch. Its own scope like every other group. No create
+  // taking a type and criteria and no edit, because a grader is always a copy
+  // of a definition somebody can read, and defining one is the surface
+  // ADR-0009 shelved.
   void app.register(graderRoutes, { provider: identity.provider, rateLimit });
 
   // The mocked world a project's simulations run in: what egma answers with
@@ -292,6 +324,23 @@ export function buildApi(options: ServerOptions): Api {
   // this project already answers for among them — never reach another group's
   // error handler.
   void app.register(mockToolRoutes, { provider: identity.provider, rateLimit });
+
+  // Which model judges here, and which of the organization's keys it is asked
+  // with. Its own scope for the reason above, and separate from the grader
+  // group because the two answer to different roles: authoring a grader is a
+  // member's act, and committing the organization's account to a provider is an
+  // admin's.
+  void app.register(judgeRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    // The same judge the seeding path gives a project that has configured none.
+    // It is handed here so that a project which moved to a key of its own can
+    // move back: the deployment's judge lives in this process's configuration,
+    // and nowhere a project could have thrown away.
+    ...(config.defaultJudge === undefined
+      ? {}
+      : { defaultJudge: config.defaultJudge }),
+  });
 
   // What a terminal starts and then watches: a run over one connection,
   // pinning exact versions, and the numbered feed a follower resumes from.
@@ -302,6 +351,16 @@ export function buildApi(options: ServerOptions): Api {
     provider: identity.provider,
     rateLimit,
     baseUrl: config.baseUrl,
+  });
+
+  // One conversation's own evidence: what happened, how egma judged it, and the
+  // two ways a person revisits that judgement. Its own scope beside the run
+  // group rather than inside it, because a conversation is reached by its own id
+  // — the address somebody pastes into a ticket — and because its refusals are
+  // its own: nothing to judge again, and nothing to disagree with.
+  void app.register(simulationRoutes, {
+    provider: identity.provider,
+    rateLimit,
   });
 
   // Where a recording's reference becomes something a browser can play. Its own

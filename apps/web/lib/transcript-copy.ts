@@ -34,12 +34,11 @@ export const LIST = {
   /**
    * The third sentence is the one that saves an afternoon.
    *
-   * A browser always acts inside one project, and this page shows that
-   * project. A key minted for a whole organization names none, so what it
-   * exports files outside every project and cannot be reached from here — an
-   * empty list that looks exactly like an exporter that was never pointed at
-   * egma at all. The only place somebody meets that is here, so it is said
-   * here rather than only in the README.
+   * A browser session is resolved with one project, and this page sends no
+   * project override, so the trace store reads that project. A key minted for
+   * the whole organization files telemetry outside every project and cannot
+   * appear here. The empty state says that where a correct exporter would
+   * otherwise look broken.
    */
   empty:
     "Nothing was recorded in this window. Point an agent's OpenTelemetry " +

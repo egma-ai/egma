@@ -87,6 +87,41 @@ export type AbsentObjectStorage = {
 
 export type ObjectStorage = RunningObjectStorage | AbsentObjectStorage;
 
+/**
+ * The setting a run uses to say that skipping is not an answer here.
+ *
+ * A contributor with no docker is promised the suite costs them nothing, and
+ * that promise is why the recording suites skip. A gate is the other case: the
+ * whole reason it exists is to prove the recording path, and a gate that went
+ * green because the store was missing proves the opposite of what it claims. So
+ * the gate sets this, and a missing store becomes a failure that names itself.
+ */
+export const REQUIRE_OBJECT_STORAGE = "EGMA_REQUIRE_OBJECT_STORAGE";
+
+/** Off, absent, or plainly a no. Anything else means somebody asked. */
+function required(env: NodeJS.ProcessEnv): boolean {
+  const asked = env[REQUIRE_OBJECT_STORAGE];
+  if (asked === undefined) return false;
+  return !["", "0", "false", "no", "off"].includes(asked.toLowerCase());
+}
+
+/**
+ * No store, and what happens next: a visible skip, or a failure where the run
+ * said a store had to be there.
+ */
+export function absentObjectStorage(
+  why: string,
+  env: NodeJS.ProcessEnv = process.env,
+): AbsentObjectStorage {
+  if (required(env)) {
+    throw new Error(
+      `${REQUIRE_OBJECT_STORAGE} is set, so the recording suites must prove ` +
+        `themselves against a real object store rather than skip: ${why}`,
+    );
+  }
+  return { available: false, why };
+}
+
 function run(
   command: string,
   argv: readonly string[],
@@ -142,7 +177,9 @@ async function answering(url: string, within: number): Promise<boolean> {
  * Every way this can fail answers `available: false` with a sentence rather
  * than throwing. A contributor with no docker was promised the suite costs them
  * nothing, and a red line here would be this arrangement breaking that promise
- * rather than the code breaking anything.
+ * rather than the code breaking anything. A run that sets
+ * `EGMA_REQUIRE_OBJECT_STORAGE` has said the opposite — see
+ * `absentObjectStorage` above — and gets the red line it asked for.
  */
 export async function startObjectStorage(
   label: string,
@@ -171,12 +208,10 @@ export async function startObjectStorage(
     START_MILLISECONDS,
   );
   if (!started.ok) {
-    return {
-      available: false,
-      why:
-        `docker would not start ${MINIO_IMAGE}, so the object-storage path is ` +
+    return absentObjectStorage(
+      `docker would not start ${MINIO_IMAGE}, so the object-storage path is ` +
         `not proved here: ${started.output}`,
-    };
+    );
   }
 
   const stop = (): void => {
@@ -186,12 +221,10 @@ export async function startObjectStorage(
   const endpoint = `http://127.0.0.1:${port}`;
   if (!(await answering(`${endpoint}/minio/health/live`, READY_MILLISECONDS))) {
     stop();
-    return {
-      available: false,
-      why:
-        `${MINIO_IMAGE} started but never answered its health probe at ` +
+    return absentObjectStorage(
+      `${MINIO_IMAGE} started but never answered its health probe at ` +
         `${endpoint}, so the object-storage path is not proved here`,
-    };
+    );
   }
 
   // The bucket and the read-only user, through `mc` inside the container —
@@ -204,24 +237,29 @@ export async function startObjectStorage(
       "sh",
       "-c",
       [
-        `mc alias set Egma http://127.0.0.1:9000 ${ROOT_ACCESS_KEY_ID} ${ROOT_SECRET_ACCESS_KEY}`,
+        // `egma` here is the name `mc` files this store under on its own disk,
+        // and every line below reaches the store by it. It is an identifier,
+        // not the product's name: `main`'s identity sweep capitalized four of
+        // these six at a3ab932 and left `mc mb egma/...` as it was, so the
+        // alias the bucket was made under no longer existed and the bucket was
+        // never created — every recording assertion in the browser lane failed
+        // with `NoSuchBucket`, naming the store rather than this line.
+        `mc alias set egma http://127.0.0.1:9000 ${ROOT_ACCESS_KEY_ID} ${ROOT_SECRET_ACCESS_KEY}`,
         `mc mb --ignore-existing egma/${BUCKET}`,
         `printf '%s' '${JSON.stringify(READ_ONLY_POLICY)}' > /tmp/read-recordings.json`,
-        "mc admin policy create Egma egma-read-recordings /tmp/read-recordings.json",
-        `mc admin user add Egma ${READ_ACCESS_KEY_ID} ${READ_SECRET_ACCESS_KEY}`,
-        `mc admin policy attach Egma egma-read-recordings --user ${READ_ACCESS_KEY_ID}`,
+        "mc admin policy create egma egma-read-recordings /tmp/read-recordings.json",
+        `mc admin user add egma ${READ_ACCESS_KEY_ID} ${READ_SECRET_ACCESS_KEY}`,
+        `mc admin policy attach egma egma-read-recordings --user ${READ_ACCESS_KEY_ID}`,
       ].join(" && "),
     ],
     READY_MILLISECONDS,
   );
   if (!provisioned.ok) {
     stop();
-    return {
-      available: false,
-      why:
-        "the object store started but its bucket and read-only user could " +
+    return absentObjectStorage(
+      "the object store started but its bucket and read-only user could " +
         `not be made, so the object-storage path is not proved here: ${provisioned.output}`,
-    };
+    );
   }
 
   const common = { publicUrl: endpoint, bucket: BUCKET, region: "us-east-1" };

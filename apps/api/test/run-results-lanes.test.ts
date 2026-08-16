@@ -1,9 +1,13 @@
+import { newId } from "@egma/ids";
 import {
   appendSpans,
   appendVerdicts,
+  claimSimulations,
+  completeSimulation,
   createPersona,
   listGraders,
   PREDEFINED_GRADERS,
+  startSimulation,
   useLibraryEntry,
   type AuthContext,
   type NewSpan,
@@ -105,12 +109,32 @@ async function aJudgedRun(label: string): Promise<{
   const started = await request("POST", "/api/runs", key, {
     connection: connectionId,
     test_versions: [String(created.body.version_id)],
+    // A start dials a real agent and spends a real judge, so the door takes the
+    // caller's own key for the attempt: an answer lost on the way back must
+    // never become a second conversation.
+    idempotency_key: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
   const runId = String(started.body.id);
   const simulations = started.body.simulations as Record<string, unknown>[];
   const simulationId = String(simulations[0]?.id);
+
+  // The conversation is conducted before anything judges it. A `queued` one is
+  // still moving, and every read here says so by answering a null verdict — so
+  // rows written against one would be judgments of a conversation that has not
+  // happened, and the surfaces would agree only by agreeing on nothing.
+  const claimant = "simulator-lanes-1";
+  const claimed = (
+    await claimSimulations({ claimant, capacity: 50 })
+  ).filter((one) => one.runId === runId);
+  for (const one of claimed) {
+    await startSimulation(auth, one.id, claimant);
+    await completeSimulation(auth, one.id, claimant, {
+      endingReason: "agent_ended",
+      turnCount: 6,
+    });
+  }
 
   // The copy every project is born with — what judges a test against its own
   // sentences — found by the entry it points at rather than remembered.
@@ -338,6 +362,67 @@ describe("the same conversation read as a transcript", () => {
     }
     // The failed row is the diagnostic's, and it says so — which is the whole
     // difference between a red card that means something and one that does not.
+    const failed = rows.find((row) => row.verdict === "failed");
+    expect(failed?.grader_id).toBe(diagnostic);
+    expect(failed?.required).toBe(false);
+  });
+});
+
+/**
+ * The three surfaces that show one run's verdict, asked in one test.
+ *
+ * **The crossing is the point, and the crossing is where the fault was.** Each
+ * surface has its own read: run detail folds `readRunVerdicts`, run history
+ * folds `readVerdictsAcrossRuns` over a whole page of runs at once, and a
+ * conversation's own page folds `readVerdicts`. Three reads, one algebra, and
+ * nothing anywhere asked all three the same question — so a lane split that one
+ * of them forgot would show a run passing on the page somebody opened and
+ * failing on the list they opened it from, with no test on either side failing.
+ *
+ * That is exactly what happened: `verdictLanes` took a defaulted `diagnostics`
+ * argument, an empty set of diagnostics means *everything gates*, and the read
+ * behind run history never passed one. Every existing test still passed,
+ * because they predate `required` and none of them builds a diagnostic copy.
+ *
+ * So this is deliberately one test over three addresses rather than three tests.
+ * Three would each be green against a tree where the surfaces disagree.
+ */
+describe("one run, read on every surface it appears on", () => {
+  it("passes on run detail, in the run list and on the conversation, with the diagnostic failing on all three", async () => {
+    const { key, runId, simulationId, diagnostic } =
+      await aJudgedRun("run_lanes_every_surface");
+
+    const detail = await request("GET", `/api/runs/${runId}`, key);
+    expect(detail.statusCode, JSON.stringify(detail.body)).toBe(200);
+
+    const history = await request("GET", "/api/runs", key);
+    expect(history.statusCode, JSON.stringify(history.body)).toBe(200);
+    const listed = (history.body.items as Record<string, unknown>[]).find(
+      (one) => one.id === runId,
+    );
+
+    const conversation = await request(
+      "GET",
+      `/api/simulations/${simulationId}`,
+      key,
+    );
+    expect(conversation.statusCode, JSON.stringify(conversation.body)).toBe(200);
+
+    // One sentence, three answers: the run passed. The diagnostic's failure is
+    // in none of them, because a copy that only reports can fail nothing.
+    expect([
+      detail.body.verdict,
+      listed?.verdict,
+      conversation.body.verdict,
+    ]).toEqual(["passed", "passed", "passed"]);
+
+    // And it is not silence either — the failure is reported, apart, on the two
+    // surfaces that carry a lane of their own.
+    expect(detail.body.diagnostics).toMatchObject({ verdict: "failed" });
+    expect(conversation.body.diagnostics).toMatchObject({ verdict: "failed" });
+
+    // The row that failed is the diagnostic's, and the conversation says so.
+    const rows = conversation.body.verdicts as Record<string, unknown>[];
     const failed = rows.find((row) => row.verdict === "failed");
     expect(failed?.grader_id).toBe(diagnostic);
     expect(failed?.required).toBe(false);

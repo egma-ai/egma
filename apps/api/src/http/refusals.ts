@@ -22,13 +22,163 @@ export const CODES = {
   not_authenticated: 401,
   not_permitted: 403,
   not_found: 404,
+  project_outside_organization: 404,
   conflict: 409,
   name_taken: 409,
+  /**
+   * A slug an admin typed that a living project of the same organization
+   * already holds. Its own code beside `name_taken` because the two name
+   * different fields and have different fixes: a project's name is free and its
+   * slug is what has to be unique, so the refusal points at the one control the
+   * person can change.
+   */
+  project_slug_taken: 409,
+  // A stale write, told apart from a plain conflict by which of the two things
+  // moved: the resource's identity, or the content of its current version.
+  // The caller's next move differs — one is retyped, the other is reapplied —
+  // so a client that could not tell them apart could not offer either.
+  identity_conflict: 409,
+  version_conflict: 409,
+  /**
+   * A link edit written against an applicability revision the test has moved
+   * past. Its own code beside the two above because it is the third of three
+   * separately recoverable losses: a client that could not tell it from an
+   * identity conflict would tell somebody to reread and retype a name when
+   * what actually moved was which agents the test applies to.
+   */
+  applicability_conflict: 409,
+  parent_agent_archived: 409,
+  // A persona an active test still names, and the persona a project points at
+  // by default. Two rules that refuse one Archive, and two sentences, because
+  // the fix for each is somewhere else.
+  persona_in_use: 409,
+  default_persona_required: 409,
+  // The store rolled a write back because another one got in its way. Its own
+  // code because it is the one refusal that is about nothing the caller did:
+  // the request was valid on the way in, nothing was written, and sending it
+  // again is the whole of the fix — which a client can do by itself.
+  write_aborted: 409,
+  /**
+   * A grader an active test names directly, refused Archive. Its own code
+   * because the fix is specific — go and take it off those tests — and the
+   * refusal names them.
+   */
+  grader_in_use: 409,
+  /**
+   * A test left with no agent to run against, refused. Three codes rather than
+   * one because the fixes are three different places: choose an agent on the
+   * form, link another agent before removing this one, and choose an agent
+   * that is actually active in this project.
+   */
+  test_needs_agent: 422,
+  last_test_agent: 409,
+  agent_not_available: 409,
+  /**
+   * A repository push at a test the browser has unlinked from the agent that
+   * repository is bound to. A fourth code beside the three above because the
+   * reader is a terminal rather than a form and the fix is somewhere else
+   * entirely: relink the test in the browser, or delete the local file. Neither
+   * side was changed, which the sentence says out loud because a push that
+   * stopped half way is the fear this refusal exists to settle.
+   */
+  repository_agent_not_applicable: 409,
+  /**
+   * A run that paired an agent with a test not linked to it. Its own code so a
+   * run builder can offer the fix — link the test, or choose another — rather
+   * than showing a general refusal about a version.
+   */
+  test_not_applicable: 409,
+  /**
+   * A test's Restore refused because its current version names an archived
+   * persona or scenario grader. Restoring is a promise the test can run, and
+   * this is the answer when it cannot.
+   */
+  test_dependency_inactive: 409,
+  /**
+   * A capability nothing offered. Its own code so a form can put the refusal
+   * beside the capability list rather than at the top of the page.
+   */
+  unknown_capability: 422,
+  /**
+   * A file naming a persona by a name two living personas answer to. Its own
+   * code because the fix belongs to a file rather than to a form: put the
+   * stable identifier in the file. Nothing picks one by list order, ever.
+   */
+  persona_name_ambiguous: 422,
   unprocessable: 422,
+  credential_required: 422,
+  credential_forbidden: 422,
+  credential_choice_required: 422,
+  no_capability_adapter: 422,
+  // A product request that named no project. Its own code because a browser
+  // reading this has a selector on screen, and the sentence names it.
+  project_required: 422,
+  // A cursor this list never issued. Its own code so a client can drop it and
+  // start again rather than showing somebody a broken page forever.
+  invalid_cursor: 422,
+  /**
+   * A project's judge pointed at a credential issued by a different provider.
+   * Nothing about the request is malformed and nothing is missing — the two
+   * settings simply cannot both be true — so it is its own answer.
+   */
+  judge_credential_provider_mismatch: 422,
+  /**
+   * A run refused because its project has no LLM judge. Its own code beside
+   * the run refusals because nothing about the selection is wrong: the fix is
+   * one page away, and a run builder shows it as a state rather than as a
+   * mistake somebody made.
+   */
+  judge_not_configured: 409,
+  /**
+   * A judge credential that something still needs. Its own code so a settings
+   * page can list the blocking projects, runs and jobs rather than showing one
+   * general sentence about a key.
+   */
+  judge_credential_in_use: 409,
+  /**
+   * A start action that named no idempotency key. 422 rather than 409: nothing
+   * conflicts, something required is missing, and the fix is to send one.
+   */
+  idempotency_key_required: 422,
+  /**
+   * A key reused over a different request. Answering the original run would
+   * tell somebody their new selection had started when it had not, so the
+   * third answer is the only honest one.
+   */
+  idempotency_conflict: 409,
+  /**
+   * A Retry that could not be derived, because something the earlier run used
+   * is no longer active or no longer applies. Its own code rather than a plain
+   * conflict because the fix is a specific one and a page can offer it: the
+   * refusal names the resource, and the next move is the run builder, where
+   * every substitution is the person's to make out loud.
+   */
+  retry_unavailable: 409,
+  /**
+   * A re-grade of a conversation egma is judging **this moment** under a
+   * narrowing that does not cover what was asked for. Its own code because it
+   * is the one ask this route cannot carry out and cannot queue either: a
+   * claimed job is judged under the instruction it was claimed with, and the
+   * only honest answer is that nothing happened and the ask has to be made
+   * again when those verdicts land.
+   */
+  narrower_grading_in_flight: 409,
   unsignable_reference: 422,
   no_adapter: 422,
   phone_setup_required: 422,
   too_many_requests: 429,
+  /**
+   * A fault, answered without relaying whatever the fault said.
+   *
+   * Every other code here is a sentence somebody wrote to be read. This one is
+   * for what nobody wrote — a driver error, a constraint name, a query layer's
+   * wrapper — on the routes where the query that failed is one that selected a
+   * sealed envelope. Echoing such a message would put ciphertext and SQL into a
+   * browser response, so the caller gets a sentence this module chose and the
+   * detail goes to the log.
+   */
+  unavailable: 500,
+  capability_check_failed: 502,
   no_object_store: 503,
 } as const;
 
@@ -41,6 +191,195 @@ function refuse(
 ): FastifyReply {
   return reply.code(CODES[error]).send({ error, message });
 }
+
+/**
+ * A refusal whose code was decided somewhere else — by a module that answers
+ * "a value or a refusal" and hands the pair back rather than a reply.
+ *
+ * The status still comes off `CODES` and the body still has exactly two
+ * fields, so a caller choosing the code cannot also choose the shape.
+ */
+export function sendRefusal(
+  reply: FastifyReply,
+  error: RefusalCode,
+  message: string,
+): FastifyReply {
+  return refuse(reply, error, message);
+}
+
+/**
+ * A project named by a browser that the signed-in organization does not hold.
+ *
+ * **404 and not 403, and the sentence says "there is no", because to this
+ * organization there is not.** A project of somebody else's and a project id
+ * that was never minted are one answer, so following a stranger's link never
+ * tells you whether the thing on the other end exists. The reader is a page
+ * with a selector on it, so the sentence names the selector.
+ */
+export function projectOutsideOrganization(projectId: string): string {
+  return (
+    `There is no project ${projectId} available to this organization. ` +
+    "Choose a project from the selector and try again."
+  );
+}
+
+/**
+ * An edit that named the revision it was written against, refused because the
+ * resource has moved since.
+ *
+ * **The sentence is composed here, by the layer that answers, rather than
+ * carried on the error.** Two route groups answer this refusal now — agents
+ * and connections in one, personas in the other — and each names its own
+ * resource word, lower case where the API spells the resource that way and
+ * capitalised where it does not. An error that baked one sentence in would
+ * make the other group either relay the wrong word or paraphrase, and the
+ * wording is contract: a coding agent reads it off a terminal.
+ *
+ * What the error carries is the data — which resource, which one, and the two
+ * revisions — which is what a caller needs to read the thing again and send
+ * the edit against the revision it names now.
+ */
+export function identityConflict(resource: string, resourceId: string): string {
+  return (
+    `${resource} ${resourceId} changed after you opened it. Read it again, ` +
+    `keep or reapply your edits, and send the update with expected_revision ` +
+    `set to its new revision.`
+  );
+}
+
+/**
+ * The exact sentences the product surface answers with, written once.
+ *
+ * **These are contract.** A page shows them word for word and a client branches
+ * on the code beside them, so the wording is filled in rather than composed:
+ * every placeholder is a value dropped into a fixed sentence, and the sentence
+ * around it never changes shape. Two copies of one of these is two things to
+ * keep in step, which is the whole reason they are here and not in each route.
+ */
+export const REFUSALS = {
+  projectRequired:
+    "This request did not name a project. Choose a project from the " +
+    "selector and try again.",
+
+  /**
+   * Missing and cross-organization data get the same sentence, because to this
+   * caller they are the same thing: following a stranger's link must never
+   * reveal whether the thing on the other end exists.
+   */
+  notFound: (resource: string, resourceId: string): string =>
+    `There is no ${resource} ${resourceId} available in this project. ` +
+    "Check the link, or choose it from the current project.",
+
+  notPermitted: (role: string, action: string): string =>
+    `Your ${role} role cannot ${action}. Ask an organization admin to change ` +
+    "your role, then try again.",
+
+  /**
+   * The same sentence the free function above composes, reached through this
+   * table so the route groups that read their wording off it do not carry a
+   * second copy of a sentence that is contract.
+   */
+  identityConflict,
+
+  versionConflict: (
+    resource: string,
+    expected: string,
+    current: string,
+  ): string =>
+    `this ${resource} edit was written against version ${expected}, and it ` +
+    `has moved on to ${current}. Read the ${resource} again, keep or reapply ` +
+    `your edits, and send them with expected_version_id set to ${current}.`,
+
+  testNeedsAgent:
+    "Every test must apply to at least one active agent. Select an active " +
+    "agent and save the test again.",
+
+  lastTestAgent: (testId: string, agentId: string): string =>
+    `Test ${testId} must apply to at least one agent. Link another active ` +
+    `agent before you remove ${agentId}.`,
+
+  agentNotAvailable: (agentId: string): string =>
+    `Agent ${agentId} is not active in this project. Choose an active agent ` +
+    "from this project's Agents page.",
+
+  /**
+   * A push at a test the browser has unlinked from the repository's own agent.
+   *
+   * **Said twice, in one wording.** `push` preflights the whole folder against
+   * the tests its bound agent still has, so the ordinary path never sends the
+   * request at all — the client says this sentence itself, from its own copy.
+   * This one is the door's, for the race where the link is removed between that
+   * preflight and the write. Both readers get the same instruction, which is
+   * the only reason a client can be told to act on the code.
+   */
+  repositoryAgentNotApplicable: (testId: string, agentId: string): string =>
+    `Test ${testId} no longer applies to the agent bound to this repository. ` +
+    `Link it to agent ${agentId} in Egma, or remove this local file; egma ` +
+    "push changed neither side.",
+
+  personaNameAmbiguous: (name: string): string =>
+    `Persona name ${name} matches more than one active persona in this ` +
+    "project. Put the intended persona's stable ID in the file and try again; " +
+    "for a pinned file, egma pull can write the IDs after the file is safe to " +
+    "migrate.",
+
+  testNotApplicable: (
+    testId: string,
+    agentId: string,
+    versionId: string,
+  ): string =>
+    `Test ${testId} does not apply to agent ${agentId}, so version ` +
+    `${versionId} cannot start. Choose a test linked to this agent, or link ` +
+    "the test in the Tests page before starting the run.",
+
+  testDependencyInactive: (testId: string, resources: string): string =>
+    `Test ${testId} cannot be restored because ${resources} in its current ` +
+    "version are archived. Restore those resources, then restore the test.",
+
+  applicabilityConflict: (testId: string): string =>
+    `Test ${testId}'s applicable agents changed after you opened it. Read the ` +
+    "test again, keep or reapply your link changes, and send them with " +
+    "expected_applicability_revision set to its new applicability revision.",
+
+  invalidCursor: (cursor: string): string =>
+    `Cursor ${cursor} is not valid for this list. Remove it and start from ` +
+    "the first page.",
+
+  graderInUse: (graderId: string, tests: string): string =>
+    `Grader ${graderId} is added directly to active tests ${tests}. Remove ` +
+    "it from those tests, or archive the tests, then archive this grader.",
+
+  projectSlugTaken: (slug: string): string =>
+    `Project slug ${slug} is already in use in this organization. Choose a ` +
+    "different slug and save the project again.",
+
+  judgeNotConfigured: (projectId: string): string =>
+    `This run needs an LLM judge, but project ${projectId} has no judge ` +
+    "configured. Open project Settings, configure the judge, and start the " +
+    "run again.",
+
+  judgeCredentialInUse: (credentialId: string, uses: string): string =>
+    `Judge credential ${credentialId} is used by ${uses}. Point those ` +
+    "projects at another credential and let pending grading finish, then " +
+    "archive this credential.",
+
+  idempotencyKeyRequired:
+    "Starting a run requires an idempotency key. Send one stable key for " +
+    "this start action and try again.",
+
+  idempotencyConflict: (key: string): string =>
+    `Idempotency key ${key} already started a different run. Reuse the ` +
+    "original request, or send a new key for this run.",
+
+  judgeCredentialProviderMismatch: (
+    credentialId: string,
+    credentialProvider: string,
+    judgeProvider: string,
+  ): string =>
+    `Judge credential ${credentialId} is for ${credentialProvider}, but this ` +
+    `project judge uses ${judgeProvider}. Choose a credential for ` +
+    `${judgeProvider} and save the judge setting again.`,
+} as const;
 
 /** The body could never be written, whatever is there. */
 export function invalid(reply: FastifyReply, message: string): FastifyReply {
@@ -100,6 +439,28 @@ export function unsignableReference(
   message: string,
 ): FastifyReply {
   return refuse(reply, "unsignable_reference", message);
+}
+
+/**
+ * A re-grade that reached a conversation already being judged, under an
+ * instruction narrower than the one just asked for.
+ *
+ * **A refusal rather than a success with a caveat in it, and that is the whole
+ * decision.** Every other outstanding job answers a re-grade by carrying it out
+ * — it is going to be judged at today's grader versions, which is all the ask
+ * was for — and a 200 saying "already waiting" is true of those. This one is
+ * not: the claimed job judges one grader that is not the one asked about,
+ * nothing is queued behind it, and no verdict for the ask will ever land. A 200
+ * carrying a new field would leave every client written before that field
+ * reassuring somebody about work that is not happening, which is the failure
+ * this answer exists to make impossible. An unread refusal is still visibly a
+ * refusal.
+ */
+export function narrowerGradingInFlight(
+  reply: FastifyReply,
+  message: string,
+): FastifyReply {
+  return refuse(reply, "narrower_grading_in_flight", message);
 }
 
 /**

@@ -24,7 +24,7 @@ import {
   unprocessable,
 } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, text } from "../http/reading.ts";
+import { given, projectNamed, text } from "../http/reading.ts";
 
 /**
  * The running graders: the copies a project actually judges with, the act that
@@ -67,6 +67,18 @@ import { given, text } from "../http/reading.ts";
  * it already wrote stay readable and stay interpretable, because their versions
  * outlive it, so an old run keeps its own meaning rather than quietly losing a
  * grader's worth of evidence.
+ *
+ * **Delete is not part of that authoring surface, and it took a wave to notice
+ * that it was being treated as though it were.** ADR-0009 shelved *defining*
+ * graders; it made switching one off the plainest act in the area — "dormant is
+ * no copy at all; there is no enable switch and no `none` value". The data
+ * access module has said so since the redesign landed, the start-up backfill is
+ * built around a person having taken that decision, and the door that would let
+ * anybody take it was never registered. So a product whose only loudness
+ * control is delete had no delete, and the screens that displayed the running
+ * copies could only display them. It is a verb here now. Edit is still absent,
+ * because editing a copy's values is the authoring surface, and that is what
+ * was shelved.
  *
  * **A copy's definition never crosses this door.** What a read answers is the
  * pointer, the filled-in values, and where the grader applies. The judge prompt
@@ -414,6 +426,7 @@ export async function graderRoutes(
   app.post(GRADERS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "author_definitions", {
       organizationId: auth.organizationId,
@@ -453,10 +466,14 @@ export async function graderRoutes(
     const scope = textIn(body, "scope", SCOPE_TAKES);
     if ("refusal" in scope) return unprocessable(reply, scope.refusal);
 
+    // The type gate first, so a `project` that is not text is refused by name
+    // rather than read as absent — then `projectNamed`'s one rule, the query
+    // and the body. **Use** is pressed from a page, which names its project in
+    // the address.
     const project = textIn(body, "project", PROJECT_TAKES);
     if ("refusal" in project) return unprocessable(reply, project.refusal);
 
-    const acting = await actingIn(auth, given(project.value));
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const created = await useLibraryEntry(acting.auth, {
@@ -514,6 +531,7 @@ export async function graderRoutes(
     const { auth } = requesterOf(request);
     const { graderId } = request.params as { graderId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     authorize(auth, "author_definitions", {
       organizationId: auth.organizationId,
@@ -547,10 +565,12 @@ export async function graderRoutes(
     const scope = textIn(body, "scope", SCOPE_TAKES);
     if ("refusal" in scope) return unprocessable(reply, scope.refusal);
 
+    // The type gate first, then `projectNamed`'s one rule, exactly as **Use**
+    // beside this reads them.
     const project = textIn(body, "project", PROJECT_TAKES);
     if ("refusal" in project) return unprocessable(reply, project.refusal);
 
-    const acting = await actingIn(auth, given(project.value));
+    const acting = await actingIn(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const edited = await editGrader(acting.auth, graderId, {
@@ -596,12 +616,24 @@ export async function graderRoutes(
    * points at its definition, and that definition has to outlive it for the
    * verdicts to stay interpretable. Deleting the entry stays refused, which is
    * what the foreign key underneath says too.
+   *
+   * **A project may end up judged by nothing at all**, and that is allowed
+   * rather than refused. The seeded expected-behaviors copy is an ordinary
+   * deletable row, so the last delete can leave a project with no graders: its
+   * runs still start, still conduct every simulation, and come back with no
+   * verdicts. A copy somebody may switch off cannot also be a thing every run
+   * is assumed to carry. The screens say so before the last one goes, because a
+   * run that judged nothing and a run where everything passed look the same on
+   * a results page with nothing red on it.
    */
   app.delete(GRADER_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { graderId } = request.params as { graderId: string };
     const query = (request.query ?? {}) as Query;
 
+    // The role first, before anything is read — the factory's own stance, so a
+    // viewer is refused for being a viewer rather than after a read that tells
+    // them what is there.
     authorize(auth, "author_definitions", {
       organizationId: auth.organizationId,
       projectId: auth.projectId,

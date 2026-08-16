@@ -249,8 +249,26 @@ describe("starting a run from the terminal's own code", () => {
         },
       },
     });
-    const dialled = (registered.json() as { connection: { id: string } })
-      .connection;
+    const listed = registered.json() as {
+      agent: { id: string };
+      connection: { id: string };
+    };
+    const dialled = listed.connection;
+
+    // The test was authored before this agent existed, so nothing yet says it
+    // is worth running against it — and a run may only pair the two once
+    // somebody has.
+    const version = await api.app.inject({
+      method: "GET",
+      url: `/api/test-versions/${versions[0] ?? ""}`,
+      headers: { authorization: `Bearer ${signedIn.key}` },
+    });
+    await api.app.inject({
+      method: "POST",
+      url: `/api/tests/${String((version.json() as { test_id: string }).test_id)}/agents`,
+      headers: { authorization: `Bearer ${signedIn.key}` },
+      payload: { agents: [listed.agent.id] },
+    });
 
     const answer = await startRun(
       signedIn,
@@ -292,8 +310,26 @@ describe("starting a run from the terminal's own code", () => {
       headers: { authorization: `Bearer ${signedIn.key}` },
       payload: { name: "Front desk line", connection: PHONE_CONNECTION },
     });
-    const dialled = (registered.json() as { connection: { id: string } })
-      .connection;
+    const listed = registered.json() as {
+      agent: { id: string };
+      connection: { id: string };
+    };
+    const dialled = listed.connection;
+
+    // The test was authored before this agent existed, so nothing yet says it
+    // is worth running against it — and a run may only pair the two once
+    // somebody has.
+    const version = await api.app.inject({
+      method: "GET",
+      url: `/api/test-versions/${versions[0] ?? ""}`,
+      headers: { authorization: `Bearer ${signedIn.key}` },
+    });
+    await api.app.inject({
+      method: "POST",
+      url: `/api/tests/${String((version.json() as { test_id: string }).test_id)}/agents`,
+      headers: { authorization: `Bearer ${signedIn.key}` },
+      payload: { agents: [listed.agent.id] },
+    });
 
     const answer = await startRun(
       signedIn,
@@ -308,7 +344,8 @@ describe("starting a run from the terminal's own code", () => {
     expect(answer.kind).toBe("refused");
     if (answer.kind !== "refused") return;
     expect(answer.reason).toBe(
-      "this Egma has not been set up to place phone calls, so nothing was " +
+      "this Egma instance has not been set up to place phone calls, so " +
+        "nothing was " +
         "dialled and nothing was charged. It is missing the carrier trunk " +
         "and the source number and the text-to-speech provider. Whoever runs " +
         "this platform makes it ready with one command in the platform " +
@@ -335,7 +372,7 @@ describe("starting a run from the terminal's own code", () => {
     expect(answer).toEqual({
       kind: "refused",
       reason:
-        `there is no test version ${missing} on this Egma. Push the test ` +
+        `there is no test version ${missing} on this Egma instance. Push the test ` +
         `first, or read the test and pin the version_id it names now.`,
     });
   });

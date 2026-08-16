@@ -41,7 +41,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 ## Commands
 
 <AccordionGroup>
-  <Accordion title="Egma — interactive wizard">
+  <Accordion title="egma — interactive wizard">
     Opens the full interactive wizard. It signs you in, discovers your voice agent using your coding agent, connects the agent to Egma, generates a first test suite, and starts a run — all in one guided flow.
 
     The wizard draws on your terminal's alternate screen. When it closes it leaves a single results URL and a plain summary in your normal terminal buffer, each item on its own line so a triple-click selects it whole.
@@ -76,7 +76,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     </Note>
   </Accordion>
 
-  <Accordion title="Egma login — sign this machine in">
+  <Accordion title="egma login — sign this machine in">
     Signs this machine in to Egma. Opens a browser to a device-approval page pre-filled with a short code. Once you approve it, Egma stores a credential at `~/.egma/credentials` (or `$EGMA_HOME/credentials`), readable only by you.
 
     No secret is ever typed into the terminal. If the machine already holds a valid credential, `egma login` says so and exits without changing anything.
@@ -124,7 +124,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     </Tip>
   </Accordion>
 
-  <Accordion title="Egma connect — register your voice agent">
+  <Accordion title="egma connect — register your voice agent">
     Registers your voice agent with Egma and creates a connection for running simulations. Reads a Retell API key from standard input or from the environment — never as a command-line argument, because arguments appear in process lists and shell history.
 
     Running `egma connect` twice against the same agent is safe. Egma detects the existing registration and reports whether it `created`, `reused`, or `connection_added` on the `registration:` line.
@@ -197,7 +197,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | `130` | Stopped partway through |
   </Accordion>
 
-  <Accordion title="Egma init — create the egma/ folder">
+  <Accordion title="egma init — create the egma/ folder">
     Creates the `egma/` folder structure in your repository. Everything `init` creates is safe to commit — nothing secret ever lands in the folder. Run it again safely at any time; it will not overwrite files that already exist.
 
     When you pass `--url`, `init` contacts that Egma instance, verifies its identity, and records the result in `egma/config.yaml`. Every subsequent command run from this repository then finds the instance address automatically, with no `--url` flag required.
@@ -225,7 +225,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | `4` | Egma did not answer, or refused (only when `--url` is passed) |
   </Accordion>
 
-  <Accordion title="Egma pull — fetch Egma's test versions">
+  <Accordion title="egma pull — fetch Egma's test versions">
     Writes Egma's current versions of every test in the `egma/` folder into your local files, updating the `version:` field in each file's front matter. Use `pull` to get changes made by teammates in the Egma dashboard before you start editing locally.
 
     **Usage**
@@ -256,7 +256,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | `130` | Stopped partway through |
   </Accordion>
 
-  <Accordion title="Egma push — upload your tests">
+  <Accordion title="egma push — upload your tests">
     Uploads the tests in your `egma/` folder to Egma, creating a new version of each test and writing the new version ID back into the file's front matter. A successful push never overwrites previous versions — results from last week still reference exactly what they ran.
 
     `push` refuses when Egma holds a version newer than the one your file last synced at. It names every conflicting file on a `conflict:` line, uploads nothing, and exits `5`. Run `egma pull` first, review what changed, then push again.
@@ -295,7 +295,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     </Warning>
   </Accordion>
 
-  <Accordion title="Egma run — run your test suite">
+  <Accordion title="egma run — run your test suite">
     Runs every test in your `egma/` folder against your connected voice agent. Each test is pinned to its current version before the run starts, so the run record is an exact snapshot of what executed. The command follows the run, printing every change as it arrives.
 
     Before starting, `egma run` checks that your local folder and Egma agree on every test file's content. Any file Egma has never seen is listed on an `unknown:` line; any file whose content differs from Egma's version appears on a `not-pushed:` line. Either condition refuses the whole run — the fix is `egma push`.
@@ -358,7 +358,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     </Note>
   </Accordion>
 
-  <Accordion title="Egma self-host up — start a local Egma instance">
+  <Accordion title="egma self-host up — start a local Egma instance">
     Starts a full local Egma instance using Docker Compose: Postgres, ClickHouse, the API, the web UI, the simulator, the grader, and (for phone simulations) a LiveKit server, SIP gateway, and Redis. Run this from your Egma platform checkout, not from your agent repository.
 
     After the stack is up, the command prints the address to point your agent repository at, and lists any platform configuration still missing.
@@ -378,7 +378,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | `4` | Docker or a required service did not start |
   </Accordion>
 
-  <Accordion title="Egma self-host setup — configure a running instance">
+  <Accordion title="egma self-host setup — configure a running instance">
     Configures a running Egma instance by asking for provider credentials and writing them through the platform API. Run this after `egma self-host up` and after signing in with `egma login --url <address>`.
 
     The command asks the platform what it is missing, then prompts you for exactly that — in a fixed order: the model provider (for persona reasoning), the speech provider (TTS and STT), and the telephony carrier (for phone simulations). A setting the platform already holds is never asked for again, so a second run only asks about what is still missing, and on a fully configured platform it changes nothing and says so.

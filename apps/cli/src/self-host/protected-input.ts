@@ -237,9 +237,17 @@ export function asStop(error: unknown): unknown {
 async function askWithoutEcho(prompt: string, options: AskOptions): Promise<string> {
   const terminal = options.input as NodeJS.ReadStream;
   const wasRaw = terminal.isRaw === true;
-  options.output.write(prompt);
+  // Echo off **before** the prompt, never after. A prompt is an invitation to
+  // type, so printing one while the driver is still echoing opens a window
+  // where what somebody types lands on the screen — and this prompt's own words
+  // are "not shown as you type". The window is small and it is real: CI caught
+  // the first secret of a run in the scrollback, with every later one correctly
+  // hidden, because by then the terminal had already been through raw mode once.
+  // Anybody pasting, or typing ahead of a prompt they knew was coming, is in
+  // that window too.
   if (terminal.setRawMode !== undefined) terminal.setRawMode(true);
   terminal.resume();
+  options.output.write(prompt);
   try {
     const answer = await new Promise<string>((resolve, reject) => {
       let typed = "";

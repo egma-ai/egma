@@ -216,7 +216,7 @@ describe("who may read and change them", () => {
       expect(refused.statusCode).toBe(403);
       expect(refused.body.message).toBe(
         "the settings of this platform are read and changed by an " +
-          "organization owner, and only while this Egma serves one " +
+          "organization owner, and only while this Egma instance serves one " +
           "organization. They are the deployment's own provider credentials — " +
           "whose account every simulation is conducted on — which is a " +
           "decision of the same kind as billing rather than of the same kind " +
@@ -601,7 +601,7 @@ describe("a platform that serves more than one organization", () => {
       expect(read.statusCode).toBe(403);
       expect(write.statusCode).toBe(403);
       expect(read.body.message).toContain(
-        "only while this Egma serves one organization",
+        "only while this Egma instance serves one organization",
       );
     }
   });

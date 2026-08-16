@@ -513,7 +513,7 @@ describe("the one door to the plaintext", () => {
       { ...claimed(), via: "engine" } as AuthContext,
     ]) {
       await expect(resolvePlatformSettings(auth)).rejects.toThrow(
-        /egma's own simulator/u,
+        /Egma's own simulator/u,
       );
     }
   });

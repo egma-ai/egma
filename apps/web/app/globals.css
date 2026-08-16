@@ -1,66 +1,41 @@
+@import "../ui/tokens.css";
+
 :root {
   color-scheme: light;
-  --background: #f7f7f4;
-  --surface: #fff;
-  --surface-soft: #efefea;
-  --foreground: #1c1c1a;
-  --muted: #696963;
-  --faint: #70706a;
-  --border: #dcdcd5;
-  --border-strong: #bcbcb3;
-  --focus: #4f67e9;
-  --inverse: #1a1a18;
-  --inverse-text: #f7f7f4;
-  --good: #28775a;
-  --warn: #9a691c;
-  --bad: #b44444;
-  --control-height: 44px;
-  --sans: var(--egma-sans), sans-serif;
-  --mono: var(--egma-mono), monospace;
+  --sans: Arial, Helvetica, sans-serif;
+  --mono: var(--egma-mono), "IBM Plex Mono", ui-monospace, monospace;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --background: #151514;
-  --surface: #1b1b1a;
-  --surface-soft: #222220;
-  --foreground: #f2f2ed;
-  --muted: #a3a39b;
-  --faint: #82827b;
-  --border: #30302d;
-  --border-strong: #4a4a44;
-  --focus: #8da0ff;
-  --inverse: #f4f4ef;
-  --inverse-text: #1a1a18;
-  --good: #55bd8c;
-  --warn: #d69a38;
-  --bad: #e27373;
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; background: var(--background); }
-body { min-height: 100svh; margin: 0; background: var(--background); color: var(--foreground); font-family: var(--sans); font-size: 16px; line-height: 1.5; }
-button, input, select, textarea { color: inherit; font: inherit; }
+html { min-width: 320px; background: var(--background); text-size-adjust: 100%; }
+body { min-height: 100svh; margin: 0; background: var(--background); color: var(--foreground); font-family: var(--sans); font-size: var(--text-body); font-synthesis: none; font-weight: 400; letter-spacing: var(--tracking-body); line-height: var(--line-body); }
+button, input, select, textarea { color: inherit; font: inherit; font-weight: 400; }
+h1, h2, h3, h4, h5, h6, strong, b { font-weight: 400; }
 a { color: inherit; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-::selection { background: color-mix(in srgb, var(--focus) 25%, transparent); }
+::selection { background: var(--surface-soft); color: var(--foreground); }
 
 @supports (appearance: base-select) {
   select, ::picker(select) { appearance: base-select; align-items: center; }
   ::picker(select) {
     margin-block: 4px;
-    padding: 5px;
+    padding: var(--space-1);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     background: var(--surface);
-    box-shadow: 0 16px 45px rgb(0 0 0 / .14);
+    box-shadow: var(--shadow-menu);
     color: var(--foreground);
   }
-  select option { padding: 9px 11px; border-radius: 7px; }
+  select option { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
   select option:checked { background: var(--surface-soft); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
+  details { --duration-press: 1ms; --duration-hover: 1ms; }
 }

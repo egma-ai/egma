@@ -141,6 +141,10 @@ const WORK_DISPATCHING = [
 const CONTEXT_REQUIRING = [
   "addConnection",
   "advanceProductionSampling",
+  // Taking a persona out of a project's authoring lists, and putting them
+  // back. Neither removes a row: a run that pinned a version stays
+  // interpretable, and a removal somebody regrets stays undoable.
+  "archivePersona",
   "appendSpans",
   "appendVerdicts",
   "cancelRun",
@@ -158,21 +162,34 @@ const CONTEXT_REQUIRING = [
   "createAgent",
   "createApiKey",
   "createInvitation",
+  // An organization's judge credential: created and labelled, listed, read as
+  // a label and a hint, and relabelled or rotated whole. Five doors and none
+  // that answers with a key — the plaintext has one reader, the grading
+  // engine, and it reaches it through `resolveJudgeKey` alone.
+  "createJudgeCredential",
   "createMockTool",
   "createPersona",
   "createProject",
   "createTest",
+  "archiveAgent",
+  "archiveConnection",
   "deactivateUser",
-  "deleteAgent",
   "deleteGrader",
   // The library's delete, which in v0 exists to refuse: every entry on the
   // shelf is one egma ships, and egma's are undeletable because the next boot
   // writes them again.
   "deleteGraderLibraryEntry",
   "deleteMockTool",
-  "deletePersona",
-  "deleteTest",
+  // Archive and Restore, never a delete: a test a run pinned has to stay
+  // interpretable forever, and a removal somebody regrets at four o'clock has
+  // to be undoable at five.
+  "archiveTest",
+  "restoreTest",
+  // Which agents a test applies to. Its own door because it moves its own
+  // revision and mints no version — target coverage is not test content.
+  "setTestAgents",
   "editGrader",
+  "editJudgeCredential",
   "editMockTool",
   "editPersona",
   "editTest",
@@ -196,10 +213,12 @@ const CONTEXT_REQUIRING = [
   "getGradingJob",
   "getGradingJobForTrace",
   "getJudgeConfiguration",
+  "getJudgeCredential",
   "getPersona",
   "getPersonaVersion",
   "getRun",
   "getSimulation",
+  "getProjectJudge",
   "getSimulationTestVersion",
   "getTest",
   "getTestVersion",
@@ -210,15 +229,27 @@ const CONTEXT_REQUIRING = [
   "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
+  "listTestVersions",
   "listMockTools",
   "listPendingInvitations",
   "listPersonas",
+  "listPersonaVersions",
   "listProjects",
   // Everything that has changed about one run since a point, in the order it
   // changed. The read a follower resumes from after a crash, and the reason
   // the events are a record rather than a rendering of the mutable rows.
   "listRunEvents",
   "listRuns",
+  // The same list with its judgment folded in: a page of runs, each carrying
+  // its machinery counts and its verdict, read from both stores at once so a
+  // row and the page it opens can never disagree.
+  "listRunHistory",
+  "readRunFold",
+  // A new run derived from an earlier one, under today's conditions. It is a
+  // verb of its own rather than a flag on `startRun` because everything it uses
+  // comes off the earlier run and nothing a caller sends can name any of it —
+  // which is what makes the link a retry writes worth trusting.
+  "retryRun",
   "listSimulations",
   "listTests",
   "listTraces",
@@ -241,12 +272,27 @@ const CONTEXT_REQUIRING = [
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
+  // The measurement door: it asks this connection's adapter what its target
+  // can do and writes down what came back. Its own verb rather than a flag on
+  // an edit, because a measurement is not an authored change and must not be
+  // able to arrive with one.
+  "refreshConnectionCapabilities",
   "registerAgent",
   "regrade",
   "releaseGradingJob",
-  "removeConnection",
   "reopenGradingJob",
   "removeMember",
+  // Archive's other half, for an agent and for one way of reaching it. They
+  // are separate verbs and deliberately not one: restoring an agent must never
+  // reactivate a child credential, so each connection comes back on its own
+  // shape's terms.
+  "restoreAgent",
+  "restoreConnection",
+  // No `listGraderVersions` and no `restoreGrader`, and both were here. A
+  // running copy has no version history a person browses and no archive to come
+  // back from: it is made by pressing **Use** and deleted whole, and what it
+  // judges by is read through its library entry at judging time.
+  "listJudgeCredentials",
   // The second secret egma holds, on the first one's terms: the read answers a
   // reference and a hint, and this is the one door to the plaintext behind it.
   "resolveJudgeKey",
@@ -257,6 +303,10 @@ const CONTEXT_REQUIRING = [
   // Names off a reviewed file turned into the identity a version names. It
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
+  "restorePersona",
+  // Which active tests currently name a persona — the same question their
+  // Archive asks, so a page and a refusal can never disagree about it.
+  "testsUsingPersona",
   // The dispatch path's door to the deployment's own settings in the clear —
   // the third secret egma holds, and the same door the connection's
   // credentials below come through. It takes the context like everything else
@@ -282,10 +332,36 @@ const CONTEXT_REQUIRING = [
   // It names no customer and takes no argument at all.
   "seedRunningGraders",
   "setJudgeConfiguration",
+  "setProjectJudge",
   "startRun",
   "startSimulation",
+  // What a run would freeze, answered before anybody starts it — and the same
+  // resolver `startRun` uses, so a review step and the run it produces can
+  // never disagree about which tests are skipped or which graders judge.
+  "planRun",
+  // What a run actually froze, including the honest `not_recorded` state for
+  // history that predates frozen plans.
+  "getGradingPlan",
+  // Taking a judge credential out of use, and asking what is stopping that.
+  // Both refuse and answer from one read, so a settings page and the refusal
+  // can never give two different reasons.
+  "archiveJudgeCredential",
+  "judgeCredentialUses",
   "updateAgent",
   "updateConnection",
+  // A project's live name, slug and description, written against the revision
+  // the edit was read at. Its counterpart `createProject` above is the one
+  // factory signup uses too, so a project made from Settings is born with the
+  // same starter persona, default pointer and judge state.
+  "updateProject",
+  // No `testsNamingGrader`, and it was here. It counted the live tests naming a
+  // grader so an archive could be refused and the blocking tests named. A test
+  // names no graders now — the `test_grader` junction is dropped — so there is
+  // no such use to block on and nothing left for the verb to count.
+  // The customer's own name, changed. The slug is deliberately not offered:
+  // it is unique across the deployment, and invitation links were sent under
+  // it, so it is a different decision with a different blast radius.
+  "updateOrganization",
   "updateOrganizationSettings",
   // The one door that makes a running grader: a pointer at a library entry
   // and the answers to whatever that entry's form asked.
@@ -347,6 +423,19 @@ const VALUES = [
   // have to read the sentence to tell them apart.
   "AgentWriteRefusedError",
   "AlreadyBelongsToAnOrganizationError",
+  // A link edit written against an applicability revision the test has moved
+  // past. The third of three conflicts, and genuinely a third thing: it guards
+  // a set that is neither the live identity nor the versioned content.
+  "ApplicabilityConflictError",
+  // Egma was asked to measure a target and the adapter could not establish
+  // anything. Its own class beside the one below, because "the target did not
+  // answer, try again" and "there is nothing here to try" are different next
+  // moves and a caller that could not tell them apart would retry forever.
+  "CapabilityCheckFailedError",
+  "NoCapabilityAdapterError",
+  // A connection could not be brought back on the terms its own shape sets.
+  // Four rules, four codes, and the reason travels beside the sentence.
+  "ConnectionRestoreRefusedError",
   // A library entry cannot leave the shelf while graders point at it. A copy
   // reads its definition through that pointer every time it judges, so an entry
   // taken away underneath one would leave a grader that judges nothing while
@@ -355,28 +444,65 @@ const VALUES = [
   // The grader factory has no refusal of its own any more. A copy's delete used
   // to be turned away while a live test named it; a test names no graders, so
   // switching one off is a decision about the project with nothing in its way.
+  // A project's judge pointed at a credential issued by somebody else's
+  // provider. Its own class because the fix is specific and nameable.
+  "JudgeProviderMismatchError",
   "LastAdminError",
   // A second answer for a tool this project already answers for. Its own class
   // because nothing about the body is wrong and something is already there,
   // which is a different answer in kind.
   "MockToolTakenError",
   "NotPermittedError",
+  // The persona factory's other refusal: archiving the persona a project
+  // points at, without saying who takes the pointer. A project always has a
+  // default persona, and this is what keeps that true.
+  "DefaultPersonaReplacementError",
+  // An identity write that named the revision it was written against, after
+  // somebody else moved the row. `TestMovedOnError` below is the same refusal
+  // one level down, about content rather than identity.
+  // A start action that reused an idempotency key over a different request.
+  // Its own class because the answer is neither the original run nor a second
+  // one: telling somebody their new selection had started when it had not is
+  // the one failure the key exists to prevent.
+  "IdempotencyConflictError",
+  "IdentityConflictError",
+  // A judge credential something still needs — a project pointing at it, a run
+  // whose frozen plan names it while a conversation is still moving, or a
+  // grading job about to resolve its secret. It carries every blocking use,
+  // because the fix for each is somewhere different.
+  "JudgeCredentialInUseError",
+  // A run refused before anything was dialed, because its plan holds a grader
+  // that judges by asking a model and the project has configured none.
+  "JudgeNotConfiguredError",
   "PersonaNamedByTestsError",
   // A delete that named one of egma's own graders. Its own class because
   // nothing about the request is wrong and nothing is in the way — the entry
   // simply is not anybody's to remove.
   "PredefinedGraderError",
   "ProjectOutsideOrganizationError",
+  // A slug an admin typed that a living project of the same organization
+  // already holds. Its own class because the slug is the one project field
+  // that has to be unique, and the refusal names the word to change.
+  "ProjectSlugTakenError",
   // A run turned away, carrying which rule turned it away: a connection
   // nobody can see, one that is not on the agent that was named, a type no
   // simulator adapter has shipped for, a selection that cannot be conducted,
   // and a cancel that arrived after the run had already finished. Five rules,
   // four codes between them, and a sentence apiece — which is why the reason
   // travels as a value rather than being read back out of the prose.
+  // A Retry that could not be derived, because something the earlier run used is
+  // no longer active or no longer applies. Its own class beside the one below
+  // because it never refuses a request somebody composed — it refuses to
+  // silently substitute, and it names the resource that stopped it.
+  "RunRetryRefusedError",
   "RunWriteRefusedError",
   // An edit refused because somebody moved the test since it was written. It
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.
+  // A test with no agent to run against, refused; and a Restore refused
+  // because the current version names an archived persona or grader.
+  "TestAgentRefusedError",
+  "TestDependencyInactiveError",
   "TestMovedOnError",
   // Use named an entry this caller cannot see, or none at all. One refusal for
   // both, because telling them apart would answer a question about somebody
@@ -384,7 +510,23 @@ const VALUES = [
   "UnknownGraderLibraryEntryError",
   // A write refused for what it says, told apart from a fault so that a layer
   // above can relay the factory's sentence instead of answering with a stack.
+  // A capability nothing offered. A subclass of the general refusal, so every
+  // relay of that one is right about this one too, with a code of its own for
+  // a form that wants to point at the capability list.
+  "UnknownCapabilityError",
+  // A persona named by a name two living personas answer to. The same subclass
+  // arrangement, and its own code because the reader is usually a repository
+  // file: the fix is to put the stable identifier in the file, which is an
+  // instruction no browser form would ever be given.
+  "PersonaNameAmbiguousError",
   "UnprocessableInputError",
+  // A versioned write that named the version it was written against, for every
+  // versioned resource reached by identifier rather than by filename.
+  "VersionConflictError",
+  // The store rolling a write back because another one got in its way. Its own
+  // class because it is the one refusal about nothing the caller did: the
+  // request was valid, nothing was written, and sending it again is the fix.
+  "WriteAbortedError",
   // The store's answer to a batch it will never take, told apart from a store
   // that is merely unreachable — a door has to answer those two differently,
   // and only the module that owns the client can tell them apart.
@@ -394,6 +536,57 @@ const VALUES = [
   "UnreadableTraceQueryError",
   "VIA",
   "VOICE_PROVIDERS",
+  // The capability catalog, and the two readers that hold a key to it. Pure
+  // values: they reach no store, take no context, and are the one list a test
+  // requirement and a connection measurement are both written from.
+  "CAPABILITY_CATALOG",
+  "CAPABILITY_KEYS",
+  "admittedCapabilities",
+  "isCapabilityKey",
+  // The three answers a capability record gives, and the door an adapter's
+  // report goes through to become one. `unsupported` and `not_measured` are a
+  // settled fact and an unasked question; collapsing them puts a false skip
+  // reason on every simulation an adapter's blind spot touched.
+  "capabilityStanding",
+  "CAPABILITY_STANDINGS",
+  "measuredCapabilities",
+  "unknownCapabilityMessage",
+  "capabilityCheckFailedMessage",
+  "noCapabilityAdapterMessage",
+  // Whether egma ships something that can measure a type's targets, and the
+  // door a deployment installs one through.
+  "hasCapabilityDiscovery",
+  "registerCapabilityDiscovery",
+  // The one shipped adapter, registered for every type egma can reach. It
+  // answers only what egma's own transport settles — whether a simulation
+  // carries audio, and that nothing can send a digit over any of them — so it
+  // states no fact about a provider, which is the rule it had to be written
+  // against. Exported so a deployment can put it back after standing another
+  // one in its place.
+  "transportCapabilities",
+  // The connection registry, as a browser may be told about it — labels, field
+  // shapes, the credential rule, and the two adapter facts. Never a gate, a
+  // hint function, a refusal sentence or a credential.
+  "connectionTypeMetadata",
+  "credentialRuleOf",
+  "variantById",
+  "variantIdOf",
+  // The settled vocabulary of a running copy's scope, exported so that a form
+  // and a refusal read the same list the schema is checked against. `GRADER_READS`
+  // stood beside it and does not exist: a copy declares no evidence reads.
+  "GRADER_SCOPES",
+  // A run's four machinery words, exported so the door that filters a history
+  // by one refuses anything else by name rather than from a second copy of the
+  // list.
+  "RUN_STATUSES",
+  "JUDGE_PROVIDERS",
+  "JUDGE_SOURCES",
+  "PLATFORM_JUDGE",
+  // No `GRADER_TYPE_REGISTRY` and no `EXPECTED_BEHAVIORS_GRADER`. The first
+  // held what each of four authorable grader types read and could score; the
+  // second described the built-in that was never a row. `GRADER_LIBRARY_CATALOG`
+  // above replaces both — the shelf egma ships, with the expected-behaviors
+  // grader an entry on it like any other and a real seeded copy per project.
   "schema",
 ];
 
@@ -451,13 +644,26 @@ const THE_FOLD = [
   // a format known in two packages is a format free to fork in one of them.
   "behaviorAssertionAt",
   "behaviorAssertionKey",
-  "foldVerdicts",
+  // `foldVerdicts` is deliberately absent, and its absence is the guard. It
+  // answers about whatever pile of rows it is handed and never asks whose they
+  // are — right inside `verdicts/`, and a loaded gun outside it, because a
+  // caller that hands it every row of a run has folded a diagnostic's failure
+  // into the headline with nothing about the call saying so. What crosses this
+  // boundary is the pair below, neither of which can be called without
+  // answering which copies only report.
   "foldVerdictsByGrader",
   "speakingVerdicts",
   // Which rows decide and which only report, split before anything is folded so
   // that the one algebra never has to ask whose rows it was handed.
   "verdictLanes",
   "VERDICTS",
+  // The same algebra one grain up, where a run's machinery meets its judgment.
+  // It is here rather than in the context-requiring group for the reason the
+  // three above are: it is handed what two stores already answered and reaches
+  // nothing itself. It exists so that no page decides for itself that a failed
+  // execution is a failed verdict, or that grading nobody has finished is one.
+  "foldRun",
+  "foldSimulation",
 ];
 
 /**

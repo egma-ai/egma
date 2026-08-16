@@ -436,24 +436,7 @@ async function runUp(
     onLine: (line) => options.fail(line),
   };
 
-  // Twice, on a workspace that has never been started. ClickHouse's own
-  // entrypoint starts a server, creates the database, stops it and starts the
-  // real one — and its health check answers during the first of those, so the
-  // API can be released to connect to a server that is on its way down. It
-  // exits, compose reports a dependency failure, and a second `up` succeeds
-  // against the stores that now exist. Measured on a clean workspace here, so
-  // this is not defensive coding: it is the first run, and a first run that
-  // fails once and works when you type the same thing again is a product that
-  // taught its first user to distrust it.
-  let started = await compose(["up", "-d", "--wait", "--wait-timeout", "300"], composeOptions);
-  // Asked before the retry, because the two failures look alike and want
-  // opposite answers. A missing bootstrap variable is refused while Compose is
-  // still reading the file — nothing was created, and a second attempt would
-  // invent no value the first one lacked — so it is reported by name here
-  // rather than dressed up as a store that would not start, which would send
-  // an operator reading container logs for a variable they never set.
-  const missing = missingRequiredVariable(started);
-  if (missing !== null) {
+  function refuseMissingVariable(missing: string): number {
     options.out("status: failed");
     options.out(
       `reason: ${missing} has no value, and this deployment deliberately has no ` +
@@ -464,13 +447,57 @@ async function runUp(
     );
     return SELF_HOST_EXIT.refused;
   }
+
+  // This workspace is a source checkout. Build its services before Compose
+  // starts them, so pulling new egma code cannot restart containers made from
+  // the previous checkout. This is separate from `up`: a Dockerfile, registry
+  // or disk failure is a build failure and must not be retried or described as
+  // a store doing its first boot. Compose keeps its normal layer cache, and
+  // services that only name a published image are not built.
+  const built = await compose(["build"], composeOptions);
+  const missingWhileBuilding = missingRequiredVariable(built);
+  if (missingWhileBuilding !== null) {
+    return refuseMissingVariable(missingWhileBuilding);
+  }
+  if (built.code !== 0) {
+    options.out("status: failed");
+    options.out(
+      "reason: docker compose could not build the platform images. What it printed " +
+        "above names the Dockerfile, registry or local runtime problem. No service " +
+        "was started, and this command is safe to run again once it is fixed.",
+    );
+    return SELF_HOST_EXIT.refused;
+  }
+
+  const start = ["up", "-d", "--wait", "--wait-timeout", "300"] as const;
+
+  // Twice, on a workspace that has never been started. ClickHouse's own
+  // entrypoint starts a server, creates the database, stops it and starts the
+  // real one — and its health check answers during the first of those, so the
+  // API can be released to connect to a server that is on its way down. It
+  // exits, compose reports a dependency failure, and a second `up` succeeds
+  // against the stores that now exist. Measured on a clean workspace here, so
+  // this is not defensive coding: it is the first run, and a first run that
+  // fails once and works when you type the same thing again is a product that
+  // taught its first user to distrust it.
+  let started = await compose(start, composeOptions);
+  // Asked before the retry, because the two failures look alike and want
+  // opposite answers. A missing bootstrap variable is refused while Compose is
+  // still reading the file — nothing was created, and a second attempt would
+  // invent no value the first one lacked — so it is reported by name here
+  // rather than dressed up as a store that would not start, which would send
+  // an operator reading container logs for a variable they never set.
+  const missing = missingRequiredVariable(started);
+  if (missing !== null) {
+    return refuseMissingVariable(missing);
+  }
   if (started.code !== 0) {
     options.fail(
       "one of the services did not come up on the first try. That is usual on a " +
         "workspace that has never been started, because a store's first boot " +
         "creates its database and restarts itself. Trying once more.",
     );
-    started = await compose(["up", "-d", "--wait", "--wait-timeout", "300"], composeOptions);
+    started = await compose(start, composeOptions);
   }
   if (started.code !== 0) {
     options.out("status: failed");

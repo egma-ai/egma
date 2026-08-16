@@ -241,7 +241,7 @@ If you are upgrading from a release that used `egma self-host phone setup`, your
   This means `EGMA_BLOB_PUBLIC_URL` names a different host than the browser uses to reach the object store. Set it to the address a browser on your network actually reaches — for example, `http://192.168.1.10:9000` if that is your server's LAN address. Also verify that `EGMA_BASE_URL` and `EGMA_BLOB_PUBLIC_URL` both use the same scheme (`http:` or `https:`): a mixed-content mismatch silently blocks every recording.
 </Accordion>
 
-<Accordion title="Egma self-host up works but the run never starts">
+<Accordion title="egma self-host up works but the run never starts">
   Check that `egma self-host setup` has been run and that the platform reports no missing settings. A platform missing its persona model will accept runs but the simulator will error on every simulation. Run `npx @egma/cli self-host setup --plan` to see what is still unset.
 </Accordion>
 

@@ -1,0 +1,171 @@
+/*
+ * Egma's product design foundation.
+ *
+ * The palette, spacing, type, shape, depth, and motion values come from the
+ * accepted direction in DESIGN.md. Route and component styles use semantic
+ * aliases so a visual decision stays here instead of drifting between pages.
+ */
+
+:root {
+  /* Locked Mistral-inspired palette. */
+  --color-parchment: #fffaeb;
+  --color-paper: #ffffff;
+  --color-midnight: #1f1f1f;
+  --color-carbon: #000000;
+  --color-graphite: #3c3c3c;
+  --color-ember: #fa520f;
+  --color-butter: #fff0c2;
+  --color-honeycomb: #ecdaa2;
+
+  /*
+   * Semantic product colors and compatibility aliases.
+   *
+   * Warm yellow is an accent, not the product's default cast. The neutral
+   * canvas and hairline are derived from the locked paper and graphite values;
+   * no new palette color is introduced.
+   */
+  --background: color-mix(in srgb, var(--color-graphite) 3%, var(--color-paper));
+  --surface: var(--color-paper);
+  --surface-soft: var(--color-butter);
+  --foreground: var(--color-midnight);
+  --muted: var(--color-graphite);
+  --faint: color-mix(in srgb, var(--color-graphite) 76%, var(--color-paper));
+  --border: color-mix(in srgb, var(--color-graphite) 18%, var(--color-paper));
+  --border-strong: var(--color-midnight);
+  --focus: var(--color-ember);
+  --accent: var(--color-ember);
+  --inverse: var(--color-carbon);
+  --inverse-text: var(--color-paper);
+
+  /*
+   * Product verdicts still need separate status colors during migration.
+   * These old aliases are temporary and must not gain new meanings.
+   */
+  --good: #28775a;
+  --warn: #9a691c;
+  --bad: #b44444;
+
+  /* Four-pixel spacing grid. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+  --space-11: 72px;
+  --space-12: 80px;
+  --space-13: 100px;
+
+  /* Provisional component shape, pending direct console evidence. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
+
+  /* Accepted type scale. Arial remains the licensed fallback. */
+  --text-caption: 14px;
+  --text-body: 16px;
+  --text-lead: 24px;
+  --text-subheading: 32px;
+  --text-heading-sm: 38px;
+  --text-heading: 48px;
+  --text-heading-lg: 56px;
+  --text-display: 82px;
+  --line-caption: 1.43;
+  --line-body: 1.5;
+  --line-lead: 1.33;
+  --line-heading: 1;
+  --tracking-caption: -0.35px;
+  --tracking-body: -0.4px;
+  --tracking-lead: -0.6px;
+  --tracking-subheading: -0.8px;
+  --tracking-heading-sm: -0.95px;
+  --tracking-heading: -1.2px;
+  --tracking-heading-lg: -1.4px;
+  --tracking-display: -2.05px;
+
+  /* Older component names remain valid while their CSS migrates. */
+  --text-2xs: var(--text-caption);
+  --text-xs: var(--text-caption);
+  --text-sm: var(--text-caption);
+  --text-md: var(--text-body);
+  --text-lg: var(--text-lead);
+  --text-xl: var(--text-subheading);
+  --line-tight: var(--line-heading);
+  --line-normal: var(--line-body);
+  --tracking-label: 0.08em;
+
+  /* Dense controls keep a separate visual size from touch targets. */
+  --control-sm: 32px;
+  --control-md: 36px;
+  --control-lg: 44px;
+  --control-height: var(--control-lg);
+  --tap-target: 44px;
+
+  /* Provisional motion baseline from the Emil design rules. */
+  --duration-press: 120ms;
+  --duration-hover: 140ms;
+  --duration-popover-in: 180ms;
+  --duration-popover-out: 140ms;
+  --duration-dialog-in: 240ms;
+  --duration-dialog-out: 180ms;
+  --duration-drawer-in: 280ms;
+  --duration-drawer-out: 220ms;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* A list row is one line of reading. */
+  --row-height: 40px;
+  --row-padding-y: var(--space-2);
+  --row-padding-x: var(--space-4);
+
+  /* Product shell measurements. */
+  --sidebar-width: 224px;
+  --topbar-height: 48px;
+  --page-gutter: var(--space-6);
+  --page-max: 1200px;
+  --page-max-wide: 1440px;
+
+  /* Warm elevation is reserved for menus, dialogs, and showcase panels. */
+  --shadow-menu: 0 12px 32px rgb(127 99 21 / 0.14);
+  --shadow-dialog:
+    rgb(127 99 21 / 0.12) -8px 16px 39px 0,
+    rgb(127 99 21 / 0.1) -33px 64px 72px 0;
+  --shadow-showcase:
+    rgb(127 99 21 / 0.12) -8px 16px 39px 0,
+    rgb(127 99 21 / 0.1) -33px 64px 72px 0,
+    rgb(127 99 21 / 0.06) -73px 144px 97px 0,
+    rgb(127 99 21 / 0.02) -130px 256px 115px 0;
+}
+
+/*
+ * The current dark theme stays available as a compatibility layer. DESIGN.md
+ * keeps its redesign provisional until direct console evidence exists.
+ */
+:root[data-theme="dark"] {
+  --background: #151514;
+  --surface: #1b1b1a;
+  --surface-soft: #222220;
+  --foreground: #f2f2ed;
+  --muted: #a3a39b;
+  --faint: #82827b;
+  --border: #30302d;
+  --border-strong: #4a4a44;
+  --focus: #8da0ff;
+  --accent: var(--focus);
+  --inverse: #f4f4ef;
+  --inverse-text: #1a1a18;
+  --good: #55bd8c;
+  --warn: #d69a38;
+  --bad: #e27373;
+}
+
+/*
+ * The responsive shell breakpoint stays in system.module.css. Custom
+ * properties cannot be used in media-query conditions.
+ */

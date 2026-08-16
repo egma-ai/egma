@@ -152,6 +152,20 @@ def test_every_variable_the_code_reads_is_passed_through_by_compose():
     )
 
 
+def test_the_capacity_default_lives_in_the_simulator_once():
+    """Compose and a copied environment file pass through absence.
+
+    The simulator owns the default. If either deployment file writes its own
+    number, a bare process and a self-host can drift again even though both
+    appear to use the same variable.
+    """
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert "EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-}" in compose
+    assert re.search(r"^EGMA_SIMULATOR_CAPACITY=$", env_example, re.MULTILINE)
+
+
 def test_every_variable_the_code_reads_is_in_the_readme_table():
     readme = (Path(config_module.__file__).parents[2] / "README.md").read_text(
         encoding="utf-8"
@@ -441,6 +455,7 @@ MAY_BE_ABSENT = {
     # Per-container tuning. The spec puts these out of scope by name: how many
     # simulations one simulator takes at once and how often the grader sweeps
     # are properties of the host, not of the deployment.
+    "EGMA_SIMULATOR_CAPACITY": "empty means the simulator's own default",
     "EGMA_SIMULATOR_CLAIMANT": "per-container tuning",
     "EGMA_SIMULATOR_HEARTBEAT_SECONDS": "per-container tuning",
     "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "per-container tuning",

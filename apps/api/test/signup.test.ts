@@ -434,7 +434,13 @@ describe("the caller behind a relayed signup", () => {
 });
 
 describe("a person with one organization and one project", () => {
-  it("is offered nothing to pick between", async () => {
+  /**
+   * The choices, and the role, and no chosen project among them. Which project
+   * a tab is working in lives in that tab's address, so this read answers what
+   * there is to choose from and never which one is current — a mutable
+   * browser-wide answer would make two tabs on two projects impossible.
+   */
+  it("is told what there is, and never which one is current", async () => {
     api = await createApi("signup_cardinality");
 
     const created = await signUp({
@@ -457,6 +463,7 @@ describe("a person with one organization and one project", () => {
       slug: "acme",
       role: "admin",
     });
+    expect(Object.keys(body)).toEqual(["user", "organizations", "projects"]);
   });
 
   it("is nobody at all without a session", async () => {

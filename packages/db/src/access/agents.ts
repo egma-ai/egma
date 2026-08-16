@@ -1,5 +1,17 @@
 import { isId, newId } from "@egma/ids";
-import { and, asc, desc, eq, isNull, lt, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import {
@@ -11,19 +23,36 @@ import {
 } from "../schema/agents.ts";
 import { sealCredentials } from "../sealing.ts";
 import {
+  CAPABILITIES_UNKNOWN,
+  capabilityCheckFailedMessage,
+  capabilityDiscoveryFor,
+  measuredCapabilities,
+  noCapabilityAdapterMessage,
+  type ConnectionCapabilities,
+  type Discovered,
+} from "./capabilities.ts";
+import {
+  credentialRuleOf,
   descriptorOf,
   shapeOf,
   validConfig,
   validCredentials,
   validModality,
+  variantById,
+  variantIdOf,
 } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
 import {
   AgentWriteRefusedError,
+  CapabilityCheckFailedError,
+  ConnectionRestoreRefusedError,
+  IdentityConflictError,
+  NoCapabilityAdapterError,
   ProjectOutsideOrganizationError,
 } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
+import { stopWorkOverConnections } from "./runs.ts";
 import { within } from "./within.ts";
 
 /**
@@ -78,12 +107,18 @@ export type Connection = {
   readonly modality: Modality;
   /** Derived from the type, never caller-supplied. */
   readonly topology: Topology;
+  /** Which shape of its type this is, frozen at create. */
+  readonly variantId: string;
   readonly environment: string | null;
   readonly config: Readonly<Record<string, string>>;
   /** The last characters of the sealed secret, or null where none belongs. */
   readonly credentialsHint: string | null;
-  /** Runtime-discovered, never caller-declared; null until discovery exists. */
-  readonly capabilities: unknown;
+  /** Measured by an adapter, never declared by a caller. Unknown until one has. */
+  readonly capabilities: ConnectionCapabilities;
+  /** What an edit says it was written against. New after every change. */
+  readonly revision: string;
+  /** When it stopped being reachable for new work, or null while it is. */
+  readonly archivedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
@@ -100,14 +135,30 @@ export type ConnectionChanges = {
   readonly environment?: string | null | undefined;
   readonly config?: Readonly<Record<string, unknown>> | undefined;
   readonly credentials?: Readonly<Record<string, unknown>> | undefined;
+  /** The revision this edit was written against. See `AgentChanges`. */
+  readonly expectedRevision?: string | undefined;
 };
 
-export type RemovedConnection = {
-  readonly id: string;
-  readonly agentId: string;
-  readonly name: string;
-  readonly deletedAt: Date;
+/** What a connection Archive answers: the row, and the work it stopped. */
+export type ArchivedConnection = {
+  readonly connection: Connection;
+  readonly canceledRuns: readonly string[];
 };
+
+/**
+ * What a Restore brings for the credential, and why the third case is a choice
+ * rather than an absence.
+ *
+ * A shape whose credential is `optional` genuinely works either way, so a
+ * Restore that simply left it out could mean two opposite things — *keep going
+ * without one* and *I forgot* — and the archived envelope is still sitting
+ * there for one of those readings to silently reuse. So the author says which:
+ * `replace` with a new credential, or `clear`, which removes the stored
+ * envelope outright. Nothing about Restore ever reuses what was sealed before.
+ */
+export type RestoreCredential =
+  | { readonly choice: "replace"; readonly credentials: Readonly<Record<string, unknown>> }
+  | { readonly choice: "clear" };
 
 export type NewAgent = {
   readonly name: string;
@@ -125,6 +176,10 @@ export type Agent = {
   readonly projectId: string;
   readonly name: string;
   readonly description: string | null;
+  /** What an edit says it was written against. New after every change. */
+  readonly revision: string;
+  /** When it stopped being available for new work, or null while it is. */
+  readonly archivedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
@@ -143,6 +198,12 @@ export type CreatedAgent = Agent & {
 export type AgentChanges = {
   readonly name?: string | undefined;
   readonly description?: string | null | undefined;
+  /**
+   * The revision this edit was written against. Left out, the edit is written
+   * blind and the last writer wins — which is right for a terminal and wrong
+   * for a browser, so the API is where it becomes compulsory.
+   */
+  readonly expectedRevision?: string | undefined;
 };
 
 export type AgentPage = {
@@ -151,15 +212,17 @@ export type AgentPage = {
   readonly nextCursor: string | undefined;
 };
 
-export type DeletedAgent = {
-  readonly id: string;
-  readonly projectId: string;
-  readonly name: string;
-  readonly deletedAt: Date;
+/** What an Archive answers: the agent as it now stands, and what went with it. */
+export type ArchivedAgent = {
+  readonly agent: Agent;
+  /** Every child connection this Archive took, active until now. */
+  readonly connections: readonly string[];
+  /** Every run whose header this Archive set to canceled. */
+  readonly canceledRuns: readonly string[];
 };
 
-const notDeleted: SQL = isNull(agent.deletedAt);
-const connectionNotDeleted: SQL = isNull(connection.deletedAt);
+const notArchived: SQL = isNull(agent.archivedAt);
+const connectionNotArchived: SQL = isNull(connection.archivedAt);
 
 /** An answer's columns, and no more — the tenant-free view. */
 const COLUMNS = {
@@ -167,6 +230,8 @@ const COLUMNS = {
   projectId: agent.projectId,
   name: agent.name,
   description: agent.description,
+  revision: agent.revision,
+  archivedAt: agent.archivedAt,
   createdAt: agent.createdAt,
   updatedAt: agent.updatedAt,
 } as const;
@@ -180,10 +245,17 @@ const CONNECTION_COLUMNS = {
   type: connection.type,
   modality: connection.modality,
   topology: connection.topology,
+  variantId: connection.variantId,
   environment: connection.environment,
   config: connection.config,
   credentialsHint: connection.credentialsHint,
-  capabilities: connection.capabilities,
+  capabilityState: connection.capabilityState,
+  capabilitiesMeasured: connection.capabilitiesMeasured,
+  capabilitiesSupported: connection.capabilitiesSupported,
+  capabilitiesCheckedAt: connection.capabilitiesCheckedAt,
+  capabilitySource: connection.capabilitySource,
+  revision: connection.revision,
+  archivedAt: connection.archivedAt,
   createdAt: connection.createdAt,
   updatedAt: connection.updatedAt,
 } as const;
@@ -232,13 +304,26 @@ function inActingProject(auth: AuthContext): SQL | undefined {
     : eq(agent.projectId, auth.projectId);
 }
 
-/** The named agent, alive, within the caller's tenancy and scope. */
+/** The named agent, active, within the caller's tenancy and scope. */
 function theAgent(auth: AuthContext, id: string): SQL {
   return within(
     auth,
     agent,
-    and(eq(agent.id, id), notDeleted, inActingProject(auth)),
+    and(eq(agent.id, id), notArchived, inActingProject(auth)),
   );
+}
+
+/**
+ * The named agent whether or not it is archived.
+ *
+ * Archive is not deletion, and the whole difference is that an archived agent
+ * stays readable: a run that names it has to keep opening, and Restore has to
+ * be able to find the thing it restores. So the reads and the lifecycle verbs
+ * come through here, and only the verbs that put an agent into *new* work go
+ * through the active door above.
+ */
+function theAgentEvenArchived(auth: AuthContext, id: string): SQL {
+  return within(auth, agent, and(eq(agent.id, id), inActingProject(auth)));
 }
 
 /**
@@ -255,11 +340,7 @@ function theConnection(
   return within(
     auth,
     connection,
-    and(
-      eq(connection.id, connectionId),
-      eq(connection.agentId, agentId),
-      connectionNotDeleted,
-    ),
+    and(eq(connection.id, connectionId), eq(connection.agentId, agentId)),
   );
 }
 
@@ -272,11 +353,17 @@ function theConnection(
 async function visibleAgent(
   auth: AuthContext,
   agentId: string,
-): Promise<{ id: string; projectId: string } | undefined> {
+): Promise<
+  { id: string; projectId: string; archivedAt: Date | null } | undefined
+> {
   const [row] = await db()
-    .select({ id: agent.id, projectId: agent.projectId })
+    .select({
+      id: agent.id,
+      projectId: agent.projectId,
+      archivedAt: agent.archivedAt,
+    })
     .from(agent)
-    .where(theAgent(auth, agentId))
+    .where(theAgentEvenArchived(auth, agentId))
     .limit(1);
   return row;
 }
@@ -330,13 +417,51 @@ type ConnectionRow = {
   readonly type: string;
   readonly modality: string;
   readonly topology: string;
+  readonly variantId: string;
   readonly environment: string | null;
   readonly config: unknown;
   readonly credentialsHint: string | null;
-  readonly capabilities: unknown;
+  readonly capabilityState: string;
+  readonly capabilitiesMeasured: unknown;
+  readonly capabilitiesSupported: unknown;
+  readonly capabilitiesCheckedAt: Date | null;
+  readonly capabilitySource: string | null;
+  readonly revision: string;
+  readonly archivedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
+
+/**
+ * The capability record a row carries, as one value rather than four columns.
+ *
+ * The schema's own check keeps the four in step — a `known` state has all three
+ * pieces of evidence or the row is refused — so the shape this returns cannot
+ * be half a measurement. Anything else is `unknown`, which is what an
+ * unmeasured connection has always been.
+ */
+function capabilitiesFromRow(row: ConnectionRow): ConnectionCapabilities {
+  if (
+    row.capabilityState !== "known" ||
+    row.capabilitiesMeasured === null ||
+    row.capabilitiesCheckedAt === null ||
+    row.capabilitySource === null
+  ) {
+    return CAPABILITIES_UNKNOWN;
+  }
+  const keys = (held: unknown): readonly string[] =>
+    Array.isArray(held)
+      ? held.filter((entry): entry is string => typeof entry === "string")
+      : [];
+
+  return {
+    state: "known",
+    measured: keys(row.capabilitiesMeasured),
+    supported: keys(row.capabilitiesSupported),
+    checkedAt: row.capabilitiesCheckedAt,
+    source: row.capabilitySource,
+  };
+}
 
 /**
  * A selected row as the caller sees it. The three enumerated columns are
@@ -351,7 +476,7 @@ function connectionFromRow(row: ConnectionRow): Connection {
     modality: row.modality as Modality,
     topology: row.topology as Topology,
     config: configFromRow(row.config, row.id),
-    capabilities: row.capabilities ?? null,
+    capabilities: capabilitiesFromRow(row),
   };
 }
 
@@ -367,6 +492,7 @@ type AdmittedConnection = {
   readonly type: ConnectionType;
   readonly modality: Modality;
   readonly topology: Topology;
+  readonly variantId: string;
   readonly environment: string | null;
   readonly config: Record<string, string>;
   readonly credentials: string | null;
@@ -393,6 +519,8 @@ function admitConnection(input: NewConnection): AdmittedConnection {
     type: input.type,
     modality,
     topology: descriptor.topology,
+    // Frozen here, from the config that chose it, and never derived again.
+    variantId: variantIdOf(input.type, input.config),
     environment: input.environment ?? null,
     config,
     credentials: sealed === null ? null : sealCredentials(sealed.sealed),
@@ -415,7 +543,7 @@ async function freeDefaultName(
       await on
         .select({ name: connection.name })
         .from(connection)
-        .where(and(eq(connection.agentId, agentId), connectionNotDeleted))
+        .where(and(eq(connection.agentId, agentId), connectionNotArchived))
     ).map((row) => row.name),
   );
 
@@ -483,6 +611,8 @@ async function insertConnection(
       type: admitted.type,
       modality: admitted.modality,
       topology: admitted.topology,
+      variantId: admitted.variantId,
+      revision: newId("rev"),
       environment: admitted.environment,
       config: admitted.config,
       credentials: admitted.credentials,
@@ -515,6 +645,7 @@ async function insertAgent(
       projectId,
       name: identity.name,
       description: identity.description,
+      revision: newId("rev"),
       createdBy: auth.userId,
     })
     .returning(COLUMNS)
@@ -698,8 +829,8 @@ export async function registerAgent(
             eq(connection.projectId, projectId),
             eq(connection.type, inline.type),
             sql`${connection.config}->>${reuseKey} = ${vendorAgent}`,
-            connectionNotDeleted,
-            notDeleted,
+            connectionNotArchived,
+            notArchived,
           ),
         ),
       )
@@ -718,6 +849,14 @@ export async function registerAgent(
           // what the row's own CHECK demands.
           credentials: inline.credentials,
           credentialsHint: inline.credentialsHint,
+          // This row moved, so anybody holding the revision it was on has to
+          // read it again before writing. A registration is the one writer
+          // that reaches a connection from outside the browser — a deploy
+          // re-running `register` while somebody has the connection open — and
+          // leaving the revision standing would let that open page archive or
+          // rename a connection whose credential is no longer the one it is
+          // showing. Every other writer here advances it; so does this one.
+          revision: newId("rev"),
           updatedAt: new Date(),
         })
         .where(eq(connection.id, sameModality.reached.id))
@@ -753,6 +892,15 @@ export async function registerAgent(
   });
 }
 
+/**
+ * One agent, archived or not.
+ *
+ * **An archived agent reads.** Its runs still open, its detail page still
+ * answers, and Restore has something to find — which is the whole difference
+ * between Archive and the deletion this replaced. What archiving takes away is
+ * entry into *new* work, and that is enforced where new work is created rather
+ * than by making the row invisible.
+ */
 export async function getAgent(
   auth: AuthContext,
   id: string,
@@ -762,7 +910,7 @@ export async function getAgent(
   const [row] = await db()
     .select(COLUMNS)
     .from(agent)
-    .where(theAgent(auth, id))
+    .where(theAgentEvenArchived(auth, id))
     .limit(1);
   return row;
 }
@@ -786,6 +934,21 @@ export async function listAgents(
   page?: {
     readonly limit?: number | undefined;
     readonly cursor?: string | undefined;
+    /**
+     * Part of a name, matched without regard to case. A list of forty agents
+     * is a list; a list of four hundred is a search box, and one that filtered
+     * only the page already fetched would answer differently depending on how
+     * far somebody had scrolled.
+     */
+    readonly search?: string | undefined;
+    /**
+     * Which half of the project to show. `active` is the authoring list and the
+     * default; `archived` is the explicit filter that makes removal reversible
+     * by making what was removed findable. There is deliberately no `both` —
+     * a mixed list would need a column saying which each row is, and the two
+     * halves are asked for by different questions.
+     */
+    readonly archived?: boolean | undefined;
   },
 ): Promise<AgentPage> {
   authorize(auth, "read", here(auth));
@@ -802,6 +965,17 @@ export async function listAgents(
   const olderThanCursor =
     cursor === undefined ? undefined : lt(agent.id, cursor);
 
+  const wanted = page?.search?.trim();
+  // `ilike` with the pattern's own wildcards escaped, so a name containing a
+  // percent sign is searched for rather than treated as "anything".
+  const named =
+    wanted === undefined || wanted === ""
+      ? undefined
+      : ilike(agent.name, `%${wanted.replace(/([\\%_])/g, "\\$1")}%`);
+
+  const half =
+    page?.archived === true ? isNotNull(agent.archivedAt) : notArchived;
+
   // One row beyond the page answers "is there more?" without a second query.
   const rows = await db()
     .select(COLUMNS)
@@ -810,7 +984,7 @@ export async function listAgents(
       within(
         auth,
         agent,
-        and(notDeleted, inActingProject(auth), olderThanCursor),
+        and(half, named, inActingProject(auth), olderThanCursor),
       ),
     )
     .orderBy(desc(agent.id))
@@ -824,15 +998,26 @@ export async function listAgents(
 }
 
 /**
- * Name and description, in place — there is no version to move, because the
- * agent is deliberately unversioned, so a rename is just a rename and the
- * run history stays the change record. A change that changes nothing is not
- * an edit at all: nothing is written, not even `updated_at`, and the current
- * row comes back — anything watching the timestamp hears only real changes.
- * Editing what the caller cannot see returns what reading it would have:
- * `undefined`, with nothing disturbed. An organization-scoped credential may
- * edit, as the persona factory allows: the row names its own project,
- * so the write has somewhere to land.
+ * Name and description, in place, against the revision the editor was written
+ * from.
+ *
+ * There is no content version to move — the agent is deliberately unversioned,
+ * because its real content lives at the provider where egma cannot freeze it —
+ * so a rename is just a rename and the run history stays the change record.
+ * What the revision buys is the other half: two people editing one agent from
+ * two browsers is the ordinary case, and without a revision the second save
+ * silently erases the first and neither of them is told.
+ *
+ * **The revision is checked in the same statement that writes.** Reading it
+ * first and comparing in TypeScript would leave a window between the read and
+ * the write in which a third save could land, which is the race the check
+ * exists to close. So the expected revision is part of the `where`, and a
+ * mismatch simply updates no row — at which point the row is read again to
+ * tell "somebody moved it" apart from "it was never yours to edit".
+ *
+ * A change that changes nothing is still not an edit: nothing is written, not
+ * even `updated_at`, and the revision stays where it is. Editing what the
+ * caller cannot see returns what reading it would have: `undefined`.
  */
 export async function updateAgent(
   auth: AuthContext,
@@ -857,9 +1042,10 @@ export async function updateAgent(
       ...(changes.description === undefined
         ? {}
         : { description: changes.description }),
+      revision: newId("rev"),
       updatedAt: new Date(),
     })
-    .where(theAgent(auth, id))
+    .where(and(theAgent(auth, id), writtenAgainst(agent, changes.expectedRevision)))
     .returning(COLUMNS)
     .catch(
       // Only a name change can lose to the name constraint.
@@ -870,46 +1056,287 @@ export async function updateAgent(
         : refusingHeldAgentName(name),
     );
 
-  return updated;
+  if (updated !== undefined) return updated;
+  return refuseOrVanish(auth, id, changes.expectedRevision, "agent");
 }
 
 /**
- * The soft-delete marker, and only the marker — on the agent alone. Every
- * connection verb walks through `visibleAgent` first, so marking the agent is
- * what makes its connections answer nothing through every read at once; their
- * own rows stay exactly as they were, for the deletion worker to sweep. The
- * agent's name returns to the living, per the partial unique index.
+ * The revision predicate, or nothing when the caller named none.
  *
- * Like create, this refuses a credential acting in no project. An edit lands
- * on a row that already names its own project; a delete decides the agent
- * should stop appearing in one, and emptying a project is an act taken from
- * inside it — the persona factory's stance, held here.
+ * Naming none is allowed on purpose and is not a hole in the rule: the CLI and
+ * a coding agent write from a terminal where there is no editor to have grown
+ * stale, and demanding a revision there would make every scripted rename a
+ * two-request dance. The browser always sends one, and the API is where that
+ * is required — this layer's job is to make the check impossible to get wrong,
+ * not to decide who has to make it.
  */
-export async function deleteAgent(
+function writtenAgainst(
+  table: typeof agent | typeof connection,
+  expected: string | undefined,
+): SQL | undefined {
+  return expected === undefined ? undefined : eq(table.revision, expected);
+}
+
+/**
+ * What an update that matched no row actually was.
+ *
+ * Two very different things look identical from a statement that changed
+ * nothing: the row moved on since the editor opened it, and the row was never
+ * this caller's to touch. Telling them apart takes one more read, and it is
+ * worth it — one of them is answered with the revision to retry against, and
+ * the other must never confirm that the row exists at all.
+ */
+async function refuseOrVanish(
   auth: AuthContext,
   id: string,
-): Promise<DeletedAgent | undefined> {
-  authorize(auth, "configure_agents", here(auth));
+  expected: string | undefined,
+  resource: "agent" | "connection",
+  agentId?: string,
+): Promise<undefined> {
+  if (expected === undefined) return undefined;
 
+  const current =
+    resource === "agent"
+      ? (
+          await db()
+            .select({ revision: agent.revision })
+            .from(agent)
+            .where(theAgentEvenArchived(auth, id))
+            .limit(1)
+        )[0]
+      : (
+          await db()
+            .select({ revision: connection.revision })
+            .from(connection)
+            .where(theConnection(auth, agentId ?? "", id))
+            .limit(1)
+        )[0];
+
+  if (current === undefined) return undefined;
+  throw new IdentityConflictError(resource, id, {
+    expected,
+    current: current.revision,
+  });
+}
+
+/**
+ * The rule this family holds an organization-wide credential to, and where it
+ * is held.
+ *
+ * **Deciding whether an agent appears in a project is an act taken from inside
+ * that project**, and a credential minted for the whole customer is acting in
+ * none — the stance `createAgent` takes, and the one the grader, persona and
+ * mock-tool factories take for their own project-scoped writes. Archive and
+ * Restore are the two halves of that one decision, so both are held to it.
+ *
+ * A connection is deliberately not: it lands in the project its agent already
+ * names, so archiving one decides nothing about which project anything belongs
+ * to. That asymmetry is the rule rather than an oversight, and it matches
+ * `addConnection`, which has never asked either.
+ *
+ * **Nothing reaches this from HTTP.** The API resolves an acting project for
+ * every write in the group before it calls, exactly as it does for graders and
+ * personas, so this is the invariant stated where a direct caller — the CLI, a
+ * test, a script — will meet it.
+ */
+function guardProjectScoped(auth: AuthContext, what: string): void {
   if (auth.projectId === undefined) {
     throw new Error(
-      "deleting an agent happens inside its project, and this credential is for the whole organization and acting in none",
+      `${what} an agent happens inside its project, and this credential is ` +
+        `for the whole organization and acting in none`,
     );
   }
+}
 
-  const deletedAt = new Date();
-  const [row] = await db()
+/**
+ * Archive an agent, and every active way of reaching it, and every piece of
+ * work that was going to use one.
+ *
+ * **Archive is always allowed, and it is not deletion.** Past runs name this
+ * agent and stay readable; tests that apply to it keep their links. The whole
+ * of what Archive does is stop it entering anything new — and stop what had
+ * already been started over it, because a queued simulation whose connection
+ * has been archived would sit in the claim queue for a target no simulator can
+ * resolve a credential for and would eventually fail, putting an operational
+ * failure on the record dressed up as something the agent did.
+ *
+ * **The children go with it, in the same transaction.** An agent whose
+ * connections stayed active would be an archived thing that egma could still
+ * reach, and — the reason this is not merely tidy — restoring the agent later
+ * would silently bring an old provider credential back into use. So Archive
+ * takes them, and Restore deliberately does not give them back: each
+ * connection comes back one at a time, through the credential rule its own
+ * shape declares.
+ */
+export async function archiveAgent(
+  auth: AuthContext,
+  id: string,
+  options: { readonly expectedRevision?: string | undefined } = {},
+): Promise<ArchivedAgent | undefined> {
+  authorize(auth, "configure_agents", here(auth));
+
+  guardProjectScoped(auth, "archiving");
+
+  const now = new Date();
+
+  return db().transaction(async (tx) => {
+    const [archived] = await tx
+      .update(agent)
+      .set({ archivedAt: now, revision: newId("rev"), updatedAt: now })
+      .where(
+        and(theAgent(auth, id), writtenAgainst(agent, options.expectedRevision)),
+      )
+      .returning(COLUMNS);
+
+    if (archived === undefined) {
+      // Archiving an already-archived agent is nothing to do rather than a
+      // refusal: the caller wanted it out of new work and it is out of new
+      // work. A conflict is only a conflict when the row is still active.
+      const [standing] = await tx
+        .select(COLUMNS)
+        .from(agent)
+        .where(theAgentEvenArchived(auth, id))
+        .limit(1);
+      if (standing === undefined) return undefined;
+      if (standing.archivedAt !== null) {
+        return { agent: standing, connections: [], canceledRuns: [] };
+      }
+      return refuseOrVanish(auth, id, options.expectedRevision, "agent");
+    }
+
+    const children = await tx
+      .update(connection)
+      .set({ archivedAt: now, revision: newId("rev"), updatedAt: now })
+      .where(
+        within(
+          auth,
+          connection,
+          and(eq(connection.agentId, id), connectionNotArchived),
+        ),
+      )
+      .returning({ id: connection.id });
+
+    const canceledRuns = await stopWorkOverConnections(
+      tx,
+      auth,
+      children.map((row) => row.id),
+      now,
+    );
+
+    return {
+      agent: archived,
+      connections: children.map((row) => row.id),
+      canceledRuns,
+    };
+  });
+}
+
+/**
+ * Restore an agent, and only the agent.
+ *
+ * Its connections stay archived, every one of them, and that is the decision
+ * rather than an omission: a connection carries a credential, and a Restore
+ * that reactivated them in a batch would put old provider keys back into use
+ * without anybody choosing to. Each comes back through its own Restore, which
+ * asks for whatever its shape's credential rule requires.
+ *
+ * A name another active agent has taken since is refused unless the Restore
+ * brings a replacement. It cannot be silently renamed: an agent is identified
+ * by its name in every list and every run builder, and a Restore that quietly
+ * produced "Front desk (2)" would be egma deciding which of two agents the
+ * history belongs to.
+ */
+export async function restoreAgent(
+  auth: AuthContext,
+  id: string,
+  options: {
+    readonly expectedRevision?: string | undefined;
+    /** A different name, when the old one has been taken. */
+    readonly name?: string | undefined;
+  } = {},
+): Promise<Agent | undefined> {
+  authorize(auth, "configure_agents", here(auth));
+
+  // Restore is the same decision as Archive, taken the other way: it is about
+  // whether this agent appears in a project. It was missing this guard while
+  // Archive had it, which made the pair answer an organization-wide credential
+  // two different ways for one decision.
+  guardProjectScoped(auth, "restoring");
+
+  const name =
+    options.name === undefined ? undefined : validName(options.name, "an agent");
+  const now = new Date();
+
+  // What this Restore is asking to be called: the replacement, or — when it
+  // brought none — the name the row already carries, which is the one the
+  // unique index will refuse it.
+  const [held] = await db()
+    .select({ name: agent.name })
+    .from(agent)
+    .where(theAgentEvenArchived(auth, id))
+    .limit(1);
+  const wanted = name ?? held?.name ?? "";
+
+  const [restored] = await db()
     .update(agent)
-    .set({ deletedAt, updatedAt: deletedAt })
-    .where(theAgent(auth, id))
-    .returning({
-      id: agent.id,
-      projectId: agent.projectId,
-      name: agent.name,
+    .set({
+      archivedAt: null,
+      ...(name === undefined ? {} : { name }),
+      revision: newId("rev"),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        theAgentEvenArchived(auth, id),
+        isNotNull(agent.archivedAt),
+        writtenAgainst(agent, options.expectedRevision),
+      ),
+    )
+    .returning(COLUMNS)
+    .catch((error: unknown) => {
+      // The name is the row's own when the Restore brought no replacement, and
+      // the constraint is what discovers that somebody else has taken it.
+      if (lostToConstraint(error, "agent_project_id_name_unique")) {
+        throw new AgentWriteRefusedError(
+          "name_taken",
+          nameTakenMessage(wanted, "agent"),
+        );
+      }
+      throw error;
     });
 
-  if (row === undefined) return undefined;
-  return { ...row, deletedAt };
+  if (restored !== undefined) return restored;
+
+  const [standing] = await db()
+    .select(COLUMNS)
+    .from(agent)
+    .where(theAgentEvenArchived(auth, id))
+    .limit(1);
+  if (standing === undefined) return undefined;
+  // Restoring an active agent is nothing to do, exactly as archiving an
+  // archived one is.
+  if (standing.archivedAt === null) return standing;
+  return refuseOrVanish(auth, id, options.expectedRevision, "agent");
+}
+
+/**
+ * The refusal a Restore gets when the name it wants is somebody else's now.
+ *
+ * **The name is always the one that collided**, which is the row's own whenever
+ * the Restore brought no replacement — a Restore that names nothing is asking
+ * for the name it had. Falling back to a phrase produced "The name this
+ * resource already has is already used by an active connection", a sentence
+ * that fills the template's slot without telling anybody which name to avoid.
+ *
+ * It names the resource rather than the row it collided with, because that row
+ * may be one the reader is not entitled to see, and because the move is the
+ * same either way: pick another name in the Restore.
+ */
+function nameTakenMessage(name: string, resource: "agent" | "connection"): string {
+  return (
+    `The name ${name} is already used by an active ${resource}. ` +
+    `Choose a different name in Restore and try again.`
+  );
 }
 
 /**
@@ -929,6 +1356,16 @@ export async function addConnection(
 
   const home = await visibleAgent(auth, agentId);
   if (home === undefined) return undefined;
+  // A new way of reaching an archived agent is new work over something that
+  // has been taken out of new work. Restore the agent first.
+  if (home.archivedAt !== null) {
+    throw new ConnectionRestoreRefusedError(
+      "parent_agent_archived",
+      `Connection cannot be added while agent ${agentId} is archived. ` +
+        `Restore the agent first, then add this connection.`,
+      { agentId },
+    );
+  }
 
   return insertConnection(db(), auth, home, admitted);
 }
@@ -980,8 +1417,8 @@ export async function connectionTypeOf(
         and(
           eq(connection.id, connectionId),
           eq(connection.projectId, projectId),
-          connectionNotDeleted,
-          isNull(agent.deletedAt),
+          connectionNotArchived,
+          isNull(agent.archivedAt),
         ),
       ),
     )
@@ -1012,28 +1449,35 @@ export async function getConnection(
 }
 
 /**
- * The agent's living connections, oldest first — the ids are time-sortable,
- * so this is the order they were attached in. A whole page, deliberately: an
- * agent holds a handful of connections, not thousands, and `undefined` for an
- * unreachable agent is a different answer than `[]` for an unwired one.
+ * The agent's connections, oldest first — the ids are time-sortable, so this is
+ * the order they were attached in. A whole page, deliberately: an agent holds a
+ * handful of connections, not thousands, and `undefined` for an unreachable
+ * agent is a different answer than `[]` for an unwired one.
+ *
+ * `archived` asks for the other half. It is a separate list rather than a
+ * column on one, because "how egma can reach this agent" and "how it used to"
+ * are two questions, and a run builder that had to filter one list would sooner
+ * or later forget to.
  */
 export async function listConnections(
   auth: AuthContext,
   agentId: string,
+  options: { readonly archived?: boolean | undefined } = {},
 ): Promise<readonly Connection[] | undefined> {
   authorize(auth, "read", here(auth));
 
   if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
 
+  const half =
+    options.archived === true
+      ? isNotNull(connection.archivedAt)
+      : connectionNotArchived;
+
   const rows = await db()
     .select(CONNECTION_COLUMNS)
     .from(connection)
     .where(
-      within(
-        auth,
-        connection,
-        and(eq(connection.agentId, agentId), connectionNotDeleted),
-      ),
+      within(auth, connection, and(eq(connection.agentId, agentId), half)),
     )
     .orderBy(asc(connection.id));
 
@@ -1046,6 +1490,19 @@ export async function listConnections(
  * credentials replace whole or stay untouched, resealed under a fresh IV with
  * the hint moved along. Editing what the caller cannot see returns what
  * reading it would have: `undefined`, with nothing disturbed.
+ *
+ * **A config change makes the capability record unknown, in the same write.**
+ * Capabilities are facts about a target, and changing the config changes which
+ * target this is: a measurement of the old one is not evidence about the new
+ * one, and leaving it in place would let a run be admitted on the strength of
+ * something that was never checked. It becomes known again only when an
+ * adapter measures the target as it now stands.
+ *
+ * **A config that would move the connection to another shape of its type is
+ * refused.** The shape is stored, not re-derived, and it is what the Restore
+ * credential rule is read from — so a connection that changed shape underneath
+ * its stored id would be held to one shape's rule while carrying the other's
+ * credential. Changing shape is a new connection, exactly as changing type is.
  */
 export async function updateConnection(
   auth: AuthContext,
@@ -1078,7 +1535,9 @@ export async function updateConnection(
     .select({
       id: connection.id,
       type: connection.type,
+      variantId: connection.variantId,
       config: connection.config,
+      archivedAt: connection.archivedAt,
     })
     .from(connection)
     .where(theConnection(auth, agentId, connectionId))
@@ -1103,15 +1562,15 @@ export async function updateConnection(
    * The sealed half cannot be read here to check it, and does not need to be:
    * what shape a connection is in is written in its config, in the clear.
    */
-  const before = shapeOf(type, current.config);
+  const before = variantById(type, current.variantId);
   const after = config === undefined ? before : shapeOf(type, config);
-  if (before !== after && changes.credentials === undefined) {
+  if (before !== after) {
     throw new AgentWriteRefusedError(
       "not_admitted",
-      `a connection's credentials belong to the shape its config is in, and ` +
-        `this change moves it from ${before.named ?? `a ${type} connection`} ` +
-        `to ${after.named ?? `a ${type} connection`}. Send the credentials ` +
-        `the new shape needs in the same change.`,
+      `a connection's shape is fixed when it is created, and this change ` +
+        `moves it from ${before.label} to ${after.label}. The two hold ` +
+        `different config keys and different credentials, so this is a new ` +
+        `connection rather than an edit — add one, and archive this.`,
     );
   }
 
@@ -1138,9 +1597,26 @@ export async function updateConnection(
             credentials: sealCredentials(sealed.sealed),
             credentialsHint: sealed.hint,
           }),
+      // The target moved, so what anybody measured about it is no longer about
+      // this connection.
+      ...(config === undefined
+        ? {}
+        : {
+            capabilityState: "unknown",
+            capabilitiesMeasured: null,
+            capabilitiesSupported: null,
+            capabilitiesCheckedAt: null,
+            capabilitySource: null,
+          }),
+      revision: newId("rev"),
       updatedAt: new Date(),
     })
-    .where(theConnection(auth, agentId, connectionId))
+    .where(
+      and(
+        theConnection(auth, agentId, connectionId),
+        writtenAgainst(connection, changes.expectedRevision),
+      ),
+    )
     .returning(CONNECTION_COLUMNS)
     .catch(
       // Only a name change can lose to the name constraint.
@@ -1151,36 +1627,324 @@ export async function updateConnection(
         : refusingHeldConnectionName(name),
     );
 
-  return updated === undefined ? undefined : connectionFromRow(updated);
+  if (updated !== undefined) return connectionFromRow(updated);
+  return refuseOrVanish(
+    auth,
+    connectionId,
+    changes.expectedRevision,
+    "connection",
+    agentId,
+  );
 }
 
 /**
- * The soft-delete marker, and only the marker. The connection vanishes from
- * fetch and list at once and its name returns to the living; the row stays
- * for the deletion worker. The agent is untouched — an agent with no
- * connections is legal, so removing the last one is never refused for being
- * the last.
+ * Archive one way of reaching an agent, and stop the work that was going over
+ * it.
+ *
+ * **Always allowed, including for an agent's last connection.** An agent with
+ * no connections is a legal thing — it is an agent nobody can reach yet, which
+ * is what every agent is for the minute between registering it and wiring it —
+ * so refusing the last one would be egma insisting a team keep a target they
+ * have decided to stop using.
+ *
+ * What it does is block new claims, settle the queue, and ask whatever is
+ * already talking to stop at its next heartbeat. What it deliberately does not
+ * do is erase anything: transcripts, verdicts and run headers stay exactly as
+ * they are, because evidence that was true stays true after the target is
+ * retired.
  */
-export async function removeConnection(
+export async function archiveConnection(
   auth: AuthContext,
   agentId: string,
   connectionId: string,
-): Promise<RemovedConnection | undefined> {
+  options: { readonly expectedRevision?: string | undefined } = {},
+): Promise<ArchivedConnection | undefined> {
   authorize(auth, "configure_agents", here(auth));
 
   if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
 
-  const deletedAt = new Date();
-  const [row] = await db()
-    .update(connection)
-    .set({ deletedAt, updatedAt: deletedAt })
-    .where(theConnection(auth, agentId, connectionId))
-    .returning({
+  const now = new Date();
+
+  return db().transaction(async (tx) => {
+    const [archived] = await tx
+      .update(connection)
+      .set({ archivedAt: now, revision: newId("rev"), updatedAt: now })
+      .where(
+        and(
+          theConnection(auth, agentId, connectionId),
+          connectionNotArchived,
+          writtenAgainst(connection, options.expectedRevision),
+        ),
+      )
+      .returning(CONNECTION_COLUMNS);
+
+    if (archived === undefined) {
+      const [standing] = await tx
+        .select(CONNECTION_COLUMNS)
+        .from(connection)
+        .where(theConnection(auth, agentId, connectionId))
+        .limit(1);
+      if (standing === undefined) return undefined;
+      if (standing.archivedAt !== null) {
+        return { connection: connectionFromRow(standing), canceledRuns: [] };
+      }
+      return refuseOrVanish(
+        auth,
+        connectionId,
+        options.expectedRevision,
+        "connection",
+        agentId,
+      );
+    }
+
+    const canceledRuns = await stopWorkOverConnections(
+      tx,
+      auth,
+      [connectionId],
+      now,
+    );
+
+    return { connection: connectionFromRow(archived), canceledRuns };
+  });
+}
+
+/**
+ * Bring one connection back, on the terms its own shape sets.
+ *
+ * Two rules, and neither is negotiable:
+ *
+ * - **The parent agent has to be active.** Restoring a connection under an
+ *   archived agent would produce a reachable way into something nobody can
+ *   run, and it would undo half of what agent Archive did without saying so.
+ * - **The archived credential is never what comes back.** A shape that
+ *   requires one demands a new one; a shape that forbids one refuses to be
+ *   handed one; a shape where it is optional makes the author say `replace` or
+ *   `clear`, because leaving it out cannot be told from meaning to drop it and
+ *   the sealed envelope is sitting right there for the wrong reading to reuse.
+ *
+ * `clear` removes the envelope outright rather than leaving it unreferenced.
+ * The rule is not "the old secret is unlikely to be used"; it is that it
+ * cannot be.
+ */
+export async function restoreConnection(
+  auth: AuthContext,
+  agentId: string,
+  connectionId: string,
+  options: {
+    readonly expectedRevision?: string | undefined;
+    readonly name?: string | undefined;
+    readonly credential?: RestoreCredential | undefined;
+  } = {},
+): Promise<Connection | undefined> {
+  authorize(auth, "configure_agents", here(auth));
+
+  const home = await visibleAgent(auth, agentId);
+  if (home === undefined) return undefined;
+
+  const [current] = await db()
+    .select({
       id: connection.id,
-      agentId: connection.agentId,
       name: connection.name,
+      type: connection.type,
+      variantId: connection.variantId,
+      config: connection.config,
+      archivedAt: connection.archivedAt,
+      revision: connection.revision,
+    })
+    .from(connection)
+    .where(theConnection(auth, agentId, connectionId))
+    .limit(1);
+  if (current === undefined) return undefined;
+
+  // Nothing to do, and answered as the read would answer — the same shape a
+  // second Archive of an archived row gets.
+  if (current.archivedAt === null) {
+    return getConnection(auth, agentId, connectionId);
+  }
+
+  if (home.archivedAt !== null) {
+    throw new ConnectionRestoreRefusedError(
+      "parent_agent_archived",
+      `Connection ${connectionId} cannot be restored while agent ${agentId} ` +
+        `is archived. Restore the agent first, then restore this connection.`,
+      { agentId },
+    );
+  }
+
+  const type = current.type as ConnectionType;
+  const variant = variantById(type, current.variantId);
+  const rule = credentialRuleOf(variant);
+  const supplied = options.credential;
+
+  if (rule === "required" && supplied?.choice !== "replace") {
+    throw new ConnectionRestoreRefusedError(
+      "credential_required",
+      `Connection ${connectionId} uses ${type}, which requires a new ` +
+        `credential after Archive. Enter a new credential and restore it again.`,
+      { connectionId, type },
+    );
+  }
+  if (rule === "forbidden" && supplied?.choice === "replace") {
+    throw new ConnectionRestoreRefusedError(
+      "credential_forbidden",
+      `Connection ${connectionId} uses ${type}, which does not accept ` +
+        `customer credentials. Remove the credential and restore it again.`,
+      { connectionId, type },
+    );
+  }
+  if (rule === "optional" && supplied === undefined) {
+    throw new ConnectionRestoreRefusedError(
+      "credential_choice_required",
+      `Connection ${connectionId} uses ${type}, which has an optional ` +
+        `credential. Choose Replace and enter a new credential, or choose ` +
+        `Clear, then restore it again.`,
+      { connectionId, type },
+    );
+  }
+
+  const sealed =
+    supplied?.choice === "replace"
+      ? validCredentials(type, current.config, supplied.credentials)
+      : null;
+
+  const name =
+    options.name === undefined
+      ? undefined
+      : validName(options.name, "a connection");
+  const now = new Date();
+
+  const [restored] = await db()
+    .update(connection)
+    .set({
+      archivedAt: null,
+      ...(name === undefined ? {} : { name }),
+      // Replace seals the new one; every other path clears the envelope, so no
+      // archived credential can ever become live again.
+      credentials: sealed === null ? null : sealCredentials(sealed.sealed),
+      credentialsHint: sealed === null ? null : sealed.hint,
+      revision: newId("rev"),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        theConnection(auth, agentId, connectionId),
+        isNotNull(connection.archivedAt),
+        writtenAgainst(connection, options.expectedRevision),
+      ),
+    )
+    .returning(CONNECTION_COLUMNS)
+    .catch((error: unknown) => {
+      if (lostToConstraint(error, "connection_agent_id_name_unique")) {
+        throw new AgentWriteRefusedError(
+          "name_taken",
+          // `current` was read above and carries the row's own name, which is
+          // what a Restore bringing no replacement is asking for.
+          nameTakenMessage(name ?? current.name, "connection"),
+        );
+      }
+      throw error;
     });
 
-  if (row === undefined) return undefined;
-  return { ...row, deletedAt };
+  if (restored !== undefined) return connectionFromRow(restored);
+  return refuseOrVanish(
+    auth,
+    connectionId,
+    options.expectedRevision,
+    "connection",
+    agentId,
+  );
+}
+
+/**
+ * Ask this connection's adapter what its target can actually do, and write
+ * down what it answered.
+ *
+ * **A measurement, never a claim.** The adapter reads the target and reports
+ * the catalog keys it *found*; anything it did not find is unsupported, and an
+ * adapter that could establish nothing leaves the record exactly as it was
+ * rather than overwriting a good measurement with a bad moment. Nothing here
+ * infers a capability from the provider's brand, which is why a type with no
+ * adapter is told so plainly instead of being handed a plausible answer.
+ *
+ * The write is guarded by the revision the connection had when the check
+ * started, so a measurement of the old target cannot land on a config somebody
+ * edited while the adapter was talking to it.
+ */
+export async function refreshConnectionCapabilities(
+  auth: AuthContext,
+  agentId: string,
+  connectionId: string,
+): Promise<Connection | undefined> {
+  authorize(auth, "configure_agents", here(auth));
+
+  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
+
+  const [current] = await db()
+    .select({
+      id: connection.id,
+      type: connection.type,
+      variantId: connection.variantId,
+      // What the transport carries, which is what most of what an adapter can
+      // establish turns on.
+      modality: connection.modality,
+      config: connection.config,
+      revision: connection.revision,
+      archivedAt: connection.archivedAt,
+    })
+    .from(connection)
+    .where(theConnection(auth, agentId, connectionId))
+    .limit(1);
+  if (current === undefined) return undefined;
+
+  const type = current.type as ConnectionType;
+  const discovery = capabilityDiscoveryFor(type);
+  if (discovery === undefined) {
+    throw new NoCapabilityAdapterError(type, noCapabilityAdapterMessage(type));
+  }
+
+  let found: Discovered;
+  try {
+    found = await discovery({
+      type,
+      variantId: current.variantId,
+      modality: current.modality as Modality,
+      config: configFromRow(current.config, current.id),
+    });
+  } catch (cause) {
+    throw new CapabilityCheckFailedError(
+      connectionId,
+      capabilityCheckFailedMessage(connectionId),
+      { cause },
+    );
+  }
+
+  const checkedAt = new Date();
+  const measured = measuredCapabilities(found, `${type} adapter`, checkedAt);
+  if (measured.state !== "known") return getConnection(auth, agentId, connectionId);
+
+  const [updated] = await db()
+    .update(connection)
+    .set({
+      capabilityState: "known",
+      capabilitiesMeasured: measured.measured,
+      capabilitiesSupported: measured.supported,
+      capabilitiesCheckedAt: measured.checkedAt,
+      capabilitySource: measured.source,
+      revision: newId("rev"),
+      updatedAt: checkedAt,
+    })
+    .where(
+      and(
+        theConnection(auth, agentId, connectionId),
+        eq(connection.revision, current.revision),
+      ),
+    )
+    .returning(CONNECTION_COLUMNS);
+
+  // The config moved while the adapter was talking to the old target, so what
+  // came back is not about the connection as it now stands. The edit already
+  // set the state to unknown, which is the honest answer, and this leaves it.
+  return updated === undefined
+    ? getConnection(auth, agentId, connectionId)
+    : connectionFromRow(updated);
 }

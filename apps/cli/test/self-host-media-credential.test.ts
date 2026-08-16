@@ -245,16 +245,25 @@ describe("the media server's credential", () => {
 
       // One pair on disk, and every pair either command handed to Compose is
       // that pair. Read from what the docker stand-in wrote down, so this is
-      // what the containers would really have been created with.
+      // what the build and the containers would really have received. Each
+      // command builds once and starts once, for four Docker invocations.
       const stored = await workspace.storedConfig();
       const calls = await workspace.dockerCalls();
+      const invocations = calls.split("\n").filter((line) => line.startsWith("ARGS compose "));
+      expect(invocations).toHaveLength(4);
+      expect(invocations.filter((line) => line === "ARGS compose build")).toHaveLength(2);
+      expect(
+        invocations.filter(
+          (line) => line === "ARGS compose up -d --wait --wait-timeout 300",
+        ),
+      ).toHaveLength(2);
       for (const variable of [KEY_VARIABLE, SECRET_VARIABLE]) {
         const onDisk = stored[variable] ?? "";
         expect(onDisk).not.toBe("");
         const handed = [...calls.matchAll(new RegExp(`^${variable}=(.*)$`, "gmu"))].map(
           (line) => line[1] as string,
         );
-        expect(handed).toHaveLength(2);
+        expect(handed).toHaveLength(4);
         expect(new Set(handed)).toEqual(new Set([onDisk]));
       }
 

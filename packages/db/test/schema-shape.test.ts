@@ -54,16 +54,30 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   grader_version: "grv",
   // The project's default judge, keyed by the project it is the judge for.
   judge_configuration: "prj",
+  // The organization's judge credentials: the keys egma judges with, and the
+  // one place any of them is stored.
+  judge_credential: "jcr",
   mock_tool: "mck",
   // The scope's junction, pinning the mock tool it narrows — the shape the
   // persona junction has, for the same reason.
   mock_tool_agent: "mck",
   test: "tst",
+  // The applicability junction, pinning the test it links — the shape the mock
+  // tool's scope junction has, for the same reason: the row's identity is the
+  // pair, and its leading half is the one this table owns.
+  test_agent: "tst",
   test_version: "tstv",
   test_persona: "tstv",
   run: "run",
   run_event: "run",
   simulation: "sim",
+  // One run's frozen grading plan: what will judge each pinned test version,
+  // and whose account pays for the judging.
+  grading_plan: "gpl",
+  // The operations a client may safely send twice. Its identity is the whole
+  // five-column key rather than an id of its own, so it pins its leading
+  // column — the shape both junction tables have, for the same reason.
+  idempotent_operation: "org",
   grading_job: "gjb",
 };
 
@@ -201,15 +215,54 @@ describe("every table", () => {
     }
   });
 
+  /**
+   * A prefixed column that is **not** the row's identity.
+   *
+   * An opaque live revision is minted in egma's own identifier format and
+   * pinned the same way, so a hand-written row cannot carry a revision nothing
+   * would ever have issued. It is named here rather than folded into
+   * `TABLE_PREFIX` because that map answers "what is this table's identity",
+   * and a revision is not one — it says which *state* was read, and a row goes
+   * through many.
+   */
+  const REVISION_COLUMNS: Readonly<Record<string, number>> = {
+    // No `grader` here, and it used to be. A running copy carries no live
+    // revision: the effort's `grader.revision NOT NULL` rode on the same
+    // migration as the judge credentials, and the grader half of that migration
+    // went with the redesign. A copy is made by pressing **Use** and deleted
+    // whole; there is no live edit for a revision to guard.
+    judge_credential: 1,
+    project: 1,
+    // Two, because a test carries two live tokens that guard two different
+    // losses: the identity revision an edit to the name is written against, and
+    // the applicability revision a link edit is written against. A count rather
+    // than a list, because one table can carry more than one.
+    test: 2,
+  };
+
   it("pins a prefix that is one of the ones egma mints", () => {
     const pinned = checks
       .map((check) => /\^([a-z]+)_\[0-9A-HJKMNP-TV-Z\]\{26\}\$/.exec(check.definition))
       .filter((match) => match !== null)
       .map((match) => match[1]);
 
-    expect(pinned.length).toBe(Object.keys(TABLE_PREFIX).length);
+    expect(pinned.length).toBe(
+      Object.keys(TABLE_PREFIX).length +
+        Object.values(REVISION_COLUMNS).reduce((all, one) => all + one, 0),
+    );
     for (const prefix of pinned) {
       expect(ID_PREFIXES).toContain(prefix);
+    }
+  });
+
+  it("pins the revision format wherever a row carries one", () => {
+    for (const [table, how_many] of Object.entries(REVISION_COLUMNS)) {
+      const pinned = checks.filter(
+        (check) =>
+          check.table_name === table &&
+          check.definition.includes(idCheckPattern("rev")),
+      );
+      expect(pinned, `${table} pins rev_`).toHaveLength(how_many);
     }
   });
 });
@@ -396,6 +449,8 @@ describe("every enumerated value", () => {
       { table: "grader_library", column: "type" },
       { table: "grader", column: "scope" },
       { table: "judge_configuration", column: "provider" },
+      { table: "judge_configuration", column: "source" },
+      { table: "judge_credential", column: "provider" },
       { table: "run", column: "status" },
       { table: "run", column: "triggered_via" },
       { table: "simulation", column: "status" },

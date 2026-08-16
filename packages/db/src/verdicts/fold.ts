@@ -146,9 +146,6 @@ export type GraderOutcome = {
  */
 export type Diagnostics = ReadonlySet<string>;
 
-/** Everything decides. What a caller that knows of no diagnostic copy passes. */
-const NOTHING_ONLY_REPORTS: Diagnostics = new Set<string>();
-
 /** The rows of one grain, in the two lanes they are folded in. */
 export type VerdictLanes<Row extends FoldableVerdict> = {
   /** From copies that can fail a test. Folding these is the answer. */
@@ -165,12 +162,21 @@ export type VerdictLanes<Row extends FoldableVerdict> = {
  * handed and never asks whose rows they are, and every question about `required`
  * is settled here, once, in the one place a reader has to look.
  *
+ * **`diagnostics` is required, and it used to have a default of the empty set.**
+ * An empty set means *everything gates*, so the default was the answer a caller
+ * got for forgetting to ask — and a read path written after the flag existed
+ * would compile, pass every test, and quietly fold a diagnostic's failure into
+ * the headline. That is precisely what happened on one of the three read paths
+ * that fold a run: run history said `failed` about a run whose own page said
+ * `passed`, the moment anybody switched on a `required: false` copy. A caller
+ * that genuinely knows of no diagnostic copy passes an empty set and says so.
+ *
  * Both lanes come back in the order they arrived, so what counted can be shown
  * beside what exists without either being reordered.
  */
 export function verdictLanes<Row extends FoldableVerdict>(
   rows: readonly Row[],
-  diagnostics: Diagnostics = NOTHING_ONLY_REPORTS,
+  diagnostics: Diagnostics,
 ): VerdictLanes<Row> {
   const required: Row[] = [];
   const diagnostic: Row[] = [];
@@ -355,7 +361,7 @@ export function foldVerdicts(rows: readonly FoldableVerdict[]): FoldedOutcome {
  */
 export function foldVerdictsByGrader(
   rows: readonly FoldableVerdict[],
-  diagnostics: Diagnostics = NOTHING_ONLY_REPORTS,
+  diagnostics: Diagnostics,
 ): readonly GraderOutcome[] {
   const byGrader = new Map<string, FoldableVerdict[]>();
   for (const row of rows) {

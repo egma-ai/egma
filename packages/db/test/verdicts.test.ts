@@ -113,6 +113,17 @@ afterAll(async () => {
 describe("a judgment written and read back", () => {
   const traceId = "1111111111111111111111111111aaaa";
 
+  /*
+   * **A `skipped` verdict states no machine-readable reason, and it used to.**
+   * There was a `reason` column beside the rationale — `modality_unsupported`
+   * on a grader that could not score this conversation — and it went with the
+   * modality check that was the only thing that ever wrote one. The idea is
+   * not retired: the glossary still says a grader that cannot score the
+   * modality is *skipped* and that a results page has to say `skipped` rather
+   * than `failed`. The column returns together with modality skipping, as its
+   * own ticket, and a proof of it belongs here when it does.
+   */
+
   it("round-trips every field it was given", async () => {
     const written = await appendVerdicts(at(acme), [
       verdict({
@@ -135,6 +146,9 @@ describe("a judgment written and read back", () => {
       verdict: "passed",
       score: 0.75,
       rationale: "the agent repeated Tuesday at four before ending the call.",
+      // No `reason` key at all, which is the assertion the note above makes
+      // concrete: `toEqual` fails on a field nothing sent, so this breaks the
+      // day the column comes back and nobody updates the note.
       citedSpanIds: ["00f067aa0ba902b7", "00f067aa0ba902b8"],
       runId: "run_01JQZ0000000000000000000AA",
       agentId: "agt_01JQZ0000000000000000000AA",

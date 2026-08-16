@@ -1,0 +1,433 @@
+/*
+ * Dense simulation evidence on warm paper.
+ *
+ * A transcript stays prose, a timeline stays a clock, a measure stays a
+ * number, and a verdict stays a judgement. The surfaces share the palette and
+ * hairlines without turning those different facts into one card pattern.
+ */
+
+/* ------------------------------------------------------------ transcript */
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.turn {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: baseline;
+  padding: var(--space-4) var(--space-5);
+  border-inline-start: 3px solid transparent;
+}
+
+.turn + .turn {
+  border-top: 1px solid var(--border);
+}
+
+.turnCited {
+  border-inline-start-color: var(--accent);
+  background: var(--surface-soft);
+}
+
+.speaker {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
+.speakerHuman {
+  color: var(--foreground);
+}
+
+.said {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+  white-space: pre-wrap;
+}
+
+.saidNothing {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.turnAside {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.turnAside > * + *::before {
+  margin-inline-end: var(--space-2);
+  content: "·";
+}
+
+.citationMark {
+  color: var(--foreground);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .turn:not(.turnCited):hover {
+    background: color-mix(
+      in srgb,
+      var(--surface-soft) 62%,
+      transparent
+    );
+  }
+}
+
+/* -------------------------------------------------------------- timeline */
+
+.scrolls {
+  overflow-x: auto;
+  scrollbar-color: var(--border) transparent;
+}
+
+.timeline {
+  display: flex;
+  min-width: 680px;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.timelineRow {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 112px 72px;
+  gap: var(--space-4);
+  align-items: center;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-caption);
+}
+
+.timelineRow + .timelineRow {
+  border-top: 1px solid var(--border);
+}
+
+.timelineAt,
+.timelineHow {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.timelineHow {
+  text-align: end;
+}
+
+.timelineWhat {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.timelineWhat strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.timelineWhat span {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timelineTrack {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--surface-soft);
+}
+
+.timelineTrack > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--timeline-left);
+  width: var(--timeline-width);
+  border-radius: var(--radius-pill);
+  background: var(--foreground);
+}
+
+.timelineTrackBad > span {
+  background: var(--accent);
+}
+
+.timelineHowBad,
+.wrong {
+  color: var(--bad);
+  font-weight: 500;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .timelineRow:hover {
+    background: color-mix(
+      in srgb,
+      var(--surface-soft) 62%,
+      transparent
+    );
+  }
+}
+
+/* -------------------------------------------------------------- measures */
+
+.measures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--border);
+}
+
+.measure {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-5);
+  background: var(--surface);
+}
+
+.measure dt {
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+.measure dd {
+  margin: 0;
+  color: var(--foreground);
+  font-family: var(--mono);
+  font-size: var(--text-body);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------- mock tools */
+
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.toolGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.toolGroup > strong {
+  margin-inline-end: var(--space-2);
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  font-weight: 500;
+}
+
+.tool {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--foreground);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+}
+
+.toolUncovered {
+  border-color: var(--accent);
+}
+
+/* --------------------------------------------------------------- verdicts */
+
+.verdict {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--foreground);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.verdict[data-verdict="failed"],
+.verdict[data-verdict="errored"] {
+  border-inline-start-color: var(--accent);
+}
+
+.verdictHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.verdictWhat {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.verdictWhat strong {
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  font-weight: 500;
+}
+
+.verdictWho,
+.cited,
+.mono {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+}
+
+.rationale {
+  max-width: 88ch;
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.cited {
+  margin: 0;
+}
+
+.beneath {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-inline-start: var(--space-4);
+  border-inline-start: 2px solid var(--border);
+  color: var(--muted);
+}
+
+.beneath summary {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  list-style: none;
+}
+
+.beneath summary::-webkit-details-marker {
+  display: none;
+}
+
+.beneath summary::before {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  background: currentColor;
+  clip-path: polygon(25% 12%, 75% 50%, 25% 88%);
+  content: "";
+  transform-origin: center;
+  transition: transform var(--duration-popover-in)
+    var(--ease-in-out);
+}
+
+.beneath[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.beneath summary:focus-visible::before {
+  transition: none;
+}
+
+.pending {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-inline-start: 3px solid var(--accent);
+  background: var(--surface-soft);
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+/* ----------------------------------------------------------- grading plan */
+
+.plan {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  list-style: none;
+}
+
+.planItem {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.7fr) minmax(0, 1.3fr);
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--text-caption);
+}
+
+.planItem + .planItem {
+  border-top: 1px solid var(--border);
+}
+
+.planItem strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.planNote {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+@media (max-width: 40rem) {
+  .turn {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+
+  .planItem {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .beneath summary::before {
+    transition: none;
+  }
+}
