@@ -151,6 +151,24 @@ describe("the organization and project selector", () => {
     expect(trigger.textContent).toContain("Default");
   });
 
+  it("puts project creation with project selection for an admin", () => {
+    render(
+      <ProjectSelector
+        organization={ACME}
+        projects={PROJECTS}
+        projectId="prj_1"
+        mayCreateProject
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Organization Acme/ }));
+    expect(
+      within(screen.getByRole("dialog"))
+        .getByRole("link", { name: "New project" })
+        .getAttribute("href"),
+    ).toBe("/new-project");
+  });
+
   it("says so plainly when the address names a project this membership has not got", () => {
     render(
       <ProjectSelector

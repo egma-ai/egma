@@ -343,6 +343,7 @@ export function AppShell({
       organization={organization}
       projects={projects}
       projectId={shown}
+      mayCreateProject={role === "admin"}
       compact={compact}
     />
   );

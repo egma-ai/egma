@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { projectsMatching, type Organization, type Project } from "../lib/me.ts";
 import { inProject } from "../lib/project-context.ts";
+import { NEW_PROJECT_PATH } from "../lib/settings.ts";
 import { TextInput } from "./controls.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
 import { confirmUnsavedSettingsNavigation } from "./settings-read.ts";
@@ -34,12 +35,15 @@ export function ProjectSelector({
   organization,
   projects,
   projectId,
+  mayCreateProject = false,
   compact = false,
 }: {
   readonly organization: Organization | undefined;
   readonly projects: readonly Project[];
   /** The project the address names, or nothing on a page that names none. */
   readonly projectId: string | null;
+  /** Whether the signed-in role may add a project to this organization. */
+  readonly mayCreateProject?: boolean;
   /** The mobile top bar, where the control shares a row with everything else. */
   readonly compact?: boolean;
 }) {
@@ -145,6 +149,21 @@ export function ProjectSelector({
               ? "One project in this organization"
               : `${projects.length} projects in this organization`}
           </MenuLabel>
+          {mayCreateProject ? (
+            <>
+              <MenuDivider />
+              <MenuItem
+                href={NEW_PROJECT_PATH}
+                role="none"
+                onClick={() => {
+                  close();
+                  setQuery("");
+                }}
+              >
+                New project
+              </MenuItem>
+            </>
+          ) : null}
         </>
       )}
     </Menu>

@@ -6,13 +6,11 @@ import { useEffect, useState } from "react";
 import { IDENTITY_CONFLICT, writeJson, type Refusal } from "../../../../lib/api.ts";
 import { roleOf } from "../../../../lib/me.ts";
 import {
-  NEW_PROJECT_PATH,
   projectSettingsPath,
   type ProjectSettings,
 } from "../../../../lib/settings.ts";
 import {
   Button,
-  ButtonLink,
   Field,
   Form,
   FormActions,
@@ -199,19 +197,6 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
         eyebrow="Settings"
         title="Project"
         lead="What this product area is called, and what it is for."
-        action={
-          <ButtonLink
-            href={NEW_PROJECT_PATH}
-            disabled={!mayAdminister}
-            why={
-              role === null
-                ? undefined
-                : `Your ${role} role cannot create a project. Ask an organization admin.`
-            }
-          >
-            New project
-          </ButtonLink>
-        }
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="project">
