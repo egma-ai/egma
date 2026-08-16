@@ -14,37 +14,32 @@
  * have been typed fails the build rather than shipping in a heading. Any string
  * a page renders belongs in here.
  *
- * The URLs are deliberately not copy. `/traces/…` is a machine surface — it is
- * the v1 endpoint's own path, and matching it is how somebody reading the
- * network tab finds the request — and no page ever prints it as a word.
+ * The URLs are deliberately not copy. The v1 endpoint's own path is a machine
+ * surface — matching it is how somebody reading the network tab finds the
+ * request — and no page ever prints it as a word. What a person navigates is
+ * **Monitoring**, and what they open there is a **transcript**.
  */
 
 /** The list page. */
 export const LIST = {
-  navigation: "Transcripts",
-  title: "Transcripts",
-  lead: "What your agents did, newest first.",
-  loading: "Loading…",
+  eyebrow: "Project",
+  /**
+   * The heading, and deliberately not the navigation label: the sidebar reads
+   * its words from `lib/navigation.ts`, which is where a navigation item is
+   * decided. Two copies of "Monitoring" that could disagree would be one too
+   * many, and this is the one the page renders.
+   */
+  title: "Monitoring",
+  lead: "What your agents did in production, newest first.",
+  /** What the table is called where somebody hears it rather than sees it. */
+  tableLabel: "Production transcripts in this project",
+  loadingWhat: "this project's production transcripts",
   signedOut: "Sign in first",
   signedOutLead: "This page is about your project.",
   signIn: "Sign in",
   setUp: "Set up Egma",
   back: "Back",
   unreachable: "Egma could not be reached. Is the API running?",
-  /**
-   * The third sentence is the one that saves an afternoon.
-   *
-   * A browser session is resolved with one project, and this page sends no
-   * project override, so the trace store reads that project. A key minted for
-   * the whole organization files telemetry outside every project and cannot
-   * appear here. The empty state says that where a correct exporter would
-   * otherwise look broken.
-   */
-  empty:
-    "Nothing was recorded in this window. Point an agent's OpenTelemetry " +
-    "export at Egma, or widen the window above. The key that export uses has " +
-    "to name this project — a key minted for the whole organization files " +
-    "its telemetry outside every project, and none of it appears here.",
   window: "Window",
   showMore: "Show more",
   loadingMore: "Loading…",
@@ -61,6 +56,12 @@ export const LIST = {
  * What each column of the list is called. The **order** they are shown in is
  * the page's, decided beside the cell that fills each one so that a heading and
  * the values under it can never drift apart.
+ *
+ * **There is no source column, and there is no name here for one.** Every row on
+ * this surface is production by definition — a simulation is read under the run
+ * that produced it — so a column repeating that on every line would be furniture
+ * around a constant. The word is still a fact about one exchange and it is still
+ * shown on the transcript, under `FACTS` below.
  */
 export const COLUMNS = {
   started: "Started",
@@ -70,9 +71,68 @@ export const COLUMNS = {
   steps: "Steps",
   tools: "Tools",
   errors: "Errors",
-  source: "Source",
   environment: "Environment",
   connection: "Connection",
+} as const;
+
+/**
+ * What a quiet Monitoring page says, in three states that never overlap.
+ *
+ * A page with nothing on it is where a developer decides whether egma works.
+ * Each of these answers a different question, and the wrong one costs an
+ * afternoon:
+ *
+ * 1. **Nothing has arrived.** The whole export setup, in the shortest form
+ *    there is: the address this deployment listens on, the two variables that
+ *    point an agent at it, and where to mint the key they carry.
+ * 2. **Nothing has arrived, and a key names the whole organization.** The one
+ *    step of that setup that fails silently — everything is accepted and stored,
+ *    and none of it is in a project, so a correct-looking export shows nothing.
+ *    Telling somebody who already exported to go and export would be the
+ *    unhelpful answer, so this replaces the teaching rather than joining it.
+ * 3. **Traffic is arriving and nothing judges it.** Every grader starts scoped
+ *    to simulations and the seeded one can only ever judge a simulation, so an
+ *    absence of verdicts here is the ordinary first state rather than a fault.
+ */
+export const QUIET = {
+  setUp: {
+    title: "Nothing has been recorded here yet",
+    lead:
+      "Point an agent's OpenTelemetry export at Egma and what it does in " +
+      "production lands on this page. If it already does, widen the window " +
+      "above.",
+    endpoint: "This deployment listens for OpenTelemetry at",
+    variables:
+      "Set these two where the agent runs. The exporter adds the rest of the " +
+      "path itself, and the space in the header is percent-encoded because " +
+      "OpenTelemetry does not allow a literal one.",
+    /** The two variables, with this deployment's own address filled in. */
+    exports: (endpoint: string): string =>
+      `export OTEL_EXPORTER_OTLP_ENDPOINT=${endpoint}\n` +
+      `export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_…"`,
+    key: "Mint a key for this project",
+    keyLead:
+      "The key that export carries has to name this project. Egma shows the " +
+      "secret once.",
+  },
+  organizationKey: {
+    title: "A key here names the whole organization",
+    /**
+     * Kept word for word from the empty state it came out of. It is the
+     * sentence that saves the afternoon, and rewording it would only risk
+     * saying something slightly different about the one thing on this path
+     * that goes wrong in silence.
+     */
+    lead:
+      "The key that export uses has to name this project — a key minted for " +
+      "the whole organization files its telemetry outside every project, and " +
+      "none of it appears here.",
+    key: "Mint a key for this project",
+  },
+  unwatched: {
+    lead: "No grader watches production, so nothing here is judged.",
+    graders: "Open Graders",
+  },
 } as const;
 
 /** How long a window the list is asking about. Basic on purpose. */
@@ -175,7 +235,8 @@ export const FACTS = {
   steps: COLUMNS.steps,
   tools: COLUMNS.tools,
   errors: COLUMNS.errors,
-  source: COLUMNS.source,
+  /** A fact about one exchange, and never a column — see `COLUMNS` above. */
+  source: "Source",
   environment: COLUMNS.environment,
   connection: COLUMNS.connection,
   reference: "Provider reference",

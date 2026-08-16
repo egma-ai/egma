@@ -333,7 +333,7 @@ function RunDetailView({
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Runs" title="Run" />
+        <PageHeader eyebrow="Simulation runs" title="Run" />
         <PageBody>
           <Loading what="this run" />
         </PageBody>
@@ -344,7 +344,7 @@ function RunDetailView({
   if (answer.status === "missing") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Runs" title="Run" />
+        <PageHeader eyebrow="Simulation runs" title="Run" />
         <PageBody>
           <NotFound
             message={answer.refusal.message}
@@ -362,7 +362,7 @@ function RunDetailView({
   if (answer.status === "failed") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Runs" title="Run" />
+        <PageHeader eyebrow="Simulation runs" title="Run" />
         <PageBody>
           <Failure message={answer.refusal.message} onRetry={reload} />
         </PageBody>
@@ -399,7 +399,7 @@ function RunDetailView({
   return (
     <ProductPage wide>
       <PageHeader
-        eyebrow="Runs"
+        eyebrow="Simulation runs"
         title={read.label ?? "Run"}
         lead={
           <>

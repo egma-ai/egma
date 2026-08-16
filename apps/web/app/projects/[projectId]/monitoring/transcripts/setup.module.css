@@ -1,0 +1,38 @@
+/*
+ * The export setup, on the page a developer meets before anything arrives.
+ *
+ * It is the one place in the product that shows something to be copied rather
+ * than something to be read, so it borrows the transcript's monospace treatment
+ * and nothing else. No new colour: the block sits on the ordinary surface with
+ * the ordinary hairline, because it is instruction and not a state.
+ */
+
+.setUp {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  text-align: left;
+  width: 100%;
+}
+
+.address,
+.exports {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+  margin: 0;
+  overflow-x: auto;
+  padding: var(--space-3) var(--space-4);
+  white-space: pre;
+  width: 100%;
+}
+
+.note {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+  margin: 0;
+}

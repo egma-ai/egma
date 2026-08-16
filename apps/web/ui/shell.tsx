@@ -107,6 +107,8 @@ const NAVIGATION_ICON_PATHS: Record<SectionId, readonly string[]> = {
   ],
   tests: ["M5 3.5h10v13H5z", "M7.5 7h5", "M7.5 10h5", "M7.5 13h3"],
   runs: ["m6.5 4.5 8 5.5-8 5.5z"],
+  // A live line: what production is doing, read left to right.
+  monitoring: ["M3 12.5h3l2.5-6 3 9 2.5-5h3"],
   personas: [
     "M7.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
     "M3.5 16c.45-2.75 1.8-4.1 4-4.1 2.15 0 3.55 1.35 4 4.1",

@@ -36,6 +36,10 @@ import {
 
 const WEB = path.join(import.meta.dirname, "..");
 
+/** One conversation, inside the project's monitoring section. */
+const TRANSCRIPT_PAGE =
+  "app/projects/[projectId]/monitoring/transcripts/[transcriptId]/page.tsx";
+
 describe("the names the signup form offers", () => {
   const cases: readonly [string, string][] = [
     ["ada@acme.example", "Acme"],
@@ -542,7 +546,7 @@ describe("the pages", () => {
       "utf8",
     );
     const transcript = await readFile(
-      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      path.join(WEB, TRANSCRIPT_PAGE),
       "utf8",
     );
     // The address a terminal prints. It draws no run of its own any more — see
@@ -654,7 +658,7 @@ describe("the pages", () => {
 
   it("shows the aggregate trace outcome", async () => {
     const transcript = await readFile(
-      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      path.join(WEB, TRANSCRIPT_PAGE),
       "utf8",
     );
     const contract = await readFile(
@@ -680,7 +684,7 @@ describe("the pages", () => {
    */
   it("shows the diagnostic lane beside that outcome, from the model", async () => {
     const transcript = await readFile(
-      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      path.join(WEB, TRANSCRIPT_PAGE),
       "utf8",
     );
     const contract = await readFile(
@@ -711,7 +715,7 @@ describe("the pages", () => {
    */
   it("reports the diagnostic fraction, not only its counts", async () => {
     const transcript = await readFile(
-      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      path.join(WEB, TRANSCRIPT_PAGE),
       "utf8",
     );
 
