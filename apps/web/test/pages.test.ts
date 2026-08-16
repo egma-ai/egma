@@ -620,6 +620,34 @@ describe("the pages", () => {
     expect(forwarder).not.toContain("graded_count");
   });
 
+  /**
+   * **Simulation runs is a label, and only a label.**
+   *
+   * Monitoring gave production traffic a surface of its own, so the surface
+   * beside it has to say which traffic *it* holds. What changed is the words on
+   * four pages and one navigation item. What did not change is anything a
+   * machine reads: the addresses stay at `/projects/{projectId}/runs`, and the
+   * stored word stays `run` — which is why this reads the page headings rather
+   * than sweeping the sources for the word.
+   */
+  it("labels every runs surface Simulation runs, without moving one address", async () => {
+    for (const page of [
+      "app/projects/[projectId]/runs/page.tsx",
+      "app/projects/[projectId]/runs/new/page.tsx",
+      "app/projects/[projectId]/runs/[runId]/page.tsx",
+      "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
+      "app/runs/[runId]/page.tsx",
+    ]) {
+      const source = await readFile(path.join(WEB, page), "utf8");
+      expect(source, page).toContain('"Simulation runs"');
+      expect(source, page).not.toContain('eyebrow="Runs"');
+      expect(source, page).not.toContain('title="Runs"');
+      // And the addresses are where they were: every link is still built from
+      // the `runs` section, which is the stored word and stays one.
+      expect(source, page).not.toContain("simulation-runs");
+    }
+  });
+
   it("show real run verdicts without folding execution failures into grader failures", async () => {
     const run = await readFile(
       path.join(WEB, "app/projects/[projectId]/runs/[runId]/page.tsx"),
