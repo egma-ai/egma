@@ -176,13 +176,13 @@ describe("the Personas list", () => {
     });
     render(<PersonasPage />);
 
-    // Twice, because one column definition draws the table and the list both.
-    expect(await screen.findAllByText("Impatient Rita")).toHaveLength(2);
+    // Once, because the table changes layout without cloning the row.
+    expect(await screen.findAllByText("Impatient Rita")).toHaveLength(1);
     expect(asked.map((one) => one.path)).toContain("/api/personas?project=prj_1");
 
     // The default persona is an ordinary row that says what it is, and it is
     // the only one that says it.
-    expect(screen.getAllByTitle(/names nobody/)).toHaveLength(2);
+    expect(screen.getAllByTitle(/names nobody/)).toHaveLength(1);
   });
 
   it("shows the archive as a separate list, asked for separately", async () => {

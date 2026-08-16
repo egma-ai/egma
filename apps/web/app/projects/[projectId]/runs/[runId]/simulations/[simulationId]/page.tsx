@@ -74,22 +74,22 @@ import styles from "./simulation.module.css";
  * and any later human correction.
  *
  * **The page is reached from its run and is not in the navigation.** A
- * conversation is a thing inside a run, not a product area, and a sidebar entry
- * for it would invite somebody to go looking for a conversation without knowing
+ * simulation is a thing inside a run, not a product area, and a sidebar entry
+ * for it would invite somebody to go looking for a simulation without knowing
  * which run they wanted. The address is project-scoped and stable, so it can be
- * pasted into a ticket and open the same conversation next month.
+ * pasted into a ticket and open the same simulation next month.
  *
  * **One read supplies the whole page.** `GET /api/simulations/{id}` answers the
  * pins, the identities, the frozen plan, the measures, the verdicts and the
  * transcript together, with the transcript's window worked out on the server
- * from the conversation's own stamps. The only second request this page ever
+ * from the simulation's own stamps. The only second request this page ever
  * makes is the recording's, and only when there is one to hear — a signed link
  * is short-lived, so carrying one in the page answer would make the address
  * stale a quarter of an hour after it loaded.
  *
- * **The four facts stay apart, everywhere.** The conversation's machinery, where
+ * **The four facts stay apart, everywhere.** The simulation's machinery, where
  * the grading stands, what was decided, and null for *nobody has decided yet*. A
- * conversation still being judged shows a pending line beside its behaviours and
+ * simulation still being judged shows a pending line beside its behaviours and
  * nothing red — turning the page into a failure while the engine is still
  * working is the single worst thing this surface could do.
  */
@@ -138,9 +138,9 @@ function EvidenceView({
   const [confirming, setConfirming] = useState(false);
   const [working, setWorking] = useState(false);
 
-  // A different conversation in the same page: everything accumulated about the
+  // A different simulation in the same page: everything accumulated about the
   // last one goes, including an open control that would otherwise be answered
-  // about a conversation nobody opened it for.
+  // about a simulation nobody opened it for.
   useEffect(() => {
     setRefused(null);
     setAsked(null);
@@ -157,8 +157,8 @@ function EvidenceView({
    * Whether anything is still being judged.
    *
    * Read off the grading job rather than off the verdict rows, because those are
-   * two different questions: a conversation with rows may still have a re-grade
-   * outstanding, and a conversation with none may have nothing queued at all.
+   * two different questions: a simulation with rows may still have a re-grade
+   * outstanding, and a simulation with none may have nothing queued at all.
    */
   const stillJudging =
     evidence !== null &&
@@ -175,7 +175,7 @@ function EvidenceView({
   async function regrade(): Promise<void> {
     if (!mayRevisit || working) return;
     // Both of these belong to the *last* ask, and a new one is being made. The
-    // sentence saying a conversation was queued is the one that must go: a
+    // sentence saying a simulation was queued is the one that must go: a
     // second ask that is refused would otherwise leave a reassurance about work
     // that was queued standing above a refusal saying nothing was — two boxes
     // disagreeing, with the comforting one on top.
@@ -209,9 +209,9 @@ function EvidenceView({
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Runs" title="Conversation" />
+        <PageHeader eyebrow="Runs" title="Simulation" />
         <PageBody>
-          <Loading what="this conversation" />
+          <Loading what="this simulation" />
         </PageBody>
       </ProductPage>
     );
@@ -220,7 +220,7 @@ function EvidenceView({
   if (answer.status === "missing") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Runs" title="Conversation" />
+        <PageHeader eyebrow="Runs" title="Simulation" />
         <PageBody>
           <NotFound
             message={answer.refusal.message}
@@ -238,7 +238,7 @@ function EvidenceView({
   if (answer.status === "failed") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Runs" title="Conversation" />
+        <PageHeader eyebrow="Runs" title="Simulation" />
         <PageBody>
           <Failure message={answer.refusal.message} onRetry={reload} />
         </PageBody>
@@ -255,10 +255,10 @@ function EvidenceView({
     <ProductPage wide>
       <PageHeader
         eyebrow="Runs"
-        title={read.test.name ?? "This conversation executed no stored test"}
+        title={read.test.name ?? "This simulation executed no stored test"}
         lead={
           <>
-            {read.persona.name ?? "a persona"} · conversation{" "}
+            {read.persona.name ?? "a persona"} · simulation{" "}
             {String(read.position).padStart(2, "0")} of{" "}
             <Link href={projectPath(projectId, "runs", runId)}>
               {read.run_label ?? "the run"}
@@ -297,8 +297,8 @@ function EvidenceView({
         {asked === null ? null : (
           <Problem>
             {asked.reopened > 0
-              ? "This conversation is queued to be judged again. Verdicts appear below as they land."
-              : "This conversation was already waiting to be judged, so nothing was asked twice. Verdicts appear below as they land."}
+              ? "This simulation is queued to be judged again. Verdicts appear below as they land."
+              : "This simulation was already waiting to be judged, so nothing was asked twice. Verdicts appear below as they land."}
           </Problem>
         )}
 
@@ -309,13 +309,13 @@ function EvidenceView({
         )}
 
         {/*
-          The four facts, kept apart and labelled. A conversation that finished
-          is not a conversation that went well, and a verdict nobody has reached
+          The four facts, kept apart and labelled. A simulation that finished
+          is not a simulation that went well, and a verdict nobody has reached
           is blank rather than red.
         */}
         <div className={styles.facts}>
           <div className={styles.fact}>
-            <span>Conversation</span>
+            <span>Simulation</span>
             <SimulationStatus status={read.status} />
           </div>
           <div className={styles.fact}>
@@ -346,14 +346,48 @@ function EvidenceView({
 
         {read.status !== "failed" ? null : (
           <Problem>
-            {read.reason ?? "Egma could not conduct this conversation."} This is
+            {read.reason ?? "Egma could not conduct this simulation."} This is
             an execution problem, not a failed grader verdict, and it says
             nothing about the agent.
           </Problem>
         )}
 
         <Section
-          title="What this conversation was"
+          title="Verdicts"
+          lead="One per judged assertion. A regrade writes a new judgement beside the old one, and the earlier one stays readable underneath it. A grader marked reports only is judged the same way and can fail nothing."
+        >
+          {stillJudging ? (
+            <GradingPending what="Grading is still running. Verdicts appear here as they land, and nothing below is a failure until a grader says so." />
+          ) : null}
+
+          {assertions.length === 0 ? (
+            <Empty
+              title={
+                read.grading === "not_required"
+                  ? "There was nothing to judge"
+                  : "Nobody has judged this yet"
+              }
+              lead={
+                read.grading === "not_required"
+                  ? "Egma never conducted this simulation, so no grading job was ever filed and none ever will be."
+                  : "The grading engine has not written a verdict for this simulation. That is not a result, and it is certainly not a failure."
+              }
+            />
+          ) : (
+            <div className={styles.verdicts}>
+              {assertions.map((judged) => (
+                <VerdictEvidence
+                  key={judged.key}
+                  judged={judged}
+                  turns={turns}
+                />
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <Section
+          title="What this simulation was"
           lead="The exact frozen versions it executed. The names read as they stand today; these do not move, which is what keeps the evidence interpretable."
         >
           <Facts
@@ -418,7 +452,7 @@ function EvidenceView({
 
         <Section
           title="What it ran against"
-          lead="The agent and the connection as they now stand, and the connection exactly as this conversation went over it. Both stay readable after either is archived."
+          lead="The agent and the connection as they now stand, and the connection exactly as this simulation went over it. Both stay readable after either is archived."
         >
           <Facts
             facts={[
@@ -477,7 +511,7 @@ function EvidenceView({
                   ),
               },
               {
-                label: "Conversation identifier",
+                label: "Simulation identifier",
                 value: <code>{read.id}</code>,
               },
             ]}
@@ -487,7 +521,7 @@ function EvidenceView({
         {/*
           The audio, where there is any.
 
-          `has_recording` is the conversation's own answer and is what decides
+          `has_recording` is the simulation's own answer and is what decides
           whether a player is offered at all — the difference between an honest
           absence and a disabled control that reads as a broken feature. What
           the player then does about a link that will not resolve, or a store
@@ -514,13 +548,13 @@ function EvidenceView({
           {read.transcript === null ? (
             <Empty
               title="No transcript was filed"
-              lead="Egma has no spans for this conversation. A conversation that was never conducted filed none, and so did one whose simulator died before its first export."
+              lead="Egma has no spans for this simulation. A simulation that was never conducted filed none, and so did one whose simulator died before its first export."
             />
           ) : (
             <>
               {read.transcript.spans_truncated ? (
                 <Problem>
-                  {`This conversation filed ${String(read.transcript.span_count)} steps, which is more than one read returns. What is below is the beginning of it, in order.`}
+                  {`This simulation filed ${String(read.transcript.span_count)} steps, which is more than one read returns. What is below is the beginning of it, in order.`}
                 </Problem>
               ) : null}
               <Transcript transcript={read.transcript} />
@@ -546,7 +580,7 @@ function EvidenceView({
 
         <Section
           title="Mock Tools"
-          lead="What egma answered for, and what ran for real and unobserved. A mocked conversation and an unmocked one are different units."
+          lead="What egma answered for, and what ran for real and unobserved. A mocked simulation and an unmocked one are different units."
         >
           <MockToolEvidence
             coverage={read.mock_tool_coverage}
@@ -556,7 +590,7 @@ function EvidenceView({
         </Section>
 
         <Section
-          title="What judged this conversation"
+          title="What judged this simulation"
           lead={
             plan === null
               ? "This run has no recorded grading plan."
@@ -573,43 +607,10 @@ function EvidenceView({
           <PlanItems items={plan?.items ?? []} />
         </Section>
 
-        <Section
-          title="Verdicts"
-          lead="One per judged assertion. A regrade writes a new judgement beside the old one, and the earlier one stays readable underneath it. A grader marked reports only is judged the same way and can fail nothing."
-        >
-          {stillJudging ? (
-            <GradingPending what="Grading is still running. Verdicts appear here as they land, and nothing below is a failure until a grader says so." />
-          ) : null}
-
-          {assertions.length === 0 ? (
-            <Empty
-              title={
-                read.grading === "not_required"
-                  ? "There was nothing to judge"
-                  : "Nobody has judged this yet"
-              }
-              lead={
-                read.grading === "not_required"
-                  ? "Egma never conducted this conversation, so no grading job was ever filed and none ever will be."
-                  : "The grading engine has not written a verdict for this conversation. That is not a result, and it is certainly not a failure."
-              }
-            />
-          ) : (
-            <div className={styles.verdicts}>
-              {assertions.map((judged) => (
-                <VerdictEvidence
-                  key={judged.key}
-                  judged={judged}
-                  turns={turns}
-                />
-              ))}
-            </div>
-          )}
-        </Section>
       </PageBody>
 
       {!confirming ? null : (
-        <Dialog title="Judge this conversation again?" onClose={() => setConfirming(false)}>
+        <Dialog title="Judge this simulation again?" onClose={() => setConfirming(false)}>
           <p>{REGRADE_IS_NOT_A_REPLAY}</p>
           <Actions>
             <Button onClick={() => setConfirming(false)}>Not now</Button>

@@ -59,10 +59,8 @@
 /*
  * The panel drawn once, under the table, for whichever row is open.
  *
- * Once and never inside a cell: the table draws every row twice, once wide and
- * once narrow, so a panel living in a cell would be two panels over one piece
- * of state — and whichever the browser focused would be the one nobody could
- * see.
+ * Once and never squeezed into a cell: the table keeps each row to one line of
+ * reading, while this panel needs the full width and owns the expanded state.
  */
 .openRow {
   display: flex;

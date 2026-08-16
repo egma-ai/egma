@@ -113,8 +113,8 @@ function columnsFor(
       cell: (run) => <RunStatus status={run.status} />,
     },
     {
-      key: "conversations",
-      header: "Conversations",
+      key: "simulations",
+      header: "Simulations",
       width: "220px",
       cell: (run) => <SimulationTally counts={run.simulation_counts} />,
     },
@@ -139,10 +139,9 @@ function columnsFor(
        * Stopping a run without opening it.
        *
        * **The button opens a row and does nothing else.** What it opens is one
-       * panel drawn under the table, because `DataTable` draws every row twice —
-       * once wide and once narrow — and a panel living in a cell would be two
-       * panels over one piece of state, with whichever the browser focused being
-       * the one nobody could see.
+       * panel drawn under the table, where the run name, consequences and retry
+       * stay together at every viewport size instead of being squeezed into an
+       * action cell.
        *
        * A finished run has nothing to cancel, so it gets no control at all
        * rather than a disabled one: a disabled control here would read as a
@@ -204,11 +203,9 @@ function Runs({ projectId }: { readonly projectId: string }) {
   /**
    * Which row's Cancel panel is open, and the two things bound to that row.
    *
-   * **The panel is drawn once, under the table**, because `DataTable` draws every
-   * row twice — once wide and once narrow — so a panel inside a cell would be two
-   * panels over one piece of state. That makes everything here shared by every
-   * row, and each of these is a different way of showing somebody the wrong
-   * run's answer:
+   * **The panel is drawn once, under the table.** That makes everything here
+   * shared by every row, and each of these is a different way of showing
+   * somebody the wrong run's answer:
    *
    * - `rowRefused` is a sentence about the run that failed. Left behind, it sits
    *   under a different run's name, and the name is the only thing on screen
@@ -453,7 +450,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
               Cancel {opened.label ?? asMoment(opened.created_at)}?
             </h3>
             <p className={styles.stopLead}>
-              Conversations still waiting stop here and now. Conversations
+              Simulations still waiting stop here and now. Simulations
               already with a simulator are told to stop and land as canceled
               when they do, and whatever they produced stays on the record. A
               canceled run never becomes completed.

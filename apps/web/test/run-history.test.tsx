@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RunDetailPage from "../app/projects/[projectId]/runs/[runId]/page.tsx";
@@ -277,7 +284,7 @@ const NO_EVENTS = { status: 200, body: { events: [], next: 0, done: true } };
  */
 const JUDGED_THE_AGENT = "At least one check failed. This is a judgement about the agent.";
 const COULD_NOT_CONDUCT =
-  "Egma could not conduct this conversation. This is an execution problem, not a failed grader verdict, and it says nothing about the agent.";
+  "Egma could not conduct this simulation. This is an execution problem, not a failed grader verdict, and it says nothing about the agent.";
 
 beforeEach(() => {
   sent = [];
@@ -550,7 +557,7 @@ function detail(
 }
 
 describe("one run's page", () => {
-  it("keeps machinery, grading and verdict apart on every conversation", async () => {
+  it("keeps machinery, grading and verdict apart on every simulation", async () => {
     detail({
       run: runDetail({
         status: "completed",
@@ -592,6 +599,15 @@ describe("one run's page", () => {
 
     await screen.findAllByText("errored");
     await screen.findAllByText("skipped");
+    const table = await screen.findByRole("table", {
+      name: "Simulations in this run",
+    });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .slice(0, 2)
+        .map((header) => header.textContent),
+    ).toEqual(["Simulation", "Status"]);
 
     // Egma could not conduct one of them, and the page says so in those words
     // rather than calling it a failed verdict.

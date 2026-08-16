@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -368,10 +369,9 @@ async function chooseEverything(): Promise<void> {
   fireEvent.change(await screen.findByLabelText("Connection"), {
     target: { value: "con_1" },
   });
-  // A table draws every row twice — once wide and once narrow — so the same
-  // control is on screen twice and either of them is the one somebody clicked.
+  // The table keeps one real control in the document at every screen width.
   fireEvent.click(
-    (await screen.findAllByLabelText("Include Reschedules a booked appointment"))[0]!,
+    await screen.findByLabelText("Include Reschedules a booked appointment"),
   );
 }
 
@@ -767,6 +767,16 @@ describe("starting", () => {
  * outlives the panel.
  */
 describe("what belongs to the open test row", () => {
+  async function detailsFor(testName: string): Promise<HTMLElement> {
+    const table = await screen.findByRole("table", {
+      name: "Tests that apply to this agent",
+    });
+    const named = within(table).getByText(testName);
+    const row = named.closest("tr");
+    if (row === null) throw new Error(`${testName} should be in a table row`);
+    return within(row).getByRole("button", { name: "Details" });
+  }
+
   /**
    * Two rows, and the second row's own read left unanswered.
    *
@@ -794,12 +804,8 @@ describe("what belongs to the open test row", () => {
       target: { value: "agt_1" },
     });
 
-    const [firstDetails, secondDetails] = await screen.findAllByRole("button", {
-      name: "Details",
-    });
-    if (firstDetails === undefined || secondDetails === undefined) {
-      throw new Error("both rows should offer their details");
-    }
+    const firstDetails = await detailsFor("Reschedules a booked appointment");
+    const secondDetails = await detailsFor("Cancels");
 
     fireEvent.click(firstDetails);
     // **Wait for the read that produces the sentence** before asserting it is
@@ -807,7 +813,7 @@ describe("what belongs to the open test row", () => {
     // the wrong reason and keep passing after the behaviour was deleted.
     await screen.findByText(/2 versions; this run would pin v3\./u);
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Details" })[1]!);
+    fireEvent.click(secondDetails);
     await waitFor(() => {
       expect(screen.queryByText(/2 versions/u)).toBeNull();
     });
@@ -826,13 +832,14 @@ describe("what belongs to the open test row", () => {
       target: { value: "agt_1" },
     });
 
-    const rows = await screen.findAllByRole("button", { name: "Details" });
-    fireEvent.click(rows[0]!);
+    const firstDetails = await detailsFor("Reschedules a booked appointment");
+    const secondDetails = await detailsFor("Cancels");
+    fireEvent.click(firstDetails);
     // Wait for the failure to actually be on screen before switching, so the
     // assertion below is about the clearing rather than about the timing.
     await screen.findByRole("button", { name: "Try again" });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Details" })[1]!);
+    fireEvent.click(secondDetails);
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();

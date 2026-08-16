@@ -50,6 +50,12 @@
   --control-sm: 24px;
   --control-md: 28px;
   --control-lg: 32px;
+  /* A pointer target is larger than a dense visual control on a touch screen. */
+  --tap-target: 44px;
+
+  /* Motion. Press feedback is brief and uses a responsive ease-out curve. */
+  --duration-press: 120ms;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 
   /* List and table density. A row is a line of reading. */
   --row-height: 36px;

@@ -220,8 +220,8 @@ describe("the grader library, in one project", () => {
     });
     render(<GraderLibraryPage />);
 
-    // Twice, because one column definition draws the table and the list both.
-    expect(await screen.findAllByText("Expected behaviors")).toHaveLength(2);
+    // Once, because the table changes layout without cloning the row.
+    expect(await screen.findAllByText("Expected behaviors")).toHaveLength(1);
     expect(asked.map((one) => one.path)).toContain(
       "/api/grader-library?project=prj_1",
     );
@@ -416,7 +416,7 @@ describe("the running graders of one project", () => {
     });
     render(<RunningGradersPage />);
 
-    expect(await screen.findAllByText("Expected behaviors")).toHaveLength(2);
+    expect(await screen.findAllByText("Expected behaviors")).toHaveLength(1);
     expect(asked.map((one) => one.path)).toContain("/api/graders?project=prj_1");
     // The shelf beside the copies, and in the same project: a copy's form is
     // its entry's declaration rendered, and this page cannot draw one without

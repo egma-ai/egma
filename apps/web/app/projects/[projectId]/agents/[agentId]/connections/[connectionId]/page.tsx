@@ -33,6 +33,8 @@ import {
   Choice,
   Facts,
   Field,
+  Form,
+  FormActions,
   Help,
   Problem,
   Section,
@@ -531,7 +533,7 @@ function ConnectionDetail({
         <Dialog title="Archive this connection?" onClose={() => setDialog(null)}>
           <p>
             Egma stops claiming work over it. Queued simulations are canceled
-            and conversations already happening are asked to stop; whatever they
+            and simulations already happening are asked to stop; whatever they
             produced stays on the record. The simulator can no longer resolve
             its credential.
           </p>
@@ -652,12 +654,7 @@ function EditConnection({
 
   return (
     <Dialog title="Edit connection" onClose={onClose}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void save();
-        }}
-      >
+      <Form onSubmit={() => void save()}>
         <Field label="Name" htmlFor="edit-connection-name">
           <TextInput id="edit-connection-name" value={name} onChange={setName} />
         </Field>
@@ -687,13 +684,13 @@ function EditConnection({
 
         {refused === null ? null : <Problem>{refused.message}</Problem>}
 
-        <Actions>
+        <FormActions>
           <Button type="submit" weight="strong" disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
           <Button onClick={onClose}>Cancel</Button>
-        </Actions>
-      </form>
+        </FormActions>
+      </Form>
     </Dialog>
   );
 }
@@ -757,12 +754,7 @@ function RotateCredential({
 
   return (
     <Dialog title="Rotate credential" onClose={onClose}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void rotate();
-        }}
-      >
+      <Form onSubmit={() => void rotate()}>
         <Help>{variant.credential_help}</Help>
         <ConnectionFields
           variant={{ ...variant, fields: [] }}
@@ -771,13 +763,13 @@ function RotateCredential({
           credentialsEditable
         />
         {refused === null ? null : <Problem>{refused.message}</Problem>}
-        <Actions>
+        <FormActions>
           <Button type="submit" weight="strong" disabled={saving}>
             {saving ? "Rotating…" : "Replace credential"}
           </Button>
           <Button onClick={onClose}>Cancel</Button>
-        </Actions>
-      </form>
+        </FormActions>
+      </Form>
     </Dialog>
   );
 }
@@ -860,12 +852,7 @@ function RestoreConnection({
 
   return (
     <Dialog title="Restore this connection?" onClose={onClose}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void restore();
-        }}
-      >
+      <Form onSubmit={() => void restore()}>
         <p>
           Restoring needs the parent agent to be active. Egma never brings back
           the credential this connection was archived with.
@@ -912,13 +899,13 @@ function RestoreConnection({
 
         {refused === null ? null : <Problem>{refused.message}</Problem>}
 
-        <Actions>
+        <FormActions>
           <Button type="submit" weight="strong" disabled={saving}>
             {saving ? "Restoring…" : "Restore connection"}
           </Button>
           <Button onClick={onClose}>Cancel</Button>
-        </Actions>
-      </form>
+        </FormActions>
+      </Form>
     </Dialog>
   );
 }

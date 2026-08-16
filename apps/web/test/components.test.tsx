@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
@@ -9,6 +10,7 @@ import { DataTable, type Column } from "../ui/data-table.tsx";
 import { Dialog } from "../ui/dialog.tsx";
 import { Failure, NotFound } from "../ui/page-state.tsx";
 import { ProjectSelector } from "../ui/project-selector.tsx";
+import { RunProgress } from "../ui/run-status.tsx";
 import { AppShell } from "../ui/shell.tsx";
 
 /**
@@ -320,12 +322,8 @@ describe("a page of rows", () => {
     { id: "agt_2", name: "Outbound reminders", when: "2026-08-14" },
   ];
 
-  /**
-   * One column definition, both layouts. A hand-written small-screen list
-   * beside a table is two things to keep in step, and the small one is always
-   * the half that falls behind.
-   */
-  it("draws the same rows as a table and as a list, from one definition", () => {
+  /** One table changes layout without putting a hidden copy of every control in the DOM. */
+  it("draws each row once and carries its small-screen labels on the same cells", () => {
     render(
       <DataTable label="Agents" columns={COLUMNS} rows={ROWS} keyOf={(row) => row.id} />,
     );
@@ -334,16 +332,15 @@ describe("a page of rows", () => {
     expect(within(table).getAllByRole("row")).toHaveLength(ROWS.length + 1);
     expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent))
       .toEqual(["Agent", "Registered"]);
+    expect(screen.queryByRole("list", { name: "Agents" })).toBeNull();
+    expect(screen.getAllByText("Front desk")).toHaveLength(1);
 
-    const list = screen.getByRole("list", { name: "Agents" });
-    const entries = within(list).getAllByRole("listitem");
-    expect(entries).toHaveLength(ROWS.length);
-
-    // The primary column names the row, and every other column becomes a fact
-    // under it rather than being dropped.
-    expect(entries[0]?.textContent).toContain("Front desk");
-    expect(entries[0]?.textContent).toContain("Registered");
-    expect(entries[0]?.textContent).toContain("2026-08-15");
+    const firstRow = within(table).getAllByRole("row")[1];
+    const cells = within(firstRow as HTMLElement).getAllByRole("cell");
+    expect(cells.map((cell) => cell.getAttribute("data-label"))).toEqual([
+      "Agent",
+      "Registered",
+    ]);
   });
 
   it("offers the next page only where the list said there is one", () => {
@@ -366,12 +363,32 @@ describe("a page of rows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show more" }));
     expect(onMore).toHaveBeenCalledTimes(1);
   });
+
+  it("mounts an interactive cell once, with one id and one focus target", () => {
+    const roleCell = vi.fn((row: Row) => (
+      <select id={`role-${row.id}`} aria-label={`Role for ${row.name}`}>
+        <option>Admin</option>
+      </select>
+    ));
+    const columns: readonly Column<Row>[] = [
+      COLUMNS[0]!,
+      { key: "role", header: "Role", cell: roleCell },
+    ];
+
+    render(
+      <DataTable label="Agents" columns={columns} rows={[ROWS[0]!]} keyOf={(row) => row.id} />,
+    );
+
+    expect(roleCell).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByLabelText("Role for Front desk")).toHaveLength(1);
+    expect(document.querySelectorAll("#role-agt_1")).toHaveLength(1);
+  });
 });
 
 /* ------------------------------------------------------------------------ */
 
 describe("a dialog", () => {
-  it("takes focus, and Escape gives it back without changing anything", () => {
+  it("uses the browser's modal lifecycle and turns Escape into a cancel request", () => {
     const onClose = vi.fn();
     render(
       <Dialog title="Navigation" onClose={onClose}>
@@ -380,13 +397,53 @@ describe("a dialog", () => {
     );
 
     const panel = screen.getByRole("dialog", { name: "Navigation" });
+    expect(panel.tagName).toBe("DIALOG");
     expect(panel.getAttribute("aria-modal")).toBe("true");
 
     // Focus is inside, so the keyboard is no longer driving the page beneath.
     expect(panel.contains(document.activeElement)).toBe(true);
 
-    fireEvent.keyDown(document, { key: "Escape" });
+    const cancel = new Event("cancel", { cancelable: true });
+    fireEvent(panel, cancel);
+    expect(cancel.defaultPrevented).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the exact control that opened it", () => {
+    function Example() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open navigation</button>
+          {open ? (
+            <Dialog title="Navigation" onClose={() => setOpen(false)}>
+              <a href="/projects/prj_1/tests">Tests</a>
+            </Dialog>
+          ) : null}
+        </>
+      );
+    }
+
+    render(<Example />);
+    const opener = screen.getByRole("button", { name: "Open navigation" });
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(document.activeElement).toBe(opener);
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+describe("run progress", () => {
+  it("moves one full-width layer with a transform instead of changing layout width", () => {
+    render(<RunProgress finished={3} expected={4} />);
+
+    const progress = screen.getByRole("progressbar", { name: "Simulations finished" });
+    const fill = progress.firstElementChild as HTMLElement;
+    expect(fill.style.transform).toBe("scaleX(0.75)");
+    expect(fill.style.width).toBe("");
   });
 });
 
@@ -561,8 +618,8 @@ describe("the Agents page", () => {
     });
     render(<AgentsPage />);
 
-    // Twice, because one column definition draws the table and the list both.
-    expect(await screen.findAllByText("Front desk")).toHaveLength(2);
+    // Once, because the table changes layout without cloning the row.
+    expect(await screen.findAllByText("Front desk")).toHaveLength(1);
     const asked = vi.mocked(globalThis.fetch).mock.calls.map(([url]) => String(url));
     expect(asked).toContain("/api/agents?project=prj_1");
   });

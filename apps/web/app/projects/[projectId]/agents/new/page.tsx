@@ -9,10 +9,11 @@ import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
-  Actions,
   Button,
   ButtonLink,
   Field,
+  Form,
+  FormActions,
   Problem,
   TextArea,
   TextInput,
@@ -150,12 +151,7 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
         lead="Its name and description in egma. Its prompt, model and tools stay where you configure them."
       />
       <PageBody>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void register();
-          }}
-        >
+        <Form onSubmit={() => void register()}>
           <Field label="Name" htmlFor="agent-name">
             <TextInput
               id="agent-name"
@@ -185,13 +181,13 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
 
           {refused === null ? null : <Problem>{refused.message}</Problem>}
 
-          <Actions>
+          <FormActions>
             <Button type="submit" weight="strong" disabled={saving || !mayRegister}>
               {saving ? "Registering…" : "Register agent"}
             </Button>
             <ButtonLink href={back}>Cancel</ButtonLink>
-          </Actions>
-        </form>
+          </FormActions>
+        </Form>
       </PageBody>
     </ProductPage>
   );

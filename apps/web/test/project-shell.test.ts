@@ -12,6 +12,7 @@ import {
 } from "../lib/me.ts";
 import {
   activeSectionIn,
+  MANAGEMENT_NAVIGATION,
   navigationFor,
   PRIMARY_NAVIGATION,
   SECONDARY_NAVIGATION,
@@ -130,6 +131,14 @@ describe("the product navigation", () => {
     ]);
   });
 
+  it("keeps Settings visible and active as a management area", () => {
+    expect(MANAGEMENT_NAVIGATION.map((item) => item.id)).toEqual(["settings"]);
+    expect(navigationFor("prj_2").management.map((link) => link.href)).toEqual([
+      "/projects/prj_2/settings",
+    ]);
+    expect(activeSectionIn("/projects/prj_2/settings/people")).toBe("settings");
+  });
+
   /**
    * The section a grader screen is under, read out of the address like every
    * other. The running-copies screen is a second page inside the same section
@@ -142,7 +151,11 @@ describe("the product navigation", () => {
   });
 
   it("has no item for a simulation, which is evidence reached from its run", () => {
-    const every = [...PRIMARY_NAVIGATION, ...SECONDARY_NAVIGATION].map(
+    const every = [
+      ...PRIMARY_NAVIGATION,
+      ...SECONDARY_NAVIGATION,
+      ...MANAGEMENT_NAVIGATION,
+    ].map(
       (item) => item.id,
     );
     expect(every).not.toContain("simulations");

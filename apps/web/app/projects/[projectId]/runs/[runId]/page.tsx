@@ -465,7 +465,7 @@ function RunDetailView({
 
         {canceling && status === "canceled" ? (
           <Problem>
-            This run was canceled. Conversations that were already with a
+            This run was canceled. Simulations that were already with a
             simulator finish honoring the cancellation, so the final counts land
             when the last of them does. A later report cannot make this run
             completed.
@@ -491,22 +491,22 @@ function RunDetailView({
 
         {stillMoving ? (
           <p className={styles.following}>
-            Updating as conversations finish and verdicts arrive.
+            Updating as simulations finish and verdicts arrive.
           </p>
         ) : null}
 
         <Section
-          title="Conversations"
+          title="Simulations"
           lead="One per test per persona. Each row keeps its machinery, its grading state and its verdict apart."
         >
           {simulations.length === 0 ? (
             <Empty
-              title="No conversation has been written yet"
-              lead="This run's conversations appear here as egma writes them."
+              title="No simulation has been written yet"
+              lead="This run's simulations appear here as egma writes them."
             />
           ) : (
             <DataTable
-              label="Conversations in this run"
+              label="Simulations in this run"
               columns={simulationColumns(projectId, runId)}
               rows={simulations}
               keyOf={(one) => one.id}
@@ -604,7 +604,7 @@ function RunDetailView({
       {confirming === "cancel" ? (
         <Dialog title="Cancel this run?" onClose={() => setConfirming(null)}>
           <p>
-            Conversations still waiting stop here and now. Conversations already
+            Simulations still waiting stop here and now. Simulations already
             with a simulator are told to stop and land as canceled when they do,
             and whatever they produced stays on the record. A canceled run never
             becomes completed.
@@ -658,7 +658,7 @@ function simulationColumns(
   return [
     {
       key: "test",
-      header: "Conversation",
+      header: "Simulation",
       primary: true,
       cell: (one) => (
         <span className={styles.conversation}>
@@ -695,7 +695,7 @@ function simulationColumns(
     },
     {
       key: "status",
-      header: "Conversation",
+      header: "Status",
       width: "120px",
       cell: (one) => <SimulationStatus status={one.status} />,
     },
@@ -741,7 +741,7 @@ function simulationColumns(
           </span>
         ) : one.status === "failed" ? (
           <span className={styles.why}>
-            {one.reason ?? "Egma could not conduct this conversation."} This is an
+            {one.reason ?? "Egma could not conduct this simulation."} This is an
             execution problem, not a failed grader verdict.
           </span>
         ) : (
@@ -817,7 +817,7 @@ function PlanGroup({
           </>
         ) : (
           <strong>
-            Conversations that executed no stored test
+            Simulations that executed no stored test
           </strong>
         )}
       </header>

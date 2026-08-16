@@ -29,9 +29,13 @@ import {
   TextInput,
 } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { ScopeNote, SettingsNav } from "../../../../../ui/settings-nav.tsx";
-import { useOrganizationRead } from "../../../../../ui/settings-read.ts";
+import {
+  useOrganizationRead,
+  useUnsavedChanges,
+} from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
   PageBody,
@@ -71,6 +75,54 @@ export default function ApiKeysSettingsPage() {
 
 const WHOLE_ORGANIZATION = "";
 
+/**
+ * The only copy of a newly minted secret.
+ *
+ * This component sits above the key-list read rather than inside it. A refresh
+ * or a failed list read therefore cannot take the secret off screen before the
+ * person who created it has copied and dismissed it.
+ */
+function ApiKeyReceipt({
+  keyValue,
+  onDismiss,
+}: {
+  readonly keyValue: MintedApiKey;
+  readonly onDismiss: () => void;
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  );
+
+  async function copy(): Promise<void> {
+    try {
+      if (navigator.clipboard === undefined) {
+        throw new Error("clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(keyValue.secret);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  }
+
+  return (
+    <Section title="Copy your new key">
+      <p role="status">
+        <strong>Here is your key. Copy it now.</strong> Egma will not show it
+        again, and cannot: only its hash was kept. <code>{keyValue.secret}</code>
+      </p>
+      <Button weight="strong" onClick={() => void copy()}>
+        Copy key
+      </Button>{" "}
+      <Button onClick={onDismiss}>Dismiss</Button>
+      {copyState === "copied" ? <Help>Copied.</Help> : null}
+      {copyState === "failed" ? (
+        <Refused message="Egma could not copy the key. Select it above and copy it before you dismiss this message." />
+      ) : null}
+    </Section>
+  );
+}
+
 function ApiKeys({ projectId }: { readonly projectId: string }) {
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
@@ -79,19 +131,22 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
   const { answer, reload } = useOrganizationRead<ApiKeyList>(API_KEYS_PATH);
 
   const [name, setName] = useState("");
-  const [scope, setScope] = useState<string>(WHOLE_ORGANIZATION);
+  const [scope, setScope] = useState<string>(projectId);
   const [minted, setMinted] = useState<MintedApiKey | null>(null);
+  const [confirmingRevoke, setConfirmingRevoke] = useState<ApiKey | null>(null);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
+  useUnsavedChanges(
+    busy || minted !== null || name.trim() !== "" || scope !== projectId,
+  );
 
   useEffect(() => {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
   }, [answer]);
 
   async function mint(): Promise<void> {
-    if (busy) return;
+    if (busy || minted !== null) return;
     setRefused(null);
-    setMinted(null);
     setBusy(true);
 
     const written = await writeJson<MintedApiKey>(API_KEYS_PATH, {
@@ -169,7 +224,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
         header: "Standing",
         cell: (key) =>
           key.revoked_at === null ? (
-            <Button disabled={busy} onClick={() => void revoke(key)}>
+            <Button disabled={busy} onClick={() => setConfirmingRevoke(key)}>
               Revoke
             </Button>
           ) : (
@@ -179,38 +234,10 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
     ];
   }
 
-  if (answer === null) {
-    return (
-      <ProductPage>
-        <PageHeader eyebrow="Settings" title="API keys" />
-        <PageBody>
-          <SettingsNav projectId={projectId} current="keys" />
-          <Loading what="your keys" />
-        </PageBody>
-      </ProductPage>
-    );
-  }
-
-  if (answer.status !== "ready") {
-    return (
-      <ProductPage>
-        <PageHeader eyebrow="Settings" title="API keys" />
-        <PageBody>
-          <SettingsNav projectId={projectId} current="keys" />
-          <Failure
-            message={
-              answer.status === "signed-out"
-                ? "Your session has ended. Sign in and try again."
-                : answer.refusal.message
-            }
-            onRetry={reload}
-          />
-        </PageBody>
-      </ProductPage>
-    );
-  }
-
-  const { mine, others } = keysOwnedBy(rowsIn(answer.value.keys), me?.user.id);
+  const { mine, others } = keysOwnedBy(
+    rowsIn(answer?.status === "ready" ? answer.value.keys : undefined),
+    me?.user.id,
+  );
 
   return (
     <ProductPage>
@@ -228,101 +255,118 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
 
         {refused === null ? null : <Refused message={refused.message} />}
 
-        <Section
-          title="Create a key"
-          lead="Every role may create, list and revoke their own keys."
-        >
-          {/*
-            * The one moment this string exists outside the terminal that will
-            * hold it. It is announced rather than merely shown, and the sentence
-            * says why there is no second chance: only a hash was kept, so egma
-            * is not withholding the key — it does not have it.
-            */}
-          {minted === null ? null : (
-            <p role="status">
-              <strong>Here is your key. Copy it now.</strong> Egma will not show
-              it again, and cannot: only its hash was kept.{" "}
-              <code>{minted.secret}</code>
-            </p>
-          )}
+        {minted === null ? null : (
+          <ApiKeyReceipt keyValue={minted} onDismiss={() => setMinted(null)} />
+        )}
 
-          <Form onSubmit={() => void mint()}>
-            <FormRow>
-              <Field
-                label="Name"
-                htmlFor="key-name"
-                hint="Optional. What this key is for, so a key nobody needs is recognisable later."
-              >
-                <TextInput
-                  id="key-name"
-                  value={name}
-                  disabled={busy}
-                  onChange={setName}
+        {answer === null ? (
+          <Loading what="your keys" />
+        ) : answer.status !== "ready" ? (
+          <Failure
+            message={
+              answer.status === "signed-out"
+                ? "Your session has ended. Sign in and try again."
+                : answer.refusal.message
+            }
+            onRetry={reload}
+          />
+        ) : (
+          <>
+            <Section
+              title="Create a key"
+              lead="Every role may create, list and revoke their own keys."
+            >
+              <Form onSubmit={() => void mint()}>
+                <FormRow>
+                  <Field
+                    label="Name"
+                    htmlFor="key-name"
+                    hint="Optional. What this key is for, so a key nobody needs is recognisable later."
+                  >
+                    <TextInput
+                      id="key-name"
+                      value={name}
+                      disabled={busy}
+                      onChange={setName}
+                    />
+                  </Field>
+                  <Field
+                    label="Scope"
+                    htmlFor="key-scope"
+                    hint="A project-scoped key reaches that project only. It cannot be widened later."
+                  >
+                    <Select
+                      id="key-scope"
+                      value={scope}
+                      disabled={busy}
+                      options={[
+                        ...projects.map((project) => ({
+                          value: project.id,
+                          label: `Project · ${project.name}`,
+                        })),
+                        {
+                          value: WHOLE_ORGANIZATION,
+                          label: "Whole organization",
+                        },
+                      ]}
+                      onChange={setScope}
+                    />
+                  </Field>
+                </FormRow>
+                <FormActions>
+                  <Button
+                    weight="strong"
+                    type="submit"
+                    disabled={busy || minted !== null}
+                    why={
+                      minted === null
+                        ? undefined
+                        : "Copy and dismiss the key above before you create another one."
+                    }
+                  >
+                    {busy ? "Creating…" : "Create key"}
+                  </Button>
+                </FormActions>
+              </Form>
+            </Section>
+
+            <Section title="Your keys">
+              {mine.length === 0 ? (
+                <Empty
+                  title="You have no keys yet."
+                  lead="Create one above, or run egma login and let the terminal mint one."
                 />
-              </Field>
-              <Field
-                label="Scope"
-                htmlFor="key-scope"
-                hint="A project-scoped key reaches that project only. It cannot be widened later."
-              >
-                <Select
-                  id="key-scope"
-                  value={scope}
-                  disabled={busy}
-                  options={[
-                    { value: WHOLE_ORGANIZATION, label: "Whole organization" },
-                    ...projects.map((project) => ({
-                      value: project.id,
-                      label: `Project · ${project.name}`,
-                    })),
-                  ]}
-                  onChange={setScope}
+              ) : (
+                <DataTable
+                  label="Your API keys"
+                  columns={columns(true)}
+                  rows={mine}
+                  keyOf={(key) => key.id}
                 />
-              </Field>
-            </FormRow>
-            <FormActions>
-              <Button weight="strong" type="submit" disabled={busy}>
-                {busy ? "Creating…" : "Create key"}
-              </Button>
-            </FormActions>
-          </Form>
-        </Section>
+              )}
+            </Section>
 
-        <Section title="Your keys">
-          {mine.length === 0 ? (
-            <Empty
-              title="You have no keys yet."
-              lead="Create one above, or run egma login and let the terminal mint one."
-            />
-          ) : (
-            <DataTable
-              label="Your API keys"
-              columns={columns(true)}
-              rows={mine}
-              keyOf={(key) => key.id}
-            />
-          )}
-        </Section>
-
-        {/*
-          * Everybody else's, which the server answers with only for an admin.
-          * The section is absent rather than empty for anybody else, because
-          * there is nothing being withheld from them: the read simply does not
-          * carry other people's rows, so a heading over nothing would suggest a
-          * list they are not being shown.
-          */}
-        {others.length === 0 ? null : (
-          <Section
-            title="Everybody else's keys"
-            lead="An admin sees every key in the organization, so responding to a leak never depends on who created one."
-          >
-            <DataTable
-              label="Other people's API keys"
-              columns={columns(false)}
-              rows={others}
-              keyOf={(key) => key.id}
-            />
-          </Section>
+            {/*
+              * Everybody else's, which the server answers with only for an admin.
+              * The section is absent rather than empty for anybody else, because
+              * there is nothing being withheld from them: the read simply does not
+              * carry other people's rows, so a heading over nothing would suggest a
+              * list they are not being shown.
+              */}
+            {others.length === 0 ? null : (
+              <Section
+                title="Everybody else's keys"
+                lead="An admin sees every key in the organization, so responding to a leak never depends on who created one."
+              >
+                <DataTable
+                  label="Other people's API keys"
+                  columns={columns(false)}
+                  rows={others}
+                  keyOf={(key) => key.id}
+                />
+              </Section>
+            )}
+          </>
         )}
 
         {role === "viewer" ? (
@@ -333,6 +377,30 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
           </Help>
         ) : null}
       </PageBody>
+
+      {confirmingRevoke === null ? null : (
+        <Dialog
+          title="Revoke this API key?"
+          onClose={() => setConfirmingRevoke(null)}
+        >
+          <p>
+            {confirmingRevoke.name ?? "This key"} will stop working on its next
+            request. This action cannot be undone.
+          </p>
+          <Button onClick={() => setConfirmingRevoke(null)}>Cancel</Button>{" "}
+          <Button
+            weight="strong"
+            disabled={busy}
+            onClick={() => {
+              const key = confirmingRevoke;
+              setConfirmingRevoke(null);
+              void revoke(key);
+            }}
+          >
+            Revoke key
+          </Button>
+        </Dialog>
+      )}
     </ProductPage>
   );
 }

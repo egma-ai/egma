@@ -245,6 +245,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The agent editors use the same layout primitive as every other product form. */
+function expectSharedFormLayout(action: HTMLElement): void {
+  const form = action.closest("form");
+  expect(form).not.toBeNull();
+  expect(form?.className).toContain("form");
+  expect(action.parentElement?.className).toContain("formActions");
+}
+
 /* ------------------------------------------------------------------------ */
 
 describe("finding an agent in a long list", () => {
@@ -328,7 +336,9 @@ describe("registering an agent", () => {
     fireEvent.change(screen.getByLabelText("Description"), {
       target: { value: "Answers the main line." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Register agent" }));
+    const register = screen.getByRole("button", { name: "Register agent" });
+    expectSharedFormLayout(register);
+    fireEvent.click(register);
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.method).toBe("POST");
@@ -484,7 +494,9 @@ describe("one agent's page", () => {
     fireEvent.change(screen.getByLabelText("Description"), {
       target: { value: "Rewritten while somebody else was editing" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const save = screen.getByRole("button", { name: "Save" });
+    expectSharedFormLayout(save);
+    fireEvent.click(save);
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.method).toBe("PATCH");
@@ -623,7 +635,9 @@ describe("adding a connection", () => {
     fireEvent.change(screen.getByLabelText("Retell API key"), {
       target: { value: "retell-secret-A1B2C3D4WXYZ" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+    const add = screen.getByRole("button", { name: "Add connection" });
+    expectSharedFormLayout(add);
+    fireEvent.click(add);
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
@@ -717,7 +731,9 @@ describe("one connection's page", () => {
     fireEvent.change(screen.getByLabelText("Retell API key"), {
       target: { value: "retell-secret-Z9Y8X7W6MNOP" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Replace credential" }));
+    const replace = screen.getByRole("button", { name: "Replace credential" });
+    expectSharedFormLayout(replace);
+    fireEvent.click(replace);
 
     await waitFor(() => expect(sent).toHaveLength(1));
     // No merge and no "leave this as it was": both would mean reading the
@@ -822,6 +838,7 @@ describe("one connection's page", () => {
     render(<ConnectionDetailPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expectSharedFormLayout(screen.getByRole("button", { name: "Save" }));
     fireEvent.change(screen.getByLabelText("Retell agent ID"), {
       target: { value: "agent_moved" },
     });
@@ -846,7 +863,9 @@ describe("one connection's page", () => {
     fireEvent.change(screen.getByLabelText("Retell API key"), {
       target: { value: "retell-secret-NEW1NEW2ABCD" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Restore connection" }));
+    const restore = screen.getByRole("button", { name: "Restore connection" });
+    expectSharedFormLayout(restore);
+    fireEvent.click(restore);
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.url).toBe(

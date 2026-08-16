@@ -343,6 +343,85 @@ describe("project settings", () => {
     });
   });
 
+  it("enables Save only for a draft, clears Saved on the next edit, and protects the draft", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/projects/prj_1": [
+        { status: 200, body: PROJECT },
+        {
+          status: 200,
+          body: { ...PROJECT, name: "Renamed", revision: "rev_2" },
+        },
+      ],
+    });
+    render(<ProjectSettingsPage />);
+
+    const name = (await screen.findByDisplayValue("Default")) as HTMLInputElement;
+    const save = screen.getByRole("button", { name: "Save project" });
+    expect(save.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(name, { target: { value: "Renamed" } });
+    expect(save.hasAttribute("disabled")).toBe(false);
+    const leaving = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(true);
+
+    fireEvent.click(save);
+    expect(await screen.findByText(/Saved\. Everybody/)).toBeTruthy();
+    const savedName = screen.getByLabelText("Name");
+    const savedButton = screen.getByRole("button", { name: "Save project" });
+    expect(savedButton.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(savedName, { target: { value: "Renamed again" } });
+    expect(screen.queryByText(/Saved\. Everybody/)).toBeNull();
+    await waitFor(() => {
+      expect(
+        screen
+          .getByRole("button", { name: "Save project" })
+          .hasAttribute("disabled"),
+      ).toBe(false);
+    });
+  });
+
+  it("asks before a Settings link or project switch discards a draft", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/projects/prj_1": { status: 200, body: PROJECT },
+    });
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    render(<ProjectSettingsPage />);
+
+    fireEvent.change(await screen.findByDisplayValue("Default"), {
+      target: { value: "A draft name" },
+    });
+
+    const settings = screen.getByRole("navigation", { name: "Settings" });
+    const judge = within(settings).getByRole("link", { name: "Judge" });
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    judge.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(confirm).toHaveBeenCalledWith(
+      "Discard your unsaved Settings changes?",
+    );
+
+    const selectors = await screen.findAllByRole("button", {
+      name: /^Organization Acme, project Default\./,
+    });
+    fireEvent.click(selectors[0]!);
+    const outbound = screen.getByRole("button", { name: "Outbound" });
+    fireEvent.click(outbound);
+    expect(routed.push).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(outbound);
+    expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/settings");
+  });
+
   /**
    * Two admins with this page open in two tabs. The refusal is shown in its own
    * words, **what was typed is still there**, and the way out is to read the
@@ -445,11 +524,17 @@ describe("project settings", () => {
     expect((screen.getByLabelText("Slug") as HTMLInputElement).disabled).toBe(
       false,
     );
-    expect(
-      screen
-        .getByRole("button", { name: "Save project" })
-        .hasAttribute("disabled"),
-    ).toBe(false);
+      expect(
+        screen
+          .getByRole("button", { name: "Save project" })
+          .hasAttribute("disabled"),
+      ).toBe(true);
+      fireEvent.change(name, { target: { value: "Default renamed" } });
+      expect(
+        screen
+          .getByRole("button", { name: "Save project" })
+          .hasAttribute("disabled"),
+      ).toBe(false);
     // And no sentence telling them a role they hold forbids what they may do.
     expect(
       screen.queryByText(/role cannot change project settings/),
@@ -662,10 +747,13 @@ describe("organization settings", () => {
     // sight let the answer overwrite the draft — the PATCH then carried "Acme"
     // and the test failed on a name nobody had typed. About one run in eight.
     await screen.findByDisplayValue(ORGANIZATION.name);
+    const save = screen.getByRole("button", { name: "Save organization" });
+    expect(save.hasAttribute("disabled")).toBe(true);
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Acme Voice" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save organization" }));
+    expect(save.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(save);
 
     await waitFor(() => {
       expect(sent.some((one) => one.method === "PATCH")).toBe(true);
@@ -675,6 +763,16 @@ describe("organization settings", () => {
     expect(sent.find((one) => one.method === "PATCH")?.body).toEqual({
       name: "Acme Voice",
     });
+    expect(await screen.findByText("Saved.")).toBeTruthy();
+    const savedButton = screen.getByRole("button", {
+      name: "Save organization",
+    });
+    expect(savedButton.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Acme Voice Labs" },
+    });
+    expect(screen.queryByText("Saved.")).toBeNull();
+    expect(savedButton.hasAttribute("disabled")).toBe(false);
   });
 
   it.each(["viewer", "member"] as const)(
@@ -779,6 +877,66 @@ describe("organization settings", () => {
     ).toContain("No judge credentials yet.");
   });
 
+  it("shows a refused credential read instead of a false empty list", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/organization": { status: 200, body: ORGANIZATION },
+      "/api/judge-credentials": {
+        status: 500,
+        body: { error: "unavailable", message: "Credential storage is offline." },
+      },
+    });
+    render(<OrganizationSettingsPage />);
+
+    expect(await screen.findByText("Credential storage is offline.")).toBeTruthy();
+    expect(screen.queryByText("No judge credentials yet.")).toBeNull();
+  });
+
+  it("shows credential loading instead of a false empty list", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/organization": { status: 200, body: ORGANIZATION },
+      "/api/judge-credentials": "never",
+    });
+    render(<OrganizationSettingsPage />);
+
+    expect(
+      await screen.findByText("Loading this organization's judge keys…"),
+    ).toBeTruthy();
+    expect(screen.queryByText("No judge credentials yet.")).toBeNull();
+  });
+
+  it("asks before archiving a judge credential", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/organization": { status: 200, body: ORGANIZATION },
+      "/api/judge-credentials": { status: 200, body: { items: [CREDENTIAL] } },
+      "/api/judge-credentials/jcr_1/archive": {
+        status: 200,
+        body: CREDENTIAL,
+      },
+    });
+    render(<OrganizationSettingsPage />);
+
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    fireEvent.click(within(keys).getByRole("button", { name: "Archive" }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Archive this judge credential?",
+    });
+    expect(dialog.textContent).toContain("Acme production");
+    expect(
+      sent.some((one) => one.url.includes("/archive") && one.method === "POST"),
+    ).toBe(false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+    await waitFor(() => {
+      expect(
+        sent.some((one) => one.url.includes("/archive") && one.method === "POST"),
+      ).toBe(true);
+    });
+  });
+
   it("offers an empty field for a replacement and never prefills the stored key", async () => {
     open("admin", ORGANIZATION, [CREDENTIAL]);
 
@@ -847,8 +1005,8 @@ describe("organization settings", () => {
       { ...CREDENTIAL, id: "jcr_2", label: "Acme staging", hint: "5678" },
     ]);
 
-    // Scoped to the wide layout's table: one column definition draws the rows
-    // twice, so an unscoped query would hand back four openers for two keys.
+    // Scoped to this table so another Settings control cannot be mistaken for
+    // one of these two credentials.
     const keys = await screen.findByRole("table", { name: "Organization keys" });
     const [openFirst, openSecond] = within(keys).getAllByRole("button", {
       name: "Replace key",
@@ -1097,6 +1255,53 @@ describe("judge settings", () => {
     ).toBe(true);
   });
 
+  it("keeps the judge choices loading until the registry answers", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/judge": { status: 200, body: NEEDS_SETUP },
+      "/api/judge/registry": "never",
+      "/api/judge-credentials": { status: 200, body: { items: [] } },
+    });
+    render(<JudgeSettingsPage />);
+
+    expect(await screen.findByText("Loading the available judges…")).toBeTruthy();
+    expect(screen.queryByLabelText("Provider")).toBeNull();
+    expect(screen.queryByLabelText("Key")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Save judge" }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("makes no role claim while the session is still loading", async () => {
+    apiAnswers({
+      "/api/me": "never",
+      "/api/judge": { status: 200, body: NEEDS_SETUP },
+      "/api/judge/registry": { status: 200, body: REGISTRY },
+      "/api/judge-credentials": { status: 200, body: { items: [] } },
+    });
+    render(<JudgeSettingsPage />);
+
+    await screen.findByLabelText("Provider");
+    expect(screen.queryByText(/role cannot change judge settings/)).toBeNull();
+  });
+
+  it("shows a refused credential read instead of saying the organization has no key", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/judge": { status: 200, body: NEEDS_SETUP },
+      "/api/judge/registry": { status: 200, body: REGISTRY },
+      "/api/judge-credentials": {
+        status: 500,
+        body: { error: "unavailable", message: "Credential storage is offline." },
+      },
+    });
+    render(<JudgeSettingsPage />);
+
+    expect(await screen.findByText("Credential storage is offline.")).toBeTruthy();
+    expect(screen.queryByLabelText("Key")).toBeNull();
+    expect(screen.queryByText(/holds no openai key yet/)).toBeNull();
+  });
+
   it("says the deployment's own judge has nothing to rotate", async () => {
     open("admin", {
       state: "configured",
@@ -1123,9 +1328,37 @@ describe("judge settings", () => {
     expect(
       (screen.getByLabelText("Provider") as HTMLSelectElement).disabled,
     ).toBe(true);
+    expect((screen.getByLabelText("Model") as HTMLInputElement).disabled).toBe(
+      true,
+    );
     expect(
       screen.getByRole("button", { name: "Save judge" }).hasAttribute("disabled"),
     ).toBe(true);
+  });
+
+  it("keeps an unchanged configured judge unsaveable", async () => {
+    open(
+      "admin",
+      {
+        state: "configured",
+        project_id: "prj_1",
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        source: "credential",
+        credential_id: "jcr_1",
+        hint: "1234",
+        updated_at: "2026-08-01T10:00:00.000Z",
+      },
+      [CREDENTIAL],
+    );
+
+    await screen.findByDisplayValue("gpt-4.1-mini");
+    const save = screen.getByRole("button", { name: "Save judge" });
+    expect(save.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "gpt-4.1" },
+    });
+    expect(save.hasAttribute("disabled")).toBe(false);
   });
 
   it("sends the provider, the model and the credential, and no key at all", async () => {
@@ -1355,6 +1588,16 @@ describe("people and invitations", () => {
     expect(document.body.textContent).toContain(
       "http://egma.test/invite?token=abc",
     );
+
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    fireEvent.click(screen.getByRole("radio", { name: "People" }));
+    expect(confirm).toHaveBeenCalledWith(
+      "Discard your unsaved Settings changes?",
+    );
+    expect(document.body.textContent).toContain(
+      "http://egma.test/invite?token=abc",
+    );
   });
 
   it("says the invitation is on its way when a transport delivered it", async () => {
@@ -1392,6 +1635,97 @@ describe("people and invitations", () => {
       await screen.findByText(/on its way to bob@acme.example/),
     ).toBeTruthy();
     expect(screen.queryByText(/Here is the link/)).toBeNull();
+  });
+
+  it("defaults a new invitation to Viewer", async () => {
+    open("admin", true, [ADA], []);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    expect((await screen.findByLabelText("Role") as HTMLSelectElement).value).toBe(
+      "viewer",
+    );
+  });
+
+  it("keeps an invitation draft when a tab click or popstate is declined", async () => {
+    open("admin", true, [ADA], []);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    const email = await screen.findByLabelText("Email");
+    fireEvent.change(email, { target: { value: "draft@acme.example" } });
+
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    fireEvent.click(screen.getByRole("radio", { name: "People" }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+      "draft@acme.example",
+    );
+
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+      "draft@acme.example",
+    );
+    expect(window.history.pushState).toHaveBeenLastCalledWith(
+      null,
+      "",
+      "/projects/prj_1/settings?tab=invitations",
+    );
+
+    const pushes = vi.mocked(window.history.pushState).mock.calls.length;
+    window.location.href = "http://egma.test/projects/prj_2/agents";
+    window.location.pathname = "/projects/prj_2/agents";
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(window.history.pushState).mock.calls).toHaveLength(pushes);
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+      "draft@acme.example",
+    );
+
+    window.location.href = "http://egma.test/projects/prj_1/settings";
+    window.location.pathname = "/projects/prj_1/settings";
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("radio", { name: "People" }));
+    expect(screen.queryByLabelText("Email")).toBeNull();
+    expect(await screen.findByRole("table", { name: "Members" })).toBeTruthy();
+  });
+
+  it("shows an invitation failure instead of an empty list", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/members": {
+        status: 200,
+        body: { members: [ADA], may_manage_members: true },
+      },
+      "/api/invitations": [
+        {
+          status: 500,
+          body: { error: "unavailable", message: "Invitations are offline." },
+        },
+      ],
+    });
+    render(<PeoplePage />);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    expect(await screen.findByText("Invitations are offline.")).toBeTruthy();
+    expect(screen.queryByText("No invitations are outstanding.")).toBeNull();
+  });
+
+  it("shows invitation loading instead of an empty list", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/members": {
+        status: 200,
+        body: { members: [ADA], may_manage_members: true },
+      },
+      "/api/invitations": "never",
+    });
+    render(<PeoplePage />);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    expect(await screen.findByText("Loading outstanding invitations…")).toBeTruthy();
+    expect(screen.queryByText("No invitations are outstanding.")).toBeNull();
   });
 
   /**
@@ -1553,13 +1887,9 @@ describe("API keys", () => {
     const create = await screen.findByRole("button", { name: "Create key" });
     expect(create.hasAttribute("disabled")).toBe(false);
     expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(false);
-    // Twice in the DOM, because one column definition draws the wide table and
-    // the narrow list. Both are the same control and both are live.
     expect(
-      screen
-        .getAllByRole("button", { name: "Revoke" })
-        .every((one) => !one.hasAttribute("disabled")),
-    ).toBe(true);
+      screen.getByRole("button", { name: "Revoke" }).hasAttribute("disabled"),
+    ).toBe(false);
   });
 
   it("shows a new key's secret once, and nothing that could show it again", async () => {
@@ -1591,6 +1921,121 @@ describe("API keys", () => {
     expect(
       screen.getByRole("table", { name: "Your API keys" }).textContent,
     ).not.toContain("egma_sk_the_only_time");
+  });
+
+  it("keeps the one-time receipt through a failed refresh, then copies and dismisses it", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("viewer") },
+      "/api/keys": [
+        { status: 200, body: { keys: [] } },
+        { status: 201, body: { ...MY_KEY, secret: "egma_sk_keep_me" } },
+        {
+          status: 500,
+          body: { error: "unavailable", message: "The key list is offline." },
+        },
+      ],
+    });
+    render(<ApiKeysPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create key" }));
+
+    expect(await screen.findByText("The key list is offline.")).toBeTruthy();
+    expect(screen.getByText("egma_sk_keep_me")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Copy key" }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("egma_sk_keep_me");
+    });
+    expect(screen.getByText("Copied.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText("egma_sk_keep_me")).toBeNull();
+  });
+
+  it("protects a one-time key while creation is still in flight", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("viewer") },
+      "/api/keys": [
+        { status: 200, body: { keys: [] } },
+        "never",
+      ],
+    });
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    render(<ApiKeysPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create key" }));
+    expect(await screen.findByRole("button", { name: "Creating…" })).toBeTruthy();
+
+    const settings = screen.getByRole("navigation", { name: "Settings" });
+    const people = within(settings).getByRole("link", { name: "People" });
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    people.dispatchEvent(click);
+
+    expect(click.defaultPrevented).toBe(true);
+    expect(confirm).toHaveBeenCalledWith(
+      "Discard your unsaved Settings changes?",
+    );
+    expect(screen.getByRole("button", { name: "Creating…" })).toBeTruthy();
+  });
+
+  it("defaults a new key to the current project", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/keys": [
+        { status: 200, body: { keys: [] } },
+        { status: 201, body: { ...MY_KEY, project_id: "prj_1", secret: "s" } },
+        { status: 200, body: { keys: [] } },
+      ],
+    });
+    render(<ApiKeysPage />);
+
+    expect((await screen.findByLabelText("Scope") as HTMLSelectElement).value).toBe(
+      "prj_1",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create key" }));
+    await waitFor(() => {
+      expect(sent.some((one) => one.method === "POST")).toBe(true);
+    });
+    expect(sent.find((one) => one.method === "POST")?.body).toEqual({
+      name: "",
+      project_id: "prj_1",
+    });
+  });
+
+  it("asks before revoking an API key", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/keys": { status: 200, body: { keys: [MY_KEY] } },
+      "/api/keys/key_1/revoke": { status: 200, body: MY_KEY },
+    });
+    render(<ApiKeysPage />);
+
+    const table = await screen.findByRole("table", { name: "Your API keys" });
+    fireEvent.click(within(table).getByRole("button", { name: "Revoke" }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Revoke this API key?",
+    });
+    expect(dialog.textContent).toContain("My laptop");
+    expect(
+      sent.some((one) => one.url.includes("/revoke") && one.method === "POST"),
+    ).toBe(false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Revoke key" }));
+    await waitFor(() => {
+      expect(
+        sent.some((one) => one.url.includes("/revoke") && one.method === "POST"),
+      ).toBe(true);
+    });
   });
 
   it("scopes a key to one project when one is chosen", async () => {

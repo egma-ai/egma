@@ -556,7 +556,7 @@ describe("the pages", () => {
       path.join(WEB, "app/projects/[projectId]/runs/[runId]/page.tsx"),
       "utf8",
     );
-    const conversation = await readFile(
+    const simulation = await readFile(
       path.join(
         WEB,
         "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
@@ -569,8 +569,8 @@ describe("the pages", () => {
     // does: they draw `AppShell` themselves and put loading, failure and
     // not-found states inside it, so the navigation, selector and account menu
     // never leave the screen while a read is in flight. The run and the
-    // conversation inside it do the same.
-    for (const page of [members, run, conversation]) {
+    // simulation inside it do the same.
+    for (const page of [members, run, simulation]) {
       expect(page).toContain("<AppShell>");
       expect(page).toContain("<Loading ");
       expect(page).not.toContain("<StatePage");
@@ -621,7 +621,7 @@ describe("the pages", () => {
       path.join(WEB, "app/projects/[projectId]/runs/[runId]/page.tsx"),
       "utf8",
     );
-    const conversation = await readFile(
+    const simulation = await readFile(
       path.join(
         WEB,
         "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
@@ -633,23 +633,23 @@ describe("the pages", () => {
       "utf8",
     );
 
-    // A conversation egma could not conduct is egma's own failure, and both
+    // A simulation egma could not conduct is egma's own failure, and both
     // surfaces say so in the same sentence rather than colouring it like a
     // grader's verdict.
-    for (const page of [run, conversation]) {
-      expect(page).toContain("Egma could not conduct this conversation.");
+    for (const page of [run, simulation]) {
+      expect(page).toContain("Egma could not conduct this simulation.");
       expect(page).toContain("not a failed grader verdict");
     }
     // Grading progress is reported apart from execution progress on both.
     expect(run).toContain("read.graded_count");
-    expect(conversation).toContain("evidence.grading_jobs.some");
+    expect(simulation).toContain("evidence.grading_jobs.some");
     // And the rationale and the turns it cites are what a judgement is worth
     // reading for, wherever one is drawn.
     expect(judgment).toContain("judgment.rationale");
     expect(judgment).toContain("judgment.cited_turns");
     // `assertion`, never `dimension`: the verdict store renamed its column
     // with the grader redesign and the word is banned at every layer.
-    expect(conversation).toContain("judgedAssertions(read.verdicts)");
+    expect(simulation).toContain("judgedAssertions(read.verdicts)");
   });
 
   it("shows the aggregate trace outcome", async () => {

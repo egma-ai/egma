@@ -58,17 +58,41 @@
   color: var(--muted);
   font-size: var(--text-md);
   text-decoration: none;
+  transition: transform var(--duration-press) var(--ease-out);
   white-space: nowrap;
 }
 
-.item:hover {
-  color: var(--foreground);
+.item:active:not(:focus-visible) {
+  transform: scale(0.97);
 }
 
 .itemActive {
   border-bottom-color: var(--accent, var(--foreground));
   color: var(--foreground);
   font-weight: 550;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .item:hover {
+    color: var(--foreground);
+  }
+}
+
+@media (pointer: coarse) {
+  .item {
+    height: var(--tap-target);
+    min-height: var(--tap-target);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item {
+    transition: none;
+  }
+
+  .item:active:not(:focus-visible) {
+    transform: none;
+  }
 }
 
 /*

@@ -112,7 +112,7 @@ function Navigation({
   readonly pathname: string;
   readonly onNavigate?: () => void;
 }) {
-  const { primary, secondary } = navigationFor(projectId);
+  const { primary, secondary, management } = navigationFor(projectId);
   const active = activeSectionIn(pathname);
 
   const group = (links: ReturnType<typeof navigationFor>["primary"], label?: string) => (
@@ -136,6 +136,7 @@ function Navigation({
     <nav className={styles.nav} aria-label="Product navigation">
       {group(primary)}
       {group(secondary, "Library")}
+      {group(management, "Manage")}
     </nav>
   );
 }

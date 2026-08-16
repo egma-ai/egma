@@ -12,7 +12,7 @@ import SimulationEvidencePage from "../app/projects/[projectId]/runs/[runId]/sim
 import type { Me } from "../lib/me.ts";
 
 /**
- * One conversation's evidence page, rendered and driven.
+ * One simulation's evidence page, rendered and driven.
  *
  * **Every test here is about the same thing said several ways**: what happened,
  * what egma made of it, and what a person said afterwards are three different
@@ -258,7 +258,7 @@ function evidence(overrides: Record<string, unknown> = {}) {
       },
     ],
     verdicts: [machineVerdict()],
-    // The conversation's own answer is folded over the required copies alone,
+    // The simulation's own answer is folded over the required copies alone,
     // and the diagnostic lane sits beside it. Nothing diagnostic judged this
     // one, so that lane is absent rather than an empty 0/0.
     outcome: {
@@ -343,7 +343,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("one conversation's evidence", () => {
+describe("one simulation's evidence", () => {
   it("reads the whole page in one request", async () => {
     page();
     render(<SimulationEvidencePage />);
@@ -355,7 +355,7 @@ describe("one conversation's evidence", () => {
     expect(
       sent.filter((one) => one.path.startsWith("/api/simulations")),
     ).toHaveLength(1);
-    // The project travels with it, because a conversation is read inside one.
+    // The project travels with it, because a simulation is read inside one.
     expect(sentWith("/api/simulations/sim_1", "GET")[0]?.url).toContain(
       "project=prj_1",
     );
@@ -373,6 +373,24 @@ describe("one conversation's evidence", () => {
     // The one join between egma's record and the agent's own telemetry.
     await screen.findByText("call_abc123");
     await screen.findByText("retell · voice · hosted-broker");
+  });
+
+  it("puts verdict evidence before technical detail and calls the unit a simulation", async () => {
+    page();
+    render(<SimulationEvidencePage />);
+
+    await screen.findByText("The agent never said the new time back.");
+    const verdicts = screen.getByRole("heading", { name: "Verdicts" });
+    const transcript = screen.getByRole("heading", { name: "Transcript" });
+
+    expect(
+      verdicts.compareDocumentPosition(transcript) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(screen.getByText("Simulation")).not.toBeNull();
+    expect(
+      screen.queryByRole("heading", { name: "Conversation" }),
+    ).toBeNull();
   });
 
   it("keeps the transcript, the timing and the measures three separate things", async () => {
@@ -418,7 +436,7 @@ describe("one conversation's evidence", () => {
 
     await screen.findByText(/No plan was recorded when this run started/u);
     await screen.findByText(
-      "No grading plan was recorded for this conversation",
+      "No grading plan was recorded for this simulation",
     );
   });
 });
@@ -468,7 +486,7 @@ describe("grading that is still running", () => {
 });
 
 describe("asking for it to be judged again", () => {
-  it("sends one regrade for the conversation in the address", async () => {
+  it("sends one regrade for the simulation in the address", async () => {
     page();
     render(<SimulationEvidencePage />);
 
@@ -520,7 +538,7 @@ describe("asking for it to be judged again", () => {
    * and it is exactly the answer a second ask can meet after a first one
    * succeeded — the engine takes the first job, narrowed, and the second ask
    * falls outside what it is judging. Two boxes then disagree about the same
-   * conversation, and the comforting one is drawn first.
+   * simulation, and the comforting one is drawn first.
    */
   it("drops the sentence about the last ask when the next one is refused", async () => {
     const inFlight =

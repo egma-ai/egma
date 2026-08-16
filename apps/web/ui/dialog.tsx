@@ -13,9 +13,11 @@ import styles from "./system.module.css";
  * it**, and **opening it moves focus inside** so that a keyboard is not still
  * driving the page underneath.
  *
- * A dialog is never the security boundary and never the only place a fact is
- * stated. It is a way of asking, and closing one always leaves the page as it
- * was.
+ * The browser owns the modal lifecycle through its native `dialog`: focus is
+ * trapped, the page behind it is inert, and Escape becomes a cancel request.
+ * We only restore the exact opener when React removes the dialog. A dialog is
+ * never the security boundary and never the only place a fact is stated. It is
+ * a way of asking, and closing one always leaves the page as it was.
  */
 
 export function Dialog({
@@ -28,38 +30,60 @@ export function Dialog({
   readonly children: ReactNode;
 }) {
   const titleId = useId();
-  const panelRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+    const dialog = dialogRef.current;
+    if (dialog === null) return undefined;
+
+    const opener = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
+    // jsdom does not implement the modal methods. Keeping the fallback local
+    // lets the rendered component tests prove focus without weakening the real
+    // browser path, which always uses `showModal`.
+    const hasNativeModal = typeof dialog.showModal === "function";
+    const fallbackEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeRef.current();
     };
-    document.addEventListener("keydown", escape);
-    return () => document.removeEventListener("keydown", escape);
-  }, [onClose]);
+    if (hasNativeModal) dialog.showModal();
+    else {
+      dialog.setAttribute("open", "");
+      document.addEventListener("keydown", fallbackEscape);
+    }
 
-  useEffect(() => {
-    const panel = panelRef.current;
-    const first = panel?.querySelector<HTMLElement>(
-      "a[href], button:not(:disabled), input, select, textarea",
+    const first = dialog.querySelector<HTMLElement>(
+      "[autofocus], a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)",
     );
-    (first ?? panel)?.focus();
+    (first ?? dialog)?.focus();
+
+    return () => {
+      if (!hasNativeModal) document.removeEventListener("keydown", fallbackEscape);
+      if (dialog.open && typeof dialog.close === "function") dialog.close();
+      else dialog.removeAttribute("open");
+      opener?.focus();
+    };
   }, []);
 
   return (
-    <div
+    <dialog
       className={styles.scrim}
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      aria-modal="true"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
         className={styles.dialog}
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
       >
         <div className={styles.dialogHead}>
           <h2 className={styles.dialogTitle} id={titleId}>
@@ -76,6 +100,6 @@ export function Dialog({
         </div>
         {children}
       </div>
-    </div>
+    </dialog>
   );
 }

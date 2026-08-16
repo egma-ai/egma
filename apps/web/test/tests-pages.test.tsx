@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -219,9 +220,9 @@ describe("the list of tests", () => {
 
   it("names the agents a test applies to, because that is what decides whether it can run", async () => {
     list();
-    // The shared table draws every row twice — once for the wide layout and once
-    // for the narrow one — so a name appears as many times as there are layouts.
-    expect((await screen.findAllByText("Front desk")).length).toBeGreaterThan(0);
+    // The shared table keeps one semantic row at every screen width.
+    const table = await screen.findByRole("table", { name: "Tests in this project" });
+    expect(within(table).getByText("Front desk")).toBeTruthy();
   });
 
   it("says plainly when every agent a test applies to is archived", async () => {

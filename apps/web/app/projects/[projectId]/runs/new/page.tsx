@@ -188,9 +188,8 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
    * and whatever went wrong reading it.
    *
    * **All three belong to the open row, and all three are cleared when a
-   * different row opens.** The panel is drawn once, under the table, because a
-   * table draws every row twice — once wide and once narrow — so a panel inside
-   * a cell would be two panels over one piece of state. That makes every value
+   * different row opens.** The panel is drawn once, under the table, because it
+   * needs the full width and owns one expanded state. That makes every value
    * here shared by every row, and each one is a different way of showing
    * somebody the wrong thing:
    *
@@ -665,9 +664,8 @@ function TestChoices({
       />
 
       {/*
-       * Drawn once, under the table, for whichever row is open — never inside a
-       * cell. A table draws every row twice, once wide and once narrow, so a
-       * panel living in a cell would be two panels over one piece of state.
+       * Drawn once, under the table, for whichever row is open. It needs the
+       * full width and keeps one expanded state outside the dense row.
        */}
       {opened === undefined ? null : (
         <div className={styles.openRow}>

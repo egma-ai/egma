@@ -411,7 +411,7 @@ export function citedTurnPositions(
  */
 export function planExplanation(state: EvidencePlan["state"]): string {
   if (state === "run_start") {
-    return "Frozen when this run started. These are the exact grader versions and judge choices this conversation was judged against.";
+    return "Frozen when this run started. These are the exact grader versions and judge choices this simulation was judged against.";
   }
   if (state === "migration_snapshot") {
     return "Captured while egma was upgraded, not when this run started. This run predates frozen plans and still had work outstanding, so the plan as it stood at the upgrade is what its grading used.";
@@ -428,7 +428,7 @@ export function planExplanation(state: EvidencePlan["state"]): string {
  * "run it again" would not expect.
  */
 export const REGRADE_IS_NOT_A_REPLAY =
-  "A regrade judges this conversation again at today's grader versions. The conversation itself is not conducted again — nothing is dialed, nothing is said, and the transcript below does not change. A grader that has been edited since will write a new row beside the old one rather than over it, and both stay readable.";
+  "A regrade judges this simulation again at today's grader versions. The simulation itself is not conducted again — nothing is dialed, nothing is said, and the transcript below does not change. A grader that has been edited since will write a new row beside the old one rather than over it, and both stay readable.";
 
 /*
  * **There was a sentence here about disagreeing with a judge, and it goes with

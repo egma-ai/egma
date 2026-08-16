@@ -7,6 +7,7 @@ import { projectsMatching, type Organization, type Project } from "../lib/me.ts"
 import { inProject } from "../lib/project-context.ts";
 import { TextInput } from "./controls.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
+import { confirmUnsavedSettingsNavigation } from "./settings-read.ts";
 import styles from "./system.module.css";
 
 /**
@@ -66,9 +67,14 @@ export function ProjectSelector({
     current?.name ?? (projectId === null ? "No project" : "Unknown project");
 
   function choose(project: Project, close: () => void): void {
+    if (project.id === projectId) {
+      close();
+      setQuery("");
+      return;
+    }
+    if (!confirmUnsavedSettingsNavigation()) return;
     close();
     setQuery("");
-    if (project.id === projectId) return;
     router.push(inProject(pathname, project.id));
   }
 

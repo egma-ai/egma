@@ -6,13 +6,14 @@ import { Button } from "./controls.tsx";
 import styles from "./system.module.css";
 
 /**
- * A page of rows, described once and drawn twice.
+ * A page of rows, described once and drawn once.
  *
- * **One column definition produces both layouts.** A wide screen gets a dense
- * table; a narrow one gets a stack of rows, where the column marked `primary`
- * becomes the row's name and the rest become its facts. The alternative — a
- * table and a hand-written mobile list side by side — is two things to keep in
- * step, and the mobile half is always the one that falls behind.
+ * **One semantic table produces both layouts.** A wide screen gets a dense
+ * table; CSS turns that same tree into a stack of labelled rows on a narrow
+ * screen. The column marked `primary` becomes the row's name and the rest
+ * become its facts. Drawing a table and a mobile list side by side would put
+ * every control and id in the document twice, even though only one copy is
+ * visible.
  *
  * **A row is a line of reading, not a card.** The height is a token, cells do
  * not wrap, and the vertical padding is deliberately small: a list of forty
@@ -56,8 +57,6 @@ export function DataTable<Row>({
   readonly more?: More;
 }) {
   const primary = columns.find((column) => column.primary) ?? columns[0];
-  const rest = columns.filter((column) => column !== primary);
-
   function cellClass(column: Column<Row>): string {
     return [
       styles.cell,
@@ -85,7 +84,11 @@ export function DataTable<Row>({
             {rows.map((row) => (
               <tr key={keyOf(row)}>
                 {columns.map((column) => (
-                  <td key={column.key}>
+                  <td
+                    className={column === primary ? styles.tableCellPrimary : undefined}
+                    data-label={column.header}
+                    key={column.key}
+                  >
                     <span className={cellClass(column)}>{column.cell(row)}</span>
                   </td>
                 ))}
@@ -94,28 +97,6 @@ export function DataTable<Row>({
           </tbody>
         </table>
       </div>
-
-      <ul className={styles.list} aria-label={label}>
-        {rows.map((row) => (
-          <li className={styles.listRow} key={keyOf(row)}>
-            <div className={styles.listRowHead}>
-              <span className={styles.listRowTitle}>
-                {primary === undefined ? null : primary.cell(row)}
-              </span>
-            </div>
-            <dl>
-              {rest.map((column) => (
-                <div className={styles.listRowFact} key={column.key}>
-                  <dt>{column.header}</dt>
-                  <dd className={column.mono === true ? styles.cellMono : undefined}>
-                    {column.cell(row)}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </li>
-        ))}
-      </ul>
 
       {more === undefined ? null : (
         <div className={styles.more}>

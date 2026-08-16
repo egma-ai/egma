@@ -21,17 +21,25 @@ import { projectPath, sectionIn } from "./project-context.ts";
  *   first in the viewer's list and pressing **Use** would have put a running
  *   copy on a project nobody was looking at. They are project-scoped now, so
  *   the item is back.
- * - **Settings is in the account menu.** Administration is not a product area
- *   and crowding it into the same list makes the list mean two things.
+ * - **Settings has a visible management slot.** It remains separate from the
+ *   daily product areas and the reusable library, but it is not hidden behind
+ *   the account menu. Its active state therefore stays visible while somebody
+ *   moves through any Settings page.
  * - **A simulation has no navigation item at all.** It is evidence, reached
- *   from the run that produced it, and a top-level list of every conversation
+ *   from the run that produced it, and a top-level list of every simulation
  *   would be a different product.
  *
  * Every item is a project's own, so every href carries the project. There is
  * no navigation to a page that is not in a project.
  */
 
-export type SectionId = "agents" | "tests" | "runs" | "personas" | "graders";
+export type SectionId =
+  | "agents"
+  | "tests"
+  | "runs"
+  | "personas"
+  | "graders"
+  | "settings";
 
 export type NavigationItem = {
   readonly id: SectionId;
@@ -51,9 +59,14 @@ export const SECONDARY_NAVIGATION: readonly NavigationItem[] = [
   { id: "graders", label: "Graders" },
 ];
 
+export const MANAGEMENT_NAVIGATION: readonly NavigationItem[] = [
+  { id: "settings", label: "Settings" },
+];
+
 const EVERY_SECTION: readonly SectionId[] = [
   ...PRIMARY_NAVIGATION,
   ...SECONDARY_NAVIGATION,
+  ...MANAGEMENT_NAVIGATION,
 ].map((item) => item.id);
 
 function linksFor(
@@ -67,10 +80,12 @@ function linksFor(
 export function navigationFor(projectId: string): {
   readonly primary: readonly NavigationLink[];
   readonly secondary: readonly NavigationLink[];
+  readonly management: readonly NavigationLink[];
 } {
   return {
     primary: linksFor(PRIMARY_NAVIGATION, projectId),
     secondary: linksFor(SECONDARY_NAVIGATION, projectId),
+    management: linksFor(MANAGEMENT_NAVIGATION, projectId),
   };
 }
 

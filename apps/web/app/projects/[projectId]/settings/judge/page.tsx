@@ -32,6 +32,7 @@ import {
 } from "../../../../../ui/controls.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import { SettingsNav, settingsPath } from "../../../../../ui/settings-nav.tsx";
 import {
   AppShell,
@@ -91,10 +92,8 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
     JUDGE_PATH,
     projectId,
   );
-  const { answer: credentials } = useProjectRead<JudgeCredentialPage>(
-    JUDGE_CREDENTIALS_PATH,
-    projectId,
-  );
+  const { answer: credentials, reload: reloadCredentials } =
+    useProjectRead<JudgeCredentialPage>(JUDGE_CREDENTIALS_PATH, projectId);
   const { answer: registry, reload: reloadRegistry } =
     useProjectRead<JudgeRegistry>(JUDGE_REGISTRY_PATH, projectId);
 
@@ -123,8 +122,14 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
   }, [settled]);
 
   useEffect(() => {
-    if (judge?.status === "signed-out") window.location.replace("/sign-in");
-  }, [judge]);
+    if (
+      judge?.status === "signed-out" ||
+      credentials?.status === "signed-out" ||
+      registry?.status === "signed-out"
+    ) {
+      window.location.replace("/sign-in");
+    }
+  }, [credentials, judge, registry]);
 
   const choosable = credentialsFor(held, provider);
 
@@ -143,16 +148,32 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
    * So there are three answers and the page renders all three: it is there, it
    * is not there, and egma could not ask.
    */
-  const registryUnreadable =
-    registry !== null &&
-    (registry.status === "failed" || registry.status === "missing");
+  const registryUnreadable = registry !== null && registry.status !== "ready";
+  const credentialsUnreadable =
+    credentials !== null && credentials.status !== "ready";
   const platformJudge =
     registry?.status === "ready" && registry.value.platform_judge_available;
+  const settledSource =
+    settled?.state === "configured"
+      ? settled.source === PLATFORM_SOURCE
+        ? PLATFORM_SOURCE
+        : (settled.credential_id ?? "")
+      : "";
+  const changed =
+    settled !== null &&
+    (settled.state === "needs_setup"
+      ? provider !== "openai" || model.trim() !== "" || source !== ""
+      : provider !== settled.provider ||
+        model.trim() !== settled.model ||
+        source !== settledSource);
   const complete =
-    !registryUnreadable && isChoiceComplete({ provider, model, source });
+    registry?.status === "ready" &&
+    credentials?.status === "ready" &&
+    isChoiceComplete({ provider, model, source });
+  useUnsavedChanges(changed && !saving);
 
   async function saveChoice(): Promise<void> {
-    if (!mayAdminister || !complete || saving) return;
+    if (!mayAdminister || !complete || !changed || saving) return;
     setRefused(null);
     setSaving(true);
 
@@ -233,9 +254,10 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
               <Badge tone="warn">Needs setup</Badge> This project has no judge, so
               a grader that judges by asking a model cannot run — the predefined
               expected-behaviors grader among them, which every project starts
-              with. Add a judge credential below and choose it, and grading works
-              from the next run. A project running no such grader needs no judge
-              and starts its runs without one.
+              with. Add a judge credential under Organization settings, then
+              choose it here, and grading works from the next run. A project
+              running no such grader needs no judge and starts its runs without
+              one.
             </p>
           ) : (
             <p>
@@ -257,7 +279,7 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
             </p>
           )}
 
-          {mayAdminister ? null : (
+          {role === null || mayAdminister ? null : (
             <p>
               Your {String(role ?? "")} role cannot change judge settings. Ask an
               organization admin.
@@ -265,10 +287,17 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
           )}
 
           <Field label="Model" htmlFor="judge-model">
-            <TextInput id="judge-model" value={model} onChange={setModel} />
+            <TextInput
+              id="judge-model"
+              value={model}
+              disabled={!mayAdminister}
+              onChange={setModel}
+            />
           </Field>
 
-          {registryUnreadable ? (
+          {registry === null ? (
+            <Loading what="the available judges" />
+          ) : registryUnreadable ? (
             /*
              * Both remaining controls are the registry's — which providers egma
              * can ask, and whether the deployment's own judge is one of the
@@ -278,7 +307,11 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
              */
             <Failure
               title="Egma could not say which judges this project may use."
-              message={registry.refusal.message}
+              message={
+                registry.status === "signed-out"
+                  ? "Your session has ended. Sign in and try again."
+                  : registry.refusal.message
+              }
               onRetry={reloadRegistry}
             />
           ) : (
@@ -287,10 +320,10 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
                 <Select
                   id="judge-provider"
                   value={provider}
-                  options={(registry?.status === "ready"
-                    ? registry.value.providers
-                    : []
-                  ).map((one) => ({ value: one.provider, label: one.provider }))}
+                  options={registry.value.providers.map((one) => ({
+                    value: one.provider,
+                    label: one.provider,
+                  }))}
                   disabled={!mayAdminister}
                   onChange={(chosen) => {
                     setProvider(chosen);
@@ -302,47 +335,61 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
                 />
               </Field>
 
-              <Field
-                label="Key"
-                htmlFor="judge-source"
-                {...(choosable.length === 0
-                  ? {
-                      hint: `This organization holds no ${provider} key yet. Add one under Organization settings.`,
-                    }
-                  : {})}
-              >
-                <Select
-                  id="judge-source"
-                  value={source}
-                  /*
-                   * The deployment's own judge is offered when **the deployment
-                   * has one**, and never when the project happens to be using
-                   * it. Reading it off the project's current choice would make
-                   * moving to a key of your own a one-way door — the option
-                   * would vanish the moment you stopped using it, and the way
-                   * back would be unreachable from the one page that exists to
-                   * take it. The registry answers this because it is the
-                   * deployment's fact to state.
-                   */
-                  options={[
-                    { value: "", label: "Choose a key" },
-                    ...choosable.map((credential) => ({
-                      value: credential.id,
-                      label: credentialLabel(credential),
-                    })),
-                    ...(platformJudge
-                      ? [
-                          {
-                            value: PLATFORM_SOURCE,
-                            label: "This deployment's own judge",
-                          },
-                        ]
-                      : []),
-                  ]}
-                  disabled={!mayAdminister}
-                  onChange={setSource}
+              {credentials === null ? (
+                <Loading what="the organization's judge keys" />
+              ) : credentialsUnreadable ? (
+                <Failure
+                  title="Egma could not list this organization's judge keys."
+                  message={
+                    credentials.status === "signed-out"
+                      ? "Your session has ended. Sign in and try again."
+                      : credentials.refusal.message
+                  }
+                  onRetry={reloadCredentials}
                 />
-              </Field>
+              ) : (
+                <Field
+                  label="Key"
+                  htmlFor="judge-source"
+                  {...(choosable.length === 0
+                    ? {
+                        hint: `This organization holds no ${provider} key yet. Add one under Organization settings.`,
+                      }
+                    : {})}
+                >
+                  <Select
+                    id="judge-source"
+                    value={source}
+                    /*
+                     * The deployment's own judge is offered when **the deployment
+                     * has one**, and never when the project happens to be using
+                     * it. Reading it off the project's current choice would make
+                     * moving to a key of your own a one-way door — the option
+                     * would vanish the moment you stopped using it, and the way
+                     * back would be unreachable from the one page that exists to
+                     * take it. The registry answers this because it is the
+                     * deployment's fact to state.
+                     */
+                    options={[
+                      { value: "", label: "Choose a key" },
+                      ...choosable.map((credential) => ({
+                        value: credential.id,
+                        label: credentialLabel(credential),
+                      })),
+                      ...(platformJudge
+                        ? [
+                            {
+                              value: PLATFORM_SOURCE,
+                              label: "This deployment's own judge",
+                            },
+                          ]
+                        : []),
+                    ]}
+                    disabled={!mayAdminister}
+                    onChange={setSource}
+                  />
+                </Field>
+              )}
             </>
           )}
 
@@ -356,7 +403,7 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
 
           <Button
             weight="strong"
-            disabled={!mayAdminister || !complete || saving}
+            disabled={!mayAdminister || !complete || !changed || saving}
             onClick={() => void saveChoice()}
           >
             {saving ? "Saving…" : "Save judge"}

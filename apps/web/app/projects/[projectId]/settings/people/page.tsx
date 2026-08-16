@@ -1,9 +1,14 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
+import {
+  readJson,
+  writeJson,
+  type Answer,
+  type Refusal,
+} from "../../../../../lib/api.ts";
 import { asDay } from "../../../../../lib/instants.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
@@ -36,7 +41,11 @@ import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { ScopeNote, SettingsNav } from "../../../../../ui/settings-nav.tsx";
-import { useOrganizationRead } from "../../../../../ui/settings-read.ts";
+import {
+  confirmUnsavedSettingsNavigation,
+  useOrganizationRead,
+  useUnsavedChanges,
+} from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
   PageBody,
@@ -84,7 +93,9 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   const mayManage = settled?.may_manage_members === true;
 
   const [tab, setTab] = useState<Tab>("people");
-  const [invitations, setInvitations] = useState<readonly Invitation[]>([]);
+  const tabRef = useRef<Tab>("people");
+  const [invitations, setInvitations] =
+    useState<Answer<InvitationList> | null>(null);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<{
@@ -94,11 +105,42 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
 
   /** The tab lives in the address, so Back works and a link can name one. */
   useEffect(() => {
-    const readTab = () => {
-      const chosen = new URLSearchParams(globalThis.location.search).get("tab");
-      setTab(chosen === "invitations" ? "invitations" : "people");
+    const pagePathname = new URL(globalThis.location.href).pathname;
+    const tabInAddress = (address: URL): Tab => {
+      const chosen = address.searchParams.get("tab");
+      return chosen === "invitations" ? "invitations" : "people";
     };
-    readTab();
+    const writeTabAddress = (next: Tab) => {
+      const address = new URL(globalThis.location.href);
+      if (next === "people") address.searchParams.delete("tab");
+      else address.searchParams.set("tab", next);
+      globalThis.history.pushState(
+        null,
+        "",
+        `${address.pathname}${address.search}`,
+      );
+    };
+    const readTab = () => {
+      const address = new URL(globalThis.location.href);
+      // A Back action can already be on another product route when popstate
+      // reaches this page. That route belongs to the shared router. Never add
+      // a People-tab query to it from a page that is about to unmount.
+      if (address.pathname !== pagePathname) return;
+      const next = tabInAddress(address);
+      const current = tabRef.current;
+      if (next === current) return;
+      if (!confirmUnsavedSettingsNavigation()) {
+        // Popstate already changed the address. Put the address for the tab
+        // whose draft remains on screen back without firing another popstate.
+        writeTabAddress(current);
+        return;
+      }
+      tabRef.current = next;
+      setTab(next);
+    };
+    const initial = tabInAddress(new URL(globalThis.location.href));
+    tabRef.current = initial;
+    setTab(initial);
     globalThis.addEventListener("popstate", readTab);
     return () => globalThis.removeEventListener("popstate", readTab);
   }, []);
@@ -109,13 +151,16 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
 
   /**
    * The outstanding invitations, which only an admin may read — so only an
-   * admin asks. A refusal here is not shown: it is the expected answer for
-   * everybody else, and the tab it would appear under is not offered to them.
+   * admin asks. The tab is not offered to everybody else. For an admin, an
+   * in-flight or refused read stays exactly that instead of becoming a false
+   * statement that there are no invitations.
    */
   const refreshInvitations = useCallback(async (): Promise<void> => {
     if (!mayManage) return;
+    setInvitations(null);
     const listed = await readJson<InvitationList>(INVITATIONS_PATH);
-    if (listed.status === "ready") setInvitations(rowsIn(listed.value.invitations));
+    setInvitations(listed);
+    if (listed.status === "signed-out") window.location.replace("/sign-in");
   }, [mayManage]);
 
   useEffect(() => {
@@ -123,10 +168,13 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   }, [refreshInvitations]);
 
   function showTab(next: Tab): void {
+    if (next === tabRef.current) return;
+    if (!confirmUnsavedSettingsNavigation()) return;
     const address = new URL(globalThis.location.href);
     if (next === "people") address.searchParams.delete("tab");
     else address.searchParams.set("tab", next);
     globalThis.history.pushState(null, "", `${address.pathname}${address.search}`);
+    tabRef.current = next;
     setTab(next);
   }
 
@@ -291,6 +339,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
             invitations={invitations}
             busy={busy}
             onSent={() => void refreshInvitations()}
+            onRetry={() => void refreshInvitations()}
             onRefused={setRefused}
             onBusy={setBusy}
           />
@@ -352,19 +401,22 @@ function Invitations({
   invitations,
   busy,
   onSent,
+  onRetry,
   onRefused,
   onBusy,
 }: {
-  readonly invitations: readonly Invitation[];
+  readonly invitations: Answer<InvitationList> | null;
   readonly busy: boolean;
   readonly onSent: () => void;
+  readonly onRetry: () => void;
   readonly onRefused: (refusal: Refusal | null) => void;
   readonly onBusy: (busy: boolean) => void;
 }) {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<string>("admin");
+  const [role, setRole] = useState<string>("viewer");
   const [link, setLink] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  useUnsavedChanges(busy || email.trim() !== "" || link !== null);
 
   /**
    * One invitation asked for, whether the form asked for it or a dead row did.
@@ -457,6 +509,10 @@ function Invitations({
         ) : null,
     },
   ];
+  const invitationRows =
+    invitations?.status === "ready"
+      ? rowsIn(invitations.value.invitations)
+      : [];
 
   return (
     <>
@@ -511,13 +567,25 @@ function Invitations({
         title="Invitations sent"
         lead="Nobody has accepted these yet. An expired one cannot be accepted at all — send another."
       >
-        {invitations.length === 0 ? (
+        {invitations === null ? (
+          <Loading what="outstanding invitations" />
+        ) : invitations.status !== "ready" ? (
+          <Failure
+            title="Egma could not list this organization's invitations."
+            message={
+              invitations.status === "signed-out"
+                ? "Your session has ended. Sign in and try again."
+                : invitations.refusal.message
+            }
+            onRetry={onRetry}
+          />
+        ) : invitationRows.length === 0 ? (
           <Empty title="No invitations are outstanding." />
         ) : (
           <DataTable
             label="Invitations"
             columns={columns}
-            rows={invitations}
+            rows={invitationRows}
             keyOf={(invitation) => invitation.id}
           />
         )}

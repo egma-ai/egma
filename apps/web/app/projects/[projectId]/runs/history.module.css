@@ -2,10 +2,8 @@
  * The one part the run history needs and no other page has: the panel drawn
  * under the table for whichever row is open.
  *
- * Once, and never inside a cell. `DataTable` draws every row twice — once wide
- * and once narrow — so a panel living in a cell would be two panels over one
- * piece of state, and whichever the browser focused would be the one nobody
- * could see.
+ * Once, and never squeezed into a cell. The table keeps each row to one line of
+ * reading; the panel needs the full width and owns the only expanded state.
  */
 
 .stopPanel {

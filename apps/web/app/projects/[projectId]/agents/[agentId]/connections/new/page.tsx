@@ -18,10 +18,11 @@ import { roleOf } from "../../../../../../../lib/me.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
 import {
-  Actions,
   Button,
   ButtonLink,
   Field,
+  Form,
+  FormActions,
   Problem,
   Select,
   TextInput,
@@ -267,12 +268,7 @@ function NewConnection({
     <ProductPage>
       {header}
       <PageBody>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void add();
-          }}
-        >
+        <Form onSubmit={() => void add()}>
           <Field label="Type" htmlFor="connection-type">
             <Select
               id="connection-type"
@@ -345,13 +341,13 @@ function NewConnection({
 
           {refused === null ? null : <Problem>{refused.message}</Problem>}
 
-          <Actions>
+          <FormActions>
             <Button type="submit" weight="strong" disabled={saving}>
               {saving ? "Adding…" : "Add connection"}
             </Button>
             <ButtonLink href={back}>Cancel</ButtonLink>
-          </Actions>
-        </form>
+          </FormActions>
+        </Form>
       </PageBody>
     </ProductPage>
   );

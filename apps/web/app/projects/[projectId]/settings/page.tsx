@@ -27,7 +27,10 @@ import {
 } from "../../../../ui/controls.tsx";
 import { Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { SettingsNav } from "../../../../ui/settings-nav.tsx";
-import { useOrganizationRead } from "../../../../ui/settings-read.ts";
+import {
+  useOrganizationRead,
+  useUnsavedChanges,
+} from "../../../../ui/settings-read.ts";
 import {
   AppShell,
   PageBody,
@@ -112,9 +115,15 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   }, [answer]);
 
   const named = name.trim() !== "" && slug.trim() !== "";
+  const changed =
+    settled !== null &&
+    (name.trim() !== settled.name ||
+      slug.trim() !== settled.slug ||
+      description.trim() !== (settled.description ?? ""));
+  useUnsavedChanges(changed && !saving);
 
   async function save(): Promise<void> {
-    if (!mayAdminister || settled === null || !named || saving) return;
+    if (!mayAdminister || settled === null || !named || !changed || saving) return;
     setRefused(null);
     setSaved(false);
     setSaving(true);
@@ -231,7 +240,10 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                   value={name}
                   disabled={!mayAdminister}
                   invalid={name.trim() === ""}
-                  onChange={setName}
+                  onChange={(next) => {
+                    setName(next);
+                    setSaved(false);
+                  }}
                 />
               </Field>
               <Field
@@ -244,7 +256,10 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                   value={slug}
                   disabled={!mayAdminister}
                   invalid={slug.trim() === ""}
-                  onChange={setSlug}
+                  onChange={(next) => {
+                    setSlug(next);
+                    setSaved(false);
+                  }}
                 />
               </Field>
             </FormRow>
@@ -258,7 +273,10 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                 id="project-description"
                 value={description}
                 disabled={!mayAdminister}
-                onChange={setDescription}
+                onChange={(next) => {
+                  setDescription(next);
+                  setSaved(false);
+                }}
               />
             </Field>
 
@@ -273,7 +291,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
               <Button
                 weight="strong"
                 type="submit"
-                disabled={!mayAdminister || !named || saving}
+                disabled={!mayAdminister || !named || !changed || saving}
                 why={
                   mayAdminister || role === null
                     ? undefined

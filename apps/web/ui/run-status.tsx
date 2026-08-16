@@ -28,7 +28,7 @@ import styles from "./run-status.module.css";
  * are shared rather than written per page.
  *
  * **A run holds four different facts and every page has to show each of them as
- * itself.** The run's machinery, each conversation's machinery, where the
+ * itself.** The run's machinery, each simulation's machinery, where the
  * grading work stands, and the verdict. Folding any into any other is the defect
  * this whole area exists to prevent: an execution failure drawn as a failed
  * verdict tells a team their agent is broken when egma is, and pending grading
@@ -80,11 +80,11 @@ export function RunStatus({ status }: { readonly status: RunStatusWord }) {
 }
 
 /**
- * One conversation's machinery.
+ * One simulation's machinery.
  *
  * `failed` is the only `bad` one, and it is bad about **egma** rather than about
- * the agent: it means the conversation could not be conducted. `skipped` is a
- * conversation egma declined to conduct at all, and `canceled` one that was
+ * the agent: it means the simulation could not be conducted. `skipped` is a
+ * simulation egma declined to conduct at all, and `canceled` one that was
  * stopped; neither says anything about the agent, and neither is ever red.
  */
 const SIMULATION_STATUS_TONE: Readonly<
@@ -104,14 +104,14 @@ const SIMULATION_STATUS_MEANING: Readonly<
 > = {
   queued: "Waiting for a simulator to pick it up.",
   claimed: "A simulator has taken it and is about to start.",
-  running: "The conversation is happening now.",
+  running: "The simulation is happening now.",
   completed:
-    "The conversation happened. Whether it went well is the verdict, which is a separate fact.",
+    "The simulation finished. Whether it went well is the verdict, which is a separate fact.",
   failed:
-    "Egma could not conduct this conversation. This is an execution problem, not a failed grader verdict, and it says nothing about the agent.",
-  canceled: "This conversation was stopped before it finished.",
+    "Egma could not conduct this simulation. This is an execution problem, not a failed grader verdict, and it says nothing about the agent.",
+  canceled: "This simulation was stopped before it finished.",
   skipped:
-    "Egma never conducted this conversation, because the test required something this connection could not be shown to do. Nothing about the agent is being said.",
+    "Egma never conducted this simulation, because the test required something this connection could not be shown to do. Nothing about the agent is being said.",
 };
 
 export function SimulationStatus({
@@ -142,9 +142,9 @@ const GRADING_WORD: Readonly<Record<GradingWord, string>> = {
 
 const GRADING_MEANING: Readonly<Record<GradingWord, string>> = {
   not_required:
-    "There is nothing to judge and there never will be. Egma either never conducted this conversation or it was stopped, so no grading work was filed for it.",
-  waiting: "The conversation has not finished, so grading has not begun.",
-  pending: "The conversation finished and no verdict has arrived yet.",
+    "There is nothing to judge and there never will be. Egma either never conducted this simulation or it was stopped, so no grading work was filed for it.",
+  waiting: "The simulation has not finished, so grading has not begun.",
+  pending: "The simulation finished and no verdict has arrived yet.",
   graded: "Verdicts have arrived.",
 };
 
@@ -203,7 +203,7 @@ export function VerdictBadge({ verdict }: { readonly verdict: VerdictWord | null
 /**
  * Machinery beside judgment, labelled, in one strip.
  *
- * The labels are not decoration. "Run", "Conversations", "Grading" and "Verdict"
+ * The labels are not decoration. "Run", "Simulations", "Grading" and "Verdict"
  * are what stops somebody reading one number as an answer to another's question,
  * and they are the same four words on the list, on the detail page and on a
  * mobile screen.
@@ -228,7 +228,7 @@ export function RunFacts({
       <Fact label="Run">
         <RunStatus status={status} />
       </Fact>
-      <Fact label="Conversations">
+      <Fact label="Simulations">
         <span className={styles.figure}>
           {finished} of {expected} finished
         </span>
@@ -263,10 +263,10 @@ function Fact({
 /**
  * How far the machinery has got, drawn as a bar.
  *
- * **The bar measures conversations, not judgment**, and it says so beside
+ * **The bar measures simulations, not judgment**, and it says so beside
  * itself. A single bar over both would have to decide which of the two a
  * half-full bar meant, and the two settle at different moments — a run whose
- * conversations have all finished is not a run whose judgment is in.
+ * simulations have all finished is not a run whose judgment is in.
  */
 export function RunProgress({
   finished,
@@ -280,21 +280,21 @@ export function RunProgress({
     <div
       className={styles.progress}
       role="progressbar"
-      aria-label="Conversations finished"
+      aria-label="Simulations finished"
       aria-valuenow={finished}
       aria-valuemin={0}
       aria-valuemax={expected}
     >
       <span
         className={styles.progressFill}
-        style={{ width: `${String(Math.round(share * 100))}%` }}
+        style={{ transform: `scaleX(${String(share)})` }}
       />
     </div>
   );
 }
 
 /**
- * How many conversations stand in each machinery state, in words.
+ * How many simulations stand in each machinery state, in words.
  *
  * Only the states that have somebody in them, and `skipped` never merged into
  * anything: a summary that hid it would be hiding the one number that says egma
@@ -310,7 +310,7 @@ export function SimulationTally({
     .map((word) => `${String(counts[word] ?? 0)} ${word}`);
   return (
     <span className={styles.tally}>
-      {said.length === 0 ? "No conversations yet" : said.join(" · ")}
+      {said.length === 0 ? "No simulations yet" : said.join(" · ")}
     </span>
   );
 }
@@ -318,7 +318,7 @@ export function SimulationTally({
 /**
  * What the graders decided, counted — and `null`, which is not zero.
  *
- * A conversation nobody has judged has no counts at all, and a page that
+ * A simulation nobody has judged has no counts at all, and a page that
  * rendered that as "0 of 0 passed" would be putting a finished-looking figure
  * against work nobody has done.
  */
@@ -386,8 +386,8 @@ export function RecentRuns({
       cell: (run) => <RunStatus status={run.status} />,
     },
     {
-      key: "conversations",
-      header: "Conversations",
+      key: "simulations",
+      header: "Simulations",
       width: "200px",
       cell: (run) => <SimulationTally counts={run.simulation_counts} />,
     },

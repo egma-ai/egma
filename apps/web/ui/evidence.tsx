@@ -85,7 +85,7 @@ export function Transcript({ transcript, highlighted = [] }: TranscriptProps) {
     return (
       <Empty
         title="Nothing was said"
-        lead="Egma filed steps for this conversation but no turns. Whatever happened, nobody spoke."
+        lead="Egma filed steps for this simulation but no turns. Whatever happened, nobody spoke."
       />
     );
   }
@@ -187,7 +187,7 @@ export function ExecutionTimeline({
     return (
       <Empty
         title="Nothing was timed"
-        lead="This conversation filed no steps, so there is nothing to put on a clock."
+        lead="This simulation filed no steps, so there is nothing to put on a clock."
       />
     );
   }
@@ -297,7 +297,7 @@ export function Measures({
     return (
       <Empty
         title="Nothing was measured"
-        lead="This conversation reported no measures. Egma does not invent one, and a zero here would be a number nobody counted."
+        lead="This simulation reported no measures. Egma does not invent one, and a zero here would be a number nobody counted."
       />
     );
   }
@@ -358,7 +358,7 @@ export function MockToolEvidence({
     <div className={styles.tools}>
       {frozen.length === 0 ? null : (
         <div className={styles.toolGroup}>
-          <strong>Frozen for this conversation</strong>
+          <strong>Frozen for this simulation</strong>
           {frozen.map((one) => (
             <span className={styles.tool} key={`frozen:${one.tool_name}`}>
               {one.tool_name}
@@ -403,7 +403,7 @@ export function MockToolEvidence({
           </div>
           <Help>
             Egma never stood in the path of a tool it did not answer for, so
-            those calls happened natively and unobserved. A conversation with
+            those calls happened natively and unobserved. A simulation with
             uncovered tools is a different unit from one without.
           </Help>
         </>
@@ -461,7 +461,7 @@ export function VerdictEvidence({
           <span className={styles.verdictWho}>{judged.graderId}</span>
         </span>
         {judged.required ? null : (
-          <Badge title="A diagnostic: judged and reported, and never able to fail this conversation.">
+          <Badge title="A diagnostic: judged and reported, and never able to fail this simulation.">
             Reports only
           </Badge>
         )}
@@ -514,7 +514,7 @@ export function PlanItems({
   if (items.length === 0) {
     return (
       <Empty
-        title="No grading plan was recorded for this conversation"
+        title="No grading plan was recorded for this simulation"
         lead="Egma will not reconstruct one from today's graders, because that would be a claim about an old run that nobody can check."
       />
     );

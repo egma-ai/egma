@@ -39,13 +39,15 @@
   align-items: baseline;
 }
 
-.turn:hover {
-  background: var(--surface-soft);
-}
-
 .turnCited {
   border-color: var(--border-strong);
   background: var(--surface-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .turn:hover {
+    background: var(--surface-soft);
+  }
 }
 
 /*

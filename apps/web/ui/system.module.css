@@ -77,11 +77,6 @@
   text-decoration: none;
 }
 
-.navItem:hover {
-  background: var(--surface-soft);
-  color: var(--foreground);
-}
-
 .navItemActive {
   background: var(--surface-soft);
   color: var(--foreground);
@@ -129,11 +124,6 @@
   color: var(--foreground);
   cursor: pointer;
   font-size: var(--text-sm);
-}
-
-.iconButton:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-soft);
 }
 
 /* ------------------------------------------------------------------- page */
@@ -266,15 +256,6 @@
   color: var(--foreground);
 }
 
-.button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--inverse) 88%, var(--background));
-}
-
-.buttonQuiet:hover:not(:disabled) {
-  border-color: var(--foreground);
-  background: var(--surface-soft);
-}
-
 .button:disabled,
 .buttonQuiet:disabled {
   cursor: not-allowed;
@@ -365,10 +346,6 @@
   font-family: var(--mono);
   font-size: var(--text-xs);
   white-space: nowrap;
-}
-
-.choiceItem:hover {
-  color: var(--foreground);
 }
 
 .choiceItemOn {
@@ -493,10 +470,6 @@
   text-decoration: none;
 }
 
-.rowName a:hover {
-  text-decoration: underline;
-}
-
 .statedTraits {
   margin-bottom: var(--space-5);
   padding: var(--space-4);
@@ -592,7 +565,6 @@
   text-decoration: none;
 }
 
-.menuItem:hover:not(:disabled),
 .menuItemHighlighted {
   background: var(--surface-soft);
 }
@@ -655,7 +627,6 @@
   text-align: left;
 }
 
-.selector:hover,
 .selectorOpen {
   border-color: var(--border-strong);
   background: var(--surface-soft);
@@ -720,7 +691,6 @@
   text-align: left;
 }
 
-.account:hover,
 .accountOpen {
   border-color: var(--border);
   background: var(--surface);
@@ -783,7 +753,7 @@
   height: 9px;
   border-radius: 50%;
   background: var(--muted);
-  transition: transform 120ms ease;
+  transition: transform var(--duration-press) var(--ease-out);
 }
 
 .themeItem[aria-checked="true"] .themeSwitch {
@@ -802,10 +772,25 @@
   position: fixed;
   z-index: 30;
   inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  overflow-y: auto;
+  border: 0;
+  color: var(--foreground);
+  background: transparent;
+}
+
+.scrim[open] {
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: var(--space-5);
+}
+
+.scrim::backdrop {
   background: rgb(0 0 0 / 0.35);
 }
 
@@ -872,10 +857,6 @@
   border-top: 0;
 }
 
-.table tbody tr:hover td {
-  background: var(--surface-soft);
-}
-
 .cell {
   display: block;
   overflow: hidden;
@@ -893,82 +874,164 @@
   font-size: var(--text-sm);
 }
 
-.list {
-  display: none;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  list-style: none;
+/* Pointer feedback is brief and never runs for a keyboard activation. */
+:is(
+  .navItem,
+  .iconButton,
+  .button,
+  .buttonQuiet,
+  .choiceItem,
+  .menuItem,
+  .selector,
+  .account,
+  .rowName a
+) {
+  transition: transform var(--duration-press) var(--ease-out);
 }
 
-.listRow dl {
-  margin: 0;
+:is(
+  .navItem,
+  .iconButton,
+  .button,
+  .buttonQuiet,
+  .choiceItem,
+  .menuItem,
+  .selector,
+  .account,
+  .rowName a
+):active:not(:focus-visible):not(:disabled) {
+  transform: scale(0.97);
 }
 
-.listRow {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-3) var(--row-padding-x);
-  border-top: 1px solid var(--border);
+/* Touch browsers must not leave a hover colour behind after a tap. */
+@media (hover: hover) and (pointer: fine) {
+  .navItem:hover {
+    background: var(--surface-soft);
+    color: var(--foreground);
+  }
+
+  .iconButton:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-soft);
+  }
+
+  .button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--inverse) 88%, var(--background));
+  }
+
+  .buttonQuiet:hover:not(:disabled) {
+    border-color: var(--foreground);
+    background: var(--surface-soft);
+  }
+
+  .choiceItem:hover {
+    color: var(--foreground);
+  }
+
+  .rowName a:hover {
+    text-decoration: underline;
+  }
+
+  .menuItem:hover:not(:disabled) {
+    background: var(--surface-soft);
+  }
+
+  .selector:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-soft);
+  }
+
+  .account:hover {
+    border-color: var(--border);
+    background: var(--surface);
+  }
+
+  .table tbody tr:hover td {
+    background: var(--surface-soft);
+  }
 }
 
-.listRow:first-child {
-  border-top: 0;
+/* Dense controls keep their visual size for a mouse and gain a real touch target. */
+@media (pointer: coarse) {
+  :is(
+    .navItem,
+    .iconButton,
+    .button,
+    .buttonQuiet,
+    .choiceItem,
+    .menuItem,
+    .selector,
+    .account,
+    .input,
+    .select,
+    .textarea,
+    .rowName a
+  ) {
+    min-height: var(--tap-target);
+  }
+
+  .iconButton {
+    width: var(--tap-target);
+    height: var(--tap-target);
+  }
+
+  .rowName a {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .input,
+  .select,
+  .selector,
+  .button,
+  .buttonQuiet,
+  .choiceItem {
+    height: var(--tap-target);
+  }
 }
 
-.listRowHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
+@media (prefers-reduced-motion: reduce) {
+  .themeSwitchThumb {
+    transition: none;
+  }
 
-.listRowTitle {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--foreground);
-  font-size: var(--text-md);
-  font-weight: 550;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+  :is(
+    .navItem,
+    .iconButton,
+    .button,
+    .buttonQuiet,
+    .choiceItem,
+    .menuItem,
+    .selector,
+    .account,
+    .rowName a
+  ) {
+    transition: none;
+  }
 
-.listRowFact {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-3);
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-
-.listRowFact dt {
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: var(--text-2xs);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-}
-
-.listRowFact dd {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  :is(
+    .navItem,
+    .iconButton,
+    .button,
+    .buttonQuiet,
+    .choiceItem,
+    .menuItem,
+    .selector,
+    .account,
+    .rowName a
+  ):active:not(:focus-visible):not(:disabled) {
+    transform: none;
+  }
 }
 
 /*
- * The one breakpoint, and the only `@media` in this file.
+ * The one layout breakpoint in this file.
  *
  * It cannot be a token — custom properties do not exist when a media query is
  * evaluated — so it is a constant, written once. Everything that changes when
  * the shell stops being two columns changes here: the sidebar gives way to a
- * top bar and a drawer, and every table becomes the list built from the same
- * column definitions.
+ * top bar and a drawer, and the semantic table becomes labelled rows without
+ * drawing a second set of controls.
  */
 @media (max-width: 900px) {
   .shell {
@@ -984,11 +1047,67 @@
   }
 
   .tableWrap {
-    display: none;
+    overflow: visible;
   }
 
-  .list {
+  .table,
+  .table tbody {
     display: block;
+  }
+
+  .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .table tbody tr {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-3) var(--row-padding-x);
+    border-top: 1px solid var(--border);
+  }
+
+  .table tbody tr:first-child {
+    border-top: 0;
+  }
+
+  .table td {
+    display: flex;
+    height: auto;
+    min-height: 0;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: 0;
+    border: 0;
+    font-size: var(--text-sm);
+  }
+
+  .table td:not(.tableCellPrimary)::before {
+    flex: 0 0 auto;
+    color: var(--faint);
+    content: attr(data-label);
+    font-family: var(--mono);
+    font-size: var(--text-2xs);
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+  }
+
+  .table td:not(.tableCellPrimary) .cell {
+    min-width: 0;
+    max-width: 70%;
+    text-align: right;
+  }
+
+  .tableCellPrimary {
+    margin-bottom: var(--space-1);
   }
 
   .page {

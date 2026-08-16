@@ -33,6 +33,8 @@ import {
   Choice,
   Facts,
   Field,
+  Form,
+  FormActions,
   Problem,
   Section,
   TextArea,
@@ -464,12 +466,7 @@ function EditAgent({
 
   return (
     <Dialog title="Edit agent" onClose={onClose}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void save();
-        }}
-      >
+      <Form onSubmit={() => void save()}>
         <Field label="Name" htmlFor="edit-agent-name">
           <TextInput
             id="edit-agent-name"
@@ -497,13 +494,13 @@ function EditAgent({
 
         {refused === null ? null : <Problem>{refused.message}</Problem>}
 
-        <Actions>
+        <FormActions>
           <Button type="submit" weight="strong" disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
           <Button onClick={onClose}>Cancel</Button>
-        </Actions>
-      </form>
+        </FormActions>
+      </Form>
     </Dialog>
   );
 }
@@ -571,7 +568,7 @@ function ConfirmLifecycle({
     >
       <p>
         {archiving
-          ? "Archiving takes this agent out of new work and archives every active connection with it. Queued simulations over those connections are canceled, and conversations already happening are asked to stop. Past runs stay readable."
+          ? "Archiving takes this agent out of new work and archives every active connection with it. Queued simulations over those connections are canceled, and simulations already happening are asked to stop. Past runs stay readable."
           : "Restoring brings the agent back. Its connections stay archived, and each one is restored on its own terms so that an old credential is never quietly reused."}
       </p>
 

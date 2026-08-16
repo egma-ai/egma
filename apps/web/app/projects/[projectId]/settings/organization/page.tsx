@@ -30,9 +30,13 @@ import {
   TextInput,
 } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { ScopeNote, SettingsNav } from "../../../../../ui/settings-nav.tsx";
-import { useOrganizationRead } from "../../../../../ui/settings-read.ts";
+import {
+  useOrganizationRead,
+  useUnsavedChanges,
+} from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
   PageBody,
@@ -102,13 +106,20 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   }, [settled]);
 
   useEffect(() => {
-    if (answer?.status === "signed-out") window.location.replace("/sign-in");
-  }, [answer]);
+    if (
+      answer?.status === "signed-out" ||
+      credentials?.status === "signed-out"
+    ) {
+      window.location.replace("/sign-in");
+    }
+  }, [answer, credentials]);
 
   const named = name.trim() !== "";
+  const changed = settled !== null && name.trim() !== settled.name;
+  useUnsavedChanges(changed && !saving);
 
   async function save(): Promise<void> {
-    if (!mayAdminister || !named || saving) return;
+    if (!mayAdminister || !named || !changed || saving) return;
     setRefused(null);
     setSaved(false);
     setSaving(true);
@@ -192,7 +203,10 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                 value={name}
                 disabled={!mayAdminister}
                 invalid={!named}
-                onChange={setName}
+                onChange={(next) => {
+                  setName(next);
+                  setSaved(false);
+                }}
               />
             </Field>
 
@@ -203,7 +217,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
               <Button
                 weight="strong"
                 type="submit"
-                disabled={!mayAdminister || !named || saving}
+                disabled={!mayAdminister || !named || !changed || saving}
                 why={
                   mayAdminister || role === null
                     ? undefined
@@ -231,9 +245,11 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
         </Section>
 
         <Credentials
-          credentials={credentialsIn(
-            credentials?.status === "ready" ? credentials.value : undefined,
-          )}
+          credentials={
+            credentials?.status === "ready"
+              ? credentialsIn(credentials.value)
+              : null
+          }
           unreadable={
             credentials !== null && credentials.status !== "ready"
               ? credentials.status === "signed-out"
@@ -273,7 +289,8 @@ function Credentials({
   mayAdminister,
   onChanged,
 }: {
-  readonly credentials: readonly JudgeCredential[];
+  /** Null until the read answers, rather than a claim that the list is empty. */
+  readonly credentials: readonly JudgeCredential[] | null;
   /** Why the list is not on screen, when egma could not answer for it. */
   readonly unreadable: string | null;
   readonly mayAdminister: boolean;
@@ -284,6 +301,14 @@ function Credentials({
   const [rotating, setRotating] = useState<string | null>(null);
   const [replacement, setReplacement] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmingArchive, setConfirmingArchive] =
+    useState<JudgeCredential | null>(null);
+  useUnsavedChanges(
+    !busy &&
+      (label.trim() !== "" ||
+        key.trim() !== "" ||
+        replacement.trim() !== ""),
+  );
 
   /**
    * Why a key could not be saved, **and which action to try again.**
@@ -400,7 +425,7 @@ function Credentials({
   }
 
   /** The row whose replacement form is open, if the row is still on the list. */
-  const rotatingCredential = credentials.find(
+  const rotatingCredential = credentials?.find(
     (credential) => credential.id === rotating,
   );
 
@@ -431,12 +456,7 @@ function Credentials({
       cell: (credential) => (
         <Button
           disabled={!mayAdminister || busy}
-          onClick={() => {
-            // Archiving is not opening a row, so it does not change which row
-            // is open — but it does replace whatever failure was on screen
-            // with its own, bound to this credential.
-            void archive(credential);
-          }}
+          onClick={() => setConfirmingArchive(credential)}
         >
           Archive
         </Button>
@@ -502,7 +522,11 @@ function Credentials({
         />
       )}
 
-      {credentials.length === 0 ? (
+      {credentials === null ? (
+        unreadable === null ? (
+          <Loading what="this organization's judge keys" />
+        ) : null
+      ) : credentials.length === 0 ? (
         <p>No judge credentials yet.</p>
       ) : (
         <>
@@ -515,11 +539,9 @@ function Credentials({
 
           {/*
            * The replacement form is drawn once, under the table, for whichever
-           * row asked for it — never inside a cell. A table draws every row
-           * twice, once wide and once narrow, so a form living in a cell would
-           * be two forms over one piece of state: two fields carrying one
-           * value, and whichever the browser focused would be the one somebody
-           * could not see.
+           * row asked for it — never inside a cell. This keeps one labelled
+           * secret field tied to the row that opened it, instead of making a
+           * table cell own a form whose state outlives that cell.
            */}
           {rotatingCredential === undefined ? null : (
             <>
@@ -572,6 +594,31 @@ function Credentials({
       >
         Add key
       </Button>
+
+      {confirmingArchive === null ? null : (
+        <Dialog
+          title="Archive this judge credential?"
+          onClose={() => setConfirmingArchive(null)}
+        >
+          <p>
+            {confirmingArchive.label} will no longer be available to a project.
+            Egma will refuse this action if a project or an active run still uses
+            it.
+          </p>
+          <Button onClick={() => setConfirmingArchive(null)}>Cancel</Button>{" "}
+          <Button
+            weight="strong"
+            disabled={busy}
+            onClick={() => {
+              const credential = confirmingArchive;
+              setConfirmingArchive(null);
+              void archive(credential);
+            }}
+          >
+            Archive
+          </Button>
+        </Dialog>
+      )}
     </section>
   );
 }

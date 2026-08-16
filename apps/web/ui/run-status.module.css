@@ -53,7 +53,7 @@
 /*
  * Machinery progress.
  *
- * One bar, and it measures conversations only. A bar over machinery and grading
+ * One bar, and it measures simulations only. A bar over machinery and grading
  * together would have to decide what a half-full bar meant, and the two settle
  * at different moments.
  */
@@ -67,10 +67,12 @@
 
 .progressFill {
   display: block;
+  width: 100%;
   height: 100%;
   border-radius: var(--radius-pill);
   background: var(--muted);
-  transition: width 200ms ease-out;
+  transform-origin: left center;
+  transition: transform 200ms var(--ease-out);
 }
 
 .tally {
@@ -83,5 +85,11 @@
   .facts {
     flex-direction: column;
     gap: var(--space-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progressFill {
+    transition: none;
   }
 }
