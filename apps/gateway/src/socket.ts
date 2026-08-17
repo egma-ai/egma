@@ -38,8 +38,14 @@ export type Duplex = {
    *
    * This is real backpressure — the peer's own socket fills and the peer
    * discovers it cannot write — and it is what lets a slow moment be a slow
-   * moment rather than a closed exchange. Absent on a host with no read flow
-   * control, and the relay then has only the loud close.
+   * moment rather than a closed exchange.
+   *
+   * **Absent is a supported answer, and it does not weaken the bound.** A host
+   * with no read flow control keeps delivering frames whatever the relay wants,
+   * so the relay does not rely on the pause for its limit: it checks what the
+   * far side is holding before every send and ends the exchange at a hard
+   * ceiling. What such a host loses is the grace, not the guarantee — a stalled
+   * peer there is hung up on rather than waited out.
    */
   pauseReading?(): void;
   resumeReading?(): void;

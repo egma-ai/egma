@@ -110,20 +110,31 @@ provider is still producing it.
 | Whole exchange | 10 min | An exchange that says a little, forever |
 | Socket idle | 2 min | An abandoned voice socket, where silence in both directions is not a quiet moment |
 | Frame size | 1 MiB | One enormous frame, the only thing that has to exist in memory in one piece |
-| Buffered per direction | 4 MiB | One peer outrunning the other — a listening leg sending audio continuously into a provider that has slowed down |
-| Drain window | 10 s | A peer that crossed the buffer bound and never starts keeping up |
+| Buffered per direction, soft | 4 MiB | One peer outrunning the other — a listening leg sending audio continuously into a provider that has slowed down |
+| Buffered per direction, hard | 8 MiB (2× the soft bound) | The same, on a host that cannot be asked to stop reading |
+| Drain window | 10 s | A peer that crossed the soft bound and never starts keeping up |
 
-**How the buffer bound behaves.** Crossing it is not a failure: a provider that
-hesitated deserves to be waited for. The gateway stops reading the fast side —
-real backpressure, so that peer's own socket fills and it discovers it cannot
-write — and the exchange carries on as soon as the slow side drains. **No frame
-is ever dropped.** Only a peer that is still behind after the drain window ends
-the exchange, with close code `1013` and a `refused` record.
+**How the buffer bound behaves.** Crossing the soft bound is not a failure: a
+provider that hesitated deserves to be waited for. The gateway stops reading the
+fast side — real backpressure, so that peer's own socket fills and it discovers
+it cannot write — and the exchange carries on as soon as the slow side drains.
+**No frame is ever dropped.** A peer still behind when the drain window runs out
+ends the exchange, with close code `1013` and a `refused` record.
 
-Stopping the read needs read flow control from the host. The local host has it;
-the Cloudflare runtime delivers frames as events and offers none, so there the
-bound has one outcome rather than two — the loud close. Both hosts report how
-much is buffered, which is what the bound is measured against.
+**The hard bound is what makes that absolute, and it is checked before every
+single send.** Stopping the read needs read flow control from the host: the
+local host has it, and the Cloudflare runtime delivers frames as events and
+offers none. Where it is absent the pause is a no-op and frames keep arriving,
+so waiting out the drain window would mean growing the buffer for ten seconds at
+whatever rate the sender manages. The hard ceiling ends the exchange at once
+instead, however much of the window was left — so **the most any direction can
+ever hold is the hard bound plus the one frame that carried it over**, on either
+host.
+
+What a host without read flow control loses is the grace, not the guarantee: a
+stalled peer there is hung up on after one bound's worth of headroom rather than
+waited out. Both hosts report how much is buffered, which is what both bounds
+are measured against.
 
 On the HTTP transport the standard streams supply back-pressure of their own, so
 a slow caller slows the provider rather than filling the gateway with the
@@ -174,7 +185,7 @@ except where a default is written below.
 | `EGMA_GATEWAY_FIRST_OUTPUT_TIMEOUT_MS` | `30000` | The first-output bound |
 | `EGMA_GATEWAY_SOCKET_IDLE_TIMEOUT_MS` | `120000` | The socket idle bound |
 | `EGMA_GATEWAY_MAX_FRAME_BYTES` | `1048576` | The largest single frame |
-| `EGMA_GATEWAY_MAX_BUFFERED_BYTES` | `4194304` | How much one direction may be holding for a peer that has stopped keeping up |
+| `EGMA_GATEWAY_MAX_BUFFERED_BYTES` | `4194304` | How much one direction may be holding before the gateway stops reading the fast side. Twice this is the hard ceiling, at which the exchange ends at once |
 | `EGMA_GATEWAY_BUFFER_DRAIN_MS` | `10000` | How long that peer has to start keeping up before the exchange ends |
 | `EGMA_GATEWAY_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARN` or `ERROR` |
 | `EGMA_GATEWAY_PORT` | an unused port | Local host only |

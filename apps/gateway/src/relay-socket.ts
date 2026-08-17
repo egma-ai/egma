@@ -76,6 +76,31 @@ const CLOSE_OVERLOADED = 1013;
 /** How often a held direction asks whether the far side has caught up. */
 const DRAIN_POLL_MS = 20;
 
+/**
+ * How far past the bound a direction may get before the exchange ends at once,
+ * without waiting for the drain window.
+ *
+ * **The drain window is time for backpressure to work, and on a host that has
+ * no backpressure there is nothing for it to be waiting for.** The Cloudflare
+ * runtime delivers frames as events and offers no way to stop taking them, so
+ * `pauseReading` there is absent and every frame the sender puts on the wire is
+ * still handed to a stalled socket — for the whole ten seconds, at whatever
+ * rate the sender manages. That is hundreds of megabytes into an isolate other
+ * exchanges are sharing.
+ *
+ * So the bound is two bounds. The first is the soft one: it stops the read
+ * where a host can, and starts the clock. The second is this — a hard ceiling
+ * checked before every single send, on every host, which ends the exchange
+ * immediately however much time the drain window had left.
+ *
+ * Twice, so that a provider that stalls for a moment on a host with no
+ * backpressure still gets a bound's worth of grace rather than being hung up on
+ * at the first sign of slowness. It is a multiple rather than its own setting
+ * because there is one number here worth reasoning about, and this is the
+ * headroom above it.
+ */
+const BUFFER_CEILING_MULTIPLE = 2;
+
 export async function relaySocket(
   host: SocketHost,
   request: Request,
@@ -284,6 +309,13 @@ export async function relaySocket(
    * waited for — so the exchange carries on as soon as the buffer drains, and
    * no frame is ever dropped. Only a peer that never starts keeping up ends the
    * exchange, loudly, with the code that says exactly that.
+   *
+   * **A host with no read flow control gets the same guarantee from the second
+   * bound rather than the first.** Where `pauseReading` is absent the pause is
+   * a no-op and frames keep arriving, so the soft bound alone would let the
+   * buffer grow for the whole drain window at the sender's own rate. The hard
+   * ceiling — checked before every send, on every host — is what makes the
+   * limit absolute there: see `BUFFER_CEILING_MULTIPLE`.
    */
   const carry = (from: Duplex, to: Duplex, count: (bytes: number) => void): void => {
     let holding = false;
@@ -307,11 +339,24 @@ export async function relaySocket(
       watching = setTimeout(() => watch(until), DRAIN_POLL_MS);
     };
 
+    const ceiling = config.maxBufferedBytes * BUFFER_CEILING_MULTIPLE;
+
     from.onMessage((frame: Frame) => {
       if (over) return;
       const size = frameBytes(frame);
       if (size > config.maxFrameBytes) {
         end("refused", CLOSE_TOO_BIG, "frame over the gateway's bound");
+        return;
+      }
+      /**
+       * Asked before the send, because after it there is nothing left to
+       * decide: the frame is already in the buffer this is trying to bound.
+       * Checking here is what makes the ceiling absolute — the most this
+       * direction can ever be holding is the ceiling plus the one frame that
+       * carried it over, whether or not the host can stop reading.
+       */
+      if (to.bufferedBytes() > ceiling) {
+        end("refused", CLOSE_OVERLOADED, "the far side is not keeping up");
         return;
       }
       count(size);
