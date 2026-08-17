@@ -617,6 +617,27 @@ type ReadingProject =
   | { readonly auth: AuthContext }
   | { readonly refusal: string };
 
+/**
+ * **Every refusal here leaves as a 400 `invalid_request`, and the flattening of
+ * `browserProject`'s own code is deliberate.**
+ *
+ * A project this session cannot reach is, in tenancy terms, an absence — which
+ * argues for 404. It must not leave as one. The browser folds an answer into
+ * what a page shows through `answerFor`, and there a 404 *is* the missing
+ * state: on the transcript page it draws "That transcript is not here", so a
+ * mistyped project id would tell somebody their conversation had aged out of
+ * the store. The request is what was malformed, not the thing it asked for, and
+ * 400 is the code that says so.
+ *
+ * Nothing is lost by it: the refusal's own sentence is carried word for word
+ * and is what the page displays. What is lost is the ability to branch on the
+ * code, and no caller does.
+ *
+ * **A new code added upstream has to be re-decided here.** `browserProject`
+ * answering a second kind of refusal one day would have it flattened into this
+ * one without anybody choosing that, so whoever adds it reads this paragraph
+ * and either keeps the flattening or gives the route a second branch.
+ */
 async function readingProject(
   auth: AuthContext,
   asked: string | undefined,
