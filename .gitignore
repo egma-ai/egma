@@ -13,6 +13,12 @@ coverage/
 .env.*
 !.env.example
 
+# What Cloudflare's own tool reads a Worker's secrets from when it runs one
+# locally. The Egma model gateway holds Egma's provider credentials, so a file
+# of them must never be a file this repository can commit.
+.dev.vars
+.dev.vars.*
+
 # A local override of the compose file, copied from the checked-in example.
 docker-compose.override.yml
 
