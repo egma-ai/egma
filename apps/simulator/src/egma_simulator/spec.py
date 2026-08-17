@@ -205,6 +205,109 @@ class PlatformSettings:
 
 
 @dataclass(frozen=True)
+class ModelSelection:
+    """One model job's pinned selection, off the work order.
+
+    Provider and model come from the persona version the run pinned, so two
+    simulations of one version ask the same provider for the same model
+    however the organization's credentials have moved since. The key is
+    resolved when the claim is prepared, so a replaced one reaches the
+    next simulation with nothing restarted.
+    """
+
+    provider: str
+    model: str
+    key: str | None = field(default=None, repr=False)
+    """The provider key, or ``None`` under managed access — where Egma's
+    own credential never leaves the Egma model gateway and this process is
+    never handed one.
+
+    Kept out of the dataclass repr, like every other key in this process:
+    a log line carrying one is a log line that should not have."""
+
+
+@dataclass(frozen=True)
+class SpeechSelection(ModelSelection):
+    """The speaking job's selection, which carries two more facts.
+
+    Which of the provider's voices, and how fast the persona talks. Both
+    are the persona version's own, so the same persona sounds identical on
+    every simulation of that version — where a described speed would have
+    to be interpreted and two runs could interpret it differently.
+    """
+
+    voice_id: str = ""
+    speed: float = 1.0
+
+
+@dataclass(frozen=True)
+class SelectedModels:
+    """What this simulation's persona thinks, listens and speaks with.
+
+    **Present only on a version-2 work order**, and its presence is what
+    says the persona chose for itself. A simulation whose persona has made
+    no selections arrives on version 1 with no block at all, and the
+    deployment's own settings decide exactly as they always did — which is
+    how every persona authored before the model catalog existed keeps
+    running.
+
+    ``access`` says who supplies the credentials. It rides here because it
+    is what says where the keys came from; nothing in this process chooses
+    it, and a simulator never sees the organization that did.
+    """
+
+    access: str
+    llm: ModelSelection
+    stt: ModelSelection
+    tts: SpeechSelection
+
+    @property
+    def secrets(self) -> tuple[str, ...]:
+        """Every key this block holds, for redaction.
+
+        One place to ask, exactly as the platform settings' own has, so a
+        fourth key arriving cannot fall out of the scrubbing.
+        """
+        return tuple(
+            secret
+            for secret in (self.llm.key, self.stt.key, self.tts.key)
+            if secret is not None
+        )
+
+    @classmethod
+    def from_document(cls, written: Any) -> SelectedModels | None:
+        """The models block of a validated spec, or ``None`` where it has none.
+
+        The schema has already refused a block that is not this shape, so
+        the reads below take what is there at face value — the same bargain
+        the rest of this module makes.
+        """
+        if not written:
+            return None
+        tts = written["tts"]
+        return cls(
+            access=written["access"],
+            llm=_selection(written["llm"]),
+            stt=_selection(written["stt"]),
+            tts=SpeechSelection(
+                provider=tts["provider"],
+                model=tts["model"],
+                key=tts.get("key"),
+                voice_id=tts["voice_id"],
+                speed=float(tts["speed"]),
+            ),
+        )
+
+
+def _selection(written: Any) -> ModelSelection:
+    return ModelSelection(
+        provider=written["provider"],
+        model=written["model"],
+        key=written.get("key"),
+    )
+
+
+@dataclass(frozen=True)
 class Limits:
     """The walls around one simulation, from the spec that claimed it.
 
@@ -256,6 +359,20 @@ class SimulationSpec:
     unobserved.
     """
 
+    models: SelectedModels | None = None
+    """What this simulation's persona thinks, listens and speaks with.
+
+    ``None`` is an ordinary state and means the persona made no selections
+    — every one authored before the model catalog existed, arriving on a
+    version-1 work order. The deployment's own settings then decide,
+    exactly as they always did.
+
+    **Where it is present it wins outright**, over the platform's settings
+    and over this container's alike. It is what the run pinned, and a
+    deployment setting quietly overriding a pinned selection would make a
+    simulation's models depend on which machine conducted it.
+    """
+
     platform: PlatformSettings = field(default_factory=PlatformSettings)
     """What the deployment has been configured with — its persona's model,
     its speech legs, its carrier — read afresh for this simulation.
@@ -280,6 +397,7 @@ class SimulationSpec:
         return cls(
             mock_tools=_mock_tools(document.get("mock_tools") or []),
             platform=PlatformSettings.from_document(document.get("platform")),
+            models=SelectedModels.from_document(document.get("models")),
             simulation_id=document["simulation_id"],
             modality=document["modality"],
             scenario_instructions=document["scenario"]["instructions"],

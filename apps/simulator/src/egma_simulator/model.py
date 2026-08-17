@@ -32,7 +32,7 @@ from .config import MODEL_PROVIDERS
 
 if TYPE_CHECKING:
     from .config import SimulatorConfig
-    from .spec import SimulationSpec
+    from .spec import SelectedModels, SimulationSpec
 
 CONCLUDE_MARKER = "[CONCLUDED]"
 """How a model says the persona is done, per the system prompt's instruction.
@@ -178,6 +178,46 @@ class OpenAICompatibleModel:
             self._session = None
 
 
+def _selected_model_client(
+    config: SimulatorConfig, spec: SimulationSpec, selected: SelectedModels
+) -> ModelClient:
+    """The client for a persona that chose its own brain.
+
+    **Refused rather than quietly downgraded to the stand-in**, on the
+    platform path's exact terms one function down: a provider this
+    simulator holds no client for must not produce a completed, green
+    simulation conducted by a canned robot. That is worse than a failure,
+    because a failure tells the truth about what happened.
+    """
+    provider = selected.llm.provider
+    if provider not in MODEL_PROVIDERS:
+        raise ModelFailure(
+            f"this persona thinks with {provider!r}, which is not a model "
+            "client this simulator has; it thinks with "
+            f"{', '.join(MODEL_PROVIDERS)}"
+        )
+    if provider != "openai":
+        return ScriptedModel(spec.scenario_instructions)
+
+    if selected.llm.key is None:
+        raise ModelFailure(
+            f"this persona thinks with {provider}, and the work order carried "
+            "no key for it"
+        )
+    return OpenAICompatibleModel(
+        # The base URL stays this container's, exactly as it does below: it
+        # says which address this simulator reaches a provider at, which is
+        # a property of the network it is on rather than of the persona.
+        base_url=config.model_base_url,
+        api_key=selected.llm.key,
+        model_name=selected.llm.model,
+        # **Not carried by a selection, and deliberately.** Reasoning effort
+        # is a legacy deployment setting rather than part of what a persona
+        # is; a persona that selected its own models uses its provider's
+        # default reasoning behavior.
+    )
+
+
 def build_model_client(
     config: SimulatorConfig, spec: SimulationSpec
 ) -> ModelClient:
@@ -187,15 +227,27 @@ def build_model_client(
     makes two different specs conduct two different exchanges with no code
     change; the OpenAI-compatible client is configuration alone.
 
-    **The platform's own settings win over this container's.** They arrive
-    on the work order, they are read afresh for every simulation, and each
-    of the four replaces this container's answer on its own — so a
-    deployment that has configured the persona's model centrally needs no
-    model variables on any simulator, and a replaced key applies to the
-    next simulation with no restart. A setting the platform does not hold
-    leaves this container's own value standing, which is what makes a
-    deployment that has configured nothing behave exactly as it did.
+    **The persona's own selection wins outright, where it made one.** It
+    is what the run pinned, so a deployment setting quietly overriding it
+    would make a simulation's brain depend on which machine conducted it,
+    and two runs of one pinned version would stop being comparable. The key
+    comes from the selection and from nowhere else: falling back to this
+    container's key for a provider the persona named would spend from an
+    account nobody in that organization chose.
+
+    **Below that, the platform's own settings win over this container's.**
+    They arrive on the work order, they are read afresh for every
+    simulation, and each of the four replaces this container's answer on
+    its own — so a deployment that has configured the persona's model
+    centrally needs no model variables on any simulator, and a replaced key
+    applies to the next simulation with no restart. A setting the platform
+    does not hold leaves this container's own value standing, which is what
+    makes a deployment that has configured nothing behave exactly as it did.
     """
+    selected = spec.models
+    if selected is not None:
+        return _selected_model_client(config, spec, selected)
+
     said = spec.platform.model
     provider = said.provider or config.model_provider
     if provider not in MODEL_PROVIDERS:

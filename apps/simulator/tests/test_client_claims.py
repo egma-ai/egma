@@ -19,6 +19,7 @@ import pytest
 from aiohttp import web
 
 from egma_simulator.client import ControlPlaneClient
+from egma_simulator.contract import SUPPORTED_SPEC_VERSIONS
 
 
 @pytest.fixture
@@ -43,12 +44,28 @@ async def recording_control_plane() -> AsyncIterator[tuple[str, list[dict]]]:
         await runner.cleanup()
 
 
-async def test_a_claim_declares_how_long_it_will_wait(recording_control_plane):
+async def test_a_claim_declares_how_long_it_will_wait_and_what_it_can_read(
+    recording_control_plane,
+):
+    """The whole body, pinned.
+
+    ``contract_versions`` is what keeps a mixed rollout safe with no drain
+    step: a simulation whose persona selects its own models can only be
+    conducted from a version-2 document, so a simulator that speaks only
+    version 1 is never offered that row and it waits for the upgraded
+    simulator beside it. Declaring it on every claim is what makes that
+    true, so it is pinned here rather than left to be noticed missing.
+    """
     base_url, bodies = recording_control_plane
 
     async with ControlPlaneClient(base_url, claim_wait_seconds=7.0) as client:
         await client.claim("sim-under-test", 3)
 
     assert bodies == [
-        {"claimant": "sim-under-test", "capacity": 3, "wait_seconds": 7.0}
+        {
+            "claimant": "sim-under-test",
+            "capacity": 3,
+            "wait_seconds": 7.0,
+            "contract_versions": list(SUPPORTED_SPEC_VERSIONS),
+        }
     ]
