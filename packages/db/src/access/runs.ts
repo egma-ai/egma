@@ -261,7 +261,6 @@ export type Simulation = {
   readonly cancelRequestedAt: Date | null;
   readonly startedAt: Date | null;
   readonly endedAt: Date | null;
-  readonly measuredAudioBandHertz: number | null;
   readonly recordingReference: string | null;
   /** How many transcript turns the conversation reached, both speakers counted. */
   readonly turnCount: number | null;
@@ -325,11 +324,10 @@ export type FailedEndingReason = (typeof FAILED_ENDING_REASONS)[number];
 
 /**
  * The summary facts any terminal landing may carry, whatever its status: what
- * the conversation reached, how the platform names it, what the audio
- * measured, and the two moments the conduction itself stamped. Each is
- * optional because a report may honestly hold none — a chat has no band, a
- * plug may offer no reference — and everything given lands on the row as the
- * terminal record.
+ * the conversation reached, how the platform names it, its recording, and the
+ * two moments the conduction itself stamped. Each is optional because a report
+ * may honestly hold none — a chat has no recording and a plug may offer no
+ * reference — and everything given lands on the row as the terminal record.
  *
  * The moments are the simulator's own, not the arrival's: a report retried
  * through a partition must not stretch the record by however long delivery
@@ -343,8 +341,6 @@ export type SimulationSummaryFacts = {
   readonly turnCount?: number | undefined;
   /** The platform's own identifier for the exchange, verbatim. */
   readonly providerReference?: string | undefined;
-  /** Measured, never declared; a chat simulation reports none. */
-  readonly measuredAudioBandHertz?: number | undefined;
   readonly recordingReference?: string | undefined;
   /**
    * Which tools were answered by mock tools and which ran for real. Absent
@@ -433,7 +429,6 @@ const SIMULATION_COLUMNS = {
   cancelRequestedAt: simulation.cancelRequestedAt,
   startedAt: simulation.startedAt,
   endedAt: simulation.endedAt,
-  measuredAudioBandHertz: simulation.measuredAudioBandHertz,
   recordingReference: simulation.recordingReference,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
@@ -518,7 +513,7 @@ function summaryFactsWrite(
 ): Record<string, unknown> {
   const write: Record<string, unknown> = {};
 
-  const { turnCount, providerReference, measuredAudioBandHertz } = facts;
+  const { turnCount, providerReference } = facts;
   if (turnCount !== undefined) {
     if (!Number.isInteger(turnCount) || turnCount < 0) {
       throw new Error(
@@ -529,14 +524,6 @@ function summaryFactsWrite(
   }
   if (providerReference !== undefined) {
     write.providerReference = providerReference.trim() || null;
-  }
-  if (measuredAudioBandHertz !== undefined) {
-    if (!Number.isInteger(measuredAudioBandHertz) || measuredAudioBandHertz <= 0) {
-      throw new Error(
-        "a measured audio band is a positive whole number of hertz",
-      );
-    }
-    write.measuredAudioBandHertz = measuredAudioBandHertz;
   }
   if (facts.recordingReference !== undefined) {
     write.recordingReference = facts.recordingReference.trim() || null;
@@ -2708,9 +2695,9 @@ async function landSimulation(
 
 /**
  * A conversation happened and this is its record: `running → completed`, the
- * terminal facts written once — how it ended, the summary facts, the measured
- * audio band that can never be backfilled. What was said is not among them:
- * the conversation is its spans, and they are already stored.
+ * terminal facts written once — how it ended and the summary facts. What was
+ * said is not among them: the conversation is its spans, and they are already
+ * stored.
  */
 export async function completeSimulation(
   auth: AuthContext,

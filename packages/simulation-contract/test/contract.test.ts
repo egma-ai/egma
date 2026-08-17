@@ -435,6 +435,36 @@ describe("the two schemas, as one contract", () => {
     expect(stripped[2]).toEqual(stripped[0]);
   });
 
+  it("keeps a voice recording without a second sample-rate fact", async () => {
+    const report = await readJson(
+      "fixtures",
+      "report",
+      "valid",
+      "completed-voice.json",
+    );
+    const event = (report.events as Record<string, unknown>[])[0];
+    expect(event).toBeDefined();
+    if (!event) throw new Error("the completed report has no event");
+    const facts = event.facts as Record<string, unknown>;
+    const audio = facts.audio as Record<string, unknown>;
+
+    delete audio.measured_sample_rate_hz;
+    expect(
+      validators.report(report),
+      JSON.stringify(validators.report.errors),
+    ).toBe(true);
+
+    audio.measured_sample_rate_hz = 8_000;
+    expect(validators.report(report)).toBe(false);
+    expect(validators.report.errors).toContainEqual(
+      expect.objectContaining({
+        instancePath: "/events/0/facts/audio",
+        keyword: "additionalProperties",
+        params: { additionalProperty: "measured_sample_rate_hz" },
+      }),
+    );
+  });
+
   it("gives each terminal status its own endings, sharing none", () => {
     const defs = reportSchema.$defs as Record<string, Record<string, unknown>>;
     const endings = ["completed_facts", "failed_facts", "canceled_facts"].flatMap(
@@ -534,18 +564,18 @@ describe("what the golden fixtures cover", () => {
     );
   });
 
-  it("shows a measured audio band on a voice report, and its absence on chat", async () => {
+  it("shows a recording on a voice report, and its absence on chat", async () => {
     const reports = await fixturesUnder("report", "valid");
     const facts = reports
       .flatMap((fixture) => fixture.document.events as Record<string, unknown>[])
       .filter((event) => event.facts !== undefined)
       .map((event) => event.facts as Record<string, unknown>);
 
-    const bands = facts.map((terminal) => terminal.audio);
-    expect(bands).toContain(null);
-    expect(bands.some((audio) => audio !== null && audio !== undefined)).toBe(
-      true,
-    );
+    const recordings = facts.map((terminal) => terminal.audio);
+    expect(recordings).toContain(null);
+    expect(
+      recordings.some((audio) => audio !== null && audio !== undefined),
+    ).toBe(true);
   });
 });
 
@@ -553,8 +583,8 @@ describe("what the golden fixtures cover", () => {
  * The coverage stamp: which of the agent's tools egma stood ready to answer
  * for, and which ran their real implementations untouched.
  *
- * It rides the terminal facts for the same reason the measured audio band
- * does. Two simulations are only comparable when they were the same kind of
+ * It rides the terminal facts because two simulations are only comparable
+ * when they were the same kind of
  * thing, and a simulation whose backends were answered by mock tools is not
  * the same kind of thing as one that reached the real ones — so the fact has
  * to be readable from the simulation's own record, without asking anything

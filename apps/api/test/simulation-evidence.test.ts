@@ -236,10 +236,10 @@ describe("one conversation's evidence, in one read", () => {
     ]);
     expect(transcript.spans_truncated).toBe(false);
 
-    // Measured, not judged, and only what is actually known.
+    // Reported counts, not judgements, and only what is actually known.
     const measures = read.body.measures as Record<string, number>;
     expect(measures.turn_count).toBe(6);
-    expect(measures.measured_audio_band_hertz).toBe(8000);
+    expect(measures).not.toHaveProperty("measured_audio_band_hertz");
     expect(measures.human_turn_count).toBe(1);
   });
 

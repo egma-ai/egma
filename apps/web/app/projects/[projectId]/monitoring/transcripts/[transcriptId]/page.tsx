@@ -354,7 +354,7 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
           </div>
         ))
       )}
-      {measured.some((one) => one.derived === true) ? (
+      {measured.some(workedOut) ? (
         <div className={styles.contextFact}>
           <span />
           <strong className={styles.muted}>{MEASURES.derived}</strong>
@@ -362,6 +362,26 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
       ) : null}
     </section>
   );
+}
+
+/**
+ * Whether Egma worked this figure out from the framework's own timings — the
+ * one origin the page still says anything about.
+ *
+ * **`derived` alone does not answer it.** A figure an agent platform reported
+ * arrives derived as well, because Egma did not time it either; `reported_by`
+ * beside it is what tells the two apart. Without that second half the page would
+ * tell a developer their platform's number was "worked out from your framework's
+ * own timings", which is a claim about an observation Egma never made. So the
+ * platform's field is read here as a gate and nothing else: a figure carrying it
+ * is neither marked nor caveated, and reads exactly as a figure Egma timed.
+ *
+ * The rest of the provenance is on the record rather than on the page, by a
+ * product decision this predicate is the whole of on this screen. Any figure's
+ * origin is still there to be asked for the day a surface asks.
+ */
+function workedOut(one: Measured): boolean {
+  return one.derived === true && one.reported_by === undefined;
 }
 
 /**
@@ -388,7 +408,12 @@ function measurement(one: Measured): string {
   // Said on the figure itself as well as once for the panel, because a page
   // mixing timed and worked-out numbers must let a reader tell which is which
   // without counting rows.
-  const from = one.derived === true ? ` · ${MEASURES.derivedOne}` : "";
+  //
+  // **One predicate decides it, the same one the panel's caveat uses**, so the
+  // mark and the sentence can never come to disagree about a figure — and a
+  // figure a platform reported takes neither, rather than taking the worked-out
+  // wording about an observation Egma never made.
+  const from = workedOut(one) ? ` · ${MEASURES.derivedOne}` : "";
   if (one.partial === true) return `${shown} · ${MEASURES.partialWorst}${from}`;
   return one.samples.length === 1
     ? `${shown}${from}`

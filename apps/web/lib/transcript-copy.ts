@@ -322,7 +322,16 @@ export const MEASURES = {
   derived:
     "Some figures here were worked out from your framework's own timings " +
     "rather than timed by Egma. Each says which.",
-  /** The mark beside one worked-out figure, so a reader need not guess which. */
+  /**
+   * The mark beside one worked-out figure, so a reader need not guess which.
+   *
+   * **It belongs to that one origin and no other.** A figure an agent platform
+   * measured and handed over was not worked out from any framework's timings,
+   * so this wording is false about it — and a caveat that is itself untrue is
+   * worse than none, because it is the sentence a developer decides how much to
+   * believe a verdict on. A platform-reported figure therefore takes no mark and
+   * no caveat at all; where it came from stays on the record, not on the page.
+   */
   derivedOne: "from your framework's timings",
   /** One measurement is the number; several are the worst of them. */
   worst: "worst",
@@ -365,11 +374,6 @@ export const RECORDING = {
   caption:
     "Egma's own audio of this exchange. Left channel is the human side, " +
     "right channel is the agent.",
-  /**
-   * Two bands are two units — the narrow band a telephone carries strips what
-   * an audio grader reads — so a reader listening is told which one this is.
-   */
-  band: (hertz: number) => `Heard at ${String(hertz)} Hz.`,
   /**
    * For a browser that cannot play the element at all. It names an owner like
    * every other line here: a reader whose browser refuses one of the two

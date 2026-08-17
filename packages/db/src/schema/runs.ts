@@ -404,8 +404,8 @@ export const simulation = pgTable(
      * The connection's modality as it was at execution — the one thing about
      * the connection this row keeps its own copy of, and it keeps it because
      * its own check names it. `simulation_audio_facts_are_voice_facts` below
-     * refuses a measured band or a recording on a conversation that was not
-     * voice, and a Postgres CHECK cannot join: the column it compares has to
+     * refuses a recording on a conversation that was not voice, and a Postgres
+     * CHECK cannot join: the column it compares has to
      * sit on the row it guards. Reaching the connection for it instead would
      * make that guarantee a trigger — a second mechanism on the report-write
      * path, and one an operator can switch off — so the fact rides here
@@ -462,13 +462,6 @@ export const simulation = pgTable(
     cancelRequestedAt: moment("cancel_requested_at"),
     startedAt: moment("started_at"),
     endedAt: moment("ended_at"),
-    /**
-     * Measured at execution, never declared: 8 kHz telephony and 48 kHz
-     * WebRTC are different units, and a simulation that did not record its
-     * band is permanently uncomparable. Null for chat, and null until the
-     * simulator measures it.
-     */
-    measuredAudioBandHertz: integer("measured_audio_band_hertz"),
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
     /**
@@ -492,11 +485,9 @@ export const simulation = pgTable(
      * three name lists the report's stamp carries.
      *
      * On the row rather than worked out from the conversation's spans,
-     * because it is the answer to "are these two numbers comparable at all",
-     * and that question has to be answerable from the simulation alone with
-     * nothing else to consult. A mocked simulation and an unmocked one are
-     * different units exactly as two audio bands are, so this sits beside the
-     * measured band for the same reason it does.
+     * because it is the answer to "did mock tools change the world this
+     * simulation met", and that question has to be answerable from the
+     * simulation alone with nothing else to consult.
      *
      * Three states, and the third is why this is nullable rather than
      * defaulted: null means the agent was never asked what tools it has, so
@@ -642,15 +633,13 @@ export const simulation = pgTable(
         SIMULATION_SKIP_REASONS,
       )}`,
     ),
-    // The audio facts are terminal facts; nothing running holds one yet.
-    // The check keeps its name across the migration that reduced it to
-    // these two, because a constraint's name is what a violation prints and
-    // renaming one would break the sentence a reader is searching for.
+    // The recording is a terminal fact; nothing running holds one yet. The
+    // check keeps its name because a constraint's name is what a violation
+    // prints, and renaming one would break the sentence a reader searches for.
     check(
       "simulation_report_only_when_ended",
       sql`${table.endedAt} is not null
-        or (${table.recordingReference} is null
-          and ${table.measuredAudioBandHertz} is null)`,
+        or ${table.recordingReference} is null`,
     ),
     // The two summary facts are terminal facts too; a check of their own
     // beside the report's rather than a rewrite of it, because they arrived
@@ -670,17 +659,11 @@ export const simulation = pgTable(
       "simulation_mock_tool_coverage_only_when_ended",
       sql`${table.endedAt} is not null or ${table.mockToolCoverage} is null`,
     ),
-    // A chat has no audio: a measured band or a recording on one would be a
-    // number nothing produced, so the row refuses to hold it.
+    // A chat has no audio, so its row refuses a recording.
     check(
       "simulation_audio_facts_are_voice_facts",
       sql`${table.modality} = 'voice'
-        or (${table.measuredAudioBandHertz} is null
-          and ${table.recordingReference} is null)`,
-    ),
-    check(
-      "simulation_audio_band_is_a_rate",
-      sql`${table.measuredAudioBandHertz} is null or ${table.measuredAudioBandHertz} > 0`,
+        or ${table.recordingReference} is null`,
     ),
     // The tenancy triangle, edge by edge, exactly as the run's: project of
     // the organization, agent of the project, connection of the agent — and

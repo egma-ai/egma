@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -52,6 +54,72 @@ type Table = {
 
 function fixture(name: string): string {
   return fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
+}
+
+type ClickHouseFailure = {
+  readonly code: number;
+  readonly type: string;
+};
+
+async function fakeClickHouse(
+  failAlter: (attempt: number) => ClickHouseFailure | undefined,
+): Promise<{
+  readonly url: string;
+  readonly state: {
+    stableStatements: number;
+    alterAttempts: number;
+    ledgerWrites: number;
+  };
+  readonly close: () => Promise<void>;
+}> {
+  const state = { stableStatements: 0, alterAttempts: 0, ledgerWrites: 0 };
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk: string) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const url = new URL(request.url ?? "/", "http://clickhouse.test");
+      const query = url.searchParams.get("query") ?? body;
+
+      if (query.includes("CREATE TABLE IF NOT EXISTS retry_probe")) {
+        state.stableStatements += 1;
+      }
+      if (query.includes("INSERT INTO egma_meta_migration")) {
+        state.ledgerWrites += 1;
+      }
+      if (query.includes("ALTER TABLE retry_probe")) {
+        state.alterAttempts += 1;
+        const failure = failAlter(state.alterAttempts);
+        if (failure !== undefined) {
+          response.statusCode = 500;
+          response.end(
+            `Code: ${failure.code}. DB::Exception: test failure ` +
+              `(${failure.type})`,
+          );
+          return;
+        }
+      }
+
+      response.statusCode = 200;
+      response.end();
+    });
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+
+  return {
+    url: `http://127.0.0.1:${port}`,
+    state,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  };
 }
 
 /**
@@ -113,7 +181,7 @@ describe("the trace store's migration files", () => {
    * before somebody writes the bare `CREATE` that only fails on the second boot
    * of a machine they are not looking at.
    */
-  it("create nothing that a second run would trip over", async () => {
+  it("guards every schema change so a second run cannot trip over it", async () => {
     for (const migration of await readMigrations(
       CLICKHOUSE_MIGRATIONS_DIRECTORY,
     )) {
@@ -123,8 +191,11 @@ describe("the trace store's migration files", () => {
             /^CREATE (?:TABLE|VIEW|MATERIALIZED VIEW|DICTIONARY|FUNCTION) IF NOT EXISTS /i,
           );
         }
-        // A column added later has to survive the re-run on the same terms.
+        // Each column operation has to survive the re-run on its own terms.
         expect(statement).not.toMatch(/\bADD COLUMN\b(?! IF NOT EXISTS)/i);
+        expect(statement).not.toMatch(/\bMODIFY COLUMN\b(?! IF EXISTS)/i);
+        expect(statement).not.toMatch(/\bRENAME COLUMN\b(?! IF EXISTS)/i);
+        expect(statement).not.toMatch(/\bDROP COLUMN\b(?! IF EXISTS)/i);
       }
     }
   });
@@ -299,6 +370,72 @@ describe("a migration that cannot apply", () => {
   });
 });
 
+describe("a replicated ALTER whose metadata is still catching up", () => {
+  it("retries the statement ClickHouse explicitly asks it to retry", async () => {
+    const clickhouse = await fakeClickHouse((attempt) =>
+      attempt === 1 ? { code: 517, type: "CANNOT_ASSIGN_ALTER" } : undefined,
+    );
+
+    try {
+      const result = await runClickHouseMigrations(
+        clickhouse.url,
+        fixture("clickhouse-transient"),
+      );
+
+      expect(clickhouse.state.stableStatements).toBe(1);
+      expect(clickhouse.state.alterAttempts).toBe(2);
+      expect(clickhouse.state.ledgerWrites).toBe(1);
+      expect(result.applied).toEqual(["0000_retry_replicated_alter.sql"]);
+    } finally {
+      await clickhouse.close();
+    }
+  });
+
+  it("does not retry a different ClickHouse error", async () => {
+    const clickhouse = await fakeClickHouse(() => ({
+      code: 56,
+      type: "UNKNOWN_STORAGE",
+    }));
+
+    try {
+      await expect(
+        runClickHouseMigrations(
+          clickhouse.url,
+          fixture("clickhouse-transient"),
+        ),
+      ).rejects.toThrow(/migration 0000_retry_replicated_alter\.sql failed/);
+      expect(clickhouse.state.alterAttempts).toBe(1);
+      expect(clickhouse.state.ledgerWrites).toBe(0);
+    } finally {
+      await clickhouse.close();
+    }
+  });
+
+  it(
+    "stops after the replica catch-up limit without recording the migration",
+    async () => {
+      const clickhouse = await fakeClickHouse(() => ({
+        code: 517,
+        type: "CANNOT_ASSIGN_ALTER",
+      }));
+
+      try {
+        await expect(
+          runClickHouseMigrations(
+            clickhouse.url,
+            fixture("clickhouse-transient"),
+          ),
+        ).rejects.toThrow(/migration 0000_retry_replicated_alter\.sql failed/);
+        expect(clickhouse.state.alterAttempts).toBe(8);
+        expect(clickhouse.state.ledgerWrites).toBe(0);
+      } finally {
+        await clickhouse.close();
+      }
+    },
+    15_000,
+  );
+});
+
 describe("the schema a boot leaves behind", () => {
   let store: MigratedTraceStore;
 
@@ -367,7 +504,8 @@ describe("the schema a boot leaves behind", () => {
     expect(typeOf("started_at")).toBe("DateTime64(6, 'UTC')");
     expect(typeOf("provider_call_id")).toBe("String");
     expect(typeOf("connection_type")).toBe("LowCardinality(String)");
-    expect(typeOf("audio_sample_rate_hz")).toBe("UInt32");
+    expect(typeOf("audio_sample_rate_hz")).toBeUndefined();
+    expect(typeOf("audio_encoding")).toBeUndefined();
   });
 
   it("carries a materialised view at turn grain, filed the same way", async () => {
@@ -380,12 +518,11 @@ describe("the schema a boot leaves behind", () => {
 
   /**
    * The verdicts table arrived as one additive file, long after the two above.
-   * This is the guard on what "additive" means: the big table and the view over
-   * it are byte for byte what the first migration left, because a chain that
-   * rewrites `spans` to add a small table beside it is a chain that will rewrite
-   * it again for the next one.
+   * This guards the settled engine, keys, and turn view. A later migration may
+   * remove a redundant normalised column, but it may not rewrite the filing
+   * shape or mix grading state into the trace row.
    */
-  it("leaves spans and its view exactly as the first migration wrote them", async () => {
+  it("leaves the spans filing shape and turn view settled", async () => {
     const spans = await tableNamed("spans");
     expect(spans?.engine).toBe("MergeTree");
     expect(spans?.sorting_key).toBe(SORTING_KEY);

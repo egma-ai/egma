@@ -24,6 +24,7 @@ from egma_simulator.model import (
     ScriptedModel,
     split_sentences,
 )
+from egma_simulator.redaction import REDACTED
 
 
 def test_sentences_split_deterministically():
@@ -175,6 +176,33 @@ async def test_the_conclude_marker_is_read_and_stripped(model_stub):
     assert CONCLUDE_MARKER not in reply.text
 
 
+async def test_a_conclude_marker_without_words_is_a_model_failure(model_stub):
+    model_stub.answer_with(CONCLUDE_MARKER)
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key="k", model_name="m"
+    )
+    try:
+        with pytest.raises(ModelFailure, match="no words"):
+            await client.reply(system_and_history())
+    finally:
+        await client.close()
+
+
+async def test_a_provider_cannot_echo_its_key_in_a_successful_reply(model_stub):
+    secret = "model-key-must-not-be-spoken"
+    model_stub.answer_with(f"Provider echoed {secret}.")
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key=secret, model_name="m"
+    )
+    try:
+        reply = await client.reply(system_and_history())
+    finally:
+        await client.close()
+
+    assert secret not in reply.text
+    assert reply.text == f"Provider echoed {REDACTED}."
+
+
 async def test_a_refusing_provider_is_a_model_failure(model_stub):
     model_stub.answers.append(web.json_response({"error": "nope"}, status=401))
     client = OpenAICompatibleModel(
@@ -186,6 +214,24 @@ async def test_a_refusing_provider_is_a_model_failure(model_stub):
     finally:
         await client.close()
     assert "401" in str(failure.value)
+
+
+async def test_a_provider_cannot_echo_its_key_into_a_model_failure(model_stub):
+    secret = "model-key-must-not-enter-tracing"
+    model_stub.answers.append(
+        web.json_response({"error": f"provider echoed {secret}"}, status=401)
+    )
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key=secret, model_name="m"
+    )
+    try:
+        with pytest.raises(ModelFailure) as failure:
+            await client.reply(system_and_history())
+    finally:
+        await client.close()
+
+    assert secret not in str(failure.value)
+    assert REDACTED in str(failure.value)
 
 
 async def test_an_unreadable_answer_is_a_model_failure(model_stub):

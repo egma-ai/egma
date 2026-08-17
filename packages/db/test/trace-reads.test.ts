@@ -96,8 +96,6 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     toolResult: "",
     providerCallId: "room-1",
     connectionType: "livekit",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     runId: "",
     agentId: "",
     agentVersionId: "",
@@ -402,6 +400,87 @@ describe("a span whose parent never arrived", () => {
   });
 });
 
+describe("changed evidence that reuses span ids", () => {
+  const REUSED = "abab1111111111111111111111111111";
+  const root = "dadadadadadadada";
+  const turn = "dbdbdbdbdbdbdbdb";
+  const child = "dcdcdcdcdcdcdcdc";
+
+  beforeAll(async () => {
+    await appendSpans(at(acme, SUPPORT), [
+      span({
+        traceId: REUSED,
+        spanId: root,
+        name: "root-original",
+        payload: '{"revision":1}',
+      }),
+      span({
+        traceId: REUSED,
+        spanId: turn,
+        parentSpanId: root,
+        name: "user_turn",
+        kind: "turn:human",
+        text: "original evidence",
+      }),
+    ]);
+    await appendSpans(at(acme, SUPPORT), [
+      span({
+        traceId: REUSED,
+        spanId: root,
+        name: "root-changed",
+        payload: '{"revision":2}',
+      }),
+      span({
+        traceId: REUSED,
+        spanId: turn,
+        parentSpanId: root,
+        name: "user_turn",
+        kind: "turn:human",
+        text: "changed evidence",
+      }),
+    ]);
+    await appendSpans(at(acme, SUPPORT), [
+      span({
+        traceId: REUSED,
+        spanId: child,
+        parentSpanId: root,
+        name: "shared-child",
+        kind: "model",
+      }),
+    ]);
+    // The changed block is different evidence, so both reused-id rows exist in
+    // storage and this suite can prove that the reader does not collapse them.
+    // Force the parts together. The response order must come from stored
+    // content, not whichever source part ClickHouse happens to read first.
+    await store.command("optimize table spans final");
+  });
+
+  it("returns every stored row in a stable tree instead of collapsing by span id", async () => {
+    const first = await readTrace(at(acme, SUPPORT), REUSED, {
+      window: WINDOW,
+    });
+    const second = await readTrace(at(acme, SUPPORT), REUSED, {
+      window: WINDOW,
+    });
+
+    expect(second).toEqual(first);
+    expect(first?.spanCount).toBe(5);
+    expect(everySpanOf(first)).toHaveLength(5);
+    expect(first?.turns.map((each) => each.text).sort()).toEqual([
+      "changed evidence",
+      "original evidence",
+    ]);
+    expect(first?.spans.map((each) => each.name)).toEqual([
+      "root-original",
+      "root-changed",
+    ]);
+    expect(first?.spans[0]?.spans.map((each) => each.name)).toEqual([
+      "shared-child",
+    ]);
+    expect(first?.spans[1]?.spans).toEqual([]);
+  });
+});
+
 /**
  * Spans that point at each other, which is what a truncated exporter buffer and
  * a hand-written client both eventually produce.
@@ -415,6 +494,7 @@ describe("a span whose parent never arrived", () => {
 describe("a parent cycle longer than one span", () => {
   const CYCLED = "eeee1111111111111111111111111111";
   const DESCENDED = "ffff1111111111111111111111111111";
+  const REUSED_IN_CYCLE = "eded1111111111111111111111111111";
 
   beforeAll(async () => {
     // Two spans, each naming the other as its parent.
@@ -463,6 +543,41 @@ describe("a parent cycle longer than one span", () => {
         startedAtMicroseconds: BigInt(WHEN.getTime() + 2000) * 1000n,
       }),
     ]);
+
+    // A later row reuses the root id inside one branch. Reaching that row also
+    // reaches the root's second child. A walk that filters all root children
+    // before it descends would therefore append that second child twice.
+    const repeatedRoot = spanId();
+    const firstChild = spanId();
+    const secondChild = spanId();
+    await appendSpans(at(acme, SUPPORT), [
+      span({
+        traceId: REUSED_IN_CYCLE,
+        spanId: repeatedRoot,
+        name: "root-original",
+      }),
+      span({
+        traceId: REUSED_IN_CYCLE,
+        spanId: firstChild,
+        parentSpanId: repeatedRoot,
+        name: "first-child",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 1000) * 1000n,
+      }),
+      span({
+        traceId: REUSED_IN_CYCLE,
+        spanId: secondChild,
+        parentSpanId: repeatedRoot,
+        name: "second-child",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 2000) * 1000n,
+      }),
+      span({
+        traceId: REUSED_IN_CYCLE,
+        spanId: repeatedRoot,
+        parentSpanId: firstChild,
+        name: "root-id-reused-in-cycle",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 3000) * 1000n,
+      }),
+    ]);
   });
 
   it("is read back whole rather than vanishing out of the transcript", async () => {
@@ -492,6 +607,21 @@ describe("a parent cycle longer than one span", () => {
       "agent_session",
       "tts_request",
       "user_turn",
+    ]);
+  });
+
+  it("returns each row once when a cycle also reuses an id", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), REUSED_IN_CYCLE, {
+      window: WINDOW,
+    });
+
+    expect(detail?.spanCount).toBe(4);
+    expect(everySpanOf(detail)).toHaveLength(4);
+    expect(everySpanOf(detail).map((each) => each.name).sort()).toEqual([
+      "first-child",
+      "root-id-reused-in-cycle",
+      "root-original",
+      "second-child",
     ]);
   });
 });
@@ -610,6 +740,121 @@ describe("a duration that the reading arithmetic cannot hold", () => {
       0n,
     );
     expect(trace?.endedAt).toBe(trace?.startedAt);
+  });
+});
+
+/**
+ * The reported-measurements block, which is the one thing a read takes off a
+ * payload.
+ *
+ * Everything else about the payload is deliberately not returned — it is the
+ * largest column on the row and nothing renders it — so what is asked here is
+ * that the exception stays the size it was argued to be: one root row, one
+ * egma-owned key, and an answer of `undefined` for every shape that is not a
+ * block. Never a throw, because a vendor's bad write must not cost a customer
+ * their transcript.
+ */
+describe("the block a platform reported on the root span", () => {
+  const REPORTED = "0a0a1111111111111111111111111111";
+  const UNREPORTED = "0b0b1111111111111111111111111111";
+  const MALFORMED = "0c0c1111111111111111111111111111";
+
+  /** A root the way a platform normalizer files one: parentless, and carrying
+   * the egma-owned corner of an otherwise vendor-owned payload. */
+  function aReportedRoot(traceId: string, normalised: unknown): NewSpan {
+    return span({
+      traceId,
+      spanId: spanId(),
+      parentSpanId: "",
+      name: "retell_call",
+      kind: "conversation",
+      payload: JSON.stringify({
+        call_id: "call_c0ffee",
+        recording_url: "https://example.invalid/one.wav",
+        egma_normalised: normalised,
+      }),
+    });
+  }
+
+  beforeAll(async () => {
+    await appendSpans(at(acme, SUPPORT), [
+      aReportedRoot(REPORTED, {
+        degraded: false,
+        reported_measurements: {
+          version: 1,
+          reported_by: "retell",
+          measurements: [
+            {
+              measure: "turn_response_latency",
+              unit: "milliseconds",
+              values: [517, 2145],
+            },
+          ],
+        },
+      }),
+      // The same payload corner without a block in it, which is every trace
+      // filed before a platform reported anything.
+      aReportedRoot(UNREPORTED, { degraded: false }),
+      // And a block of a version this code has never seen, which is the shape a
+      // reader has to be able to tell from a block it simply predates.
+      aReportedRoot(MALFORMED, {
+        reported_measurements: { version: 99, reported_by: "", measurements: 7 },
+      }),
+    ]);
+  });
+
+  it("is read back with the root span it rode in on", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), REPORTED, {
+      window: WINDOW,
+    });
+
+    expect(detail?.reported).toEqual({
+      spanId: detail?.spans[0]?.spanId,
+      reportedBy: "retell",
+      measurements: [
+        {
+          measure: "turn_response_latency",
+          unit: "milliseconds",
+          values: [517, 2145],
+        },
+      ],
+    });
+  });
+
+  it("is absent on a root that carries no block, and the trace reads as ever", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), UNREPORTED, {
+      window: WINDOW,
+    });
+
+    expect(detail?.spanCount).toBe(1);
+    expect(detail?.reported).toBeUndefined();
+  });
+
+  it("is absent rather than fatal when the block is one nothing can read", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), MALFORMED, {
+      window: WINDOW,
+    });
+
+    // The transcript is unharmed, which is the half that was never in doubt.
+    expect(detail?.spanCount).toBe(1);
+    expect(detail?.reported).toBeUndefined();
+  });
+
+  /**
+   * The payload itself is still not returned. One key of one row is the whole
+   * exception, and a span in the transcript carries no payload at all — which
+   * is what keeps a trace read from shipping megabytes of a vendor's own
+   * document to a page that renders none of it.
+   */
+  it("does not put the payload on a span, block or no block", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), REPORTED, {
+      window: WINDOW,
+    });
+
+    for (const each of everySpanOf(detail)) {
+      expect(Object.keys(each)).not.toContain("payload");
+      expect(JSON.stringify(each)).not.toContain("recording_url");
+    }
   });
 });
 

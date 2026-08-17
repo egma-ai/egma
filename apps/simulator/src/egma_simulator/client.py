@@ -193,24 +193,30 @@ class ControlPlaneClient:
         A 200 may still carry a partial success, which is how the
         specification says an ingest reports data it will not store.
         Nothing is retried on it — the specification is explicit that
-        rejected data must not be — but the count is said out loud, because
-        evidence quietly dropped is exactly what a verdict must never rest
-        on.
+        rejected data must not be. It is still a final rejection to the
+        ordered reporter, because a terminal simulation may not claim that
+        incomplete evidence landed.
         """
         body = await self._post_document(
-            f"{self._base_url}{OTLP_TRACES_PATH}", serialized
+            f"{self._base_url}{OTLP_TRACES_PATH}",
+            serialized,
+            accepted_statuses=(200, 204),
         )
         rejected, why = _partial_success(body)
         if rejected:
-            logger.error(
-                "the ingest refused %d of %s's spans and will refuse them "
-                "again, so they are not resent: %s",
-                rejected,
-                simulation_id,
-                why or "it gave no reason",
+            raise DocumentRejected(
+                f"the ingest refused {rejected} of {simulation_id}'s spans "
+                "and will refuse them again, so they are not resent: "
+                f"{why or 'it gave no reason'}"
             )
 
-    async def _post_document(self, url: str, serialized: bytes) -> str:
+    async def _post_document(
+        self,
+        url: str,
+        serialized: bytes,
+        *,
+        accepted_statuses: tuple[int, ...] = (200, 202, 204),
+    ) -> str:
         """One document, posted as the bytes it already is.
 
         Both directions the ordered sender carries come through here, so
@@ -226,7 +232,7 @@ class ControlPlaneClient:
                 headers={"content-type": "application/json"},
                 timeout=self._brisk_timeout,
             ) as response:
-                if response.status in (200, 202, 204):
+                if response.status in accepted_statuses:
                     return await response.text()
                 text = await response.text()
                 if response.status in (408, 429):
@@ -242,23 +248,49 @@ def _partial_success(body: str) -> tuple[int, str]:
     """What an OTLP answer says it refused, if it says anything at all.
 
     An empty body is the whole batch landed, which is the ordinary case
-    and the one worth staying quiet about. Anything unreadable is treated
-    the same way: the status already said the request was accepted, and
-    inventing a refusal out of a body nobody can parse would be worse than
-    trusting the code.
+    and the one worth staying quiet about. A non-empty body must be a readable
+    OTLP response: terminal delivery needs proof that its rejected count is
+    zero, not a guess from bytes the client could not understand.
     """
     if not body.strip():
         return 0, ""
     try:
         document = json.loads(body)
-    except ValueError:
+    except ValueError as error:
+        raise TransientDeliveryFailure(
+            "the ingest returned an unreadable OTLP success response"
+        ) from error
+    if not isinstance(document, dict):
+        raise TransientDeliveryFailure(
+            "the ingest returned an unreadable OTLP success response"
+        )
+    if "partialSuccess" not in document:
         return 0, ""
-    partial = document.get("partialSuccess") if isinstance(document, dict) else None
+    partial = document["partialSuccess"]
     if not isinstance(partial, dict):
-        return 0, ""
-    try:
-        rejected = int(partial.get("rejectedSpans", 0))
-    except (TypeError, ValueError):
-        rejected = 0
+        raise TransientDeliveryFailure(
+            "the ingest returned an unreadable OTLP partial-success response"
+        )
+    raw_rejected = partial.get("rejectedSpans", 0)
+    if isinstance(raw_rejected, bool):
+        raise TransientDeliveryFailure(
+            "the ingest returned an unreadable OTLP rejected-span count"
+        )
+    if isinstance(raw_rejected, int):
+        rejected = raw_rejected
+    elif (
+        isinstance(raw_rejected, str)
+        and raw_rejected.isascii()
+        and raw_rejected.isdigit()
+    ):
+        rejected = int(raw_rejected)
+    else:
+        raise TransientDeliveryFailure(
+            "the ingest returned an unreadable OTLP rejected-span count"
+        )
+    if rejected < 0:
+        raise TransientDeliveryFailure(
+            "the ingest returned an unreadable negative OTLP rejected-span count"
+        )
     message = partial.get("errorMessage")
     return rejected, message if isinstance(message, str) else ""

@@ -144,8 +144,8 @@
           "minimum": 0
         },
         "audio": {
-          "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
-          "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
+          "description": "The simulator-side recording when voice audio was captured; null when no recording was captured.",
+          "oneOf": [{ "$ref": "#/$defs/audio_recording" }, { "type": "null" }]
         },
         "provider_reference": { "$ref": "#/$defs/provider_reference" },
         "mock_tool_coverage": { "$ref": "#/$defs/mock_tool_coverage" }
@@ -183,8 +183,8 @@
           "minimum": 0
         },
         "audio": {
-          "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
-          "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
+          "description": "The simulator-side recording when voice audio was captured; null when no recording was captured.",
+          "oneOf": [{ "$ref": "#/$defs/audio_recording" }, { "type": "null" }]
         },
         "provider_reference": { "$ref": "#/$defs/provider_reference" },
         "mock_tool_coverage": { "$ref": "#/$defs/mock_tool_coverage" }
@@ -222,8 +222,8 @@
           "minimum": 0
         },
         "audio": {
-          "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
-          "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
+          "description": "The simulator-side recording when voice audio was captured; null when no recording was captured.",
+          "oneOf": [{ "$ref": "#/$defs/audio_recording" }, { "type": "null" }]
         },
         "provider_reference": { "$ref": "#/$defs/provider_reference" },
         "mock_tool_coverage": { "$ref": "#/$defs/mock_tool_coverage" }
@@ -235,7 +235,7 @@
       "minLength": 1
     },
     "mock_tool_coverage": {
-      "description": "Which of the agent's tools mock tools answered for during this simulation, and which reached their real implementations. The one terminal fact that may be omitted, and deliberately: absent means the agent was never asked what tools it has, so nothing was learned and nothing is claimed — which is the honest reading of every report written before this stamp existed, and of every connection egma stands outside the tool path of. Present with three empty lists means the asking happened and no tool came back, whether because nothing was listening or because there was nothing to list: a simulation no mock tool took any part in. A simulation whose tools were answered by mock tools and one whose tools ran for real are different units, exactly as two audio bands are, and comparing their numbers is invalid: this is where that is readable, on the simulation's own facts, with nothing else to consult and nothing editable to ask.",
+      "description": "Which of the agent's tools mock tools answered for during this simulation, and which reached their real implementations. The one terminal fact that may be omitted, and deliberately: absent means the agent was never asked what tools it has, so nothing was learned and nothing is claimed — which is the honest reading of every report written before this stamp existed, and of every connection egma stands outside the tool path of. Present with three empty lists means the asking happened and no tool came back, whether because nothing was listening or because there was nothing to list: a simulation no mock tool took any part in. A simulation whose tools were answered by mock tools and one whose tools ran for real are different units, so comparing their numbers is invalid: this is where that is readable, on the simulation's own facts, with nothing else to consult and nothing editable to ask.",
       "type": "object",
       "additionalProperties": false,
       "required": ["discovered", "covered", "uncovered"],
@@ -264,19 +264,14 @@
       "description": "The platform's own identifier for this exchange on the connection's side — a Retell chat id, a telephony provider's id for the dialed leg. The only join between egma's record and the agent's own telemetry, since no trace context crosses an audio channel. Null when the plug has none to offer.",
       "type": ["string", "null"]
     },
-    "audio_band": {
-      "description": "What the audio actually was, measured at execution and frozen here. The connection declares a band in its config, but connections are editable and unversioned — so the measured band lives on the simulation, or a later edit would silently rewrite what old results meant.",
+    "audio_recording": {
+      "description": "The canonical simulator-side recording of a voice simulation. Its file header carries the sample rate needed for playback; the report stores only the recording reference.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["measured_sample_rate_hz", "recording"],
+      "required": ["recording"],
       "properties": {
-        "measured_sample_rate_hz": {
-          "description": "The sample rate the simulator actually heard, negotiated or measured, never copied from configuration. 8 kHz telephony and 48 kHz WebRTC are different units: the narrow band strips what audio graders read and inflates every latency number, so scores across bands are not comparable.",
-          "type": "integer",
-          "minimum": 1
-        },
         "recording": {
-          "description": "An opaque reference to the dual-channel recording the simulator wrote to the blob store — one side per channel, so each speaker can be heard alone when a transcript looks wrong. Resolved by the control plane; never a URL, never carries how to fetch it.",
+          "description": "An opaque reference to the Pipecat-captured, dual-channel recording the simulator wrote to the blob store — human on the first channel and agent on the second, so each speaker can be heard alone when a transcript looks wrong. Resolved by the control plane; never a URL, never carries how to fetch it.",
           "type": "string",
           "minLength": 1
         }

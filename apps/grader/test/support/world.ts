@@ -18,6 +18,8 @@ import {
   readVerdicts,
   recordProductionTraces,
   PREDEFINED_GRADERS,
+  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
+  reportedMeasurementsPayload,
   seedGraderLibrary,
   seedRunningGraders,
   setJudgeConfiguration,
@@ -28,6 +30,7 @@ import {
   type ExpectedBehavior,
   type GradingJob,
   type NewSpan,
+  type ReportedMeasurement,
   type UseLibraryEntry,
   type RecordedVerdict,
   type Simulation,
@@ -632,8 +635,6 @@ function simulationSpan(
     // instrumentation's scope name, and only LiveKit's is one egma knows —
     // this world reaches its agent over a Retell chat connection.
     connectionType: "",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     // Resolved by the door from egma's own row, never from the payload.
     runId: simulation.runId,
     agentId: simulation.agentId,
@@ -711,6 +712,33 @@ export async function conductProductionTrace(
      * decision to take, and the day it does, these rows are what arrive.
      */
     readonly measured?: Readonly<Record<string, readonly number[]>> | undefined;
+    /**
+     * What the **agent platform** measured about this conversation, filed the
+     * way a managed platform's normalizer files it: the neutral block on the
+     * root span's payload, and placeholder turns beside it — every one opening
+     * at the conversation's own start, lasting nothing, with no speech inside.
+     *
+     * **The two go together because on a real platform they always do.** Retell
+     * publishes no per-turn timing, so `normaliseRetellCall` has no instant to
+     * open a turn at except the one the conversation opened at, and no width to
+     * give it — and the block exists precisely because there is nothing else to
+     * measure from. A harness writing the block onto turns egma could read the
+     * geometry of would be describing a conversation no platform produces: the
+     * derivation would answer first and outrank the block, and this option
+     * would quietly stop being about the source it names.
+     *
+     * The instants matter as much as the widths, and that is the sharp edge.
+     * Zero-width turns at instants two seconds apart are **chat**-shaped —
+     * really observed, and the derivation is right to measure the gaps between
+     * them. Only turns that share the conversation's own start are the
+     * placeholder signature the guard is allowed to read as "never timed".
+     */
+    readonly reportedByPlatform?:
+      | {
+          readonly by: string;
+          readonly measurements: readonly ReportedMeasurement[];
+        }
+      | undefined;
   } = {},
 ): Promise<ConductedTrace> {
   nextTraceOrdinal += 1;
@@ -733,6 +761,8 @@ export async function conductProductionTrace(
       ...over,
     });
 
+  const reportedByPlatform = conducting.reportedByPlatform;
+
   said.forEach((turn, at) => {
     const turnSpan = spanning({
       name: turn.speaker === "human" ? "user_turn" : "agent_turn",
@@ -740,6 +770,22 @@ export async function conductProductionTrace(
       text: turn.text,
       startedAtMicroseconds:
         BigInt(startedAt.getTime()) * 1_000n + BigInt(at) * 2_000_000n,
+      // **The placeholder signature, exactly as `normaliseRetellCall` writes
+      // it: every turn opens at the conversation's own start and lasts
+      // nothing.** Not merely zero-width — zeroing the width while leaving the
+      // turns two seconds apart makes a *chat*-shaped conversation, whose
+      // instants were really observed and whose gaps the derivation is right to
+      // measure. It would answer 2000 ms here, outrank the block, and this
+      // option would silently stop being about the source it names. The two
+      // facts travel together because on a real platform they always do:
+      // Retell publishes no per-turn timing, so there is no instant to open a
+      // turn at except the one the conversation opened at.
+      ...(reportedByPlatform === undefined
+        ? {}
+        : {
+            startedAtMicroseconds: BigInt(startedAt.getTime()) * 1_000n,
+            durationNanoseconds: 0n,
+          }),
     });
     spans.push(turnSpan);
 
@@ -791,6 +837,25 @@ export async function conductProductionTrace(
         name: "agent_session",
         kind: "root",
         durationNanoseconds: 20_000_000_000n,
+        // The block rides here, under the egma-owned corner of a payload that
+        // is otherwise the vendor's own document — written through the
+        // contract's own writer, so this harness cannot spell it differently
+        // from the normalizer it stands in for.
+        ...(reportedByPlatform === undefined
+          ? {}
+          : {
+              payload: JSON.stringify({
+                call_id: `platform-${traceId.slice(-6)}`,
+                egma_normalised: {
+                  degraded: false,
+                  [REPORTED_MEASUREMENTS_PAYLOAD_KEY]:
+                    reportedMeasurementsPayload(
+                      reportedByPlatform.by,
+                      reportedByPlatform.measurements,
+                    ),
+                },
+              }),
+            }),
       }),
     ]);
   }
@@ -844,8 +909,6 @@ function productionSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
     toolResult: "",
     providerCallId: `room-${traceId.slice(-6)}`,
     connectionType: "livekit",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     // Empty, as the door writes them: a trace arriving there was not started by
     // egma, so there is no run and no agent behind it.
     runId: "",

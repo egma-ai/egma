@@ -39,11 +39,11 @@ touching the others:
   the agent's worker dispatched into it. To write the next, read the
   `plugs/__init__.py` docstring; it is the entire brief.
 - **The media backends** (`media/`) — how a voice exchange's audio
-  travels. One driver per way in, behind a four-method seam: open a
-  session, dial, wait until somebody answers, tear it down. `livekit.py`
-  places real phone calls over a SIP trunk the deployment brings from any
-  carrier; `livekit_room.py` holds an exchange in the customer's own room
-  and dispatches their agent into it, where "dial" means asking for a
+  travels. One driver per way in, behind a four-method seam: create a
+  Pipecat transport, dial, wait until somebody answers, tear it down.
+  `livekit.py` places real phone calls over a SIP trunk the deployment
+  brings from any carrier; `livekit_room.py` holds an exchange in the
+  customer's own room and dispatches their agent into it, where "dial" means asking for a
   worker rather than placing a call; `scripted.py` is the local stand-in
   that answers a call nobody placed, and is what CI runs on. The two that
   join a room share `room.py`, which is the joining itself. Nothing above
@@ -66,9 +66,9 @@ touching the others:
 One pipeline is assembled per simulation from its own spec and torn down
 after (`pipeline.py`). Modality selects the legs, and the connection
 selects who conducts. A chat simulation is the plug and the brain, walked
-a turn at a time. A voice simulation on a full-duplex line is the same
-brain with the speech legs around it, conducted by a real Pipecat
-pipeline (`conductor.py`): both directions of the line are open at once,
+a turn at a time. A voice simulation on a full-duplex transport is the
+same brain with the speech legs around it, conducted by a real Pipecat
+pipeline (`conductor.py`): both directions of the transport are open at once,
 the detector and the turn model decide where turns fall, and nothing
 announces a turn because nothing announces one on a real call. A spec
 naming a connection type the simulator holds no plug for is refused out
@@ -80,12 +80,6 @@ plane's to sweep.
 The same transcript, ending and measurements a chat simulation records,
 plus what only audio can owe:
 
-- **The measured band.** Connections declare a band; platforms carry what
-  they can. What the record keeps is the band the audio actually flowed
-  at, stamped at execution — connections are editable and unversioned, so
-  a band copied from one would let a later edit rewrite what an old result
-  meant. 8 kHz telephony and 48 kHz WebRTC are different units: scores
-  across them are not comparable.
 - **A dual-channel recording**, the persona on channel 0 and the agent on
   channel 1, so either side can be heard alone when a transcript looks
   wrong. It is written through the blob seam (`blob.py`) — one interface
@@ -124,8 +118,8 @@ has no place to put them even by accident.
 
 ## The conversation, as spans
 
-Every turn, tool call and measurement is authored as an OpenTelemetry
-span (`spans.py`) and streamed to the control plane's OTLP ingest while
+The OpenTelemetry SDK (`spans.py`) authors every turn, tool call, and
+measurement and streams them to the control plane's OTLP ingest while
 the simulation runs — the same door a customer's own agent exports to, so
 a simulation is readable the way a production trace is readable, live and
 partial included. The vocabulary — the scope, the span names, the
@@ -136,12 +130,13 @@ pinned as golden fixtures beside it.
 
 Three things about it are worth knowing before reading the code:
 
-- **Delivery is the reporter's, not an exporter's.** Span batches go
+- **Delivery is the reporter's.** The SDK's official OTLP encoder feeds span batches
   through the same write-ahead log and the same single ordered sender the
-  lifecycle documents ride. So a resend is byte-identical with its ids,
-  which lets the store dedup on them, and the terminal report leaves only
-  after every span before it landed — when the control plane records a
-  simulation terminal, the conversation is already stored.
+  lifecycle documents ride. A resend is byte-identical, which lets ClickHouse
+  suppress a recent exact block repeat. Later, regrouped, reordered, or changed
+  blocks can append. The reporter creates the terminal report only after the
+  ingest accepts every earlier span, so the control plane can read the trace
+  when it records the terminal state.
 - **A timing span's own duration is the measurement.** A span named for a
   measure opens one measurement before the moment it was taken, so the
   number is the interval in nanoseconds and there is no second field to
@@ -152,9 +147,10 @@ Three things about it are worth knowing before reading the code:
   counted in samples, never stamped off a clock — so whether two turns
   crossed is a fact about what was said rather than about when code ran.
 
-Pipecat's own auto-tracing stays off. Its turn spans carry no text, cannot
-represent two people speaking at once, and ride the stock lossy pipeline;
-what the record needs is authored where the conversation is observed.
+Pipecat's native service tracing is on and keeps its own scope and fields.
+Pipecat interaction-cycle turn tracking stays off. Only Egma's
+`human_turn` and `agent_turn` spans make transcript lines. Egma authors those
+spans where it observes the exchange, so they can represent overlap.
 
 The simulator reaches the ingest at the control-plane URL it already has.
 There is no second address to configure.
@@ -189,7 +185,7 @@ dial Retell and fails at the door, because the key in a fixture is a
 placeholder, and so does the `livekit` one, whose server is an example
 hostname; the `phone` fixture is refused with a clear log
 line naming `EGMA_SIMULATOR_MEDIA_BACKEND`, because a local run
-configures no bridge to place a call through.
+configures no media backend to place a call through.
 `GET /workbench/records` returns the same as JSON;
 `POST /workbench/simulations/<id>/cancel` flags a cancel directive for the
 next heartbeat; `POST /workbench/specs` queues another spec while
@@ -277,8 +273,8 @@ uv run egma-simulator
 ```
 
 A connection's config carries the number and nothing secret: the trunk
-and the bridge belong to the deployment, which is why they arrive here
-and never in a spec. Anything missing stops the process on its first
+and the media backend belong to the deployment, which is why they arrive
+here and never in a spec. Anything missing stops the process on its first
 line naming the variable, the way every other required-if-enabled
 variable does — including a trunk given only half a credential, since a
 carrier answers half a username-and-password the same 403 it answers a
@@ -294,12 +290,10 @@ network. `egma-workbench --phone-number +1...` is the other half of the
 local demo — it points the phone fixture at a real agent instead of the
 placeholder it carries, and queues nothing else.
 
-A phone call is carried at 8 kHz, always, and no connection can ask for
-another band. That is what the public telephone network gives, and a band
-a spec could choose would be a band declared rather than one the audio
-really had — so the number stamped on a result is a band that audio
-genuinely carried, and a narrowband call can never read as a wideband
-one.
+Pipecat and the transport choose the media rate. Egma does not force a
+phone processing rate or store a separate sample-rate field. The
+recording's WAV header tells a player how to play the file; it does not
+describe the connection's codec or acoustic quality.
 
 ## Configuration
 
@@ -307,9 +301,9 @@ Everything arrives as environment variables.
 
 **The provider settings in this table are a fallback, and a deployment does
 not use them.** Which model the persona thinks with, what it speaks and hears
-with, which bridge places a call and which carrier trunk it goes over are the
-*platform's* settings: the control plane stores them sealed and hands them to
-this process on the work order it claims, read afresh for every simulation. A
+with, which media backend places a call and which carrier trunk it goes over
+are the *platform's* settings: the control plane stores them sealed and hands
+them to this process on the work order it claims, read afresh for every simulation. A
 work-order value replaces whatever this environment said, and no compose file
 passes any of them — so on a real deployment there is nothing here to set and
 nothing to keep in step. They stay readable for the one reader who has no
@@ -340,7 +334,7 @@ workbench story and every contributor's checkout run.
 | `EGMA_SIMULATOR_TTS_MODEL` | per provider | Which model the speaking leg asks for. Unset, each leg asks for its own provider's default: `gpt-4o-mini-tts` for `openai`, `sonic-3.5` for `cartesia`. |
 | `EGMA_SIMULATOR_TTS_VOICE` | per provider | Which voice a persona speaks with when its own traits name none. A voice identifier belongs to the provider that minted it, so unset means each leg uses its own provider's default voice. |
 | `EGMA_SIMULATOR_VAD_PROVIDER` | `scripted` | What hears the agent start and stop speaking: `scripted`, which reads the test tone exactly, or `silero`. Needs no key either way — Silero ships inside the pinned pipecat wheel and downloads nothing. |
-| `EGMA_SIMULATOR_MEDIA_BACKEND` | (none) | Which bridge places a phone call: `livekit`, or `scripted` for the local stand-in that places none. Unset, the simulator places no calls and says so when a simulation names a number. |
+| `EGMA_SIMULATOR_MEDIA_BACKEND` | (none) | Which media backend places a phone call: `livekit`, or `scripted` for the local stand-in that places none. Unset, the simulator places no calls and says so when a simulation names a number. |
 | `EGMA_SIMULATOR_LIVEKIT_URL` | (required for `livekit`) | The LiveKit server — self-hosted or Cloud, only the URL differs. |
 | `EGMA_SIMULATOR_LIVEKIT_API_KEY` | (required for `livekit`) | The LiveKit API key. |
 | `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | (required for `livekit`) | The LiveKit API secret. Never logged. |
@@ -424,11 +418,10 @@ stays honestly silent; and a planted credential appears in no log, report,
 or write-ahead log.
 
 Voice is proved the same way, off the same records: a voice fixture yields
-a transcript, an ending, a band that is the one measured rather than the
-one configured, and a reference — which is then opened, and each channel
-transcribed, to show one speaker to a channel. One scenario run over chat
-and over voice produces one transcript, which is the diagnostic the
-modality split exists for.
+a transcript, an ending and a recording reference. The recording is then
+opened and each channel is transcribed to show one speaker to a channel.
+One scenario run over chat and over voice produces one transcript, which
+is the diagnostic the modality split exists for.
 
 The whole suite runs on the scripted model client and the deterministic
 speech legs — no model, no provider, no network, so nothing can flake.
@@ -444,7 +437,7 @@ where a refused key and an endpoint nobody answers each end the simulation
 
 The `phone` plug converses through the scripted media backend the same
 way: a spec naming a number yields a transcript, an ending, per-turn
-timings, a measured band and a recording, with no LiveKit and no trunk
+timings and a recording, with no LiveKit and no trunk
 anywhere. Its failure paths are the point of the plug, so each is proved
 too — busy, no answer, declined, a carrier that failed, and a trunk that
 cannot be used at all — each ending `failed` with a reason naming what
@@ -541,9 +534,9 @@ already sets, and a trunk arrives either as `TEST_SIP_TRUNK_ID` or inline
 as `TEST_SIP_TRUNK_ADDRESS` with `TEST_SIP_TRUNK_USERNAME` and
 `TEST_SIP_TRUNK_PASSWORD`. What it asserts is structure and not content:
 a live agent says different words every time, so it checks that a
-conversation happened, that it ended honestly, that the band was
-measured, that the recording resolves with both channels carrying sound,
-and that no credential reached a single byte the simulator wrote.
+conversation happened, that it ended honestly, that the recording
+resolves with both channels carrying sound, and that no credential
+reached a single byte the simulator wrote.
 
 ## Layout
 
@@ -561,25 +554,24 @@ src/egma_simulator/
                   plug author's whole brief; scripted.py chats,
                   loopback.py speaks, retell.py is the first real
                   platform, phone.py dials a number, and livekit.py holds
-                  an exchange in the agent's own room. media_line.py is
-                  how any live line is carried a slice at a time.
-  media/          The media-backend seam: how a voice exchange's audio
-                  travels. Its __init__ docstring is the driver author's
-                  whole brief; livekit.py places real calls over a SIP
+                  an exchange in the agent's own room.
+  media/          The media-backend seam: how a voice exchange's Pipecat
+                  transport is created. Its __init__ docstring is the
+                  driver author's whole brief; livekit.py places real calls over a SIP
                   trunk, livekit_room.py dispatches an agent into a room,
                   room.py is the joining the two of them share, and
                   scripted.py is the one CI converses through.
   pipeline.py     One pipeline per simulation, built from its spec: which
                   legs the modality selects, which of the two conductors
-                  it gets, and what the audio measured.
-  conductor.py    A voice simulation on a full-duplex line, conducted by a
-                  real Pipecat pipeline: the detector, the turn model, the
-                  brain, the legs, and the audio timeline the record is
+                  it gets, and what evidence it records.
+  conductor.py    A voice simulation on a full-duplex transport, conducted
+                  by a real Pipecat pipeline: the detector, the turn model,
+                  the brain, the legs, and the audio timeline the record is
                   anchored to.
   speech.py       The speech legs, and the deterministic pair CI speaks
                   and listens with — no corpus, no provider, no network.
-  recording.py    One simulation's dual-channel recording, and the two
-                  audio facts a report carries about it.
+  recording.py    One simulation's dual-channel recording and the
+                  recording reference a report carries.
   blob.py         Where a recording is written and what a report points
                   at: one key-confining seam, an object store and a
                   directory behind it.

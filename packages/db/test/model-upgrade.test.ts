@@ -155,8 +155,14 @@ beforeAll(async () => {
 
   // The schema exactly as the release before the upgrade shipped it.
   const migrations = await readMigrations();
-  const subject = migrations.findIndex((one) => one.name.startsWith("0037_"));
-  if (subject === -1) throw new Error("0037 is missing");
+  const subject = migrations.findIndex((one) =>
+    one.name.endsWith("_model_upgrade.sql"),
+  );
+  // Found by name rather than by number, because a number is a merge away from
+  // moving: this effort's migrations were renumbered when main's own landed
+  // first, and a test pinned to `0037_` would have started building the
+  // "previous release" at the wrong file rather than failing.
+  if (subject === -1) throw new Error("the model-upgrade migration is missing");
   for (const migration of migrations.slice(0, subject)) {
     await writeFile(path.join(asItWas, migration.name), migration.sql);
   }

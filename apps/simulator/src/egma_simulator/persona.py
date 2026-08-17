@@ -98,7 +98,20 @@ class Persona:
         self._system_prompt = compose_system_prompt(traits, scenario_instructions)
         self._model = model
 
+    @property
+    def model_name(self) -> str:
+        """The provider model label Pipecat records on its native span."""
+        return self._model.model_name
+
+    def messages(self, history: Sequence[Turn]) -> list[dict[str, str]]:
+        """The exact provider input for this point in the conversation."""
+        return messages_for(self._system_prompt, history)
+
+    async def reply_to(self, messages: list[dict[str, str]]) -> PersonaReply:
+        """Ask the configured model without changing its provider contract."""
+        return await self._model.reply(messages)
+
     async def next_turn(self, history: Sequence[Turn]) -> PersonaReply:
         """What the persona says next, given everything said so far —
         and whether, having said it, they consider the exchange concluded."""
-        return await self._model.reply(messages_for(self._system_prompt, history))
+        return await self.reply_to(self.messages(history))

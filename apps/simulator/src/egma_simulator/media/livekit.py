@@ -43,11 +43,10 @@ import logging
 
 from ..config import MediaSettings
 from ..redaction import SecretRegistry
-from . import ERROR, NOT_ANSWERED, MediaBackendError, sip_refusal
+from . import ERROR, NOT_ANSWERED, MediaBackendError, VoiceMedia, sip_refusal
 from .room import (
     QUOTED_REFUSAL_CHARS,
     JoinedRoom,
-    RoomSession,
     delete_room,
     fresh_room_name,
     room_token,
@@ -64,7 +63,6 @@ class LiveKitBackend:
         *,
         settings: MediaSettings,
         config: dict,
-        band_hz: int,
         caller_id: str | None,
     ) -> None:
         if config:
@@ -83,7 +81,6 @@ class LiveKitBackend:
                 "place calls through"
             )
         self._settings = settings
-        self._band_hz = band_hz
         self._caller_id = caller_id or settings.trunk_number
         # One registry, built from the same secrets the process-wide log
         # filter was given at startup, so what a driver quotes goes through
@@ -100,8 +97,8 @@ class LiveKitBackend:
         """The room this call is conducted in — one room, one call."""
         return self._room_name
 
-    async def create_session(self) -> RoomSession:
-        """Join the room, outbound, and answer with the call's audio."""
+    async def create_transport(self) -> VoiceMedia:
+        """Build the room transport for the conductor's Pipecat pipeline."""
         self._room = JoinedRoom(
             url=self._settings.livekit_url,
             token=room_token(
@@ -110,13 +107,15 @@ class LiveKitBackend:
                 self._room_name,
             ),
             room_name=self._room_name,
-            band_hz=self._band_hz,
             quotable=self._quotable,
         )
-        return await self._room.join()
+        return self._room.create_transport()
 
     async def dial(self, number: str) -> None:
         """Ask LiveKit to place the call. Returns as soon as it is away."""
+        if self._room is None:
+            raise MediaBackendError("a call was dialled before its room transport")
+        await self._room.wait_connected()
         self._dialling = asyncio.create_task(
             self._place(number), name=f"dial:{self._room_name}"
         )
@@ -154,10 +153,11 @@ class LiveKitBackend:
         room, self._room = self._room, None
         if room is None:
             return
+        joined = room.joined
         try:
             await room.leave()
         finally:
-            if room.joined:
+            if joined:
                 # No room was ever joined, so there is no room to delete
                 # and nobody to ask — a trunk refused at construction must
                 # not cost a call to LiveKit that could only fail.

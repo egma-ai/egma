@@ -46,7 +46,7 @@ from .pipeline import Assembled, assemble
 from .plugs import failed_ending, plug_for
 from .redaction import SecretRegistry
 from .reporting import Reporter
-from .spans import SpanEmitter
+from .spans import SpanEmitter, trace_id_for
 from .spec import SimulationSpec
 from .speech import SpeechProviders
 from .walk import Conducted, WalkControls, conduct
@@ -239,7 +239,12 @@ class RunningSimulation:
                 logger.exception(
                     "the heartbeat for %s ended badly", self.simulation_id
                 )
-            await self._reporter.close()
+            try:
+                await self._reporter.close()
+            finally:
+                # A failed final SDK-to-WAL handoff must not leave the
+                # process-wide provider holding this simulation's route.
+                self._spans.abort()
 
     async def _conduct_and_report(self) -> None:
         reporter = self._reporter
@@ -332,6 +337,7 @@ class RunningSimulation:
             # terminal state now would be a guess; a simulation whose
             # simulator vanished is answered by the control plane noticing
             # the heartbeats stop. Say nothing.
+            self._spans.abort()
             raise
         except Exception as fault:
             reason = self._secrets.redact(f"{type(fault).__name__}: {fault}")
@@ -341,17 +347,20 @@ class RunningSimulation:
             # that broke, and only the plug knows the difference. See
             # `plugs.failed_ending`.
             self._spans.sealed()
+            await reporter.drain()
             reporter.failed(failed_ending(fault), reason)
             return
 
-        self._report_terminal(conducted)
+        await self._report_terminal(conducted)
 
-    def _report_terminal(self, conducted: Conducted) -> None:
-        # Sealed first, always: the conversation's last spans are minted
-        # ahead of the terminal document, and the one ordered sender does
-        # the rest. That is what makes "the record is terminal" also mean
-        # "the evidence is stored".
+    async def _report_terminal(self, conducted: Conducted) -> None:
+        # Seal and wait first, always. The provider must hand every ended span
+        # to the WAL, and the ingest must accept every queued batch, before a
+        # terminal lifecycle document is even minted. A final rejection marks
+        # the reporter abandoned, so that later terminal stays in the WAL and
+        # never reaches the control plane.
         self._spans.sealed()
+        await self._reporter.drain()
         self._reporter.provider_reference = conducted.provider_reference
         if conducted.status == "canceled":
             self._reporter.canceled("cancel directive on heartbeat")
@@ -682,6 +691,19 @@ class SimulatorService:
                 continue
             except (KeyError, TypeError) as malformed:
                 logger.error("refusing an unreadable claimed spec: %r", malformed)
+                continue
+
+            try:
+                trace_id_for(spec.simulation_id)
+            except ValueError as invalid_identity:
+                # OpenTelemetry reserves its all-zero trace id. Refuse before
+                # submission, so no `running` event can claim that an
+                # evidence-complete simulation started under no valid trace.
+                logger.error(
+                    "refusing claimed spec %s: %s",
+                    spec.simulation_id,
+                    invalid_identity,
+                )
                 continue
 
             if plug_for(spec.connection_type) is None:

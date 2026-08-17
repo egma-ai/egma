@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 
-import type { NewSpan } from "@egma/db";
+import {
+  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
+  reportedMeasurementsPayload,
+  type NewSpan,
+  type ReportedMeasurement,
+} from "@egma/db";
+import { catalogedMeasure, isSpanDerivedMeasure } from "@egma/simulation-contract";
 
 /**
  * One Retell call object, as spans. The single place that reading happens.
@@ -96,9 +102,9 @@ export function traceIdFor(connectionId: string, callId: string): string {
  * A span id inside one trace: sixteen hex characters, derived from the trace
  * and the span's own place in it.
  *
- * Derived rather than random for the reason the trace id is: a replay after a
- * crash has to produce the identical batch, or ClickHouse's insert dedup has
- * nothing to recognise and the replay lands a second copy.
+ * Derived rather than random so a replay after a crash produces the same
+ * byte-identical block. ClickHouse can suppress that recent retry. This is not
+ * a global or permanent duplicate guarantee.
  */
 function spanIdFor(traceId: string, within: string): string {
   return createHash("sha256")
@@ -286,18 +292,148 @@ function turnsIn(call: RetellCall): {
 /**
  * What Retell measured about the whole conversation, gathered onto the root.
  *
- * These are aggregates — a p50, a p90, a maximum — and they describe the call
- * rather than any moment in it, so the root span is the only honest place for
- * them. Kept as the vendor's own names inside the root's payload, which is
- * where a reader who knows Retell will look; egma reads no meaning into them
- * here, because a measure egma computes is computed from spans by the one
- * shared measure module and never copied off a vendor's summary.
+ * Retell reports one object per stage — `e2e`, `llm`, `tts` and the rest — each
+ * holding its own summary (`p50`, `p90`, `p95`, `p99`, `min`, `max`, `num`)
+ * beside `values`, the individual measurements the summary was worked out from.
+ * They describe the call rather than any moment in it, so the root span is the
+ * only honest place for them. This keeps the whole object under the vendor's
+ * own names, verbatim, which is where a reader who knows Retell will look; the
+ * translation into egma's vocabulary is `reportedLatencyOf` below, and it reads
+ * `values` alone.
  */
 function latencyOf(call: RetellCall): Record<string, unknown> {
   const held = call["latency"];
   return typeof held === "object" && held !== null && !Array.isArray(held)
     ? (held as Record<string, unknown>)
     : {};
+}
+
+/**
+ * What this platform is called wherever egma names it: the connection type on
+ * every row it files, the prefix on a measure only Retell has a word for, and
+ * the reporter's name on the block. One spelling, in one place.
+ */
+const RETELL = "retell";
+
+/**
+ * What a stage egma has no catalog name for is counted in.
+ *
+ * The fallback only. A measure the catalog names takes the catalog's own unit,
+ * below, because a unit stated twice is a unit that comes to disagree — and a
+ * bound is read in whichever one the reader believed.
+ */
+const MILLISECONDS = "milliseconds";
+
+/**
+ * A catalog name, refused if the catalog has stopped saying it.
+ *
+ * The measure catalog owns the names egma computes and judges by, and this
+ * table is the one place a vendor's word is bound to one of them. A rename in
+ * the catalog with no rename here would leave Retell's numbers stored under a
+ * measure nothing reads — green, silent, and wrong, which is the exact failure
+ * the catalog exists to prevent. The sibling OTLP normalizer takes the same
+ * rule the other way round, by reading its span names out of the catalog rather
+ * than listing them again; a mapping cannot do that, so it says so instead, at
+ * the moment the table is built and loudly enough to stop a build.
+ */
+function catalogNamed(measure: string): string {
+  if (!isSpanDerivedMeasure(measure)) {
+    throw new Error(
+      `the measure catalog no longer names \`${measure}\`, so Retell's own ` +
+        `measurements would be reported under a measure nothing computes or ` +
+        `judges — rename it here in the same breath as the catalog`,
+    );
+  }
+  return measure;
+}
+
+/**
+ * Which of Retell's latency stages is which measure, and the only place that
+ * mapping is written down.
+ *
+ * **Same meaning, same name.** Retell's `e2e` is what the measure catalog calls
+ * `turn_response_latency` — how long the agent took to answer — so it is
+ * reported under the catalog's own name, and the day the measure module reads
+ * this block a developer's existing latency grader judges Retell traffic with
+ * nothing reconfigured. A stage the catalog has no counterpart for keeps a
+ * platform-prefixed name rather than a forced fit: the numbers are captured
+ * now, surfaced when a display asks for them, and promoted to a catalog name
+ * the day a second platform proves the general shape.
+ *
+ * Ordered, because the block's bytes are: the order here is the order the
+ * measurements are written in, and a replay has to produce the identical batch.
+ */
+const REPORTED_LATENCY_MEASURES: readonly (readonly [
+  stage: string,
+  measure: string,
+])[] = [
+  ["e2e", catalogNamed("turn_response_latency")],
+  ["llm", `${RETELL}/llm_latency`],
+  ["tts", `${RETELL}/tts_latency`],
+  ["asr", `${RETELL}/asr_latency`],
+  ["knowledge_base", `${RETELL}/knowledge_base_latency`],
+];
+
+/**
+ * Retell's own measurements as the neutral reported-measurements block, or
+ * `undefined` where Retell reported none worth carrying.
+ *
+ * **This is the only code that knows Retell's shape.** The block it builds is
+ * one contract for every platform, so the shared measure module — on the day it
+ * reads this block — reads a single shape for all of them, and the next
+ * platform is one more mapping table in its own normalizer rather than a second
+ * parser under the arithmetic every verdict rests on.
+ *
+ * **The individual measurements, never the summary.** Each stage's `values` are
+ * the measurements themselves, so "every measurement holds the bound, the worst
+ * turn decides" stays truthful and percentile math stays egma's own. A p50
+ * carried as a measurement would let one summarised turn pass a bound a real
+ * turn failed.
+ *
+ * Read defensively, because this is a vendor document: a stage that is missing,
+ * a `values` that is not a list, and an entry inside one that is not a finite
+ * number are each simply not there. A stage left with nothing is dropped, and a
+ * call whose every stage is dropped writes no block at all — absence being the
+ * honest shape for a conversation nobody measured.
+ *
+ * **A measurement that is not a number is dropped silently, and that is the
+ * deliberate line.** `degraded` is raised for a payload egma could not read as
+ * a conversation — no id, contradictory instants, a transcript that is not one
+ * — because that is a trace somebody has to look at. One unreadable entry in a
+ * stage's list is not: the rest of the list is still true, the vendor's whole
+ * document is still on the row verbatim, and flagging the trace would spend
+ * somebody's attention on a number egma never needed.
+ */
+function reportedLatencyOf(
+  call: RetellCall,
+): Record<string, unknown> | undefined {
+  const stages = latencyOf(call);
+  const measurements: ReportedMeasurement[] = [];
+
+  for (const [stage, measure] of REPORTED_LATENCY_MEASURES) {
+    const held = stages[stage];
+    if (typeof held !== "object" || held === null || Array.isArray(held)) continue;
+    const values = (held as Record<string, unknown>)["values"];
+    if (!Array.isArray(values)) continue;
+    // In the order Retell reported them, which is the order they happened in.
+    const kept = values.filter(
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value),
+    );
+    // Never an empty list: the contract says a measurement holds at least one
+    // number, and a stage that reported none is a stage nobody reported.
+    if (kept.length === 0) continue;
+    measurements.push({
+      measure,
+      // The catalog's own unit for a measure it names, so a bound and a
+      // measurement are read in one unit; the platform's honest word for a
+      // stage it does not name.
+      unit: catalogedMeasure(measure)?.unit ?? MILLISECONDS,
+      values: kept,
+    });
+  }
+
+  return reportedMeasurementsPayload(RETELL, measurements);
 }
 
 /** One span with every field stated, including the empty ones. */
@@ -316,8 +452,6 @@ function span(fields: Partial<NewSpan> & Pick<NewSpan, "traceId" | "spanId" | "n
     toolResult: "",
     providerCallId: "",
     connectionType: "",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     runId: "",
     agentId: "",
     agentVersionId: "",
@@ -331,9 +465,8 @@ function span(fields: Partial<NewSpan> & Pick<NewSpan, "traceId" | "spanId" | "n
  * One Retell call object as the spans that will be filed for it.
  *
  * `now` is injected so a payload with no timestamps normalises to the same
- * spans twice — the property the whole exactly-once protocol rests on, because
- * a replay has to produce a byte-identical batch for the store's insert dedup
- * to recognise it. Nothing else in here reads a clock.
+ * spans twice. A deterministic replay keeps the block byte-identical. Nothing
+ * else in here reads a clock.
  */
 export function normaliseRetellCall(
   call: RetellCall,
@@ -356,6 +489,7 @@ export function normaliseRetellCall(
   const startedAt = microseconds(times.startedAt);
   const endedAt = microseconds(times.endedAt);
   const environment = into.environment ?? "default";
+  const reported = reportedLatencyOf(call);
 
   const shared = {
     traceId,
@@ -392,6 +526,13 @@ export function normaliseRetellCall(
           degraded,
           disconnection_reason: text(call["disconnection_reason"]),
           latency: latencyOf(call),
+          // Under the contract's own key, never a spelling of egma's own: the
+          // read side looks the block up by the same constant. Absent rather
+          // than empty where Retell measured nothing, so a reader meets the
+          // same shape a payload nobody wrote has.
+          ...(reported === undefined
+            ? {}
+            : { [REPORTED_MEASUREMENTS_PAYLOAD_KEY]: reported }),
         },
       }),
     }),

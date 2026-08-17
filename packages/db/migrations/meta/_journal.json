@@ -250,29 +250,36 @@
     {
       "idx": 35,
       "version": "7",
-      "when": 1786961303765,
-      "tag": "0035_customer_owned_model_access",
+      "when": 1786990925129,
+      "tag": "0035_drop_retired_audio_band",
       "breakpoints": true
     },
     {
       "idx": 36,
       "version": "7",
-      "when": 1786971693012,
-      "tag": "0036_managed_model_access",
+      "when": 1786990925130,
+      "tag": "0036_customer_owned_model_access",
       "breakpoints": true
     },
     {
       "idx": 37,
       "version": "7",
-      "when": 1786997076792,
-      "tag": "0037_model_upgrade",
+      "when": 1786990925131,
+      "tag": "0037_managed_model_access",
       "breakpoints": true
     },
     {
       "idx": 38,
       "version": "7",
-      "when": 1787001011427,
-      "tag": "0038_upgrade_tracks_its_sources",
+      "when": 1786990925132,
+      "tag": "0038_model_upgrade",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1786990925133,
+      "tag": "0039_upgrade_tracks_its_sources",
       "breakpoints": true
     }
   ]

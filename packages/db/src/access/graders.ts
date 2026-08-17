@@ -424,9 +424,9 @@ async function definitionOf(
  * typo from a modality. Only the moment of writing can.
  *
  * **The list is the span-derived one, which is narrower than the catalog.** A
- * measure the catalog names but no span carries — the turn count and the audio
- * band, both reported on the terminal transition and both kept on the simulation
- * row — is a real number in the wrong place for a grader: reading the trace
+ * measure the catalog names but no span carries — the turn count, reported on
+ * the terminal transition and kept on the simulation row — is a real number in
+ * the wrong place for a grader: reading the trace
  * would never find it, so a copy naming one is exactly the forever-`skipped`
  * check this rule exists to refuse. It is the same list the **Use** form offers
  * and the same list the shared measure module implements, so a developer cannot

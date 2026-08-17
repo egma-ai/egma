@@ -34,14 +34,22 @@ ALLOWED_DEPENDENCIES = {
     "jsonschema",  # holds every document to the contract, both directions
     "rfc3339-validator",  # so the schemas' date-time format is really checked
     # The voice pipeline: the speech legs, the recording, and the LiveKit
-    # transport a phone call rides. Its three extras ride with it — the
-    # two speech providers and livekit, which brings both the room client
-    # and the server API that places a SIP call — so a deployment that
+    # transport a phone call rides. Pipecat's configured extras carry the two
+    # speech providers and its tracing hooks. LiveKit is pinned separately
+    # because the guarded media-drain seam is exact to that SDK release; it
+    # brings both the room client and the server API that places a SIP call — so a
+    # deployment that
     # configures one already has what it needs and one that configures
     # none never imports any of them: the guards below.
     "pipecat-ai",
+    "livekit",
     "loguru",  # what pipecat logs through, gathered under one filter
     "nltk",  # pipecat's tokenizer, held to no downloads (see __init__)
+    # Pipecat creates the service spans; the SDK gives those and egma's domain
+    # spans one trace, and the proto-common encoder turns finished SDK spans into
+    # the official OTLP request that the existing durable reporter sends.
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-common",
     # The object store a deployment's recordings land in. Signing an S3
     # request by hand is security-adjacent code nobody should write twice,
     # and this is the client every store the seam will ever meet already
@@ -132,9 +140,8 @@ def test_the_dependency_list_stays_short_and_declared():
 
 def test_no_module_imports_anything_from_outside_the_app():
     """Third-party imports are the declared ones; everything else is stdlib."""
-    # The distribution names above are not always the module names, and
-    # `livekit` arrives inside pipecat-ai's own extra rather than as a
-    # dependency of its own.
+    # Distribution names above are not always module names. The OTLP encoder's
+    # generated protobuf types live under Google's shared namespace.
     allowed_modules = {
         "aiohttp",
         "jsonschema",
@@ -144,6 +151,8 @@ def test_no_module_imports_anything_from_outside_the_app():
         "livekit",
         "boto3",
         "botocore",
+        "opentelemetry",
+        "google",
     }
     permitted = allowed_modules | set(sys.stdlib_module_names) | {"egma_simulator"}
 

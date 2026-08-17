@@ -1,5 +1,5 @@
 {
-  "id": "7fa9f1c0-23fe-4d53-ac9b-7746cb2c11a4",
+  "id": "807f86c2-06ba-4d88-9c13-5321d1dbf94e",
   "prevId": "e6634a49-a6ca-4688-8468-8e5688424a06",
   "version": "7",
   "dialect": "postgresql",
@@ -1269,205 +1269,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.model_access": {
-      "name": "model_access",
-      "schema": "",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_by": {
-          "name": "updated_by",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "model_access_organization_id_organization_id_fk": {
-          "name": "model_access_organization_id_organization_id_fk",
-          "tableFrom": "model_access",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "model_access_updated_by_user_id_fk": {
-          "name": "model_access_updated_by_user_id_fk",
-          "tableFrom": "model_access",
-          "tableTo": "user",
-          "columnsFrom": [
-            "updated_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "model_access_organization_id_prefix": {
-          "name": "model_access_organization_id_prefix",
-          "value": "\"model_access\".\"organization_id\" ~ '^org_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "model_access_mode_allowed": {
-          "name": "model_access_mode_allowed",
-          "value": "\"model_access\".\"mode\" in ('managed', 'customer-owned')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.model_provider_credential": {
-      "name": "model_provider_credential",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credentials": {
-          "name": "credentials",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credentials_hint": {
-          "name": "credentials_hint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revision": {
-          "name": "revision",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "model_provider_credential_organization_id_organization_id_fk": {
-          "name": "model_provider_credential_organization_id_organization_id_fk",
-          "tableFrom": "model_provider_credential",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "model_provider_credential_created_by_user_id_fk": {
-          "name": "model_provider_credential_created_by_user_id_fk",
-          "tableFrom": "model_provider_credential",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "model_provider_credential_one_per_provider": {
-          "name": "model_provider_credential_one_per_provider",
-          "nullsNotDistinct": false,
-          "columns": [
-            "organization_id",
-            "provider"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "model_provider_credential_id_prefix": {
-          "name": "model_provider_credential_id_prefix",
-          "value": "\"model_provider_credential\".\"id\" ~ '^mpc_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "model_provider_credential_revision_prefix": {
-          "name": "model_provider_credential_revision_prefix",
-          "value": "\"model_provider_credential\".\"revision\" ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "model_provider_credential_provider_allowed": {
-          "name": "model_provider_credential_provider_allowed",
-          "value": "\"model_provider_credential\".\"provider\" in ('openai', 'deepgram', 'cartesia')"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.device_code": {
       "name": "device_code",
       "schema": "",
@@ -1853,12 +1654,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "models": {
-          "name": "models",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_by": {
           "name": "created_by",
@@ -3143,12 +2938,6 @@
         },
         "judge_model": {
           "name": "judge_model",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "grader_model": {
-          "name": "grader_model",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
@@ -4962,18 +4751,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "ending_detail": {
-          "name": "ending_detail",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ending_repair": {
-          "name": "ending_repair",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "claimed_by": {
           "name": "claimed_by",
           "type": "text",
@@ -5007,12 +4784,6 @@
         "ended_at": {
           "name": "ended_at",
           "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "measured_audio_band_hertz": {
-          "name": "measured_audio_band_hertz",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -5365,14 +5136,6 @@
           "name": "simulation_ending_reason_allowed",
           "value": "\"simulation\".\"ending_reason\" is null or \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached', 'agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed')"
         },
-        "simulation_ending_repair_allowed": {
-          "name": "simulation_ending_repair_allowed",
-          "value": "\"simulation\".\"ending_repair\" is null or \"simulation\".\"ending_repair\" in ('model_providers')"
-        },
-        "simulation_ending_repair_has_a_reason_to_exist": {
-          "name": "simulation_ending_repair_has_a_reason_to_exist",
-          "value": "\"simulation\".\"ending_repair\" is null or \"simulation\".\"ending_detail\" is not null"
-        },
         "simulation_ending_reason_agrees": {
           "name": "simulation_ending_reason_agrees",
           "value": "case \"simulation\".\"status\"\n        when 'completed' then \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached')\n        when 'failed' then \"simulation\".\"ending_reason\" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed')\n        else \"simulation\".\"ending_reason\" is null\n      end"
@@ -5423,7 +5186,7 @@
         },
         "simulation_report_only_when_ended": {
           "name": "simulation_report_only_when_ended",
-          "value": "\"simulation\".\"ended_at\" is not null\n        or (\"simulation\".\"recording_reference\" is null\n          and \"simulation\".\"measured_audio_band_hertz\" is null)"
+          "value": "\"simulation\".\"ended_at\" is not null\n        or \"simulation\".\"recording_reference\" is null"
         },
         "simulation_summary_facts_only_when_ended": {
           "name": "simulation_summary_facts_only_when_ended",
@@ -5439,11 +5202,7 @@
         },
         "simulation_audio_facts_are_voice_facts": {
           "name": "simulation_audio_facts_are_voice_facts",
-          "value": "\"simulation\".\"modality\" = 'voice'\n        or (\"simulation\".\"measured_audio_band_hertz\" is null\n          and \"simulation\".\"recording_reference\" is null)"
-        },
-        "simulation_audio_band_is_a_rate": {
-          "name": "simulation_audio_band_is_a_rate",
-          "value": "\"simulation\".\"measured_audio_band_hertz\" is null or \"simulation\".\"measured_audio_band_hertz\" > 0"
+          "value": "\"simulation\".\"modality\" = 'voice'\n        or \"simulation\".\"recording_reference\" is null"
         }
       },
       "isRLSEnabled": false

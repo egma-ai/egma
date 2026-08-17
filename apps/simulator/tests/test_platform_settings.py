@@ -440,10 +440,8 @@ def test_a_speech_provider_nobody_wrote_refuses_rather_than_conducting(
     # Both entry points, because a voice simulation goes through both and a
     # refusal only one of them held would be a leg silently standing in.
     for build in (
-        lambda: build_legs(
-            providers, voice=voice_from_traits({}), sample_rate_hz=8000
-        ),
-        lambda: build_vad(providers, sample_rate_hz=8000, window_samples=160),
+        lambda: build_legs(providers, voice=voice_from_traits({})),
+        lambda: build_vad(providers),
     ):
         with pytest.raises(SpeechFault) as refusal:
             build()

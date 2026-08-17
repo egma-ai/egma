@@ -1,6 +1,6 @@
 # The measure catalog
 
-**Catalog version: 3**
+**Catalog version: 4**
 
 Every measure a conversation produces, named once and defined once, so that a
 grader references a known measure instead of guessing a string — and so that the
@@ -21,11 +21,10 @@ than surfacing months later as a grader nobody noticed was silent.
 
 A grader names what it reads as a string, and a string that names nothing
 produces a grader that reads nothing, judges nothing, and is `skipped` forever:
-green, silent, and wrong. Nothing downstream can catch it. A missing measure is a
-perfectly legitimate `skipped` — a chat conversation has no audio band to bound —
-so the grading engine has no way to tell a typo from a modality. Only the moment
-of writing can, which is why the grader factory's write door refuses a measure
-this catalog does not name.
+green, silent, and wrong. Nothing downstream can catch it. A missing measure can
+be a legitimate `skipped`, so the grading engine has no way to tell a typo from
+a modality. Only the moment of writing can, which is why the grader factory's
+write door refuses a measure this catalog does not name.
 
 The same argument, one level down, is why each measure now carries its
 **span-level definition**. A name says what may be asked for; the definition
@@ -58,7 +57,6 @@ or counted.
 | `agent_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long the agent spoke for, silence inside the answer excluded. |
 | `persona_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long Egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did. |
 | `turn_count` | turns | once | every simulation | terminal fact | How many transcript turns the conversation reached, both speakers counted. |
-| `measured_audio_band_hertz` | hertz | once | voice simulations | terminal fact | The sample rate the simulator actually heard, negotiated or measured and never copied from configuration. |
 
 A voice-only measure on a chat conversation is not a failure and not an error.
 The conversation did not produce the thing the check is about, so the check did
@@ -90,7 +88,6 @@ switches on exhaustively. A rule nothing implements stops the build.
 | `agent_speech_duration` | `timing_spans_named_for_it` | Every span named `agent_speech_duration`; each span's own duration is one sample. |
 | `persona_speech_duration` | `timing_spans_named_for_it` | Every span named `persona_speech_duration`; each span's own duration is one sample. |
 | `turn_count` | `no_span_carries_it` | Nothing. The simulator counts the turns it conducted and reports the total on the terminal transition, where the simulation row keeps it. |
-| `measured_audio_band_hertz` | `no_span_carries_it` | Nothing. The band is heard on the media line and reported on the terminal transition, where the simulation row keeps it beside the recording. |
 
 A timing span's duration **is** the measurement — nanoseconds on the wire,
 milliseconds here, and nothing carries the number a second time for the two to
@@ -99,12 +96,10 @@ per-turn series reads forwards and two readings of one conversation reduce the
 same list.
 
 **A measure with the rule `no_span_carries_it` may not be named by a grader**,
-and the write door refuses it. Both of the ones here already arrive on the
-terminal transition and are read back off the simulation row; deriving them a
-second time from the spans would be a second answer about one conversation, and
-two counts of one call disagreeing is exactly what one shared module exists to
-prevent. `turn_count` is the pointed case: the turn spans could be counted, and
-they are deliberately not.
+and the write door refuses it. `turn_count` already arrives on the terminal
+transition and is read back off the simulation row; deriving it a second time
+from the spans would be a second answer about one simulation. The turn spans
+could be counted, and they are deliberately not.
 
 ## Derived measures: a framework's own spans, read as these numbers
 

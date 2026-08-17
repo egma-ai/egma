@@ -262,11 +262,11 @@ const NO_SUCH_RUN =
  *
  * `mock_tool_coverage` is here because comparing two of these numbers is only
  * valid when both conversations were conducted in the same world. A simulation
- * whose tools were answered by mock tools and one whose tools ran for real are
- * different units, exactly as two audio bands are, and this is where a reader
- * finds that out — off the conversation itself, with nothing else to fetch and
- * nothing editable to ask. Null says the agent was never asked what tools it
- * has, so nothing was learned and nothing is claimed.
+ * whose tools were answered by mock tools and one whose tools ran for real met
+ * different worlds, and this is where a reader finds that out — off the
+ * conversation itself, with nothing else to fetch and nothing editable to ask.
+ * Null says the agent was never asked what tools it has, so nothing was learned
+ * and nothing is claimed.
  */
 function describedSimulation(
   one: ConductedSimulation,

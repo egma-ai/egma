@@ -329,10 +329,10 @@ const CONTEXT_REQUIRING = [
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  // The ledger that makes a Retell conversation land exactly once however it
-  // arrived: the claim a transport takes on an identity, and the mark that
-  // moves the connection's cursor once the spans are stored. Both take the
-  // context the watch resolver handed out.
+  // The ledger that chooses one live writer for a Retell conversation: the
+  // claim a transport takes on an identity, and the mark that moves the
+  // connection's cursor once the spans are stored. Both take the context the
+  // watch resolver handed out.
   "advanceProductionCursor",
   "claimProductionTrace",
   "finishProductionTrace",
@@ -861,6 +861,17 @@ const THE_MEASURES = [
   "everySpanIn",
   "measuresFromSpans",
   "worstSampleOf",
+  // The reported-measurements block: the one neutral shape between every
+  // platform's normalizer and the measure module. The writer half and the
+  // reader half cross this surface together because they are one contract —
+  // a normalizer embeds what `reportedMeasurementsOf` reads back — and the
+  // constants ride along so neither side ever spells the version or the
+  // payload path for itself.
+  "REPORTED_MEASUREMENTS_PAYLOAD_KEY",
+  "REPORTED_MEASUREMENTS_PAYLOAD_PATH",
+  "REPORTED_MEASUREMENTS_VERSION",
+  "reportedMeasurementsOf",
+  "reportedMeasurementsPayload",
 ];
 
 describe("the data-access module's surface", () => {

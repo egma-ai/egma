@@ -100,7 +100,7 @@ describe("who may hear a recording", () => {
 
     expect(resolved.statusCode, JSON.stringify(resolved.body)).toBe(200);
     expect(resolved.body.simulation_id).toBe(run.heard);
-    expect(resolved.body.measured_audio_band_hertz).toBe(8000);
+    expect(resolved.body).not.toHaveProperty("measured_audio_band_hertz");
 
     // The link is against the address a browser was given, and it carries its
     // own proof — no key of the reader's, and nothing that would let a client
