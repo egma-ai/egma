@@ -1,5 +1,7 @@
 import {
+  claimGradingJobs,
   getGrader,
+  GRADING_CAPABILITIES,
   readVerdicts,
   removeModelProviderCredential,
   storeModelProviderCredential,
@@ -78,6 +80,77 @@ beforeAll(async () => {
 afterAll(async () => {
   await service.stop();
   await world.drop();
+});
+
+/**
+ * A grader binary built before grader models existed, and the work it is and is
+ * not offered.
+ *
+ * **The failure this guards against is silent and it produces verdicts.** Such
+ * a binary reads no `grader_model`, so it would judge a grader that selected
+ * its own model through the project's judge configuration instead — a different
+ * model, on a different account nobody chose, with a green report to show for
+ * it. So the queue does not offer it that work at all, exactly as the
+ * simulation queue does not offer a version-1 worker a row needing a version-2
+ * document.
+ *
+ * Both directions are asserted, because only one of them is the interesting
+ * one: an old binary must be turned away, *and* must still drain everything it
+ * was always able to judge. A guard that starved it would be a rollout that
+ * stops grading rather than one that grades wrongly, which is better and still
+ * wrong.
+ *
+ * **This half runs first, and the order is the arrangement.** It needs a
+ * project in which nothing has selected its own model, and that is what this
+ * world is until the cases below seed one — so the honest way to have one is to
+ * ask before they do rather than to build a second world beside this one.
+ */
+describe("a grader binary that cannot read a grader's own model", () => {
+  /** A claim as an old binary makes one: it declares nothing, because it had nothing to declare. */
+  function anOldBinary(claimant: string) {
+    return claimGradingJobs({ claimant, capacity: 5 });
+  }
+
+  /** A claim as this release's binary makes one. */
+  function thisRelease(claimant: string) {
+    return claimGradingJobs({
+      claimant,
+      capacity: 5,
+      capabilities: [...GRADING_CAPABILITIES],
+    });
+  }
+
+  it("still drains the work it was always able to judge", async () => {
+    // Every copy in this project is on the compatibility path so far, which is
+    // exactly what an old binary understands.
+    const testId = await seedTest(world, [BEHAVIOR]);
+    await conductSimulation(world, { testId, spans: aConversation() });
+
+    const taken = await anOldBinary("grader-before-models");
+    expect(taken.length).toBeGreaterThan(0);
+    expect(taken.every((job) => job.projectId === world.projectId)).toBe(true);
+  });
+
+  it("is offered no conversation whose project holds one, and one that can takes it", async () => {
+    await seedGrader(
+      world,
+      aJudgedCopy({
+        name: "Judged by a model this grader chose",
+        graderModel: { provider: "openai", model: "gpt-4o" },
+      }),
+    );
+
+    const testId = await seedTest(world, [BEHAVIOR]);
+    await conductSimulation(world, { testId, spans: aConversation() });
+
+    // The old binary sees an empty queue rather than work it would judge on an
+    // account nobody chose.
+    expect(await anOldBinary("grader-before-models-2")).toEqual([]);
+
+    // And the upgraded binary standing beside it takes exactly that work.
+    const taken = await thisRelease("grader-this-release");
+    expect(taken.length).toBeGreaterThan(0);
+  });
 });
 
 describe("a grader that selected its own model", () => {

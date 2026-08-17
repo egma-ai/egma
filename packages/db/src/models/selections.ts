@@ -151,28 +151,42 @@ export function validGraderModel(model: GraderModel): GraderModel {
  * refuses to build until it is told how to be compared — a forgotten field
  * would call two different selections identical, and an edit somebody made
  * would vanish instead of minting a version.
+ *
+ * Two maps rather than one, because there are two shapes: everything a
+ * selection has, and the two more a speaking one carries. One map over the
+ * wider shape would have to be handed a narrower value at every call, which is
+ * a cast — and a cast is exactly what stops the compiler from noticing a field
+ * nobody taught it to compare.
  */
-const sameSelectionField: {
-  readonly [K in keyof SpeechSelection]: (
-    a: SpeechSelection,
-    b: SpeechSelection,
+const sameBaseField: {
+  readonly [K in keyof ModelSelection]: (
+    a: ModelSelection,
+    b: ModelSelection,
   ) => boolean;
 } = {
   provider: (a, b) => a.provider === b.provider,
   model: (a, b) => a.model === b.model,
+};
+
+const sameSpeechField: {
+  readonly [K in Exclude<keyof SpeechSelection, keyof ModelSelection>]: (
+    a: SpeechSelection,
+    b: SpeechSelection,
+  ) => boolean;
+} = {
   voiceId: (a, b) => a.voiceId === b.voiceId,
   speed: (a, b) => a.speed === b.speed,
 };
 
 function sameSelection(a: ModelSelection, b: ModelSelection): boolean {
-  return (
-    sameSelectionField.provider(a as SpeechSelection, b as SpeechSelection) &&
-    sameSelectionField.model(a as SpeechSelection, b as SpeechSelection)
-  );
+  return Object.values(sameBaseField).every((same) => same(a, b));
 }
 
 function sameSpeech(a: SpeechSelection, b: SpeechSelection): boolean {
-  return Object.values(sameSelectionField).every((same) => same(a, b));
+  return (
+    sameSelection(a, b) &&
+    Object.values(sameSpeechField).every((same) => same(a, b))
+  );
 }
 
 /** Byte-identical persona models, so a save that changed nothing mints nothing. */

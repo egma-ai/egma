@@ -112,6 +112,27 @@ export function providersIn(
   return seen;
 }
 
+/**
+ * What a person calls one provider, as the catalog named it.
+ *
+ * **The catalog's own label, never the stored word.** `openai` is an
+ * identifier: it is what a work order carries and what a credential is filed
+ * under, and showing it on a screen makes a person read Egma's storage rather
+ * than the name their provider goes by. The word itself is the fallback for a
+ * provider the catalog no longer ships, because a row that named nothing at all
+ * would be worse than one naming its identifier.
+ */
+export function labelOfProvider(
+  catalog: ModelCatalog | undefined,
+  provider: string,
+): string {
+  if (!Array.isArray(catalog?.providers)) return provider;
+  return (
+    catalog.providers.find((entry) => entry.provider === provider)?.label ??
+    provider
+  );
+}
+
 /** Which model jobs one provider does, so a row can say what its key is for. */
 export function jobsOfProvider(
   catalog: ModelCatalog | undefined,

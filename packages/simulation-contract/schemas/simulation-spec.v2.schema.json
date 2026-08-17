@@ -165,7 +165,7 @@
           "minLength": 1
         },
         "reasoning_effort": {
-          "description": "How hard the model should think before the persona speaks, in the provider's own vocabulary \u2014 an open string, not an enum here, because the accepted values differ between providers speaking one chat-completions shape and have grown more than once. Absent means send nothing at all, which is what keeps a model that has never heard of the field working exactly as it did. A persona is a caller in a hurry rather than a puzzle-solver: the reasoning under test is the agent's, and every moment the persona spends thinking is silence on a live line that no real caller would leave.",
+          "description": "How hard the model should think before the persona speaks, in the provider's own vocabulary \u2014 an open string, not an enum here, because the accepted values differ between providers speaking one chat-completions shape and have grown more than once. Absent means send nothing at all, which is what keeps a model that has never heard of the field working exactly as it did. A persona is in a hurry rather than solving a puzzle: the reasoning under test is the agent's, and every moment the persona spends thinking is silence on a live line that nobody real would leave. It belongs to the deployment's own settings and never to a persona's selections, so a persona that selects its own models uses its provider's default reasoning behavior.",
           "type": "string",
           "minLength": 1
         }

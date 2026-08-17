@@ -6,6 +6,7 @@ import {
   getPersonaVersion,
   getRun,
   getSimulationTestVersion,
+  ManagedAccessUnavailableError,
   ModelProviderCredentialMissingError,
   readModelAccess,
   resolveMockTools,
@@ -237,12 +238,12 @@ async function modelsBlock(
 
   if (access.mode === "managed") {
     // Nothing on this deployment can select managed access yet — the setting
-    // refuses it by name while no inference key is connected — so a row saying
-    // so is a state this control plane cannot honor. Said as an error naming
-    // the mode rather than conducted with no credentials at all.
-    throw new Error(
-      "this organization is on managed model access, and this deployment has no Egma model gateway connection to send its model traffic through",
-    );
+    // refuses it by name while no connection to a gateway exists — so a row
+    // saying so is a state this control plane cannot honor. Typed rather than
+    // thrown plainly, so it lands on the row as an infrastructure error naming
+    // the mode with somewhere to go, rather than as a bare dispatch failure
+    // with nothing on it a person could act on.
+    throw new ManagedAccessUnavailableError();
   }
 
   /**
@@ -660,7 +661,8 @@ export async function claimRoutes(
             // screen. Every other fault is Egma being broken, and sending
             // somebody to Model providers for one of those would be a link that
             // fixes nothing.
-            ...(fault instanceof ModelProviderCredentialMissingError
+            ...(fault instanceof ModelProviderCredentialMissingError ||
+            fault instanceof ManagedAccessUnavailableError
               ? { repair: "model_providers" as const }
               : {}),
           }),

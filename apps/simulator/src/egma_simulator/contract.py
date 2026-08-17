@@ -117,52 +117,71 @@ SCHEMA_OF = {
 
 
 @cache
-def validator(direction: str) -> Draft202012Validator:
-    """The compiled validator for one direction, built once per process.
+def _compiled(filename: str) -> Draft202012Validator:
+    """One schema file, compiled once per process.
 
-    Compiling is part of the guarantee: a schema that is not valid
-    2020-12 fails here, at import of the first document, rather than
-    quietly accepting everything.
+    Compiling is part of the guarantee: a schema that is not valid 2020-12
+    fails here, at the first document, rather than quietly accepting
+    everything.
+
+    Keyed by the filename rather than by a direction, because the spec
+    direction has more than one of them and a cache keyed by direction
+    would hand a version-2 document the version-1 validator.
+    """
+    schema = _load_schema(filename)
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema, format_checker=FormatChecker())
+
+
+def validator(direction: str) -> Draft202012Validator:
+    """The compiled validator for one direction.
 
     ``spec`` names version 1, which is what every reader that predates a
-    second version means by it. ``spec_validator`` below takes the version
-    it wants.
+    second version means by it. :func:`spec_validator` takes the version it
+    wants.
     """
-    schema = _load_schema(SCHEMA_OF[direction])
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+    return _compiled(SCHEMA_OF[direction])
 
 
-@cache
-def _spec_validator_for(version: int) -> Draft202012Validator:
-    schema = _load_schema(SPEC_SCHEMA_FILENAMES[version])
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+def _unknown_version(version: object) -> ContractViolation:
+    """The refusal a version this simulator does not implement earns.
+
+    Written once, because it is raised from two places — asking for a
+    validator, and validating a document — and two spellings of one refusal
+    is one of them going stale the day a third version ships.
+    """
+    return ContractViolation(
+        "spec",
+        [
+            "/contract_version: must be one of "
+            + ", ".join(str(known) for known in SUPPORTED_SPEC_VERSIONS)
+            + f", and this document says {version!r}"
+        ],
+    )
 
 
 def spec_validator(version: int = 1) -> Draft202012Validator:
     """The compiled spec validator for one contract version."""
     if version not in SPEC_SCHEMA_FILENAMES:
-        raise ContractViolation(
-            "spec",
-            [
-                f"/contract_version: must be one of "
-                f"{', '.join(str(known) for known in SUPPORTED_SPEC_VERSIONS)}, "
-                f"and this document says {version!r}"
-            ],
-        )
-    return _spec_validator_for(version)
+        raise _unknown_version(version)
+    return _compiled(SPEC_SCHEMA_FILENAMES[version])
 
 
 def report_validator() -> Draft202012Validator:
     return validator("report")
 
 
-def _flatten_complaints(errors) -> list[str]:
+def _complaints_from(errors) -> list[str]:
+    """Every complaint a validator had, flattened.
+
+    A ``oneOf`` reports each branch's own complaints as context rather than
+    at the top, so a reader given only the outer error is told "does not
+    match any branch" and nothing about which field was wrong.
+    """
     flat: list[str] = []
     for error in errors:
         if error.context:
-            flat.extend(_flatten_complaints(error.context))
+            flat.extend(_complaints_from(error.context))
         else:
             place = "".join(f"/{part}" for part in error.absolute_path)
             flat.append(f"{place}: {error.message}")
@@ -170,17 +189,7 @@ def _flatten_complaints(errors) -> list[str]:
 
 
 def _complaints(direction: str, document: object) -> list[str]:
-    def flatten(errors) -> list[str]:
-        flat: list[str] = []
-        for error in errors:
-            if error.context:
-                flat.extend(flatten(error.context))
-            else:
-                place = "".join(f"/{part}" for part in error.absolute_path)
-                flat.append(f"{place}: {error.message}")
-        return flat
-
-    return flatten(validator(direction).iter_errors(document))
+    return _complaints_from(validator(direction).iter_errors(document))
 
 
 def validate(direction: str, document: object) -> None:
@@ -209,18 +218,9 @@ def validate_spec(document: object) -> None:
     """
     version = spec_version_of(document)
     if version not in SPEC_SCHEMA_FILENAMES:
-        raise ContractViolation(
-            "spec",
-            [
-                f"/contract_version: must be one of "
-                f"{', '.join(str(known) for known in SUPPORTED_SPEC_VERSIONS)}, "
-                f"and this document says {version!r}"
-            ],
-        )
+        raise _unknown_version(version)
 
-    complaints = _flatten_complaints(
-        spec_validator(version).iter_errors(document)
-    )
+    complaints = _complaints_from(spec_validator(version).iter_errors(document))
     if complaints:
         raise ContractViolation("spec", complaints)
 

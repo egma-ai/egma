@@ -1177,6 +1177,27 @@ export class ManagedAccessNotConnectedError extends Error {
 }
 
 /**
+ * A simulation or a grading job selected managed model access on a deployment
+ * that has no Egma model gateway connection behind it.
+ *
+ * **A tripwire rather than a fault, and it is typed so it lands as one.** No
+ * door in this release can store `managed` — the setting refuses it by name —
+ * so a claim that reaches this has found a row nothing should have written.
+ * Saying so as an infrastructure error naming the mode, with somewhere to go,
+ * is what keeps it from arriving as a bare dispatch failure with nothing on it
+ * a person could act on. The release that connects a gateway is the one that
+ * makes this reachable and answers it.
+ */
+export class ManagedAccessUnavailableError extends Error {
+  constructor() {
+    super(
+      "this organization is on managed model access, which sends its model traffic through the Egma model gateway, and this deployment has no connection to one. Choose Customer-owned under Model providers and add a credential for each provider your personas and graders select.",
+    );
+    this.name = "ManagedAccessUnavailableError";
+  }
+}
+
+/**
  * A simulation or a grading job could not be prepared, because the organization
  * holds no credential for a provider its pinned selections name.
  *

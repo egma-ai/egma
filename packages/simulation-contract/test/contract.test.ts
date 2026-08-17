@@ -278,15 +278,34 @@ describe("the two schemas, as one contract", () => {
    * documents on purpose: a reader has to be able to see the whole of what a
    * version says without holding the other one in their head. The price is that
    * they could drift apart in a field neither version meant to change, and this
-   * pins everything except the version, the identity, the prose and the block
-   * that is the point of the second version.
+   * pins everything except the version, the identity and the block that is the
+   * point of the second version.
+   *
+   * **Prose is stripped everywhere rather than only at the top.** What must not
+   * fork is the shape — which fields exist, what they accept, what is required
+   * — and a description is neither. Each version explains itself to the reader
+   * who has that version in front of them, so a sentence reworded in one and
+   * not the other is the documents doing their job rather than drifting.
    */
   it("differ by the models block and by nothing else", () => {
+    /** Every `description`, anywhere, gone — see the note above. */
+    const withoutProse = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(withoutProse);
+      if (typeof node !== "object" || node === null) return node;
+      return Object.fromEntries(
+        Object.entries(node as Record<string, unknown>)
+          .filter(([key]) => key !== "description")
+          .map(([key, value]) => [key, withoutProse(value)]),
+      );
+    };
+
     const stripped = (schema: Record<string, unknown>): unknown => {
-      const clone = structuredClone(schema) as Record<string, unknown>;
+      const clone = withoutProse(structuredClone(schema)) as Record<
+        string,
+        unknown
+      >;
       delete clone.$id;
       delete clone.title;
-      delete clone.description;
       const properties = clone.properties as Record<string, unknown>;
       delete properties.contract_version;
       delete properties.models;

@@ -118,6 +118,17 @@ export const COMPLETED_ENDING_REASONS = [
 ] as const;
 
 /**
+ * Where a person goes to repair what stopped a simulation.
+ *
+ * One entry today: the organization's Model providers screen, which is where
+ * every model credential in the product lives. The list grows when a failure
+ * arrives that a different screen fixes, and it stays closed so that a stored
+ * word is always a page a browser can actually open.
+ */
+export const ENDING_REPAIRS = ["model_providers"] as const;
+export type EndingRepair = (typeof ENDING_REPAIRS)[number];
+
+/**
  * Why a simulation never produced a conversation to grade. These must never
  * collapse into "the agent behaved badly": an agent that never joined, a line
  * that was never answered, a platform out of capacity, egma's own error, and
@@ -131,17 +142,6 @@ export const COMPLETED_ENDING_REASONS = [
  * a claimed row into a spec worth handing over — a broken row is the
  * platform's fault, never pinned on a simulator that was handed nothing.
  */
-/**
- * Where a person goes to repair what stopped a simulation.
- *
- * One entry today: the organization's Model providers screen, which is where
- * every model credential in the product lives. The list grows when a failure
- * arrives that a different screen fixes, and it stays closed so that a stored
- * word is always a page a browser can actually open.
- */
-export const ENDING_REPAIRS = ["model_providers"] as const;
-export type EndingRepair = (typeof ENDING_REPAIRS)[number];
-
 export const FAILED_ENDING_REASONS = [
   "agent_never_joined",
   "not_answered",

@@ -51,15 +51,28 @@ export function ModelFields({
     (value: string) =>
       onChange({ ...draft, [key]: value });
 
-  const providersFor = (job: "llm" | "stt" | "tts", held: string) =>
-    providerOptions(
-      form === null
-        ? null
-        : form.model_catalog
-            .filter((entry) => entry.job === job)
-            .map((entry) => entry.provider),
+  /**
+   * What a person picks from: the providers the catalog offers for this job,
+   * named the way the catalog names them.
+   *
+   * **The label, never the stored word.** `openai` is an identifier — what a
+   * work order carries and what a credential is filed under — and showing it in
+   * a form makes an author read Egma's storage instead of the name their
+   * provider goes by. A provider the catalog no longer ships falls back to its
+   * own word, because a persona already on one has to stay editable in every
+   * other respect and an unnamed option would be worse than an identifier.
+   */
+  const providersFor = (job: "llm" | "stt" | "tts", held: string) => {
+    const entries = form === null ? [] : form.model_catalog.filter((entry) => entry.job === job);
+    return providerOptions(
+      form === null ? null : entries.map((entry) => entry.provider),
       held,
-    ).map((provider) => ({ value: provider, label: provider }));
+    ).map((provider) => ({
+      value: provider,
+      label:
+        entries.find((entry) => entry.provider === provider)?.label ?? provider,
+    }));
+  };
 
   const reading = form === null ? "Reading the providers Egma supports…" : null;
   const range = form?.speed_range;
@@ -181,6 +194,7 @@ export function ModelFields({
           <TextInput
             id="persona-tts-speed"
             value={draft.ttsSpeed}
+            numeric
             disabled={disabled}
             onChange={set("ttsSpeed")}
           />

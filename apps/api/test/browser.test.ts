@@ -2475,13 +2475,28 @@ describe("the complete product, walked in order in a second project", () => {
       // Which mode this organization is on, said as a word rather than left to
       // be inferred from which rows are filled in.
       await saysWithin(walk, "Customer-owned");
+      // One row for each provider Egma ships, named the way the catalog names
+      // it rather than by the word it is stored under.
+      const table = walk.locator('table[aria-label="Model providers"]');
+      await table.waitFor();
+      await expect.poll(() => table.locator("tbody tr").count()).toBe(3);
+      expect(await table.innerText()).toContain("OpenAI");
+
+      // The form is opened by the row it belongs to, so exactly one labelled
+      // secret field is on screen at a time rather than one per provider.
+      expect(await walk.locator('input[type="password"]').count()).toBe(0);
+      await walk.getByRole("button", { name: "Add key" }).first().click();
 
       const key = walk.locator("#model-provider-openai");
       await key.waitFor();
       // A password field, so a shoulder cannot read what is being typed.
       expect(await key.getAttribute("type")).toBe("password");
+      expect(await walk.locator('input[type="password"]').count()).toBe(1);
       await key.fill("sk-browser-sentinel-openai-A1B2");
-      await walk.getByRole("button", { name: "Add key" }).first().click();
+      await walk
+        .getByRole("button", { name: "Add key" })
+        .last()
+        .click();
 
       // Four characters and nothing else, and the field it was typed into is
       // empty again — the form is never the one place in the product showing a
@@ -2489,7 +2504,11 @@ describe("the complete product, walked in order in a second project", () => {
       // because the badge is uppercased by the design system and reads back as
       // "CONFIGURED", which "NOT CONFIGURED" also contains.
       await expect.poll(() => walk.innerText("main")).toContain("…A1B2");
-      await expect.poll(() => key.inputValue()).toBe("");
+      // The fourth save state, said out loud: a write that landed and left
+      // nothing on screen is indistinguishable from one that never went.
+      await saysWithin(walk, "key is saved");
+      // And the field is gone with the form it belonged to.
+      await expect.poll(() => walk.locator('input[type="password"]').count()).toBe(0);
       const shown = await walk.innerText("main");
       expect(shown).not.toContain("sk-browser-sentinel-openai-A1B2");
       expect(shown).toContain("…A1B2");
@@ -3691,29 +3710,33 @@ describe("the complete product, walked in order in a second project", () => {
           await saysWithin(walk, "Customer-owned");
           // And why the other mode is not on offer, said before anybody tries.
           await saysWithin(walk, "Egma model gateway");
-          // A provider with no key is a state and not a fault, and the page
-          // says what it actually costs rather than refusing to let anybody
-          // leave until every row is filled. Read off the sentence rather than
-          // the badge, which the design system uppercases.
-          await saysWithin(walk, "stops with an error naming it");
+          // A provider with no key is a state and not a fault: the row says so
+          // and the page still lets somebody leave. The badge is uppercased by
+          // the design system, so the whole phrase is what tells it from the
+          // configured one.
+          await expect
+            .poll(() => walk.innerText("main"))
+            .toContain("NOT CONFIGURED");
 
+          await walk
+            .getByRole("button", { name: "Replace key" })
+            .first()
+            .click();
           const key = walk.locator("#model-provider-openai");
           await key.waitFor();
           // A password field, so a shoulder cannot read what is being typed.
           expect(await key.getAttribute("type")).toBe("password");
+          const save = walk.getByRole("button", { name: "Replace key" }).last();
 
-          const button = walk
-            .getByRole("button", { name: "Replace key" })
-            .first();
           if (width === 390) {
             // A pointer target on a coarse pointer is at least 44px. Checked
             // on the button somebody actually presses to store a key.
-            const box = await button.boundingBox();
+            const box = await save.boundingBox();
             expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
           }
 
           await key.fill(replacement);
-          await button.click();
+          await save.click();
 
           // The stored key is four characters and nothing else, the field it
           // was typed into is empty again, and neither the key that was there
@@ -3721,11 +3744,44 @@ describe("the complete product, walked in order in a second project", () => {
           await expect
             .poll(() => walk.innerText("main"))
             .toContain(`…${replacement.slice(-4)}`);
-          await expect.poll(() => key.inputValue()).toBe("");
+          await expect
+            .poll(() => walk.locator('input[type="password"]').count())
+            .toBe(0);
           const shown = await walk.innerText("main");
           expect(shown).not.toContain(replacement);
           expect(shown).not.toContain(THE_KEY);
         }
+      },
+      SETTLE,
+    );
+
+    it(
+      "confirms removing a key, names the provider, and says what stops",
+      async () => {
+        await walk.setViewportSize({ width: 1280, height: 900 });
+        await walk.goto(at("settings", "model-providers"));
+        await saysWithin(walk, "Model providers");
+
+        // **Nothing is removed by one click.** The stored key cannot be read
+        // back, so a stray press is unrecoverable in the product, and it stops
+        // every later simulation and grading job that selects the provider.
+        await walk.getByRole("button", { name: "Remove key" }).first().click();
+
+        const dialog = walk.getByRole("dialog");
+        await dialog.waitFor();
+        const asked = await dialog.innerText();
+        // It names the provider it is about, and says what stops rather than
+        // asking "are you sure".
+        expect(asked).toContain("OpenAI");
+        expect(asked).toContain("stops with an error naming it");
+        expect(asked).toContain("cannot be undone");
+
+        // Escape leaves it exactly where it was.
+        await walk.keyboard.press("Escape");
+        await expect.poll(() => walk.getByRole("dialog").count()).toBe(0);
+        await expect
+          .poll(() => walk.innerText("main"))
+          .toContain("CONFIGURED");
       },
       SETTLE,
     );

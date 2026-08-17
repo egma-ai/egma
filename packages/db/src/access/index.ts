@@ -121,6 +121,7 @@ export {
   JudgeProviderMismatchError,
   LastAdminError,
   ManagedAccessNotConnectedError,
+  ManagedAccessUnavailableError,
   MockToolTakenError,
   ModelProviderCredentialMissingError,
   NoCapabilityAdapterError,
@@ -595,6 +596,11 @@ export type { JudgeSource } from "../schema/graders.ts";
  * plaintext one — `resolveModelProviderKeys` — refuses every context that did
  * not come from a simulation or a grading claim.
  */
+export {
+  GRADING_CAPABILITIES,
+  type GradingCapability,
+} from "./grading.ts";
+
 export {
   DEFAULT_MODEL_ACCESS,
   readModelAccess,

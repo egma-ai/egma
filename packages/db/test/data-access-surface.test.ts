@@ -468,6 +468,11 @@ const THE_MODEL_CATALOG = [
   // the browser's business — and closed, because a page turns it into a link
   // and an unknown word would be a button to nowhere.
   "ENDING_REPAIRS",
+  // What a grader binary understands beyond what every one of them always has.
+  // A rollout fact rather than a setting: a binary that cannot read a grader's
+  // own model selection is offered no work that carries one, so it never
+  // judges on an account nobody chose.
+  "GRADING_CAPABILITIES",
   "MODEL_ACCESS_MODES",
   "MODEL_JOBS",
   "MODEL_PROVIDERS",
@@ -513,14 +518,18 @@ const VALUES = [
   // provider. Its own class because the fix is specific and nameable.
   "JudgeProviderMismatchError",
   "LastAdminError",
-  // A second answer for a tool this project already answers for. Its own class
-  // because nothing about the body is wrong and something is already there,
-  // which is a different answer in kind.
   // Managed model access selected while nothing is connected to Egma's own
   // provider accounts. A refusal rather than a quiet no-op, because a stored
   // `managed` with no inference key behind it fails one claim at a time for a
   // setting that read as saved.
   "ManagedAccessNotConnectedError",
+  // The same state found on the claim path instead — a tripwire, because no
+  // door in this release can write it. Typed so it lands as an infrastructure
+  // error naming the mode rather than as a bare dispatch failure.
+  "ManagedAccessUnavailableError",
+  // A second answer for a tool this project already answers for. Its own class
+  // because nothing about the body is wrong and something is already there,
+  // which is a different answer in kind.
   "MockToolTakenError",
   // A claim that could not open a credential its pinned selections name. It is
   // an infrastructure error and never a failed verdict, and it carries the

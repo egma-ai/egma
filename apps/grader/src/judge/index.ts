@@ -1,5 +1,6 @@
 import {
   getJudgeConfiguration,
+  JUDGE_PROVIDERS,
   resolveJudgeKey,
   resolveModelProviderKeys,
   type AuthContext,
@@ -160,7 +161,9 @@ export function judgesOnce(auth: AuthContext): ConversationJudges {
   let theProjects: Promise<ProjectJudge | NoJudge> | undefined;
   const byProvider = new Map<string, Promise<string | NoJudge>>();
 
-  const keyForProvider = (provider: string): Promise<string | NoJudge> => {
+  const keyForProvider = (
+    provider: GraderModel["provider"],
+  ): Promise<string | NoJudge> => {
     const held = byProvider.get(provider);
     if (held !== undefined) return held;
     const resolving = organizationKeyFor(auth, provider);
@@ -180,15 +183,19 @@ export function judgesOnce(auth: AuthContext): ConversationJudges {
         return configured.judging(grader.judgeModel, makers);
       }
 
-      const maker = makerFor(selected.provider, makers);
-      if (maker instanceof NoJudge) return maker;
+      const asked = makerFor(selected.provider, makers);
+      if (asked instanceof NoJudge) return asked;
 
       const key = await keyForProvider(selected.provider);
       if (key instanceof NoJudge) return key;
 
       return {
-        ask: maker({
-          provider: selected.provider as JudgeProvider,
+        ask: asked.maker({
+          // The provider `makerFor` matched, rather than the one that was
+          // asked for: they are the same word, and this one is the closed type
+          // a resolved judge is made of, so nothing here has to be cast across
+          // two vocabularies that only happen to overlap.
+          provider: asked.provider,
           model: selected.model,
           key,
         }),
@@ -210,7 +217,7 @@ export function judgesOnce(auth: AuthContext): ConversationJudges {
  */
 async function organizationKeyFor(
   auth: AuthContext,
-  provider: string,
+  provider: GraderModel["provider"],
 ): Promise<string | NoJudge> {
   let resolved: Awaited<ReturnType<typeof resolveModelProviderKeys>>;
   try {
@@ -226,7 +233,7 @@ async function organizationKeyFor(
     );
   }
 
-  const key = resolved.keys.get(provider as never);
+  const key = resolved.keys.get(provider);
   if (key === undefined) {
     return new NoJudge(
       `this grader judges with ${provider}, and this organization holds no ${provider} model-provider credential; add one under Model providers in Organization settings.`,
@@ -243,16 +250,22 @@ async function organizationKeyFor(
  * maker that exists would judge a customer's conversation on a model nobody
  * chose, and the verdict would read as if they had.
  */
-function makerFor(provider: string, makers: JudgeMakers): JudgeMaker | NoJudge {
-  const known = Object.hasOwn(makers, provider)
-    ? makers[provider as JudgeProvider]
-    : undefined;
+function makerFor(
+  provider: string,
+  makers: JudgeMakers,
+): { readonly provider: JudgeProvider; readonly maker: JudgeMaker } | NoJudge {
+  // Matched against the closed list rather than looked up on the roster, so
+  // the word comes back as the type a resolved judge is made of. The model
+  // catalog's providers and the judge roster's are two closed vocabularies
+  // that overlap; finding the word in one of them is what crosses between
+  // them honestly, where an index and a cast would only assume it.
+  const known = JUDGE_PROVIDERS.find((candidate) => candidate === provider);
   if (known === undefined) {
     return new NoJudge(
-      `this grader judges with ${provider}, and this release ships no judge for it; it judges with ${Object.keys(makers).join(", ")}.`,
+      `this grader judges with ${provider}, and this release ships no judge for it; it judges with ${JUDGE_PROVIDERS.join(", ")}.`,
     );
   }
-  return known;
+  return { provider: known, maker: makers[known] };
 }
 
 export async function projectJudge(

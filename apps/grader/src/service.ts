@@ -1,5 +1,6 @@
 import {
   claimGradingJobs,
+  GRADING_CAPABILITIES,
   finishGradingJob,
   recordGradingHeartbeat,
   releaseGradingJob,
@@ -113,6 +114,16 @@ export function startService(options: ServiceOptions): Service {
           capacity: config.capacity,
           leaseSeconds: config.leaseSeconds,
           idleSeconds: config.traceIdleSeconds,
+          // What this binary understands, declared on every claim.
+          //
+          // **This is what keeps a rolling deploy honest.** A grader version
+          // that selects its own model is judged with the organization's
+          // credential for that provider; a binary that could not read the
+          // field would judge it through the project's judge configuration
+          // instead — a different model, on a different account, with verdicts
+          // to show for it. Declaring what this one can read is what stops the
+          // queue offering it that work at all.
+          capabilities: [...GRADING_CAPABILITIES],
         });
       } catch (error) {
         // The control plane is unreachable or refused. Say so once and wait;

@@ -170,9 +170,20 @@ export function EditForm({
    * since left the catalog still has to be readable and still has to be
    * editable in every other respect.
    */
-  const providerChoices = (held: string): readonly string[] => {
+  const providerChoices = (
+    held: string,
+  ): readonly { readonly value: string; readonly label: string }[] => {
     const offered = llm.map((entry) => entry.provider);
-    return held === "" || offered.includes(held) ? offered : [...offered, held];
+    const all =
+      held === "" || offered.includes(held) ? offered : [...offered, held];
+    // The catalog's label, never the stored word: `openai` is an identifier —
+    // what a grading claim carries and what a credential is filed under — and
+    // showing it in a form makes an author read Egma's storage rather than the
+    // name their provider goes by.
+    return all.map((provider) => ({
+      value: provider,
+      label: llm.find((entry) => entry.provider === provider)?.label ?? provider,
+    }));
   };
   const recommendedFor = (provider: string): string | undefined =>
     llm.find((entry) => entry.provider === provider)?.recommended_model;
@@ -346,10 +357,7 @@ export function EditForm({
             value={modelProvider}
             options={[
               { value: "", label: EDIT.modelClear },
-              ...providerChoices(modelProvider).map((provider) => ({
-                value: provider,
-                label: provider,
-              })),
+              ...providerChoices(modelProvider),
             ]}
             onChange={(chosen) => {
               setModelProvider(chosen);
