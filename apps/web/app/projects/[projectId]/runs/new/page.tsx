@@ -266,15 +266,19 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
         label: name,
       },
     });
-    setStarting(false);
     if (written.status === "signed-out") {
+      setStarting(false);
       window.location.replace("/sign-in");
       return;
     }
     if (written.status !== "ready") {
+      setStarting(false);
       setRefused(written.refusal);
       return;
     }
+    // Stay busy until the successful navigation unmounts this builder. If the
+    // draft guard is re-enabled first, it mistakes the submitted run for an
+    // unsaved edit and blocks the product's own redirect.
     router.push(projectPath(projectId, "runs", written.value.id));
   }
 

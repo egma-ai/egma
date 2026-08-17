@@ -879,6 +879,9 @@ describe("starting", () => {
     await confirmStart();
     await waitFor(() => expect(sentTo("/api/runs")).toHaveLength(1));
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_1");
+    expect(
+      screen.getByRole("button", { name: "Starting…" }).getAttribute("aria-busy"),
+    ).toBe("true");
     const firstKey = (
       sentTo("/api/runs")[0]?.body as { idempotency_key: string }
     ).idempotency_key;
@@ -905,7 +908,27 @@ describe("starting", () => {
   });
 
   it("mints a different key for a different selection, because it is a different run", async () => {
-    builder({ tests: [testRow(), testRow({ id: "tst_2", name: "Cancels", version_id: "tstv_2" })] });
+    builder({
+      tests: [
+        testRow(),
+        testRow({ id: "tst_2", name: "Cancels", version_id: "tstv_2" }),
+      ],
+      started: [
+        {
+          status: 502,
+          body: { error: "unavailable", message: "Egma could not answer." },
+        },
+        {
+          status: 201,
+          body: {
+            id: "run_1",
+            status: "pending",
+            expected_simulation_count: 2,
+            skipped_count: null,
+          },
+        },
+      ],
+    });
     render(<NewRunPage />);
     await chooseEverything();
     nameRun();
@@ -921,6 +944,7 @@ describe("starting", () => {
     await waitFor(() => {
       expect(sentTo("/api/runs")).toHaveLength(1);
     });
+    await screen.findByText("Egma could not answer.");
 
     fireEvent.click(screen.getAllByLabelText("Include Cancels")[0]!);
     await waitFor(() => {

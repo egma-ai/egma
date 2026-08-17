@@ -1,8 +1,12 @@
+import { seedPlatformSettings } from "@egma/db";
 import { newId } from "@egma/ids";
 import type { Browser, Page, Request } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { asSecond } from "../../web/lib/instants.ts";
+import {
+  asSecond,
+  relativeViewerInstant,
+} from "../../web/lib/instants.ts";
 import { PLATFORM_IDENTITY_PATH } from "../src/routes/platform.ts";
 import { openBrowser } from "./support/browser.ts";
 import {
@@ -68,6 +72,13 @@ let origin: string;
 const BROWSER_RETELL_KEY = "retell-browser-fixture-key-WXYZ";
 const BROWSER_RETELL_AGENT = "agent_in_retell_journey";
 const BROWSER_RETELL_NUMBER = "+14155550100";
+
+/** The platform facts a completed self-host phone setup stores. */
+const BROWSER_PHONE_IS_SET_UP = {
+  carrier_trunk_address: "browser-fixture.pstn.twilio.com",
+  carrier_trunk_number: "+14155550101",
+  text_to_speech_provider: "openai",
+} as const;
 
 /** Retell's read-only setup surface, with no network outside the test. */
 const browserRetellFetch: typeof fetch = async (input, init) => {
@@ -142,6 +153,7 @@ beforeAll(async () => {
     retellFetch: browserRetellFetch,
     ...(storage.available ? { blob: storage.store } : {}),
   });
+  await seedPlatformSettings(BROWSER_PHONE_IS_SET_UP);
   origin = instance.origin;
 
   browser = await openBrowser();
@@ -327,10 +339,10 @@ describe("adding a colleague, with no mail configured", () => {
       await page.goto(`${origin}/members`);
       await page.waitForURL(/\/projects\/prj_[^/]+\/settings\/people$/);
       expect(await page.getByText("Invite somebody").count()).toBe(0);
-      // A radio group rather than a tablist: it is the product's shared "which
-      // of two lists is this page showing" control, and it is exactly one of a
-      // small closed set.
-      await page.getByRole("radio", { name: "Invitations" }).click();
+      // People and invitations are two views of the same settings surface.
+      // The semantic tab is what makes that relationship clear to a keyboard
+      // user and to assistive technology.
+      await page.getByRole("tab", { name: "Invitations" }).click();
       await page.waitForSelector("text=Invite somebody");
 
       await page.fill("#invite-email", "bob@acme.example");
@@ -1139,8 +1151,20 @@ describe("what a project recorded in production", () => {
       // capture was recorded. Nothing was widened to find this row.
       expect(await page.inputValue("#window")).toBe("24h");
 
-      // The facts the list endpoint returns, as columns.
-      expect(shown).toContain(asSecond(FIXTURE_TRACE.started_at));
+      // The visible date is readable at a glance. The exact evidence stays on
+      // the semantic time element for copying, inspection and accessibility.
+      const started = page.locator("tbody tr time").first();
+      expect(await started.innerText()).toBe(
+        relativeViewerInstant(FIXTURE_TRACE.started_at, AT.getTime()),
+      );
+      expect(await started.getAttribute("datetime")).toBe(
+        FIXTURE_TRACE.started_at,
+      );
+      expect(await started.getAttribute("title")).toBe(
+        asSecond(FIXTURE_TRACE.started_at),
+      );
+
+      // The other facts the list endpoint returns, as columns.
       expect(shown).toContain("1m 13s");
       expect(shown).toContain(
         `${FIXTURE_TRACE.humanTurns} human · ${FIXTURE_TRACE.agentTurns} agent`,
@@ -1724,7 +1748,11 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
 
       await page.goto(`${inProject}/simulations/${run.heard}`);
 
-      const player = page.locator("audio[data-recording]");
+      const evidence = page.getByRole("dialog", {
+        name: "Transcript and audio",
+      });
+      await evidence.waitFor({ timeout: 30_000 });
+      const player = evidence.getByLabel("Simulation recording");
       await player.waitFor({ timeout: 30_000 });
 
       // The link points at the **store**, and never at egma. The bytes do not
@@ -1842,11 +1870,15 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       // absence.
       await page.goto(`${inProject}/simulations/${run.silent}`);
       // **Waited for the read that would have supplied a player**: the
-      // transcript heading is drawn from the same answer, so by here the page
-      // has been told everything it knows and is offering nothing.
-      await page
+      // default-open evidence sheet is drawn from the same answer, so by here
+      // the page has been told everything it knows and is offering nothing.
+      const silentEvidence = page.getByRole("dialog", {
+        name: "Transcript and audio",
+      });
+      await silentEvidence.waitFor({ timeout: 30_000 });
+      await silentEvidence
         .getByRole("heading", { name: "Transcript", exact: true })
-        .waitFor({ timeout: 30_000 });
+        .waitFor();
       expect(await page.locator("audio").count()).toBe(0);
     },
     SETTLE,
@@ -1876,11 +1908,16 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       await page.goto(
         `${origin}/projects/${who.auth.projectId ?? ""}/runs/${run.runId}/simulations/${run.heard}`,
       );
-      // The heading comes off the same answer a player would have, so waiting
-      // for it is waiting for the read that could contradict the absence below.
-      await page
+      // The default-open sheet comes off the same answer a player would have,
+      // so waiting for it is waiting for the read that could contradict the
+      // absence below.
+      const evidence = page.getByRole("dialog", {
+        name: "Transcript and audio",
+      });
+      await evidence.waitFor({ timeout: 30_000 });
+      await evidence
         .getByRole("heading", { name: "Transcript", exact: true })
-        .waitFor({ timeout: 30_000 });
+        .waitFor();
 
       expect(await page.locator("audio").count()).toBe(0);
       // Not even the line that says a recording is being looked for, which is
@@ -2578,13 +2615,17 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.getByRole("button", { name: "Register agent" }).click();
 
       await walk.waitForURL(
-        new RegExp(`/projects/${second}/agents/agt_[^/]+$`),
+        new RegExp(
+          `/projects/${second}/agents/agt_[^/]+/connections/new\\?onboarding=connection$`,
+        ),
       );
-      agentAddress = walk.url();
-      await saysWithin(walk, "No connections");
+      const agentId = /\/agents\/(agt_[^/]+)\//u.exec(walk.url())?.[1];
+      expect(agentId, walk.url()).toBeDefined();
+      agentAddress = at("agents", agentId ?? "");
 
-      await walk.getByRole("link", { name: "Add connection" }).click();
-      await walk.waitForURL(/\/connections\/new$/);
+      // Registration now continues through one setup journey. The connection
+      // form is the second step rather than a dead end on an empty detail page.
+      await walk.getByRole("navigation", { name: "Agent setup" }).waitFor();
       // The form is drawn from the registry rather than from a list in the
       // browser, so waiting for the first field is waiting for that read.
       await walk.waitForSelector("#connection-type");
@@ -2601,29 +2642,41 @@ describe("the complete product, walked in order in a second project", () => {
       );
       await walk.getByRole("button", { name: "Add connection" }).click();
 
-      await walk.waitForURL(/\/connections\/con_[^/]+$/);
-      connectionAddress = walk.url();
+      await walk.waitForURL(new RegExp(`/agents/${agentId ?? ""}/onboarding$`));
+      await walk.getByRole("navigation", { name: "Agent setup" }).waitFor();
+      // This new project has no tests yet. The setup says that plainly and
+      // lets the person finish instead of inventing a test selection.
+      await saysWithin(walk, "This project has no active tests yet");
+      await walk.getByRole("link", { name: "Finish setup" }).click();
+      await walk.waitForURL(agentAddress);
+      await walk.getByRole("button", { name: "Configuration" }).click();
       await saysWithin(walk, "Retell staging");
       // Provider discovery rechecks the route immediately before the write.
       // The resulting connection is only the public phone destination; the
       // Retell key and agent id do not enter the stored connection.
       const stored = await instance.database.sql<{
+        id: string;
         type: string;
         modality: string;
         config: Record<string, unknown>;
         credentials: string | null;
       }>(
-        `select type, modality, config, credentials
+        `select id, type, modality, config, credentials
            from connection where name = 'Retell staging'`,
       );
-      expect(stored.rows).toEqual([
-        {
-          type: "phone",
-          modality: "voice",
-          config: { phoneNumber: BROWSER_RETELL_NUMBER },
-          credentials: null,
-        },
-      ]);
+      expect(stored.rows).toHaveLength(1);
+      expect(stored.rows[0]).toMatchObject({
+        type: "phone",
+        modality: "voice",
+        config: { phoneNumber: BROWSER_RETELL_NUMBER },
+        credentials: null,
+      });
+      connectionAddress = at(
+        "agents",
+        agentId ?? "",
+        "connections",
+        stored.rows[0]?.id ?? "",
+      );
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
     },
@@ -2732,9 +2785,9 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(at("tests"));
       await walk.getByRole("link", { name: "Write a test" }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/tests/new$`));
-      // The agents and personas this form offers are read, so waiting for the
-      // agent to be on offer is waiting for both reads.
-      await saysWithin(walk, "The Support line");
+      // Long lists stay behind searchable selectors. The trigger shows that
+      // the form has loaded; the named choice appears only after it is opened.
+      await saysWithin(walk, "Select agents");
 
       await walk.fill("#test-name", "Reschedules a booked appointment");
       await walk.fill(
@@ -2744,8 +2797,14 @@ describe("the complete product, walked in order in a second project", () => {
       await walk
         .getByRole("textbox", { name: "Expected behavior 1" })
         .fill("confirms the new time back before finishing");
-      await walk.getByRole("checkbox", { name: "The Support line" }).check();
-      await walk.getByRole("checkbox", { name: "Impatient Rita" }).check();
+      // Agent and persona lists can be long. Open each searchable selector,
+      // choose the named row, then close the menu through its own action.
+      await walk.getByRole("button", { name: "Choose agents" }).click();
+      await walk.getByRole("checkbox", { name: "The Support line" }).click();
+      await walk.getByRole("button", { name: "Done" }).click();
+      await walk.getByRole("button", { name: "Choose personas" }).click();
+      await walk.getByRole("checkbox", { name: "Impatient Rita" }).click();
+      await walk.getByRole("button", { name: "Done" }).click();
       await walk.getByRole("button", { name: "Write the test" }).click();
 
       await walk.waitForURL(new RegExp(`/projects/${second}/tests/tst_[^/]+$`));
@@ -2781,8 +2840,8 @@ describe("the complete product, walked in order in a second project", () => {
 
       // The review is the same resolution the start performs, so waiting for it
       // is waiting for egma to have said what it would freeze.
-      await walk.waitForSelector("#run-label");
-      await walk.fill("#run-label", "The first run in Support");
+      await walk.waitForSelector("#run-name");
+      await walk.fill("#run-name", "The first run in Support");
       // Nothing here is a run that judges nothing: a grader was switched on two
       // steps ago and every project is created holding another.
       expect(
@@ -2790,9 +2849,20 @@ describe("the complete product, walked in order in a second project", () => {
       ).toBe(0);
 
       await walk.getByRole("button", { name: "Start run" }).click();
-      await walk.waitForURL(new RegExp(`/projects/${second}/runs$`));
-
-      await walk.getByRole("link", { name: "The first run in Support" }).click();
+      const confirmation = walk.getByRole("dialog", { name: "Start this run?" });
+      await confirmation.waitFor();
+      await confirmation.getByText("1 simulation will be conducted.").waitFor();
+      const started = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/api/runs",
+      );
+      await confirmation.getByRole("button", { name: "Start run" }).click();
+      const startedResponse = await started;
+      expect(
+        startedResponse.status(),
+        await startedResponse.text(),
+      ).toBe(201);
       await walk.waitForURL(
         new RegExp(`/projects/${second}/runs/run_[^/]+$`),
       );
@@ -2813,8 +2883,7 @@ describe("the complete product, walked in order in a second project", () => {
       // What the run was against, as it now stands — the agent, and the
       // connection exactly as this run went over it.
       expect(shown).toContain("The Support line");
-      expect(shown).toContain("retell");
-      expect(shown).toContain("staging");
+      expect(shown).toContain("Retell staging");
 
       const row = walk
         .getByRole("link", { name: "Reschedules a booked appointment" })
@@ -2830,9 +2899,13 @@ describe("the complete product, walked in order in a second project", () => {
     "opens that conversation's own evidence, before anything has conducted it",
     async () => {
       await walk.goto(`${origin}${conversation}`);
-      await walk
+      const evidence = walk.getByRole("dialog", {
+        name: "Transcript and audio",
+      });
+      await evidence.waitFor({ timeout: 30_000 });
+      await evidence
         .getByRole("heading", { name: "Transcript", exact: true })
-        .waitFor({ timeout: 30_000 });
+        .waitFor();
 
       const shown = await walk.innerText("main");
       // It is the conversation it says it is: the test it will execute, and
@@ -2841,7 +2914,7 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).toContain("Impatient Rita");
       // And nothing has happened yet, said as an absence rather than as a
       // failure or as an empty space that could mean either.
-      expect(shown).toContain("No transcript was filed");
+      expect(await evidence.innerText()).toContain("No transcript was filed");
       expect(await walk.locator("audio").count()).toBe(0);
     },
     SETTLE,
@@ -2877,14 +2950,18 @@ describe("the complete product, walked in order in a second project", () => {
       );
 
       await walk.goto(`${origin}${conversation}`);
-      await walk
+      const evidence = walk.getByRole("dialog", {
+        name: "Transcript and audio",
+      });
+      await evidence.waitFor({ timeout: 30_000 });
+      await evidence
         .getByRole("heading", { name: "Transcript", exact: true })
-        .waitFor({ timeout: 30_000 });
+        .waitFor();
 
       await expect
-        .poll(() => walk.innerText("main"), { timeout: 30_000 })
+        .poll(() => evidence.innerText(), { timeout: 30_000 })
         .toContain("I need to move my cleaning to next week.");
-      const shown = await walk.innerText("main");
+      const shown = await evidence.innerText();
       expect(shown).toContain("Of course — which afternoon suits you?");
       expect(shown).not.toContain("No transcript was filed");
 
@@ -2962,7 +3039,7 @@ describe("the complete product, walked in order in a second project", () => {
         address: `${agentAddress}/connections/new`,
         // The form is drawn from the registry, so this field exists only once
         // that read has landed.
-        says: "Modality",
+        says: "Retell API key",
       },
       {
         what: "one connection",
@@ -2977,9 +3054,9 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Write a test",
         address: at("tests", "new"),
-        // The agents this form offers are read; the agent being on offer is
-        // that read having landed.
-        says: "The Support line",
+        // Long agent lists stay behind a searchable selector. Its trigger is
+        // present only after the form has taken over the route.
+        says: "Select agents",
       },
       {
         what: "one test",
@@ -3773,11 +3850,15 @@ describe("the complete product, walked in order in a second project", () => {
 
         // And a transcript is dense: its turns are lines rather than cards.
         await walk.goto(`${origin}${conversation}`);
-        await walk
+        const evidence = walk.getByRole("dialog", {
+          name: "Transcript and audio",
+        });
+        await evidence.waitFor({ timeout: 30_000 });
+        await evidence
           .getByRole("heading", { name: "Transcript", exact: true })
-          .waitFor({ timeout: 30_000 });
+          .waitFor();
         await expect
-          .poll(() => walk.innerText("main"), { timeout: 30_000 })
+          .poll(() => evidence.innerText(), { timeout: 30_000 })
           .toContain("I need to move my cleaning to next week.");
       },
       SETTLE,
@@ -4130,7 +4211,11 @@ describe("the complete product, walked in order in a second project", () => {
       "reaches the recording controls with the keyboard",
       async () => {
         await walk.goto(`${origin}${conversation}`);
-        const player = walk.locator("audio[data-recording]");
+        const evidence = walk.getByRole("dialog", {
+          name: "Transcript and audio",
+        });
+        await evidence.waitFor({ timeout: 30_000 });
+        const player = evidence.getByLabel("Simulation recording");
         await player.waitFor({ timeout: 30_000 });
 
         expect(await player.getAttribute("controls")).not.toBeNull();
