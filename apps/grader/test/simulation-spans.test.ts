@@ -326,8 +326,20 @@ describe("what the simulator measured", () => {
 
     // The number the span's start and end bracket, read back to the
     // millisecond — nothing on the span carries it a second time.
+    //
+    // **Precedence is per measure, and this list is exact so that stays true.**
+    // The timed measure keeps the timing span's own duration and is never
+    // derived beside it; the measure this conversation timed nothing for is
+    // worked out from its turns, and is named here rather than allowed to arrive
+    // unremarked. The day a derivation appends to `first_response_latency`
+    // instead of standing aside, this assertion is what says so.
+    //
+    // The derived pair is hand-computed from the conversation's own shape: four
+    // turns 2000 ms apart, each a single instant on a chat simulation, so each
+    // of the two human turns is answered 2000 ms later.
     expect(judge.asked[0]?.evidence.measures).toEqual([
       { measure: "first_response_latency", samples: [1_214] },
+      { measure: "turn_response_latency", samples: [2_000, 2_000] },
     ]);
   });
 

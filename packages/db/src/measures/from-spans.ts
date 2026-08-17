@@ -74,6 +74,17 @@ export type MeasuredFromSpans = {
   /** The catalog's own unit, so nothing downstream has to look it up again. */
   readonly unit: CatalogedMeasure["unit"];
   /**
+   * Whether this number was worked out from a framework's own spans rather than
+   * read off a timing span egma's vocabulary names.
+   *
+   * A fact about *this* conversation and not about the measure, which is why it
+   * rides the answer instead of sitting in the catalog: the same measure is
+   * timed on a simulation and derived on a stock LiveKit call. A page saying
+   * where a number came from is the difference between a verdict a developer
+   * trusts and one they have to go and check.
+   */
+  readonly derived: boolean;
+  /**
    * One measurement, or the whole series for a measure taken once a turn, in
    * the order they were taken.
    *
@@ -97,7 +108,26 @@ export type MeasuredFromSpans = {
  */
 const TIMING = "timing";
 
+/**
+ * The kinds a derivation reads, and the whole of why reading them is safe.
+ *
+ * **The vetting lives at the door.** `apps/api/src/otlp/normalise.ts` assigns
+ * every one of these from a table keyed by the emitting instrumentation scope;
+ * a scope that table does not know is filed as `other`, whatever its spans are
+ * called. So a span carrying one of these kinds is a span egma recognised the
+ * emitter of, and nothing here has to re-check a name a lookalike framework
+ * could have chosen. `speaking` is LiveKit's alone today; the two turn kinds
+ * are LiveKit's and egma's own simulator's, and a simulation carries timing
+ * spans, which win outright below.
+ */
+const ROOT = "root";
+const HUMAN_TURN = "turn:human";
+const AGENT_TURN = "turn:agent";
+const SPEAKING = "speaking";
+
 const NANOSECONDS_PER_MILLISECOND = 1_000_000;
+const NANOSECONDS_PER_MICROSECOND = 1_000n;
+const MICROSECONDS_PER_SECOND = 1_000_000n;
 
 /**
  * Every measure this conversation's spans carry, in the catalog's own order.
@@ -113,15 +143,32 @@ export function measuresFromSpans(
   conversation: SpannedConversation,
 ): readonly MeasuredFromSpans[] {
   const timed = timingSpansByName(conversation);
+  const derived = derivedFromFrameworkSpans(conversation);
 
   const measured: MeasuredFromSpans[] = [];
   for (const cataloged of MEASURE_CATALOG) {
     const found = samplesOf(cataloged, timed);
-    if (found.length === 0) continue;
+    if (found.length > 0) {
+      measured.push({
+        measure: cataloged.measure,
+        unit: cataloged.unit,
+        derived: false,
+        samples: found,
+      });
+      continue;
+    }
+    // **egma's own timing vocabulary wins absolutely, and this `continue` is
+    // where.** A conversation carrying both a timed measure and the shapes a
+    // derivation reads has one answer, not two averaged or two appended: the
+    // measurement somebody instrumented on purpose. Deriving beside it would
+    // double the samples of one turn and quietly move every percentile.
+    const worked = derived.get(cataloged.measure) ?? [];
+    if (worked.length === 0) continue;
     measured.push({
       measure: cataloged.measure,
       unit: cataloged.unit,
-      samples: found,
+      derived: true,
+      samples: worked,
     });
   }
   return measured;
@@ -179,12 +226,9 @@ function timingSpansByName(
       at: span.startedAt,
       // The span's own duration **is** the measurement. Nothing carries the
       // number a second time — a second copy would be free to disagree with the
-      // interval — so this conversion is the only place nanoseconds become
-      // milliseconds. Floating point on purpose: a measure is `862.5ms` and a
-      // whole-number division would quietly floor every one of them, and the
-      // counts involved are tens of seconds, nowhere near where a double stops
-      // holding a nanosecond exactly.
-      value: Number(span.durationNanoseconds) / NANOSECONDS_PER_MILLISECOND,
+      // interval — and it becomes milliseconds through the one conversion this
+      // module has, which every derived measure also goes through.
+      value: milliseconds(BigInt(span.durationNanoseconds)),
       spanId: span.spanId,
     });
   }
@@ -226,6 +270,271 @@ function samplesOf(
       return [];
     }
   }
+}
+
+/* ------------------------------------------------------------------- *
+ * The derived measures: a framework's own spans, read as the catalog's
+ * numbers.
+ * ------------------------------------------------------------------- */
+
+/**
+ * The measures egma works out from the shapes a recognised framework emits,
+ * for a conversation that timed none of them itself.
+ *
+ * **Why derive at all.** A team points a stock LiveKit agent at egma and
+ * watches real conversations arrive, and the one question monitoring exists to
+ * answer — is my agent answering fast enough — was `skipped` on every one of
+ * them, because the framework times its turns in its own vocabulary and egma
+ * only read its own. The durations were there the whole time. Reading them is
+ * what turns a polite silence into a verdict.
+ *
+ * **Read time, not write time.** Nothing new is stored and the door still
+ * writes exactly what arrived, so every conversation already in the store gains
+ * its measures on the next read rather than on the next ingest.
+ *
+ * **Recognition rides the door's scope vetting** — see the kinds above. A
+ * framework egma does not know files everything as `other`, matches none of
+ * this, and derives nothing, which is the honest answer for a conversation egma
+ * cannot read.
+ *
+ * Every rule below is written out beside its measure's name in
+ * `packages/simulation-contract/measure-catalog.md`, plainly enough that two
+ * readers compute the same number from the same spans.
+ */
+function derivedFromFrameworkSpans(
+  conversation: SpannedConversation,
+): ReadonlyMap<string, readonly Sample[]> {
+  const turns: TimedSpan[] = [];
+  let root: TimedSpan | undefined;
+
+  for (const span of everySpanIn(conversation)) {
+    if (span.kind === HUMAN_TURN || span.kind === AGENT_TURN) {
+      turns.push(timed(span));
+      continue;
+    }
+    // The earliest root, so a trace holding more than one — a flush whose
+    // parent never came — is read from where the conversation actually began.
+    if (span.kind === ROOT) {
+      const candidate = timed(span);
+      if (root === undefined || candidate.startedAt < root.startedAt) {
+        root = candidate;
+      }
+    }
+  }
+  turns.sort(byWhenItBegan);
+
+  const derived = new Map<string, readonly Sample[]>();
+  put(derived, "turn_response_latency", turnResponseLatency(turns));
+  put(derived, "first_response_latency", firstResponseLatency(root, turns));
+  put(derived, "agent_speech_duration", agentSpeechDuration(turns));
+  return derived;
+}
+
+/** A measure with no samples is absent, exactly as it is for a timed one. */
+function put(
+  derived: Map<string, readonly Sample[]>,
+  measure: string,
+  samples: readonly Sample[],
+): void {
+  if (samples.length > 0) derived.set(measure, samples);
+}
+
+/**
+ * How long the agent took to answer, once for every turn the human took.
+ *
+ * From the **human turn's end** to the moment the agent's next turn began
+ * speaking — its first `speaking` child's start, or the turn's own start for an
+ * agent turn that carried no speech, which is what a turn that answered with a
+ * tool call looks like. The next agent turn is the next one in the
+ * conversation, ordered by when each began, which is the order a transcript
+ * reads in.
+ *
+ * **A measurement that runs backwards is not a slow answer and is not kept.**
+ * The agent begins speaking before the human stops on every interruption, and
+ * on a real captured call that is five neighbouring turn pairs out of twelve. A
+ * negative latency would drag a mean below zero and make a bound pass that
+ * should have failed — a number that is wrong is worse than a measurement that
+ * is missing, so the overlapping turn contributes nothing and the turns around
+ * it still count.
+ */
+function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
+  const samples: Sample[] = [];
+  for (const [at, turn] of turns.entries()) {
+    if (turn.kind !== HUMAN_TURN) continue;
+    const answered = answeringSpeech(turns, at);
+    if (answered === undefined) continue;
+    const latency = milliseconds(answered.startedAt - turn.endedAt);
+    if (latency < 0) continue;
+    samples.push({ value: latency, spanId: answered.spanId });
+  }
+  return samples;
+}
+
+/**
+ * How long the agent took to say anything at all, from the moment the
+ * conversation began.
+ *
+ * The root span is where a conversation begins — the one span the whole thing
+ * happened inside — and the agent's first word is its first turn's first
+ * `speaking` child. A first agent turn that never spoke has no first word to
+ * have waited for, so nothing is measured rather than a start time standing in
+ * for one: this measure is taken once, and one wrong number is the whole of it.
+ */
+function firstResponseLatency(
+  root: TimedSpan | undefined,
+  turns: readonly TimedSpan[],
+): readonly Sample[] {
+  if (root === undefined) return [];
+  const first = turns.find((turn) => turn.kind === AGENT_TURN);
+  if (first === undefined) return [];
+  const spoke = first.speech[0];
+  if (spoke === undefined) return [];
+  const latency = milliseconds(spoke.startedAt - root.startedAt);
+  if (latency < 0) return [];
+  return [{ value: latency, spanId: spoke.spanId }];
+}
+
+/**
+ * How long the agent spoke for in each of its turns, silence inside the answer
+ * excluded — which is what summing the turn's `speaking` children rather than
+ * taking the turn's own duration gets: a turn that thought for two seconds and
+ * then talked for one spoke for one.
+ *
+ * One sample per agent turn **that spoke**. A turn with no speech in it did not
+ * speak for zero milliseconds; it has no speech duration at all, and a zero
+ * would be a measurement of something that never happened.
+ *
+ * The sample cites the turn rather than one of the children, because the number
+ * is the turn's and no single child holds it.
+ */
+function agentSpeechDuration(turns: readonly TimedSpan[]): readonly Sample[] {
+  const samples: Sample[] = [];
+  for (const turn of turns) {
+    if (turn.kind !== AGENT_TURN || turn.speech.length === 0) continue;
+    let spoken = 0n;
+    for (const speech of turn.speech) spoken += speech.duration;
+    samples.push({ value: milliseconds(spoken), spanId: turn.spanId });
+  }
+  return samples;
+}
+
+/**
+ * Where the agent's answer to the human turn at `at` began.
+ *
+ * The next agent turn's first speech, or that turn's own start when it carried
+ * none. `undefined` when nobody answered — the human had the last word, or said
+ * something else first.
+ *
+ * **An agent turn answers only the nearest human turn before it, so the walk
+ * stops at the next human turn rather than reading past it.** A caller who says
+ * "hello" and then "are you there" before the agent replies has taken two turns
+ * and been answered once, and letting the one reply count for both would file
+ * the same wait twice — the same number in the series twice over, a worse worst
+ * on a page, and, in the limit, a bound failed by a duplicate. The unanswered
+ * first turn measures nothing, which is what actually happened: the wait it
+ * would have measured ended when the caller spoke again, not when the agent did.
+ */
+function answeringSpeech(
+  turns: readonly TimedSpan[],
+  at: number,
+): { readonly startedAt: bigint; readonly spanId: string } | undefined {
+  for (const turn of turns.slice(at + 1)) {
+    if (turn.kind === HUMAN_TURN) return undefined;
+    if (turn.kind !== AGENT_TURN) continue;
+    return turn.speech[0] ?? { startedAt: turn.startedAt, spanId: turn.spanId };
+  }
+  return undefined;
+}
+
+/**
+ * A span as this arithmetic needs it: nanoseconds rather than the two strings
+ * a read hands back, and its speech lifted out once rather than per measure.
+ */
+type TimedSpan = {
+  readonly spanId: string;
+  readonly kind: string;
+  readonly startedAt: bigint;
+  readonly endedAt: bigint;
+  readonly duration: bigint;
+  /** This turn's own `speaking` children, earliest first. */
+  readonly speech: readonly {
+    readonly startedAt: bigint;
+    readonly spanId: string;
+    readonly duration: bigint;
+  }[];
+};
+
+function timed(span: TraceSpan): TimedSpan {
+  const startedAt = startedAtNanoseconds(span);
+  const duration = BigInt(span.durationNanoseconds);
+  return {
+    spanId: span.spanId,
+    kind: span.kind,
+    startedAt,
+    endedAt: startedAt + duration,
+    duration,
+    speech: span.spans
+      .filter((child) => child.kind === SPEAKING)
+      .map((child) => ({
+        startedAt: startedAtNanoseconds(child),
+        spanId: child.spanId,
+        duration: BigInt(child.durationNanoseconds),
+      }))
+      .sort((left, right) =>
+        left.startedAt < right.startedAt
+          ? -1
+          : left.startedAt > right.startedAt
+            ? 1
+            : 0,
+      ),
+  };
+}
+
+/**
+ * When a span began, in nanoseconds since the epoch.
+ *
+ * The store keeps starts to the microsecond and durations to the nanosecond, so
+ * this is exactly as precise as what was written: the six fractional digits are
+ * read as digits rather than through a `Date`, which holds milliseconds and
+ * would round the last three away — and a latency is a difference of two of
+ * these, where three lost digits is three lost digits of the answer.
+ */
+function startedAtNanoseconds(span: TraceSpan): bigint {
+  const dot = span.startedAt.indexOf(".");
+  if (dot === -1) {
+    return (
+      BigInt(Math.round(Date.parse(span.startedAt) / 1000)) *
+      MICROSECONDS_PER_SECOND *
+      NANOSECONDS_PER_MICROSECOND
+    );
+  }
+  const seconds = BigInt(Math.round(Date.parse(`${span.startedAt.slice(0, dot)}Z`) / 1000));
+  const fraction = span.startedAt.slice(dot + 1).replace(/[^0-9]/g, "");
+  const microseconds = BigInt(fraction.slice(0, 6).padEnd(6, "0"));
+  return (
+    (seconds * MICROSECONDS_PER_SECOND + microseconds) *
+    NANOSECONDS_PER_MICROSECOND
+  );
+}
+
+/**
+ * Nanoseconds as the milliseconds the catalog states every latency in.
+ *
+ * Floating point on purpose, exactly as a timing span's own duration is: a
+ * measure is `862.5ms` and a whole-number division would floor every one of
+ * them.
+ */
+function milliseconds(nanoseconds: bigint): number {
+  return Number(nanoseconds) / NANOSECONDS_PER_MILLISECOND;
+}
+
+/** Earliest first, on the nanoseconds rather than on the stored strings. */
+function byWhenItBegan(left: TimedSpan, right: TimedSpan): number {
+  return left.startedAt < right.startedAt
+    ? -1
+    : left.startedAt > right.startedAt
+      ? 1
+      : 0;
 }
 
 /**

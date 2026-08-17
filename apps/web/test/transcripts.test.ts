@@ -988,3 +988,56 @@ describe("what the exchange measured", () => {
     expect(copy.MEASURES.none.length).toBeGreaterThan(40);
   });
 });
+
+/**
+ * Where a number came from, said on the page that shows it.
+ *
+ * **A verdict's provenance must never be a surprise.** Some figures on this
+ * page were not timed by anybody: Egma worked them out from the timings the
+ * agent's own framework already records. A developer whose latency check starts
+ * failing is owed that sentence beside the number, not in a document.
+ *
+ * And the quiet sentence for an exchange that measured nothing stays exactly as
+ * it was, because it is still exactly as true — a framework emitting nothing
+ * Egma recognises still measures nothing.
+ */
+describe("saying which numbers Egma worked out", () => {
+  it("adds a clause only when a worked-out figure is on the page", async () => {
+    const page = await readFile(path.join(WEB, DETAIL_PAGE), "utf8");
+
+    // Shown from the answer's own flag, and only when one is set — a caveat
+    // about something that did not happen is noise on every other exchange.
+    expect(page).toContain("one.derived === true");
+    expect(page).toContain("MEASURES.derived");
+    expect(copy.MEASURES.derived).toContain("your framework's own timings");
+    // Marked on the figure too, so a page mixing the two can be read without
+    // counting rows.
+    expect(copy.MEASURES.derivedOne).toContain("framework");
+  });
+
+  it("keeps the nothing-was-measured sentence exactly as it was", () => {
+    expect(copy.MEASURES.none).toBe(
+      "Nothing was measured here. Egma's own simulations time their turns; an " +
+        "exchange your agent had carries whatever its telemetry emitted, which " +
+        "for most frameworks is no timings at all.",
+    );
+  });
+
+  /**
+   * The words on the page are the product's, and three storage words are not
+   * among them: a developer reading a transcript never has to know what a span,
+   * a trace or an instrumentation scope is to understand where a number
+   * came from.
+   */
+  it("says none of it in the storage vocabulary", () => {
+    for (const said of [
+      copy.MEASURES.derived,
+      copy.MEASURES.derivedOne,
+      copy.MEASURES.none,
+    ]) {
+      expect(said.toLowerCase()).not.toContain("span");
+      expect(said.toLowerCase()).not.toContain("trace");
+      expect(said.toLowerCase()).not.toContain("scope");
+    }
+  });
+});

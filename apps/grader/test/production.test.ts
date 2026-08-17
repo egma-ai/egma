@@ -251,14 +251,35 @@ describe("a production trace whose root span closes", () => {
       },
     ]);
 
-    // And no measures — not because this is production, but because these spans
-    // carry none. The shared measure module is handed the trace and knows
-    // nothing about who conducted it; most agents' telemetry emits no timings,
-    // so most production traces measure nothing, and a grader asked for one
-    // answers `skipped`, which leaves the score's denominator. A production
-    // trace that *does* carry timing spans measures exactly what a simulation's
-    // identical spans measure, which the case below is about.
-    expect(conversation.measures).toEqual([]);
+    // And a measure, **derived** — not because this is production, but because
+    // these spans carry the shapes a derivation reads. The shared measure module
+    // is handed the trace and knows nothing about who conducted it: this agent
+    // emitted no timing span of egma's own, and its turn latency is worked out
+    // from the turns the framework itself timed.
+    //
+    // Hand-computed from this tree: the turns are 2000 ms apart and each runs
+    // for 1000 ms, so the human turn ends 1000 ms in and the agent's turn — which
+    // carries no speech, so its own start is the answer — begins at 2000 ms.
+    expect(conversation.measures).toEqual([
+      {
+        measure: "turn_response_latency",
+        unit: "milliseconds",
+        derived: true,
+        samples: [{ value: 1_000, spanId: expect.any(String) }],
+      },
+    ]);
+    // The other two are absent, and each for a reason this tree has: nothing
+    // here spoke, so there is no speech to have measured and no first word to
+    // have waited for. A grader asked for either answers `skipped`, which leaves
+    // the score's denominator. A production trace that *does* carry egma's own
+    // timing spans measures exactly what a simulation's identical spans measure,
+    // which the case below is about.
+    expect(conversation.measures.map((one) => one.measure)).not.toContain(
+      "agent_speech_duration",
+    );
+    expect(conversation.measures.map((one) => one.measure)).not.toContain(
+      "first_response_latency",
+    );
 
     // Empty, and honestly so: a trace that arrived at the OTLP door was not
     // started by egma, so there is no run and no agent row behind it.

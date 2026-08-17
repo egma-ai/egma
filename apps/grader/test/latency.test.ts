@@ -71,6 +71,7 @@ function measured(
   return {
     measure,
     unit: "milliseconds",
+    derived: false,
     // Each measurement carries the span it happened in, which is what a
     // judgment cites — one list, so nothing here has to keep two in step.
     samples: values.map((value, at) => ({

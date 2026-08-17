@@ -453,19 +453,27 @@ describe("the captured trace, read as a transcript", () => {
    * verdict rests on are one arithmetic, and no page can be the reason somebody
    * distrusts a judgment.
    *
-   * The captured exchange measures **nothing**, and that is the honest answer
-   * rather than a gap: LiveKit's own agent emits no timing spans, so there is
-   * nothing in this trace for a measure to be computed from. A grader asked for
-   * one answers `skipped`, which leaves the score's denominator. The day the
-   * ingest door normalises a provider's own latency attribute into a span this
-   * list grows, and nothing else has to change.
+   * The captured exchange emits no timing span of egma's own, and it is
+   * measured anyway: the three latencies are **derived** from the shapes the
+   * framework itself timed, and each says so. That is the answer to what this
+   * read used to return — an empty list, and a latency grader `skipped` on every
+   * production conversation a stock agent ever had.
+   *
+   * The numbers themselves are asserted in
+   * `apps/api/test/otlp-derived-measures.test.ts`, against figures hand-computed
+   * from the capture's raw timestamps. What is asked here is the read's shape:
+   * which measures come back, and that the answer is a present list either way.
    */
-  it("answers what the exchange measured, which for this telemetry is nothing", async () => {
+  it("answers what the exchange measured, derived from the framework's own timings", async () => {
     const detail = await transcript();
 
-    expect(detail.measures).toEqual([]);
-    // Present and empty rather than absent, so a client can tell "nothing was
-    // measured" from "this response is an older shape that never said".
+    expect(detail.measures?.map((one) => one.measure)).toEqual([
+      "first_response_latency",
+      "turn_response_latency",
+      "agent_speech_duration",
+    ]);
+    // Present rather than absent, so a client can tell "nothing was measured"
+    // from "this response is an older shape that never said".
     expect(Array.isArray(detail.measures)).toBe(true);
   });
 });

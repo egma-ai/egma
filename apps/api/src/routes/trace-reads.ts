@@ -347,6 +347,12 @@ function describedMeasures(
     return {
       measure: measured.measure,
       unit: measured.unit,
+      // Where the number came from, so a page can say it and a client that
+      // never asked is unaffected. **Added rather than changed**: every field a
+      // consumer integrated against still means exactly what it did, and a
+      // measure timed by egma's own vocabulary carries `false` here as it
+      // always implicitly did.
+      derived: measured.derived,
       samples: measured.samples.map((sample) => sample.value),
       span_ids: measured.samples.map((sample) => sample.spanId),
       // The one number a bound is held against, and where it happened. Null is
@@ -500,9 +506,20 @@ export async function traceReadRoutes(
     // the 128 bits that id carries written as hex. The two are the same number,
     // so the reader that has one can always derive the other — which is what
     // lets a transcript show what egma made of it with nothing having stored a
-    // mapping. A production trace derives to a simulation id nothing minted,
-    // and simply has no verdicts filed that way.
-    const filedUnder = simulationIdOfTrace(traceId) ?? traceId;
+    // mapping.
+    //
+    // **A production trace's verdicts are filed under the trace id itself**, and
+    // asking `detail.source` is what keeps that true. The derivation is a pure
+    // bit conversion and succeeds for *every* trace id, so a production trace
+    // would otherwise be looked up under a simulation id nothing ever minted —
+    // and the read would answer "skipped, nothing judged" while real verdict
+    // rows sat in the store under the id it was handed. A judgment egma wrote
+    // and then could not find is the exact false trust this product exists to
+    // kill, so the question is asked rather than the answer assumed.
+    const filedUnder =
+      detail.source === "simulation"
+        ? (simulationIdOfTrace(traceId) ?? traceId)
+        : traceId;
     const judged = await readVerdicts(acting, filedUnder, { projectId }).catch(
       () => undefined,
     );
