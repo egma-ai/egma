@@ -463,6 +463,11 @@ const THE_GRADER_LIBRARY = [
  * default somebody can mistype into a model nobody proved.
  */
 const THE_MODEL_CATALOG = [
+  // Where a person goes to repair what stopped a simulation, as one word from
+  // a closed list. A word rather than a URL, because the address of a page is
+  // the browser's business — and closed, because a page turns it into a link
+  // and an unknown word would be a button to nowhere.
+  "ENDING_REPAIRS",
   "MODEL_ACCESS_MODES",
   "MODEL_JOBS",
   "MODEL_PROVIDERS",
