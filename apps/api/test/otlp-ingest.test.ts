@@ -322,17 +322,11 @@ describe("the captured trace, posted at the door", () => {
     expect(row?.payload).toContain("telemetry.sdk.version");
   });
 
-  it("says which framework the agent was reached over, and measures no audio it did not hear", async () => {
-    const rows = await store().rows<{
-      connection_type: string;
-      audio_sample_rate_hz: number;
-      audio_encoding: string;
-    }>(
-      "select distinct connection_type, audio_sample_rate_hz, audio_encoding from spans",
+  it("says which framework the agent was reached over", async () => {
+    const rows = await store().rows<{ connection_type: string }>(
+      "select distinct connection_type from spans",
     );
-    expect(rows).toEqual([
-      { connection_type: "livekit", audio_sample_rate_hz: 0, audio_encoding: "" },
-    ]);
+    expect(rows).toEqual([{ connection_type: "livekit" }]);
   });
 
   it("pins no run, no agent and no versions, because nothing here started one", async () => {

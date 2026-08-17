@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { traceIdOfSimulation } from "../src/trace-identity.ts";
+import {
+  simulationIdOfTrace,
+  traceIdOfSimulation,
+} from "../src/trace-identity.ts";
 
 /**
  * The derivation, held to the document that promises it.
@@ -77,6 +80,12 @@ describe("the trace a simulation's spans belong to", () => {
     expect(traceIdOfSimulation("run_01K3XQ7M4E8YB2FVN0H9TZQWER")).toBeUndefined();
     expect(traceIdOfSimulation("01K3XQ7M4E8YB2FVN0H9TZQWER")).toBeUndefined();
     expect(traceIdOfSimulation("")).toBeUndefined();
+    // OpenTelemetry reserves zero as an invalid trace identity. The simulator
+    // refuses this otherwise well-shaped id before it reports `running`.
+    expect(
+      traceIdOfSimulation("sim_00000000000000000000000000"),
+    ).toBeUndefined();
+    expect(simulationIdOfTrace("0".repeat(32))).toBeUndefined();
     // Twenty-six Crockford characters hold 130 bits and a trace id holds 128.
     // egma's own ids never reach the top two — a UUIDv7's millisecond field
     // does not — and one that somehow did would be truncated into somebody

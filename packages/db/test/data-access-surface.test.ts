@@ -279,10 +279,10 @@ const CONTEXT_REQUIRING = [
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  // The ledger that makes a Retell conversation land exactly once however it
-  // arrived: the claim a transport takes on an identity, and the mark that
-  // moves the connection's cursor once the spans are stored. Both take the
-  // context the watch resolver handed out.
+  // The ledger that chooses one live writer for a Retell conversation: the
+  // claim a transport takes on an identity, and the mark that moves the
+  // connection's cursor once the spans are stored. Both take the context the
+  // watch resolver handed out.
   "advanceProductionCursor",
   "claimProductionTrace",
   "finishProductionTrace",

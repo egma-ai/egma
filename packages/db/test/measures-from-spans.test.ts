@@ -111,8 +111,6 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     toolResult: "",
     providerCallId: "room-1",
     connectionType: "livekit",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     runId: "",
     agentId: "",
     agentVersionId: "",

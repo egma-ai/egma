@@ -10,14 +10,14 @@ import { MEASURE_CATALOG } from "../src/measures.ts";
  * The span fixtures, held to the vocabulary document beside them.
  *
  * These files are the meeting point between the simulator's emitter and the
- * platform's OTLP ingest: the emitter produces exactly these shapes, and the
- * ingest's own suite posts these same files and asserts what lands. What this
- * suite holds is the contract itself — every fixture speaks the one scope,
- * names its simulation on the resource, uses only the span names and attribute
- * keys the document declares, and derives its trace identity from the
- * simulation id the way the document says to. A shape used in a fixture and
- * missing from the document, or the other way round, fails here rather than
- * surfacing as two sides that each believed the other.
+ * platform's OTLP ingest: they are worked examples of the Egma vocabulary,
+ * and the ingest's own suite posts these same files and asserts what lands.
+ * What this suite holds is the contract itself — every fixture speaks the one
+ * scope, names its simulation on the resource, uses only the span names and
+ * attribute keys the document declares, and derives its trace identity from
+ * the simulation id the way the document says to. A shape used in a fixture
+ * and missing from the document, or the other way round, fails here rather
+ * than surfacing as two sides that each believed the other.
  */
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));

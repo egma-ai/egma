@@ -96,8 +96,6 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     toolResult: "",
     providerCallId: "room-1",
     connectionType: "livekit",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     runId: "",
     agentId: "",
     agentVersionId: "",
@@ -402,6 +400,87 @@ describe("a span whose parent never arrived", () => {
   });
 });
 
+describe("changed evidence that reuses span ids", () => {
+  const REUSED = "abab1111111111111111111111111111";
+  const root = "dadadadadadadada";
+  const turn = "dbdbdbdbdbdbdbdb";
+  const child = "dcdcdcdcdcdcdcdc";
+
+  beforeAll(async () => {
+    await appendSpans(at(acme, SUPPORT), [
+      span({
+        traceId: REUSED,
+        spanId: root,
+        name: "root-original",
+        payload: '{"revision":1}',
+      }),
+      span({
+        traceId: REUSED,
+        spanId: turn,
+        parentSpanId: root,
+        name: "user_turn",
+        kind: "turn:human",
+        text: "original evidence",
+      }),
+    ]);
+    await appendSpans(at(acme, SUPPORT), [
+      span({
+        traceId: REUSED,
+        spanId: root,
+        name: "root-changed",
+        payload: '{"revision":2}',
+      }),
+      span({
+        traceId: REUSED,
+        spanId: turn,
+        parentSpanId: root,
+        name: "user_turn",
+        kind: "turn:human",
+        text: "changed evidence",
+      }),
+    ]);
+    await appendSpans(at(acme, SUPPORT), [
+      span({
+        traceId: REUSED,
+        spanId: child,
+        parentSpanId: root,
+        name: "shared-child",
+        kind: "model",
+      }),
+    ]);
+    // The changed block is different evidence, so both reused-id rows exist in
+    // storage and this suite can prove that the reader does not collapse them.
+    // Force the parts together. The response order must come from stored
+    // content, not whichever source part ClickHouse happens to read first.
+    await store.command("optimize table spans final");
+  });
+
+  it("returns every stored row in a stable tree instead of collapsing by span id", async () => {
+    const first = await readTrace(at(acme, SUPPORT), REUSED, {
+      window: WINDOW,
+    });
+    const second = await readTrace(at(acme, SUPPORT), REUSED, {
+      window: WINDOW,
+    });
+
+    expect(second).toEqual(first);
+    expect(first?.spanCount).toBe(5);
+    expect(everySpanOf(first)).toHaveLength(5);
+    expect(first?.turns.map((each) => each.text).sort()).toEqual([
+      "changed evidence",
+      "original evidence",
+    ]);
+    expect(first?.spans.map((each) => each.name)).toEqual([
+      "root-original",
+      "root-changed",
+    ]);
+    expect(first?.spans[0]?.spans.map((each) => each.name)).toEqual([
+      "shared-child",
+    ]);
+    expect(first?.spans[1]?.spans).toEqual([]);
+  });
+});
+
 /**
  * Spans that point at each other, which is what a truncated exporter buffer and
  * a hand-written client both eventually produce.
@@ -415,6 +494,7 @@ describe("a span whose parent never arrived", () => {
 describe("a parent cycle longer than one span", () => {
   const CYCLED = "eeee1111111111111111111111111111";
   const DESCENDED = "ffff1111111111111111111111111111";
+  const REUSED_IN_CYCLE = "eded1111111111111111111111111111";
 
   beforeAll(async () => {
     // Two spans, each naming the other as its parent.
@@ -463,6 +543,41 @@ describe("a parent cycle longer than one span", () => {
         startedAtMicroseconds: BigInt(WHEN.getTime() + 2000) * 1000n,
       }),
     ]);
+
+    // A later row reuses the root id inside one branch. Reaching that row also
+    // reaches the root's second child. A walk that filters all root children
+    // before it descends would therefore append that second child twice.
+    const repeatedRoot = spanId();
+    const firstChild = spanId();
+    const secondChild = spanId();
+    await appendSpans(at(acme, SUPPORT), [
+      span({
+        traceId: REUSED_IN_CYCLE,
+        spanId: repeatedRoot,
+        name: "root-original",
+      }),
+      span({
+        traceId: REUSED_IN_CYCLE,
+        spanId: firstChild,
+        parentSpanId: repeatedRoot,
+        name: "first-child",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 1000) * 1000n,
+      }),
+      span({
+        traceId: REUSED_IN_CYCLE,
+        spanId: secondChild,
+        parentSpanId: repeatedRoot,
+        name: "second-child",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 2000) * 1000n,
+      }),
+      span({
+        traceId: REUSED_IN_CYCLE,
+        spanId: repeatedRoot,
+        parentSpanId: firstChild,
+        name: "root-id-reused-in-cycle",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 3000) * 1000n,
+      }),
+    ]);
   });
 
   it("is read back whole rather than vanishing out of the transcript", async () => {
@@ -492,6 +607,21 @@ describe("a parent cycle longer than one span", () => {
       "agent_session",
       "tts_request",
       "user_turn",
+    ]);
+  });
+
+  it("returns each row once when a cycle also reuses an id", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), REUSED_IN_CYCLE, {
+      window: WINDOW,
+    });
+
+    expect(detail?.spanCount).toBe(4);
+    expect(everySpanOf(detail)).toHaveLength(4);
+    expect(everySpanOf(detail).map((each) => each.name).sort()).toEqual([
+      "first-child",
+      "root-id-reused-in-cycle",
+      "root-original",
+      "second-child",
     ]);
   });
 });

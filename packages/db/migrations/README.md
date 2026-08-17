@@ -4,7 +4,7 @@ One rule keeps every deploy and every rollback safe, and it binds both
 stores — the Postgres files here and the ClickHouse files in
 `../clickhouse-migrations/`:
 
-**A migration may never break the code that is currently running.**
+**By default, a migration may never break the code that is currently running.**
 
 The platform deploys on every green merge, and the API applies these files
 on boot, before the new code serves — so for a moment the *old* code runs
@@ -17,14 +17,19 @@ In practice:
 
 - **Add freely.** New tables, new nullable columns, new indexes — code that
   does not know them never sees them.
+- **Prelaunch cleanup is the explicit exception.** A one-step removal is allowed
+  only when the founder confirms that no older API or rollback contract is
+  supported. Record that decision in the migration and accept that the prior
+  build cannot run after the change.
 - **Remove in two releases, not one.** Stop reading the thing first and ship
   that; drop it in a later release than the one that stopped using it. A
   rename is an add and a remove, in that order, never one statement.
 - **Never rewrite an applied file.** The runner refuses a changed file
   rather than skipping it (`packages/db/src/migrate.ts`), so the history
   here is what production actually ran.
-- **ClickHouse has no choice.** There is no transaction to wrap a file in,
-  so its migrations are additive by necessity rather than convention.
+- **ClickHouse migrations must resume safely.** There is no transaction around
+  a file, so every statement uses `IF EXISTS` or `IF NOT EXISTS` and survives a
+  second run after a partial failure.
 
 A change that cannot follow the rule in one step — a type change, a backfill
 that must rewrite — ships as expand, migrate, contract across releases, and

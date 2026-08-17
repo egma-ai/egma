@@ -1,6 +1,6 @@
 {
-  "id": "e6634a49-a6ca-4688-8468-8e5688424a06",
-  "prevId": "600d097c-4927-24b4-b3fc-85cebe34d202",
+  "id": "807f86c2-06ba-4d88-9c13-5321d1dbf94e",
+  "prevId": "e6634a49-a6ca-4688-8468-8e5688424a06",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4787,12 +4787,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "measured_audio_band_hertz": {
-          "name": "measured_audio_band_hertz",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "recording_reference": {
           "name": "recording_reference",
           "type": "text",
@@ -5192,7 +5186,7 @@
         },
         "simulation_report_only_when_ended": {
           "name": "simulation_report_only_when_ended",
-          "value": "\"simulation\".\"ended_at\" is not null\n        or (\"simulation\".\"recording_reference\" is null\n          and \"simulation\".\"measured_audio_band_hertz\" is null)"
+          "value": "\"simulation\".\"ended_at\" is not null\n        or \"simulation\".\"recording_reference\" is null"
         },
         "simulation_summary_facts_only_when_ended": {
           "name": "simulation_summary_facts_only_when_ended",
@@ -5208,11 +5202,7 @@
         },
         "simulation_audio_facts_are_voice_facts": {
           "name": "simulation_audio_facts_are_voice_facts",
-          "value": "\"simulation\".\"modality\" = 'voice'\n        or (\"simulation\".\"measured_audio_band_hertz\" is null\n          and \"simulation\".\"recording_reference\" is null)"
-        },
-        "simulation_audio_band_is_a_rate": {
-          "name": "simulation_audio_band_is_a_rate",
-          "value": "\"simulation\".\"measured_audio_band_hertz\" is null or \"simulation\".\"measured_audio_band_hertz\" > 0"
+          "value": "\"simulation\".\"modality\" = 'voice'\n        or \"simulation\".\"recording_reference\" is null"
         }
       },
       "isRLSEnabled": false

@@ -571,7 +571,7 @@ describe("a transport that died mid-protocol", () => {
     expect(row?.status).toBe("written");
   });
 
-  it("is recovered after an append with no mark, and exactly one copy exists", async () => {
+  it("suppresses a recent exact replay after an append with no mark", async () => {
     const target = await targetFor(acmeWired);
     const call = callFixture("call_append_only", BASE + AHEAD + 6_000);
     const normalised = normaliseRetellCall(
@@ -594,6 +594,7 @@ describe("a transport that died mid-protocol", () => {
       endedAt: normalised.endedAt,
     });
     // Appended, and then killed before anything said so.
+    // This is the exact block that recovery will replay.
     await appendSpans(target.auth, normalised.spans);
     await recordProductionTraces(target.auth, normalised.spans);
     expect(await spansOf(acme, normalised.traceId)).toBe(3);
@@ -603,8 +604,8 @@ describe("a transport that died mid-protocol", () => {
     const swept = await sweep();
     expect(swept.replayed).toBe(1);
 
-    // The replay's append is byte-identical, so the store drops it as the
-    // duplicate block it is. Three spans, not six.
+    // The replay is immediate and byte-identical, so ClickHouse's recent block
+    // backstop suppresses it. Three spans, not six.
     expect(await spansOf(acme, normalised.traceId)).toBe(3);
     const [row] = (await claimRows()).filter(
       (one) => one.trace_id === normalised.traceId,

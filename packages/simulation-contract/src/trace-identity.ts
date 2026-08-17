@@ -65,7 +65,10 @@ export function traceIdOfSimulation(simulationId: string): string | undefined {
   // field stay zero for the next eight thousand years — and one that somehow
   // were would silently truncate into a trace belonging to a different
   // conversation, which is worse than having no answer.
-  if (value >= 1n << TRACE_ID_BITS) return undefined;
+  // OpenTelemetry reserves the all-zero value as an invalid trace identity.
+  // The simulator refuses this otherwise well-shaped id before `running`, so
+  // readers must not look for evidence under a trace the SDK cannot record.
+  if (value === 0n || value >= 1n << TRACE_ID_BITS) return undefined;
 
   return value.toString(16).padStart(TRACE_ID_HEX_LENGTH, "0");
 }
@@ -92,7 +95,9 @@ const SIMULATION_ID_CHARACTERS = 26;
  * lookup simply returns no verdicts filed that way.
  */
 export function simulationIdOfTrace(traceId: string): string | undefined {
-  if (!/^[0-9a-f]{32}$/u.test(traceId)) return undefined;
+  if (!/^[0-9a-f]{32}$/u.test(traceId) || /^0{32}$/u.test(traceId)) {
+    return undefined;
+  }
 
   let value = BigInt(`0x${traceId}`);
   const characters: string[] = [];

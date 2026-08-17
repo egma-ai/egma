@@ -697,7 +697,6 @@ def loopback_spec(
     ends_after_replies: bool = False,
     echoes_what_it_hears: bool = False,
     answer_delay_seconds: float = 0.0,
-    sample_rate_hz: int | None = None,
     provider_reference: str | None = None,
     max_turns: int = 60,
     max_duration_seconds: int = 600,
@@ -719,8 +718,6 @@ def loopback_spec(
         config["ends_after_replies"] = True
     if echoes_what_it_hears:
         config["echoes_what_it_hears"] = True
-    if sample_rate_hz is not None:
-        config["sample_rate_hz"] = sample_rate_hz
     if provider_reference is not None:
         config["provider_reference"] = provider_reference
     spec = a_spec(
@@ -867,57 +864,14 @@ def assert_one_speaker_to_a_channel(
 ) -> None:
     """Each turn is on its own speaker's channel and on neither other one.
 
-    The recording is read the only way a listener could read it — the
-    samples of each channel, transcribed — so this says what a person
-    would hear, not what the simulator believed it wrote.
+    The transcript already proves the words. This reads audible stretches
+    from the recording itself and proves that their two channels map to the
+    same speakers, in the same order.
     """
-    from egma_simulator.recording import channels_of
-    from egma_simulator.speech import decode_speech
-
-    persona_audio, agent_audio, band = channels_of(recording)
-    said = {
-        "human": decode_speech(persona_audio, band),
-        "agent": decode_speech(agent_audio, band),
-    }
-    for speaker, text in turns:
-        other = "agent" if speaker == "human" else "human"
-        assert text in said[speaker], (speaker, text)
-        assert text not in said[other], (speaker, text)
-
-
-async def carry(line, outgoing: bytes = b"", *, slices: int = 1) -> bytes:
-    """Drive a duplex line the way the conductor drives it, and keep what
-    came back: the same number of samples each way, every slice, quiet
-    included.
-
-    The one way any voice plug is exercised here, because it is the one
-    way a voice plug is exercised in production — there is no turn-shaped
-    door left to knock on.
-    """
-    from egma_simulator.conductor import LINE_SLICE_SAMPLES
-    from egma_simulator.speech import SAMPLE_WIDTH_BYTES
-
-    width = LINE_SLICE_SAMPLES * SAMPLE_WIDTH_BYTES
-    said = bytearray(outgoing)
-    said += bytes(max(0, slices * width - len(said)))
-    heard = bytearray()
-    for offset in range(0, len(said), width):
-        heard += await line.exchange(bytes(said[offset : offset + width]))
-    return bytes(heard)
-
-
-async def hear(line, said: str = "", *, seconds: float = 3.0) -> str:
-    """What the far end says back over one persona turn and the quiet after
-    it — read as words, which is all a lifecycle test cares about."""
-    from egma_simulator.conductor import LINE_SLICE_SAMPLES
-    from egma_simulator.speech import decode_speech, encode_speech
-
-    band = line.sample_rate_hz
-    spoken = encode_speech(said, band) if said else b""
-    quiet = round(seconds * band / LINE_SLICE_SAMPLES)
-    heard = await carry(line, spoken)
-    heard += await carry(line, slices=quiet)
-    return decode_speech(heard, band)
+    heard = speech_in_the_recording(recording)
+    assert [speaker for speaker, _began, _ended in heard] == [
+        speaker for speaker, _text in turns
+    ]
 
 
 def speech_in_the_recording(recording: bytes) -> list[tuple[str, int, int]]:
@@ -929,12 +883,12 @@ def speech_in_the_recording(recording: bytes) -> list[tuple[str, int, int]]:
     What comes out is the conversation as the audio holds it, which is
     what a turn span claims to be about.
     """
-    from egma_simulator.conductor import LINE_SLICE_SAMPLES
     from egma_simulator.recording import channels_of
     from egma_simulator.speech import SAMPLE_WIDTH_BYTES, carries_speech
 
-    width = LINE_SLICE_SAMPLES * SAMPLE_WIDTH_BYTES
-    persona_audio, agent_audio, _band = channels_of(recording)
+    persona_audio, agent_audio, band = channels_of(recording)
+    window_samples = max(1, round(band * 0.005))
+    width = window_samples * SAMPLE_WIDTH_BYTES
     heard: list[tuple[str, int, int]] = []
     for speaker, channel in (("human", persona_audio), ("agent", agent_audio)):
         opened: int | None = None
@@ -947,11 +901,15 @@ def speech_in_the_recording(recording: bytes) -> list[tuple[str, int, int]]:
                 heard.append(
                     (
                         speaker,
-                        opened * LINE_SLICE_SAMPLES,
-                        position * LINE_SLICE_SAMPLES,
+                        opened * window_samples,
+                        position * window_samples,
                     )
                 )
                 opened = None
+        if opened is not None:
+            heard.append(
+                (speaker, opened * window_samples, len(channel) // SAMPLE_WIDTH_BYTES)
+            )
     return sorted(heard, key=lambda run: run[1])
 
 

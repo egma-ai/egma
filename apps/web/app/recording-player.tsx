@@ -46,8 +46,6 @@ export type RecordingWords = {
   readonly label: string;
   /** What this audio is and who is on which channel — said beside it, always. */
   readonly caption: string;
-  /** The band it was measured at, where the conversation reported one. */
-  readonly band: (hertz: number) => string;
   /** For a browser that cannot play the element at all. */
   readonly fallback: string;
   /** When a player that was already on screen stops working. */
@@ -77,11 +75,7 @@ export type RecordingWords = {
  */
 type Playable =
   | { readonly status: "resolving" }
-  | {
-      readonly status: "ready";
-      readonly url: string;
-      readonly band: number | null;
-    }
+  | { readonly status: "ready"; readonly url: string }
   | {
       readonly status: "unresolved";
       readonly why: string;
@@ -197,16 +191,9 @@ export function RecordingPlayer({
         // and never ask again, which is the dead scrubber this whole path
         // exists to prevent. What replaces a link here is a failure, not a
         // clock.
-        const resolved = (await answer.json()) as {
-          url: string;
-          measured_audio_band_hertz: number | null;
-        };
+        const resolved = (await answer.json()) as { url: string };
         if (stopped) return;
-        setPlayable({
-          status: "ready",
-          url: resolved.url,
-          band: resolved.measured_audio_band_hertz,
-        });
+        setPlayable({ status: "ready", url: resolved.url });
       } catch {
         if (!stopped) {
           setPlayable({
@@ -326,10 +313,7 @@ export function RecordingPlayer({
       >
         {words.fallback}
       </audio>
-      <p>
-        {words.caption}
-        {playable.band === null ? "" : ` ${words.band(playable.band)}`}
-      </p>
+      <p>{words.caption}</p>
     </section>
   );
 }

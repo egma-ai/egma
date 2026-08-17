@@ -298,7 +298,6 @@ export async function landOneConversationOf(
       ? {}
       : {
           recordingReference: options.reference,
-          measuredAudioBandHertz: 8000,
         }),
   });
 
@@ -308,8 +307,6 @@ export async function landOneConversationOf(
 export type ConductedRunOptions = {
   /** What the recorded conversation reports as its recording. */
   readonly reference: string;
-  /** What band it says it heard. Telephony's narrow one by default. */
-  readonly measuredAudioBandHertz?: number;
   /** Chat rather than voice, for the refusal a chat earns. */
   readonly modality?: "voice" | "chat";
   readonly label?: string;
@@ -392,7 +389,6 @@ export async function aConductedRun(
       ? {}
       : {
           recordingReference: options.reference,
-          measuredAudioBandHertz: options.measuredAudioBandHertz ?? 8000,
         }),
   });
 

@@ -12,8 +12,9 @@ import { normaliseRetellCall, type RetellCall } from "./normalise.ts";
 /**
  * The one write path, and both transports go through it.
  *
- * The protocol across the two stores, in order, and it is the whole of what
- * makes a conversation land exactly once:
+ * The protocol across the two stores, in order. The Postgres claim makes one
+ * live transport the writer; recovery remains at-least-once across the two
+ * stores:
  *
  *  1. **Claim** in Postgres, carrying the verbatim payload. An insert on a
  *     unique identity, never a check — the loser conflicts and walks away.
@@ -23,10 +24,10 @@ import { normaliseRetellCall, type RetellCall } from "./normalise.ts";
  *
  * A crash between 1 and 2 leaves a claimed-but-unwritten row that the lease
  * sweep replays from the payload on the claim. A crash between 2 and 3 replays
- * the identical append, which ClickHouse's block-level insert dedup absorbs,
- * because the normalizer is a pure function of the payload and the ids are
- * derived rather than random. Neither store needs a transaction spanning the
- * other.
+ * the identical append. ClickHouse normally suppresses that byte-identical
+ * block inside its recent deduplication window. A delayed replay can append a
+ * second copy; readers and operators must not be promised global exactly-once
+ * storage. Neither store needs a transaction spanning the other.
  *
  * **Grading gets nothing new.** `recordProductionTraces` is the door's own
  * bookkeeping, called here with the very spans that were just appended: the
@@ -135,9 +136,11 @@ export async function writeRetellCall(
  * Finish a claim somebody else started and did not get to the end of.
  *
  * The payload is the one stored on the claim, so this normalises the identical
- * input into the identical batch: an append that had already landed is dropped
- * by the store as the duplicate block it is, and an append that never happened
- * lands now. Either way exactly one copy exists when this returns.
+ * input into the identical batch. A recent byte-identical append that already
+ * landed is normally suppressed by ClickHouse, while an append that never
+ * happened lands now. If recovery is delayed beyond ClickHouse's recent
+ * deduplication window, a second copy may land; the claim still prevents
+ * another live transport from racing this replay.
  *
  * **The claim's own `ended_at` stands in for the clock**, and that is what makes
  * "identical" true rather than nearly true. A payload carrying no timestamps

@@ -29,9 +29,8 @@ import type { SpanSource } from "./spans.ts";
  * **Nothing is deduplicated at read time.** No `FINAL`, no `LIMIT 1 BY`, nothing
  * of that family anywhere near `spans` — the obligation not to send a span twice
  * belongs to whoever wrote it, and ClickHouse's block-level insert dedup is the
- * backstop under that. The `group by trace_id` in the list is an aggregation over
- * distinct spans, which is a different thing entirely from collapsing repeats of
- * one.
+ * backstop under that. The `group by trace_id` in the list aggregates every
+ * stored row for one trace; it does not collapse rows that reuse an id.
  *
  * **Reading is permitted to every role, `viewer` included.** The permission
  * table's `read` row names all three, and this file asks for it the way every
@@ -168,11 +167,10 @@ export type TraceFacts = {
   readonly durationNanoseconds: string;
   /**
    * How many spans of this trace the window holds — **rows, not nodes of a
-   * tree**. The two are the same number except in two cases, and both of them
-   * are ones a caller has to be told about rather than have hidden: a trace over
-   * `MAXIMUM_SPANS_PER_TRACE`, where the transcript is a prefix and this is
-   * still the whole trace; and telemetry that sent one span id twice, which is
-   * one node in the transcript and two rows here.
+   * tree**. The two are the same number unless a trace is over
+   * `MAXIMUM_SPANS_PER_TRACE`; then the transcript is a prefix and this is still
+   * the whole trace. Reused span ids do not reduce the tree: each stored row is
+   * returned as its own node.
    */
   readonly spanCount: number;
   readonly humanTurnCount: number;
@@ -873,6 +871,12 @@ export async function readTrace(
   // parallel because no answer is another's input, and all three carry the same
   // tenancy and the same window, so the third can no more reach another
   // customer's row than the first two can.
+  //
+  // A reused span id can carry changed evidence at the same timestamp. Payload
+  // leads the remaining tie-breakers because raw-only changes must be stable
+  // too; the returned fields finish the order when a direct writer supplied the
+  // same payload with a changed projection. Rows equal on every listed value
+  // are indistinguishable in this response, so their order cannot move a fact.
   const [summaries, rows, roots] = await Promise.all([
     rowsOf<SummaryRow>(
       `select
@@ -899,7 +903,20 @@ export async function readTrace(
        tool_result
      from ${SPANS_TABLE}
      where ${where}
-     order by started_at asc, span_id asc
+     order by
+       started_at asc,
+       span_id asc,
+       payload asc,
+       parent_span_id asc,
+       name asc,
+       kind asc,
+       status asc,
+       duration_ns asc,
+       text asc,
+       audio_url asc,
+       tool_name asc,
+       tool_arguments asc,
+       tool_result asc
      limit ${MAXIMUM_SPANS_PER_TRACE + 1}`,
       parameters,
     ),
@@ -1032,12 +1049,11 @@ function reportedOn(row: RootSliceRow | undefined): ReportedOnTrace | undefined 
  * away the one structure that says which of several `llm_request_run` spans was
  * the retry. The tree is returned as it arrived.
  *
- * In one case "exactly once" is per **id** rather than per row, and it is worth
- * saying out loud: two rows sharing a span id are one node here, because a tree
- * built from a repeat walks forever. They are two in `spanCount`, which counts
- * the rows the window holds. Telemetry that sent a span twice is the only way to
- * see the two numbers disagree, and reporting the disagreement is more use than
- * hiding it behind either one.
+ * **Row identity, not span id, bounds the walk.** Changed evidence may reuse a
+ * span id and the append-only store keeps both rows. Each stored row therefore
+ * becomes one node here. If duplicate parents make the tree ambiguous, the
+ * first parent reached owns their shared children; the other row still appears
+ * as its own node. Nothing is hidden to make the tree look unique.
  */
 function transcriptOf(rows: readonly SpanRow[]): {
   readonly turns: readonly TraceSpan[];
@@ -1060,22 +1076,27 @@ function transcriptOf(rows: readonly SpanRow[]): {
     else siblings.push(row);
   }
 
-  // Span ids are unique inside a trace on the wire, but they arrive from outside
-  // and a repeated one would otherwise be a tree that walks forever. Visiting
-  // each span at most once bounds the walk to the rows that were read.
-  const visited = new Set<string>();
+  // Parentage is named by span id, but row identity is the only honest walk
+  // identity: changed evidence may reuse ids and every stored row must return.
+  // Object identity also closes cycles without collapsing those rows.
+  const visited = new Set<SpanRow>();
 
   const build = (row: SpanRow): TraceSpan => {
-    visited.add(row.span_id);
-    const children = (childrenOf.get(row.span_id) ?? []).filter(
-      (child) => !isTurn(child.kind) && !visited.has(child.span_id),
-    );
-    return { ...spanOf(row), spans: children.map(build) };
+    visited.add(row);
+    const children: TraceSpan[] = [];
+    // Recheck immediately before each descent. An earlier sibling can reach a
+    // later one through a cycle whose rows reuse an id; filtering the whole
+    // sibling list first would then build that later row twice.
+    for (const child of childrenOf.get(row.span_id) ?? []) {
+      if (isTurn(child.kind) || visited.has(child)) continue;
+      children.push(build(child));
+    }
+    return { ...spanOf(row), spans: children };
   };
 
   const turns = rows
     .filter((row) => isTurn(row.kind))
-    .map((row) => (visited.has(row.span_id) ? undefined : build(row)))
+    .map((row) => (visited.has(row) ? undefined : build(row)))
     .filter((turn): turn is TraceSpan => turn !== undefined);
 
   const spans: TraceSpan[] = [];
@@ -1085,7 +1106,7 @@ function transcriptOf(rows: readonly SpanRow[]): {
   // the list was drawn up can have been reached by the time its turn comes.
   const appendUnvisited = (candidates: readonly SpanRow[]): void => {
     for (const row of candidates) {
-      if (isTurn(row.kind) || visited.has(row.span_id)) continue;
+      if (isTurn(row.kind) || visited.has(row)) continue;
       spans.push(build(row));
     }
   };

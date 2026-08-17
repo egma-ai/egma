@@ -32,9 +32,8 @@ configuration.
 What is asserted is *structure*, not content: a live agent says different
 words every time and a carrier's latency is nobody's to pin. So this
 checks that a conversation happened, that it ended honestly, that the
-band was measured, that the recording resolves with one speaker to a
-channel, and that no credential appears in a single byte the simulator
-wrote.
+recording resolves with both speakers audible, and that no credential
+appears in a single byte the simulator wrote.
 """
 
 from __future__ import annotations
@@ -248,14 +247,14 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
     # this record and the platform's telemetry.
     assert facts["provider_reference"], "no SIP participant identity came back"
 
-    # The band was measured on the wire, and the recording resolves.
+    # The recording resolves with both speakers audible. Its WAV header
+    # carries the playback rate; the report stores no second rate.
     audio = facts["audio"]
     assert audio is not None, "a phone call with no audio on the record"
-    band = audio["measured_sample_rate_hz"]
-    assert band > 0
+    assert set(audio) == {"recording"}
     recording = simulator.blob(audio["recording"])
-    persona_audio, agent_audio, recorded_band = channels_of(recording)
-    assert recorded_band == band
+    persona_audio, agent_audio, recording_rate_hz = channels_of(recording)
+    assert recording_rate_hz > 0
     assert any(persona_audio), "the persona's channel is silent"
     assert any(agent_audio), "the agent's channel is silent"
     # The fourth place a credential could be, and the one nothing else

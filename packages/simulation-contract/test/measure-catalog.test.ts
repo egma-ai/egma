@@ -111,10 +111,9 @@ describe("what the catalog names", () => {
   });
 
   /**
-   * Not everything in the catalog is a timing span. `turn_count` is counted
-   * and the audio band is measured, and both arrive on the terminal transition
-   * inside its facts — so the ones the scan cannot see are exactly the ones the
-   * catalog marks as terminal facts, and nothing else.
+   * Not everything in the catalog is a timing span. `turn_count` arrives on
+   * the terminal transition inside its facts, so the ones the scan cannot see
+   * are exactly the ones the catalog marks as terminal facts, and nothing else.
    */
   it("names nothing beyond what the simulator emits or reports as a fact", async () => {
     const emitted = new Set(await measuresTheSimulatorEmits());
@@ -221,6 +220,8 @@ describe("how each measure is computed from the spans", () => {
     // Cataloged, recorded, and not something a grader may read a trace for.
     expect(isCatalogedMeasure("turn_count")).toBe(true);
     expect(isSpanDerivedMeasure("turn_count")).toBe(false);
+    // Retired from the catalog, so neither a grader nor a trace may name it.
+    expect(isCatalogedMeasure("measured_audio_band_hertz")).toBe(false);
     expect(isSpanDerivedMeasure("measured_audio_band_hertz")).toBe(false);
     // And a name nothing has ever measured is no on both counts.
     expect(isSpanDerivedMeasure("time_to_resolution")).toBe(false);

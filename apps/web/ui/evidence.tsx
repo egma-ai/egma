@@ -274,10 +274,6 @@ const MEASURES: Readonly<
   agent_turn_count: { label: "Agent turns", shown: String },
   tool_call_count: { label: "Tool calls", shown: String },
   errored_step_count: { label: "Errored steps", shown: String },
-  measured_audio_band_hertz: {
-    label: "Audio band",
-    shown: (n) => `${String(n)} Hz`,
-  },
   interruption_count: { label: "Interruptions", shown: String },
   cost_cents: { label: "Cost", shown: (n) => `${(n / 100).toFixed(2)}` },
 };
@@ -288,8 +284,8 @@ const MEASURES: Readonly<
  * A metric measures and a grader judges, and that line is the reason this is its
  * own block instead of sitting among the verdicts. Nobody wrote down that the
  * conversation took four minutes; somebody had to decide that confirming a
- * booking matters. Only what is actually known appears — a chat has no audio
- * band, and a conversation that never connected has no duration.
+ * booking matters. Only what is actually known appears — a conversation that
+ * never connected has no duration.
  */
 export function Measures({
   measures,
@@ -331,8 +327,8 @@ export function Measures({
  * **The absence of a stamp is a fact of its own**, and it is said out loud: no
  * stamp means nothing ever asked the agent what tools it has, while three empty
  * lists mean the asking happened and nothing came back. A mocked conversation
- * and an unmocked one are different units, exactly as two audio bands are, and
- * this is where a reader comparing two of them finds out which they have.
+ * and an unmocked one are different units, and this is where a reader comparing
+ * two of them finds out which they have.
  *
  * There is no authoring here and there never will be: this is a record of what
  * was served, and a control that edited a mock tool from a conversation's page

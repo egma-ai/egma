@@ -408,9 +408,9 @@ describe("values that do not answer what the entry asked", () => {
    * **A measure the catalog names and no span carries is refused too**, and the
    * refusal says which of the two things went wrong.
    *
-   * The turn count and the audio band are real numbers egma records — they
-   * arrive on the transition that ends a simulation and live on the simulation
-   * row — and a grader reading a conversation's spans would never find one. So a
+   * The turn count is a real number Egma records. It arrives on the transition
+   * that ends a simulation and lives on the simulation row, so a grader reading
+   * a conversation's spans would never find it. A
    * copy naming one is exactly the forever-`skipped` check this rule exists to
    * refuse, and it is refused at the one moment anything can tell it from a
    * measure a chat conversation simply did not produce.

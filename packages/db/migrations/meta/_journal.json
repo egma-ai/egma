@@ -246,6 +246,13 @@
       "when": 1786923110581,
       "tag": "0034_watch_production",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786990925129,
+      "tag": "0035_drop_retired_audio_band",
+      "breakpoints": true
     }
   ]
 }

@@ -113,7 +113,7 @@ describe("the trace store's migration files", () => {
    * before somebody writes the bare `CREATE` that only fails on the second boot
    * of a machine they are not looking at.
    */
-  it("create nothing that a second run would trip over", async () => {
+  it("guards every schema change so a second run cannot trip over it", async () => {
     for (const migration of await readMigrations(
       CLICKHOUSE_MIGRATIONS_DIRECTORY,
     )) {
@@ -123,8 +123,11 @@ describe("the trace store's migration files", () => {
             /^CREATE (?:TABLE|VIEW|MATERIALIZED VIEW|DICTIONARY|FUNCTION) IF NOT EXISTS /i,
           );
         }
-        // A column added later has to survive the re-run on the same terms.
+        // Each column operation has to survive the re-run on its own terms.
         expect(statement).not.toMatch(/\bADD COLUMN\b(?! IF NOT EXISTS)/i);
+        expect(statement).not.toMatch(/\bMODIFY COLUMN\b(?! IF EXISTS)/i);
+        expect(statement).not.toMatch(/\bRENAME COLUMN\b(?! IF EXISTS)/i);
+        expect(statement).not.toMatch(/\bDROP COLUMN\b(?! IF EXISTS)/i);
       }
     }
   });
@@ -367,7 +370,8 @@ describe("the schema a boot leaves behind", () => {
     expect(typeOf("started_at")).toBe("DateTime64(6, 'UTC')");
     expect(typeOf("provider_call_id")).toBe("String");
     expect(typeOf("connection_type")).toBe("LowCardinality(String)");
-    expect(typeOf("audio_sample_rate_hz")).toBe("UInt32");
+    expect(typeOf("audio_sample_rate_hz")).toBeUndefined();
+    expect(typeOf("audio_encoding")).toBeUndefined();
   });
 
   it("carries a materialised view at turn grain, filed the same way", async () => {
@@ -380,12 +384,11 @@ describe("the schema a boot leaves behind", () => {
 
   /**
    * The verdicts table arrived as one additive file, long after the two above.
-   * This is the guard on what "additive" means: the big table and the view over
-   * it are byte for byte what the first migration left, because a chain that
-   * rewrites `spans` to add a small table beside it is a chain that will rewrite
-   * it again for the next one.
+   * This guards the settled engine, keys, and turn view. A later migration may
+   * remove a redundant normalised column, but it may not rewrite the filing
+   * shape or mix grading state into the trace row.
    */
-  it("leaves spans and its view exactly as the first migration wrote them", async () => {
+  it("leaves the spans filing shape and turn view settled", async () => {
     const spans = await tableNamed("spans");
     expect(spans?.engine).toBe("MergeTree");
     expect(spans?.sorting_key).toBe(SORTING_KEY);
