@@ -461,7 +461,9 @@ MAY_BE_ABSENT = {
     # naming what is missing, rather than a leg quietly calling a provider.
     "EGMA_MODEL_GATEWAY_URL": "unset until managed access is connected",
     "EGMA_CLOUD_URL": "the application's own default is hosted Egma's address",
-    "EGMA_GATEWAY_INTERNAL_KEY": "hosted Egma's alone; a self-hosted deployment presents the key it connected",
+    "EGMA_GATEWAY_INTERNAL_KEY": (
+        "hosted Egma's alone; a self-hosted deployment presents the key it connected"
+    ),
     # Mail, which is optional and load-bearing in being optional: with none,
     # an invitation hands its link back to whoever sent it.
     "EGMA_SMTP_URL": "optional by design",
