@@ -755,3 +755,143 @@ describe("measures derived from a recognised framework's own spans", () => {
     expect(measureIn(both, "agent_speech_duration")?.derived).toBe(true);
   });
 });
+
+/**
+ * A Retell-shaped production trace: a `conversation` root holding the whole
+ * thing's width, and turns beneath it that hold none.
+ *
+ * Exactly the rows `apps/api/src/retell/normalise.ts` writes. The provider
+ * reports no per-turn timing, so every turn opens where the trace opened and
+ * closes in the same instant, and nothing `speaking` is filed anywhere.
+ */
+async function aRetellTrace(
+  speakers: readonly ("human" | "agent")[],
+): Promise<TraceDetail> {
+  const id = traceId();
+  const root = spanId();
+  const at = BigInt(WHEN.getTime()) * 1000n;
+
+  const spans: NewSpan[] = [
+    span({
+      traceId: id,
+      spanId: root,
+      name: "retell_call",
+      kind: "conversation",
+      connectionType: "retell",
+      startedAtMicroseconds: at,
+      durationNanoseconds: 143_000_000_000n,
+    }),
+  ];
+
+  for (const speaker of speakers) {
+    spans.push(
+      span({
+        traceId: id,
+        spanId: spanId(),
+        parentSpanId: root,
+        name: speaker === "human" ? "human_turn" : "agent_turn",
+        kind: speaker === "human" ? "turn:human" : "turn:agent",
+        connectionType: "retell",
+        startedAtMicroseconds: at,
+        durationNanoseconds: 0n,
+      }),
+    );
+  }
+
+  await appendSpans(auth, spans);
+  const read = await readTrace(auth, id, { window: WINDOW });
+  if (read === undefined) throw new Error("the trace store lost the spans");
+  return read;
+}
+
+/**
+ * **A zero read off a turn that had no width is not a measurement**, and this is
+ * the shape that made the rule necessary.
+ *
+ * Retell publishes no per-turn timing, so its normalizer writes placeholders and
+ * says so plainly. Subtract one from the next and the answer is zero every time
+ * — a series a bound cannot fail, so a production trace whose worst wait was
+ * really 2145 ms held a two-second bound with "0 milliseconds at its worst" as
+ * its rationale. A false pass is the exact false trust this product exists to
+ * kill, and it is worse than the `skipped` a provider reporting no timing has
+ * earned.
+ *
+ * **`turn_response_latency` is the whole of what is load-bearing below**, and
+ * the empty answer is stated in full only so nothing arrives here unremarked.
+ * The other two were never derivable on a Retell trace and are not evidence of
+ * this rule: `first_response_latency` needs a root, and Retell's root is filed
+ * as `conversation` while the module reads `root`. `agent_speech_duration` needs
+ * `speaking` children, and Retell reports none, so no turn here has any.
+ */
+describe("a production trace whose turns were never timed", () => {
+  it("derives nothing at all, so every measure is absent", async () => {
+    const trace = await aRetellTrace([
+      "agent",
+      "human",
+      "agent",
+      "human",
+      "agent",
+    ]);
+
+    // Nothing — not a series of zeroes. A zero here would be a measurement of a
+    // wait nobody observed, and an absent measure is the `skipped` grader that
+    // says so, which is out of the score's denominator rather than a pass.
+    expect(measuresFromSpans(trace)).toEqual([]);
+    for (const measure of SPAN_DERIVED_MEASURES) {
+      expect(measureIn(trace, measure)).toBeUndefined();
+    }
+  });
+});
+
+/**
+ * **A turn of no width is not the same thing as a turn nobody timed**, and the
+ * two cases below are why the rule is a pair rather than a width.
+ *
+ * A chat simulation has no duration to write — a typed message is one instant —
+ * so every turn it files is zero nanoseconds wide at a real, distinct moment.
+ * Its geometry is honestly timed and its waits are real. `apps/grader` reads
+ * exactly these numbers into the evidence a judge is shown, and the rule is
+ * pinned here as well so it lives beside the arithmetic it constrains.
+ *
+ * The stamps say `production` on these rows, as they do on every constructed
+ * tree in this file, and it changes nothing: the module cannot see which world a
+ * conversation came from, which is what the pair of describes above proves.
+ */
+describe("turns of no width at real instants", () => {
+  it("measures the gaps between them, because the gaps were observed", async () => {
+    const trace = await aLiveKitCall([
+      { who: "human", from: 0, to: 0 },
+      { who: "agent", from: 2_000, to: 2_000 },
+      { who: "human", from: 4_000, to: 4_000 },
+      { who: "agent", from: 6_000, to: 6_000 },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    expect(measured?.derived).toBe(true);
+    // Each human turn answered 2000 ms later, which is what the instants say
+    // and what a chat simulation's evidence carries today.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([
+      2_000, 2_000,
+    ]);
+  });
+
+  /**
+   * **A turn stays a barrier however well it was timed.** The second caller turn
+   * here has no width, and holding it out of the ordered turns would let the
+   * agent's reply answer the *first* one instead — measuring 5000 ms across the
+   * caller's own re-speaking, which nobody waited. Missing would have become
+   * wrong, so the exclusion lives on the sample and never on the list.
+   */
+  it("still separates the turns around it, so no wait is measured twice over", async () => {
+    const trace = await aLiveKitCall([
+      { who: "human", from: 0, to: 1_000 },
+      { who: "human", from: 5_000, to: 5_000 },
+      { who: "agent", from: 6_000, to: 8_000, spoke: [[6_000, 8_000]] },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    // One sample, and it is the second turn's: 6000 − 5000. A second number
+    // here would be the first turn measured across a wait that never happened.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([1_000]);
+  });
+});
