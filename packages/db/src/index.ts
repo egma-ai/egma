@@ -135,6 +135,7 @@ export {
   type SpannedConversation,
 } from "./measures/from-spans.ts";
 export {
+  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
   REPORTED_MEASUREMENTS_PAYLOAD_PATH,
   REPORTED_MEASUREMENTS_VERSION,
   reportedMeasurementsOf,

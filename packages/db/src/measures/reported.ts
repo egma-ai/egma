@@ -61,15 +61,16 @@ export type ReportedMeasurements = {
 };
 
 /**
- * The block as JSON inside a span's payload, snake_cased like everything else
- * that rides one. The parse below is the only reader and the normalizers are
- * the only writers, so the two casings meet nowhere else.
+ * The block's key inside a span's payload, snake_cased like everything else
+ * that rides one. Exported because a normalizer embeds the block under this
+ * exact name and the read side looks it up by the same one — two modules
+ * spelling it independently is the drift this file exists to rule out.
  */
-const PAYLOAD_KEY = "reported_measurements";
+export const REPORTED_MEASUREMENTS_PAYLOAD_KEY = "reported_measurements";
 
 /** Where the block rides: `payload.egma_normalised.reported_measurements`. */
 export const REPORTED_MEASUREMENTS_PAYLOAD_PATH =
-  `egma_normalised.${PAYLOAD_KEY}`;
+  `egma_normalised.${REPORTED_MEASUREMENTS_PAYLOAD_KEY}`;
 
 /**
  * The block a normalizer wants to write, as the payload object it embeds.
