@@ -27,6 +27,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
+import { AgentOnboardingProgress } from "../onboarding-progress.tsx";
 
 /**
  * Registering an agent: its name in egma, and what it is for.
@@ -138,7 +139,15 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
       return;
     }
 
-    router.push(projectPath(projectId, "agents", answer.value.agent.id));
+    router.push(
+      `${projectPath(
+        projectId,
+        "agents",
+        answer.value.agent.id,
+        "connections",
+        "new",
+      )}?onboarding=connection`,
+    );
   }
 
   if (role !== null && !canAuthor(role)) {
@@ -174,6 +183,7 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
         lead="Its name and description in Egma. Its prompt, model and tools stay where you configure them."
       />
       <PageBody>
+        <AgentOnboardingProgress current="agent" />
         <Form onSubmit={() => void register()}>
           <Field label="Name" htmlFor="agent-name">
             <TextInput

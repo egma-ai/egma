@@ -21,14 +21,15 @@
   background: var(--surface);
 }
 
+.behavior > button {
+  height: var(--control-lg);
+  min-height: var(--control-lg);
+}
+
 .behavior textarea {
   min-height: var(--control-lg);
   padding-block: var(--space-2);
   field-sizing: content;
-}
-
-.behavior > button {
-  min-height: var(--control-lg);
 }
 
 @media (max-width: 640px) {

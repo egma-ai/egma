@@ -688,9 +688,14 @@ describe("one test's page", () => {
     );
     await screen.findByLabelText("Scenario");
 
+    const expectedBehavior = screen.getByLabelText("Expected behavior 1");
+    expect(expectedBehavior.getAttribute("rows")).toBe("1");
     expect(
-      screen.getByLabelText("Expected behavior 1").getAttribute("rows"),
-    ).toBe("1");
+      within(expectedBehavior.closest("li") as HTMLElement).getByRole(
+        "button",
+        { name: "Remove" },
+      ),
+    ).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Scenario"), {
       target: { value: "They call from the station." },

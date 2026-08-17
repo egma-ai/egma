@@ -25,6 +25,8 @@ export type ConfigField = {
   readonly kind: FieldKind;
   readonly required: boolean;
   readonly help: string;
+  /** Draw this supporting field after the credential fields. */
+  readonly after_credentials: boolean;
 };
 
 export type CredentialField = {

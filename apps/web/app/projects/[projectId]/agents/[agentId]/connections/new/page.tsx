@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { readJson, writeJson, type Refusal } from "../../../../../../../lib/api.ts";
@@ -44,6 +44,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../../../ui/shell.tsx";
+import { AgentOnboardingProgress } from "../../../onboarding-progress.tsx";
 import { ConnectionFields, type Draft } from "../fields.tsx";
 
 /** Provider setup first, then only the fields that provider actually needs. */
@@ -71,6 +72,8 @@ function NewConnection({
   readonly agentId: string;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const onboarding = searchParams.get("onboarding") === "connection";
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const [catalog, setCatalog] = useState<ConnectionTypeCatalog | null>(null);
@@ -262,21 +265,23 @@ function NewConnection({
     } else {
       if (described.type === "retell") setRetellKey("");
       router.push(
-        projectPath(
-          projectId,
-          "agents",
-          agentId,
-          "connections",
-          answer.value.connection.id,
-        ),
+        onboarding
+          ? projectPath(projectId, "agents", agentId, "onboarding")
+          : projectPath(
+              projectId,
+              "agents",
+              agentId,
+              "connections",
+              answer.value.connection.id,
+            ),
       );
     }
   }
 
   const header = (
     <PageHeader
-      eyebrow="Connection"
-      title="Add a connection"
+      eyebrow={onboarding ? "Agent setup" : "Connection"}
+      title={onboarding ? "Connect the agent" : "Add a connection"}
       breadcrumbs={[
         { label: "Agents", href: projectPath(projectId, "agents") },
         {
@@ -288,7 +293,11 @@ function NewConnection({
         },
         { label: "New connection" },
       ]}
-      lead="Choose the platform that hosts this agent. Egma then asks only for that platform's setup."
+      lead={
+        onboarding
+          ? "Choose how Egma reaches this agent. You can add another connection later."
+          : "Choose the platform that hosts this agent. Egma then asks only for that platform's setup."
+      }
     />
   );
 
@@ -349,6 +358,7 @@ function NewConnection({
     <ProductPage>
       {header}
       <PageBody>
+        {onboarding ? <AgentOnboardingProgress current="connection" /> : null}
         <Form onSubmit={() => void add()}>
           <Field label="Platform" htmlFor="connection-type">
             <Select
@@ -362,13 +372,14 @@ function NewConnection({
             />
           </Field>
 
-          <Field label="Name (optional)" htmlFor="connection-name">
+          <Field label="Connection name (optional)" htmlFor="connection-name">
             <TextInput
               id="connection-name"
               value={name}
               placeholder="A name for this connection"
               onChange={setName}
             />
+            <Help>The label shown for this connection in Egma.</Help>
           </Field>
 
           {described.type === "retell" ? (
@@ -443,8 +454,22 @@ function NewConnection({
             >
               {saving ? "Adding…" : "Add connection"}
             </Button>
-            <ButtonLink href={back}>Cancel</ButtonLink>
+            <ButtonLink
+              href={
+                onboarding
+                  ? projectPath(projectId, "agents", agentId, "onboarding")
+                  : back
+              }
+            >
+              {onboarding ? "Skip connection for now" : "Cancel"}
+            </ButtonLink>
           </FormActions>
+          {onboarding ? (
+            <Help>
+              Without a connection, Egma cannot run a simulation against this
+              agent. You can add one later from Configuration.
+            </Help>
+          ) : null}
         </Form>
       </PageBody>
     </ProductPage>

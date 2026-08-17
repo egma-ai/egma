@@ -850,6 +850,7 @@ export async function agentRoutes(
             kind: field.kind,
             required: field.required,
             help: field.help,
+            after_credentials: field.afterCredentials === true,
           })),
           credential_rule: variant.credentialRule,
           credential_help: variant.credentialHelp,

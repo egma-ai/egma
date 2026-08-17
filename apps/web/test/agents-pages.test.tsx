@@ -12,9 +12,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AgentDetailPage from "../app/projects/[projectId]/agents/[agentId]/page.tsx";
 import ConnectionDetailPage from "../app/projects/[projectId]/agents/[agentId]/connections/[connectionId]/page.tsx";
 import NewConnectionPage from "../app/projects/[projectId]/agents/[agentId]/connections/new/page.tsx";
+import AgentOnboardingPage from "../app/projects/[projectId]/agents/[agentId]/onboarding/page.tsx";
 import RegisterAgentPage from "../app/projects/[projectId]/agents/new/page.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
+import type { ListedTest } from "../lib/tests.ts";
 
 /**
  * The Agents and Connections pages, rendered and driven.
@@ -32,6 +34,7 @@ const routed = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
   pathname: "/projects/prj_1/agents",
+  search: "",
   params: {
     projectId: "prj_1",
     agentId: "agt_1",
@@ -42,6 +45,7 @@ const routed = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
   useRouter: () => ({ push: routed.push, replace: routed.replace, back: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(routed.search),
   useParams: () => routed.params,
 }));
 
@@ -160,6 +164,32 @@ const CONNECTION = {
   updated_at: "2026-08-15T10:00:00.000Z",
 };
 
+function onboardingTest(
+  overrides: Partial<ListedTest> = {},
+): ListedTest {
+  return {
+    id: "tst_1",
+    project_id: "prj_1",
+    name: "Books an appointment",
+    description: "The caller asks for a booking.",
+    version: 2,
+    version_id: "tstv_2",
+    scenario: "Ask for an appointment.",
+    expected_behaviors: ["The agent offers a time."],
+    personas: [],
+    required_capabilities: [],
+    override_count: 0,
+    agents: [{ id: "agt_9", name: "Existing agent", archived_at: null }],
+    revision: "rev_test_1",
+    applicability_revision: "rev_app_1",
+    archived_at: null,
+    archive_reason: null,
+    created_at: "2026-08-15T10:00:00.000Z",
+    updated_at: "2026-08-15T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
 const TYPES = {
   items: [
     {
@@ -212,17 +242,19 @@ const TYPES = {
           fields: [
             {
               key: "url",
-              label: "LiveKit URL",
+              label: "LiveKit WebSocket URL",
               kind: "url",
               required: true,
-              help: "The LiveKit server URL.",
+              help: "Your LiveKit project or self-hosted server.",
+              after_credentials: false,
             },
             {
               key: "agentName",
-              label: "Agent name",
+              label: "LiveKit agent name",
               kind: "text",
               required: false,
-              help: "Which worker to dispatch.",
+              help: "The LiveKit worker dispatch name. Leave it empty for automatic dispatch.",
+              after_credentials: false,
             },
             {
               key: "metadata",
@@ -230,6 +262,7 @@ const TYPES = {
               kind: "json",
               required: false,
               help: "JSON handed to the agent.",
+              after_credentials: true,
             },
           ],
           credential_rule: "required",
@@ -258,10 +291,11 @@ const TYPES = {
           fields: [
             {
               key: "url",
-              label: "LiveKit URL",
+              label: "LiveKit WebSocket URL",
               kind: "url",
               required: true,
-              help: "The LiveKit server URL.",
+              help: "Your LiveKit project or self-hosted server.",
+              after_credentials: false,
             },
             {
               key: "tokenEndpoint",
@@ -269,6 +303,7 @@ const TYPES = {
               kind: "url",
               required: true,
               help: "The service that creates room tokens.",
+              after_credentials: false,
             },
           ],
           credential_rule: "optional",
@@ -319,6 +354,7 @@ beforeEach(() => {
   routed.push.mockReset();
   routed.replace.mockReset();
   routed.pathname = "/projects/prj_1/agents";
+  routed.search = "";
   routed.params = {
     projectId: "prj_1",
     agentId: "agt_1",
@@ -462,6 +498,11 @@ describe("registering an agent", () => {
     for (const provider of ["prompt", "model", "tools"]) {
       expect(Object.keys(sent[0]?.body ?? {})).not.toContain(provider);
     }
+    await waitFor(() =>
+      expect(routed.push).toHaveBeenCalledWith(
+        "/projects/prj_1/agents/agt_1/connections/new?onboarding=connection",
+      ),
+    );
   });
 
   it("refuses an empty name here rather than making somebody wait for egma", async () => {
@@ -531,6 +572,170 @@ describe("registering an agent", () => {
       ),
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Register agent" })).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+describe("onboarding an agent", () => {
+  it("reuses the connection form, then carries the new agent into test setup", async () => {
+    routed.search = "?onboarding=connection";
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    const progress = await screen.findByRole("navigation", {
+      name: "Agent setup",
+    });
+    expect(within(progress).getByText("Connection").getAttribute("aria-current"))
+      .toBe("step");
+    expect(screen.queryByText(/Step 2 of 3/u)).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Skip connection for now" })
+        .getAttribute("href"),
+    ).toBe("/projects/prj_1/agents/agt_1/onboarding");
+    expect(
+      screen.getByText(/Without a connection, Egma cannot run a simulation/u),
+    ).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText("Platform"), {
+      target: { value: "phone" },
+    });
+    fireEvent.change(await screen.findByLabelText("Phone number"), {
+      target: { value: "+14155550100" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    await waitFor(() =>
+      expect(routed.push).toHaveBeenCalledWith(
+        "/projects/prj_1/agents/agt_1/onboarding",
+      ),
+    );
+  });
+
+  it("attaches selected existing tests through each test's applicability revision", async () => {
+    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
+    const test = onboardingTest();
+    const second = onboardingTest({
+      id: "tst_2",
+      name: "Handles a cancellation",
+      applicability_revision: "rev_app_2",
+    });
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [CONNECTION] },
+      },
+      "/api/tests": [
+        { status: 200, body: { items: [test], next_cursor: "cursor_2" } },
+        { status: 200, body: { items: [second], next_cursor: null } },
+      ],
+      "/api/tests/tst_1/agents": {
+        status: 200,
+        body: {
+          ...test,
+          agents: [...test.agents, { id: "agt_1", name: "Front desk" }],
+          applicability_revision: "rev_app_2",
+        },
+      },
+      "/api/tests/tst_2/agents": {
+        status: 200,
+        body: {
+          ...second,
+          agents: [...second.agents, { id: "agt_1", name: "Front desk" }],
+          applicability_revision: "rev_app_3",
+        },
+      },
+    });
+    render(<AgentOnboardingPage />);
+
+    const choice = await screen.findByRole("checkbox", {
+      name: /Books an appointment/u,
+    });
+    fireEvent.click(choice);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    const secondChoice = await screen.findByRole("checkbox", {
+      name: /Handles a cancellation/u,
+    });
+    expect((choice as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(secondChoice);
+    expect(screen.getByRole("button", { name: "Attach 2 tests and finish" }))
+      .toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Attach 2 tests and finish" }),
+    );
+
+    await waitFor(() => {
+      expect(sent.find((call) => call.url.startsWith("/api/tests/tst_1/agents")))
+        .toBeDefined();
+    });
+    const call = sent.find((item) => item.url.startsWith("/api/tests/tst_1/agents"));
+    expect(call?.body).toEqual({
+      agents: ["agt_9", "agt_1"],
+      expected_applicability_revision: "rev_app_1",
+    });
+    const secondCall = sent.find((item) =>
+      item.url.startsWith("/api/tests/tst_2/agents"),
+    );
+    expect(secondCall?.body).toEqual({
+      agents: ["agt_9", "agt_1"],
+      expected_applicability_revision: "rev_app_2",
+    });
+    await waitFor(() =>
+      expect(routed.push).toHaveBeenCalledWith(
+        "/projects/prj_1/agents/agt_1",
+      ),
+    );
+  });
+
+  it("keeps a selected test pinned while the server searches another page", async () => {
+    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
+    const test = onboardingTest();
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/api/tests": [
+        { status: 200, body: { items: [test], next_cursor: null } },
+        { status: 200, body: { items: [], next_cursor: null } },
+      ],
+    });
+    render(<AgentOnboardingPage />);
+
+    const choice = await screen.findByRole("checkbox", {
+      name: /Books an appointment/u,
+    });
+    fireEvent.click(choice);
+    fireEvent.change(screen.getByLabelText("Search tests by name"), {
+      target: { value: "weekend" },
+    });
+
+    await waitFor(() => {
+      const asked = vi
+        .mocked(globalThis.fetch)
+        .mock.calls.map(([url]) => String(url));
+      expect(asked).toContain("/api/tests?name=weekend&project=prj_1");
+    });
+    expect(
+      (screen.getByRole("checkbox", {
+        name: /Books an appointment/u,
+      }) as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(screen.getByRole("button", { name: "Attach 1 test and finish" }))
+      .toBeDefined();
   });
 });
 
@@ -711,9 +916,11 @@ describe("adding a connection", () => {
     });
     render(<NewConnectionPage />);
 
-    fireEvent.change(await screen.findByLabelText("Name (optional)"), {
+    fireEvent.change(await screen.findByLabelText("Connection name (optional)"), {
       target: { value: "Keep this connection" },
     });
+    expect(screen.getByText("The label shown for this connection in Egma."))
+      .toBeTruthy();
     const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(breadcrumb).getByRole("link", { name: "Front desk" }))
       .toBeTruthy();
@@ -802,6 +1009,9 @@ describe("adding a connection", () => {
       "/api/agents/agt_1/connections/retell-phone?project=prj_1",
     );
     await waitFor(() => expect(field.value).toBe(""));
+    expect(routed.push).toHaveBeenCalledWith(
+      "/projects/prj_1/agents/agt_1/connections/con_1",
+    );
   });
 
   it("uses either honest LiveKit access method and defaults its channel to voice", async () => {
@@ -827,7 +1037,7 @@ describe("adding a connection", () => {
     });
     expect(screen.queryByText(/shape/i)).toBeNull();
     expect(screen.queryByText(/credential/i)).toBeNull();
-    fireEvent.change(screen.getByLabelText("LiveKit URL"), {
+    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
       target: { value: "wss://rooms.example.test" },
     });
     fireEvent.change(screen.getByLabelText("Token endpoint"), {
@@ -869,21 +1079,31 @@ describe("adding a connection", () => {
     fireEvent.change(await screen.findByLabelText("Platform"), {
       target: { value: "livekit" },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit URL"), {
+    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
       target: { value: "wss://rooms.example.test" },
     });
-    fireEvent.change(screen.getByLabelText("Agent name (optional)"), {
+    fireEvent.change(screen.getByLabelText("LiveKit agent name (optional)"), {
       target: { value: "front-desk" },
     });
-    fireEvent.change(screen.getByLabelText("Room metadata (optional)"), {
+    expect(
+      screen.getByText(
+        "The LiveKit worker dispatch name. Leave it empty for automatic dispatch.",
+      ),
+    ).toBeTruthy();
+    const metadata = screen.getByLabelText("Room metadata (optional)");
+    fireEvent.change(metadata, {
       target: { value: '{"tenant":"acme"}' },
     });
     fireEvent.change(screen.getByLabelText("LiveKit API key"), {
       target: { value: "livekit-key" },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit API secret"), {
+    const apiSecret = screen.getByLabelText("LiveKit API secret");
+    fireEvent.change(apiSecret, {
       target: { value: "livekit-secret" },
     });
+    expect(
+      apiSecret.compareDocumentPosition(metadata) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
     fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
 
     await waitFor(() => expect(sent).toHaveLength(1));

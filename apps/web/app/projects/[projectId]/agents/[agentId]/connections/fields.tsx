@@ -130,10 +130,16 @@ export function ConnectionFields({
     onChange({ ...draft, config: { ...draft.config, [key]: value } });
   const setCredential = (field: string, value: string) =>
     onChange({ ...draft, credentials: { ...draft.credentials, [field]: value } });
+  const beforeCredentials = variant.fields.filter(
+    (field) => field.after_credentials !== true,
+  );
+  const afterCredentials = variant.fields.filter(
+    (field) => field.after_credentials === true,
+  );
 
   return (
     <>
-      {variant.fields.map((field) => (
+      {beforeCredentials.map((field) => (
         <ConfigControl
           key={field.key}
           field={field}
@@ -155,6 +161,15 @@ export function ConnectionFields({
           ))}
         </>
       ) : null}
+
+      {afterCredentials.map((field) => (
+        <ConfigControl
+          key={field.key}
+          field={field}
+          value={draft.config[field.key] ?? ""}
+          onChange={(value) => setConfig(field.key, value)}
+        />
+      ))}
     </>
   );
 }
