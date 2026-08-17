@@ -835,10 +835,8 @@ export {
 } from "./model-upgrade-completion.ts";
 export {
   activateCredentialCandidate,
-  anythingOnTheLegacyPath,
   listCredentialCandidates,
   listModelUpgradeActions,
-  modelUpgradeOutstanding,
   type CredentialCandidate,
   type ModelUpgradeAction,
 } from "./model-upgrade-actions.ts";

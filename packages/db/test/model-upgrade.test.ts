@@ -568,7 +568,7 @@ describe("the completion marker", () => {
 
     expect(again.completedAt?.getTime()).toBe(first.completedAt?.getTime());
     const { rows } = await client.sql<{ count: string }>(
-      "select count(*) as count from model_upgrade_completion",
+      "select count(*) as count from platform_instance where model_upgrade_completed_at is not null",
     );
     expect(Number(rows[0]?.count)).toBe(1);
   });

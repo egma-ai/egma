@@ -1,7 +1,8 @@
-import { sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "../client.ts";
-import { modelUpgradeCompletion } from "../schema/upgrade.ts";
+import { platformInstance } from "../schema/platform.ts";
+import { platformInstanceId } from "./instance.ts";
 
 /**
  * Whether this installation has finished moving onto model selections — the one
@@ -100,10 +101,18 @@ async function outstandingConditions(): Promise<readonly UpgradeCondition[]> {
   return UPGRADE_CONDITIONS.filter((condition) => answer[condition] === true);
 }
 
+/**
+ * The stamp as it stands, read off the row that means "this installation".
+ *
+ * A missing row is a missing marker rather than a fault: an installation that
+ * has never answered its own identity has never been asked anything, so it has
+ * certainly not finished.
+ */
 async function storedMarker(): Promise<Date | null> {
   const [row] = await db()
-    .select({ completedAt: modelUpgradeCompletion.completedAt })
-    .from(modelUpgradeCompletion)
+    .select({ completedAt: platformInstance.modelUpgradeCompletedAt })
+    .from(platformInstance)
+    .where(eq(platformInstance.singleton, true))
     .limit(1);
   return row?.completedAt ?? null;
 }
@@ -151,14 +160,28 @@ export async function recordModelUpgradeCompletion(): Promise<ModelUpgradeComple
     return { completed: false, completedAt: null, outstanding };
   }
 
+  // The identity row is minted here if this installation has never answered its
+  // own identity, which is the ordinary state of a deployment whose public
+  // route nobody has called yet.
+  await platformInstanceId();
+
+  const now = new Date();
   const [written] = await db()
-    .insert(modelUpgradeCompletion)
-    .values({ singleton: true, completedAt: new Date() })
-    .onConflictDoNothing({ target: modelUpgradeCompletion.singleton })
-    .returning({ completedAt: modelUpgradeCompletion.completedAt });
+    .update(platformInstance)
+    .set({ modelUpgradeCompletedAt: now })
+    .where(
+      and(
+        eq(platformInstance.singleton, true),
+        isNull(platformInstance.modelUpgradeCompletedAt),
+      ),
+    )
+    .returning({ completedAt: platformInstance.modelUpgradeCompletedAt });
 
   return {
     completed: true,
+    // The row a concurrent boot stamped first, where this update matched
+    // nothing: two replicas finishing together settle on one moment rather than
+    // on whichever wrote last.
     completedAt: written?.completedAt ?? (await storedMarker()),
     outstanding: [],
   };

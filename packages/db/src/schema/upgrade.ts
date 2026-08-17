@@ -1,6 +1,4 @@
-import { check, pgTable, text, unique } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
-import { boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, unique } from "drizzle-orm/pg-core";
 
 import { organization } from "./tenancy.ts";
 import {
@@ -14,10 +12,13 @@ import {
 
 /**
  * What the upgrade onto model selections leaves behind: the legacy keys it
- * found, the decisions it refused to make on somebody's behalf, and the one
- * stamp that says this installation has finished.
+ * found, and the decisions it refused to make on somebody's behalf.
  *
- * **All three exist because an upgrade cannot guess.** A deployment configured
+ * The stamp that says an installation has *finished* is not here — it is one
+ * nullable column on `platform_instance`, which is already the row that belongs
+ * to the whole deployment and to no customer on it.
+ *
+ * **Both exist because an upgrade cannot guess.** A deployment configured
  * before persona and grader models existed holds provider keys in three
  * different places and model choices in a fourth; the upgrade collects what is
  * there and gives every current persona and grader an explicit successor where
@@ -198,37 +199,5 @@ export const modelUpgradeAction = pgTable(
       table.kind,
       table.subject,
     ),
-  ],
-);
-
-/**
- * The stamp that says this installation has finished moving onto model
- * selections.
- *
- * **Per installation, and `platform_instance` is the precedent**: one row that
- * belongs to the whole deployment and to no customer, so it survives a restart
- * and moves with a restored backup. A marker held in a process would be a
- * marker every replica held a different answer for.
- *
- * **It gates the later removal and nothing else.** Reading it is how the
- * release after this one knows that every current persona and grader carries
- * explicit selections and that no queued, claimed or grading work still depends
- * on the old contract or an old credential reference. Writing it is not a
- * decision anybody makes: the conditions are re-checked on every boot and the
- * stamp is written the first time they all hold.
- *
- * **Written once and never withdrawn.** A deployment that finished and then
- * authored a legacy-shaped row could not have — nothing writes one any more —
- * so a marker that could flip back would be a marker nothing could rely on.
- */
-export const modelUpgradeCompletion = pgTable(
-  "model_upgrade_completion",
-  {
-    singleton: boolean("singleton").primaryKey().default(true),
-    /** When the conditions were first all true. */
-    completedAt: moment("completed_at").notNull(),
-  },
-  (table) => [
-    check("model_upgrade_completion_is_one_row", sql`${table.singleton}`),
   ],
 );

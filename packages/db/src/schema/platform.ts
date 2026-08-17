@@ -1,6 +1,6 @@
 import { boolean, pgTable, text, unique, uniqueIndex } from "drizzle-orm/pg-core";
 
-import { createdAt, idText, prefixCheck, updatedAt } from "./columns.ts";
+import { createdAt, idText, moment, prefixCheck, updatedAt } from "./columns.ts";
 
 /**
  * The identity of this Egma platform, not of any customer on it.
@@ -14,6 +14,23 @@ export const platformInstance = pgTable(
   {
     singleton: boolean("singleton").primaryKey().default(true),
     id: idText("id").notNull(),
+    /**
+     * When this installation finished moving onto model selections, and null
+     * while it has not.
+     *
+     * **The marker the later removal of the legacy model paths is gated on, and
+     * it is a column here because this is the row that means "this
+     * installation".** Whether every current persona and grader carries
+     * explicit selections, and whether anything queued or claimed still needs
+     * the old work-order contract or an old judge credential, is something only
+     * the deployment can know and only by asking. The conditions are re-asked
+     * on every boot and this is stamped the first time they all hold.
+     *
+     * Never withdrawn: nothing writes a legacy-shaped row any more, so a
+     * deployment that finished cannot un-finish, and a marker that could flip
+     * back would be one no cleanup could safely read.
+     */
+    modelUpgradeCompletedAt: moment("model_upgrade_completed_at"),
     createdAt: createdAt(),
   },
   (table) => [

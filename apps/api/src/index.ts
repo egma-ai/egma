@@ -5,11 +5,13 @@ import {
   disconnectClickHouse,
   managedDeploymentFrom,
   runClickHouseMigrations,
+  recordModelUpgradeCompletion,
   runMigrations,
   seedDefaultJudge,
   seedGraderLibrary,
   seedPlatformSettings,
   seedRunningGraders,
+  upgradeModelSetup,
 } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
@@ -73,6 +75,27 @@ const shelved = await seedGraderLibrary();
 // keeps it off across every restart.
 const judging = await seedRunningGraders();
 
+// And the upgrade that gives every persona and grader on this installation an
+// explicit model, from whatever the deployment was configured with before the
+// model catalog existed. After the seeding above, because a project that just
+// gained its mandatory grading copy is a grader this has to consider.
+//
+// Idempotent for the same reason as everything above it, and stronger: it only
+// ever looks at versions that carry no selections, so the run after the first
+// finds nothing to do. It copies nothing into a deployment serving several
+// organizations, and it guesses nothing anywhere — where the answer is
+// ambiguous it writes an action an administrator reads under Model providers.
+const upgraded = await upgradeModelSetup({
+  singleOrganization: config.singleOrganization,
+});
+
+// Then the marker, which is the only thing the later removal of the legacy
+// paths is allowed to act on. It is written the first time every current
+// persona and grader has selections and nothing nonterminal still needs the old
+// contract or an old credential reference — re-checked here on every boot,
+// because only this installation can know.
+const finished = await recordModelUpgradeCompletion();
+
 const { app } = buildApi({ config });
 if (seeded.length > 0) {
   // The names, never the values and never their hints: what is worth saying is
@@ -97,6 +120,41 @@ if (judging.length > 0) {
   app.log.info(
     { projects: judging.map((copy) => copy.projectId) },
     "Egma's expected-behaviors grader was switched on in projects that had never had it",
+  );
+}
+if (
+  upgraded.personas.length > 0 ||
+  upgraded.graders.length > 0 ||
+  upgraded.candidates.length > 0 ||
+  upgraded.actions.length > 0 ||
+  upgraded.managedAccess.length > 0
+) {
+  // Identifiers and provider names, never a key and never its hint: what is
+  // worth saying is which personas and graders now carry explicit models, which
+  // stored keys were found, and what was left for somebody to choose.
+  app.log.info(
+    {
+      personas: upgraded.personas,
+      graders: upgraded.graders,
+      candidates: upgraded.candidates.length,
+      activated: upgraded.activated,
+      actions: upgraded.actions,
+      managedAccess: upgraded.managedAccess,
+    },
+    "existing personas and graders were moved onto explicit model selections",
+  );
+}
+if (finished.completed) {
+  app.log.info(
+    { completedAt: finished.completedAt },
+    "this installation has finished moving onto model selections",
+  );
+} else {
+  // The conditions rather than a bare "not yet": somebody reading this while
+  // deciding whether an old worker can be drained needs to know which.
+  app.log.info(
+    { outstanding: finished.outstanding },
+    "this installation is still serving work that needs the legacy model paths",
   );
 }
 if (judged.length > 0) {

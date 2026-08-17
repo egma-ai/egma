@@ -1,10 +1,8 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 
 import { db } from "../client.ts";
 
-import { grader, graderVersion } from "../schema/graders.ts";
 import { modelProviderCredential } from "../schema/models.ts";
-import { persona, personaVersion } from "../schema/personas.ts";
 import {
   modelCredentialCandidate,
   modelUpgradeAction,
@@ -265,47 +263,4 @@ export async function activateCredentialCandidate(
 
     return { provider: candidate.provider, hint: candidate.hint };
   });
-}
-
-/**
- * Whether this organization still has anything on the legacy path at all — the
- * one-line answer a settings screen draws a banner from.
- *
- * Deliberately a count of live facts rather than of action rows: an
- * organization that never needed an action has none, and an organization whose
- * personas were all given selections this morning has stale ones.
- */
-export async function modelUpgradeOutstanding(auth: AuthContext): Promise<number> {
-  authorize(auth, "read", here(auth));
-  return (await listModelUpgradeActions(auth)).length;
-}
-
-/** Whether a persona or grader of this organization is still on the old path. */
-export async function anythingOnTheLegacyPath(auth: AuthContext): Promise<boolean> {
-  authorize(auth, "read", here(auth));
-
-  const [waiting] = await db()
-    .select({ found: sql<number>`1` })
-    .from(persona)
-    .innerJoin(personaVersion, eq(persona.currentVersionId, personaVersion.id))
-    .where(
-      and(within(auth, persona), isNull(personaVersion.models)),
-    )
-    .limit(1);
-  if (waiting !== undefined) return true;
-
-  const [judged] = await db()
-    .select({ found: sql<number>`1` })
-    .from(grader)
-    .innerJoin(graderVersion, eq(grader.currentVersionId, graderVersion.id))
-    .where(
-      and(
-        within(auth, grader),
-        eq(grader.type, "llm_as_judge"),
-        isNull(grader.deletedAt),
-        isNull(graderVersion.graderModel),
-      ),
-    )
-    .limit(1);
-  return judged !== undefined;
 }

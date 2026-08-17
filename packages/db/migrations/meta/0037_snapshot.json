@@ -1,5 +1,5 @@
 {
-  "id": "e2436c9e-1307-4be5-b5bc-68144f30ea65",
+  "id": "0c93b505-c23e-41c9-8c4c-5e30be35236b",
   "prevId": "4a5d3363-2612-445c-ac48-95f3604ad245",
   "version": "7",
   "dialect": "postgresql",
@@ -20,6 +20,12 @@
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
+        },
+        "model_upgrade_completed_at": {
+          "name": "model_upgrade_completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -1872,37 +1878,6 @@
         "model_upgrade_action_kind_allowed": {
           "name": "model_upgrade_action_kind_allowed",
           "value": "\"model_upgrade_action\".\"kind\" in ('select_model_provider_credential', 'select_persona_models', 'select_grader_model', 'set_up_model_access')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.model_upgrade_completion": {
-      "name": "model_upgrade_completion",
-      "schema": "",
-      "columns": {
-        "singleton": {
-          "name": "singleton",
-          "type": "boolean",
-          "primaryKey": true,
-          "notNull": true,
-          "default": true
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "model_upgrade_completion_is_one_row": {
-          "name": "model_upgrade_completion_is_one_row",
-          "value": "\"model_upgrade_completion\".\"singleton\""
         }
       },
       "isRLSEnabled": false

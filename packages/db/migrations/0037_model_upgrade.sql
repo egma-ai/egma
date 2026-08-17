@@ -15,11 +15,13 @@
 --    legacy model, an organization on a deployment that copies nothing into it.
 --    One row per subject, so the list does not grow every time a container
 --    restarts. Its sentence is Egma's own writing and carries no secret.
---  * `model_upgrade_completion` is one row belonging to the whole deployment,
---    on `platform_instance`'s terms. It is written the first time every current
+--  * `platform_instance.model_upgrade_completed_at` is the marker, and it is a
+--    column on that row rather than a table of its own because that row already
+--    means "this installation" — one per deployment, surviving a restart and
+--    moving with a restored backup. It is stamped the first time every current
 --    persona and grader carries explicit selections and no queued, claimed or
 --    grading work still depends on the old contract or an old credential
---    reference — and it is what the later removal reads before it takes the
+--    reference, and it is what the later removal reads before it takes the
 --    legacy paths out.
 --
 -- Additive. Nothing is dropped, nothing is backfilled here, and every read that
@@ -57,11 +59,6 @@ CREATE TABLE "model_upgrade_action" (
 	CONSTRAINT "model_upgrade_action_kind_allowed" CHECK ("model_upgrade_action"."kind" in ('select_model_provider_credential', 'select_persona_models', 'select_grader_model', 'set_up_model_access'))
 );
 --> statement-breakpoint
-CREATE TABLE "model_upgrade_completion" (
-	"singleton" boolean PRIMARY KEY DEFAULT true NOT NULL,
-	"completed_at" timestamp with time zone NOT NULL,
-	CONSTRAINT "model_upgrade_completion_is_one_row" CHECK ("model_upgrade_completion"."singleton")
-);
---> statement-breakpoint
+ALTER TABLE "platform_instance" ADD COLUMN "model_upgrade_completed_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "model_credential_candidate" ADD CONSTRAINT "model_credential_candidate_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "model_upgrade_action" ADD CONSTRAINT "model_upgrade_action_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;
