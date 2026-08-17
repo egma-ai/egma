@@ -884,8 +884,9 @@ curl -H "authorization: Bearer egma_sk_..." \
 |---|---|---|
 | `from`, `to` | **required** | RFC 3339, honoured to the microsecond. The window is closed at `from` and open at `to`. |
 | `project_id` | optional | Narrows to one project. Absent — or empty — means the whole organization. |
+| `source` | optional | `simulation` or `production`. Narrows to one kind of traffic; absent — or empty — means both. Any other word is refused. |
 | `limit` | optional | 50 by default. Above the maximum of 200 it is clamped; zero, negative or not a count at all is refused. Empty is absent. |
-| `cursor` | optional | `next_cursor` from the previous page. |
+| `cursor` | optional | `next_cursor` from the previous page. Send `source` again on every page: a token is a position in the ordering it was minted in. |
 
 **`GET /v1/traces/:traceId`** returns one trace as a transcript: `turns` in the
 order they were taken, each carrying the spans that happened inside it, and
@@ -968,13 +969,14 @@ within a few months, and a silently rounded latency is worse than no latency.
 
 ## Reading one in the dashboard
 
-Sign in and open **Transcripts**. You get the recent transcripts of the project
-your session is acting in, newest first, defaulting to the last twenty-four
-hours — when each one started, how long it ran, how many turns each speaker
-took, how many steps and tools and failures are in it, and the first thing the
-human said. Pick a different window from the control beside the heading and the
-address carries it, so a refresh and a link both stay on the window you chose;
-**Show more** walks the pages.
+Sign in and open **Monitoring**. You get that project's production transcripts,
+newest first, defaulting to the last twenty-four hours — when each one started,
+how long it ran, how many turns each speaker took, how many steps and tools and
+failures are in it, and the first thing the human said. Test traffic is not
+here: a simulation is read under the **Simulation run** that produced it, beside
+the test it froze and the persona that called. Pick a different window from the
+control beside the heading and the address carries it, so a refresh and a link
+both stay on the window you chose; **Show more** walks the pages.
 
 Open one and you read it as a transcript: alternating `human:` and `agent:`
 turns in the order they were taken, each with how far into the exchange it
@@ -995,15 +997,16 @@ whose audio it is, and so does the link.
 
 Two things about this are worth knowing:
 
-- **The window rides in the address.** A transcript's link carries the window
-  the exchange happened in, because the endpoint under it needs one; that is why
-  the link works when you send it to somebody, and why opening
-  `/traces/<id>` with no window asks you to come in from the list.
-- **The dashboard reads what a browser session can read, which is the project
-  the session is acting in.** A key minted for a whole organization files its
-  spans under no project at all (see above), and those do not appear here.
-  **Mint the exporter's key against a project** and its telemetry lands where
-  the dashboard looks.
+- **The project and the window both ride in the address.** Every page in this
+  section lives under `/projects/<projectId>/monitoring/…`, and a transcript's
+  link carries the window the exchange happened in as well, because the endpoint
+  under it needs one. That is why the link works when you send it to somebody,
+  and why opening a transcript's address with no window asks you to come in from
+  the list.
+- **A key minted for a whole organization files its spans under no project at
+  all** (see above), and those do not appear here. **Mint the exporter's key
+  against a project** and its telemetry lands where the page looks — the empty
+  page says so, and links to where the key is minted.
 
 The pages are drawn from the two v1 endpoints above — the same contract you
 would integrate against, on the same origin, authenticated by the same session

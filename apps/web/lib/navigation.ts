@@ -3,9 +3,18 @@ import { projectPath, sectionIn } from "./project-context.ts";
 /**
  * The product areas, and which of them the navigation offers.
  *
- * **Primary navigation is the three things a team works on today**: the agent
- * under test, the tests, and the runs that executed them. Everything else earns
- * its place separately:
+ * **Primary navigation is the four things a team works on today**: the agent
+ * under test, the tests, the simulation runs that executed them, and the
+ * monitoring of what the agent does in production. Everything else earns its
+ * place separately:
+ *
+ * - **Monitoring is a pillar rather than a library entry.** Production traffic
+ *   is half of what a team looks at, and it was reachable at no address the
+ *   product linked to at all until this item existed.
+ * - **Simulation runs is a label, and only a label.** The addresses under
+ *   `/projects/{projectId}/runs` do not move, the stored word stays `run`, and
+ *   what changed is the two words a person reads — so that the runs surface and
+ *   the monitoring surface say which kind of traffic each one holds.
  *
  * - **Personas and Graders have direct paths and not primary slots.** A persona
  *   is authored on its own and reused across tests; a grader is switched on
@@ -23,7 +32,8 @@ import { projectPath, sectionIn } from "./project-context.ts";
  *   the item is back.
  * - **Settings lives in the account menu.** It is administrative work rather
  *   than a project destination, so it does not consume a permanent sidebar
- *   slot beside Agents, Tests, Runs, Personas, and Graders.
+ *   slot beside Agents, Tests, Simulation runs, Monitoring, Personas, and
+ *   Graders.
  * - **A simulation has no navigation item at all.** It is evidence, reached
  *   from the run that produced it, and a top-level list of every simulation
  *   would be a different product.
@@ -36,6 +46,7 @@ export type SectionId =
   | "agents"
   | "tests"
   | "runs"
+  | "monitoring"
   | "personas"
   | "graders"
   | "settings";
@@ -43,6 +54,17 @@ export type SectionId =
 export type NavigationItem = {
   readonly id: SectionId;
   readonly label: string;
+  /**
+   * The page inside the area the item opens, where that is not the area's own
+   * address.
+   *
+   * Monitoring is the one that has it. `/projects/{projectId}/monitoring` is a
+   * real address and lands on the transcript list, but the item points straight
+   * at the list rather than at a page whose whole job is to forward — a
+   * navigation click should not cost a redirect, and a reserved neighbour under
+   * the same area should never be able to become the landing by accident.
+   */
+  readonly opens?: readonly string[];
 };
 
 export type NavigationLink = NavigationItem & { readonly href: string };
@@ -50,7 +72,8 @@ export type NavigationLink = NavigationItem & { readonly href: string };
 export const PRIMARY_NAVIGATION: readonly NavigationItem[] = [
   { id: "agents", label: "Agents" },
   { id: "tests", label: "Tests" },
-  { id: "runs", label: "Runs" },
+  { id: "runs", label: "Simulation runs" },
+  { id: "monitoring", label: "Monitoring", opens: ["transcripts"] },
 ];
 
 export const SECONDARY_NAVIGATION: readonly NavigationItem[] = [
@@ -70,7 +93,10 @@ function linksFor(
   items: readonly NavigationItem[],
   projectId: string,
 ): readonly NavigationLink[] {
-  return items.map((item) => ({ ...item, href: projectPath(projectId, item.id) }));
+  return items.map((item) => ({
+    ...item,
+    href: projectPath(projectId, item.id, ...(item.opens ?? [])),
+  }));
 }
 
 /** The navigation of one project, as the shell renders it. */

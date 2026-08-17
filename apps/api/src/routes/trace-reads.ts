@@ -9,6 +9,8 @@ import {
   readVerdicts,
   UnreadableTraceQueryError,
   type AssertionWords,
+  type AuthContext,
+  type SpanSource,
   type TimeWindow,
   type TraceDetail,
   type TraceFacts,
@@ -19,6 +21,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 
 import { simulationIdOfTrace } from "@egma/simulation-contract";
 
+import { browserProject } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given } from "../http/reading.ts";
@@ -72,6 +75,7 @@ type Query = {
   readonly from?: string;
   readonly to?: string;
   readonly project_id?: string;
+  readonly source?: string;
   readonly limit?: string;
   readonly cursor?: string;
 };
@@ -164,6 +168,56 @@ function windowOf(query: Query): ParsedWindow {
   }
 
   return { from: opened, to: closed };
+}
+
+/**
+ * The two kinds of traffic one store holds, and the only two words this
+ * parameter takes.
+ *
+ * Written here rather than derived from a type, because it is what the refusal
+ * below reads out to whoever got it wrong.
+ */
+const TRAFFIC_SOURCES: readonly SpanSource[] = ["simulation", "production"];
+
+/**
+ * Which kind of traffic to read — **optional, and absent means both.**
+ *
+ * That is the whole of what makes this addition safe on a surface that is
+ * otherwise a one-way door: an integration written before the parameter existed
+ * sends nothing, and gets byte for byte the answer it always got. Nothing is
+ * defaulted here and nothing is echoed back, so there is no shape to change.
+ *
+ * A word that is not one of the two is **refused rather than ignored**. A
+ * misspelled filter that quietly read everything would answer a different
+ * question than the one asked and say nothing about having done so — the same
+ * rule the window is held to — and on this parameter the difference is a page
+ * of simulations under a heading that promised production. The refusal names
+ * both accepted words, because a caller who got it wrong is a caller who does
+ * not know what the right ones are.
+ *
+ * An **empty** parameter is a parameter nobody set, on the same terms as
+ * `?project_id=` and `?limit=`: it is what a form submits for a field left
+ * blank, and refusing it would refuse a request nobody meant anything by.
+ */
+type ParsedSource =
+  | { readonly source: SpanSource | undefined }
+  | { readonly refusal: string };
+
+function sourceOf(query: Query): ParsedSource {
+  const asked = given(query.source);
+  if (asked === undefined) return { source: undefined };
+
+  const known = TRAFFIC_SOURCES.find((one) => one === asked);
+  if (known === undefined) {
+    return {
+      refusal:
+        `source says which kind of traffic to read, and "${asked}" is not one ` +
+        `of them. It is ${TRAFFIC_SOURCES.join(" or ")} — a conversation Egma ` +
+        `conducted, or one your own agent had. Leave it out for both, which ` +
+        `is what this list answers when nobody narrows it.`,
+    };
+  }
+  return { source: known };
 }
 
 /**
@@ -342,7 +396,14 @@ export async function traceReadRoutes(
    * is what a form submits for a field left blank, and reading it as a name
    * would answer with the traces of a project that cannot exist; `?limit=` is
    * the same case, and `Number("")` is zero, which would be refused as a page
-   * size nobody could want. Both read as absence, which is what they mean.
+   * size nobody could want. `?source=` joins them. All three read as absence,
+   * which is what they mean.
+   *
+   * **`source` is the one filter this list has, and it is additive.** Absent, it
+   * is not consulted and the answer is what it has always been; present, it
+   * narrows to one kind of traffic. It rides every page of a walk, because a
+   * token is a position in an ordering and the ordering it was minted in is the
+   * narrowed one.
    */
   app.get(TRACES_LIST_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -352,8 +413,11 @@ export async function traceReadRoutes(
     if ("refusal" in window) return invalid(reply, window.refusal);
 
     const projectId = given(query.project_id);
-    const project = projectRefusal(auth.projectId, projectId);
-    if (project !== undefined) return invalid(reply, project);
+    const project = await readingProject(auth, projectId);
+    if ("refusal" in project) return invalid(reply, project.refusal);
+
+    const source = sourceOf(query);
+    if ("refusal" in source) return invalid(reply, source.refusal);
 
     const asked = given(query.limit);
     const limit = asked === undefined ? undefined : Number(asked);
@@ -365,9 +429,10 @@ export async function traceReadRoutes(
       );
     }
 
-    const list = await listTraces(auth, {
+    const list = await listTraces(project.auth, {
       window,
       projectId,
+      source: source.source,
       limit,
       cursor: given(query.cursor),
     });
@@ -399,10 +464,17 @@ export async function traceReadRoutes(
     if ("refusal" in window) return invalid(reply, window.refusal);
 
     const projectId = given(query.project_id);
-    const project = projectRefusal(auth.projectId, projectId);
-    if (project !== undefined) return invalid(reply, project);
+    const project = await readingProject(auth, projectId);
+    if ("refusal" in project) return invalid(reply, project.refusal);
 
-    const detail = await readTrace(auth, traceId, { window, projectId });
+    // The context the whole page is read through, project included: the
+    // transcript, the verdicts filed beside it, and the words behind their
+    // assertion keys. One resolution rather than three, so the turns somebody
+    // reads and the judgments printed under them can never come from two
+    // different projects.
+    const acting = project.auth;
+
+    const detail = await readTrace(acting, traceId, { window, projectId });
 
     // A trace this customer has no span of is a trace that is not there, and it
     // reads identically whether it belongs to somebody else or to nobody. That
@@ -431,7 +503,7 @@ export async function traceReadRoutes(
     // mapping. A production trace derives to a simulation id nothing minted,
     // and simply has no verdicts filed that way.
     const filedUnder = simulationIdOfTrace(traceId) ?? traceId;
-    const judged = await readVerdicts(auth, filedUnder, { projectId }).catch(
+    const judged = await readVerdicts(acting, filedUnder, { projectId }).catch(
       () => undefined,
     );
 
@@ -443,7 +515,7 @@ export async function traceReadRoutes(
     const words: AssertionWords | undefined =
       detail.source === "simulation" && (judged?.verdicts.length ?? 0) > 0
         ? await readAssertionWords(
-            auth,
+            acting,
             filedUnder,
             (judged?.verdicts ?? []).map((its) => its.graderId),
           ).catch(() => undefined)
@@ -511,12 +583,86 @@ export async function traceReadRoutes(
 }
 
 /**
- * Whether a project-scoped credential was asked for a different project.
+ * Which project these reads narrow to, once `project_id` has been answered.
+ *
+ * **A session's project is a default; a key's is a scope**, and that one
+ * sentence is the whole of this function. Every member of an organization holds
+ * their organization role on every project in it, so a browser naming a sibling
+ * project is what the project selector does on every click — while a key minted
+ * for one product area is bounded by it, and reaching a sibling with one is
+ * refused rather than quietly narrowed back.
+ *
+ * The two rules are not written here. `acting.ts` owns them, and its own note
+ * says why the branch lives there: *"so that every route group a page reaches
+ * gets the one rule, and a group added later cannot get the other one by
+ * omission."* This surface was that group. It carried a project check of its
+ * own, written when a session's project was a fact nobody could change, and
+ * that check read a session's default as though it were a key's scope — so an
+ * organization with two projects had Monitoring answer 400 on every project but
+ * the first.
+ *
+ * **The key half is unchanged, deliberately and to the byte.** It is a published
+ * refusal on a public contract, and a key that reached a sibling project because
+ * this function grew a branch would be the one failure worth more than the bug
+ * being fixed. A key for the whole organization is unchanged too: it names no
+ * project, so there is nothing here to refuse, and the data-access module
+ * narrows by whatever it asked for.
+ *
+ * **Tenancy cannot widen either way.** The organization comes off the credential
+ * and appears in every predicate underneath; the only project a session can come
+ * to name is one its own membership already reaches, which is `browserProject`'s
+ * read and not this request's claim.
+ */
+type ReadingProject =
+  | { readonly auth: AuthContext }
+  | { readonly refusal: string };
+
+/**
+ * **Every refusal here leaves as a 400 `invalid_request`, and the flattening of
+ * `browserProject`'s own code is deliberate.**
+ *
+ * A project this session cannot reach is, in tenancy terms, an absence — which
+ * argues for 404. It must not leave as one. The browser folds an answer into
+ * what a page shows through `answerFor`, and there a 404 *is* the missing
+ * state: on the transcript page it draws "That transcript is not here", so a
+ * mistyped project id would tell somebody their conversation had aged out of
+ * the store. The request is what was malformed, not the thing it asked for, and
+ * 400 is the code that says so.
+ *
+ * Nothing is lost by it: the refusal's own sentence is carried word for word
+ * and is what the page displays. What is lost is the ability to branch on the
+ * code, and no caller does.
+ *
+ * **A new code added upstream has to be re-decided here.** `browserProject`
+ * answering a second kind of refusal one day would have it flattened into this
+ * one without anybody choosing that, so whoever adds it reads this paragraph
+ * and either keeps the flattening or gives the route a second branch.
+ */
+async function readingProject(
+  auth: AuthContext,
+  asked: string | undefined,
+): Promise<ReadingProject> {
+  if (asked === undefined) return { auth };
+
+  if (auth.via === "session") {
+    const acting = await browserProject(auth, asked);
+    return "auth" in acting ? acting : { refusal: acting.refusal };
+  }
+
+  const refusal = projectRefusal(auth.projectId, asked);
+  return refusal === undefined ? { auth } : { refusal };
+}
+
+/**
+ * Whether a project-scoped **key** was asked for a different project.
  *
  * The data-access module ignores the argument in that case and reads the
  * credential's own project regardless, which is the property that matters. This
  * is the other half: saying so out loud, because a caller whose filter was
  * silently dropped would read the answer as though the filter had applied.
+ *
+ * Reached only for a key now — see `readingProject` above — and its wording says
+ * "key" because that is the only credential it can be about.
  */
 function projectRefusal(
   credentialProjectId: string | undefined,

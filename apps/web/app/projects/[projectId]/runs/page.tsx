@@ -515,7 +515,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
     <ProductPage>
       <PageHeader
         eyebrow="Project"
-        title="Runs"
+        title="Simulation runs"
         lead="Every execution of a selection of tests against one agent over one connection. Machinery and judgment are shown apart, because a run that finished is not the same as a run that went well."
         action={plan()}
       />

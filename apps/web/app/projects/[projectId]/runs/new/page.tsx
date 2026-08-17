@@ -373,7 +373,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
   return (
     <ProductPage>
       <PageHeader
-        eyebrow="Runs"
+        eyebrow="Simulation runs"
         title="Create a run"
         lead="A run executes a selection of tests against one agent over one connection. Every simulation it produces is pinned to the exact test, persona and grader versions Egma froze when it started."
         action={

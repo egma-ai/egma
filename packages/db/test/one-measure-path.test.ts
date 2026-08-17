@@ -37,6 +37,18 @@ const REPOSITORY = path.resolve(import.meta.dirname, "..", "..", "..");
 const THE_MODULE = "packages/db/src/measures/from-spans.ts";
 
 /**
+ * The page that prints a reduction it was handed, named once.
+ *
+ * It moved into the project with the monitoring surface — it used to answer at
+ * `app/traces/[traceId]` — and it is named twice below, so it is written once
+ * here. Two names for one page is how one of them goes stale: the walk-reaches-
+ * the-source guard would keep failing on a path nobody serves any more, while
+ * the rule that matters quietly stopped covering the page it is about.
+ */
+const THE_TRANSCRIPT_PAGE =
+  "apps/web/app/projects/[projectId]/monitoring/transcripts/[transcriptId]/page.tsx";
+
+/**
  * Every file egma actually runs.
  *
  * Tests may say anything — a fixture builder writes timing spans by name, and
@@ -107,7 +119,7 @@ describe("the scan itself", () => {
     expect(files.length).toBeGreaterThan(100);
     expect(files).toContain(THE_MODULE);
     expect(files).toContain("apps/grader/src/graders/latency.ts");
-    expect(files).toContain("apps/web/app/traces/[traceId]/page.tsx");
+    expect(files).toContain(THE_TRANSCRIPT_PAGE);
     // And nothing from a test directory, which is allowed to say anything.
     for (const file of files) {
       expect(file).not.toMatch(/\/tests?\//u);
@@ -204,8 +216,7 @@ describe("reducing the measurements to one number", () => {
       "sends it, beside the module's own reduction of it",
     "apps/grader/src/graders/latency.ts": "counts it, for the rationale",
     "apps/grader/src/judge/input.ts": "renders it, as words a judge reads",
-    "apps/web/app/traces/[traceId]/page.tsx":
-      "counts it, and prints the reduction it was handed",
+    [THE_TRANSCRIPT_PAGE]: "counts it, and prints the reduction it was handed",
     "apps/web/lib/transcripts.ts": "declares what arrives on the answer",
   };
 

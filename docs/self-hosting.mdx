@@ -188,7 +188,9 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3100
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
 ```
 
-Use your API's address (port 3100), not the web application (port 3101). Mint the exporter's API key against a specific project so spans appear in the dashboard.
+Either origin reaches the same door: the ingest endpoint lives on the API (`3100`), and the web application (`3101`) forwards `/v1/traces` to it. The API is one hop shorter. Leave `/v1/traces` off the end — the exporter appends it.
+
+Mint the exporter's API key against a specific project. A key that names the whole organization files its spans under no project, and none of them appear in the dashboard.
 
 ## Single-organization mode
 

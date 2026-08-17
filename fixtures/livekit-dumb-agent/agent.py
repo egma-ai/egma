@@ -40,6 +40,14 @@ all** — no wrapper, no message, the same two callables — so this file
 behaves identically whether or not egma is anywhere near it, which is the
 property `tests/test_outside_egma.py` holds it to.
 
+## The export that makes this agent visible in egma
+
+``OTEL_EXPORTER_OTLP_ENDPOINT`` is the whole switch. Set it and this
+worker builds an OpenTelemetry exporter and hands it to the agents
+framework, so the conversation lands in a project's Monitoring. Leave it
+unset and nothing is built and nothing is imported — which is the
+production case, and the same inertness ``mockable`` promises.
+
 Dispatch style is chosen by environment, so both of egma's paths are
 testable with the same file:
 
@@ -120,7 +128,73 @@ def prewarm(proc: agents.JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
 
 
+ENDPOINT = "OTEL_EXPORTER_OTLP_ENDPOINT"
+"""The one variable that decides whether this agent exports anything.
+
+It is OpenTelemetry's own, not egma's: an agent already pointed at some
+other collector needs no second setting to be pointed here instead.
+"""
+
+
+_exporting = None
+"""The one provider this process ever builds, once the endpoint asks for it.
+
+A worker process can serve one room after another, and `entrypoint` runs
+once per room — so the provider is built on the first job and reused by
+every later one. Rebuilding it per job would install a new batch
+processor, and its exporter thread, every conversation, and never take
+one down.
+"""
+
+
+def export_telemetry(ctx: agents.JobContext) -> None:
+    """Send this job's telemetry wherever the environment says, or nowhere.
+
+    **Nowhere is the default and it costs nothing.** No endpoint means no
+    provider, and the imports below never run — so a worker outside egma
+    is the same worker it was before this function existed, which is the
+    property `tests/test_outside_egma.py` holds this file to.
+
+    The exporter takes no arguments on purpose. Endpoint, the key header
+    and the service name all come off the standard ``OTEL_*`` variables,
+    which is the contract egma's LiveKit guide hands a customer — so what
+    is configured here is exactly what a reader of that page configures,
+    and a mistake in it is reproducible from their side.
+    """
+    global _exporting
+    if os.environ.get(ENDPOINT, "").strip() == "":
+        return
+
+    if _exporting is None:
+        from livekit.agents.telemetry import set_tracer_provider
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        provider = TracerProvider()
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        set_tracer_provider(provider)
+        _exporting = provider
+
+    provider = _exporting
+
+    async def flush() -> None:
+        # The batch processor exports on a timer, so the last turns of a
+        # conversation are still held in it when the job ends. Without
+        # this the goodbye is the part that never arrives. The flush is
+        # per job on the one shared provider; shutdown belongs to the
+        # process, not to any conversation it served.
+        provider.force_flush()
+
+    ctx.add_shutdown_callback(flush)
+
+
 async def entrypoint(ctx: agents.JobContext) -> None:
+    # Before anything can be traced, and before the room, so the framework
+    # has somewhere to put the spans it opens on connecting.
+    export_telemetry(ctx)
     await ctx.connect()
     agent = FrontDesk()
     session = AgentSession(

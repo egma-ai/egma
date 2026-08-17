@@ -7,16 +7,25 @@ import * as copy from "../lib/transcript-copy.ts";
 import * as gradingCopy from "../lib/grading-copy.ts";
 import {
   assertionHeading,
+  everRecordedPath,
   everyStep,
   howFarIn,
   howLong,
   humanizeIdentifier,
   isHuman,
+  isWidestWindow,
   milliseconds,
+  monitoringPath,
+  namesWholeOrganization,
+  productionListPath,
+  quietState,
   recentWindow,
   somethingFailed,
   stepsInside,
   transcriptPath,
+  transcriptReadPath,
+  transcriptsPath,
+  watchesProduction,
   whenItWas,
   windowAround,
   windowChoiceOf,
@@ -32,6 +41,11 @@ import {
  */
 
 const WEB = path.join(import.meta.dirname, "..");
+
+/** Where the two pages live, now that both are inside a project. */
+const SECTION = "app/projects/[projectId]/monitoring";
+const LIST_PAGE = `${SECTION}/transcripts/page.tsx`;
+const DETAIL_PAGE = `${SECTION}/transcripts/[transcriptId]/page.tsx`;
 
 const FACTS: Facts = {
   trace_id: "5c1e4b0f8d2a4e6b9f0c1d2e3a4b5c6d",
@@ -161,8 +175,12 @@ describe("the window one transcript carries", () => {
 
   /** Which is what makes one transcript a link somebody can send. */
   it("rides in the address, so the page opens on its own", () => {
-    const where = transcriptPath(FACTS);
-    expect(where.startsWith(`/traces/${FACTS.trace_id}?`)).toBe(true);
+    const where = transcriptPath("prj_2", FACTS);
+    expect(
+      where.startsWith(
+        `/projects/prj_2/monitoring/transcripts/${FACTS.trace_id}?`,
+      ),
+    ).toBe(true);
 
     const asked = new URLSearchParams(where.slice(where.indexOf("?")));
     expect(Date.parse(asked.get("from") ?? "")).toBeLessThan(
@@ -171,6 +189,320 @@ describe("the window one transcript carries", () => {
     expect(Date.parse(asked.get("to") ?? "")).toBeGreaterThan(
       Date.parse(FACTS.ended_at),
     );
+  });
+});
+
+/**
+ * Where the monitoring section is, and what its two pages ask for.
+ *
+ * Every segment is a glossary word. The store files a trace made of spans and
+ * the v1 paths say so, because that is the machine surface; what a person
+ * navigates is **monitoring**, and what they open is a **transcript**.
+ */
+describe("the addresses the monitoring section holds", () => {
+  it("puts both pages inside the project that owns them", () => {
+    expect(monitoringPath("prj_2")).toBe("/projects/prj_2/monitoring");
+    expect(transcriptsPath("prj_2")).toBe(
+      "/projects/prj_2/monitoring/transcripts",
+    );
+  });
+
+  /**
+   * `dashboard` is reserved and undecided. Nothing ships there and nothing
+   * claims it, so no address this module can build reaches it.
+   */
+  it("claims nothing at the reserved dashboard address", () => {
+    for (const where of [
+      monitoringPath("prj_2"),
+      transcriptsPath("prj_2"),
+      transcriptPath("prj_2", FACTS),
+    ]) {
+      expect(where, where).not.toContain("dashboard");
+    }
+  });
+
+  it("says trace nowhere in an address a person is shown", () => {
+    for (const where of [
+      monitoringPath("prj_2"),
+      transcriptsPath("prj_2"),
+      transcriptPath("prj_2", FACTS).split("?")[0] ?? "",
+    ]) {
+      // The identifier a row carries is the store's, and it is a value rather
+      // than a segment — so the check is on the path with the name removed.
+      expect(where.replace(FACTS.trace_id, ""), where).not.toMatch(
+        /\btrace|\bspan/iu,
+      );
+    }
+  });
+});
+
+/**
+ * What the list asks the v1 contract for.
+ *
+ * **Production, this project, and a window** — three narrowings, each of which
+ * the page would be wrong without. Every one of them is in the address of the
+ * request rather than applied to what came back: a filter applied afterwards
+ * answers differently depending on what had already been fetched, and quietly
+ * breaks paging.
+ */
+describe("what the monitoring list asks for", () => {
+  const WINDOW = {
+    from: "2026-08-01T20:00:00.000Z",
+    to: "2026-08-02T20:01:00.000Z",
+  };
+
+  function asked(path: string): URLSearchParams {
+    return new URLSearchParams(path.slice(path.indexOf("?")));
+  }
+
+  it("narrows to production, so no simulation can appear here", () => {
+    const query = asked(
+      productionListPath({ window: WINDOW, projectId: "prj_2" }),
+    );
+    expect(query.get("source")).toBe("production");
+  });
+
+  it("names the project from the address rather than leaving it to be resolved", () => {
+    const query = asked(
+      productionListPath({ window: WINDOW, projectId: "prj_2" }),
+    );
+    expect(query.get("project_id")).toBe("prj_2");
+    expect(query.get("from")).toBe(WINDOW.from);
+    expect(query.get("to")).toBe(WINDOW.to);
+  });
+
+  /**
+   * A token minted under a filter pages within that filter, so the next page
+   * carries the same narrowing — and a first page and a next page differ only
+   * by where they start.
+   */
+  it("carries the same narrowing into the next page", () => {
+    const next = asked(
+      productionListPath({
+        window: WINDOW,
+        projectId: "prj_2",
+        cursor: "eyJhIjoxfQ==",
+      }),
+    );
+    expect(next.get("cursor")).toBe("eyJhIjoxfQ==");
+    expect(next.get("source")).toBe("production");
+    expect(next.get("project_id")).toBe("prj_2");
+  });
+
+  it("sends no cursor on the first page, however absence is spelled", () => {
+    for (const cursor of [null, undefined, ""]) {
+      const query = asked(
+        productionListPath({ window: WINDOW, projectId: "prj_2", cursor }),
+      );
+      expect(query.has("cursor"), String(cursor)).toBe(false);
+    }
+  });
+
+  /**
+   * One transcript is looked up by name, and a source filter on a lookup could
+   * only ever turn a link somebody was sent into a page saying it is not there.
+   */
+  it("looks one transcript up by project and window, and never by source", () => {
+    const where = transcriptReadPath({
+      traceId: "5c1e/4b",
+      window: WINDOW,
+      projectId: "prj_2",
+    });
+    expect(where.startsWith("/v1/traces/5c1e%2F4b?")).toBe(true);
+    expect(asked(where).get("project_id")).toBe("prj_2");
+    expect(asked(where).has("source")).toBe(false);
+  });
+});
+
+/**
+ * What a quiet Monitoring page owes its reader — four states, and never two at
+ * once.
+ *
+ * Each answers a different question, and the wrong one costs an afternoon:
+ * somebody with a week of traffic reading the last hour told to set up an
+ * export they already have, somebody with no export told that no grader watches
+ * production, somebody whose key names the whole organization told to point an
+ * export at egma a second time.
+ */
+describe("which guidance a quiet page shows", () => {
+  /** An empty page in a project that has never recorded anything, nothing failed. */
+  function seen(overrides: Partial<Parameters<typeof quietState>[0]>) {
+    return quietState({
+      listed: 0,
+      everRecorded: 0,
+      organizationWideKeys: 0,
+      watchingProduction: 0,
+      ...overrides,
+    });
+  }
+
+  /**
+   * **The window is a reason for an empty list, and it is not the project's
+   * fault** — but only where something *is* recorded further back. A project
+   * with a week of traffic read at the last hour is empty and healthy, and a
+   * setup tutorial there tells somebody their working export is broken.
+   */
+  it("blames the window when the project has traffic further back", () => {
+    expect(seen({ listed: 0, everRecorded: 1 })).toBe("nothing-in-this-window");
+    // Even where everything else would have had something to say.
+    expect(seen({ listed: 0, everRecorded: 9, organizationWideKeys: 3 })).toBe(
+      "nothing-in-this-window",
+    );
+  });
+
+  /**
+   * **And nothing anywhere is the day-one page, whatever window is selected.**
+   *
+   * A developer who has just signed up lands on the default window, not on the
+   * widest, and an empty page is the one thing standing between them and a
+   * working export. Deciding this by the selected window alone would put a
+   * click in front of the teaching written for exactly this moment — so the
+   * question asked is "has this project ever recorded anything", which the
+   * window cannot answer and one extra read can.
+   */
+  it("teaches the setup whenever nothing has ever arrived, at any window", () => {
+    expect(seen({ listed: 0, everRecorded: 0 })).toBe("set-up-capture");
+  });
+
+  it("knows which window is the widest, so the extra read can be skipped there", () => {
+    expect(isWidestWindow("30d")).toBe(true);
+    for (const narrower of ["1h", "24h", "7d"] as const) {
+      expect(isWidestWindow(narrower), narrower).toBe(false);
+    }
+  });
+
+  /**
+   * The one step of that setup that fails in silence: everything is accepted
+   * and stored, and none of it is in a project. Telling somebody who already
+   * exported to go and export is the unhelpful answer, so this replaces the
+   * teaching rather than joining it.
+   */
+  it("names the organization-wide key instead, when one is visible", () => {
+    expect(seen({ organizationWideKeys: 1 })).toBe("key-names-the-organization");
+  });
+
+  it("says nothing watches production once traffic is arriving", () => {
+    expect(seen({ listed: 4, organizationWideKeys: 1 })).toBe(
+      "nothing-watches-production",
+    );
+  });
+
+  /** A healthy project gets no guidance at all, which is the fifth answer. */
+  it("says nothing at all when traffic is arriving and something judges it", () => {
+    expect(seen({ listed: 3, watchingProduction: 1 })).toBeNull();
+  });
+
+  /**
+   * **A read that never answered is not a zero**, which is the same rule
+   * `ui/page-state.tsx` states between failed and empty. A failed grader read
+   * folded into a count would put "no grader watches production" on screen on
+   * the strength of an answer egma never got, so a supporting read that did not
+   * land means one thing less is said and never one thing more.
+   */
+  it("says nothing rather than guessing, when a supporting read did not answer", () => {
+    expect(seen({ listed: 4, watchingProduction: null })).toBeNull();
+    // And the keys read failing leaves the teaching, which claims nothing about
+    // any key — its caution line covers the case for every reader anyway.
+    expect(seen({ listed: 0, organizationWideKeys: null })).toBe(
+      "set-up-capture",
+    );
+  });
+
+  /**
+   * **The unanswered probe is that rule at its sharpest**, because both
+   * sentences it decides between are confident ones. *Nothing here, try a wider
+   * window* is true whatever the answer would have been; the teaching would be
+   * telling somebody with a working export to go and build one.
+   */
+  it("falls back to the window line, never the teaching, when the probe failed", () => {
+    expect(seen({ listed: 0, everRecorded: null })).toBe(
+      "nothing-in-this-window",
+    );
+    // Including where a visible organization-wide key would otherwise have
+    // spoken: that sentence is about an empty project too.
+    expect(seen({ listed: 0, everRecorded: null, organizationWideKeys: 2 })).toBe(
+      "nothing-in-this-window",
+    );
+  });
+
+  /**
+   * With no traffic, telling somebody that no grader watches production is
+   * noise about a problem they do not have yet — so the order is fixed and
+   * exactly one state can ever be on screen.
+   */
+  it("never shows two of them, whatever the four inputs say", () => {
+    const named = [
+      "nothing-in-this-window",
+      "set-up-capture",
+      "key-names-the-organization",
+      "nothing-watches-production",
+    ];
+
+    for (const listed of [0, 5]) {
+      for (const everRecorded of [0, 7, null]) {
+        for (const organizationWideKeys of [0, 2, null]) {
+          for (const watchingProduction of [0, 1, null]) {
+            const state = quietState({
+              listed,
+              everRecorded,
+              organizationWideKeys,
+              watchingProduction,
+            });
+            expect(state === null || named.includes(state)).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  /**
+   * The probe asks the widest window for one row, because *some* or *none* is
+   * the whole branch and a count is not wanted.
+   */
+  it("asks the widest window for a single row, and nothing more", () => {
+    const where = everRecordedPath("prj_2", new Date("2026-08-16T12:00:00Z"));
+    const asked = new URLSearchParams(where.slice(where.indexOf("?")));
+
+    expect(asked.get("limit")).toBe("1");
+    expect(asked.get("project_id")).toBe("prj_2");
+    expect(asked.get("source")).toBe("production");
+    // The widest window this page offers, which is thirty days.
+    expect(asked.get("from")).toBe("2026-07-17T12:00:00.000Z");
+  });
+
+  /**
+   * A copy scoped to `both` judges production as well as simulations, so it
+   * counts. `simulations` never does, whatever its sampling rate says — and
+   * that is the day-one trap the line exists for, because every new grader
+   * starts there.
+   */
+  it("counts a grader as watching only when its scope reaches production", () => {
+    expect(watchesProduction({ scope: "production" })).toBe(true);
+    expect(watchesProduction({ scope: "both" })).toBe(true);
+    expect(watchesProduction({ scope: "simulations" })).toBe(false);
+  });
+
+  it("reads a key with no project as one that names the whole organization", () => {
+    expect(
+      namesWholeOrganization({ project_id: null, revoked_at: null }),
+    ).toBe(true);
+    expect(
+      namesWholeOrganization({ project_id: "prj_2", revoked_at: null }),
+    ).toBe(false);
+  });
+
+  /**
+   * A revoked key authenticates nothing, so it files nothing anywhere. Counting
+   * one would explain an empty page with a key somebody already dealt with —
+   * a wrong answer wearing the clothes of a knowledgeable one.
+   */
+  it("does not count a key that has been revoked", () => {
+    expect(
+      namesWholeOrganization({
+        project_id: null,
+        revoked_at: "2026-08-15T09:00:00.000000Z",
+      }),
+    ).toBe(false);
   });
 });
 
@@ -483,8 +815,8 @@ describe("what the pages say out loud", () => {
    */
   it("is what the pages actually render", async () => {
     for (const page of [
-      "app/traces/page.tsx",
-      "app/traces/[traceId]/page.tsx",
+      LIST_PAGE,
+      DETAIL_PAGE,
     ]) {
       const source = await readFile(path.join(WEB, page), "utf8");
       expect(source, page).toContain("transcript-copy.ts");
@@ -496,7 +828,7 @@ describe("what the pages say out loud", () => {
     // outcome was folded without.
     for (const page of [
       "app/judgment-card.tsx",
-      "app/traces/[traceId]/page.tsx",
+      DETAIL_PAGE,
     ]) {
       const source = await readFile(path.join(WEB, page), "utf8");
       expect(source, page).toContain("grading-copy.ts");
@@ -506,13 +838,33 @@ describe("what the pages say out loud", () => {
 
 describe("the transcript pages", () => {
   it("exist, at the two addresses the list links between", async () => {
-    const found = await readdir(path.join(WEB, "app/traces"), {
-      recursive: true,
-    });
+    const found = (
+      await readdir(path.join(WEB, SECTION), { recursive: true })
+    ).map((one) => one.replaceAll(path.sep, "/"));
+
+    expect(found).toContain("transcripts/page.tsx");
+    expect(found).toContain("transcripts/[transcriptId]/page.tsx");
+    // The area's own address lands on the list, and it is the only other page
+    // under here: `dashboard` is reserved and nothing claims it.
     expect(found).toContain("page.tsx");
-    expect(found.map((one) => one.replaceAll(path.sep, "/"))).toContain(
-      "[traceId]/page.tsx",
-    );
+    expect(found.filter((one) => one.includes("dashboard"))).toEqual([]);
+
+    const landing = await readFile(path.join(WEB, SECTION, "page.tsx"), "utf8");
+    expect(landing).toContain("redirect(transcriptsPath(projectId))");
+  });
+
+  /**
+   * **The addresses they used to live at are gone rather than forwarded.**
+   *
+   * They were never linked from the product — the pages carried no project, so
+   * no navigation could honestly point at them — which means a saved address is
+   * a hand-typed one. A redirect would be a second name for a page that has one
+   * name now, kept alive for nobody.
+   */
+  it("no longer resolve at the top-level addresses they came from", async () => {
+    for (const gone of ["app/traces", "app/traces/[traceId]"]) {
+      await expect(readdir(path.join(WEB, gone))).rejects.toThrow();
+    }
   });
 
   /**
@@ -538,12 +890,18 @@ describe("the transcript pages", () => {
       /source: "\/v1\/traces", destination: `\$\{api\}\/v1\/traces`/,
     );
 
-    for (const page of [
-      "app/traces/page.tsx",
-      "app/traces/[traceId]/page.tsx",
+    /**
+     * The pages no longer name the endpoint themselves — both addresses are
+     * built by `lib/transcripts.ts`, so the project and the source filter
+     * cannot be forgotten by one page and remembered by the other. What is held
+     * to the rewrite is therefore what that module builds.
+     */
+    const window = { from: "2026-08-01T20:00:00Z", to: "2026-08-02T20:00:00Z" };
+    for (const built of [
+      productionListPath({ window, projectId: "prj_1" }),
+      transcriptReadPath({ traceId: "abc", window, projectId: "prj_1" }),
     ]) {
-      const source = await readFile(path.join(WEB, page), "utf8");
-      expect(source, page).toContain("/v1/traces");
+      expect(built.startsWith("/v1/traces"), built).toBe(true);
     }
   });
 });
@@ -561,7 +919,7 @@ describe("the transcript pages", () => {
 describe("what the exchange measured", () => {
   it("is read from the answer, and never worked out from the timings", async () => {
     const page = await readFile(
-      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      path.join(WEB, DETAIL_PAGE),
       "utf8",
     );
 
@@ -593,7 +951,7 @@ describe("what the exchange measured", () => {
    */
   it("prints the reduction it was handed, and never computes one", async () => {
     const page = await readFile(
-      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      path.join(WEB, DETAIL_PAGE),
       "utf8",
     );
 
@@ -618,7 +976,7 @@ describe("what the exchange measured", () => {
    */
   it("qualifies the figure when the reading is only part of the exchange", async () => {
     const page = await readFile(
-      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      path.join(WEB, DETAIL_PAGE),
       "utf8",
     );
 

@@ -2,6 +2,7 @@ import { traceStore } from "../clickhouse/client.ts";
 import type { AuthContext } from "./context.ts";
 import { UnreadableTraceQueryError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
+import type { SpanSource } from "./spans.ts";
 
 /**
  * Reading traces, and the only way anything ever does.
@@ -103,6 +104,19 @@ export type ListTracesOptions = {
    * project.
    */
   readonly projectId?: string | undefined;
+  /**
+   * Which kind of traffic to read: a conversation egma conducted, or one a real
+   * caller had. **Absent is both**, which is what this list has always answered
+   * and what a caller written before this option existed still gets.
+   *
+   * Narrowing only, like the project beside it — there is nothing wider than
+   * both. The column is on every row because comparing a simulation against a
+   * production exchange is the premise of the product, so a surface that shows
+   * one kind asks the store for one kind rather than reading a page of both and
+   * throwing half of it away: a page filtered after the fact holds however many
+   * rows survived, and how many rows a page holds is what a token walks.
+   */
+  readonly source?: SpanSource | undefined;
   readonly limit?: number | undefined;
   /** Where the last page stopped. Opaque, and issued by this module alone. */
   readonly cursor?: string | undefined;
@@ -538,6 +552,11 @@ type SummaryRow = {
  * Every count is a `countIf` in the same single pass, so a page's whole set of
  * numbers costs one scan of a window the sort key has already pruned to this
  * organization, this project, and these minutes.
+ *
+ * **`source` narrows that scan and nothing else about this call changes.** A
+ * caller naming none reads both kinds of traffic, exactly as every caller did
+ * before the option existed; a caller naming one reads that one, and a token it
+ * was handed resumes inside the same narrowed ordering.
  */
 export async function listTraces(
   auth: AuthContext,
@@ -551,6 +570,26 @@ export async function listTraces(
     options.cursor === undefined || options.cursor === ""
       ? undefined
       : decodeCursor(options.cursor);
+
+  // The kind of traffic, when a caller asked for one. It joins the scan rather
+  // than the page, which is what makes a token minted under it walk the
+  // filtered ordering: `having` prunes groups after this predicate has already
+  // decided which rows there were to group, so the row a page stopped at is a
+  // position in the same ordering the next request resumes.
+  //
+  // **Qualified by the table, and that is not decoration.** The select list
+  // aliases `any(source) as source`, and ClickHouse resolves a bare `source` in
+  // the `where` against that alias — then refuses the whole query, because an
+  // aggregate cannot be a predicate on the rows it aggregates. Naming the table
+  // is what points this at the column.
+  //
+  // A parameter, because it is the one part of this statement that came from
+  // outside.
+  const source = named(options.source);
+  const narrowing =
+    source === undefined
+      ? ""
+      : `\n       and ${SPANS_TABLE}.source = {source:String}`;
 
   const limit = Math.min(
     Math.max(Math.trunc(options.limit ?? DEFAULT_LIST_LIMIT), 1),
@@ -577,12 +616,13 @@ export async function listTraces(
      from ${SPANS_TABLE}
      where ${tenancy.clause}
        and started_at >= ${asDateTime64(window.from)}
-       and started_at < ${asDateTime64(window.to)}
+       and started_at < ${asDateTime64(window.to)}${narrowing}
      group by trace_id
      ${after}order by ${TRACE_POSITION} desc, trace_id desc
      limit ${limit + 1}`,
     {
       ...tenancy.parameters,
+      ...(source === undefined ? {} : { source }),
       ...(cursor === undefined
         ? {}
         : {
