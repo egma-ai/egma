@@ -106,12 +106,63 @@ two counts of one call disagreeing is exactly what one shared module exists to
 prevent. `turn_count` is the pointed case: the turn spans could be counted, and
 they are deliberately not.
 
-**Nothing is derived from the shape of the transcript**, on either source. The
-obvious candidate — the gap between a human turn ending and the agent's beginning
-— comes out negative on a real captured conversation, where five of twelve
-neighbouring turn pairs overlap. A number that is wrong is worse than a measure
-that is missing, so a measure the spans do not carry is absent, and a grader
-asked for it answers `skipped`.
+## Derived measures: a framework's own spans, read as these numbers
+
+A **derived** measure is one Egma works out from a framework's own spans rather
+than reading off a timing span named for it. It is a fact about one
+conversation, not a new measure and not a new word: the same three names below
+are timed on a simulation and derived on a stock LiveKit call, and a grader
+bounding one never has to know which it got.
+
+Why they exist: a team pointing a stock LiveKit agent at Egma got `skipped` on
+every production conversation, because the framework times its turns in its own
+vocabulary and Egma read only its own. The durations were there the whole time.
+
+Three rules hold over all of them.
+
+- **Recognition rides the door's scope vetting, never a span name.** The ingest
+  door assigns `root`, `turn:human`, `turn:agent` and `speaking` from a table
+  keyed by the emitting instrumentation scope; a scope it does not know is filed
+  as `other`, whatever its spans are called. So the kinds below are already
+  evidence that Egma recognised the emitter, and a lookalike span from some
+  other framework becomes nothing.
+- **Egma's own timing vocabulary wins absolutely.** When a conversation carries
+  timing spans for a measure, no derivation for that measure runs. A
+  conversation carrying both has one answer, never two appended.
+- **A measurement that runs backwards is not kept.** The agent begins speaking
+  before the human stops on every interruption — five of twelve neighbouring
+  turn pairs on the captured call. A negative latency would drag a mean below
+  zero and pass a bound that should have failed.
+
+Derived at read time. Nothing new is stored, and every conversation already in
+the store gains these on the next read.
+
+| Measure | Derived from the LiveKit scope as | Taken |
+| --- | --- | --- |
+| `turn_response_latency` | From each `turn:human` span's **end** to the start of the next `turn:agent` span's first `speaking` child — or to that agent turn's own start when it carried no `speaking` child. The next agent turn is the next one by start time, which is the order a transcript reads in. | One sample per human turn, in conversation order. A human turn nobody answered, and one whose sample runs backwards, contribute none. |
+| `first_response_latency` | From the `root` span's start to the start of the first `turn:agent` span's first `speaking` child. A first agent turn that never spoke has no first word to have waited for, and nothing is measured. | Once. |
+| `agent_speech_duration` | The sum of a `turn:agent` span's own `speaking` children's durations — so a turn that thought for two seconds and then talked for one spoke for one. | One sample per agent turn **that spoke**. A turn with no speech in it has no speech duration; a zero would measure something that never happened. |
+
+Each sample cites the span its number came from: the span whose start closed the
+interval for a latency, and the turn itself for a duration summed over its
+children.
+
+**Two measures are deliberately not derived.**
+
+- `time_to_first_word` — defined out of audio Egma does not hold for production
+  traffic.
+- `persona_speech_duration` — Egma's synthetic caller is not in a production
+  conversation, so the measure has no production meaning.
+
+Every other framework derives nothing until an effort of its own teaches this
+document its shapes.
+
+**Nothing is derived from the shape of the transcript alone**, on either source
+— which is what the `speaking` children above are for. The obvious shortcut, the
+gap between one turn ending and the next beginning, comes out negative on a real
+captured conversation. A number that is wrong is worse than a measure that is
+missing, so a measure the spans do not carry is absent, and a grader asked for
+it answers `skipped`.
 
 ## The aggregations
 

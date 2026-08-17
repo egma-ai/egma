@@ -133,6 +133,14 @@ export type Outcome = {
 export type Measured = {
   readonly measure: string;
   readonly unit: string;
+  /**
+   * True when Egma worked the number out from the framework's own timings
+   * rather than reading one Egma's simulator timed itself.
+   *
+   * Optional because an answer from an older platform does not carry it, which
+   * is a page that says nothing about provenance rather than one that breaks.
+   */
+  readonly derived?: boolean;
   /** One sample, or the series a per-turn measure produced. Never empty. */
   readonly samples: readonly number[];
   /** The span each sample came off, in the same order. */

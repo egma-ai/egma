@@ -347,6 +347,12 @@ function describedMeasures(
     return {
       measure: measured.measure,
       unit: measured.unit,
+      // Where the number came from, so a page can say it and a client that
+      // never asked is unaffected. **Added rather than changed**: every field a
+      // consumer integrated against still means exactly what it did, and a
+      // measure timed by egma's own vocabulary carries `false` here as it
+      // always implicitly did.
+      derived: measured.derived,
       samples: measured.samples.map((sample) => sample.value),
       span_ids: measured.samples.map((sample) => sample.spanId),
       // The one number a bound is held against, and where it happened. Null is

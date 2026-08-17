@@ -131,23 +131,35 @@ type Measured = Readonly<Record<string, readonly number[]>>;
  * and each one's **duration is its number** — nothing carries the value a second
  * time, exactly as the span vocabulary pins it.
  */
+/**
+ * Whether the door recognised this conversation's emitter.
+ *
+ * `unrecognised` files every span as `other`, which is what the door does for a
+ * scope its table does not know — so nothing is derivable from the shape and a
+ * case can be about egma's own timing spans and nothing else. `recognised` is
+ * the ordinary LiveKit-shaped conversation, whose turns a derivation reads.
+ */
+type Framework = "recognised" | "unrecognised";
+
 function aConversation(
   measured: Measured,
   stamped: Partial<NewSpan> = {},
+  framework: Framework = "unrecognised",
 ): { readonly traceId: string; readonly spans: readonly NewSpan[] } {
   const id = traceId();
   const root = spanId();
   const at = BigInt(WHEN.getTime()) * 1000n;
+  const known = framework === "recognised";
 
   const spans: NewSpan[] = [
-    span({ ...stamped, traceId: id, spanId: root }),
+    span({ ...stamped, traceId: id, spanId: root, kind: known ? "root" : "other" }),
     span({
       ...stamped,
       traceId: id,
       spanId: spanId(),
       parentSpanId: root,
       name: "user_turn",
-      kind: "turn:human",
+      kind: known ? "turn:human" : "other",
       text: "Can you move my cleaning to Tuesday?",
       startedAtMicroseconds: at + 1_000_000n,
     }),
@@ -157,7 +169,7 @@ function aConversation(
       spanId: spanId(),
       parentSpanId: root,
       name: "agent_turn",
-      kind: "turn:agent",
+      kind: known ? "turn:agent" : "other",
       text: "Booked for Tuesday at four.",
       startedAtMicroseconds: at + 3_000_000n,
     }),
@@ -192,8 +204,9 @@ async function stored(
   measured: Measured,
   stamped: Partial<NewSpan> = {},
   customer: AuthContext = auth,
+  framework: Framework = "unrecognised",
 ): Promise<TraceDetail> {
-  const conversation = aConversation(measured, stamped);
+  const conversation = aConversation(measured, stamped, framework);
   await appendSpans(customer, conversation.spans);
   const read = await readTrace(customer, conversation.traceId, {
     window: WINDOW,
@@ -245,11 +258,14 @@ describe("one conversation's measures", () => {
       {
         measure: "first_response_latency",
         unit: "milliseconds",
+        // Timed by egma's own vocabulary, so it is read rather than worked out.
+        derived: false,
         samples: [{ value: 1_214, spanId: expect.any(String) }],
       },
       {
         measure: "turn_response_latency",
         unit: "milliseconds",
+        derived: false,
         // In the order they were taken, so a per-turn series is the
         // conversation read forwards — and the half is still here, which a
         // whole-number division would have floored away.
@@ -475,5 +491,247 @@ describe("a conversation a measure cannot be computed for", () => {
     for (const each of notFromSpans) {
       expect(measureIn(trace, each.measure)).toBeUndefined();
     }
+  });
+});
+
+/* ------------------------------------------------------------------- *
+ * The derived measures: a framework's own spans, read as these numbers.
+ * ------------------------------------------------------------------- */
+
+/**
+ * What egma works out for a conversation that timed nothing itself.
+ *
+ * **Constructed trees, and the shapes are the point.** Each case here is one
+ * arrangement of turns and speech that a rule has to answer the same way twice —
+ * turns out of order, a turn that answered without speaking, an interruption,
+ * an emitter the door did not recognise, and a conversation carrying both
+ * vocabularies. The captured LiveKit trace proves the whole path in
+ * `apps/api/test/otlp-derived-measures.test.ts`, against numbers hand-computed
+ * from its own timestamps; what is proved here is the arithmetic itself.
+ *
+ * Rows are written and read back through the real store, exactly as every case
+ * above is, so the derivation is asked the same question a grader asks.
+ */
+
+/** One turn of a constructed conversation, in whole milliseconds from the root. */
+type Turn = {
+  readonly who: "human" | "agent";
+  readonly from: number;
+  readonly to: number;
+  /** The `speaking` children the door filed inside it, if any. */
+  readonly spoke?: readonly (readonly [number, number])[];
+};
+
+const MILLISECOND = 1_000n;
+
+/**
+ * A LiveKit-shaped conversation: a root, its turns, and the speech inside them.
+ *
+ * Timing spans are the caller's to add, so a case can put both vocabularies on
+ * one conversation and ask which wins.
+ */
+async function aLiveKitCall(
+  turns: readonly Turn[],
+  timed: Measured = {},
+): Promise<TraceDetail> {
+  const id = traceId();
+  const root = spanId();
+  const at = BigInt(WHEN.getTime()) * 1000n;
+  const ends = turns.reduce((longest, turn) => Math.max(longest, turn.to), 0);
+
+  const spans: NewSpan[] = [
+    span({
+      traceId: id,
+      spanId: root,
+      name: "agent_session",
+      kind: "root",
+      startedAtMicroseconds: at,
+      durationNanoseconds: BigInt(ends) * 1_000_000n,
+    }),
+  ];
+
+  for (const turn of turns) {
+    const id_ = spanId();
+    spans.push(
+      span({
+        traceId: id,
+        spanId: id_,
+        parentSpanId: root,
+        name: turn.who === "human" ? "user_turn" : "agent_turn",
+        kind: turn.who === "human" ? "turn:human" : "turn:agent",
+        startedAtMicroseconds: at + BigInt(turn.from) * MILLISECOND,
+        durationNanoseconds: BigInt(turn.to - turn.from) * 1_000_000n,
+      }),
+    );
+    for (const [from, to] of turn.spoke ?? []) {
+      spans.push(
+        span({
+          traceId: id,
+          spanId: spanId(),
+          parentSpanId: id_,
+          name: turn.who === "human" ? "user_speaking" : "agent_speaking",
+          kind: "speaking",
+          startedAtMicroseconds: at + BigInt(from) * MILLISECOND,
+          durationNanoseconds: BigInt(to - from) * 1_000_000n,
+        }),
+      );
+    }
+  }
+
+  let taken = 0n;
+  for (const [measure, samples] of Object.entries(timed)) {
+    for (const milliseconds of samples) {
+      taken += 100_000n;
+      spans.push(
+        span({
+          traceId: id,
+          spanId: spanId(),
+          parentSpanId: root,
+          name: measure,
+          kind: "timing",
+          startedAtMicroseconds: at + taken,
+          durationNanoseconds: BigInt(Math.round(milliseconds * 1_000_000)),
+        }),
+      );
+    }
+  }
+
+  await appendSpans(auth, spans);
+  const read = await readTrace(auth, id, { window: WINDOW });
+  if (read === undefined) throw new Error("the trace store lost the spans");
+  return read;
+}
+
+describe("measures derived from a recognised framework's own spans", () => {
+  /**
+   * Two exchanges, so the series is a conversation read forwards rather than a
+   * bag of numbers — the order is what makes a percentile mean anything.
+   */
+  it("measures every human turn's wait, in the order the turns happened", async () => {
+    const trace = await aLiveKitCall([
+      { who: "human", from: 0, to: 1_000 },
+      { who: "agent", from: 1_100, to: 3_000, spoke: [[1_400, 3_000]] },
+      { who: "human", from: 4_000, to: 5_000 },
+      { who: "agent", from: 5_050, to: 7_000, spoke: [[5_600, 7_000]] },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    expect(measured?.derived).toBe(true);
+    // 1400 − 1000, then 5600 − 5000: the human turn's end to the agent's first
+    // word, once per human turn and in that order.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([400, 600]);
+  });
+
+  /**
+   * A turn that answered with a tool call and no speech still answered. The
+   * turn's own start stands in for the first word it never said, which is the
+   * only endpoint the trace holds.
+   */
+  it("falls back to an agent turn's own start when it never spoke", async () => {
+    const trace = await aLiveKitCall([
+      { who: "human", from: 0, to: 1_000 },
+      { who: "agent", from: 1_250, to: 2_000 },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([250]);
+    // And a turn that never spoke has no speech duration at all — not a zero,
+    // which would measure something that did not happen.
+    expect(measureIn(trace, "agent_speech_duration")).toBeUndefined();
+  });
+
+  /**
+   * The agent talking over the caller is an interruption, not a fast answer.
+   * The measurement runs backwards, so it is dropped — and the turns around it
+   * are still measured, which is the half that matters.
+   */
+  it("drops a turn the agent interrupted, and keeps the ones it did not", async () => {
+    const trace = await aLiveKitCall([
+      { who: "human", from: 0, to: 5_000 },
+      // Begins speaking two seconds before the caller stops.
+      { who: "agent", from: 2_500, to: 6_000, spoke: [[3_000, 6_000]] },
+      { who: "human", from: 7_000, to: 8_000 },
+      { who: "agent", from: 8_100, to: 9_000, spoke: [[8_300, 9_000]] },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([300]);
+  });
+
+  it("measures the first answer from the moment the conversation began", async () => {
+    const trace = await aLiveKitCall([
+      { who: "agent", from: 40, to: 4_000, spoke: [[1_500, 4_000]] },
+      { who: "human", from: 5_000, to: 6_000 },
+    ]);
+
+    const measured = measureIn(trace, "first_response_latency");
+    expect(measured?.derived).toBe(true);
+    // The root's start to the first agent turn's first word, and taken once.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([1_500]);
+  });
+
+  /**
+   * Silence inside an answer is not speech. Two bursts with a gap between them
+   * sum to what was said, which is what the turn's own duration would have got
+   * wrong.
+   */
+  it("sums the speech inside each agent turn, once per turn that spoke", async () => {
+    const trace = await aLiveKitCall([
+      {
+        who: "agent",
+        from: 0,
+        to: 5_000,
+        spoke: [
+          [500, 1_500],
+          [3_000, 3_750],
+        ],
+      },
+      { who: "human", from: 6_000, to: 7_000 },
+      { who: "agent", from: 8_000, to: 9_000, spoke: [[8_100, 9_000]] },
+    ]);
+
+    const measured = measureIn(trace, "agent_speech_duration");
+    expect(measured?.derived).toBe(true);
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([
+      1_750, 900,
+    ]);
+    // The number is the turn's, so it cites the turn rather than one child.
+    expect(measured?.samples[0]?.spanId).toBe(trace.turns[0]?.spanId);
+  });
+
+  /**
+   * **The trust rule.** Recognition rides the kinds the ingest door assigns from
+   * the emitting scope, and a scope it does not know is filed as `other`. A
+   * framework egma has not been taught therefore derives nothing, however
+   * conversation-shaped its spans look.
+   */
+  it("derives nothing at all from an emitter the door did not recognise", async () => {
+    const trace = await stored({}, {}, auth, "unrecognised");
+
+    expect(measuresFromSpans(trace)).toEqual([]);
+  });
+
+  /**
+   * **egma's own timing vocabulary wins absolutely.** The conversation below
+   * carries both — turns a derivation could read and a timing span that measured
+   * the same thing — and the answer is the timed one, alone. Appending both
+   * would double one turn's samples and move every percentile a grader reduces
+   * by.
+   */
+  it("never derives a measure the conversation already timed itself", async () => {
+    const turns: readonly Turn[] = [
+      { who: "human", from: 0, to: 1_000 },
+      { who: "agent", from: 1_100, to: 3_000, spoke: [[1_400, 3_000]] },
+    ];
+    const both = await aLiveKitCall(turns, { turn_response_latency: [862.5] });
+
+    const measured = measureIn(both, "turn_response_latency");
+    expect(measured?.derived).toBe(false);
+    // The timed number, and not the 400 the same spans would have derived.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([862.5]);
+
+    // The measures it did **not** time are still derived, so precedence is per
+    // measure rather than a switch that turns the whole conversation off.
+    expect(measureIn(both, "agent_speech_duration")?.derived).toBe(true);
   });
 });

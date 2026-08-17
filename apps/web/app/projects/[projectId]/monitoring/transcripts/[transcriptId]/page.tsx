@@ -354,6 +354,12 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
           </div>
         ))
       )}
+      {measured.some((one) => one.derived === true) ? (
+        <div className={styles.contextFact}>
+          <span />
+          <strong className={styles.muted}>{MEASURES.derived}</strong>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -379,10 +385,14 @@ function measurement(one: Measured): string {
   if (one.worst === null) return DETAIL.notReported;
 
   const shown = `${String(one.worst.value)} ${one.unit}`;
-  if (one.partial === true) return `${shown} · ${MEASURES.partialWorst}`;
+  // Said on the figure itself as well as once for the panel, because a page
+  // mixing timed and worked-out numbers must let a reader tell which is which
+  // without counting rows.
+  const from = one.derived === true ? ` · ${MEASURES.derivedOne}` : "";
+  if (one.partial === true) return `${shown} · ${MEASURES.partialWorst}${from}`;
   return one.samples.length === 1
-    ? shown
-    : `${shown} · ${MEASURES.worst} of ${MEASURES.counted(one.samples.length)}`;
+    ? `${shown}${from}`
+    : `${shown} · ${MEASURES.worst} of ${MEASURES.counted(one.samples.length)}${from}`;
 }
 
 /** What was judged, in the words a tally is read in. Written once, so the two

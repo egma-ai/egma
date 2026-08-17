@@ -306,6 +306,24 @@ export const MEASURES = {
     "Nothing was measured here. Egma's own simulations time their turns; an " +
     "exchange your agent had carries whatever its telemetry emitted, which " +
     "for most frameworks is no timings at all.",
+  /**
+   * Where the numbers came from, said once and only when it applies.
+   *
+   * **A verdict's provenance must never be a surprise.** Some of these figures
+   * were not timed by anybody: Egma worked them out from the timings your
+   * agent's own framework already records. A developer whose latency check
+   * suddenly starts failing is owed that sentence on the same screen as the
+   * number, not in a document they would have to go and find.
+   *
+   * Shown only when at least one figure on this page was worked out that way.
+   * A page whose every number was timed outright says nothing here, because a
+   * caveat about something that did not happen is noise.
+   */
+  derived:
+    "Some figures here were worked out from your framework's own timings " +
+    "rather than timed by Egma. Each says which.",
+  /** The mark beside one worked-out figure, so a reader need not guess which. */
+  derivedOne: "from your framework's timings",
   /** One measurement is the number; several are the worst of them. */
   worst: "worst",
   counted: (howMany: number): string =>
