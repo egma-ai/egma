@@ -39,6 +39,17 @@ export type ModelUpgradeAction = {
   readonly kind: ModelUpgradeActionKind;
   /** The persona, grader, provider or organization it is about. */
   readonly subject: string;
+  /**
+   * What that subject is called, as a person knows it: the persona's or
+   * grader's own name, the provider's word, or null for an action about the
+   * organization itself.
+   *
+   * **Read live rather than stored.** Two personas both blocked is the ordinary
+   * case, and an identifier is not something anybody can tell them apart by; a
+   * *stored* name would go stale the first time somebody renamed one, so a list
+   * meant to be acted on would name a persona that no longer exists.
+   */
+  readonly subjectName: string | null;
   /** Egma's own sentence. Never a key, a hint, or anything a customer wrote. */
   readonly detail: string;
   readonly createdAt: Date;
@@ -66,6 +77,14 @@ export async function listModelUpgradeActions(
       id: modelUpgradeAction.id,
       kind: modelUpgradeAction.kind,
       subject: modelUpgradeAction.subject,
+      subjectName: sql<string | null>`case ${modelUpgradeAction.kind}
+          when 'select_persona_models'
+            then (select p.name from persona p where p.id = ${modelUpgradeAction.subject})
+          when 'select_grader_model'
+            then (select g.name from grader g where g.id = ${modelUpgradeAction.subject})
+          when 'select_model_provider_credential' then ${modelUpgradeAction.subject}
+          else null
+        end`,
       detail: modelUpgradeAction.detail,
       createdAt: modelUpgradeAction.createdAt,
     })

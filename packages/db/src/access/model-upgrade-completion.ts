@@ -16,9 +16,14 @@ import { platformInstanceId } from "./instance.ts";
  * know by asking. So the conditions are re-asked on every boot and the stamp is
  * written the first time they all hold.
  *
- * **Written once, never withdrawn.** Nothing writes a legacy-shaped row any
- * more, so a deployment that finished cannot un-finish; a marker that could
- * flip back would be one no cleanup could safely read.
+ * **The stamp is written once and never withdrawn, and it is not a
+ * permission.** It records the first moment every condition held. During the
+ * compatibility period the ordinary authoring doors still write personas and
+ * graders with no selections, so a stamped installation can legitimately go
+ * back to having outstanding work — which is why the read below re-evaluates
+ * every condition on every call and answers `completed` from that, never from
+ * the stamp. Anything deciding whether a legacy path may be removed must ask
+ * this door and act on its answer, not on the presence of a timestamp.
  *
  * **This file builds the marker and the checks that read it. It removes
  * nothing.** Taking the legacy paths out is the next release's work, and doing
@@ -46,18 +51,39 @@ export const UPGRADE_CONDITIONS = [
    */
   "simulations",
   /**
-   * Some grading job that has not finished belongs to a run whose frozen plan
-   * names a judge credential — the legacy credential reference, still to be
-   * resolved.
+   * Some grading job that has not finished still resolves through the legacy
+   * judge path — either its run's frozen plan names a judge credential, or the
+   * plan pins a grader version that carries no selection of its own and will
+   * therefore ask the project's judge configuration when it runs.
+   *
+   * **Both halves, and the second is the one that is easy to miss.** A plan
+   * judged by the *deployment's* own judge names no credential at all — the
+   * plan stores the `platform` sentinel rather than an id, so the credential
+   * index is empty — and a marker that only read that index would declare a
+   * deployment finished while grading jobs were still queued behind exactly
+   * the configuration the next release removes.
    */
   "grading",
 ] as const;
 export type UpgradeCondition = (typeof UPGRADE_CONDITIONS)[number];
 
 export type ModelUpgradeCompletion = {
-  /** Whether the marker is written. */
+  /**
+   * Whether the conditions hold **now**, evaluated freshly on every read.
+   *
+   * **Never read off the stamp, and that is the whole rule.** The stamp says
+   * when the conditions first held; it does not say they still do. During the
+   * compatibility period the ordinary authoring doors can still write a persona
+   * or a grader with no selections — that is what makes the period a period —
+   * so a stamped installation can legitimately acquire new legacy-shaped work
+   * the day after it was stamped. Anything that acts on this must ask, not
+   * remember.
+   */
   readonly completed: boolean;
-  /** When it was written, or null while it is not. */
+  /**
+   * When the conditions were first all true, or null while they never have
+   * been. It is a record of a moment and never a permission.
+   */
   readonly completedAt: Date | null;
   /**
    * What is still outstanding, in the order above. Empty exactly when the
@@ -92,7 +118,17 @@ async function outstandingConditions(): Promise<readonly UpgradeCondition[]> {
           join simulation s on s.id = j.simulation_id
           join grading_plan p on p.run_id = s.run_id
          where j.status in ('pending', 'claimed')
-           and jsonb_array_length(p.judge_credential_ids) > 0
+           and (
+             jsonb_array_length(p.judge_credential_ids) > 0
+             or exists (
+               select 1
+                 from jsonb_array_elements(p.groups) as grp
+                 cross join lateral jsonb_array_elements(grp->'items') as item
+                 join grader_version gv on gv.id = item->>'graderVersionId'
+                where item->'judge'->>'tag' = 'configured'
+                  and gv.grader_model is null
+             )
+           )
       ) as grading
   `)) as unknown as { rows: readonly Record<string, boolean>[] };
 
@@ -130,15 +166,15 @@ async function storedMarker(): Promise<Date | null> {
  * no organization a caller could name.
  */
 export async function readModelUpgradeCompletion(): Promise<ModelUpgradeCompletion> {
-  const completedAt = await storedMarker();
-  if (completedAt !== null) {
-    return { completed: true, completedAt, outstanding: [] };
-  }
-  return {
-    completed: false,
-    completedAt: null,
-    outstanding: await outstandingConditions(),
-  };
+  // Both, always, and in that order: the conditions as they are now, and the
+  // moment they first held. A read that short-circuited on the stamp would be
+  // the one thing this type's own documentation forbids.
+  const [outstanding, completedAt] = await Promise.all([
+    outstandingConditions(),
+    storedMarker(),
+  ]);
+
+  return { completed: outstanding.length === 0, completedAt, outstanding };
 }
 
 /**
@@ -150,14 +186,16 @@ export async function readModelUpgradeCompletion(): Promise<ModelUpgradeCompleti
  * conflicts with itself and does nothing.
  */
 export async function recordModelUpgradeCompletion(): Promise<ModelUpgradeCompletion> {
+  const outstanding = await outstandingConditions();
   const completedAt = await storedMarker();
+
+  if (outstanding.length > 0) {
+    // Stamped already and no longer clear: the stamp stays, because it records
+    // a moment that really happened, and the answer says what is standing now.
+    return { completed: false, completedAt, outstanding };
+  }
   if (completedAt !== null) {
     return { completed: true, completedAt, outstanding: [] };
-  }
-
-  const outstanding = await outstandingConditions();
-  if (outstanding.length > 0) {
-    return { completed: false, completedAt: null, outstanding };
   }
 
   // The identity row is minted here if this installation has never answered its

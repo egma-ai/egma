@@ -538,11 +538,29 @@ async function activateSoleCandidates(
   const actions: { kind: ModelUpgradeActionKind; subject: string }[] = [];
 
   for (const [provider, forProvider] of [...byProvider].sort()) {
-    // A provider this release does not carry cannot be activated and cannot be
-    // chosen between: there is no credential row it could become. The personas
-    // and graders that named it get their own actions, which say what to do;
-    // a second one here would be a sentence with no button.
-    if (!isModelProvider(provider)) continue;
+    /**
+     * A provider this release's catalog does not carry, and the reason this
+     * check is *after* the count rather than before it.
+     *
+     * There is no credential row such a key could become, so it cannot be
+     * activated and cannot be chosen between. But it was configured, it is
+     * still stored, and saying nothing about it is exactly the silence this
+     * whole section exists to break: the deployment would keep speaking through
+     * a provider the product no longer offers, and the only sign would be the
+     * persona actions naming it. So it gets an action of its own, naming the
+     * catalog, and the screen shows its key as kept and unusable.
+     */
+    if (!isModelProvider(provider)) {
+      await recordAction(
+        tx,
+        organizationId,
+        "select_model_provider_credential",
+        provider,
+        `This installation holds a stored ${provider} key, and ${provider} is not a provider in this release's model catalog — so Egma cannot use it and will not choose a substitute for it. Store a key for a provider this release carries under Model providers.`,
+      );
+      actions.push({ kind: "select_model_provider_credential", subject: provider });
+      continue;
+    }
 
     if (forProvider.length > 1) {
       await recordAction(
@@ -559,13 +577,37 @@ async function activateSoleCandidates(
     const [sole] = forProvider;
     if (sole === undefined) continue;
 
+    /**
+     * A stored key that will not open stops this provider and nothing else.
+     *
+     * The alternative is a boot that throws, and a deployment that will not
+     * start because one legacy row is corrupt is a worse answer than a
+     * deployment that starts and says which provider needs a key typed again.
+     * An administrator choosing a candidate by hand is told loudly instead —
+     * they asked about this exact key, so the refusal belongs in their answer.
+     */
+    let envelope: string;
+    try {
+      envelope = asACredential(sole);
+    } catch {
+      await recordAction(
+        tx,
+        organizationId,
+        "select_model_provider_credential",
+        provider,
+        `Egma could not read the stored ${provider} key it found on this installation, so nothing was activated for it. Store a ${provider} key again under Model providers.`,
+      );
+      actions.push({ kind: "select_model_provider_credential", subject: provider });
+      continue;
+    }
+
     const [written] = await tx
       .insert(modelProviderCredential)
       .values({
         id: newId("mpc"),
         organizationId,
         provider,
-        credentials: asACredential(sole),
+        credentials: envelope,
         credentialsHint: sole.hint,
         revision: newId("rev"),
         createdBy: null,
@@ -591,26 +633,49 @@ async function activateSoleCandidates(
 }
 
 /**
- * One candidate's envelope, in the shape the credential store reads.
+ * One candidate's envelope, in the shape the credential store reads — and
+ * checked, once, on the way through.
  *
  * **This is the one place the upgrade opens a secret, and it opens it to *use*
  * it rather than to learn anything about it.** A credential sealed by the judge
- * or credential stores already holds `{ key }` and is copied across untouched.
- * A deployment setting seals the value itself, so becoming a credential means
- * being written in the credential store's shape — which cannot be done without
- * the plaintext, however briefly.
+ * or credential stores already holds `{ key }` and is copied across untouched;
+ * a deployment setting seals the value itself, so becoming a credential means
+ * being written in the credential store's shape, which cannot be done without
+ * the plaintext however briefly.
  *
- * Nothing is compared, nothing is logged, and nothing is returned: the
- * plaintext exists for the length of one re-seal and the fresh envelope is what
- * lands. Leaving the bare value in the credential column instead would put two
- * shapes in one column and make every later reader guess which it had.
+ * **It opens both shapes, and that is deliberate rather than wasteful.** A
+ * `key_document` needs no conversion, but an envelope that will not open is a
+ * credential that fails at the first simulation that selects its provider —
+ * hours or days after somebody chose it, with a message about grading rather
+ * than about the choice they made. Opening it here moves that failure to the
+ * moment of the choice, where it can be answered.
+ *
+ * Opened exactly once. Nothing is compared, nothing is logged, and nothing is
+ * returned but the envelope: the plaintext exists for the length of one check
+ * and one re-seal.
  */
 export function asACredential(candidate: {
   readonly credentials: string;
   readonly shape: string;
 }): string {
-  if (candidate.shape === "key_document") return candidate.credentials;
   const opened = openCredentials(candidate.credentials);
+
+  if (candidate.shape === "key_document") {
+    const held =
+      typeof opened === "object" && opened !== null && !Array.isArray(opened)
+        ? (opened as Record<string, unknown>)["key"]
+        : undefined;
+    if (typeof held !== "string" || held === "") {
+      throw new Error(
+        "a stored credential did not hold a key this upgrade could make an organization credential of; the row needs repairing before it can be used",
+      );
+    }
+    // Unchanged, because it is already what the credential store reads. The
+    // open above was the check, and the envelope that lands is the one that was
+    // already there — so nothing is re-sealed and nothing moves.
+    return candidate.credentials;
+  }
+
   if (typeof opened !== "string" || opened === "") {
     throw new Error(
       "a stored deployment setting did not hold a value this upgrade could make a credential of; the row needs repairing before it can be used",
@@ -646,7 +711,18 @@ function isBlocked(value: unknown): value is Blocked {
  */
 function selectionsFor(
   settings: Settings,
-  voice: { readonly provider: string; readonly voiceId: string; readonly speed: number } | undefined,
+  /**
+   * The persona's own voice, which every persona has.
+   *
+   * **Required rather than optional, because the traits say so.** A version's
+   * `voice` is a written trait with a provider, an id and a speed, and the
+   * shape guard refuses a row without one — so a fallback to the deployment's
+   * voice here would be a branch nothing could reach, and an unreachable branch
+   * reads as a rule that exists. The specification's "the deployment supplies a
+   * voice only when the persona has none" is satisfied by there being no such
+   * persona.
+   */
+  voice: { readonly provider: string; readonly voiceId: string; readonly speed: number },
 ): PersonaModels | Blocked {
   const llmProvider = plain(settings, "persona_model_provider");
   const llmModel = plain(settings, "persona_model");
@@ -681,30 +757,21 @@ function selectionsFor(
   const stt = catalogProviderFor("stt", sttProvider);
   if (stt === undefined) return { blocked: notCarried("listens with", sttProvider) };
 
-  const speaking = voice?.provider ?? ttsProvider;
-  if (voice !== undefined && voice.provider !== ttsProvider) {
+  if (voice.provider !== ttsProvider) {
     return {
       blocked: `this persona's own voice is ${voice.provider} and this deployment speaks with ${ttsProvider}. Egma will not choose between them. Select this persona's text-to-speech provider, model and voice under Persona models.`,
     };
   }
-  const tts = catalogProviderFor("tts", speaking);
-  if (tts === undefined) return { blocked: notCarried("speaks with", speaking) };
+  const tts = catalogProviderFor("tts", voice.provider);
+  if (tts === undefined) return { blocked: notCarried("speaks with", voice.provider) };
 
-  const voiceId = voice?.voiceId ?? plain(settings, "text_to_speech_voice");
-  if (voiceId === undefined) {
-    return {
-      blocked:
-        "neither this persona nor this deployment names a voice for it to speak with, so Egma could not work one out. Select its text-to-speech voice under Persona models.",
-    };
-  }
-
+  // The persona's own voice and its own pace, which is the precedence written
+  // down: what a persona sounds like is the persona's, not the deployment's.
   const speech: SpeechSelection = {
     provider: tts,
     model: ttsModel,
-    voiceId,
-    // A persona that has said nothing about how fast it talks talks the way the
-    // voice does, which is what the selection's own default already means.
-    speed: voice?.speed ?? 1,
+    voiceId: voice.voiceId,
+    speed: voice.speed,
   };
 
   return {
@@ -942,6 +1009,18 @@ async function recordAction(
         modelUpgradeAction.subject,
       ],
       set: { detail, resolvedAt: null, updatedAt: new Date() },
+      /**
+       * Only where something really moved.
+       *
+       * **Without this the row is rewritten on every boot**, and a container
+       * that restarts twice an hour would carry an `updated_at` that says the
+       * decision arrived minutes ago and a `resolved_at` that was cleared for
+       * no reason. The timestamps are the only record of when Egma first asked
+       * and when somebody answered, and a write on every start makes both of
+       * them mean nothing.
+       */
+      setWhere: sql`${modelUpgradeAction.detail} <> ${detail}
+        or ${modelUpgradeAction.resolvedAt} is not null`,
     });
 }
 

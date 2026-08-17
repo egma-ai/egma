@@ -221,6 +221,13 @@ export type ModelUpgradeAction = {
     | "set_up_model_access";
   /** The persona, grader, provider or organization it is about. */
   readonly subject: string;
+  /**
+   * What that subject is called: the persona's or grader's own name, the
+   * provider's word, or null for the organization itself. Two blocked personas
+   * is the ordinary case, and an identifier is not something anybody can tell
+   * them apart by.
+   */
+  readonly subject_name: string | null;
   /** Egma's own sentence, written to be acted on. */
   readonly detail: string;
   readonly created_at: string;

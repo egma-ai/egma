@@ -473,6 +473,14 @@ function ModelProviders({ projectId }: { readonly projectId: string }) {
                 ),
               },
               {
+                key: "which",
+                header: "Which one",
+                // Without this an organization with two blocked personas reads
+                // the same two words twice and cannot tell which persona either
+                // row is about.
+                cell: (action) => <span>{action.subject_name ?? "—"}</span>,
+              },
+              {
                 key: "why",
                 header: "Why",
                 cell: (action) => <span>{action.detail}</span>,

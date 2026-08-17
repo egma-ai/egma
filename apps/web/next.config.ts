@@ -145,6 +145,16 @@ const config: NextConfig = {
           source: "/api/model-provider-credentials/:path*",
           destination: `${api}/api/model-provider-credentials/:path*`,
         },
+        // What the upgrade onto model selections left for this organization to
+        // decide, and the one door that settles a provider with two stored
+        // keys. Both named outright for the reason above: the section they draw
+        // is invisible when its read 404s, which is the one failure it exists
+        // to prevent.
+        { source: "/api/model-upgrade", destination: `${api}/api/model-upgrade` },
+        {
+          source: "/api/model-credential-candidates/:path*",
+          destination: `${api}/api/model-credential-candidates/:path*`,
+        },
         // The shelf of grader definitions the Library screen draws itself
         // from. One rule and no `:path*` beside it, because the library is
         // read and never authored: a second address under it would be a

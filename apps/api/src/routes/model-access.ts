@@ -10,6 +10,7 @@ import {
   managedDeployment,
   ManagedAccessBoundElsewhereError,
   ManagedAccessNotConnectedError,
+  NotPermittedError,
   MODEL_ACCESS_MODES,
   MODEL_JOBS,
   PROVIDER_CATALOG,
@@ -189,6 +190,7 @@ function describedAction(action: ModelUpgradeAction): Record<string, unknown> {
     id: action.id,
     kind: action.kind,
     subject: action.subject,
+    subject_name: action.subjectName,
     detail: action.detail,
     created_at: action.createdAt.toISOString(),
   };
@@ -420,14 +422,17 @@ export async function modelAccessRoutes(
     const { auth } = requesterOf(request);
     const { id } = request.params as { id: string };
 
-    if (auth.role !== "admin") {
-      return refuseRole(reply, auth, "choose a stored provider key");
-    }
-
     try {
       const chosen = await activateCredentialCandidate(auth, id);
       return reply.send({ provider: chosen.provider, hint: chosen.hint });
     } catch (refusal) {
+      // Who may do this is `manage_organization`, and the data-access layer
+      // already owns that decision — the same row of the permission table that
+      // names provider credentials. A role literal here would be a second copy
+      // of it, free to drift from the one that is actually enforced.
+      if (refusal instanceof NotPermittedError) {
+        return refuseRole(reply, auth, "choose a stored provider key");
+      }
       if (refusal instanceof UnprocessableInputError) {
         return unprocessable(reply, refusal.message);
       }
