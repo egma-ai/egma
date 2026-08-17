@@ -51,6 +51,16 @@ export type RunStepOptions = {
   /** What the run is against, as connect registered it. */
   readonly agentId: string;
   readonly connectionId: string;
+  /**
+   * The number every simulation in this run will dial, or `null` where nothing
+   * is dialled.
+   *
+   * Carried here from the connect step for one reason: this step writes the
+   * ending the whole walk is for, and that ending is the only thing the
+   * developer still has once the alternate screen is thrown away. See
+   * `buildExitNotice`.
+   */
+  readonly dialled: string | null;
   /** The versions the push just put on egma. Exactly what this run pins. */
   readonly testVersionIds: readonly string[];
   /** What this folder's suite is called, for the run's own label. */
@@ -214,6 +224,7 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
       total: stopped.total,
       // Never asked, so there is no answer to report.
       skill: { kind: "not-offered" },
+      dialled: options.dialled,
     };
   }
 
@@ -240,5 +251,6 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
     graded: tally.graded,
     total: tally.total,
     skill,
+    dialled: options.dialled,
   };
 }

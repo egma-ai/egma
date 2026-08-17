@@ -43,6 +43,8 @@ export type LiveKitConnected = {
       readonly prompt: null;
       readonly toolCount: null;
     };
+    /** A room is spoken into rather than dialled, so this is always `null`. */
+    readonly dialled: null;
   } | null;
 };
 
@@ -305,10 +307,15 @@ export async function connectLiveKitStep(
           kind: "connected",
           agentName: result.registered.agent.name,
           connectionName: result.registered.connection.name,
+          // A LiveKit room is spoken into rather than dialled, so there is no
+          // number and the ending says nothing about one.
+          dialled: null,
         },
         connected: {
           registered: result.registered,
           source: { prompt: null, toolCount: null },
+          // Spoken into rather than dialled, so the ending says no number.
+          dialled: null,
         },
       };
     }

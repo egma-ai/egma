@@ -319,6 +319,7 @@ describe("LiveKit correction paths", () => {
       kind: "connected",
       agentName: "front-desk-2",
       connectionName: "livekit-1",
+      dialled: null,
     });
     expect(ui.record.statuses).toContain(collision);
     expect(
@@ -350,6 +351,7 @@ describe("LiveKit correction paths", () => {
       kind: "connected",
       agentName: "front-desk",
       connectionName: "livekit-1",
+      dialled: null,
     });
     expect(ui.record.statuses).toContain(refusal);
     expect(

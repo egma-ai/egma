@@ -326,7 +326,15 @@ describe("the choice between text and phone", () => {
     // One number reaches this agent, so there was nothing to choose between —
     // and the number egma was about to dial was said all the same, because it
     // is the one fact in the walk that costs somebody money.
-    expect(run.raw()).toContain(`Egma will dial ${DIALLED}.`);
+    //
+    // **Read out of scrollback rather than out of everything ever drawn.** The
+    // wizard says it as it works, in a panel on the alternate screen the
+    // terminal throws away — measured living there for about a twentieth of a
+    // second, and on a run whose renders coalesced, drawn no times at all. A
+    // fact that costs money cannot be a frame somebody had to be looking at, so
+    // it is on the ending, and this is the stronger promise: not that it
+    // flashed, but that the developer still has it.
+    expect(run.scrollback()).toContain(`Egma will dial ${DIALLED}.`);
 
     // The phone connection, and nothing else. No retell connection was made
     // alongside it, and the key never reached egma at all.

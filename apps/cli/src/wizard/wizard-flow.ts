@@ -303,6 +303,8 @@ async function runWizardWithAgent(
     readonly connected: {
       readonly registered: Registered;
       readonly source: { readonly prompt: string | null; readonly toolCount: number | null };
+      /** The number this connection dials, or `null` where it dials nothing. */
+      readonly dialled: string | null;
     } | null;
   };
   if (agentPlatform === "retell") {
@@ -327,6 +329,7 @@ async function runWizardWithAgent(
                 prompt: retell.connected.config.prompt,
                 toolCount: retell.connected.config.tools.length,
               },
+              dialled: retell.connected.number,
             },
     };
   } else {
@@ -377,6 +380,7 @@ async function runWizardWithAgent(
     signedIn,
     agentId: connected.connected.registered.agent.id,
     connectionId: connected.connected.registered.connection.id,
+    dialled: connected.connected.dialled,
     testVersionIds: written.pushed,
     suite: written.suite,
     drivenAgentId: drivenAgent.id,

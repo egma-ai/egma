@@ -60,6 +60,7 @@ function reportFor(outcome: ConnectOutcome, signal: AbortSignal): ExitReport {
         kind: "connected",
         agentName: outcome.registered.agent.name,
         connectionName: outcome.registered.connection.name,
+        dialled: outcome.number,
       };
     case "no-key":
       return { kind: "failed", reason: "no Retell key was given, so there is nothing to test." };

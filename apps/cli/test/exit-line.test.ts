@@ -17,7 +17,13 @@ const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "found-agent", framework: "retell-sdk", prompts: "prompts/order-line.md" },
   { kind: "found-agent", framework: "retell-sdk", prompts: null },
   { kind: "found-agent", framework: null, prompts: null },
-  { kind: "connected", agentName: "order-line", connectionName: "retell-1" },
+  { kind: "connected", agentName: "order-line", connectionName: "retell-1", dialled: null },
+  {
+    kind: "connected",
+    agentName: "order-line",
+    connectionName: "phone-1",
+    dialled: "+14155550111",
+  },
   { kind: "tests-pushed", count: 12 },
   { kind: "tests-pushed", count: 1 },
   { kind: "tests-kept", count: 12, stopped: false },
@@ -26,6 +32,7 @@ const EVERY_ENDING: readonly ExitReport[] = [
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
+    dialled: null,
     graded: 3,
     total: 12,
     skill: {
@@ -39,6 +46,7 @@ const EVERY_ENDING: readonly ExitReport[] = [
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
+    dialled: null,
     graded: 3,
     total: 12,
     skill: {
@@ -52,6 +60,7 @@ const EVERY_ENDING: readonly ExitReport[] = [
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
+    dialled: null,
     graded: 12,
     total: 12,
     skill: { kind: "skipped", drivenAgentName: "Claude Code" },
@@ -59,6 +68,7 @@ const EVERY_ENDING: readonly ExitReport[] = [
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
+    dialled: null,
     graded: 0,
     total: 12,
     skill: { kind: "not-offered" },
@@ -196,6 +206,7 @@ describe("the exit line", () => {
     const lines = exitLines({
       kind: "run-started",
       resultsUrl: RESULTS_URL,
+      dialled: null,
       graded: 3,
       total: 12,
       skill: { kind: "skipped", drivenAgentName: "Claude Code" },
@@ -229,6 +240,7 @@ describe("the exit line", () => {
     const lines = exitLines({
       kind: "run-started",
       resultsUrl: RESULTS_URL,
+      dialled: null,
       graded: 1,
       total: 12,
       skill: { kind: "not-offered" },
@@ -247,6 +259,7 @@ describe("the exit line", () => {
       buildExitLine({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
+        dialled: null,
         graded,
         total,
         skill: { kind: "not-offered" },
@@ -258,12 +271,90 @@ describe("the exit line", () => {
     expect(of(0, 1)).toBe("✓ Your first run is live — 1 simulation, none graded yet.");
   });
 
+  /**
+   * The one fact in the walk that costs somebody money.
+   *
+   * The wizard says it while it works, in a panel on a screen the terminal
+   * throws away — where it was measured living for about a twentieth of a
+   * second before the lines after it pushed it out, and where a run that
+   * painted no frame in that window said it to nobody at all. So it is on the
+   * ending too, which is the part the developer still has afterwards.
+   */
+  it("says which number Egma will dial, where the developer still has it", () => {
+    expect(
+      buildExitLine({
+        kind: "connected",
+        agentName: "order-line",
+        connectionName: "phone-1",
+        dialled: "+14155550111",
+      }),
+    ).toBe(
+      "Egma connected your voice agent: order-line, over phone-1. Egma will dial +14155550111.",
+    );
+
+    expect(
+      buildExitNotice({
+        kind: "run-started",
+        dialled: "+14155550111",
+        resultsUrl: RESULTS_URL,
+        graded: 1,
+        total: 12,
+        skill: { kind: "not-offered" },
+      }),
+    ).toBe("Egma will dial +14155550111.");
+  });
+
+  it("says nothing about a number where nothing is dialled", () => {
+    // A text connection reaches the agent with messages, and a LiveKit room is
+    // spoken into. Neither costs a telephone network anything, and an ending
+    // that mentioned a number for one of them would be inventing a fact.
+    expect(
+      buildExitLine({
+        kind: "connected",
+        agentName: "order-line",
+        connectionName: "retell-1",
+        dialled: null,
+      }),
+    ).toBe("Egma connected your voice agent: order-line, over retell-1.");
+
+    expect(
+      buildExitNotice({
+        kind: "run-started",
+        dialled: null,
+        resultsUrl: RESULTS_URL,
+        graded: 1,
+        total: 12,
+        skill: { kind: "not-offered" },
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps the number and the skill answer apart, each on its own", () => {
+    // Both must survive and neither may swallow the other, so they are
+    // paragraphs rather than a sentence with two halves.
+    const notice = buildExitNotice({
+      kind: "run-started",
+      dialled: "+14155550111",
+      resultsUrl: RESULTS_URL,
+      graded: 1,
+      total: 12,
+      skill: { kind: "skipped", drivenAgentName: "Claude Code" },
+    });
+
+    expect(notice).toContain("Egma will dial +14155550111.");
+    expect(notice).toContain("Claude Code");
+    expect(notice?.split("\n\n")).toHaveLength(2);
+    // In the order the walk did them.
+    expect(notice?.indexOf("dial")).toBeLessThan(notice?.indexOf("Claude Code") ?? 0);
+  });
+
   /** Never silent, in either direction, and it has to outlive the screen. */
   it("says what became of the skill offer, whichever way it was answered", () => {
     expect(
       buildExitNotice({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
+        dialled: null,
         graded: 1,
         total: 12,
         skill: {
@@ -284,6 +375,7 @@ describe("the exit line", () => {
       buildExitNotice({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
+        dialled: null,
         graded: 1,
         total: 12,
         skill: {
@@ -302,6 +394,7 @@ describe("the exit line", () => {
       buildExitNotice({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
+        dialled: null,
         graded: 1,
         total: 12,
         skill: { kind: "skipped", drivenAgentName: "Codex" },
@@ -314,6 +407,7 @@ describe("the exit line", () => {
       buildExitNotice({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
+        dialled: null,
         graded: 1,
         total: 12,
         skill: { kind: "not-offered" },

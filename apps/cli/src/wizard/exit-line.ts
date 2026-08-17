@@ -22,6 +22,7 @@
  * address comes with it.
  */
 
+import { dialLine } from "../retell/connect.ts";
 import {
   installedLine,
   skippedLine,
@@ -63,6 +64,16 @@ export type ExitReport =
       readonly kind: "connected";
       readonly agentName: string;
       readonly connectionName: string;
+      /**
+       * The number every simulation will dial, or `null` where nothing is
+       * dialled.
+       *
+       * **It is on the ending because it is the one fact in the walk that costs
+       * somebody money**, and the wizard's own screen cannot keep it: the
+       * alternate screen is thrown away on exit, and a number said only there
+       * was said to nobody. A text connection dials nothing and says nothing.
+       */
+      readonly dialled: string | null;
     }
   /** The tests are on egma, and they are files in the repository as well. */
   | { readonly kind: "tests-pushed"; readonly count: number }
@@ -80,6 +91,12 @@ export type ExitReport =
       readonly total: number;
       /** What became of the skill offer, so skipping is never silent. */
       readonly skill: SkillOutcome;
+      /**
+       * The number every simulation in that run will dial, or `null` where
+       * nothing is dialled. Carried the whole way here for the reason above:
+       * this is the ending the walk is for, and the number has to survive it.
+       */
+      readonly dialled: string | null;
     }
   /**
    * The developer read the list and did not run them. Nothing was uploaded and
@@ -198,8 +215,13 @@ export function buildExitLine(report: ExitReport): string {
       return foundLine(report.framework, report.prompts);
     case "run-started":
       return runStartedLine(report.graded, report.total);
-    case "connected":
-      return `Egma connected your voice agent: ${report.agentName}, over ${report.connectionName}.`;
+    case "connected": {
+      const connected = `Egma connected your voice agent: ${report.agentName}, over ${report.connectionName}.`;
+      // The number rides the same line rather than a second one, because it is
+      // part of what was connected rather than a separate thing to copy — and
+      // this ending is a line a triple-click takes whole.
+      return report.dialled === null ? connected : `${connected} ${dialLine(report.dialled)}`;
+    }
     case "tests-pushed":
       return report.count === 1
         ? `Egma put 1 test on Egma and left it in ${TESTS_FOLDER} — commit it, edit it, then run egma push.`
@@ -291,21 +313,35 @@ export function exitLines(report: ExitReport): readonly string[] {
  * to say what became of it: **the offer is never silent in either direction**,
  * so an install says where the file went and a skip says that nothing was
  * written, and both survive the screen the wizard drew them on.
+ *
+ * **The number Egma will dial survives here for exactly that reason.** The
+ * wizard says it as it works, in a panel on the alternate screen — where it
+ * lived for about a twentieth of a second before the next lines pushed it out,
+ * and where a run that painted no frame in that window said it to nobody at
+ * all. It is the one fact in the walk that costs somebody money, so it belongs
+ * where the developer still has it once the screen is gone.
  */
 export function buildExitNotice(report: ExitReport): string | null {
   if (report.kind === "no-coding-agent") return pasteFallbackMessage();
   if (report.kind !== "run-started") return null;
 
-  switch (report.skill.kind) {
+  // In the order the walk did them: the number was dialled before the offer was
+  // made. Each is its own paragraph, because each is a separate fact and the
+  // block's whole shape is that nothing shares a line with anything else.
+  const kept: string[] = [];
+  if (report.dialled !== null) kept.push(dialLine(report.dialled));
+  const offer = skillNotice(report.skill);
+  if (offer !== null) kept.push(offer);
+  return kept.length === 0 ? null : kept.join("\n\n");
+}
+
+/** What became of the skill offer, said in a line, or nothing where none was made. */
+function skillNotice(skill: SkillOutcome): string | null {
+  switch (skill.kind) {
     case "installed":
-      return installedLine(
-        report.skill.scope,
-        report.skill.file,
-        report.skill.drivenAgentName,
-        report.skill.replaced,
-      );
+      return installedLine(skill.scope, skill.file, skill.drivenAgentName, skill.replaced);
     case "skipped":
-      return skippedLine(report.skill.drivenAgentName);
+      return skippedLine(skill.drivenAgentName);
     case "not-offered":
       return null;
   }

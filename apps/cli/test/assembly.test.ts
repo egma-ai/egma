@@ -243,6 +243,8 @@ describe("the whole walk, offline", () => {
       graded: 1,
       total: SUITE_SIZE,
       skill: { kind: "skipped", drivenAgentName: "Claude Code" },
+      // This walk connects a chat agent, so the ending names no number.
+      dialled: null,
     });
 
     // The block, exactly: a headline, the address alone on its line, and the

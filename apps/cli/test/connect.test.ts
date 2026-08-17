@@ -218,6 +218,8 @@ describe("the key, and the two failures worth a second try", () => {
       kind: "connected",
       agentName: "order-line",
       connectionName: "retell-1",
+      // A text connection exchanges messages, so nothing is dialled.
+      dialled: null,
     });
   });
 
@@ -269,6 +271,8 @@ describe("one agent, and several", () => {
       kind: "connected",
       agentName: "order-line",
       connectionName: "retell-1",
+      // A text connection exchanges messages, so nothing is dialled.
+      dialled: null,
     });
   });
 
@@ -287,6 +291,8 @@ describe("one agent, and several", () => {
       kind: "connected",
       agentName: "chat-desk",
       connectionName: "retell-1",
+      // A text connection exchanges messages, so nothing is dialled.
+      dialled: null,
     });
 
     const [connection] = platform.registered.connections;
@@ -490,6 +496,8 @@ describe("what lands on the platform", () => {
       kind: "connected",
       agentName: "order-line",
       connectionName: "retell-1",
+      // A text connection exchanges messages, so nothing is dialled.
+      dialled: null,
     });
     expect(second.connected?.registered.result).toBe("reused");
     expect(first.connected?.registered.result).toBe("created");
