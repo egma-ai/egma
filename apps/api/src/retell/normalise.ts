@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-import type { NewSpan } from "@egma/db";
+import {
+  reportedMeasurementsPayload,
+  type NewSpan,
+  type ReportedMeasurement,
+} from "@egma/db";
 
 /**
  * One Retell call object, as spans. The single place that reading happens.
@@ -286,18 +290,90 @@ function turnsIn(call: RetellCall): {
 /**
  * What Retell measured about the whole conversation, gathered onto the root.
  *
- * These are aggregates — a p50, a p90, a maximum — and they describe the call
- * rather than any moment in it, so the root span is the only honest place for
- * them. Kept as the vendor's own names inside the root's payload, which is
- * where a reader who knows Retell will look; egma reads no meaning into them
- * here, because a measure egma computes is computed from spans by the one
- * shared measure module and never copied off a vendor's summary.
+ * Retell reports one object per stage — `e2e`, `llm`, `tts` and the rest — each
+ * holding its own summary (`p50`, `p90`, `p95`, `p99`, `min`, `max`, `num`)
+ * beside `values`, the individual measurements the summary was worked out from.
+ * They describe the call rather than any moment in it, so the root span is the
+ * only honest place for them. This keeps the whole object under the vendor's
+ * own names, verbatim, which is where a reader who knows Retell will look; the
+ * translation into egma's vocabulary is `reportedLatencyOf` below and reads the
+ * samples alone.
  */
 function latencyOf(call: RetellCall): Record<string, unknown> {
   const held = call["latency"];
   return typeof held === "object" && held !== null && !Array.isArray(held)
     ? (held as Record<string, unknown>)
     : {};
+}
+
+/** What Retell counts its latency in, and the catalog's word for it too. */
+const MILLISECONDS = "milliseconds";
+
+/**
+ * Which of Retell's latency stages is which measure, and the only place that
+ * mapping is written down.
+ *
+ * **Same meaning, same name.** Retell's `e2e` is what the measure catalog calls
+ * `turn_response_latency` — how long the agent took to answer — so it is
+ * reported under the catalog's own name and the graders a developer already
+ * configured judge Retell traffic unchanged. A stage the catalog has no
+ * counterpart for keeps a platform-prefixed name rather than a forced fit: the
+ * numbers are captured now, surfaced when a display asks for them, and promoted
+ * to a catalog name the day a second platform proves the general shape.
+ *
+ * Ordered, because the block's bytes are: the order here is the order the
+ * measurements are written in, and a replay has to produce the identical batch.
+ */
+const REPORTED_LATENCY_MEASURES: readonly (readonly [string, string])[] = [
+  ["e2e", "turn_response_latency"],
+  ["llm", "retell/llm_latency"],
+  ["tts", "retell/tts_latency"],
+  ["asr", "retell/asr_latency"],
+  ["knowledge_base", "retell/knowledge_base_latency"],
+];
+
+/**
+ * Retell's own measurements as the neutral reported-measurements block, or
+ * `undefined` where Retell reported none worth carrying.
+ *
+ * **This is the only code that knows Retell's shape.** The block it builds is
+ * one contract for every platform, so the shared measure module reads a single
+ * shape forever and the next platform is one more mapping table in its own
+ * normalizer rather than a second parser under the arithmetic every verdict
+ * rests on.
+ *
+ * **The samples, never the summary.** Each stage's `values` are the individual
+ * measurements, so "every measurement holds the bound, the worst turn decides"
+ * stays truthful and percentile math stays egma's own. A p50 carried as a
+ * sample would let one summarised turn pass a bound a real turn failed.
+ *
+ * Read defensively, because this is a vendor document: a stage that is missing,
+ * a `values` that is not a list, and an entry inside one that is not a finite
+ * number are each simply not there. A stage left with nothing is dropped by the
+ * block itself, and a call whose every stage is dropped writes no block at all
+ * — absence being the honest shape for a conversation nobody measured.
+ */
+function reportedLatencyOf(call: RetellCall): Record<string, unknown> | undefined {
+  const stages = latencyOf(call);
+  const measurements: ReportedMeasurement[] = [];
+
+  for (const [stage, measure] of REPORTED_LATENCY_MEASURES) {
+    const held = stages[stage];
+    if (typeof held !== "object" || held === null || Array.isArray(held)) continue;
+    const values = (held as Record<string, unknown>)["values"];
+    if (!Array.isArray(values)) continue;
+    measurements.push({
+      measure,
+      unit: MILLISECONDS,
+      // In the order Retell reported them, which is the order they happened in.
+      values: values.filter(
+        (value): value is number =>
+          typeof value === "number" && Number.isFinite(value),
+      ),
+    });
+  }
+
+  return reportedMeasurementsPayload("retell", measurements);
 }
 
 /** One span with every field stated, including the empty ones. */
@@ -356,6 +432,7 @@ export function normaliseRetellCall(
   const startedAt = microseconds(times.startedAt);
   const endedAt = microseconds(times.endedAt);
   const environment = into.environment ?? "default";
+  const reported = reportedLatencyOf(call);
 
   const shared = {
     traceId,
@@ -392,6 +469,10 @@ export function normaliseRetellCall(
           degraded,
           disconnection_reason: text(call["disconnection_reason"]),
           latency: latencyOf(call),
+          // Absent rather than empty where Retell measured nothing, so a
+          // reader meets the same shape a payload nobody wrote has — and so a
+          // replay of this call writes the identical bytes.
+          ...(reported === undefined ? {} : { reported_measurements: reported }),
         },
       }),
     }),
