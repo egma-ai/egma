@@ -229,6 +229,67 @@ describe("a payload the normalizer cannot fully read", () => {
     expect(asBytes(replayed.spans)).toBe(asBytes(first.spans));
   });
 
+  it("never claims a negative duration when the clock disagrees with itself", () => {
+    // End before start. The duration column is unsigned, so a negative one is
+    // not a bad number — it is an append the store refuses, a claim left
+    // unwritten, and a replay that fails identically on every tick for ever.
+    const skewed = normaliseRetellCall(
+      capturedCall({
+        start_timestamp: 1_786_000_074_000,
+        end_timestamp: 1_786_000_000_000,
+      }),
+      FILED_INTO,
+      NOW,
+    );
+
+    expect(skewed.degraded).toBe(true);
+    expect(skewed.spans[0]?.durationNanoseconds).toBe(0n);
+    // Filed at the instant the provider called the end, and both original
+    // timestamps are still in the payload underneath.
+    expect(skewed.endedAt.getTime()).toBe(1_786_000_000_000);
+    const held = JSON.parse(skewed.spans[0]?.payload ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(held["start_timestamp"]).toBe(1_786_000_074_000);
+    // The provider did report an end, contradictory or not, so the cursor is
+    // allowed to believe this one.
+    expect(skewed.endReported).toBe(true);
+  });
+
+  it("says when an end is egma's stand-in rather than the provider's answer", () => {
+    // The case the cursor must not believe: no end at all, so the instant is
+    // the wall clock, and honouring it would carry the cursor to now and drop
+    // everything a sweep had not yet drained.
+    const timeless = normaliseRetellCall(
+      { call_id: "call_timeless", agent_id: "agent_in_retell_1" },
+      FILED_INTO,
+      NOW,
+    );
+    expect(timeless.endReported).toBe(false);
+    expect(timeless.endedAt.getTime()).toBe(NOW);
+
+    // A start and no end is still nobody's reported end, but it is at least an
+    // instant the provider named, so nothing is invented.
+    const started = normaliseRetellCall(
+      {
+        call_id: "call_open",
+        agent_id: "agent_in_retell_1",
+        start_timestamp: 1_786_000_000_000,
+      },
+      FILED_INTO,
+      NOW,
+    );
+    expect(started.endReported).toBe(false);
+    expect(started.endedAt.getTime()).toBe(1_786_000_000_000);
+    expect(started.spans[0]?.durationNanoseconds).toBe(0n);
+
+    // And an ordinary conversation is the provider's own answer.
+    expect(normaliseRetellCall(capturedCall(), FILED_INTO, NOW).endReported).toBe(
+      true,
+    );
+  });
+
   it("is not degraded merely for having said nothing", () => {
     const quiet = normaliseRetellCall(
       {

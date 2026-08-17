@@ -143,7 +143,16 @@ export const RETELL_WEBHOOK_REFUSALS = [
   "switched_off",
   /** A switched-on connection names it, and no candidate's key signs the body. */
   "bad_signature",
-  /** A kind egma does not write. Acknowledged, and dropped. */
+  /**
+   * **Retained by the constraint, and no longer written.**
+   *
+   * A `call_started` from a connection egma is watching is the provider doing
+   * exactly what it was asked to; egma acknowledges it and declines to write a
+   * conversation that has not finished. That is not a refusal, and counting it
+   * beside the three above buried them under it. The column may still hold the
+   * value — a check constraint is what a column *may* hold, not what the code
+   * writes — so no migration is owed for a word that stopped being used.
+   */
   "other_kind",
 ] as const;
 export type RetellWebhookRefusal = (typeof RETELL_WEBHOOK_REFUSALS)[number];

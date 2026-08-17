@@ -146,8 +146,14 @@ export async function retellWebhookRoutes(app: FastifyInstance): Promise<void> {
       await recordRetellWebhookDelivery(target.auth, target.connectionId);
     }
 
+    // **Acknowledged and dropped, and deliberately not counted.** A refusal is
+    // a delivery egma could not place — an agent nobody registered, a body
+    // nobody's key signed. A `call_started` from a connection egma is watching
+    // is none of those: it is the provider doing exactly what it was asked to,
+    // and egma declining to write a conversation that has not finished. Counting
+    // it beside the refusals would bury three signals that mean something under
+    // one that means the door is working.
     if (textIn(body, "event") !== WRITES || call === undefined) {
-      await countRetellWebhookRefusal("other_kind");
       return acknowledged(false);
     }
 

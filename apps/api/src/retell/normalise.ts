@@ -36,8 +36,23 @@ export type RetellCall = Readonly<Record<string, unknown>>;
 export type NormalisedTrace = {
   readonly traceId: string;
   readonly providerCallId: string;
-  /** When the conversation ended, which is what the poller's cursor moves to. */
+  /**
+   * When this conversation ended, as the one place that question is answered.
+   * Where the provider reported no end at all this is a stand-in, and
+   * `endReported` is what says which of the two it is.
+   */
   readonly endedAt: Date;
+  /**
+   * Whether `endedAt` is the provider's own answer or egma's stand-in for one.
+   *
+   * **The poller's cursor moves only on a reported end.** A cursor is the claim
+   * *everything at or before this is stored*, and a stand-in is a wall-clock
+   * reading rather than a fact about the conversation — so honouring it would
+   * jump the cursor to now and silently drop everything between the old cursor
+   * and that moment if the sweep then stopped. The conversation is still
+   * stored, flagged degraded; only the cursor declines to believe it.
+   */
+  readonly endReported: boolean;
   /** True when something in the payload could not be read. Never fatal. */
   readonly degraded: boolean;
   readonly spans: readonly NewSpan[];
@@ -107,29 +122,74 @@ function microseconds(milliseconds: number): bigint {
 }
 
 /**
- * The two ends of the conversation, in milliseconds.
+ * Where a conversation sits in time, as far as the provider is willing to say —
+ * **and the only place that question is answered.**
  *
- * A call that reports no start is not readable as a conversation at all, so the
- * fallback is the moment egma read it — which is honest (egma heard about this
- * now) and keeps the row findable in a window somebody would actually ask for.
- * It is one of the two things that make a payload degraded.
+ * Everything that needs to know when a conversation ended reads this: the
+ * spans' own instants, the ledger's `ended_at`, the cursor, and the order the
+ * poller writes a page in. It used to be answered in two places that disagreed
+ * — the normalizer stood in the wall clock for a payload with no timestamps
+ * while the poller's own reader answered zero for the same call — and two
+ * answers to when something happened is one answer too many for anything that
+ * keeps a cursor.
+ *
+ * `reported` is the load-bearing half. It says whether this instant came from
+ * the provider or from egma standing in for one, which is what lets a cursor
+ * decline to move on a guess.
+ */
+export function endInstantOf(call: RetellCall): {
+  readonly at: number | undefined;
+  readonly reported: boolean;
+} {
+  const ended = number(call["end_timestamp"]);
+  if (ended !== undefined) return { at: ended, reported: true };
+  // A call with a start and no end is one egma can still file, at the only
+  // instant it was told about — but not one whose end anybody reported.
+  return { at: number(call["start_timestamp"]), reported: false };
+}
+
+/**
+ * The two ends of the conversation, in milliseconds, and never in the wrong
+ * order.
+ *
+ * **The span's duration is `endedAt - startedAt` and the column it lands in is
+ * unsigned**, so a payload whose end precedes its start cannot be allowed to
+ * produce one: the store refuses the whole batch, the claim stays unwritten,
+ * and the sweep that replays it hits the same refusal on every tick for ever.
+ * One clock-skewed conversation would stop the deployment watching anything.
+ *
+ * So a contradictory pair is a degraded payload like any other: it is filed at
+ * the instant the provider called the end, with no duration, flagged, and with
+ * both original timestamps intact in the verbatim payload. The same is true of
+ * a call reporting only one of the two.
+ *
+ * A call reporting neither is filed at the moment egma read it — honest (egma
+ * heard about this now) and findable in a window somebody would actually ask
+ * for — and it is exactly the case `reported` exists to keep away from the
+ * cursor.
  */
 function extent(call: RetellCall, now: number): {
   readonly startedAt: number;
   readonly endedAt: number;
   readonly whole: boolean;
+  readonly reported: boolean;
 } {
   const started = number(call["start_timestamp"]);
-  const ended = number(call["end_timestamp"]);
-  if (started === undefined || ended === undefined || ended < started) {
-    const fallbackStart = started ?? ended ?? now;
-    return {
-      startedAt: fallbackStart,
-      endedAt: ended ?? started ?? now,
-      whole: false,
-    };
+  const end = endInstantOf(call);
+  const at = end.at ?? now;
+
+  if (started === undefined || end.at === undefined || end.at < started) {
+    // One instant, used for both ends: no duration is claimed, because none was
+    // honestly reported, and the arithmetic can never come out negative.
+    return { startedAt: at, endedAt: at, whole: false, reported: end.reported };
   }
-  return { startedAt: started, endedAt: ended, whole: true };
+
+  return {
+    startedAt: started,
+    endedAt: end.at,
+    whole: true,
+    reported: end.reported,
+  };
 }
 
 /** One entry of Retell's `transcript_object`, as much as egma reads of it. */
@@ -379,6 +439,7 @@ export function normaliseRetellCall(
     traceId,
     providerCallId,
     endedAt: new Date(times.endedAt),
+    endReported: times.reported,
     degraded,
     spans,
   };

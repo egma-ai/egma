@@ -374,6 +374,20 @@ export async function finishProductionTrace(
  * Re-stamping under `for update skip locked` is what keeps two API replicas
  * from replaying one conversation at the same moment. It is the grading claim's
  * own arrangement, for the same reason.
+ *
+ * **Only claims whose connection is still live are offered.** A claim belonging
+ * to an archived connection can never be replayed — there is nothing left to
+ * normalise it against — so a sweep that kept picking it up would spend its
+ * whole window on rows it must then skip, and fifty of them would starve every
+ * pass for as long as they existed. Filtering here rather than abandoning the
+ * row is deliberate twice over: archive is not deletion, so the record of a
+ * conversation somebody claimed stays exactly where it is; and restoring the
+ * connection puts its claims straight back in the window, which marking them
+ * terminal would not.
+ *
+ * The lock is taken `of` the claim table alone. The connection is read to
+ * decide reachability and nothing more, and a sweep that held a lock on it
+ * would make an ordinary connection edit wait behind a background job.
  */
 export async function sweepStaleProductionClaims(
   options: { readonly leaseSeconds?: number | undefined } = {},
@@ -390,15 +404,17 @@ export async function sweepStaleProductionClaims(
     const candidates = await tx
       .select({ id: productionTraceClaim.id })
       .from(productionTraceClaim)
+      .innerJoin(connection, eq(connection.id, productionTraceClaim.connectionId))
       .where(
         and(
           eq(productionTraceClaim.status, "claimed"),
           lt(productionTraceClaim.claimedAt, staleSince),
+          isNull(connection.archivedAt),
         ),
       )
       .orderBy(asc(productionTraceClaim.id))
       .limit(MOST_REPLAYED_AT_ONCE)
-      .for("update", { skipLocked: true });
+      .for("update", { of: productionTraceClaim, skipLocked: true });
 
     if (candidates.length === 0) return [];
 

@@ -38,7 +38,15 @@ import { normaliseRetellCall, type RetellCall } from "./normalise.ts";
 
 export type WriteOutcome =
   /** This call stored it. */
-  | { readonly kind: "written"; readonly traceId: string; readonly degraded: boolean }
+  | {
+      readonly kind: "written";
+      readonly traceId: string;
+      readonly degraded: boolean;
+      /** The normalizer's answer, so a caller never re-reads the payload. */
+      readonly endedAt: Date;
+      /** Whether the provider reported that end, or egma stood in for one. */
+      readonly endReported: boolean;
+    }
   /** Somebody else holds the claim — the other transport, or an earlier tick. */
   | { readonly kind: "already"; readonly traceId: string };
 
@@ -88,14 +96,19 @@ export async function writeRetellCall(
     connectionId: target.connectionId,
     endedAt: normalised.endedAt,
     degraded: normalised.degraded,
-    // Only the poller's own cursor is the poller's to move.
-    advanceCursor: transport === "pull",
+    // Two conditions, and each is load-bearing. Only the poller's own cursor is
+    // the poller's to move; and a cursor may only move to an instant the
+    // provider actually reported, never to egma's stand-in for one — which is
+    // the wall clock, and would jump the cursor past everything not yet drained.
+    advanceCursor: transport === "pull" && normalised.endReported,
   });
 
   return {
     kind: "written",
     traceId: normalised.traceId,
     degraded: normalised.degraded,
+    endedAt: normalised.endedAt,
+    endReported: normalised.endReported,
   };
 }
 
@@ -153,6 +166,6 @@ export async function replayProductionClaim(
     connectionId: claim.connectionId,
     endedAt: normalised.endedAt,
     degraded: normalised.degraded,
-    advanceCursor: claim.transport === "pull",
+    advanceCursor: claim.transport === "pull" && normalised.endReported,
   });
 }

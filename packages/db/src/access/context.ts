@@ -63,10 +63,18 @@ export type AuthContext = {
  * else's production traffic into egma — the poller beside the simulation sweep
  * and the receiving endpoint a provider delivers to. `resolveRetellWatch`
  * builds one per switched-on connection, from the connection's own tenancy and
- * from nothing a delivery claimed. It is its own word for the same reason
- * `simulator` is: this context files spans and grading bookkeeping, and it must
- * not be able to open a judge key or a connection's credentials by wearing
- * another service's name.
+ * from nothing a delivery claimed.
+ *
+ * It is its own word so that a context which came from a watched connection
+ * says so wherever it is read, and so that it opens neither of the other two
+ * services' secrets: `resolveJudgeKey` admits `engine` and
+ * `resolveSimulationConnection` admits `simulator`, and this is neither.
+ *
+ * **What it is not is the thing that guards the credential this path uses.**
+ * The watched connection's own key is unsealed by `resolveRetellWatch`, which
+ * takes no `AuthContext` at all — so no context can be widened into it and none
+ * can be narrowed out of it either. That door is guarded by what it cannot be
+ * asked: a connection id or nothing, and never whose traffic to bring back.
  */
 export const VIA = [
   "session",

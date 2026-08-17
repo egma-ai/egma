@@ -14,10 +14,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   DELIVERY_FRESH_MILLISECONDS,
+  pollConnection,
   pollsThisTick,
   runProductionSweep,
   SAFETY_NET_INTERVAL_MILLISECONDS,
 } from "../src/production-sweep.ts";
+import { PAGE_SIZE } from "../src/retell/api.ts";
 import { normaliseRetellCall, type RetellCall } from "../src/retell/normalise.ts";
 import {
   publicWebhookAddress,
@@ -48,6 +50,7 @@ import { contextFor, request, signUp, type Customer } from "./support/traces.ts"
 let api: TestApi;
 let acme: Customer;
 let globex: Customer;
+let initech: Customer;
 let retell: RetellStub;
 
 /** Comfortably around everything this file writes. */
@@ -62,7 +65,9 @@ const AHEAD = 60_000;
 
 const ACME_KEY = "retell-secret-acme-A1B2C3D4WXYZ";
 const GLOBEX_KEY = "retell-secret-globex-E5F6G7H8QRST";
+const INITECH_KEY = "retell-secret-initech-J9K0L1M2NPQR";
 const SHARED_AGENT = "agent_shared_between_projects";
+const INITECH_AGENT = "agent_with_a_long_backlog";
 
 /* ------------------------------------------------------------------- *
  * A Retell-shaped server on loopback.
@@ -116,18 +121,33 @@ async function startRetellStub(): Promise<RetellStub> {
             end_timestamp?: { lower_threshold?: number };
           };
           limit?: number;
+          pagination_key?: string;
         };
         const agentId = asked.filter_criteria?.agent_id?.[0] ?? "";
         const since = asked.filter_criteria?.end_timestamp?.lower_threshold ?? 0;
         const limit = asked.limit ?? 100;
 
-        const held = (stub.calls.get(agentId) ?? [])
-          .filter((call) => Number(call["end_timestamp"] ?? 0) >= since)
+        const matching = (stub.calls.get(agentId) ?? [])
+          .filter((call) => {
+            // A provider cannot filter on a field the record does not carry, so
+            // a call reporting no end is in every window. That is the shape
+            // that makes a stand-in end reachable through the poller at all.
+            const ended = call["end_timestamp"];
+            return typeof ended !== "number" || ended >= since;
+          })
           .sort(
             (a, b) =>
               Number(a["end_timestamp"] ?? 0) - Number(b["end_timestamp"] ?? 0),
-          )
-          .slice(0, limit);
+          );
+
+        // Retell resumes after the call whose id it was handed.
+        const resumeAfter =
+          asked.pagination_key === undefined
+            ? -1
+            : matching.findIndex(
+                (call) => call["call_id"] === asked.pagination_key,
+              );
+        const held = matching.slice(resumeAfter + 1, resumeAfter + 1 + limit);
 
         answer.writeHead(200, { "content-type": "application/json" });
         answer.end(JSON.stringify(held));
@@ -239,7 +259,10 @@ async function targetFor(wired: Wired): Promise<RetellWatchTarget> {
 }
 
 /** One tick of the real sweep, against the stub. */
-async function sweep(): Promise<{ readonly replayed: number }> {
+async function sweep(): Promise<{
+  readonly replayed: number;
+  readonly replayFailed: number;
+}> {
   return runProductionSweep({ url: retell.url }, new Map<string, number>(), {
     info: () => undefined,
     error: () => undefined,
@@ -329,6 +352,7 @@ async function backdateClaims(): Promise<void> {
 
 let acmeWired: Wired;
 let globexWired: Wired;
+let initechWired: Wired;
 
 beforeAll(async () => {
   retell = await startRetellStub();
@@ -338,8 +362,17 @@ beforeAll(async () => {
   });
   acme = await signUp(api.app, "ada@acme.example", "Acme");
   globex = await signUp(api.app, "grace@globex.example", "Globex");
+  initech = await signUp(api.app, "hank@initech.example", "Initech");
   acmeWired = await wire(acme, "Front desk", ACME_KEY);
   globexWired = await wire(globex, "Support line", GLOBEX_KEY);
+  // Its own agent, because the paging case files more conversations than one
+  // page of the read endpoint answers with and would crowd another customer's.
+  initechWired = await wire(
+    initech,
+    "Order line",
+    INITECH_KEY,
+    INITECH_AGENT,
+  );
 });
 
 afterAll(async () => {
@@ -732,8 +765,8 @@ describe("the receiving endpoint", () => {
     ).toHaveLength(0);
   });
 
-  it("acknowledges a kind it does not write, and drops it", async () => {
-    const before = (await refusalCounts()).other_kind ?? 0;
+  it("acknowledges a kind it does not write, drops it, and calls it no refusal", async () => {
+    const before = await refusalCounts();
     const call = callFixture("call_started_only", BASE + AHEAD + 42_000);
 
     const started = await deliver({ event: "call_started", call }, ACME_KEY);
@@ -743,7 +776,10 @@ describe("the receiving endpoint", () => {
     const analyzed = await deliver({ event: "call_analyzed", call }, ACME_KEY);
     expect(analyzed.stored).toBe(false);
 
-    expect((await refusalCounts()).other_kind).toBe(before + 2);
+    // The provider did exactly what it was asked to and Egma declined to write
+    // a conversation that has not finished. Counting that beside the three real
+    // refusals would bury them under the door working.
+    expect(await refusalCounts()).toEqual(before);
     expect(
       (await tracesOf(acme)).filter(
         (one) => one.provider_call_id === "call_started_only",
@@ -952,6 +988,269 @@ describe("the poller's cadence", () => {
     expect(after.webhookDeliveredAt?.getTime()).toBeGreaterThan(
       before.webhookDeliveredAt?.getTime() ?? 0,
     );
+  });
+});
+
+/* ------------------------------------------------------------------- *
+ * The three findings the passing suite did not reach.
+ * ------------------------------------------------------------------- */
+
+describe("a backlog longer than one page that is already stored", () => {
+  it("is paged through, so a conversation the webhook missed is still reached", async () => {
+    await setWatching(initechWired, true);
+    const target = await targetFor(initechWired);
+
+    // Exactly one page of conversations the webhook already stored. A webhook
+    // write never moves the cursor — correctly — so every one of these sits
+    // past it, and the poller's first page is entirely already-claimed.
+    const backlog = Array.from({ length: PAGE_SIZE }, (_, index) =>
+      callFixture(`call_paged_${index}`, BASE + AHEAD + 100_000 + index, {
+        agent_id: INITECH_AGENT,
+        transcript_object: [],
+      }),
+    );
+    for (const call of backlog) {
+      const outcome = await writeRetellCall(target, call, "webhook");
+      expect(outcome.kind).toBe("written");
+    }
+
+    // And one beyond it that the webhook did not deliver.
+    const missed = callFixture(
+      "call_the_webhook_missed",
+      BASE + AHEAD + 100_000 + PAGE_SIZE,
+      { agent_id: INITECH_AGENT, transcript_object: [] },
+    );
+    retell.calls.set(INITECH_AGENT, [...backlog, missed]);
+
+    // One tick. The old loop broke on the first full page because nothing in it
+    // moved the cursor, and this conversation was unreachable for good.
+    await sweep();
+
+    const stored = (await tracesOf(initech)).filter(
+      (one) => one.provider_call_id === "call_the_webhook_missed",
+    );
+    expect(stored).toHaveLength(1);
+    // And it is the poller's own write, so the cursor moved to it.
+    expect((await cursorOf(initechWired.connectionId))?.getTime()).toBe(
+      BASE + AHEAD + 100_000 + PAGE_SIZE,
+    );
+
+    // Nothing was written twice on the way past.
+    const paged = (await tracesOf(initech)).filter((one) =>
+      String(one.provider_call_id).startsWith("call_paged_"),
+    );
+    expect(paged).toHaveLength(PAGE_SIZE);
+
+    await setWatching(initechWired, false);
+    retell.calls.delete(INITECH_AGENT);
+  }, 120_000);
+});
+
+describe("a payload whose clock disagrees with itself", () => {
+  it("is written degraded with no duration, rather than poisoning every sweep", async () => {
+    // End before start. The duration would be negative, the store's column is
+    // unsigned, and the append used to throw — leaving the claim unwritten and
+    // the replay loop hitting the same refusal on every tick for ever.
+    const skewed = callFixture("call_skewed", BASE + AHEAD + 110_000, {
+      start_timestamp: BASE + AHEAD + 110_000 + 50_000,
+      end_timestamp: BASE + AHEAD + 110_000,
+      transcript_object: [],
+    });
+    const alsoFine = callFixture("call_after_the_skew", BASE + AHEAD + 111_000, {
+      transcript_object: [],
+    });
+    retell.calls.set(SHARED_AGENT, [skewed, alsoFine]);
+
+    await sweep();
+
+    const stored = (await tracesOf(acme)).filter((one) =>
+      ["call_skewed", "call_after_the_skew"].includes(
+        String(one.provider_call_id),
+      ),
+    );
+    // Both landed: the skewed one did not stop the sweep it was in.
+    expect(stored.map((one) => one.provider_call_id).sort()).toEqual([
+      "call_after_the_skew",
+      "call_skewed",
+    ]);
+
+    const [skew] = stored.filter(
+      (one) => one.provider_call_id === "call_skewed",
+    );
+    expect(skew?.duration_ns).toBe("0");
+    const [row] = (await claimRows()).filter(
+      (one) => one.trace_id === String(skew?.trace_id),
+    );
+    expect(row?.degraded).toBe(true);
+    expect(row?.status).toBe("written");
+
+    retell.calls.clear();
+  });
+});
+
+describe("a claim that cannot be replayed at all", () => {
+  it("is counted and stepped over, and blocks neither other replays nor polling", async () => {
+    const target = await targetFor(acmeWired);
+
+    // A timestamp so far out that the store cannot hold it: the append throws
+    // where no amount of normalising helps. It stands in here for any claim
+    // whose replay fails, which before this had no handler at all — one row
+    // aborted every replay behind it and every poll after it, on every tick.
+    const unstorable = {
+      call_id: "call_unstorable",
+      agent_id: SHARED_AGENT,
+      call_status: "ended",
+      start_timestamp: 1e18,
+      end_timestamp: 1e18,
+    } satisfies RetellCall;
+    const recoverable = callFixture("call_recoverable", BASE + AHEAD + 120_000, {
+      transcript_object: [],
+    });
+
+    for (const [call, at] of [
+      [unstorable, new Date(BASE + AHEAD + 119_000)],
+      [recoverable, new Date(BASE + AHEAD + 120_000)],
+    ] as const) {
+      const claimed = await claimProductionTrace(target.auth, {
+        connectionId: target.connectionId,
+        traceId: `poison-${String(call["call_id"])}`,
+        providerCallId: String(call["call_id"]),
+        transport: "pull",
+        payload: JSON.stringify(call),
+        endedAt: at,
+      });
+      expect(claimed).toBeDefined();
+    }
+
+    // Something for the poll half of the same tick to find, so the test can
+    // tell "the replay was stepped over" from "the tick stopped politely".
+    const alsoPolled = callFixture("call_polled_past_it", BASE + AHEAD + 121_000, {
+      transcript_object: [],
+    });
+    retell.calls.set(SHARED_AGENT, [alsoPolled]);
+
+    await backdateClaims();
+    const swept = await sweep();
+
+    expect(swept.replayFailed).toBe(1);
+    expect(swept.replayed).toBe(1);
+
+    const stored = (await tracesOf(acme)).map((one) => one.provider_call_id);
+    // The replay behind the poison one ran...
+    expect(stored).toContain("call_recoverable");
+    // ...and so did the polling after both of them.
+    expect(stored).toContain("call_polled_past_it");
+    // The unstorable one is still owed a write, and is nobody's emergency.
+    const [poison] = (await claimRows()).filter(
+      (one) => one.trace_id === "poison-call_unstorable",
+    );
+    expect(poison?.status).toBe("claimed");
+
+    retell.calls.clear();
+  });
+});
+
+describe("a conversation that reported no end at all", () => {
+  it("is stored, and never carries the cursor to the wall clock", async () => {
+    const target = await targetFor(acmeWired);
+    const at = (await cursorOf(acmeWired.connectionId))?.getTime() ?? 0;
+    expect(at).toBeGreaterThan(0);
+
+    // No timestamps at all, so the normalizer stands in the moment it read it.
+    // It sorts first, which is what puts it before the two below in the page.
+    const timeless = {
+      call_id: "call_no_end",
+      agent_id: SHARED_AGENT,
+      call_status: "ended",
+    } satisfies RetellCall;
+    const between = [
+      callFixture("call_between_1", at + 1_000, { transcript_object: [] }),
+      callFixture("call_between_2", at + 2_000, { transcript_object: [] }),
+    ];
+    retell.calls.set(SHARED_AGENT, [timeless, ...between]);
+
+    // The sweep writes the timeless one and is then interrupted, which is the
+    // whole scenario: if its stand-in end had moved the cursor to now, both
+    // conversations below would have been behind the cursor and lost.
+    let seen = 0;
+    await expect(
+      pollConnection(target, { url: retell.url }, {
+        write: async (into, call) => {
+          seen += 1;
+          if (seen > 1) throw new Error("the store went away mid-page");
+          return writeRetellCall(into, call, "pull");
+        },
+      }),
+    ).rejects.toThrow("the store went away mid-page");
+
+    const afterTheTimeless = await tracesOf(acme);
+    expect(
+      afterTheTimeless.filter((one) => one.provider_call_id === "call_no_end"),
+    ).toHaveLength(1);
+    // The cursor did not believe a stand-in.
+    expect((await cursorOf(acmeWired.connectionId))?.getTime()).toBe(at);
+
+    // So the next tick still reaches everything that ended after it.
+    await sweep();
+    const stored = (await tracesOf(acme)).map((one) => one.provider_call_id);
+    expect(stored).toContain("call_between_1");
+    expect(stored).toContain("call_between_2");
+    expect((await cursorOf(acmeWired.connectionId))?.getTime()).toBe(at + 2_000);
+
+    retell.calls.clear();
+  });
+});
+
+describe("a sweep killed between two items of one page", () => {
+  it("loses nothing: the written one stays, the rest arrive on the next tick", async () => {
+    const target = await targetFor(acmeWired);
+    const at = (await cursorOf(acmeWired.connectionId))?.getTime() ?? 0;
+    const page = [
+      callFixture("call_item_1", at + 1_000, { transcript_object: [] }),
+      callFixture("call_item_2", at + 2_000, { transcript_object: [] }),
+      callFixture("call_item_3", at + 3_000, { transcript_object: [] }),
+    ];
+    retell.calls.set(SHARED_AGENT, page);
+
+    // The first item is durably written; the second item's **write** fails,
+    // which is a kill between two items of one page rather than a page that
+    // never arrived.
+    let seen = 0;
+    await expect(
+      pollConnection(target, { url: retell.url }, {
+        write: async (into, call) => {
+          seen += 1;
+          if (seen === 2) throw new Error("the store went away mid-page");
+          return writeRetellCall(into, call, "pull");
+        },
+      }),
+    ).rejects.toThrow("the store went away mid-page");
+
+    const afterTheKill = (await tracesOf(acme)).map(
+      (one) => one.provider_call_id,
+    );
+    expect(afterTheKill).toContain("call_item_1");
+    expect(afterTheKill).not.toContain("call_item_2");
+    expect(afterTheKill).not.toContain("call_item_3");
+    // The cursor is exactly the last item durably written, which is what makes
+    // the next tick resume rather than restart or skip.
+    expect((await cursorOf(acmeWired.connectionId))?.getTime()).toBe(at + 1_000);
+
+    await sweep();
+
+    const resumed = (await tracesOf(acme)).filter((one) =>
+      String(one.provider_call_id).startsWith("call_item_"),
+    );
+    // Three conversations, once each. The first was re-offered by the inclusive
+    // window and skipped by the ledger; the other two were written.
+    expect(resumed.map((one) => one.provider_call_id).sort()).toEqual([
+      "call_item_1",
+      "call_item_2",
+      "call_item_3",
+    ]);
+    expect((await cursorOf(acmeWired.connectionId))?.getTime()).toBe(at + 3_000);
+
+    retell.calls.clear();
   });
 });
 

@@ -1074,7 +1074,7 @@ export async function agentRoutes(
           reply,
           invalid(
             "watch_production is true or false: whether Egma stores this " +
-              "connection's production conversations",
+              "connection's production traffic as production traces",
           ),
         );
       }

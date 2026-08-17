@@ -5,7 +5,12 @@ import {
 } from "@egma/db";
 
 import { listEndedCalls, PAGE_SIZE, type RetellReach } from "./retell/api.ts";
-import { replayProductionClaim, writeRetellCall } from "./retell/write.ts";
+import { endInstantOf, type RetellCall } from "./retell/normalise.ts";
+import {
+  replayProductionClaim,
+  writeRetellCall,
+  type WriteOutcome,
+} from "./retell/write.ts";
 
 /**
  * The pull floor: what makes watching work everywhere, including on a laptop
@@ -116,6 +121,8 @@ export type PolledConnection = {
 export type ProductionSweepResult = {
   readonly polled: readonly PolledConnection[];
   readonly replayed: number;
+  /** Claims this tick could not replay. Counted, and never fatal — see below. */
+  readonly replayFailed: number;
 };
 
 export type ProductionSweepLog = {
@@ -153,23 +160,70 @@ export type ProductionSweep = {
  * is not a reason to stop sweeping another customer's — and because the answer
  * a sweep owes its log is *what happened*, which includes stopping early.
  */
+export type PollOptions = {
+  /**
+   * What one conversation's write runs. The default is the real write path, and
+   * the product never passes anything else; a test hands in its own to fail the
+   * write of one item in the middle of a page, which no real store does on cue.
+   */
+  readonly write?: (
+    target: RetellWatchTarget,
+    call: RetellCall,
+  ) => Promise<WriteOutcome>;
+};
+
 export async function pollConnection(
   target: RetellWatchTarget,
   reach: RetellReach,
+  options: PollOptions = {},
 ): Promise<PolledConnection> {
+  const write =
+    options.write ?? ((into, call) => writeRetellCall(into, call, "pull"));
+
   let written = 0;
   let degraded = 0;
-  // Read from the row at the start and advanced in memory as each conversation
-  // lands, so the next page asks from the last durable write. The persisted
-  // cursor is moved by the write itself, inside the same transaction that marks
-  // the claim; this is that same value, held so the paging does not have to
-  // re-read the row.
+
+  /**
+   * The window every page of this tick is asked for, read once at the start.
+   *
+   * **Fixed for the whole tick, on purpose.** Paging is done with the
+   * provider's own pagination key, and a lower bound that moved underneath it
+   * would be a page cursor and a time filter disagreeing about which page comes
+   * next. The persisted cursor still only moves on a durable write; this is the
+   * value it held when the tick began, and the next tick re-reads it.
+   */
+  const askFrom = target.cursor;
+
+  // The local mirror of what has been written this tick. The persisted cursor
+  // is moved by the write itself, inside the transaction that marks the claim.
   let since = target.cursor;
+
+  /**
+   * Where the previous page stopped, in the provider's own terms.
+   *
+   * **This is what replaced the no-advance break, and the difference is a
+   * conversation reachable rather than lost.** The old loop stopped on a full
+   * page that moved the cursor nowhere, on the theory that such a page could
+   * only be one instant's worth of already-stored conversations. That theory
+   * stopped being true the moment webhooks stopped moving the cursor: with a
+   * healthy webhook the backlog past the cursor is *entirely* already-stored,
+   * and once it grows past one page every poll fetched the same hundred
+   * already-claimed calls, wrote nothing, and gave up — so a conversation the
+   * webhook happened to miss beyond that backlog was unreachable for good.
+   *
+   * Paging by key has no such theory in it. A page of already-stored
+   * conversations is simply a page, and the next one is asked for.
+   */
+  let paginationKey: string | undefined;
 
   for (let page = 0; page < MOST_PAGES_PER_TICK; page += 1) {
     const answer = await listEndedCalls(
       target.apiKey,
-      { retellAgentId: target.retellAgentId, since },
+      {
+        retellAgentId: target.retellAgentId,
+        since: askFrom,
+        ...(paginationKey === undefined ? {} : { paginationKey }),
+      },
       reach,
     );
 
@@ -189,42 +243,48 @@ export async function pollConnection(
 
     // Oldest first, whatever order the provider chose to answer in: per-item
     // checkpointing is only honest if the item the cursor lands on is the
-    // latest one actually written.
+    // latest one actually written. The instant is the normalizer's own, so the
+    // order a page is written in and the instant its cursor lands on are one
+    // answer rather than two.
     const calls = [...answer.calls].sort(
-      (a, b) => endTimestampOf(a) - endTimestampOf(b),
+      (a, b) => (endInstantOf(a).at ?? 0) - (endInstantOf(b).at ?? 0),
     );
 
-    let advanced = false;
     for (const call of calls) {
-      const outcome = await writeRetellCall(
-        { ...target, cursor: since },
-        call,
-        "pull",
-      );
+      const outcome = await write({ ...target, cursor: since }, call);
       if (outcome.kind !== "written") continue;
 
       written += 1;
       if (outcome.degraded) degraded += 1;
-      const ended = new Date(endTimestampOf(call));
-      if (since === null || ended.getTime() > since.getTime()) {
-        since = ended;
-        advanced = true;
+      // The mirror follows the persisted cursor's own rule: only an end the
+      // provider actually reported moves it.
+      if (
+        outcome.endReported &&
+        (since === null || outcome.endedAt.getTime() > since.getTime())
+      ) {
+        since = outcome.endedAt;
       }
     }
 
-    // A short page is the end of the backlog. A full page that moved nothing is
-    // a page entirely of conversations already stored — which happens when a
-    // whole page sits on one instant — and asking again from the same cursor
-    // would ask for the same page forever.
-    if (calls.length < PAGE_SIZE || !advanced) break;
+    // A short page is the end of the backlog, whatever was in it.
+    if (calls.length < PAGE_SIZE) break;
+
+    // Retell resumes from the last call of the page it just answered, in its
+    // own order rather than in the order this loop wrote them.
+    const resumeFrom = providerCallIdOf(answer.calls.at(-1));
+    // A provider that answered a full page and no key to continue from, or the
+    // same key twice, has stopped making progress. Asking again would ask for
+    // the same page, which is the failure this whole arrangement replaced.
+    if (resumeFrom === undefined || resumeFrom === paginationKey) break;
+    paginationKey = resumeFrom;
   }
 
   return { connectionId: target.connectionId, written, degraded };
 }
 
-function endTimestampOf(call: Readonly<Record<string, unknown>>): number {
-  const held = call["end_timestamp"];
-  return typeof held === "number" && Number.isFinite(held) ? held : 0;
+function providerCallIdOf(call: RetellCall | undefined): string | undefined {
+  const held = call?.["call_id"];
+  return typeof held === "string" && held !== "" ? held : undefined;
 }
 
 /**
@@ -243,17 +303,35 @@ export async function runProductionSweep(
 ): Promise<ProductionSweepResult> {
   const stale = await sweepStaleProductionClaims();
   let replayed = 0;
+  let replayFailed = 0;
   for (const claim of stale) {
-    const [connection] = await resolveRetellWatch({
-      connectionId: claim.connectionId,
-    });
-    if (connection === undefined) continue;
-    await replayProductionClaim(claim, {
-      connectionType: connection.connectionType,
-      agentId: connection.agentId,
-      environment: connection.environment,
-    });
-    replayed += 1;
+    // **Per claim, and never around the loop.** This runs before any polling,
+    // so a single claim that throws on every attempt used to abort the whole
+    // tick — replays and polls alike — for as long as the row existed. One
+    // customer's unreplayable conversation would stop the deployment watching
+    // anything at all, silently, for ever.
+    try {
+      const [connection] = await resolveRetellWatch({
+        connectionId: claim.connectionId,
+      });
+      // A connection nobody can reach any more. The claim keeps its record and
+      // stays out of the window — `sweepStaleProductionClaims` only offers
+      // claims whose connection is still live — so this is the broken-row case
+      // rather than the archived one, and there is nothing to replay it with.
+      if (connection === undefined) continue;
+      await replayProductionClaim(claim, {
+        connectionType: connection.connectionType,
+        agentId: connection.agentId,
+        environment: connection.environment,
+      });
+      replayed += 1;
+    } catch (fault) {
+      replayFailed += 1;
+      log.error(
+        { err: fault },
+        "a claimed production trace could not be replayed; it stays claimed and the sweep goes on",
+      );
+    }
   }
 
   const targets = await resolveRetellWatch({});
@@ -290,7 +368,7 @@ export async function runProductionSweep(
     if (!watched.has(connectionId)) lastPolledAt.delete(connectionId);
   }
 
-  return { polled, replayed };
+  return { polled, replayed, replayFailed };
 }
 
 /**
@@ -324,7 +402,7 @@ export function startProductionSweep(
       // A quiet sweep is the ordinary case and is not news. What was stored is,
       // because each of those rows is a customer's conversation and this line is
       // where its arrival is first visible.
-      if (written > 0 || result.replayed > 0) {
+      if (written > 0 || result.replayed > 0 || result.replayFailed > 0) {
         options.log.info(
           {
             connectionIds: result.polled
@@ -332,6 +410,7 @@ export function startProductionSweep(
               .map((one) => one.connectionId),
             degraded: result.polled.reduce((all, one) => all + one.degraded, 0),
             replayed: result.replayed,
+            replayFailed: result.replayFailed,
           },
           `stored ${written} production trace(s) from watched connections`,
         );

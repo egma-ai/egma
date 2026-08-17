@@ -172,7 +172,7 @@ const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
  * every claim arrives with the `AuthContext` narrowed to that row's own
  * organization and project — which is what the work itself goes through.
  *
- * A seventh name here is a decision somebody has to make on purpose.
+ * A tenth name here is a decision somebody has to make on purpose.
  */
 const WORK_DISPATCHING = [
   "claimGradingJobs",
