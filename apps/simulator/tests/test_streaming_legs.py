@@ -6,12 +6,14 @@ work while the far end is still talking, which is the whole reason they
 exist beside the segmented legs already here.
 
 Nothing in this file reaches a provider. What is checked is what a leg is
-built with — the model, the voice, framework-owned sample-rate choice,
-and where the turn boundary is decided. The live suites beside this one
+built with — the model, the voice, and where the turn boundary is decided.
+The live suites beside this one
 prove the audio really flows; this one proves the wiring.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
@@ -32,33 +34,57 @@ from egma_simulator.speech import (
 A_KEY = "sk-only-this-test-holds-this-one"
 
 
+def capture_construction(
+    monkeypatch: pytest.MonkeyPatch, service: type
+) -> list[dict[str, Any]]:
+    """Remember the public arguments Egma hands a provider service."""
+    calls: list[dict[str, Any]] = []
+    original = service.__init__
+
+    def remember(instance: object, *args: object, **kwargs: Any) -> None:
+        calls.append(kwargs)
+        original(instance, *args, **kwargs)
+
+    monkeypatch.setattr(service, "__init__", remember)
+    return calls
+
+
 # -- The cartesia mouth -------------------------------------------------------
 
 
-def test_the_cartesia_mouth_leaves_the_rate_to_pipecat():
-    leg, spoken_with, closers = _mouth(
+def test_the_cartesia_mouth_uses_the_default_voice():
+    _leg, spoken_with, closers = _mouth(
         SpeechProviders(tts="cartesia", tts_key=A_KEY),
         voice_from_traits({}),
     )
 
-    assert leg._init_sample_rate is None
     assert spoken_with.voice_id == DEFAULT_CARTESIA_VOICE_ID
     assert spoken_with.provider == "cartesia"
     assert closers == ()
 
 
-def test_the_cartesia_mouth_asks_for_this_providers_model_when_nobody_named_one():
-    leg, _, _ = _mouth(
+def test_the_cartesia_mouth_asks_for_this_providers_model_when_nobody_named_one(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from pipecat.services.cartesia.tts import CartesiaTTSService
+
+    calls = capture_construction(monkeypatch, CartesiaTTSService)
+    _mouth(
         SpeechProviders(tts="cartesia", tts_key=A_KEY),
         voice_from_traits({}),
     )
 
-    assert leg._settings.model == DEFAULT_CARTESIA_TTS_MODEL
+    assert calls[0]["settings"].model == DEFAULT_CARTESIA_TTS_MODEL
 
 
-def test_a_named_model_and_voice_reach_the_cartesia_mouth():
+def test_a_named_model_and_voice_reach_the_cartesia_mouth(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """What the platform said wins over the provider's own default."""
-    leg, spoken_with, _ = _mouth(
+    from pipecat.services.cartesia.tts import CartesiaTTSService
+
+    calls = capture_construction(monkeypatch, CartesiaTTSService)
+    _leg, spoken_with, _ = _mouth(
         SpeechProviders(
             tts="cartesia",
             tts_key=A_KEY,
@@ -68,7 +94,7 @@ def test_a_named_model_and_voice_reach_the_cartesia_mouth():
         voice_from_traits({}),
     )
 
-    assert leg._settings.model == "sonic-something-newer"
+    assert calls[0]["settings"].model == "sonic-something-newer"
     assert spoken_with.voice_id == "a-voice-the-platform-chose"
 
 
@@ -91,18 +117,22 @@ def test_a_persona_authored_for_another_provider_speaks_with_the_default_voice()
     [(1.2, 1.2), (3.0, 1.5), (0.1, 0.6)],
 )
 def test_a_speed_outside_what_cartesia_accepts_is_clamped_rather_than_refused(
-    authored: float, spoken: float
+    authored: float, spoken: float, monkeypatch: pytest.MonkeyPatch
 ):
     """Speed rides this provider's own generation block, and a persona's
     speed was authored against whichever provider it was written for. Out
     of range is clamped, because a refused request would fail a whole
     simulation over a timbre."""
-    leg, _, _ = _mouth(
+    from pipecat.services.cartesia.tts import CartesiaTTSService
+
+    calls = capture_construction(monkeypatch, CartesiaTTSService)
+    _mouth(
         SpeechProviders(tts="cartesia", tts_key=A_KEY),
         voice_from_traits({"voice": {"speed": authored}}),
     )
 
-    assert leg._settings.generation_config.speed == pytest.approx(spoken)
+    generation = calls[0]["settings"].generation_config
+    assert generation.speed == pytest.approx(spoken)
 
 
 def test_the_cartesia_mouth_refuses_without_a_key_rather_than_at_the_first_turn():
@@ -116,40 +146,58 @@ def test_the_cartesia_mouth_refuses_without_a_key_rather_than_at_the_first_turn(
 # -- The openai realtime ears -------------------------------------------------
 
 
-def test_the_realtime_ears_ask_for_the_streaming_model_by_default():
+def test_the_realtime_ears_ask_for_the_streaming_model_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """The two openai transports are two provider names, and each has its
     own default model. The segmented leg's default reaching the streaming
     one would be a name asked of the wrong endpoint."""
-    leg, connected = _ears(
+    from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+
+    calls = capture_construction(monkeypatch, OpenAIRealtimeSTTService)
+    _leg, connected = _ears(
         SpeechProviders(stt="openai_realtime", stt_key=A_KEY)
     )
 
-    assert leg._settings.model == DEFAULT_REALTIME_STT_MODEL
-    assert leg._settings.model != DEFAULT_STT_MODEL
+    model = calls[0]["settings"].model
+    assert model == DEFAULT_REALTIME_STT_MODEL
+    assert model != DEFAULT_STT_MODEL
     # A streaming leg drops audio handed to it before it can hear, so it
     # must offer something to wait on. The segmented leg has nothing to
     # wait for and offers none.
     assert connected is not None
 
 
-def test_the_segmented_ears_keep_their_own_default():
-    leg, connected = _ears(SpeechProviders(stt="openai", stt_key=A_KEY))
+def test_the_segmented_ears_keep_their_own_default(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from pipecat.services.openai.stt import OpenAISTTService
 
-    assert leg._settings.model == DEFAULT_STT_MODEL
+    calls = capture_construction(monkeypatch, OpenAISTTService)
+    _leg, connected = _ears(SpeechProviders(stt="openai", stt_key=A_KEY))
+
+    assert calls[0]["settings"].model == DEFAULT_STT_MODEL
     assert connected is None
 
 
-def test_a_named_model_reaches_the_realtime_ears():
-    leg, _ = _ears(
+def test_a_named_model_reaches_the_realtime_ears(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+
+    calls = capture_construction(monkeypatch, OpenAIRealtimeSTTService)
+    _ears(
         SpeechProviders(
             stt="openai_realtime", stt_key=A_KEY, stt_model="gpt-live-something-newer"
         ),
     )
 
-    assert leg._settings.model == "gpt-live-something-newer"
+    assert calls[0]["settings"].model == "gpt-live-something-newer"
 
 
-def test_the_realtime_ears_leave_the_turn_boundary_to_the_detector_in_the_pipeline():
+def test_the_realtime_ears_leave_the_turn_boundary_to_the_detector_in_the_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """The one setting on this leg that is not a name.
 
     Server-side detection would be a second opinion about where a turn
@@ -158,12 +206,12 @@ def test_the_realtime_ears_leave_the_turn_boundary_to_the_detector_in_the_pipeli
     then disagree. False is this service's word for "the detector is in
     the pipeline", which is where egma's is.
     """
-    leg, _ = _ears(SpeechProviders(stt="openai_realtime", stt_key=A_KEY))
+    from pipecat.services.openai.stt import OpenAIRealtimeSTTService
 
-    # The flag the service derives from that choice, which is the one that
-    # decides behavior: with it off, the server detects nothing and the
-    # boundary is whatever the pipeline's own detector says.
-    assert leg._server_vad_enabled is False
+    calls = capture_construction(monkeypatch, OpenAIRealtimeSTTService)
+    _ears(SpeechProviders(stt="openai_realtime", stt_key=A_KEY))
+
+    assert calls[0]["turn_detection"] is False
 
 
 def test_the_realtime_ears_refuse_without_a_key_rather_than_at_the_first_turn():

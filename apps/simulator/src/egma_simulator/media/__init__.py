@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import import_module
 from typing import Protocol
 
@@ -84,16 +84,19 @@ def sip_refusal(
 
 @dataclass(frozen=True)
 class VoiceMedia:
-    """The Pipecat processors and end signal for one voice connection.
+    """The Pipecat processors and lifecycle signals for one voice connection.
 
     The transport owns frames, conversion, buffering, and pacing.  A plug
     gives these processors to the voice conductor once; it never exchanges
-    PCM bytes with the conductor itself.
+    PCM bytes with the conductor itself. ``ended`` means the remote agent
+    left normally. ``failed`` means the media path itself was lost.
     """
 
     input: tuple[object, ...]
     output: tuple[object, ...]
     ended: asyncio.Event
+    failed: asyncio.Event = field(default_factory=asyncio.Event)
+    transport_name: str = "voice transport"
     input_recorded: Callable[[object], None] = lambda _frame: None
 
 

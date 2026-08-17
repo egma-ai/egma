@@ -111,10 +111,9 @@ describe("what the catalog names", () => {
   });
 
   /**
-   * Not everything in the catalog is a timing span. `turn_count` is counted
-   * and the audio band is measured, and both arrive on the terminal transition
-   * inside its facts — so the ones the scan cannot see are exactly the ones the
-   * catalog marks as terminal facts, and nothing else.
+   * Not everything in the catalog is a timing span. `turn_count` arrives on
+   * the terminal transition inside its facts, so the ones the scan cannot see
+   * are exactly the ones the catalog marks as terminal facts, and nothing else.
    */
   it("names nothing beyond what the simulator emits or reports as a fact", async () => {
     const emitted = new Set(await measuresTheSimulatorEmits());

@@ -144,7 +144,7 @@
           "minimum": 0
         },
         "audio": {
-          "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
+          "description": "The simulator-side recording when voice audio was captured; null when no recording was captured.",
           "oneOf": [{ "$ref": "#/$defs/audio_recording" }, { "type": "null" }]
         },
         "provider_reference": { "$ref": "#/$defs/provider_reference" },
@@ -183,7 +183,7 @@
           "minimum": 0
         },
         "audio": {
-          "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
+          "description": "The simulator-side recording when voice audio was captured; null when no recording was captured.",
           "oneOf": [{ "$ref": "#/$defs/audio_recording" }, { "type": "null" }]
         },
         "provider_reference": { "$ref": "#/$defs/provider_reference" },
@@ -222,7 +222,7 @@
           "minimum": 0
         },
         "audio": {
-          "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
+          "description": "The simulator-side recording when voice audio was captured; null when no recording was captured.",
           "oneOf": [{ "$ref": "#/$defs/audio_recording" }, { "type": "null" }]
         },
         "provider_reference": { "$ref": "#/$defs/provider_reference" },
@@ -235,7 +235,7 @@
       "minLength": 1
     },
     "mock_tool_coverage": {
-      "description": "Which of the agent's tools mock tools answered for during this simulation, and which reached their real implementations. The one terminal fact that may be omitted, and deliberately: absent means the agent was never asked what tools it has, so nothing was learned and nothing is claimed — which is the honest reading of every report written before this stamp existed, and of every connection egma stands outside the tool path of. Present with three empty lists means the asking happened and no tool came back, whether because nothing was listening or because there was nothing to list: a simulation no mock tool took any part in. A simulation whose tools were answered by mock tools and one whose tools ran for real are different units, exactly as two audio bands are, and comparing their numbers is invalid: this is where that is readable, on the simulation's own facts, with nothing else to consult and nothing editable to ask.",
+      "description": "Which of the agent's tools mock tools answered for during this simulation, and which reached their real implementations. The one terminal fact that may be omitted, and deliberately: absent means the agent was never asked what tools it has, so nothing was learned and nothing is claimed — which is the honest reading of every report written before this stamp existed, and of every connection egma stands outside the tool path of. Present with three empty lists means the asking happened and no tool came back, whether because nothing was listening or because there was nothing to list: a simulation no mock tool took any part in. A simulation whose tools were answered by mock tools and one whose tools ran for real are different units, so comparing their numbers is invalid: this is where that is readable, on the simulation's own facts, with nothing else to consult and nothing editable to ask.",
       "type": "object",
       "additionalProperties": false,
       "required": ["discovered", "covered", "uncovered"],
@@ -265,7 +265,7 @@
       "type": ["string", "null"]
     },
     "audio_recording": {
-      "description": "The canonical simulator-side recording of a voice simulation. Its file header carries the sample rate needed for playback; the report stores no separate transport-rate or measured-band fact.",
+      "description": "The canonical simulator-side recording of a voice simulation. Its file header carries the sample rate needed for playback; the report stores only the recording reference.",
       "type": "object",
       "additionalProperties": false,
       "required": ["recording"],

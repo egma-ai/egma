@@ -85,6 +85,8 @@ class JoinedRoom:
         self.arrivals = asyncio.Event()
         self.carrying_audio = asyncio.Event()
         self.ended = asyncio.Event()
+        self.failed = asyncio.Event()
+        self._leaving = False
 
     @property
     def joined(self) -> bool:
@@ -110,7 +112,8 @@ class JoinedRoom:
 
         @transport.event_handler("on_disconnected")
         async def _disconnected(_transport: object) -> None:
-            self.ended.set()
+            if not self._leaving:
+                self.failed.set()
 
         @transport.event_handler("on_participant_connected")
         async def _arrived(_transport: object, _participant: str) -> None:
@@ -135,11 +138,15 @@ class JoinedRoom:
             input=(transport.input(), _Arrival()),
             output=(transport.output(),),
             ended=self.ended,
+            failed=self.failed,
+            transport_name=f"livekit server at {self._quotable(self._url)}",
         )
 
     async def wait_connected(self) -> None:
         """Wait for the running Pipecat transport to enter the room."""
-        if not await first_of(self._connected, self.ended, within=CONNECT_SECONDS):
+        if not await first_of(
+            self._connected, self.ended, self.failed, within=CONNECT_SECONDS
+        ):
             raise MediaBackendError(
                 f"the livekit server at {self._url} did not let the simulator "
                 f"into a room within {CONNECT_SECONDS:.0f}s",
@@ -158,9 +165,9 @@ class JoinedRoom:
                 f"{method} was offered before the room transport existed",
                 ending=ERROR,
             )
-        # LiveKitTransport offers no public path to its participant. This one
-        # access is pinned to the Pipecat version in uv.lock and covered by the
-        # room mock-tool tests.
+        # Pipecat 1.7.0 offers no public path from LiveKitTransport to its
+        # local participant. This one access is pinned in uv.lock and covered
+        # by the room mock-tool tests.
         self._transport._client.room.local_participant.register_rpc_method(
             method, answering(handler)
         )
@@ -168,6 +175,7 @@ class JoinedRoom:
     async def leave(self) -> None:
         """Release transport event handlers after the pipeline has ended."""
         transport, self._transport = self._transport, None
+        self._leaving = True
         self.ended.set()
         if transport is not None:
             try:

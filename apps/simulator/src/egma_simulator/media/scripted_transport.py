@@ -51,6 +51,7 @@ class ScriptedTransport:
         ends_after_replies: bool,
         fallback_reply: str | None = None,
         echoes_what_it_hears: bool = False,
+        hangup_silence_seconds: float = HANGUP_SILENCE_SECONDS,
     ) -> None:
         self._greeting = greeting
         self._replies = list(replies)
@@ -58,6 +59,7 @@ class ScriptedTransport:
         self._ends_after_replies = ends_after_replies
         self._fallback_reply = fallback_reply
         self._echoes = echoes_what_it_hears
+        self._hangup_silence_seconds = hangup_silence_seconds
         self._delivered = 0
 
         self._input_rate = 0
@@ -166,7 +168,9 @@ class ScriptedTransport:
 
     def _queue_words(self, words: str, *, hang_up_after: bool = False) -> None:
         trailing = (
-            HANGUP_SILENCE_SECONDS if hang_up_after else TRAILING_SILENCE_SECONDS
+            self._hangup_silence_seconds
+            if hang_up_after
+            else TRAILING_SILENCE_SECONDS
         )
         audio = (
             silence(self._delay, self._input_rate)
@@ -227,15 +231,12 @@ class _ScriptedInput(FrameProcessor):
             )
             acknowledged = self._transport.wait_for_ack(frame)
             self._transport.input_frames += 1
-            if chunk.hang_up_after:
-                # The far end has already left when its final media frame
-                # enters the pipeline. Signal that before turn handling so
-                # the final words are recorded without starting a new
-                # persona turn. EndFrame will drain this queued media.
-                self._transport.stop()
             await self.push_frame(frame)
             await acknowledged.wait()
             if chunk.hang_up_after:
+                # Participant departure follows the final accepted media,
+                # which is the ordering a live room exposes to the pipeline.
+                self._transport.stop()
                 return
 
 

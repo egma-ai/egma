@@ -416,10 +416,10 @@ class ScriptedVAD(VADAnalyzer):
 
     def set_sample_rate(self, sample_rate: int) -> None:
         """Learn the input rate from Pipecat's start frame."""
-        self._params.start_secs = (
+        self.params.start_secs = (
             self.SPEAKING_WINDOWS * self._window_samples / sample_rate
         )
-        self._params.stop_secs = (
+        self.params.stop_secs = (
             self.QUIET_WINDOWS * self._window_samples / sample_rate
         )
         super().set_sample_rate(sample_rate)
@@ -734,9 +734,10 @@ def _ears(
         # The service opens its websocket in a background task and drops
         # audio handed to it before that finishes, saying nothing. The
         # flag it sets when the connection can accept audio is the one
-        # the service waits on itself when it reconnects; there is no
-        # public way to ask. A pipecat release that renames it must be
-        # noticed here, loudly, rather than by first turns going missing.
+        # the service waits on itself when it reconnects. Pipecat 1.7.0,
+        # pinned in uv.lock and exercised by the live Deepgram test, has no
+        # public readiness seam. A rename must fail loudly here rather than
+        # make first turns go missing.
         connection_ready = getattr(leg, "_connection_ready", None)
         if connection_ready is None:
             raise SpeechFault(
@@ -925,11 +926,10 @@ def _openai_realtime_ears(
         # simply be missing — the failure LISTENING_READY_SECONDS exists
         # for, and the one the deepgram leg waits out the same way.
         #
-        # The first gate is the service's own public event. The second
-        # reads a private flag, exactly as the deepgram leg does and for
-        # the same reason: there is no public way to ask, and a pipecat
-        # release that renames it must be noticed here, loudly, rather
-        # than by first turns quietly going missing.
+        # The first gate is the service's own public event. The second reads
+        # a private flag, exactly as the Deepgram leg does. Pipecat 1.7.0,
+        # pinned in uv.lock, has no event for a configured realtime session;
+        # a rename must fail loudly here rather than make first turns vanish.
         await opened.wait()
         if not hasattr(leg, "_session_ready"):
             raise SpeechFault(

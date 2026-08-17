@@ -24,6 +24,9 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TTSStoppedFrame,
+    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -93,33 +96,36 @@ class _AgentEar(VADProcessor):
 
     def __init__(self, *, vad_analyzer: VADAnalyzer, conductor: VoiceConductor) -> None:
         super().__init__(vad_analyzer=vad_analyzer, audio_idle_timeout=0.0)
-        self._detector = vad_analyzer
         self._conductor = conductor
         self.position = Fraction(0)
         self.speaking_since: MediaPosition | None = None
         self.utterances: list[tuple[MediaPosition, MediaPosition]] = []
 
-        @self._vad_controller.event_handler("on_speech_started")
-        async def _started(_controller: object) -> None:
+    async def broadcast_frame(self, frame_cls: type[Frame], **kwargs: Any) -> None:
+        """Track the public VAD boundaries before passing them onward."""
+        if frame_cls is VADUserStartedSpeakingFrame:
             self.speaking_since = max(
                 Fraction(0),
-                self.position - _seconds(self._detector.params.start_secs),
+                self.position - _seconds(kwargs.get("start_secs", 0.0)),
             )
-
-        @self._vad_controller.event_handler("on_speech_stopped")
-        async def _stopped(_controller: object) -> None:
+        elif frame_cls is VADUserStoppedSpeakingFrame:
             if self.speaking_since is None:
+                await super().broadcast_frame(frame_cls, **kwargs)
                 return
-            ended = max(
-                self.speaking_since,
-                self.position - _seconds(self._detector.params.stop_secs),
-            )
-            self.utterances.append((self.speaking_since, ended))
+            began = self.speaking_since
+            ended = max(began, self.position - _seconds(kwargs.get("stop_secs", 0.0)))
+            self.utterances.append((began, ended))
             self.speaking_since = None
+        await super().broadcast_frame(frame_cls, **kwargs)
 
     @property
     def hearing_speech(self) -> bool:
         return self.speaking_since is not None
+
+    async def finalize_active_utterance(self) -> None:
+        """Close speech at the last media position when its participant leaves."""
+        if self.speaking_since is not None:
+            await self.broadcast_frame(VADUserStoppedSpeakingFrame, stop_secs=0.0)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, InputAudioRawFrame):
@@ -129,12 +135,17 @@ class _AgentEar(VADProcessor):
             self._conductor.media_advanced()
 
 
-class _TurnKeeper(UserTurnProcessor):
-    """Put Pipecat's user-turn verdict into the ordered frame stream."""
+class _TurnBoundary(FrameProcessor):
+    """Put Pipecat's public user-turn verdict into the ordered frame stream."""
 
-    async def _on_user_turn_stopped(self, controller, strategy, params) -> None:
-        await super()._on_user_turn_stopped(controller, strategy, params)
-        await self.push_frame(_AgentFinished())
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+        if (
+            direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, UserStoppedSpeakingFrame)
+        ):
+            await self.push_frame(_AgentFinished())
 
 
 class _EvidenceRecorder(AudioBufferProcessor):
@@ -144,8 +155,8 @@ class _EvidenceRecorder(AudioBufferProcessor):
     def bot_position(self) -> MediaPosition:
         if not self.sample_rate:
             return Fraction(0)
-        # AudioBufferProcessor has no public cursor. This access is pinned to
-        # the Pipecat version in uv.lock and covered by alignment tests.
+        # Pipecat 1.7.0 has no public current-output cursor. This one access is
+        # pinned in uv.lock and covered by the frame-level alignment test.
         return Fraction(len(self._bot_audio_buffer) // 2, self.sample_rate)
 
 
@@ -268,6 +279,7 @@ class VoiceConductor:
         self._record = _Record()
         self._heard_so_far = 0
         self._ending: Ending | None = None
+        self._agent_departed = False
         self._owes_a_turn = False
         self._opened_unix_nano = 0
 
@@ -370,7 +382,7 @@ class VoiceConductor:
         self._opened_unix_nano = _now()
 
         ear = _AgentEar(vad_analyzer=self._vad, conductor=self)
-        turns = _TurnKeeper(
+        turns = UserTurnProcessor(
             user_turn_strategies=UserTurnStrategies(
                 start=[
                     VADUserTurnStartStrategy(
@@ -380,6 +392,7 @@ class VoiceConductor:
             ),
             user_turn_stop_timeout=self._parameters.agent_turn_backstop_seconds,
         )
+        turn_boundary = _TurnBoundary()
         assert self._persona is not None
         brain = _PersonaBrain(persona=self._persona, conductor=self)
         recorder = _EvidenceRecorder(num_channels=2, auto_start_recording=True)
@@ -404,6 +417,7 @@ class VoiceConductor:
                 ear,
                 self._legs.stt,
                 turns,
+                turn_boundary,
                 brain,
                 self._legs.tts,
                 *media.output,
@@ -442,8 +456,14 @@ class VoiceConductor:
             # StartFrame. A join refusal therefore arrives as a pipeline
             # fault while the connection's open step is pending. Keep it a
             # platform refusal instead of calling it a speech-leg failure.
+            transport = (
+                self._media.transport_name
+                if self._media is not None
+                else "voice transport"
+            )
             raise PlugError(
-                f"the voice connection could not open: {refused}"
+                f"the voice connection could not open through the {transport}: "
+                f"{refused}"
             ) from refused
         self.media_advanced()
 
@@ -506,10 +526,19 @@ class VoiceConductor:
 
     async def _evaluate(self) -> None:
         self._stop_if_asked()
+        media = self._media
+        if media is not None and media.failed.is_set():
+            raise PlugError(
+                f"the {media.transport_name} disconnected before the simulation ended"
+            )
         ear = self._ear
         if ear is None:
             return
-        if self._connection.far_end_left:
+        if media is not None and media.ended.is_set() and not self._agent_departed:
+            await self._agent_left()
+        if self._agent_departed:
+            if ear.hearing_speech or self._heard_so_far < len(ear.utterances):
+                return
             self._ending = AGENT_ENDED
             return
         if self._owes_a_turn or ear.hearing_speech:
@@ -567,6 +596,14 @@ class VoiceConductor:
         if self._on_answered is not None:
             await self._on_answered()
         if self._ending is not None:
+            return None
+        if self._agent_departed or (
+            self._media is not None and self._media.ended.is_set()
+        ):
+            self._agent_departed = True
+            self._ending = AGENT_ENDED
+            self._owes_a_turn = False
+            self.media_advanced()
             return None
         self._owes_a_turn = True
         if stopped_at is None:
@@ -688,36 +725,54 @@ class VoiceConductor:
         if self._controls.cause is not None:
             raise _Stopped()
 
+    async def _agent_left(self) -> None:
+        """Finish any active input turn before recording a normal departure."""
+        self._agent_departed = True
+        if self._ear is not None:
+            await self._ear.finalize_active_utterance()
+        self.media_advanced()
+
     async def _next_activity(self) -> None:
         if self._running is None or self._media is None:
             raise PipelineGone("the voice pipeline was not running")
         changed = asyncio.ensure_future(self._activity.wait())
         faulted = asyncio.ensure_future(self._faulted.wait())
         stopped = asyncio.ensure_future(self._controls.guard(_never()))
-        ended = asyncio.ensure_future(self._media.ended.wait())
+        failed = asyncio.ensure_future(self._media.failed.wait())
+        ended = (
+            None
+            if self._agent_departed
+            else asyncio.ensure_future(self._media.ended.wait())
+        )
+        waiting = {changed, faulted, stopped, failed, self._running}
+        if ended is not None:
+            waiting.add(ended)
         try:
             done, _pending = await asyncio.wait(
-                {changed, faulted, stopped, ended, self._running},
+                waiting,
                 return_when=asyncio.FIRST_COMPLETED,
             )
         finally:
-            for unfinished in (changed, faulted, stopped, ended):
+            for unfinished in (changed, faulted, stopped, failed, ended):
+                if unfinished is None:
+                    continue
                 if not unfinished.done():
                     unfinished.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await unfinished
-        if changed in done:
-            return
         if faulted in done:
             self._raise_fault()
         if stopped in done:
             raise _Stopped()
-        if ended in done:
-            self._ending = AGENT_ENDED
-            # A persona answer can be waiting on more media time from the
-            # final input frame. Wake it so it sees the ending and lets that
-            # frame, then EndFrame, drain through the pipeline.
-            self.media_advanced()
+        if failed in done:
+            raise PlugError(
+                f"the {self._media.transport_name} disconnected before the "
+                "simulation ended"
+            )
+        if ended is not None and ended in done:
+            await self._agent_left()
+            return
+        if changed in done:
             return
         raise PipelineGone("the voice pipeline ended before the conversation did")
 

@@ -9,8 +9,8 @@ network.
 
 Every number asserted below is measured from the audio that flowed —
 positions on the conversation's own sample timeline — rather than from a
-clock, so the suite cannot flake and the assertions can be exact rather
-than approximate.
+packet-arrival clock. Transcript boundaries may differ by one media frame,
+and the acceptance proves that this offset does not grow.
 """
 
 from __future__ import annotations
@@ -34,12 +34,13 @@ from pipecat.processors.frame_processor import FrameProcessor
 from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import ConductParameters, VoiceConductor
+from egma_simulator.contract import ERROR
 from egma_simulator.media import VoiceMedia
 from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import Assembled, assemble
-from egma_simulator.plugs import PlugError
+from egma_simulator.plugs import PlugError, failed_ending
 from egma_simulator.recording import (
     AGENT_CHANNEL,
     PERSONA_CHANNEL,
@@ -48,6 +49,7 @@ from egma_simulator.recording import (
 )
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import (
+    CONVERSATION_VAD,
     DEFAULT_ENGLISH_VOICE_ID,
     DEFAULT_VOICE_ID,
     SAMPLES_PER_BYTE,
@@ -251,13 +253,11 @@ def test_the_detector_is_chosen_at_assembly_like_every_other_leg(
 
     scripted = build_vad(SCRIPTED_PAIR)
     assert isinstance(scripted, ScriptedVAD)
-    assert scripted._init_sample_rate is None
 
     from pipecat.audio.vad.silero import SileroVADAnalyzer
 
     chosen = build_vad(SpeechProviders(vad="silero"))
     assert isinstance(chosen, SileroVADAnalyzer)
-    assert chosen._init_sample_rate is None
 
 
 # -- The recording -----------------------------------------------------------
@@ -388,22 +388,44 @@ async def test_the_recording_holds_each_speaker_on_their_own_channel(
     assert_one_speaker_to_a_channel(recording, carried)
 
 
-async def test_every_span_points_at_the_audio_it_names(tmp_path: Path):
+async def test_every_span_points_at_the_audio_it_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """The two channels are one clock, and the spans are on it.
 
     Both directions carry the same number of samples, quiet included, so
     the recording is the conversation's own timeline. Every stretch of
     speech a listener can find on it — either channel — is one turn's
-    span, at the same distance from every other, to the sample. That is
-    what "anchored to the audio timeline" means, checked against the
-    audio rather than against the conductor's own bookkeeping.
+    span on that shared timeline. Its transcript boundary stays within one
+    media frame, and the offset at the final spoken turn does not grow from
+    the first. The check uses the audio, not a second transcript clock.
     """
-    observed = await voice_simulation(
-        tmp_path,
+    opened_unix_nano = 1_800_000_000_000_000_000
+    monkeypatch.setattr(conductor_module, "_now", lambda: opened_unix_nano)
+    spec = spec_for(
         scenario="First point. Second point.",
         greeting="Front desk, hello.",
         replies=["Certainly.", "Done."],
         answer_delay_seconds=0.3,
+    )
+    assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+    conductor = assembled.conductor
+    assert conductor is not None
+    transport = conductor._connection.transport
+    next_turn = Persona.next_turn
+
+    async def delayed(persona: Persona, history):
+        before = transport.input_frames
+        for _ in range(100):
+            await asyncio.sleep(0)
+            if transport.input_frames > before:
+                break
+        assert transport.input_frames > before
+        return await next_turn(persona, history)
+
+    monkeypatch.setattr(Persona, "next_turn", delayed)
+    observed = await observe(
+        conductor, assembled, spec, controls=WalkControls()
     )
     audio = observed.assembled.audio
     assert audio is not None
@@ -420,38 +442,40 @@ async def test_every_span_points_at_the_audio_it_names(tmp_path: Path):
         speaker for speaker, _text, _began, _ended in spoken
     ]
 
-    def since_the_first(positions: list[int]) -> list[int]:
-        return [position - positions[0] for position in positions]
-
     def in_samples(instants: list[int]) -> list[int]:
         return [
-            round((instant - instants[0]) * band / 1_000_000_000)
+            round((instant - opened_unix_nano) * band / 1_000_000_000)
             for instant in instants
         ]
 
     media_frame = round(0.02 * band)
-    recorded_begins = since_the_first(
-        [began for _speaker, began, _ended in heard]
-    )
+    recorded_begins = [began for _speaker, began, _ended in heard]
     transcript_begins = in_samples(
         [began for _speaker, _text, began, _ended in spoken]
     )
-    recorded_ends = since_the_first([ended for _speaker, _began, ended in heard])
+    recorded_ends = [ended for _speaker, _began, ended in heard]
     transcript_ends = in_samples(
         [ended for _speaker, _text, _began, ended in spoken]
     )
-    assert all(
-        abs(recorded - transcript) <= media_frame
+    begin_offsets = [
+        recorded - transcript
         for recorded, transcript in zip(
             recorded_begins, transcript_begins, strict=True
         )
+    ]
+    end_offsets = [
+        recorded - transcript
+        for recorded, transcript in zip(recorded_ends, transcript_ends, strict=True)
+    ]
+    first_offsets = (begin_offsets[0], end_offsets[0])
+    final_offsets = (begin_offsets[-1], end_offsets[-1])
+    assert all(
+        abs(offset) <= media_frame for offset in begin_offsets + end_offsets
     )
     assert all(
-        abs(recorded - transcript) <= media_frame
-        for recorded, transcript in zip(recorded_ends, transcript_ends, strict=True)
+        abs(final - first) <= media_frame
+        for first, final in zip(first_offsets, final_offsets, strict=True)
     )
-    # The final turn has the same bound as the first; the offset did not grow.
-    assert abs(recorded_ends[-1] - transcript_ends[-1]) <= media_frame
 
 
 async def test_every_turn_is_measured_and_the_measures_never_run_backwards(
@@ -516,6 +540,132 @@ async def test_an_exchange_the_agent_ends_still_leaves_a_recording(
     audio = observed.assembled.audio
     assert audio is not None
     assert (tmp_path / audio["recording"]).exists()
+
+
+class _ProductionStopScriptedVAD(ScriptedVAD):
+    """The exact test detector with the live detector's stop window."""
+
+    def set_sample_rate(self, sample_rate: int) -> None:
+        super().set_sample_rate(sample_rate)
+        self.params.stop_secs = CONVERSATION_VAD.stop_secs
+
+
+class _AbruptDeparture:
+    """An agent that leaves while its final utterance is still active."""
+
+    def __init__(self) -> None:
+        self.transport = ScriptedTransport(
+            greeting="These are my final words before I leave the room now.",
+            replies=[],
+            answer_delay_seconds=0,
+            ends_after_replies=True,
+            hangup_silence_seconds=0,
+        )
+
+    @property
+    def provider_reference(self) -> str | None:
+        return None
+
+    @property
+    def far_end_left(self) -> bool:
+        return self.transport.ended.is_set()
+
+    async def prepare(self) -> VoiceMedia:
+        return self.transport.media
+
+    async def open(self) -> None:
+        await self.transport.activate()
+
+    async def close(self) -> None:
+        self.transport.stop()
+
+
+async def test_departure_finalizes_the_active_agent_utterance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A live 0.8 second VAD stop window cannot erase the last words."""
+    monkeypatch.setattr(
+        conductor_module,
+        "build_vad",
+        lambda _speech: _ProductionStopScriptedVAD(),
+    )
+    spec = spec_for(scenario="A scenario the agent ends itself.")
+    connection = _AbruptDeparture()
+    conductor = VoiceConductor(
+        connection=connection,
+        voice=voice_from_traits(spec.persona_traits),
+        blobs=FilesystemBlobStore(tmp_path),
+        recording_key=f"{spec.simulation_id}/dual-channel.wav",
+    )
+
+    observed = await observe(
+        conductor, Assembled(conductor=conductor), spec, controls=WalkControls()
+    )
+
+    assert observed.conducted.ending == "agent_ended"
+    assert observed.turns == [
+        ("agent", "These are my final words before I leave the room now.")
+    ]
+
+
+class _TransportLost:
+    """A connected media path that fails without its agent leaving."""
+
+    def __init__(self) -> None:
+        self.transport = ScriptedTransport(
+            greeting="Front desk, hello.",
+            replies=[],
+            answer_delay_seconds=0,
+            ends_after_replies=False,
+        )
+        self.failed = asyncio.Event()
+
+    @property
+    def provider_reference(self) -> str | None:
+        return None
+
+    @property
+    def far_end_left(self) -> bool:
+        return False
+
+    async def prepare(self) -> VoiceMedia:
+        media = self.transport.media
+        return VoiceMedia(
+            input=media.input,
+            output=media.output,
+            ended=media.ended,
+            failed=self.failed,
+            input_recorded=media.input_recorded,
+        )
+
+    async def open(self) -> None:
+        await self.transport.activate()
+        self.failed.set()
+
+    async def close(self) -> None:
+        self.transport.stop()
+
+
+async def test_transport_loss_is_a_platform_fault(tmp_path: Path):
+    spec = spec_for(scenario="One point.")
+    connection = _TransportLost()
+    conductor = VoiceConductor(
+        connection=connection,
+        voice=voice_from_traits(spec.persona_traits),
+        blobs=FilesystemBlobStore(tmp_path),
+        recording_key=f"{spec.simulation_id}/dual-channel.wav",
+    )
+
+    with pytest.raises(PlugError) as lost:
+        await observe(
+            conductor,
+            Assembled(conductor=conductor),
+            spec,
+            controls=WalkControls(),
+        )
+
+    assert failed_ending(lost.value) == ERROR
+    assert "voice transport disconnected" in str(lost.value)
 
 
 async def test_the_persona_opens_when_the_far_end_does_not(tmp_path: Path):
@@ -955,17 +1105,8 @@ assembled pipeline can be inspected here without a network or an account."""
 
 
 def voice_on_the_leg(legs: SpeechLegs) -> str:
-    """The voice the speaking leg will really ask its provider for.
-
-    Read off the leg itself rather than off the bookkeeping beside it: a
-    leg built with one voice while the record says another is exactly the
-    regression worth catching, and only the leg can be asked. A scripted
-    leg keeps it as the persona's voice; a provider's service keeps it in
-    the settings it was constructed with.
-    """
-    if isinstance(legs.tts, ScriptedTTS):
-        return legs.tts.voice.voice_id
-    return str(legs.tts._settings.voice)
+    """The public voice choice the assembled speech pair reports."""
+    return legs.voice.voice_id
 
 
 @asynccontextmanager

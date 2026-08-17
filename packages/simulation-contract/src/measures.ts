@@ -62,7 +62,7 @@ export const MEASURE_CATALOG_VERSION = 4;
  *
  * They live here, with the measures, rather than beside the grader that applies
  * them: which reductions make sense is a fact about what was measured — a
- * latency taken every turn has a p90 and a sample rate measured once does not
+ * latency taken every turn has a p90 and a turn count taken once does not
  * usefully have one — so the catalog is where both halves of "what may a
  * threshold ask" are written down together.
  *

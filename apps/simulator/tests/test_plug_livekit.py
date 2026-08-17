@@ -50,6 +50,7 @@ from egma_simulator.media.livekit_room import (
 from egma_simulator.media.room import (
     PERSONA_IDENTITY,
     ROOM_PREFIX,
+    JoinedRoom,
     room_token,
 )
 from egma_simulator.media.scripted_transport import FRAME_SECONDS
@@ -83,6 +84,57 @@ FAILED_ENDINGS = frozenset(
 """The endings a failed simulation may honestly claim, read off the
 contract itself rather than spelled again here — a plug that invented a
 variant would be refused at the door, and this says so early."""
+
+
+async def test_room_transport_loss_is_not_remote_participant_departure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Pipecat exposes two events, and Egma keeps their meanings separate."""
+    from pipecat.transports.livekit import transport as livekit_transport
+
+    class EventTransport:
+        created: EventTransport | None = None
+
+        def __init__(self, **_kwargs: object) -> None:
+            self.handlers: dict[str, object] = {}
+            EventTransport.created = self
+
+        def event_handler(self, name: str):
+            def register(handler):
+                self.handlers[name] = handler
+                return handler
+
+            return register
+
+        def input(self) -> object:
+            return object()
+
+        def output(self) -> object:
+            return object()
+
+        async def cleanup(self) -> None:
+            disconnected = self.handlers["on_disconnected"]
+            await disconnected(self)
+
+    monkeypatch.setattr(livekit_transport, "LiveKitTransport", EventTransport)
+    room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    media = room.create_transport()
+    transport = EventTransport.created
+    assert transport is not None
+    assert A_SECRET not in media.transport_name
+
+    await transport.handlers["on_disconnected"](transport)
+    assert media.failed.is_set()
+    assert not media.ended.is_set()
+
+    await transport.handlers["on_participant_disconnected"](
+        transport, AGENT_IDENTITY
+    )
+    assert media.ended.is_set()
+
+    media.failed.clear()
+    await room.leave()
+    assert not media.failed.is_set()
 
 
 def livekit_spec(
