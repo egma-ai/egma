@@ -146,11 +146,15 @@ export type Measured = {
    * The agent platform that measured this figure — `retell` — on the figures a
    * platform reported rather than Egma measured.
    *
-   * **Absent on everything else, and that absence is the whole signal.** Egma
+   * **Absent on everything else, and the page reads it as a gate only.** Egma
    * working a number out from your framework's spans and a platform reporting
-   * its own number are different claims, and the page must not word one as the
-   * other: `derived` alone cannot tell them apart, so a figure carrying this
-   * field is said differently from one that does not.
+   * its own number are different claims, and `derived` alone cannot tell them
+   * apart — so this field is what stops the worked-out caveat being said about a
+   * figure Egma never worked out. A figure carrying it renders bare: no mark, no
+   * caveat, the same as a figure Egma timed.
+   *
+   * It stays on the answer whether or not a screen shows it. Who measured is a
+   * fact about the record, and the day a surface asks for it, it is here.
    */
   readonly reported_by?: string;
   /** One sample, or the series a per-turn measure produced. Never empty. */

@@ -354,45 +354,34 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
           </div>
         ))
       )}
-      {measured.some(
-        (one) => one.derived === true && one.reported_by === undefined,
-      ) ? (
+      {measured.some(workedOut) ? (
         <div className={styles.contextFact}>
           <span />
           <strong className={styles.muted}>{MEASURES.derived}</strong>
         </div>
       ) : null}
-      {reportingPlatform(measured) === undefined ? null : (
-        <div className={styles.contextFact}>
-          <span />
-          <strong className={styles.muted}>
-            {MEASURES.reported(reportingPlatform(measured) ?? "")}
-          </strong>
-        </div>
-      )}
     </section>
   );
 }
 
 /**
- * The agent platform that reported figures on this page, or nothing where none
- * did.
+ * Whether Egma worked this figure out from the framework's own timings — the
+ * one origin the page still says anything about.
  *
- * One name rather than a list, because there is only ever one to have: the
- * figures a platform reports ride the one span that opens the exchange, written
- * by the one platform the exchange happened on. Reading the first is therefore
- * reading the only one, and a page that listed them would be dressing a
- * certainty up as a set.
+ * **`derived` alone does not answer it.** A figure an agent platform reported
+ * arrives derived as well, because Egma did not time it either; `reported_by`
+ * beside it is what tells the two apart. Without that second half the page would
+ * tell a developer their platform's number was "worked out from your framework's
+ * own timings", which is a claim about an observation Egma never made. So the
+ * platform's field is read here as a gate and nothing else: a figure carrying it
+ * is neither marked nor caveated, and reads exactly as a figure Egma timed.
+ *
+ * The rest of the provenance is on the record rather than on the page, by a
+ * product decision this predicate is the whole of on this screen. Any figure's
+ * origin is still there to be asked for the day a surface asks.
  */
-function reportingPlatform(
-  measured: readonly Measured[],
-): string | undefined {
-  for (const one of measured) {
-    if (one.reported_by !== undefined && one.reported_by !== "") {
-      return one.reported_by;
-    }
-  }
-  return undefined;
+function workedOut(one: Measured): boolean {
+  return one.derived === true && one.reported_by === undefined;
 }
 
 /**
@@ -420,15 +409,11 @@ function measurement(one: Measured): string {
   // mixing timed and worked-out numbers must let a reader tell which is which
   // without counting rows.
   //
-  // **The platform's mark is asked for first, and it is not the other one
-  // reworded.** A figure a platform reported was not worked out from anything;
-  // saying it was would be this page inventing an observation Egma never made.
-  const from =
-    one.reported_by !== undefined && one.reported_by !== ""
-      ? ` · ${MEASURES.reportedOne(one.reported_by)}`
-      : one.derived === true
-        ? ` · ${MEASURES.derivedOne}`
-        : "";
+  // **One predicate decides it, the same one the panel's caveat uses**, so the
+  // mark and the sentence can never come to disagree about a figure — and a
+  // figure a platform reported takes neither, rather than taking the worked-out
+  // wording about an observation Egma never made.
+  const from = workedOut(one) ? ` · ${MEASURES.derivedOne}` : "";
   if (one.partial === true) return `${shown} · ${MEASURES.partialWorst}${from}`;
   return one.samples.length === 1
     ? `${shown}${from}`

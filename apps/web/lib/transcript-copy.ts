@@ -322,28 +322,17 @@ export const MEASURES = {
   derived:
     "Some figures here were worked out from your framework's own timings " +
     "rather than timed by Egma. Each says which.",
-  /** The mark beside one worked-out figure, so a reader need not guess which. */
-  derivedOne: "from your framework's timings",
   /**
-   * Where a number the **platform** measured came from — a different sentence
-   * from the one above, deliberately.
+   * The mark beside one worked-out figure, so a reader need not guess which.
    *
-   * **These figures were not worked out by Egma at all.** Retell publishes no
-   * per-turn timing, so there is nothing for Egma to work anything out from;
-   * what there is, is Retell's own measurement of its own agent, handed over
-   * and judged as it stands. Saying "worked out from your framework's timings"
-   * about it would claim Egma observed something it never saw — a caveat that
-   * is itself untrue is worse than none, because it is the sentence a developer
-   * decides how much to believe the verdict on.
-   *
-   * The platform's name is filled in from the answer rather than written here:
-   * this page never hardcodes which platforms exist.
+   * **It belongs to that one origin and no other.** A figure an agent platform
+   * measured and handed over was not worked out from any framework's timings,
+   * so this wording is false about it — and a caveat that is itself untrue is
+   * worse than none, because it is the sentence a developer decides how much to
+   * believe a verdict on. A platform-reported figure therefore takes no mark and
+   * no caveat at all; where it came from stays on the record, not on the page.
    */
-  reported: (platform: string): string =>
-    `Some figures here were measured by ${platform} and reported to Egma, ` +
-    `not observed by Egma. Each says which.`,
-  /** The mark beside one such figure, so a reader need not guess which. */
-  reportedOne: (platform: string): string => `as reported by ${platform}`,
+  derivedOne: "from your framework's timings",
   /** One measurement is the number; several are the worst of them. */
   worst: "worst",
   counted: (howMany: number): string =>
