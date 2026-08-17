@@ -38,6 +38,7 @@ export {
   cloudInferenceKeyVerifier,
   deployedVerifier,
   eitherVerifier,
+  INFERENCE_KEY_PREFIX,
   internalCredentialVerifier,
   INTERNAL_CREDENTIAL_ID,
   INTERNAL_CREDENTIAL_PREFIX,

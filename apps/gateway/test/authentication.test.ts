@@ -502,12 +502,6 @@ describe("an inference key", () => {
     }
   });
 
-  it("refuses an ordinary Egma product key, because a product key is not one of these", async () => {
-    // Never issued in Egma Cloud's inference-key store, because a product key
-    // lives in a different table entirely. The gateway learns that by asking.
-    const productKey = "egma_sk_sentinel-a-product-key-not-an-inference-one";
-    expect((await ask({ "egma-inference-key": productKey })).status).toBe(401);
-  });
 });
 
 describe("an Egma Cloud that cannot be reached", () => {
@@ -563,6 +557,52 @@ describe("an Egma Cloud that cannot be reached", () => {
       );
 
       expect(answered.status).toBe(200);
+    } finally {
+      await world.world.stop();
+    }
+  });
+});
+
+describe("a credential that could not be an inference key", () => {
+  it("is refused without Egma Cloud being asked about it at all", async () => {
+    const before = standing.cloud.asks.length;
+
+    for (const offered of [
+      // An internal credential whose signature does not hold. It is
+      // unambiguously one of ours and unambiguously wrong; nobody else could
+      // settle that.
+      `${INTERNAL_CREDENTIAL_PREFIX}bm90LWEtcGF5bG9hZA.bm90LWEtc2lnbmF0dXJl`,
+      // An ordinary Egma product key. It lives in a different table entirely.
+      "egma_sk_sentinel-a-product-key-not-an-inference-one",
+      // A provider key somebody pasted into the wrong field.
+      "sk-sentinel-a-provider-key-in-the-wrong-slot",
+    ]) {
+      expect((await ask({ "egma-inference-key": offered })).status, offered).toBe(401);
+    }
+
+    // Not one round trip spent, and — the reason that matters — not one of
+    // these reads as "nobody could say" on a day Egma Cloud is down.
+    expect(standing.cloud.asks.length).toBe(before);
+  });
+
+  it("stays refused while Egma Cloud is unreachable, because nothing was in doubt", async () => {
+    const world = await standUp();
+    try {
+      world.cloud.goDown();
+
+      const answered = await fetch(
+        `${world.world.origin}/openai/v1/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "egma-inference-key": "egma_sk_sentinel-a-product-key-Zz9Yy8",
+          },
+          body: JSON.stringify({ model: "m", messages: [] }),
+        },
+      );
+
+      expect(answered.status).toBe(401);
     } finally {
       await world.world.stop();
     }

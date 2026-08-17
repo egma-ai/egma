@@ -51,11 +51,18 @@ Two shipped answers sit behind it, tried in that order:
   organization travels *inside* the signature, which is what keeps it out of a
   caller's hands: edit it and the signature stops matching, hold no signing key
   and you cannot name an organization at all;
-- an **inference key** — an organization's own credential for managed model
-  access. The gateway keeps no key store and holds no copy of anybody's key: it
-  asks Egma Cloud, where the key was minted and hashed, whether it is still good
-  and whose it is. One small request when a connection opens, never per audio
-  frame.
+- an **inference key** — `egma_ik_…`, an organization's own credential for
+  managed model access. The gateway keeps no key store and holds no copy of
+  anybody's key: it asks Egma Cloud, where the key was minted and hashed,
+  whether it is still good and whose it is. One small request when a connection
+  opens, never per audio frame.
+
+**A credential that could not be an inference key is refused without Egma Cloud
+being asked.** A forged internal credential, an ordinary Egma product key
+(`egma_sk_…`), a provider key pasted into the wrong field — none is a value Egma
+Cloud could recognise. Asking would spend a round trip to be told so, would make
+every one of them read as "nobody could say" on a day Egma Cloud is down, and
+would turn the validation door into a free oracle for arbitrary strings.
 
 Two things follow from asking rather than caching, and both are promises this
 product makes. **Revocation is effective for the very next connection**, because

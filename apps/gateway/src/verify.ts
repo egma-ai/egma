@@ -88,6 +88,19 @@ function sameSecret(offered: string, expected: string): boolean {
  */
 export const INTERNAL_CREDENTIAL_PREFIX = "egma_ig_";
 
+/**
+ * The static prefix every inference key starts with.
+ *
+ * Here for a sharper reason than tidiness: **the gateway does not ask Egma
+ * Cloud about a value that could not be an inference key.** A forged internal
+ * credential, an ordinary Egma product key, a provider key somebody pasted into
+ * the wrong field — none of those is a key Egma Cloud could recognise, and
+ * asking about them would spend a round trip to be told so, would make every
+ * one of them read as "nobody could say" whenever Egma Cloud is down, and would
+ * turn the validation door into a free oracle for arbitrary strings.
+ */
+export const INFERENCE_KEY_PREFIX = "egma_ik_";
+
 /** The identifier an internal credential is recorded under. Never a key. */
 export const INTERNAL_CREDENTIAL_ID = "egma-internal";
 
@@ -218,6 +231,13 @@ export function cloudInferenceKeyVerifier(
   return {
     async verify(credential: string | null): Promise<Verified> {
       if (credential === null || credential === "") return { refused: "absent" };
+      // Refused here rather than asked about. See `INFERENCE_KEY_PREFIX`: a
+      // value that is not shaped like an inference key is one Egma Cloud could
+      // not recognise, and a refusal is both the honest answer and the cheap
+      // one — it stays right when Egma Cloud is unreachable.
+      if (!credential.startsWith(INFERENCE_KEY_PREFIX)) {
+        return { refused: "not-recognized" };
+      }
       const where = config.validationUrl;
       if (where === undefined) return { refused: "unavailable" };
 
