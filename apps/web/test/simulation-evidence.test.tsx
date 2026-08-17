@@ -656,7 +656,7 @@ describe("one simulation's evidence", () => {
     for (const failure of ["throws", "rejects"] as const) {
       page({ recording: true, read: evidence({ has_recording: true }) });
       let opened = 0;
-      let closed = 0;
+      let closeAttempts = 0;
       class ClosingAudioContext {
         private isClosed = false;
 
@@ -674,6 +674,7 @@ describe("one simulation's evidence", () => {
         }
 
         close() {
+          closeAttempts += 1;
           if (this.isClosed) {
             throw new DOMException(
               "Cannot close a closed AudioContext.",
@@ -681,7 +682,6 @@ describe("one simulation's evidence", () => {
             );
           }
           this.isClosed = true;
-          closed += 1;
           const failureReason = new DOMException(
             "The AudioContext could not close.",
             "OperationError",
@@ -701,7 +701,7 @@ describe("one simulation's evidence", () => {
 
       expect(() => rendered.unmount()).not.toThrow();
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(closed).toBe(opened);
+      expect(closeAttempts).toBe(opened);
     }
   });
 

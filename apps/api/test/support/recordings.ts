@@ -33,10 +33,13 @@ import { mintKey, NEUTRAL_TRAITS, request as ask } from "./traces.ts";
 
 /** A voice connection that needs no carrier, so a run over it starts anywhere. */
 const A_VOICE_AGENT = {
-  type: "retell",
+  type: "livekit",
   modality: "voice",
-  config: { retellAgentId: "agent_in_retell_1" },
-  credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+  config: { url: "wss://acme.livekit.cloud" },
+  credentials: {
+    apiKey: "livekit-key-A1B2C3D4WXYZ",
+    apiSecret: "livekit-secret-E5F6G7H8QRST",
+  },
 } as const;
 
 /** The same shape, over chat, for the refusal that a chat has no audio. */
@@ -327,18 +330,13 @@ export async function aConductedRun(
   options: ConductedRunOptions,
 ): Promise<ConductedRun> {
   const modality = options.modality ?? "voice";
+  const runs = (conducted += 1);
 
   const registered = await ask(app, "POST", "/api/agents", who.key, {
-    name: `Front desk ${modality}`,
+    name: `Front desk ${modality} ${runs}`,
     connection: modality === "voice" ? A_VOICE_AGENT : A_CHAT_AGENT,
   });
-  // 201 the first time and 200 `reused` after it — registering the same agent
-  // through the same wizard twice is a thing the product answers rather than
-  // refuses, and one customer wanting two runs is an ordinary case here.
-  expect(
-    [200, 201],
-    JSON.stringify(registered.body),
-  ).toContain(registered.statusCode);
+  expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   const connectionId = (registered.body.connection as { id: string }).id;
 
   // Two people to call about the one test, which is what makes a run of two
@@ -348,7 +346,6 @@ export async function aConductedRun(
   // people of one name is a project where naming a persona in a test is
   // ambiguous — which the product refuses, correctly, and which a caller
   // wanting a second run has no reason to meet.
-  const runs = (conducted += 1);
   const callers = [`Impatient Rita ${runs}`, `Deliberate Sam ${runs}`];
   for (const name of callers) {
     await createPersona(who.auth, { name, traits: NEUTRAL_TRAITS });
