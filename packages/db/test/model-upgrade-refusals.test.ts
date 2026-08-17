@@ -14,9 +14,11 @@ import {
   readModelUpgradeCompletion,
   resolveModelProviderKeys,
   storeModelProviderCredential,
+  seedDefaultJudge,
   seedPlatformSettings,
   seedRunningGraders,
   setJudgeConfiguration,
+  setProjectJudge,
   upgradeModelSetup,
   useLibraryEntry,
   writePlatformSettings,
@@ -628,5 +630,104 @@ describe("a legacy key rotated after the upgrade has run", () => {
       "sk-sentinel-rotation-model-key-NEW5",
     );
     expect(report.activated).toEqual(["openai"]);
+  });
+});
+
+/**
+ * The boundary of the rotation fix, pinned so nobody has to rediscover it.
+ *
+ * **A rotated `EGMA_JUDGE_API_KEY` and a restart do not reach an existing
+ * platform judge row at all**, and that is deliberate behaviour this effort did
+ * not introduce: `seedDefaultJudge` reads only projects that have *no* judge
+ * configuration and writes with `onConflictDoNothing`, which the schema states
+ * as the whole promise that a project's chosen judge is never replaced. So the
+ * copy this upgrade takes cannot go stale against its source — the source did
+ * not move — and no refresh trigger of any kind could see a change that never
+ * happened.
+ *
+ * The door that *does* re-seal such a row from the deployment's current key is
+ * an administrator choosing the platform judge for a project, and it stamps the
+ * row. That one the refresh follows, which is the half worth proving here: the
+ * fix is not weaker than its source's own clock.
+ */
+describe("the deployment's own judge key", () => {
+  const solo = { organization: newId("org"), project: newId("prj") };
+
+  beforeAll(async () => {
+    holdManagedDeployment(SELF_HOSTED);
+    await database.drop();
+    database = await createConnectedDatabase("model_upgrade_judge_env");
+    await seedUser(database, ada, "ada@acme.example");
+    await seedOrganization(database, solo.organization, [
+      { id: solo.project, slug: "main" },
+    ]);
+  });
+
+  it("does not reach an existing project when the environment rotates it", async () => {
+    expect(
+      await seedDefaultJudge({
+        provider: "openai",
+        model: "gpt-4o-mini",
+        key: "sk-sentinel-judge-env-OLD1",
+      }),
+    ).toEqual([solo.project]);
+    const before = await database.sql<{ hint: string; updated_at: Date }>(
+      "select credentials_hint as hint, updated_at from judge_configuration where project_id = $1",
+      [solo.project],
+    );
+
+    // The operator rotates the environment variable and restarts.
+    const seeded = await seedDefaultJudge({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      key: "sk-sentinel-judge-env-NEW9",
+    });
+
+    const after = await database.sql<{ hint: string; updated_at: Date }>(
+      "select credentials_hint as hint, updated_at from judge_configuration where project_id = $1",
+      [solo.project],
+    );
+
+    // Nothing was written, so there is nothing for the upgrade to notice. The
+    // grading engine goes on spending the key this project was seeded with —
+    // which is the deployment's standing behaviour and not this upgrade's.
+    expect(seeded).toEqual([]);
+    expect(after.rows[0]?.hint).toBe("OLD1");
+    expect(after.rows[0]?.updated_at).toEqual(before.rows[0]?.updated_at);
+  });
+
+  it("is followed by the refresh where a real door does re-seal the row", async () => {
+    await upgradeModelSetup(ONE_TEAM);
+    expect(
+      (await listCredentialCandidates(acting(solo))).find(
+        (one) => one.source === "judge_configuration",
+      )?.hint,
+    ).toBe("OLD1");
+
+    // An administrator choosing the platform judge for this project re-seals
+    // the row from the deployment's *current* key — the one this process was
+    // started with, which is where the rotated value really lives — and stamps
+    // the row on the way. That is the door the copy can follow.
+    await setProjectJudge(acting(solo), {
+      source: "platform",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      platformJudge: {
+        provider: "openai",
+        model: "gpt-4o-mini",
+        key: "sk-sentinel-judge-env-NEW9",
+      },
+    });
+    const report = await upgradeModelSetup(ONE_TEAM);
+
+    const copied = (await listCredentialCandidates(acting(solo))).find(
+      (one) => one.source === "judge_configuration",
+    );
+    expect(copied?.hint).toBe("NEW9");
+    expect(report.activated).toContain("openai");
+    const resolved = await resolveModelProviderKeys(theSimulatorIn(solo), [
+      "openai",
+    ]);
+    expect(resolved.keys.get("openai")).toBe("sk-sentinel-judge-env-NEW9");
   });
 });

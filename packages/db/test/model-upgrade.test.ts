@@ -846,6 +846,52 @@ describe("the completion marker", () => {
     }
   });
 
+  /**
+   * The stamp names the moment its own predicate was verified, not the moment
+   * the transaction that verified it happened to open.
+   *
+   * `now()` in Postgres is the *transaction's* start, and this transaction
+   * waits on an advisory lock before its update runs — so `now()` would stamp a
+   * moment before the evidence for it existed, by however long the wait lasted.
+   * Held here on purpose, and the moment is read off Postgres' own clock rather
+   * than this process's so no skew between the two can decide it.
+   */
+  it("names the moment its predicate was verified, not the moment it opened", async () => {
+    await client.sql(
+      "update platform_instance set model_upgrade_completed_at = null",
+    );
+
+    const other = await openSingleConnection(database.url);
+    try {
+      await other.sql("begin");
+      await other.sql(
+        "select pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+        ["egma:upgrade-model-setup"],
+      );
+
+      const recording = recordModelUpgradeCompletion();
+      await waitingOnTheUpgradeLock();
+
+      // Strictly after the blocked transaction opened, on the database's clock.
+      const { rows } = await other.sql<{ held: Date }>(
+        "select clock_timestamp() as held",
+      );
+      const held = rows[0]?.held;
+      await new Promise((settle) => setTimeout(settle, 50));
+      await other.sql("commit");
+
+      const settled = await recording;
+
+      expect(settled.completed).toBe(true);
+      expect(held).toBeInstanceOf(Date);
+      expect(settled.completedAt?.getTime()).toBeGreaterThanOrEqual(
+        (held as Date).getTime(),
+      );
+    } finally {
+      await other.close();
+    }
+  });
+
   it("stays written, and a second recording does not move it", async () => {
     const first = await readModelUpgradeCompletion();
     const again = await recordModelUpgradeCompletion();

@@ -237,6 +237,15 @@ export async function recordModelUpgradeCompletion(): Promise<ModelUpgradeComple
    * is seen and the stamp is refused, and work committed after it began was not
    * yet true at the moment the stamp names. Either way the timestamp is honest.
    *
+   * **`statement_timestamp()` rather than `now()`, and the difference is the
+   * whole point of the sentence above.** In Postgres `now()` is the
+   * *transaction's* start, and this transaction waits on an advisory lock
+   * before its update runs — so `now()` would stamp a moment before the
+   * predicate that justifies it was ever evaluated, by however long the wait
+   * lasted. Seconds, in practice. But this is a permanent record that a later
+   * release and an operator both read as "everything was clear at this time",
+   * and a record must not name a moment before its own evidence.
+   *
    * The advisory lock is the upgrade act's own, so a boot's upgrade and the
    * marker that follows it cannot interleave with another replica's.
    */
@@ -247,7 +256,7 @@ export async function recordModelUpgradeCompletion(): Promise<ModelUpgradeComple
 
     const { rows } = (await tx.execute(sql`
       update platform_instance
-         set model_upgrade_completed_at = now()
+         set model_upgrade_completed_at = statement_timestamp()
        where singleton
          and model_upgrade_completed_at is null
          and not ${CONDITIONS.personas}
