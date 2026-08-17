@@ -39,9 +39,9 @@ import { TraceStoreRefusedError } from "./errors.ts";
 export type SpanSource = "simulation" | "production";
 
 /**
- * Which side measured this. egma's outside view of a trace and the agent's
- * inside view are different measurements, and averaging them together is the
- * same error as mixing two audio bands.
+ * Which side measured this. Egma's outside view of a trace and the agent's
+ * inside view are different measurements, so they must not be averaged
+ * together.
  */
 export type SpanEmitter = "egma-runtime" | "agent";
 

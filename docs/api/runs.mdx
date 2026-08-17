@@ -325,10 +325,6 @@ This endpoint is only meaningful for voice simulations that completed a call. Ch
   ISO 8601 timestamp of when the URL expires. If the URL has expired, request this endpoint again for a fresh one.
 </ResponseField>
 
-<ResponseField name="measured_audio_band_hertz" type="integer | null">
-  The audio bandwidth the recording was measured at (e.g. `8000` for narrow-band telephone audio, `16000` for wideband). `null` for recordings written before this measurement was introduced. Two simulations with different bands are different units: a narrow-band recording strips what an audio grader reads.
-</ResponseField>
-
 ### Example
 
 ```bash

@@ -284,9 +284,8 @@ function describedJudgeChoice(
  * Only what is actually known: a measure nobody emitted is absent from this
  * object rather than present as null, because a page that drew a slot for every
  * measure the catalog names would report zeros for things nothing counted. A
- * chat has no audio band; a conversation that never connected has no duration;
- * latency, interruption counts and cost are not stored on this path yet and are
- * simply not here.
+ * conversation that never connected has no duration; latency, interruption
+ * counts and cost are not stored on this path yet and are simply not here.
  */
 function describedMeasures(
   one: Simulation,
@@ -297,9 +296,6 @@ function describedMeasures(
     measures.duration_ms = one.endedAt.getTime() - one.startedAt.getTime();
   }
   if (one.turnCount !== null) measures.turn_count = one.turnCount;
-  if (one.measuredAudioBandHertz !== null) {
-    measures.measured_audio_band_hertz = one.measuredAudioBandHertz;
-  }
   if (detail !== undefined) {
     measures.tool_call_count = detail.toolSpanCount;
     measures.errored_step_count = detail.erroredSpanCount;

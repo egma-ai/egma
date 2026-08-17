@@ -221,6 +221,8 @@ describe("how each measure is computed from the spans", () => {
     // Cataloged, recorded, and not something a grader may read a trace for.
     expect(isCatalogedMeasure("turn_count")).toBe(true);
     expect(isSpanDerivedMeasure("turn_count")).toBe(false);
+    // Retired from the catalog, so neither a grader nor a trace may name it.
+    expect(isCatalogedMeasure("measured_audio_band_hertz")).toBe(false);
     expect(isSpanDerivedMeasure("measured_audio_band_hertz")).toBe(false);
     // And a name nothing has ever measured is no on both counts.
     expect(isSpanDerivedMeasure("time_to_resolution")).toBe(false);

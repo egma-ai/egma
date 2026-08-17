@@ -241,8 +241,7 @@ export function simulationNamedBy(resourceSpans: OtlpResourceSpans): string {
 
 /**
  * The connection an agent was reached over, when the telemetry says so. Only
- * the framework is knowable from a scope name; the audio band is measured
- * rather than declared, and nothing here measured it.
+ * the framework is knowable from a scope name.
  */
 const CONNECTION_TYPE_BY_SCOPE: Readonly<Record<string, string>> = {
   [LIVEKIT_SCOPE]: "livekit",

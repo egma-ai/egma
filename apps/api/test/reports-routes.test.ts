@@ -367,7 +367,6 @@ describe("the lifecycle lands", () => {
     expect(row?.providerReference).toBe("chat_5d1f9a3b7c");
     expect(row?.startedAt?.toISOString()).toBe("2026-08-05T09:00:00.000Z");
     expect(row?.endedAt?.toISOString()).toBe("2026-08-05T09:02:10.551Z");
-    expect(row?.measuredAudioBandHertz).toBeNull();
 
     // The landing minted the judgement and froze the header, exactly as the
     // access layer promises every terminal transition does.
@@ -410,7 +409,7 @@ describe("the lifecycle lands", () => {
     expect(row?.providerReference).toBe("chat_5d1f9a3b7c");
   });
 
-  it("lands a voice conversation's measured band and recording reference", async () => {
+  it("lands a voice conversation's recording reference", async () => {
     const { ada, key, agentId, versionId } = await aCustomerReadyToRun(
       "reports_voice",
     );
@@ -432,7 +431,6 @@ describe("the lifecycle lands", () => {
     const answered = await report(simulationId, [
       terminalEvent("completed", "agent_ended", {
         audio: {
-          measured_sample_rate_hz: 8_000,
           recording: `${simulationId}/dual-channel.wav`,
         },
         provider_reference: "CA7e2b9c1d4f6a8e0b",
@@ -442,7 +440,6 @@ describe("the lifecycle lands", () => {
     expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
 
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
-    expect(row?.measuredAudioBandHertz).toBe(8_000);
     expect(row?.recordingReference).toBe(`${simulationId}/dual-channel.wav`);
     expect(row?.turnCount).toBe(22);
     expect(row?.providerReference).toBe("CA7e2b9c1d4f6a8e0b");
@@ -531,7 +528,7 @@ describe("the lifecycle lands", () => {
     ).toEqual({ discovered: [], covered: [], uncovered: [] });
   });
 
-  it("refuses audio facts for a chat conversation, which has none to measure", async () => {
+  it("refuses recording facts for a chat conversation", async () => {
     const { key, connectionId, versionId } = await aCustomerReadyToRun(
       "reports_chat_audio",
     );
@@ -540,7 +537,6 @@ describe("the lifecycle lands", () => {
     const refused = await report(simulationId, [
       terminalEvent("completed", "persona_concluded", {
         audio: {
-          measured_sample_rate_hz: 48_000,
           recording: "somewhere/dual-channel.wav",
         },
       }),

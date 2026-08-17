@@ -50,8 +50,12 @@
  * conversation that answered "nothing measured" at version 2 answers with
  * three latencies at version 3 — which is a measure changing what it means to a
  * consumer, and this number is what tells them so.
+ *
+ * **4** removes ``measured_audio_band_hertz``. A recording's WAV header keeps
+ * the rate needed to play that file; a second product field cannot describe
+ * the connection's acoustic quality and is no longer a measure.
  */
-export const MEASURE_CATALOG_VERSION = 3;
+export const MEASURE_CATALOG_VERSION = 4;
 
 /**
  * How a measure is reduced to the one number a threshold is applied to.
@@ -262,21 +266,6 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
         "no span carries it: the simulator counts the turns it conducted and reports the total on the terminal transition, where the simulation row keeps it",
     },
     means: "how many transcript turns the conversation reached, both speakers counted",
-    aggregations: EVERY_AGGREGATION,
-  },
-  {
-    measure: "measured_audio_band_hertz",
-    unit: "hertz",
-    taken: "once",
-    from: "voice simulations",
-    origin: "terminal_fact",
-    fromSpans: {
-      rule: "no_span_carries_it",
-      definition:
-        "no span carries it: the band is heard on the media line and reported on the terminal transition, where the simulation row keeps it beside the recording",
-    },
-    means:
-      "the sample rate the simulator actually heard, negotiated or measured and never copied from configuration",
     aggregations: EVERY_AGGREGATION,
   },
 ];

@@ -130,9 +130,8 @@ class Reporter:
         """The platform's own identifier for the exchange, once the plug
         offers one; rides the terminal facts."""
         self.audio: dict | None = None
-        """The contract's audio block — the band measured at execution and
-        the recording's reference — for a voice simulation; ``None`` for a
-        chat one, where there is no audio to measure."""
+        """The recording reference for a voice simulation; ``None`` for a
+        chat simulation, which has no simulator recording."""
         self.mock_tool_coverage: dict | None = None
         """Which of the agent's tools mock tools answered for, and which
         ran their own implementations.

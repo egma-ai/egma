@@ -34,20 +34,15 @@ from conftest import (
     A_SCENARIO,
     a_spec,
     assert_one_speaker_to_a_channel,
-    carry,
-    hear,
     speech_in_the_recording,
 )
 from room_stub import AGENT_IDENTITY, RoomStub
 from token_endpoint_stub import serving
 
 from egma_simulator.blob import FilesystemBlobStore
-from egma_simulator.conductor import LINE_SLICE_SAMPLES
 from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR, contract_dir
-from egma_simulator.media import MediaBackend, MediaBackendError, MediaSession
-from egma_simulator.media import room as room_module
+from egma_simulator.media import MediaBackend, MediaBackendError, VoiceMedia
 from egma_simulator.media.livekit_room import (
-    ROOM_BAND_HZ,
     LiveKitRoomBackend,
     RoomSettings,
     dispatch_metadata,
@@ -55,20 +50,19 @@ from egma_simulator.media.livekit_room import (
 from egma_simulator.media.room import (
     PERSONA_IDENTITY,
     ROOM_PREFIX,
-    RoomSession,
     room_token,
 )
+from egma_simulator.media.scripted_transport import FRAME_SECONDS
 from egma_simulator.mock_tools import PROTOCOL_VERSION
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import assemble
-from egma_simulator.plugs import DuplexLine, PlugError, failed_ending, plug_for
+from egma_simulator.plugs import PlugError, VoiceConnection, failed_ending, plug_for
 from egma_simulator.plugs import livekit as livekit_plug
 from egma_simulator.plugs.livekit import LiveKitRoom
 from egma_simulator.recording import channels_of
 from egma_simulator.redaction import REDACTED
 from egma_simulator.spec import SimulationSpec
-from egma_simulator.speech import decode_speech, encode_speech, leading_silence_seconds
 from egma_simulator.walk import Conducted, WalkControls
 
 A_URL = "wss://lakeside-dental.livekit.cloud"
@@ -198,10 +192,6 @@ def endpoint_room(
     )
 
 
-THREE_SECONDS_OF_SLICES = round(3.0 * ROOM_BAND_HZ / LINE_SLICE_SAMPLES)
-"""Long enough for anything the agent has queued to have crossed the room."""
-
-
 async def room_walk(
     tmp_path: Path,
     stub: RoomStub,
@@ -260,11 +250,16 @@ def test_the_registry_knows_the_livekit_plug():
     assert plug_for("livekit") is LiveKitRoom
 
 
-def test_a_room_is_a_full_duplex_line():
-    """The seam it wears is what decides which conductor it gets, so the
-    verbs are the thing to pin — and a room has them now, exactly as the
-    loopback counterpart does."""
-    assert isinstance(room(RoomStub()), DuplexLine)
+def test_a_room_is_one_pipecat_voice_connection():
+    """The seam gives Pipecat the transport instead of exchanging PCM.
+
+    There is no second byte bridge, processing rate, or playout clock for
+    the room plug to own.
+    """
+    connection = room(RoomStub())
+    assert isinstance(connection, VoiceConnection)
+    assert not hasattr(connection, "exchange")
+    assert not hasattr(connection, "sample_rate_hz")
 
 
 # -- One whole simulation ----------------------------------------------------
@@ -277,9 +272,8 @@ async def test_a_livekit_spec_conducts_a_whole_simulation_in_a_room(
 
     A spec whose connection names a room becomes a conversation, and what
     comes back is a transcript, a distinct ending, per-turn measurements
-    that never run backwards, the band the audio was really carried at,
-    a dual-channel recording that resolves, and the room's own name as the
-    join to the platform's telemetry.
+    that never run backwards, a dual-channel recording that resolves, and
+    the room's own name as the join to the platform's telemetry.
     """
     stub = RoomStub(
         greeting="Lakeside Dental, how can I help?",
@@ -322,28 +316,27 @@ async def test_a_livekit_spec_conducts_a_whole_simulation_in_a_room(
     assert named.count("persona_speech_duration") == 2
     assert named.count("first_response_latency") == 1
     assert named.count("turn_response_latency") == 2
-    # The agent was quiet for exactly as long as it waits before speaking,
-    # on every one of its turns — measured out of the audio, so this costs
-    # CI nothing and would cost a live room nine tenths of a second.
-    assert [
+    # The configured quiet is present before every answer. Pipecat also
+    # carries turn-boundary media, so this is a lower bound rather than an
+    # exact sample count.
+    delays = [
         milliseconds
         for measure, milliseconds, _ in measures
         if measure == "time_to_first_word"
-    ] == [300.0, 300.0, 300.0]
+    ]
+    assert len(delays) == 3
+    assert all(delay >= 300.0 for delay in delays)
     # And nothing was stamped before the measurement reported ahead of it.
     stamped = [at for _, _, at in measures]
     assert stamped == sorted(stamped)
 
-    # The band on the record is the one that flowed, read off the audio
-    # the recorder saw rather than copied out of a config.
     audio = assembled.audio
-    assert audio["measured_sample_rate_hz"] == ROOM_BAND_HZ == 16000
+    assert set(audio) == {"recording"}
 
     # The reference is a reference: no bytes on the wire, and it resolves
     # to a recording with one speaker to a channel.
     assert "://" not in audio["recording"]
     recording = (tmp_path / audio["recording"]).read_bytes()
-    assert channels_of(recording)[2] == ROOM_BAND_HZ
     assert_one_speaker_to_a_channel(
         recording, [turn for turn in turns if turn[1] != GOODBYE]
     )
@@ -357,10 +350,9 @@ async def test_a_room_turn_span_is_anchored_to_the_audio_timeline(
 ):
     """The same claim the loopback and the phone make, over a room.
 
-    A turn's span is not the moment the simulator noticed the turn: both
-    of its ends are positions on the exchange's own sample timeline. So
-    every stretch of speech a listener can find in the recording is one
-    span, at the same distance from every other, to the sample.
+    A turn's span follows Pipecat's recording timeline. The two clocks can
+    differ by one media frame, but that difference must not grow during
+    the simulation.
     """
     stub = RoomStub(
         greeting="Front desk, hello.",
@@ -378,6 +370,7 @@ async def test_a_room_turn_span_is_anchored_to_the_audio_timeline(
 
     recording = (tmp_path / assembled.audio["recording"]).read_bytes()
     heard = speech_in_the_recording(recording)
+    _human, _agent, recording_rate = channels_of(recording)
     # Every turn but the persona's concluding goodbye, which was never
     # spoken into the room and is honestly an instant.
     spoken = [span for span in spans if span[2] != span[3]]
@@ -385,33 +378,27 @@ async def test_a_room_turn_span_is_anchored_to_the_audio_timeline(
         speaker for speaker, _text, _began, _ended in spoken
     ]
 
-    def since_the_first(positions: list[int]) -> list[int]:
-        return [position - positions[0] for position in positions]
+    def audio_offsets(positions: list[int]) -> list[float]:
+        return [(position - positions[0]) / recording_rate for position in positions]
 
-    def in_samples(instants: list[int]) -> list[int]:
-        return [
-            round((instant - instants[0]) * ROOM_BAND_HZ / 1_000_000_000)
-            for instant in instants
-        ]
+    def span_offsets(instants: list[int]) -> list[float]:
+        return [(instant - instants[0]) / 1_000_000_000 for instant in instants]
 
-    assert since_the_first([began for _speaker, began, _ended in heard]) == (
-        in_samples([began for _speaker, _text, began, _ended in spoken])
+    recorded_begins = audio_offsets([began for _speaker, began, _ended in heard])
+    recorded_ends = audio_offsets([ended for _speaker, _began, ended in heard])
+    spanned_begins = span_offsets(
+        [began for _speaker, _text, began, _ended in spoken]
     )
-    assert since_the_first([ended for _speaker, _began, ended in heard]) == (
-        in_samples([ended for _speaker, _text, _began, ended in spoken])
-    )
+    spanned_ends = span_offsets([ended for _speaker, _text, _began, ended in spoken])
+    assert recorded_begins == pytest.approx(spanned_begins, abs=FRAME_SECONDS)
+    assert recorded_ends == pytest.approx(spanned_ends, abs=FRAME_SECONDS)
 
 
-# -- The plug's own lifecycle, turn by turn -----------------------------------
+# -- The plug's own lifecycle -------------------------------------------------
 
 
-async def test_the_plug_joins_converses_and_leaves():
-    """The three steps the conductor drives, against a room-shaped LiveKit.
-
-    The line is driven one slice at a time, both directions at once,
-    because that is the only door a voice plug has — where a turn falls is
-    the conductor's reading of the audio and none of this file's business.
-    """
+async def test_the_plug_prepares_joins_and_leaves_one_voice_transport():
+    """The lifecycle the conductor drives, against a room-shaped LiveKit."""
     stub = RoomStub(
         greeting="Lakeside Dental, how can I help?",
         replies=["Of course — could I take your name?", "Booked for Thursday."],
@@ -419,96 +406,17 @@ async def test_the_plug_joins_converses_and_leaves():
     plug = room(stub, agentName="front-desk")
     assert plug.provider_reference is None, "no room exists before one is made"
 
+    media = await plug.prepare()
+    assert isinstance(media, VoiceMedia)
+    assert media.input and media.output
     await plug.open()
     assert plug.provider_reference == stub.rooms[0].name
-
-    assert await hear(plug) == "Lakeside Dental, how can I help?"
     assert not plug.far_end_left
-    assert await hear(plug, "I need to move my cleaning.") == (
-        "Of course — could I take your name?"
-    )
-    assert await hear(plug, "Margaret Hale.") == "Booked for Thursday."
+    assert stub.room.joined
     await plug.close()
 
-    # And the room's side of the same story: both stretches of persona
-    # speech really went out over it, in order, and the room did not
-    # outlive them.
-    heard = [
-        decode_speech(pcm, ROOM_BAND_HZ) for pcm in stub.sessions[0].heard
-    ]
-    assert heard == ["I need to move my cleaning.", "Margaret Hale."]
+    assert not stub.room.joined
     assert stub.deleted == [stub.rooms[0].name]
-
-
-async def test_an_agent_that_joins_and_says_nothing_carries_quiet():
-    """A room somebody is in but nobody is talking in is ordinary, and it
-    is not a fault. The line carries the quiet, which is how the conductor
-    learns nobody is going to speak first."""
-    stub = RoomStub(replies=["Go on."])
-    plug = room(stub)
-    await plug.open()
-    assert await carry(plug, slices=20) == bytes(20 * LINE_SLICE_SAMPLES * 2)
-    await plug.close()
-
-
-async def test_a_stretch_of_speech_the_agent_answers_with_nothing_stays_quiet():
-    """The budget for quiet is spent in audio, so this costs CI nothing.
-
-    Without it a spent script would leave the line waiting on an agent
-    that never speaks until the simulation's duration limit, and the
-    record would say "limit reached" about a room nobody was talking in.
-    """
-    stub = RoomStub(replies=["Only one thing to say."])
-    plug = room(stub)
-    await plug.open()
-    assert await hear(plug, "First point.") == "Only one thing to say."
-    assert await hear(plug, "Second point.") == ""
-    assert not plug.far_end_left
-    await plug.close()
-
-
-async def test_the_quiet_before_the_first_word_is_carried_as_quiet():
-    """Time-to-first-word is read out of the audio the line carries, so
-    the quiet the room really had has to be in it — at its real length,
-    and as quiet rather than as whatever else was on the line."""
-    stub = RoomStub(greeting="Hello there.", answer_delay_seconds=0.4)
-    plug = room(stub)
-    await plug.open()
-    heard = await carry(plug, slices=THREE_SECONDS_OF_SLICES)
-    await plug.close()
-
-    asked_for = round(0.4 * ROOM_BAND_HZ)
-    quiet = round(leading_silence_seconds(heard, ROOM_BAND_HZ) * ROOM_BAND_HZ)
-    assert asked_for <= quiet < asked_for + LINE_SLICE_SAMPLES
-    assert decode_speech(heard, ROOM_BAND_HZ) == "Hello there."
-
-
-async def test_agent_speech_arriving_while_the_persona_speaks_is_heard():
-    """The drop is gone, and this is the test that says so.
-
-    The agent starts talking while the persona is still mid-sentence. The
-    room used to wait out the persona's own audio and throw away
-    everything that arrived meanwhile, so an agent talking over the
-    persona vanished from the record entirely. Now both directions cross
-    in the same slices.
-    """
-    stub = RoomStub(greeting="Talking over you now.", replies=["And on we go."])
-    plug = room(stub)
-    await plug.open()
-
-    said_over = encode_speech(
-        "A long sentence the persona is still in the middle of saying.",
-        ROOM_BAND_HZ,
-    )
-    heard = await carry(plug, said_over)
-
-    assert len(heard) == len(said_over), "the two directions left the same clock"
-    assert decode_speech(heard, ROOM_BAND_HZ) == "Talking over you now."
-
-    # Conducted on, rather than merely survived: the exchange goes to its
-    # next answer with nothing lost in between.
-    assert await hear(plug, "And I carried on.") == "And on we go."
-    await plug.close()
 
 
 # -- Getting the agent into the room -----------------------------------------
@@ -824,11 +732,11 @@ async def test_a_livekit_that_answers_nowhere_fails_without_a_credential(
         {"apiKey": A_KEY, "apiSecret": A_SECRET},
     )
     driver = LiveKitRoomBackend(
-        settings=settings, band_hz=ROOM_BAND_HZ, simulation_id=A_SIMULATION
+        settings=settings, simulation_id=A_SIMULATION
     )
 
     with pytest.raises(MediaBackendError) as refusal:
-        await driver.create_session()
+        await driver.create_transport()
     await driver.teardown()
 
     told = str(refusal.value)
@@ -841,6 +749,49 @@ async def test_a_livekit_that_answers_nowhere_fails_without_a_credential(
     assert any("was not deleted" in line for line in logged), logged
     for line in logged:
         assert A_SECRET not in line
+
+
+async def test_a_real_transport_join_refusal_reaches_the_running_pipeline(
+    tmp_path: Path,
+):
+    """A stock LiveKit transport connects only after Pipecat starts it."""
+    with serving(
+        token="a.token.the.server.will.not.take",
+        server_url="ws://127.0.0.1:1",
+    ) as endpoint:
+        spec = SimulationSpec.from_document(
+            livekit_endpoint_spec(
+                url="ws://127.0.0.1:1",
+                token_endpoint=endpoint.url,
+                scenario="One point.",
+                max_duration_seconds=30,
+            )
+        )
+        assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+        conductor = assembled.conductor
+        assert conductor is not None
+
+        async def ignore(*_facts: object) -> None:
+            return None
+
+        with pytest.raises(PlugError) as refused:
+            await conductor.conduct(
+                persona=Persona(
+                    traits=spec.persona_traits,
+                    scenario_instructions=spec.scenario_instructions,
+                    model=ScriptedModel(spec.scenario_instructions),
+                ),
+                max_turns=spec.limits.max_turns,
+                max_duration_seconds=spec.limits.max_duration_seconds,
+                controls=WalkControls(),
+                name="sim:real-room-join-refusal",
+                on_utterance=ignore,
+                on_measured=ignore,
+            )
+
+    told = str(refused.value)
+    assert "voice connection could not open" in told
+    assert A_HEADER_SECRET not in told
 
 
 async def test_a_platform_that_says_the_secret_back_still_leaks_nothing(
@@ -978,18 +929,6 @@ async def test_closing_a_simulation_that_never_opened_asks_for_nothing():
     assert stub.deleted == [], "nothing was ever there to delete"
 
 
-# -- The band ----------------------------------------------------------------
-
-
-def test_a_room_is_wideband_and_nothing_can_ask_it_not_to_be():
-    """A band a connection could ask for would be a band declared, and
-    what a record stamps has to be a band the audio really carried."""
-    assert room(RoomStub()).sample_rate_hz == ROOM_BAND_HZ == 16000
-    with pytest.raises(PlugError) as refusal:
-        room(RoomStub(), sample_rate_hz=8000)
-    assert "sample_rate_hz" in str(refusal.value)
-
-
 # -- Connections the plug does not understand --------------------------------
 
 
@@ -1061,7 +1000,7 @@ def test_the_room_is_made_fresh_and_never_reused():
     )
     built = [
         LiveKitRoomBackend(
-            settings=settings, band_hz=ROOM_BAND_HZ, simulation_id=A_SIMULATION
+            settings=settings, simulation_id=A_SIMULATION
         ).room_name
         for _ in range(2)
     ]
@@ -1093,7 +1032,7 @@ def test_the_room_driver_is_behind_the_four_verb_seam():
     """The same four verbs every media driver has, in the same order and
     with the same shapes — except ``dial``, which reaches for nothing here
     because who to reach is the room's own configuration."""
-    for name in ("create_session", "dial", "wait_answered", "teardown"):
+    for name in ("create_transport", "dial", "wait_answered", "teardown"):
         method = getattr(LiveKitRoomBackend, name, None)
         assert method is not None, f"the room driver has no {name}"
         assert inspect.iscoroutinefunction(method), name
@@ -1101,15 +1040,6 @@ def test_the_room_driver_is_behind_the_four_verb_seam():
             assert taken_by(method) == [("self", inspect.Parameter.empty)]
             continue
         assert taken_by(method) == taken_by(getattr(MediaBackend, name)), name
-
-
-def test_a_room_session_is_the_same_surface_every_driver_answers_with():
-    for name in ("send", "receive"):
-        assert taken_by(getattr(RoomSession, name)) == taken_by(
-            getattr(MediaSession, name)
-        ), name
-    for name in ("sample_rate_hz", "far_end_left", "carrying_audio"):
-        assert isinstance(getattr(RoomSession, name), property), name
 
 
 def test_the_fake_is_the_real_driver_with_its_network_answered():
@@ -1121,7 +1051,6 @@ def test_the_fake_is_the_real_driver_with_its_network_answered():
         settings=RoomSettings.from_connection(
             {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
         ),
-        band_hz=ROOM_BAND_HZ,
         simulation_id=A_SIMULATION,
     )
     assert isinstance(driver, LiveKitRoomBackend)
@@ -1157,13 +1086,12 @@ async def test_the_golden_livekit_fixture_is_a_connection_the_plug_accepts(
         simulation_id=spec.simulation_id,
     )
     assert isinstance(plug, LiveKitRoom)
-    assert plug.sample_rate_hz == ROOM_BAND_HZ
     assert plug.provider_reference is None, "no room exists before one is made"
     assert plug.backend.room_name.startswith(f"{ROOM_PREFIX}-")
 
     assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
     assert assembled.conductor is not None
-    assert assembled.audio is None, "nothing was conducted, so nothing was measured"
+    assert assembled.audio is None, "nothing was conducted, so nothing was recorded"
 
 
 # -- The second way in: the customer mints the token -------------------------
@@ -1319,6 +1247,7 @@ async def test_a_token_under_any_of_the_three_names_is_taken(alias: str):
     stub = RoomStub(greeting="Front desk.")
     with serving(token="under.this.name", alias=alias) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
+        await plug.prepare()
         await plug.open()
         await plug.close()
 
@@ -1331,6 +1260,7 @@ async def test_the_endpoints_own_server_url_is_where_egma_joins():
     stub = RoomStub(greeting="Front desk.")
     with serving(server_url="wss://elsewhere.livekit.cloud") as endpoint:
         plug = endpoint_room(stub, endpoint.url)
+        await plug.prepare()
         await plug.open()
         await plug.close()
 
@@ -1342,6 +1272,7 @@ async def test_the_connections_own_url_is_where_egma_joins_without_one():
     stub = RoomStub(greeting="Front desk.")
     with serving() as endpoint:
         plug = endpoint_room(stub, endpoint.url)
+        await plug.prepare()
         await plug.open()
         await plug.close()
 
@@ -1406,7 +1337,7 @@ async def test_an_endpoint_that_answers_badly_is_a_fault_in_its_own_words(
     with serving(**scripted) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
         with pytest.raises(PlugError) as refused:
-            await plug.open()
+            await plug.prepare()
         await plug.close()
         served = endpoint.url
 
@@ -1433,7 +1364,7 @@ async def test_a_token_the_endpoint_minted_is_never_quoted_back():
     with serving(body={"token": minted, "serverUrl": 17}) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
         with pytest.raises(PlugError) as refused:
-            await plug.open()
+            await plug.prepare()
         await plug.close()
 
     told = str(refused.value)
@@ -1464,7 +1395,7 @@ async def test_a_token_in_a_failing_answer_is_never_quoted_back(
     with serving(status=status, body={"token": minted}) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
         with pytest.raises(PlugError) as refused:
-            await plug.open()
+            await plug.prepare()
         await plug.close()
 
     told = str(refused.value)
@@ -1488,7 +1419,7 @@ async def test_an_endpoint_that_redirects_is_answered_rather_than_followed():
     ) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
         with pytest.raises(PlugError) as refused:
-            await plug.open()
+            await plug.prepare()
         await plug.close()
 
     told = str(refused.value)
@@ -1504,7 +1435,7 @@ async def test_an_endpoint_that_answers_nowhere_is_a_fault_naming_it():
     plug = endpoint_room(stub, "http://127.0.0.1:1/egma/livekit-token")
 
     with pytest.raises(PlugError) as refused:
-        await plug.open()
+        await plug.prepare()
     await plug.close()
 
     told = str(refused.value)
@@ -1512,42 +1443,6 @@ async def test_an_endpoint_that_answers_nowhere_is_a_fault_naming_it():
     assert "127.0.0.1:1" in told
     assert "could not be reached" in told
     assert A_HEADER_SECRET not in told
-
-
-async def test_a_token_the_server_rejects_is_a_fault_in_the_servers_words(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """The endpoint answered, and the server would not take what it minted.
-
-    The real driver the whole way: a real endpoint mints a token, and the
-    real transport takes it to a LiveKit that is not there. Nothing is
-    stubbed here at all, which is what makes the sentence the one a
-    customer would read.
-    """
-    # Only the tidying-up budget is shortened, and only because nothing
-    # here is under test after the refusal. The wait for the server is
-    # left as it ships: a closed port refuses at once, so the real budget
-    # costs this test nothing and shortening it would prove less.
-    monkeypatch.setattr(room_module, "TEARDOWN_SECONDS", 1.0)
-
-    with serving(token="a.token.the.server.will.not.take") as endpoint:
-        settings = RoomSettings.from_connection(
-            {"url": "ws://127.0.0.1:1", "tokenEndpoint": endpoint.url},
-            {"headers": AN_AUTH_HEADER},
-        )
-        room_driver = LiveKitRoomBackend(
-            settings=settings, band_hz=ROOM_BAND_HZ, simulation_id=A_SIMULATION
-        )
-
-        with pytest.raises(MediaBackendError) as refusal:
-            await room_driver.create_session()
-        await room_driver.teardown()
-
-    told = str(refusal.value)
-    assert failed_ending(refusal.value) == ERROR
-    assert "127.0.0.1:1" in told, "the reason names the server that said no"
-    assert A_HEADER_SECRET not in told
-    assert A_HEADER_SECRET not in repr(refusal.value.__cause__)
 
 
 async def test_the_agent_nobody_dispatched_is_the_endpoints_duty(
@@ -1704,7 +1599,7 @@ async def test_an_endpoint_that_says_the_header_back_still_leaks_nothing():
     ) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
         with pytest.raises(PlugError) as refused:
-            await plug.open()
+            await plug.prepare()
         await plug.close()
 
     told = str(refused.value)
@@ -1819,7 +1714,6 @@ async def test_the_golden_token_endpoint_fixture_is_a_connection_the_plug_accept
         simulation_id=spec.simulation_id,
     )
     assert isinstance(plug, LiveKitRoom)
-    assert plug.sample_rate_hz == ROOM_BAND_HZ
     # Named after the simulation, because the endpoint being asked has to
     # be able to check the name against its own rules.
     assert plug.backend.room_name == f"{ROOM_PREFIX}-{spec.simulation_id}"

@@ -6,10 +6,9 @@ participant, gets the agent's worker into it, holds the exchange, and
 tidies up when it is over. That is the whole of this file, in the four
 verbs every media driver has (see :mod:`egma_simulator.media`):
 
-1. ``create_session`` — come by a token and a room, and join purely
-   outbound through Pipecat's stock transport. The simulator needs no
-   inbound network surface: it opens the websocket and negotiates the
-   media.
+1. ``create_transport`` — come by a token and a room, then build
+   Pipecat's stock transport. The simulator needs no inbound network
+   surface: it opens the websocket and negotiates the media.
 2. ``dial`` — get the agent in. A connection that names an agent gets an
    **explicit dispatch** by that name; one that names none relies on
    **automatic dispatch**, which is LiveKit's own behavior for a worker
@@ -122,12 +121,11 @@ from ..mock_tools import (
     MockToolSeam,
 )
 from ..redaction import SecretRegistry
-from . import MediaBackendError
+from . import MediaBackendError, VoiceMedia
 from .room import (
     PERSONA_IDENTITY,
     QUOTED_REFUSAL_CHARS,
     JoinedRoom,
-    RoomSession,
     delete_room,
     first_of,
     fresh_room_name,
@@ -137,18 +135,6 @@ from .room import (
 )
 
 logger = logging.getLogger(__name__)
-
-ROOM_BAND_HZ = 16000
-"""The band an exchange in a room is carried at.
-
-WebRTC negotiates its own codec and Pipecat's transport resamples what
-arrives to the band the pipeline was assembled at, so this is the band
-that really flows through egma — wideband, where a phone call is
-narrowband. What a record stamps is still measured off the audio the
-recorder saw, never copied from here, and there is no way for a
-connection to ask for another: a band that could be asked for would be a
-band declared.
-"""
 
 KNOWN_CONFIG_KEYS = frozenset({"url", "agentName", "metadata"})
 KNOWN_CREDENTIAL_KEYS = frozenset({"apiKey", "apiSecret"})
@@ -532,12 +518,10 @@ class LiveKitRoomBackend:
         self,
         *,
         settings: RoomSettings,
-        band_hz: int,
         simulation_id: str,
         mock_tools: MockToolSeam | None = None,
     ) -> None:
         self._settings = settings
-        self._band_hz = band_hz
         self._simulation_id = simulation_id
         self._mock_tools = mock_tools
         # One registry per driver, so what this driver quotes from the
@@ -565,13 +549,11 @@ class LiveKitRoomBackend:
         reference."""
         return self._room_name
 
-    async def create_session(self) -> RoomSession:
-        """Get a way into the room, join it, and answer with its audio."""
+    async def create_transport(self) -> VoiceMedia:
+        """Get a way into the room and build its Pipecat transport."""
         way_in = await self._way_in()
         self._room = self._joined_room(way_in)
-        session = await self._room.join()
-        self._answer_for_mocked_tools()
-        return session
+        return self._room.create_transport()
 
     def _answer_for_mocked_tools(self) -> None:
         """Stand ready to answer for the agent's tools, in the room.
@@ -649,6 +631,10 @@ class LiveKitRoomBackend:
         not given, so putting a worker in the room is the endpoint's job
         and egma's part is to be in the room when it arrives.
         """
+        if self._room is None:
+            raise MediaBackendError("an agent was requested before a room transport")
+        await self._room.wait_connected()
+        self._answer_for_mocked_tools()
         if not self._settings.mints_its_own:
             return
         if not self._settings.agent_name:
@@ -658,8 +644,7 @@ class LiveKitRoomBackend:
     async def wait_answered(self, seconds: float) -> str:
         """Wait for the agent to turn up and be heard, or say nobody did."""
         room = self._room
-        session = None if room is None else room.session
-        if room is None or session is None:
+        if room is None:
             raise MediaBackendError("an agent was waited for before a room")
 
         # One deadline for both halves, not one each: the budget is how
@@ -671,7 +656,7 @@ class LiveKitRoomBackend:
                 self._nobody_came(seconds), ending=AGENT_NEVER_JOINED
             )
         left = deadline - asyncio.get_running_loop().time()
-        if left <= 0 or not await first_of(session.carrying_audio, within=left):
+        if left <= 0 or not await first_of(room.carrying_audio, within=left):
             raise MediaBackendError(
                 f"an agent joined the room but published no audio within "
                 f"{seconds:.0f}s; check that the worker publishes a track "
@@ -880,7 +865,6 @@ class LiveKitRoomBackend:
             url=way_in.url,
             token=way_in.token,
             room_name=self._room_name,
-            band_hz=self._band_hz,
             quotable=self._quotable,
         )
 

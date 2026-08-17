@@ -307,7 +307,7 @@ async function signedUpKey(): Promise<{
 async function rowOf(simulationId: string): Promise<Record<string, unknown>> {
   const { rows } = await instance.database.sql(
     `select status, ending_reason, claimed_by, started_at, ended_at,
-            turn_count, provider_reference, measured_audio_band_hertz,
+            turn_count, provider_reference,
             cancel_requested_at
        from simulation where id = $1`,
     [simulationId],
@@ -706,7 +706,6 @@ describe("the shipped simulator against the real API", () => {
       expect(row.turn_count).toBe(4);
       // Retell's own id for the exchange, echoed off the counterpart.
       expect(String(row.provider_reference)).toMatch(/^chat_/);
-      expect(row.measured_audio_band_hertz).toBeNull();
       const startedAt = new Date(String(row.started_at));
       const endedAt = new Date(String(row.ended_at));
       expect(startedAt.getTime()).toBeLessThanOrEqual(endedAt.getTime());

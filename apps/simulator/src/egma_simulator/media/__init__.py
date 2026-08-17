@@ -1,125 +1,20 @@
-"""Media backends: the one place that knows how a call's audio travels.
+"""Media backends give Pipecat one transport for an outbound phone call.
 
-A **media backend** is the component behind a phone call's audio. It alone
-knows how to open a session with a bridge, ask that bridge to place a call
-over a trunk, learn whether anybody came on the line, carry audio both
-ways, and tear the call down. Everything above it is backend-blind: the
-phone plug drives this seam, the speech legs and the recorder see only
-audio, and the conductor and the report never learn which bridge ran.
+A backend creates the transport processors, dials, waits for an answer,
+and tears the call down. The transport owns frames, conversion, buffering,
+and pacing. It never exposes a PCM exchange or a processing rate to Egma.
 
-This docstring is the driver author's whole brief. If writing a new
-driver requires reading anything beyond this file, that is a bug in this
-file.
-
-## Why the seam exists at all
-
-The bridge is bought, not built — LiveKit today, Daily or another the day
-somebody wants it — and the pieces that differ between two bridges are
-small and few: how a session is opened, how a call is placed, how an
-answer is learned, and how it all ends. Everything else about a phone
-simulation is identical, so everything else sits above this line. Adding
-a bridge is therefore one new module in this package and one line in the
-registry below, and the diff that adds it touches nothing else.
-
-## What a driver implements
-
-Two objects, and no more.
-
-:class:`MediaBackend` is the call: four methods, in this order, once each.
-
-1. ``await create_session()`` — open the way in and answer with the
-   :class:`MediaSession` that carries the audio. No call is placed yet.
-   Raise :class:`MediaBackendError` when the bridge cannot be reached.
-2. ``await dial(number)`` — ask the bridge to place the call. Returns as
-   soon as the request is away; it does not wait for an answer, because
-   the plug wants the ringing time on the clock rather than inside one
-   call it cannot see into.
-3. ``await wait_answered(seconds)`` — block until somebody is on the
-   line, then answer with **the provider's own identifier for the call**,
-   which is what the report carries as its join to the platform's
-   telemetry. Raise :class:`MediaBackendError` when the call never
-   became a conversation, with the ending it deserves — see below.
-4. ``await teardown()`` — end the call and release everything. Called
-   exactly once whatever happened: after a natural end, after a limit,
-   after a cancel, after a refusal at any step above, and even when
-   ``create_session`` never ran. Make it safe in every one of those
-   states.
-
-:class:`MediaSession` is the audio, and it is only alive between an
-answer and teardown:
-
-- ``sample_rate_hz`` — the band the session carries, which the driver is
-  handed rather than choosing: the pipeline above is already assembled at
-  it, and a driver that answered with a different one would be handing
-  the recorder samples it will mis-time.
-- ``observed_band_hz`` — the band the far end's audio *really arrived at*,
-  read off what flowed, or ``None`` before anything has. What a record
-  stamps as its measured band comes from here, never from the request
-  above it: the two agree in every configuration that works, and the one
-  worth catching is the configuration that does not.
-- ``await send(pcm)`` — the persona's audio, out to the far end, and
-  **back as soon as it is away**. It is a small piece of a voice rather
-  than a whole turn, and a driver neither waits out its length nor
-  touches what arrives while it is playing: both directions of a line are
-  open at once, and the far end speaking over the persona is exactly the
-  thing the record exists to hold. Real-time pacing is the transport's
-  own, which is why a fake line costs a deterministic test nothing.
-- ``await receive(seconds)`` — the next audio that arrived, or ``None``
-  when none arrived within ``seconds``. Quiet is audio: a real line
-  carries comfort noise between words, and a driver must hand it over
-  rather than hide it, because the count of samples that crossed the line
-  is the conversation's own clock.
-- ``far_end_left`` — true once the far end is off the line. On LiveKit
-  that is the SIP participant leaving the room, and it is exactly what
-  "the agent hung up" means.
-
-## Which failed ending a refusal deserves
-
-The contract has three failed endings and this seam uses two of them.
-The line is *who* refused, and it is worth stating once because a wrong
-answer here is a lie on somebody's record:
-
-- :data:`NOT_ANSWERED` — the call reached the far end and nothing came on
-  the line: busy, ringing out, declined. The simulator did its part and
-  the phone was not picked up.
-- :data:`ERROR` — the call never reached the far end: the trunk refused
-  the credentials, the carrier failed, the number is not allocated, the
-  bridge could not be reached. Somebody has something to fix.
-
-Neither is ever the agent failing, and the reason carried alongside is
-what names which of them happened, in the carrier's own words where
-there are any.
-
-## Configuration and credentials
-
-A driver is handed ``settings`` — the deployment's already-checked
-:class:`egma_simulator.config.MediaSettings`. Nothing is read from the
-environment down here: a simulator that cannot place calls has to say so
-on its first line naming the variable, and that can only happen at
-startup, before anything is claimed. A phone connection's spec carries
-no secret at all, because a trunk belongs to a deployment rather than to
-one simulation.
-
-Use the secrets to reach the bridge and for nothing else: **never log
-one, never let one into an exception message, never let one into a
-returned value.** Every secret the settings hold is registered with the
-process's redacting log filter at startup, and a driver that quotes a
-bridge's own words back into a refusal scrubs them through the same
-:class:`egma_simulator.redaction.SecretRegistry` first — one
-implementation, used in both places. The acceptance suite plants
-sentinel trunk credentials and scans every byte the process emits, on
-the happy path and the failing ones both.
-
-## Registration
-
-The registry is :data:`BACKENDS` below: one entry per driver, naming its
-module and its class. :func:`backend_for` reads it, so adding a bridge is
-one new module and one line.
+Backends receive checked deployment settings. They must keep credentials
+out of logs, exceptions, and returned values. A refusal is ``not_answered``
+only when the far end declined or did not pick up; path and carrier faults
+are ``error``.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from importlib import import_module
 from typing import Protocol
 
@@ -187,27 +82,25 @@ def sip_refusal(
     return MediaBackendError(f"{named}{f'; {told}' if told else ''}", ending=ending)
 
 
-class MediaSession(Protocol):
-    """The audio channel one call rides on. See the module docstring."""
+@dataclass(frozen=True)
+class VoiceMedia:
+    """The Pipecat processors and end signal for one voice connection.
 
-    @property
-    def sample_rate_hz(self) -> int: ...
+    The transport owns frames, conversion, buffering, and pacing.  A plug
+    gives these processors to the voice conductor once; it never exchanges
+    PCM bytes with the conductor itself.
+    """
 
-    @property
-    def observed_band_hz(self) -> int | None: ...
-
-    @property
-    def far_end_left(self) -> bool: ...
-
-    async def send(self, pcm: bytes) -> None: ...
-
-    async def receive(self, seconds: float) -> bytes | None: ...
+    input: tuple[object, ...]
+    output: tuple[object, ...]
+    ended: asyncio.Event
+    input_recorded: Callable[[object], None] = lambda _frame: None
 
 
 class MediaBackend(Protocol):
     """One outbound call, from opening the way in to hanging up."""
 
-    async def create_session(self) -> MediaSession: ...
+    async def create_transport(self) -> VoiceMedia: ...
 
     async def dial(self, number: str) -> None: ...
 
@@ -217,9 +110,7 @@ class MediaBackend(Protocol):
 
 
 BackendFactory = Callable[..., MediaBackend]
-"""What the registry hands back: called with ``settings=``, ``config=``,
-``band_hz=`` and ``caller_id=`` keywords, it returns one backend for one
-call — in practice, the driver class itself."""
+"""A backend class called with settings, config, and caller id."""
 
 
 def backend_for(name: str) -> BackendFactory | None:

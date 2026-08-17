@@ -55,6 +55,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
+    StartFrame,
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -305,16 +306,18 @@ class ScriptedTTS(FrameProcessor):
     no network to speak.
     """
 
-    def __init__(self, *, voice: PersonaVoice, sample_rate_hz: int) -> None:
+    def __init__(self, *, voice: PersonaVoice) -> None:
         super().__init__()
         self.voice = voice
-        self.sample_rate_hz = sample_rate_hz
+        self.sample_rate_hz = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         # A transcription is a text frame travelling the other way — the
         # agent's words on their way to the persona, never something to
         # speak. The service base class draws the same line.
+        if isinstance(frame, StartFrame):
+            self.sample_rate_hz = frame.audio_out_sample_rate
         if isinstance(frame, TextFrame) and not isinstance(
             frame, TranscriptionFrame | InterimTranscriptionFrame
         ):
@@ -347,9 +350,9 @@ class ScriptedSTT(SegmentedSTTService):
     and stop and calls :meth:`run_stt` once with the whole utterance.
     """
 
-    def __init__(self, *, sample_rate_hz: int) -> None:
+    def __init__(self) -> None:
         super().__init__(
-            sample_rate=sample_rate_hz,
+            sample_rate=None,
             settings=STTSettings(model=None, language=None),
             ttfs_p99_latency=1.0,
         )
@@ -397,19 +400,29 @@ class ScriptedVAD(VADAnalyzer):
     to sit through a gap between words, short enough that the persona is
     not left waiting on somebody who has finished."""
 
-    def __init__(self, *, sample_rate_hz: int, window_samples: int) -> None:
-        self._window_samples = window_samples
+    def __init__(self) -> None:
+        self._window_samples = SAMPLES_PER_BYTE
         super().__init__(
-            sample_rate=sample_rate_hz,
+            sample_rate=None,
             params=VADParams(
                 confidence=0.5,
                 # Loudness is already the whole of this leg's answer, so a
                 # second loudness gate could only disagree with it.
                 min_volume=0.0,
-                start_secs=self.SPEAKING_WINDOWS * window_samples / sample_rate_hz,
-                stop_secs=self.QUIET_WINDOWS * window_samples / sample_rate_hz,
+                start_secs=0.0,
+                stop_secs=0.0,
             ),
         )
+
+    def set_sample_rate(self, sample_rate: int) -> None:
+        """Learn the input rate from Pipecat's start frame."""
+        self._params.start_secs = (
+            self.SPEAKING_WINDOWS * self._window_samples / sample_rate
+        )
+        self._params.stop_secs = (
+            self.QUIET_WINDOWS * self._window_samples / sample_rate
+        )
+        super().set_sample_rate(sample_rate)
 
     def num_frames_required(self) -> int:
         return self._window_samples
@@ -590,9 +603,7 @@ class SpeechLegs:
                 logger.exception("a speech leg did not close cleanly")
 
 
-def build_legs(
-    providers: SpeechProviders, *, voice: PersonaVoice, sample_rate_hz: int
-) -> SpeechLegs:
+def build_legs(providers: SpeechProviders, *, voice: PersonaVoice) -> SpeechLegs:
     """The pair this simulation speaks and listens with.
 
     Building is not connecting: a real leg constructs its client here and
@@ -600,8 +611,8 @@ def build_legs(
     pipeline stays the validation step it has always been.
     """
     providers = providers.checked()
-    speaking, spoken_with, closers = _mouth(providers, voice, sample_rate_hz)
-    listening_leg, listening = _ears(providers, sample_rate_hz)
+    speaking, spoken_with, closers = _mouth(providers, voice)
+    listening_leg, listening = _ears(providers)
     return SpeechLegs(
         stt=listening_leg,
         tts=speaking,
@@ -611,7 +622,7 @@ def build_legs(
     )
 
 
-TELEPHONY_VAD = VADParams(
+CONVERSATION_VAD = VADParams(
     # Pipecat's own default is 0.2, and their documentation is explicit that
     # 0.2 is the value to use **when a turn analyzer is doing the real work**
     # and this is only its fallback. With nothing above it, 0.2 ends a turn at
@@ -620,12 +631,9 @@ TELEPHONY_VAD = VADParams(
     # each. Their recommendation for conversation without an analyzer is 0.8,
     # and that is what this is.
     stop_secs=0.8,
-    # Both of the remaining defaults — 0.7 and 0.6 — are tuned for a clean
-    # wideband microphone. This line is 8 kHz telephony: quieter, band-limited
-    # and compressed, so the same thresholds are strictly harsher here than
-    # they are where they were chosen. Lowered together, because raising the
-    # bar for what counts as speech on a phone line is how an agent's words
-    # stop being heard at all.
+    # Both remaining defaults are tuned for a clean headset. Voice-agent
+    # connections are often quieter and compressed, so the same thresholds
+    # are harsher here than where they were chosen.
     confidence=0.6,
     min_volume=0.3,
     # Left at Pipecat's default. This one says how much speech must arrive
@@ -633,17 +641,10 @@ TELEPHONY_VAD = VADParams(
     # sound threshold on any channel.
     start_secs=0.2,
 )
-"""How the persona hears a phone line, as against a microphone.
-
-Every number here is a departure from a Pipecat default, and each is a
-departure for the same reason: the defaults assume a headset in a quiet
-room and this is a compressed 8 kHz call to a business.
-"""
+"""How the persona detects speech on a voice-agent connection."""
 
 
-def build_vad(
-    providers: SpeechProviders, *, sample_rate_hz: int, window_samples: int
-) -> VADAnalyzer:
+def build_vad(providers: SpeechProviders) -> VADAnalyzer:
     """The leg this simulation hears speech *starting and stopping* with.
 
     Chosen at assembly and nowhere else, exactly like the mouth and the
@@ -655,27 +656,25 @@ def build_vad(
     """
     providers = providers.checked()
     if providers.vad != "silero":
-        return ScriptedVAD(
-            sample_rate_hz=sample_rate_hz, window_samples=window_samples
-        )
+        return ScriptedVAD()
 
     # Imported here and not at the top of the file, for the reason every
     # provider in this module is: an unconfigured simulator must not load
     # a model it will never run. The quarantine suite holds this.
     from pipecat.audio.vad.silero import SileroVADAnalyzer
 
-    return SileroVADAnalyzer(sample_rate=sample_rate_hz, params=TELEPHONY_VAD)
+    return SileroVADAnalyzer(params=CONVERSATION_VAD)
 
 
 def _mouth(
-    providers: SpeechProviders, voice: PersonaVoice, sample_rate_hz: int
+    providers: SpeechProviders, voice: PersonaVoice
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
     if providers.tts == "openai":
-        return _openai_mouth(providers, voice, sample_rate_hz)
+        return _openai_mouth(providers, voice)
     if providers.tts == "cartesia":
-        return _cartesia_mouth(providers, voice, sample_rate_hz)
+        return _cartesia_mouth(providers, voice)
     if providers.tts != "elevenlabs":
-        return ScriptedTTS(voice=voice, sample_rate_hz=sample_rate_hz), voice, ()
+        return ScriptedTTS(voice=voice), voice, ()
 
     # Imported here and not at the top of the file: an unconfigured
     # simulator must not pay for a provider it will not use, and a
@@ -698,7 +697,6 @@ def _mouth(
     leg = ElevenLabsHttpTTSService(
         api_key=providers.tts_key,
         aiohttp_session=session,
-        sample_rate=sample_rate_hz,
         settings=settings,
         # One persona turn is one whole thing to say, so it goes to the
         # provider in one piece rather than a sentence at a time, which
@@ -716,21 +714,21 @@ def _mouth(
 
 
 def _ears(
-    providers: SpeechProviders, sample_rate_hz: int
+    providers: SpeechProviders,
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     if providers.stt == "openai":
-        return _openai_ears(providers, sample_rate_hz), None
+        return _openai_ears(providers), None
     if providers.stt == "openai_realtime":
-        return _openai_realtime_ears(providers, sample_rate_hz)
+        return _openai_realtime_ears(providers)
     if providers.stt != "deepgram":
-        return ScriptedSTT(sample_rate_hz=sample_rate_hz), None
+        return ScriptedSTT(), None
 
     from pipecat.services.deepgram.stt import DeepgramSTTService
 
     if not providers.stt_key:
         raise SpeechFault("the deepgram listening leg was chosen without a key")
 
-    leg = DeepgramSTTService(api_key=providers.stt_key, sample_rate=sample_rate_hz)
+    leg = DeepgramSTTService(api_key=providers.stt_key)
 
     async def connected() -> None:
         # The service opens its websocket in a background task and drops
@@ -751,18 +749,12 @@ def _ears(
 
 
 def _cartesia_mouth(
-    providers: SpeechProviders, voice: PersonaVoice, sample_rate_hz: int
+    providers: SpeechProviders, voice: PersonaVoice
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
-    """The persona's voice, through Cartesia, at the band the line carries.
+    """The persona's voice through Pipecat's stock Cartesia service.
 
-    **Three lines rather than the openai mouth's thirty, and the reason is
-    worth writing down: this provider is told the band and honors it.** It
-    is asked for raw 16-bit signed little-endian mono at the line's own
-    rate, so what arrives is already what the pipeline was assembled for
-    and there is nothing to convert and nothing to mislabel. The openai
-    mouth needs :class:`_BandCorrection` because its endpoint returns one
-    fixed band whatever it is asked for; that is a fact about that wire,
-    not a habit of this module.
+    It is asked for raw 16-bit signed little-endian mono. Pipecat gives it
+    the output rate from the start frame and the transport owns conversion.
 
     The voice is a Cartesia identifier and belongs to Cartesia, so a
     persona authored for another provider's voice speaks with the default
@@ -809,7 +801,6 @@ def _cartesia_mouth(
 
     leg = CartesiaTTSService(
         api_key=providers.tts_key,
-        sample_rate=sample_rate_hz,
         encoding="pcm_s16le",
         container="raw",
         settings=settings,
@@ -823,36 +814,13 @@ def _cartesia_mouth(
     return leg, spoken_with, ()
 
 
-# -- The openai pair, and the band it really speaks at ------------------------
-
-OPENAI_TTS_BAND_HZ = 24000
-"""The band OpenAI's speech endpoint really returns, whatever is asked of it.
-
-It is asked for ``response_format: "pcm"``, and that format is documented
-as 24 kHz 16-bit signed little-endian mono. There is no parameter that
-changes it. So this is not a default this code chose — it is a fact about
-the other end of the wire, and the reason :func:`_openai_mouth` exists.
-"""
+# -- The OpenAI pair ----------------------------------------------------------
 
 
 def _openai_mouth(
-    providers: SpeechProviders, voice: PersonaVoice, sample_rate_hz: int
+    providers: SpeechProviders, voice: PersonaVoice
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
-    """The persona's voice, through OpenAI, at the band the line carries.
-
-    **The whole reason this is not three lines.** Pipecat's OpenAI speaking
-    leg asks the provider for raw PCM and then stamps every chunk with the
-    band the *pipeline* was assembled at — it never converts. Assembled on
-    a phone line that is a 24 kHz recording labelled 8 kHz: the persona
-    speaks at a third of the rate, three times too deep, for three times as
-    long, and the only sign is a warning in a log. Every measurement taken
-    off it is wrong by the same factor, and the agent under test hears a
-    voice no caller has.
-
-    So the leg is built at the band the provider really speaks at, and its
-    audio is converted down to the line's band with Pipecat's own stream
-    resampler before it leaves this processor. Conversion, not relabelling.
-    """
+    """The persona's voice through Pipecat's stock OpenAI service."""
     from pipecat.services.openai.tts import OpenAITTSService
 
     if not providers.tts_key:
@@ -868,34 +836,18 @@ def _openai_mouth(
     )
     if spoken_with.speed is not None:
         settings.speed = spoken_with.speed
-    from pipecat.pipeline.pipeline import Pipeline
-
-    leg = Pipeline(
-        [
-            OpenAITTSService(
-                api_key=providers.tts_key,
-                # Built at the provider's own band. Handing it the line's
-                # band is what makes it mislabel, so it is never told one.
-                sample_rate=OPENAI_TTS_BAND_HZ,
-                settings=settings,
-            ),
-            _BandCorrection(
-                spoken_at_hz=OPENAI_TTS_BAND_HZ, carried_at_hz=sample_rate_hz
-            ),
-        ]
+    leg = OpenAITTSService(
+        api_key=providers.tts_key,
+        settings=settings,
     )
     return leg, spoken_with, ()
 
 
-def _openai_ears(
-    providers: SpeechProviders, sample_rate_hz: int
-) -> FrameProcessor:
+def _openai_ears(providers: SpeechProviders) -> FrameProcessor:
     """What the agent said, transcribed by OpenAI.
 
-    Nothing to correct here, and worth saying why the two legs differ: this
-    one is segmented, so Pipecat hands the provider a WAV it writes itself
-    with the line's own band in its header. The audio and the header agree
-    by construction, and the provider resamples whatever it is given.
+    This leg is segmented, so Pipecat hands the provider a WAV it writes
+    from the pipeline input. The provider accepts that recording directly.
     """
     from pipecat.services.openai.stt import OpenAISTTService
 
@@ -904,7 +856,6 @@ def _openai_ears(
 
     return OpenAISTTService(
         api_key=providers.stt_key,
-        sample_rate=sample_rate_hz,
         settings=OpenAISTTService.Settings(
             model=providers.stt_model or DEFAULT_STT_MODEL
         ),
@@ -912,7 +863,7 @@ def _openai_ears(
 
 
 def _openai_realtime_ears(
-    providers: SpeechProviders, sample_rate_hz: int
+    providers: SpeechProviders,
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     """What the agent said, transcribed while they are still saying it.
 
@@ -935,9 +886,8 @@ def _openai_realtime_ears(
     in front of this leg in the pipeline and pushes the frame it commits
     on, so the two are wired together by the assembly order.
 
-    The band is the provider's own — its socket takes 24 kHz and nothing
-    else — and the service resamples what it is handed, so nothing here
-    has to correct a band the way the speaking leg does.
+    The stock service owns the rate its socket requires and converts the
+    pipeline audio itself.
     """
     from pipecat.services.openai.stt import OpenAIRealtimeSTTService
 
@@ -948,7 +898,6 @@ def _openai_realtime_ears(
 
     leg = OpenAIRealtimeSTTService(
         api_key=providers.stt_key,
-        sample_rate=sample_rate_hz,
         # False is this service's word for "the detector is in the
         # pipeline, not on the server". Named rather than left to the
         # default, because a release changing it would move where a turn
@@ -999,60 +948,6 @@ def _openai_realtime_ears(
             await asyncio.sleep(0.05)
 
     return leg, connected
-
-
-class _BandCorrection(FrameProcessor):
-    """Converts the audio of the leg above it to the band the line carries.
-
-    Placed after a speaking leg rather than inside one, so the provider's
-    own service stays the stock Pipecat class a release can replace.
-
-    A sample is two bytes and a provider's stream is cut wherever its HTTP
-    chunking fell, so an odd byte waits here for its partner: resampling
-    half a sample shifts every sample after it by a byte, which is noise.
-    """
-
-    def __init__(self, *, spoken_at_hz: int, carried_at_hz: int) -> None:
-        super().__init__()
-        from pipecat.audio.utils import create_stream_resampler
-
-        self.spoken_at_hz = spoken_at_hz
-        self.carried_at_hz = carried_at_hz
-        # A stream resampler rather than a fresh one per chunk: a filter
-        # restarted at every chunk boundary clicks at every chunk boundary.
-        self._resampler = create_stream_resampler()
-        self._pending = bytearray()
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
-        await super().process_frame(frame, direction)
-        if (
-            isinstance(frame, TTSAudioRawFrame)
-            and direction == FrameDirection.DOWNSTREAM
-            and self.spoken_at_hz != self.carried_at_hz
-        ):
-            converted = await self._convert(frame.audio)
-            if converted is None:
-                return
-            await self.push_frame(
-                TTSAudioRawFrame(
-                    audio=converted, sample_rate=self.carried_at_hz, num_channels=1
-                ),
-                direction,
-            )
-            return
-        await self.push_frame(frame, direction)
-
-    async def _convert(self, audio: bytes) -> bytes | None:
-        self._pending.extend(audio)
-        whole_samples = len(self._pending) & ~1
-        if whole_samples == 0:
-            return None
-        taken = bytes(self._pending[:whole_samples])
-        del self._pending[:whole_samples]
-        converted = await self._resampler.resample(
-            taken, self.spoken_at_hz, self.carried_at_hz
-        )
-        return converted or None
 
 
 def _voice_from(

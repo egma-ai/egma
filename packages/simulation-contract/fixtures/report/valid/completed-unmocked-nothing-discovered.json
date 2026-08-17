@@ -14,7 +14,6 @@
         "ended_at": "2026-08-09T15:02:55.120000Z",
         "turn_count": 11,
         "audio": {
-          "measured_sample_rate_hz": 48000,
           "recording": "sim_01K3XV8KC0R6N3YFAD5PTBW29E/dual-channel.wav"
         },
         "provider_reference": "egma-sim-01K3XV8KC0R6N3YFAD5PTBW29E",

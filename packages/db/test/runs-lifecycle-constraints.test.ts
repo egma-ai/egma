@@ -401,18 +401,8 @@ describe("a simulation's shape", () => {
     );
   });
 
-  it("refuses the audio facts on a row that has not ended", async () => {
-    // The report check reduced to these two when the conversation left the
-    // row, and this is the pair it still holds to a landing. A chat row
-    // could not hold them at all, so the case is voice.
-    await expect(
-      insertSimulation("running", {
-        modality: "voice",
-        measured_audio_band_hertz: 8_000,
-      }),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
+  it("refuses a recording on a row that has not ended", async () => {
+    // A chat row cannot hold a recording at all, so this case is voice.
     await expect(
       insertSimulation("running", {
         modality: "voice",
@@ -456,23 +446,17 @@ describe("a simulation's shape", () => {
     );
   });
 
-  it("holds audio facts to voice: a chat cannot carry a band or a recording", async () => {
-    await expect(
-      insertSimulation("completed", { measured_audio_band_hertz: 48_000 }),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
+  it("holds recordings to voice: a chat cannot carry one", async () => {
     await expect(
       insertSimulation("completed", { recording_reference: "recordings/one.flac" }),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
 
-    // On voice they are exactly what the row is for.
+    // On voice this is exactly what the row is for.
     await expect(
       insertSimulation("completed", {
         modality: "voice",
-        measured_audio_band_hertz: 8_000,
         recording_reference: "recordings/one.flac",
       }),
     ).resolves.toBeDefined();

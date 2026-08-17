@@ -78,7 +78,6 @@ type StatusEvent = {
     readonly ended_at: string;
     readonly turn_count: number;
     readonly audio: {
-      readonly measured_sample_rate_hz: number;
       readonly recording: string;
     } | null;
     readonly provider_reference: string | null;
@@ -153,10 +152,7 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
       : { providerReference: facts.provider_reference }),
     ...(facts.audio === null
       ? {}
-      : {
-          measuredAudioBandHertz: facts.audio.measured_sample_rate_hz,
-          recordingReference: facts.audio.recording,
-        }),
+      : { recordingReference: facts.audio.recording }),
     // Left off where the document left it off, rather than landed as three
     // empty lists: absent is the report saying nobody was ever asked, and
     // empty is the asking happening and nothing coming back. Writing one for
