@@ -1,7 +1,7 @@
 /**
  * The smoke check: real Claude Code, finding a real voice agent's prompts.
  *
- * Nothing here is scripted. egma starts the adapter the agent registry names,
+ * Nothing here is scripted. egma starts the installed Claude Code profile,
  * hands it the two skills as the task's instructions, and the check passes only
  * if the coding agent comes back with marker lines naming the framework and the
  * prompts — read out of a repository this file has never seen and does not name.
@@ -30,6 +30,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { discoverCodingAgents, installedCodingAgent } from "../src/acp/coding-agents.ts";
 import { FACTS } from "../src/wizard/facts.ts";
 import { DETAIL_MARK } from "../src/wizard/status.ts";
 import { RULE, say } from "./support/report.ts";
@@ -120,15 +121,21 @@ async function main(): Promise<void> {
 
   const redact = redactor(target.trim());
 
-  say("Starting: egma, driving the coding agent the registry calls claude-acp.");
+  const claude = installedCodingAgent(await discoverCodingAgents(), "claude");
+  if (claude === null) throw new Error("Claude Code is not installed on this machine.");
+  say(`Starting: egma, driving ${claude.name} (${claude.id}).`);
   say("Folder:   <target repo>");
   say("");
 
   const started = Date.now();
-  const child = spawn(process.execPath, [CLI_ENTRY, "--headless", "--cwd", target.trim()], {
-    cwd: target.trim(),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    [CLI_ENTRY, "--headless", "--cwd", target.trim(), "--coding-agent", claude.id],
+    {
+      cwd: target.trim(),
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 
   let stdout = "";
   let stderr = "";

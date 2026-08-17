@@ -799,8 +799,9 @@ export const CONNECTION_REGISTRY: Readonly<
      *
      * The customer either hands egma their project's key pair and egma mints
      * its own, or they keep the pair and stand up an endpoint egma asks. The
-     * second is the shape a team ships to production with, because the secret
-     * that signs tokens for their whole project never leaves their side.
+     * first is the quickest setup and lets egma manage each simulation. The
+     * second is an advanced, customer-operated integration for a team that
+     * must keep the token-signing secret on its side.
      *
      * Nothing carries over between them. A connection that names an endpoint
      * holds no key pair, so it cannot create a room, cannot dispatch a worker
@@ -811,7 +812,7 @@ export const CONNECTION_REGISTRY: Readonly<
     variants: [
       {
         id: "livekit.key_pair",
-        label: "LiveKit project key pair",
+        label: "LiveKit project credentials — Recommended",
         config: {
           // The LiveKit server: a customer's cloud project, or the one they
           // run.
@@ -845,9 +846,9 @@ export const CONNECTION_REGISTRY: Readonly<
           },
         ],
         credentialHelp:
-          "Egma mints its own room tokens from this pair and stores it " +
-          "sealed. A read gives back the last four characters of the key, " +
-          "never the secret.",
+          "This is the quickest setup. Egma mints its own room tokens from " +
+          "this pair and stores it sealed. A read gives back the last four " +
+          "characters of the key, never the secret.",
         credentialFields: [
           {
             field: "apiKey",
@@ -880,7 +881,7 @@ export const CONNECTION_REGISTRY: Readonly<
         named: "a token-endpoint livekit connection",
         chosenBy: "tokenEndpoint",
         id: "livekit.token_endpoint",
-        label: "LiveKit token endpoint",
+        label: "Customer token endpoint — Advanced",
         config: {
           // Where the join goes, unless the endpoint's answer names another.
           url: livekitServerUrl,
@@ -902,10 +903,10 @@ export const CONNECTION_REGISTRY: Readonly<
           },
         ],
         credentialHelp:
-          "Auth headers Egma sends when it asks your endpoint for a token. " +
-          "They are optional, because an endpoint reachable only from Egma " +
-          "can be open to it. A read gives back the header names and never " +
-          "their values.",
+          "This is a customer-operated integration. Auth headers are sent " +
+          "when Egma asks your endpoint for a token. They are optional, " +
+          "because an endpoint reachable only from Egma can be open to it. " +
+          "A read gives back the header names and never their values.",
         credentialFields: [
           {
             field: "headers",

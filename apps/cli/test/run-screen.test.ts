@@ -57,6 +57,7 @@ const ONE_AGENT: FakeRetellScript = {
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
+      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },
   ],
@@ -174,8 +175,7 @@ async function toTheRun(cols = 100): Promise<TerminalRun> {
   await showing(run, "Paste your Retell API key");
   run.write(`${KEY}\r`);
 
-  // Text or phone. Not this check's subject, and not skippable
-  // either: egma never picks one of the two for a developer.
+  // This Retell chat agent supports text. Egma still requires confirmation.
   await showing(run, "How should Egma reach this agent?");
   run.write("\r");
 

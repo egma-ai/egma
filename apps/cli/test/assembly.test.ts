@@ -35,7 +35,7 @@ import { readCredentials } from "../src/platform/credentials.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitNotice, exitLines } from "../src/wizard/exit-line.ts";
 import { alreadyAsked } from "../src/wizard/login-step.ts";
-import { walk } from "../src/wizard/walk.ts";
+import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -47,7 +47,7 @@ import {
   type Workspace,
 } from "./support/workspace.ts";
 
-// Three subprocesses and two servers per walk, inside a run using every core:
+// One coding-agent subprocess and two servers per wizard run, inside a run using every core:
 // the budget is generous so that only a broken walk can reach it.
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
@@ -70,6 +70,7 @@ function account(prompt: string): FakeRetellScript {
       {
         agent_id: RETELL_AGENT_ID,
         agent_name: "order-line",
+        channel: "chat",
         response_engine: { type: "retell-llm", llm_id: "llm_quillfeather" },
       },
     ],
@@ -207,7 +208,7 @@ describe("the whole walk, offline", () => {
     const grading = gradeEveryRun(platform, { atMost: 1 });
     let report;
     try {
-      report = await walk({
+      report = await runWizard({
         ui,
         // Named as well as commanded, because which coding agent this is
         // decides whether there is a skill offer at all and where it points.
@@ -263,6 +264,24 @@ describe("the whole walk, offline", () => {
     expect(buildExitNotice(report)).toBe(
       "Nothing was installed. Claude Code can still drive Egma — tell it to run egma --help.",
     );
+
+    // Discovery and test writing are two turns in one ACP context. The coding
+    // agent is started, initialized and given a session exactly once.
+    const driven = JSON.parse(
+      await readFile(path.join(workspace.dir, "fake-agent-report.json"), "utf8"),
+    ) as {
+      processIds: number[];
+      initializeCount: number;
+      sessionIds: string[];
+      promptSessionIds: string[];
+    };
+    expect(new Set(driven.processIds).size).toBe(1);
+    expect(driven.initializeCount).toBe(1);
+    expect(driven.sessionIds).toHaveLength(1);
+    expect(driven.promptSessionIds).toEqual([
+      driven.sessionIds[0],
+      driven.sessionIds[0],
+    ]);
 
     /* this machine is signed in, and to this egma */
 

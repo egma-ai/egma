@@ -181,6 +181,7 @@ function exitCodeFor(outcome: ConnectOutcome): number {
       return CONNECT_EXIT.noAgents;
     case "unchosen":
     case "unchosen-reach":
+    case "incompatible-reach":
     case "unchosen-number":
       return CONNECT_EXIT.unchosen;
     case "no-numbers":
@@ -291,11 +292,9 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
     // coding agent reading this is told exactly what a person is told. There is
     // nobody here to answer it, so it is answered in the command or not at all
     // — and not at all creates nothing, which is the point.
-    chooseReach: () => {
+    chooseReach: (compatible) => {
       options.out(`note: ${REACH_ASK_LINE}`);
-      for (const way of ["text", "phone"] as const) {
-        options.out(`reach_option: ${way} ${REACH_LINES[way]}`);
-      }
+      options.out(`reach_option: ${compatible} ${REACH_LINES[compatible]}`);
       return Promise.resolve(named === null ? null : named.reach);
     },
     chooseNumber: (numbers) => {
@@ -394,6 +393,11 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
           `--reach text or --reach phone, or set ${REACH_VARIABLE}. Nothing was written.`,
       );
       break;
+    case "incompatible-reach":
+      options.out(`compatible_reach: ${outcome.compatible}`);
+      options.out("status: incompatible-reach");
+      options.fail(outcome.reason);
+      break;
     case "unchosen-number":
       options.out(`retell_numbers: ${outcome.numbers.length}`);
       options.out("status: unchosen-number");
@@ -406,7 +410,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       options.out("status: no-numbers");
       options.fail(
         "Retell routes no phone number to that agent, so there is nothing for Egma to " +
-          "dial. Assign one in the Retell dashboard, or connect over text with --reach text.",
+          "dial. Assign one in the Retell dashboard, then try again.",
       );
       break;
     case "no-key":

@@ -79,6 +79,28 @@ describe("where the skill goes", () => {
     expect(places?.global).toBe(path.join(home.dir, ".codex", "skills", "egma", "SKILL.md"));
   });
 
+  it("puts Cursor's where Cursor keeps skills, at both scopes", () => {
+    const places = placesFor("cursor");
+
+    expect(places?.name).toBe("Cursor");
+    expect(places?.project).toBe(
+      path.join(repository.dir, ".cursor", "skills", "egma", "SKILL.md"),
+    );
+    expect(places?.global).toBe(path.join(home.dir, ".cursor", "skills", "egma", "SKILL.md"));
+  });
+
+  it("puts OpenCode's in its different project and global roots", () => {
+    const places = placesFor("opencode");
+
+    expect(places?.name).toBe("OpenCode");
+    expect(places?.project).toBe(
+      path.join(repository.dir, ".opencode", "skills", "egma", "SKILL.md"),
+    );
+    expect(places?.global).toBe(
+      path.join(home.dir, ".config", "opencode", "skills", "egma", "SKILL.md"),
+    );
+  });
+
   /**
    * A coding agent whose skill convention egma does not know gets no offer at
    * all. Guessing at a directory would put a file somewhere nothing reads, and

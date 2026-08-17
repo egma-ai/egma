@@ -2,6 +2,8 @@
 name: coordinate-implementation
 description: Drive one ticketed effort through parallel implementation, independent review, serial integration, and one open pull request.
 disable-model-invocation: true
+metadata:
+  internal: true
 ---
 
 <!-- path-routing:start -->

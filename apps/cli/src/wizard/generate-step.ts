@@ -44,11 +44,9 @@ import {
   type FolderPaths,
   type FolderTest,
 } from "../folder/egma-folder.ts";
-import { driveOneTask } from "../acp/drive.ts";
-import type { DrivenAgentLaunch } from "../acp/registry.ts";
+import type { DrivenAgent } from "../acp/driven-agent.ts";
 import type { Registered } from "../platform/agents.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
-import type { RetellConfig } from "../retell/client.ts";
 import { pushTests } from "../sync/push.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { DrivenAgentLog } from "./driven-agent-log.ts";
@@ -93,7 +91,7 @@ const FOLDER_LOOK_MS = 400;
 
 export type GenerateStepOptions = {
   readonly ui: WizardUI;
-  readonly launch: DrivenAgentLaunch;
+  readonly drivenAgent: DrivenAgent;
   /** The repository the folder goes in, and the whole of what is read. */
   readonly cwd: string;
   readonly signal: AbortSignal;
@@ -102,12 +100,18 @@ export type GenerateStepOptions = {
   readonly signedIn: SignedIn;
   /** What connect registered, which is what the tests are for. */
   readonly registered: Registered;
-  /** What the provider is running, which is what the tests are grounded in. */
-  readonly config: RetellConfig;
+  /** Provider facts when the provider exposes them; otherwise repository context wins. */
+  readonly source: {
+    readonly prompt: string | null;
+    readonly toolCount: number | null;
+  };
   /** What the find-the-agent step reported. */
   readonly facts: Facts;
   /** How many tests a first suite holds. The default when it is left out. */
   readonly howMany?: number;
+  /** State-machine seams. They report ordering and perform no I/O themselves. */
+  readonly onReviewReady?: ((count: number) => void) | undefined;
+  readonly onReviewApproved?: ((count: number) => void) | undefined;
 };
 
 /**
@@ -144,7 +148,7 @@ async function writeFiles(
   instructions: string,
   goal: number,
 ): Promise<ExitReport | null> {
-  const { ui, launch, cwd, signal, log } = options;
+  const { ui, drivenAgent, signal, log } = options;
 
   const tally = new GenerationTally(what, goal);
   const markers = new MarkerStream();
@@ -223,16 +227,9 @@ async function writeFiles(
   ui.taskStarted();
   let result;
   try {
-    result = await driveOneTask({
-      launch,
-      cwd,
+    result = await drivenAgent.run({
       instructions,
-      ui,
-      signal,
-      logStderr: (chunk) => log.write(chunk),
       watch: (chunk) => take(markers.push(chunk)),
-      onLogin: (name) =>
-        ui.pushStatus(`${ACTION_MARK} ${name} needs you to log in. Handing you to its own login.`),
     });
     // The agent's last line often arrives without the line ending that would
     // have finished it, and it is read before the pane comes down.
@@ -253,11 +250,11 @@ async function writeFiles(
       // The agent stopping itself is not the same as writing nothing. What it
       // wrote before it stopped is on disk, and the folder is read either way.
       ui.pushStatus(
-        `${FAILURE_MARK} ${result.reason === "" ? `${launch.name} stopped, and did not say why.` : result.reason}`,
+        `${FAILURE_MARK} ${result.reason === "" ? `${drivenAgent.name} stopped, and did not say why.` : result.reason}`,
       );
       return null;
     case "interrupted":
-      return stoppedHere(signal, launch.name, paths);
+      return stoppedHere(signal, drivenAgent.name, paths);
     case "unreachable":
       return { kind: "no-coding-agent" };
     case "needs-login":
@@ -266,7 +263,7 @@ async function writeFiles(
         reason: `${result.drivenAgentName} is not logged in, and Egma could not hand you to its login. Log in to it, then run egma again.`,
       };
     case "failed":
-      ui.pushStatus(`What ${launch.name} printed is in ${log.file}`);
+      ui.pushStatus(`What ${drivenAgent.name} printed is in ${log.file}`);
       return { kind: "failed", reason: result.reason };
   }
 }
@@ -418,7 +415,9 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   // closes the wizard instead of answering has answered too, so the wait ends
   // with the signal and not only with a keystroke.
   const said = await untilAborted(ui.waitForAnswer("existing-tests"), signal);
-  if (signal.aborted) return ending(await stoppedHere(signal, options.launch.name, paths));
+  if (signal.aborted) {
+    return ending(await stoppedHere(signal, options.drivenAgent.name, paths));
+  }
 
   const existing = await readExistingTests(cwd, said ?? null);
   if (existing.kind === "unusable") {
@@ -457,8 +456,8 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     const context: GenerationContext = {
       cwd,
       facts: options.facts,
-      prompt: options.config.prompt,
-      toolCount: options.config.tools.length,
+      prompt: options.source.prompt,
+      toolCount: options.source.toolCount,
       agentName: options.registered.agent.name,
       taken: namesOf(converted),
       personas: PERSONAS_EGMA_HOLDS,
@@ -508,10 +507,11 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     if (gate.rows.length === 0 && refused.length === 0) {
       return ending({
         kind: "failed",
-        reason: `${options.launch.name} wrote no test Egma could use. What it printed is in ${options.log.file}.`,
+        reason: `${options.drivenAgent.name} wrote no test Egma could use. What it printed is in ${options.log.file}.`,
       });
     }
 
+    if (gate.rows.length > 0) options.onReviewReady?.(gate.rows.length);
     ui.setGate(gate);
     await untilAborted(ui.waitForGate("run-tests"), signal);
     ui.setGate(null);
@@ -545,7 +545,10 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     ]);
 
     const unagreed = pushed.refused.filter((held) => !agreedToGoWithout.has(held.file));
-    if (unagreed.length === 0) return { report: pushed.report, pushed: pushed.pushed, suite };
+    if (unagreed.length === 0) {
+      if (pushed.pushed.length > 0) options.onReviewApproved?.(pushed.pushed.length);
+      return { report: pushed.report, pushed: pushed.pushed, suite };
+    }
 
     // The platform refused something nobody agreed to go without, so the list
     // that would run is not the list the keystroke was over. Round it goes

@@ -25,10 +25,13 @@ is how CI runs it.
 
 <!-- The facts are FACTS in src/wizard/facts.ts, which is the source of truth; keep this sentence in step. -->
 
-`npx @egma/cli` signs this machine in to Egma, then finds your voice agent. It starts
-the coding agent you already have, hands it Egma's own notes on how voice agents
-are built, and has it read this folder and report which framework runs it, where
-its prompts live, where its tools are defined, how it reaches production, and
+`npx @egma/cli` first finds the supported coding agents installed on this
+machine and asks which one to use. It supports Claude Code, Codex, Cursor, and
+OpenCode. It signs this machine in to Egma, then finds your voice agent. It starts
+only the coding agent you chose, hands it Egma's own notes on how voice agents
+are built, and has it read this folder and report which framework runs it, what
+the voice agent is called, where its prompts live, where its tools are defined,
+how it reaches production, and
 where its identifier is written down. Every action it takes appears on screen
 while it works, and the facts it finds arrive one line at a time.
 
@@ -40,9 +43,8 @@ the trade — you see everything, as it happens.
 
 Your code and your prompts never leave this machine.
 
-If this folder holds no voice agent, Egma asks once for the folder your prompts
-are in — teams often keep them apart — looks there, and otherwise says plainly
-that you should run it where your agent is defined.
+If this folder holds no voice agent, Egma ends and says to use the folder that
+contains the agent or configure it in the Egma UI.
 
 Then it connects that agent so Egma can reach it, writes a first suite of tests
 for it, puts them on Egma when you say so, and runs them — closing as soon as
@@ -109,7 +111,13 @@ which is also where the `egma` in that line comes from today.
 ## Connecting your voice agent
 
 Finding your agent in the repository is not the same as being able to reach it,
-so the next thing Egma asks for is a Retell API key. It is typed as dots, and
+so the wizard routes setup by the agent platform it found. Retell and LiveKit
+work today. Pipecat and Vapi are recognized, but their CLI setup is coming soon;
+the wizard says so and points to the Egma UI instead of asking for a Retell key.
+
+### Retell
+
+For Retell, the next thing Egma asks for is an API key. It is typed as dots, and
 the screen says what happens to it before you type it:
 
 ```
@@ -129,26 +137,24 @@ take, and a key for an account with no agents on it, are told apart by name and
 each is worth one more try. One agent on the account is shown for confirmation
 with nothing to answer; several get a list to choose from.
 
-The agent's configuration — its prompt, its voice, its tools — is pulled, and
-then Egma asks the one question that decides what it creates:
+The agent's configuration — its prompt, its voice, its tools — is pulled. Egma
+then shows the connection that matches the Retell agent's channel and asks you
+to confirm it:
 
 ```
 ◇ How should Egma reach this agent?
-  › Text — Egma exchanges messages with the agent. No phone call, nothing dialled.
-    Phone — Egma dials one of the agent's numbers and talks to it over the
+  › Phone — Egma dials one of the agent's numbers and talks to it over the
     telephone network, the way the people who call it do.
 
-  Egma creates the one you choose, and only that one.
+  Egma creates this connection only after you confirm it.
 ```
 
-Both are real ways to test one voice agent, and they answer different
-questions. Text exercises the prompt, the reasoning and the tools. Phone
-exercises all of that plus the speech stack and the line it is carried on. The
-same test over both is the sharpest thing Egma can tell you: passes on text and
-fails on phone means the prompt is fine and the speech stack is not.
+Retell voice agents use phone. Retell chat agents use text. An explicit choice
+that does not match the agent stops before Egma writes a connection or a local
+binding.
 
-**Egma creates the connection you chose and never both.** Choose the phone and
-it lists the numbers Retell routes to that agent, you pick one, and the
+For a voice agent, Egma lists the numbers Retell routes to that agent. You pick
+one, and the
 connection it writes holds that number and nothing else — no Retell identifier
 and no credential of any kind, because the public telephone network neither
 knows nor cares what answers. Choose text and it writes one Retell chat
@@ -164,6 +170,33 @@ If your repository keeps a prompt of its own and it differs from what Retell is
 running, Egma says so in one line and carries on. It never blocks: being out of
 step is not an error, and the line names which of the two your tests will be
 grounded in.
+
+### LiveKit
+
+For LiveKit, the wizard reads `GET /api/connection-types` from the Egma
+platform. The platform supplies the field names, help text, and credential
+rules. You then choose one of two setups:
+
+- **LiveKit project credentials — Recommended.** This is the quickest setup.
+  Give Egma the project URL, API key, and API secret so it can manage room
+  tokens for simulations.
+- **Customer token endpoint — Advanced.** You operate an API that gives Egma a
+  short-lived room token for each simulation. Optional auth headers protect
+  that API, and the project signing secret stays on your side.
+
+Secrets are drawn as dots and never enter wizard state, the coding-agent
+context, a repository file, a log, or a command argument. Setup does not contact
+the LiveKit server or token endpoint. Egma sends the completed connection to
+`POST /api/agents`, where the credentials are sealed. If the platform refuses a
+field, the wizard shows that reason and gives one correction attempt. If an
+agent name is already taken, it asks for another name; it never joins two
+LiveKit targets by URL because a LiveKit URL identifies a server, not an agent.
+
+LiveKit keeps its prompt and tools in repository code. Test writing therefore
+uses the repository evidence and the context already held by the same coding
+agent session; there is no provider prompt API to pull first.
+
+### Retell without the wizard
 
 ```
 egma connect
@@ -243,8 +276,7 @@ One test is one file:
 ```markdown
 ---
 name: missed-appointment-reschedule
-personas: [impatient-caller]
-version: tstv_01K…
+description: The caller missed an appointment and needs another time this week.
 ---
 ## Scenario
 The caller missed yesterday's appointment and wants to
@@ -256,8 +288,9 @@ reschedule this week. They are short on time and irritated.
 ```
 
 Name a persona only when the situation needs a particular kind of person on the
-other end; leave `personas` out and the default one applies. `version:` is
-absent until `pull` or `push` writes it.
+other end; leave `personas` out and the default one applies. A new file can also
+leave out `format`, `version`, `identity_revision`, and persona IDs. `pull` or
+`push` writes the current machine fields.
 
 `egma/mock-tools.md` is the mocked world: a **mock tool** answers for one of
 your agent's tools while a simulation runs, so a test never reaches your real
@@ -455,9 +488,8 @@ your whole team has it. `[g]` writes `~/.claude/skills/egma/SKILL.md`, for every
 repository you open. `[s]` writes nothing at all, and is a perfectly good
 answer: `egma --help` is enough for any coding agent to drive the whole product.
 
-Codex keeps its skills the same way, under `.codex/` instead. A coding agent
-Egma has no skill convention for is not offered one, rather than being handed a
-file in a directory it may never read.
+Codex keeps its skills under `.codex/`, Cursor under `.cursor/`, and OpenCode
+under `.opencode/` for a project or `~/.config/opencode/` globally.
 
 Egma writes the one file itself. Nothing is downloaded, nothing else on your
 machine is touched, and the screen names the exact path before you press
@@ -479,7 +511,7 @@ Hand your coding agent this: "Read egma/config.yaml, then egma --help — you ca
 ```
 
 The results address **opens already signed in** — your browser holds the
-sign-in from the approval at the start of the walk. That is why nothing rides on
+sign-in from the approval at the start of the wizard. That is why nothing rides on
 the address: no token, no key, no query at all.
 
 ## Keeping the folder and Egma in step
@@ -528,27 +560,46 @@ and the version the file now pins.
 6 Egma turned a test away at its door   130 stopped part way
 ```
 
-## The notes Egma hands your coding agent
+## The context Egma hands your coding agent
 
-They are markdown files inside this package, under `skills/`. They are sent as
-part of the task, at the moment the task is sent. Nothing is installed on your
-machine, nothing is downloaded, and nothing is written to your repository.
+Egma has three public Agent Skills, authored in the public repository under
+`skills/`: `egma` for operating the product, `find-voice-agent` for mapping a
+repository's voice agent, and `write-egma-tests` for writing the local test
+files. The CLI package carries the exact snapshot from its release tag.
 
-Today there are three: one on finding a voice agent in a repository nobody has
-described, one on what a Retell voice agent looks like from the inside, and one
-on writing a test file that says something worth checking.
+The wizard puts `write-egma-tests` at the front of each generation task. It
+then adds the facts for this repository and the CLI marker lines its screen
+reads. Discovery puts `find-voice-agent` at the front of its task. When the
+repository points to Retell or LiveKit, the coding agent reads only that
+provider reference from the public skill. The exact marker lines remain part of
+the wizard task.
 
-A fourth, `skills/egma/SKILL.md`, is the only one that is ever *installed* —
-and only when you say so, at the end of the walk. It teaches a coding agent to
-drive Egma: read `egma/config.yaml`, run `egma --help`, pull, push, run, and
-keep the four verdicts apart.
+Nothing is downloaded while the wizard runs. The public skills and their
+references are read from this package. The only skill that the wizard offers to
+install is `egma`, and it does so only when you say yes at the end of the wizard.
+
+You can install the public skills independently for any supported coding agent:
+
+```sh
+npx skills add egma-ai/egma --skill egma
+npx skills add egma-ai/egma --skill find-voice-agent
+npx skills add egma-ai/egma --skill write-egma-tests
+```
+
+Leave out `--skill` to choose from all three.
 
 ## How it reaches your coding agent
 
 Over the [Agent Client Protocol](https://agentclientprotocol.com). The agent runs
-as a subprocess and Egma is the client. Which agents exist, and the command that
-starts each one, come from the protocol's own agent registry, mirrored inside
-this package so a first run needs no network for the lookup.
+as a subprocess and Egma is the client. Before the consent screen, Egma checks
+for Claude Code, Codex, Cursor, and OpenCode on this machine and shows the ones
+it can prove are installed. It does not start ACP, log in, or download an agent
+during this check. `--coding-agent <id>` makes the choice without a screen.
+
+The wizard opens one ACP process and one session after consent. Discovery,
+conversion, and test writing are later turns in that same session, so the coding
+agent keeps the repository context it already built. Egma never starts a fresh
+ACP job between those steps.
 
 Your code and your prompts never leave your machine. There is no Egma model in
 this path and no Egma server in it.
@@ -582,8 +633,8 @@ egma push [options]      Upload the tests in it. Refuses, naming names, when
 egma run [options]       Run this folder's tests, pinning the version of each.
                          Follows the run and prints every change.
 
-  --coding-agent <id>  Which coding agent to drive, named as the agent
-                       registry names it. Default: claude-acp
+  --coding-agent <id>  Use one installed coding agent without asking.
+                       claude, codex, cursor, opencode
   --cwd <path>         The folder to work in. Default: this folder.
   --url <address>      Which Egma this one command talks to. It is the only
                        way to name one, so a command that should reach that
@@ -640,8 +691,10 @@ report.
 
 ## Requirements
 
-Node 22 or newer. A coding agent installed — Claude Code and Codex both work,
-as does any agent in the protocol registry that ships as a package.
+Node 22 or newer. Install at least one of Claude Code, Codex, Cursor, or
+OpenCode. The interactive wizard lists the supported agents it finds and asks
+which one to use. A headless run with several installed agents needs
+`--coding-agent <id>`.
 
 You do not have to be logged in to it first. If it asks Egma to log in, Egma
 hands you to that agent's own login and carries on where it left off. And if
@@ -724,14 +777,14 @@ page, and the screen keeps following until execution and grading are both
 finished — a run whose calls have all ended is not yet a run whose judgment is
 in, and the two are reported apart so neither can be mistaken for the other.
 
-The whole walk is checked against a real instance the same way. On a checkout
+The whole wizard flow is checked against a real instance the same way. On a checkout
 that has had `pnpm install`, and on a machine with a Chrome — or with
 `PLAYWRIGHT_BROWSERS_PATH` pointing at a Playwright Chromium, because the
 approval really happens in a browser — it is two commands:
 
 ```
 pnpm db:up
-pnpm --filter @egma/cli smoke:walk
+pnpm --filter @egma/cli smoke:wizard-flow
 ```
 
 The second builds everything it needs, starts an Egma of its own, signs in,

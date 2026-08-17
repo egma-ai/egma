@@ -474,7 +474,8 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
       }),
     ).rejects.toThrow(
       "a connection's shape is fixed when it is created, and this change " +
-        "moves it from LiveKit project key pair to LiveKit token endpoint. " +
+        "moves it from LiveKit project credentials — Recommended to " +
+        "Customer token endpoint — Advanced. " +
         "The two hold different config keys and different credentials, so " +
         "this is a new connection rather than an edit — add one, and archive " +
         "this.",

@@ -21,13 +21,13 @@ import { REACH_ASK_LINE, REACH_LINES, type Reach } from "../../../retell/connect
 import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 
 export type ReachScreenProps = {
+  /** The ways the selected Retell agent supports. */
+  readonly ways: readonly Reach[];
   /** The chosen way, or `null` when the developer chose neither. */
   readonly onAnswer: (reach: Reach | null) => void;
 };
 
-const WAYS: readonly Reach[] = ["text", "phone"];
-
-export function ReachScreen({ onAnswer }: ReachScreenProps) {
+export function ReachScreen({ ways, onAnswer }: ReachScreenProps) {
   const [at, setAt] = useState(0);
 
   const bindings: KeyBinding[] = [
@@ -35,19 +35,19 @@ export function ReachScreen({ onAnswer }: ReachScreenProps) {
       match: "upArrow",
       label: "↑↓",
       action: "choose",
-      handler: () => setAt((held) => (held === 0 ? WAYS.length - 1 : held - 1)),
+      handler: () => setAt((held) => (held === 0 ? ways.length - 1 : held - 1)),
     },
     {
       match: "downArrow",
       label: "↑↓",
       action: "choose",
-      handler: () => setAt((held) => (held + 1) % WAYS.length),
+      handler: () => setAt((held) => (held + 1) % ways.length),
     },
     {
       match: "return",
       label: "enter",
       action: "reach it this way",
-      handler: () => onAnswer(WAYS[at] ?? null),
+      handler: () => onAnswer(ways[at] ?? null),
     },
     {
       match: "escape",
@@ -68,7 +68,7 @@ export function ReachScreen({ onAnswer }: ReachScreenProps) {
       <Text>{REACH_ASK_LINE}</Text>
       <Box height={1} />
       <Box flexDirection="column">
-        {WAYS.map((way, index) => {
+        {ways.map((way, index) => {
           const chosen = index === at;
           return (
             <Text key={way} bold={chosen}>
@@ -78,7 +78,7 @@ export function ReachScreen({ onAnswer }: ReachScreenProps) {
         })}
       </Box>
       <Box height={1} />
-      <Text dimColor>Egma creates the one you choose, and only that one.</Text>
+      <Text dimColor>Egma creates this connection only after you confirm it.</Text>
       <Box height={1} />
       <Text dimColor>{hintBar(bindings)}</Text>
     </Box>

@@ -13,6 +13,8 @@
  */
 
 import process from "node:process";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -38,6 +40,57 @@ describe("the wizard on a real terminal", () => {
   afterEach(async () => {
     await platform.close();
     await workspace.remove();
+  });
+
+  it("keeps a fast coding-agent choice when arrows and enter arrive together", async () => {
+    const bin = path.join(workspace.dir, "coding-agents");
+    await mkdir(bin);
+    const writeProbe = async (
+      name: string,
+      version: string,
+      acpHelp: string | null = null,
+    ): Promise<void> => {
+      const file = path.join(bin, name);
+      await writeFile(
+        file,
+        [
+          "#!/bin/sh",
+          `if [ \"$1\" = \"--version\" ]; then printf '%s\\n' '${version}'; exit 0; fi`,
+          ...(acpHelp === null
+            ? []
+            : [
+                `if [ \"$1\" = \"acp\" ] && [ \"$2\" = \"--help\" ]; then printf '%s\\n' '${acpHelp}'; exit 0; fi`,
+              ]),
+          "exit 97",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(file, 0o755);
+    };
+    await writeProbe("claude", "2.1.233 (Claude Code)");
+    await writeProbe("codex", "codex-cli 0.148.0");
+    await writeProbe("agent", "2026.08.15", "Cursor Agent ACP Agent Client Protocol");
+    await writeProbe("opencode", "1.18.16", "opencode acp Agent Client Protocol");
+
+    const terminal = runInTerminal({
+      command: process.execPath,
+      args: [CLI_ENTRY, "--url", platform.url, "--cwd", workspace.dir],
+      cwd: workspace.dir,
+      env: { ...workspace.env(), PATH: bin },
+    });
+
+    try {
+      await showing(terminal, "Claude Code", "Codex", "Cursor", "OpenCode");
+      terminal.write("\u001b[B\u001b[B\r");
+
+      await showing(terminal, "It reads this folder with Cursor", "[enter] begin");
+      terminal.write("q");
+      expect(await terminal.exited).toBe(0);
+      expect(terminal.scrollback().trim()).toBe("Egma closed. Nothing ran.");
+    } finally {
+      await terminal.kill();
+    }
   });
 
   it("opens the alternate screen, shows the intro, works, and leaves one line", async () => {
@@ -109,7 +162,7 @@ describe("the wizard on a real terminal", () => {
     }
   });
 
-  it("asks once for the prompts when the folder holds no voice agent", async () => {
+  it("ends plainly when the folder holds no voice agent", async () => {
     const script = await workspace.script({
       steps: [
         { kind: "say", text: "egma:none There is no voice agent in this folder.\n" },
@@ -138,59 +191,10 @@ describe("the wizard on a real terminal", () => {
       await showing(terminal, "Egma is about to find your voice agent", "[enter] begin");
       terminal.write("\r");
 
-      await showing(
-        terminal,
-        "Nothing in this folder looks like a voice agent",
-        "[enter] look there",
-        "[esc] nowhere else",
-      );
-
-      // The developer has nowhere to point egma at, and says so.
-      terminal.write("");
-
       expect(await terminal.exited).toBe(1);
       expect(terminal.scrollback().trim()).toBe(
-        "Egma found no voice agent to test. Run egma again where your agent is defined.",
+        "Egma could not find a voice agent. Use its folder or configure it in the UI.",
       );
-    } finally {
-      await terminal.kill();
-    }
-  });
-
-  it("stops rather than hangs when Ctrl-C lands on that question", async () => {
-    const script = await workspace.script({
-      steps: [
-        { kind: "say", text: "egma:none There is no voice agent in this folder.\n" },
-        { kind: "stop", reason: "end_turn" },
-      ],
-    });
-
-    const terminal = runInTerminal({
-      command: process.execPath,
-      args: [
-        CLI_ENTRY,
-        "--url",
-        platform.url,
-        "--cwd",
-        workspace.dir,
-        "--",
-        process.execPath,
-        FAKE_AGENT,
-        script,
-      ],
-      cwd: workspace.dir,
-      env: workspace.env(),
-    });
-
-    try {
-      await showing(terminal, "Egma is about to find", "[enter] begin");
-      terminal.write("\r");
-      await showing(terminal, "Nothing in this folder looks like a voice agent", "[esc] nowhere else");
-
-      terminal.write("");
-
-      expect(await terminal.exited).toBe(130);
-      expect(terminal.scrollback().trim()).toContain("stopped before the task finished");
     } finally {
       await terminal.kill();
     }

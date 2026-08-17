@@ -283,6 +283,45 @@ describe("egma run", () => {
     expect(said.code).toBe(RUN_EXIT.done);
   });
 
+  it("waits for grading after the simulations have finished", async () => {
+    const registered = await register();
+    await makeFolder(registered);
+    await seed(["quoted-a-price"]);
+
+    const said = await egmaRun({
+      during: async () => {
+        const started = await waitUntil(() => platform.running.runs.length > 0, 30_000);
+        if (!started) throw new Error("the command never created a run to grade");
+
+        platform.running.advance({ simulation: "quoted-a-price", status: "claimed" });
+        platform.running.advance({ simulation: "quoted-a-price", status: "running" });
+
+        const pollsBeforeFinish = platform.records.filter(
+          (record) => record.method === "GET" && record.path.endsWith("/events"),
+        ).length;
+        platform.running.advance({ simulation: "quoted-a-price", status: "completed" });
+
+        const sawFinishedRun = await waitUntil(
+          () =>
+            platform.records.filter(
+              (record) => record.method === "GET" && record.path.endsWith("/events"),
+            ).length > pollsBeforeFinish,
+          30_000,
+        );
+        if (!sawFinishedRun) throw new Error("the command never observed the finished run");
+
+        platform.running.grade({ simulation: "quoted-a-price", verdict: "failed" });
+      },
+    });
+
+    expect(valuesOf(said.lines, "verdict")).toEqual([
+      "quoted-a-price default-persona failed",
+    ]);
+    expect(factOf(said.lines, "failed")).toBe("1");
+    expect(factOf(said.lines, "pending")).toBe("0");
+    expect(said.code).toBe(RUN_EXIT.failed);
+  });
+
   it("marks the first verdict, once, whichever simulation gets there first", async () => {
     const registered = await register();
     await makeFolder(registered);

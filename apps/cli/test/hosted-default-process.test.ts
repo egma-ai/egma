@@ -65,6 +65,7 @@ describe("a repository that names no platform", () => {
           {
             agent_id: "synthetic-retell-agent",
             agent_name: "Default receptionist",
+            channel: "chat",
             response_engine: { type: "retell-llm", llm_id: "synthetic-llm" },
           },
         ],

@@ -33,7 +33,7 @@ export type PlatformAccess = ResolvedPlatform & {
  * whole point of the split: a developer reads which egma their repository is
  * about to talk to before egma has said one word to it.
  */
-export type WalkPlatform = {
+export type WizardPlatform = {
   readonly url: string;
   /**
    * True when this address came out of `egma/config.yaml` rather than a flag.
@@ -55,7 +55,7 @@ export type WalkPlatform = {
  * reasons. They hand it over through here rather than each writing a `verify`
  * that asks nobody anything.
  */
-export function alreadyAsked(access: PlatformAccess): WalkPlatform {
+export function alreadyAsked(access: PlatformAccess): WizardPlatform {
   // Not bound: whoever hands a platform over this way resolved it for their own
   // reasons rather than reading it out of a committed file. The one path where
   // a binding really chose the address builds its own, in `main.ts`, from the

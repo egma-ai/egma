@@ -1,7 +1,7 @@
 /**
  * The smoke check: real Claude Code, writing real tests for a real repository.
  *
- * Nothing here is scripted. egma starts the adapter the agent registry names,
+ * Nothing here is scripted. egma starts the installed Claude Code profile,
  * hands it the writing-tests notes and a task built from what the earlier steps
  * of the walk would have learned, and the check passes only if files land in
  * `egma/tests/` that egma can read back — in the settled format, each with at
@@ -25,8 +25,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import { driveOneTask } from "../src/acp/drive.ts";
-import { launchForId, DEFAULT_DRIVEN_AGENT_ID } from "../src/acp/registry.ts";
+import { discoverCodingAgents, installedCodingAgent } from "../src/acp/coding-agents.ts";
+import { withDrivenAgent } from "../src/acp/driven-agent.ts";
 import { createEgmaFolder } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
@@ -59,6 +59,8 @@ const FACTS = new Map<string, string>([
 ]);
 
 async function main(): Promise<void> {
+  const claude = installedCodingAgent(await discoverCodingAgents(), "claude");
+  if (claude === null) throw new Error("Claude Code is not installed on this machine.");
   const dir = await mkdtemp(path.join(tmpdir(), "egma-smoke-generate-"));
   // A secret in the folder, so the fence has something real to stand in front
   // of while the agent works.
@@ -69,7 +71,7 @@ async function main(): Promise<void> {
   const prompt = await readFile(path.join(dir, "prompts", "order-line.md"), "utf8");
 
   say(`Folder: ${dir}`);
-  say(`Starting: egma, driving the coding agent the registry calls ${DEFAULT_DRIVEN_AGENT_ID}.`);
+  say(`Starting: egma, driving ${claude.name} (${claude.id}).`);
   say(`Asking for: ${HOW_MANY} tests in egma/tests/.`);
   say("");
 
@@ -89,32 +91,37 @@ async function main(): Promise<void> {
   const giveUp = new AbortController();
   const timer = setTimeout(() => giveUp.abort("interrupt"), TIMEOUT_MS);
 
-  const result = await driveOneTask({
-    launch: launchForId(DEFAULT_DRIVEN_AGENT_ID),
-    cwd: dir,
-    instructions: generateInstructions(
-      {
-        cwd: dir,
-        facts: FACTS,
-        prompt,
-        toolCount: 2,
-        agentName: "order-line",
-        taken: [],
-        personas: [],
-      },
-      HOW_MANY,
-    ),
-    ui,
-    signal: giveUp.signal,
-    watch: (chunk) => {
-      for (const line of markers.push(chunk)) {
-        if (line.kind === "marker" && line.marker.kind === "wrote") {
-          announced.push(line.marker.name);
-        }
-      }
-      return null;
+  const result = await withDrivenAgent(
+    {
+      launch: claude.launch,
+      cwd: dir,
+      ui,
+      signal: giveUp.signal,
     },
-  });
+    (agent) =>
+      agent.run({
+        instructions: generateInstructions(
+          {
+            cwd: dir,
+            facts: FACTS,
+            prompt,
+            toolCount: 2,
+            agentName: "order-line",
+            taken: [],
+            personas: [],
+          },
+          HOW_MANY,
+        ),
+        watch: (chunk) => {
+          for (const line of markers.push(chunk)) {
+            if (line.kind === "marker" && line.marker.kind === "wrote") {
+              announced.push(line.marker.name);
+            }
+          }
+          return null;
+        },
+      }),
+  );
   clearTimeout(timer);
 
   const seconds = ((Date.now() - started) / 1000).toFixed(1);

@@ -1,11 +1,11 @@
 /**
- * egma's skills as a shipped artifact.
+ * The instruction content that ships with the CLI.
  *
- * A skill nobody can read is not a skill, and a skill that falls out of the
- * package on the way to npm is worse than none — it works on the machine it was
- * written on and nowhere else. So this checks the two things a developer could
- * check for themselves: the files are in the package that `npm pack` would
- * build, and their content is what the wizard puts in front of a coding agent.
+ * Public Agent Skills are usable on their own. The finder discloses provider
+ * references only when repository evidence selects them. The wizard adds its
+ * marker protocol and the projected reference root at dispatch time. These
+ * checks keep those layers separate while proving the npm package carries
+ * everything the public skill can read.
  */
 
 import { execFile } from "node:child_process";
@@ -17,73 +17,94 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import {
-  SKILL_NAMES,
+  PUBLIC_SKILL_NAMES,
   installableSkill,
   instructionsWith,
-  skill,
-  skillFile,
+  publicSkill,
+  publicSkillDirectory,
+  publicSkillFile,
 } from "../src/skills/index.ts";
+import { discoveryInstructions } from "../src/wizard/discovery.ts";
 import { FACTS } from "../src/wizard/facts.ts";
 import { pasteFallbackMessage } from "../src/wizard/no-coding-agent.ts";
+import { generateInstructions } from "../src/wizard/test-generation.ts";
 import { BANNED, SCENARIO_HEADING } from "./support/glossary.ts";
 
 const run = promisify(execFile);
-
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const CLI_MARKER = /\begma:(?:found|note|none|abort|plan|writing|wrote)\b/u;
 
-describe("egma's skills", () => {
-  it("are markdown content, shaped the way a skill file is", () => {
-    for (const name of SKILL_NAMES) {
-      const content = skill(name);
+describe("Egma's instruction content", () => {
+  it("keeps every public skill in the standard standalone shape", () => {
+    for (const name of PUBLIC_SKILL_NAMES) {
+      const content = publicSkill(name);
       expect(content.startsWith("---\n")).toBe(true);
-      expect(content).toMatch(/^name: \S+$/m);
-      expect(content).toMatch(/^description: \S.+$/m);
-      // Long enough to teach something, short enough to sit in a prompt.
+      expect(content).toMatch(new RegExp(`^name: ${name}$`, "mu"));
+      expect(content).toMatch(/^description: \S.+$/mu);
       expect(content.length).toBeGreaterThan(1_000);
       expect(content.length).toBeLessThan(20_000);
     }
   });
 
-  it("teach the marker lines egma reads answers from", () => {
-    const finding = skill("context-finding");
-    expect(finding).toContain("egma:found framework");
-    expect(finding).toContain("egma:note");
-    expect(finding).toContain("egma:none");
-    expect(finding).toContain("egma:abort");
+  it("keeps marker protocols in assembled CLI tasks, not public skills", () => {
+    const discovery = discoveryInstructions("/repo");
+    expect(discovery.startsWith(publicSkill("find-voice-agent"))).toBe(true);
+    expect(discovery).toContain(publicSkillDirectory("find-voice-agent"));
+    expect(discovery).not.toContain("# Trace Retell repository evidence");
+    for (const marker of ["egma:found", "egma:note", "egma:none", "egma:abort"]) {
+      expect(discovery).toContain(marker);
+    }
 
-    // The step that writes files reports through markers of its own, and the
-    // pane a developer watches is drawn from nothing else.
-    const writing = skill("writing-tests");
-    expect(writing).toContain("egma:plan");
-    expect(writing).toContain("egma:writing");
-    expect(writing).toContain("egma:wrote");
+    const writing = generateInstructions(
+      {
+        cwd: "/repo",
+        facts: new Map(),
+        prompt: "Help the person with an appointment.",
+        toolCount: 1,
+        agentName: "reception",
+        taken: [],
+        personas: [],
+      },
+      2,
+    );
+    for (const marker of ["egma:plan", "egma:writing", "egma:wrote", "egma:abort"]) {
+      expect(writing).toContain(marker);
+    }
+
+    for (const name of PUBLIC_SKILL_NAMES) {
+      expect(publicSkill(name)).not.toMatch(CLI_MARKER);
+    }
   });
 
-  it("say what a test file is made of, in the shape egma writes one", () => {
-    const writing = skill("writing-tests");
+  it("teaches the test-writing work before the run-specific task", () => {
+    const writing = publicSkill("write-egma-tests");
     expect(writing).toContain("egma/tests/");
     expect(writing).toContain("## Expected behaviors");
-    expect(writing).toContain("personas:");
-    // The two rules the platform enforces at its own door, taught before a
-    // file is written rather than reported after one is refused. Prose is
-    // wrapped to a width, so it is read the way a reader reads it.
-    const unwrapped = writing.replace(/\s+/g, " ");
-    expect(unwrapped).toContain("there is always at least one");
-    expect(unwrapped).toContain("Never write a `version:` line.");
+    expect(writing).toContain("## Mock tools");
+    expect(writing.replace(/\s+/gu, " ")).toContain(
+      "Preserve every machine-owned field already in the frontmatter",
+    );
+
+    const instructions = generateInstructions(
+      {
+        cwd: "/repo",
+        facts: new Map(),
+        prompt: null,
+        toolCount: 0,
+        agentName: "agent",
+        taken: [],
+        personas: [],
+      },
+      1,
+    );
+    expect(instructions.indexOf(writing)).toBe(0);
+    expect(instructions.indexOf(writing)).toBeLessThan(instructions.indexOf("# Your task"));
   });
 
-  /**
-   * The facts are prose in three places — this skill, the README, and the
-   * message for a machine with no coding agent on it — and code in one. The
-   * code is the source of truth; this is what keeps the prose from drifting
-   * away from it without anybody noticing.
-   */
-  it("ask for the facts egma reads back, in the words egma reads them", () => {
-    // Prose is wrapped to a width, and a phrase does not stop meaning what it
-    // means because a line ending landed in the middle of it.
-    const unwrapped = (text: string): string => text.replace(/\s+/g, " ");
-
-    const finding = skill("context-finding");
+  /** Code owns the field names; all prose that asks for them must agree. */
+  it("asks for the facts Egma reads back, in the words Egma reads them", () => {
+    const unwrapped = (text: string): string => text.replace(/\s+/gu, " ");
+    const finding = discoveryInstructions("/repo");
     const readme = unwrapped(readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"));
     const pasted = unwrapped(pasteFallbackMessage());
 
@@ -94,14 +115,7 @@ describe("egma's skills", () => {
     }
   });
 
-  /**
-   * The folder's layout is written down in three places — the module that makes
-   * it, the skill a coding agent reads, and the README a person reads — and a
-   * layout that says three different things is two of them being wrong. This
-   * holds the two shipped ones to the same line, so a part of the folder added
-   * without a home in the documentation fails here.
-   */
-  it("say what is in the folder, and agree with the README about it", () => {
+  it("agrees with the README about the repository folder", () => {
     const layout = [
       "egma/",
       "  config.yaml     what this folder points at — names and ids",
@@ -113,24 +127,7 @@ describe("egma's skills", () => {
     expect(readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8")).toContain(layout);
   });
 
-  /**
-   * A fence that holds a fence has to be longer than the one it holds.
-   *
-   * This is the mistake that makes a document look right in a diff and wrong
-   * everywhere it is read: the inner fence closes the outer one, and everything
-   * after it — headings, prose, the rest of the page — renders as a code block.
-   * A skill is read by a coding agent and a README by a person, and neither of
-   * them can tell you the file broke.
-   */
-  it("still read as prose after the examples that show a fence", () => {
-    /**
-     * Every line the reader is shown as code, by markdown's own rule: a fence
-     * opens on a run of three or more backticks, and closes only on a run at
-     * least as long *with nothing after it*. A ```json line inside a ```markdown
-     * block therefore does not close it — but the ``` ending the JSON does, and
-     * the fence meant to close the outer block opens a new one that runs on
-     * until something else closes it.
-     */
+  it("still reads as prose after examples that contain code fences", () => {
     const insideAFence = (content: string): ReadonlySet<string> => {
       const shown = new Set<string>();
       let open: number | null = null;
@@ -147,17 +144,18 @@ describe("egma's skills", () => {
       return shown;
     };
 
-    // One heading from below each example, per document. If an example's fences
-    // are nested wrongly, the heading after it is swallowed into a code block
-    // and the whole of the rest of the section goes with it — which reads
-    // perfectly in a diff and is broken everywhere it is rendered.
     const held: readonly (readonly [string, string, string])[] = [
+      ["skills/egma/SKILL.md", installableSkill(), "## Keep the folder and Egma in step"],
       [
-        "skills/egma/SKILL.md",
-        installableSkill(),
-        "## Keeping the folder and Egma in step",
+        "skills/find-voice-agent/SKILL.md",
+        publicSkill("find-voice-agent"),
+        "If no candidate survives corroboration",
       ],
-      ["skills/writing-tests.md", skill("writing-tests"), "## How to report: marker lines"],
+      [
+        "skills/write-egma-tests/SKILL.md",
+        publicSkill("write-egma-tests"),
+        "## Handle personas and capabilities carefully",
+      ],
       [
         "README.md",
         readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"),
@@ -174,34 +172,56 @@ describe("egma's skills", () => {
     }
   });
 
-  it("say where a mock tool goes, and which half of it versions", () => {
-    const driving = installableSkill();
-    expect(driving).toContain("egma/mock-tools.md");
-    expect(driving).toContain("## Mock tools");
-    // The two halves behave differently, and a coding agent that did not know
-    // which was which would author the wrong one.
-    const unwrapped = driving.replace(/\s+/g, " ");
-    expect(unwrapped).toContain("the one authored thing Egma does not version");
-    expect(unwrapped).toContain("That override belongs to the test and is versioned with it");
+  it("says where each kind of mock-tool answer belongs", () => {
+    const driving = installableSkill().replace(/\s+/gu, " ");
+    expect(driving).toContain("Project-wide answers live in `egma/mock-tools.md`");
+    expect(driving).toContain("inside that test file under `## Mock tools`");
 
-    // The skill that writes tests points at the test's own file and nowhere
-    // else, because it must never author the project's mocked world.
-    const writing = skill("writing-tests").replace(/\s+/g, " ");
-    expect(writing).toContain("## Mock tools");
-    expect(writing).toContain("not `egma/mock-tools.md`");
+    const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
+    expect(writing).toContain("Add `## Mock tools` only when this test needs an answer different");
+    expect(writing).toContain("Put either `answer` or `error` in its JSON block");
   });
 
-  it("say what a Retell voice agent looks like, both ways round", () => {
-    const retell = skill("retell");
+  it("recognizes both repository-managed and dashboard-managed Retell agents", () => {
+    const retell = readFileSync(
+      path.join(publicSkillDirectory("find-voice-agent"), "references", "retell.md"),
+      "utf8",
+    );
     expect(retell).toContain("retell-sdk");
     expect(retell).toContain("Retell dashboard");
     expect(retell).toContain("agent_");
     expect(retell).toContain("llm_");
   });
 
-  it("use the words egma uses, because a skill is user-facing text", () => {
-    for (const name of SKILL_NAMES) {
-      const content = skill(name).replaceAll(SCENARIO_HEADING, "");
+  it("recognizes LiveKit workers without assuming one SDK shape", () => {
+    const livekit = readFileSync(
+      path.join(publicSkillDirectory("find-voice-agent"), "references", "livekit.md"),
+      "utf8",
+    );
+    expect(livekit).toContain("livekit-agents");
+    expect(livekit).toContain("@livekit/agents");
+    expect(livekit).toContain("AgentSession");
+    expect(livekit).toContain("WorkerOptions");
+    expect(livekit).toContain("agent name");
+  });
+
+  it("uses Egma's product words in public and dispatched content", () => {
+    const retell = readFileSync(
+      path.join(publicSkillDirectory("find-voice-agent"), "references", "retell.md"),
+      "utf8",
+    );
+    const livekit = readFileSync(
+      path.join(publicSkillDirectory("find-voice-agent"), "references", "livekit.md"),
+      "utf8",
+    );
+    const all = [
+      ...PUBLIC_SKILL_NAMES.map((name) => [name, publicSkill(name)] as const),
+      ["find-voice-agent/references/retell.md", retell] as const,
+      ["find-voice-agent/references/livekit.md", livekit] as const,
+    ];
+
+    for (const [name, source] of all) {
+      const content = source.replaceAll(SCENARIO_HEADING, "");
       for (const banned of BANNED) {
         expect({ name, banned: String(banned), hit: banned.exec(content)?.[0] ?? null }).toEqual({
           name,
@@ -209,62 +229,81 @@ describe("egma's skills", () => {
           hit: null,
         });
       }
-      // The bare word is the voice agent; the driven one is always named.
       expect(content).toContain("voice agent");
     }
   });
 
-  /**
-   * The carve-out is a hole in a guard, and a hole nobody measured is how a
-   * guard stops guarding. It takes out the heading and it takes out nothing
-   * else — so the one word a skill may write stays the one word it may write.
-   */
-  it("carve out the heading and nothing that hides behind it", () => {
+  it("carves out only the file-format heading from the vocabulary guard", () => {
     const taken = (text: string): string => text.replaceAll(SCENARIO_HEADING, "");
 
-    // The heading, however a skill writes it — and it goes.
     expect(taken("## Scenario")).toBe("");
     expect(taken("- **`## Scenario`** is prose.")).toBe("- **** is prose.");
     expect(taken("#### scenario")).toBe("");
 
-    // Everything else stays, and the ban is what meets it.
     for (const hiding of [
       "the scenario the test describes",
       "## Scenarios",
       "a scenario-led suite",
       "Scenario: the person is late",
     ]) {
-      expect(taken(hiding), hiding).toMatch(/scenario/i);
-      expect(/\bscenarios?\b/i.test(taken(hiding)), hiding).toBe(true);
+      expect(taken(hiding), hiding).toMatch(/scenario/iu);
+      expect(/\bscenarios?\b/iu.test(taken(hiding)), hiding).toBe(true);
     }
   });
 
-  it("survive npm packing, which is the only reason they are outside dist", async () => {
-    const { stdout } = await run("npm", ["pack", "--dry-run", "--json"], { cwd: PACKAGE_ROOT });
+  it("survives npm packing with every public skill and its references", async () => {
+    const { stdout } = await run("npm", ["pack", "--dry-run", "--json"], {
+      cwd: PACKAGE_ROOT,
+    });
     const packed = (JSON.parse(stdout) as { files: { path: string }[] }[])[0];
     const paths = (packed?.files ?? []).map((file) => file.path);
 
-    for (const name of SKILL_NAMES) {
-      expect(paths).toContain(`skills/${name}.md`);
+    for (const name of PUBLIC_SKILL_NAMES) {
+      expect(paths).toContain(`skills/${name}/SKILL.md`);
+    }
+    expect(paths).toContain("skills/find-voice-agent/references/retell.md");
+    expect(paths).toContain("skills/find-voice-agent/references/livekit.md");
+    expect(paths.some((file) => file.startsWith("context/"))).toBe(false);
+    for (const removed of [
+      "dist/acp/drive.js",
+      "dist/acp/registry.js",
+      "dist/acp/registry-snapshot.json",
+      "dist/ui/tui/screens/PromptsPointerScreen.js",
+      "dist/wizard/walk.js",
+    ]) {
+      expect(paths).not.toContain(removed);
     }
   });
 
-  it("are read out of the package, wherever the package is", () => {
-    for (const name of SKILL_NAMES) {
-      const file = skillFile(name);
-      expect(path.relative(PACKAGE_ROOT, file)).toBe(path.join("skills", `${name}.md`));
-      expect(readFileSync(file, "utf8")).toContain(skill(name));
+  it("reads every instruction from its package path", () => {
+    for (const name of PUBLIC_SKILL_NAMES) {
+      const file = publicSkillFile(name);
+      expect(path.relative(PACKAGE_ROOT, file)).toBe(path.join("skills", name, "SKILL.md"));
+      expect(readFileSync(file, "utf8")).toContain(publicSkill(name));
+    }
+    for (const [provider, heading] of [
+      ["retell", "# Trace Retell repository evidence"],
+      ["livekit", "# Trace LiveKit repository evidence"],
+    ] as const) {
+      const reference = path.join(
+        publicSkillDirectory("find-voice-agent"),
+        "references",
+        `${provider}.md`,
+      );
+      expect(path.relative(PACKAGE_ROOT, reference)).toBe(
+        path.join("skills", "find-voice-agent", "references", `${provider}.md`),
+      );
+      expect(readFileSync(reference, "utf8")).toContain(heading);
     }
   });
 
-  it("go in front of the task, in the order they were asked for", () => {
-    const instructions = instructionsWith(["context-finding", "retell"], "# Your task\nLook.");
+  it("keeps the finder before the task and leaves provider details conditionally disclosed", () => {
+    const finding = publicSkill("find-voice-agent");
+    const instructions = instructionsWith([finding], "# Your task\nLook.");
 
-    expect(instructions.indexOf(skill("context-finding"))).toBe(0);
-    expect(instructions.indexOf(skill("retell"))).toBeGreaterThan(0);
-    expect(instructions.indexOf(skill("retell"))).toBeLessThan(
-      instructions.indexOf("# Your task"),
-    );
+    expect(instructions.indexOf(finding)).toBe(0);
+    expect(instructions).not.toContain("# Trace Retell repository evidence");
+    expect(instructions).not.toContain("# Trace LiveKit repository evidence");
     expect(instructions.endsWith("# Your task\nLook.")).toBe(true);
   });
 });

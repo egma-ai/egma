@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine, buildExitNotice } from "../src/wizard/exit-line.ts";
-import { walk } from "../src/wizard/walk.ts";
+import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import {
   RETELL_FIXTURE_REPO,
@@ -97,7 +97,7 @@ describe("finding the voice agent", () => {
     });
 
     const ui = new HeadlessUI();
-    const report = await walk({
+    const report = await runWizard({
       ui,
       launch: scratch.launch(script),
       cwd: repo.dir,
@@ -131,7 +131,7 @@ describe("finding the voice agent", () => {
     );
   });
 
-  it("hands the coding agent both skills, and leaves the repository as it found it", async () => {
+  it("hands the coding agent the public finder, and leaves the repository as it found it", async () => {
     const before = await filesUnder(repo.dir);
 
     const script = await scratch.script({
@@ -139,20 +139,22 @@ describe("finding the voice agent", () => {
       steps: REPORTS_THE_FIXTURE,
     });
 
-    await walk({
+    await runWizard({
       ui: new HeadlessUI(),
       launch: scratch.launch(script),
       cwd: repo.dir,
       signal: new AbortController().signal,
     });
 
-    // The skills arrived as the task's own instructions — not installed, not
+    // The public skill arrived as the task's own instructions — not installed, not
     // written down, not fetched: sent.
     const instructions = (await observed()).instructions;
     expect(instructions).toHaveLength(1);
     const sent = instructions[0] as string;
-    expect(sent).toContain("name: finding-the-voice-agent");
-    expect(sent).toContain("name: retell-voice-agents");
+    expect(sent).toContain("name: find-voice-agent");
+    expect(sent).toContain("# Find the voice agent");
+    expect(sent).toContain("references/retell.md");
+    expect(sent).not.toContain("# Trace Retell repository evidence");
     expect(sent).toContain("egma:found framework retell-sdk");
     expect(sent).toContain("# Your task");
     expect(sent).toContain(repo.dir);
@@ -162,42 +164,29 @@ describe("finding the voice agent", () => {
     expect(before).toContain("prompts/order-line.md");
   });
 
-  it("asks once for a pointer when the folder holds nothing, and looks there", async () => {
-    const elsewhere = await makeWorkspace({}, { from: RETELL_FIXTURE_REPO });
+  it("ends plainly when this folder holds no voice agent", async () => {
     const empty = await makeWorkspace({ "README.md": "# nothing here yet\n" });
 
     try {
-      // Each dispatch is its own agent, so each leaves its own record where it
-      // was pointed — which is how both folders can be checked.
       const script = await scratch.script({
         steps: REPORTS_NOTHING,
-        stepsByFolder: [{ contains: path.basename(elsewhere.dir), steps: REPORTS_THE_FIXTURE }],
       });
 
-      const ui = new HeadlessUI({ answers: { "prompts-pointer": elsewhere.dir } });
-      const report = await walk({
+      const ui = new HeadlessUI();
+      const report = await runWizard({
         ui,
         launch: scratch.launch(script),
         cwd: empty.dir,
         signal: new AbortController().signal,
       });
 
-      // Asked once, and only once.
-      expect(ui.record.asked).toEqual(["prompts-pointer"]);
-      // Looked here first, then where it was pointed — two folders, two tasks.
+      expect(ui.record.asked).toEqual([]);
       expect((await recordIn(empty.dir)).folders).toEqual([empty.dir]);
-      expect((await recordIn(elsewhere.dir)).folders).toEqual([elsewhere.dir]);
-      expect((await recordIn(elsewhere.dir)).instructions[0]).toContain(
-        `Find the voice agent in ${elsewhere.dir}`,
+      expect(report).toEqual({ kind: "no-agent-context" });
+      expect(buildExitLine(report)).toBe(
+        "Egma could not find a voice agent. Use its folder or configure it in the UI.",
       );
-      expect(report).toEqual({
-        kind: "found-agent",
-        framework: "retell-sdk",
-        prompts: "prompts/order-line.md (pushed to Retell by scripts/deploy.ts)",
-      });
-      expect(ui.record.summary).toContain("src/config.ts");
     } finally {
-      await elsewhere.remove();
       await empty.remove();
     }
   });
@@ -211,48 +200,21 @@ describe("finding the voice agent", () => {
         steps: REPORTS_NOTHING,
       });
 
-      // Nobody supplied a pointer, which is a real answer and not a hang.
       const ui = new HeadlessUI();
-      const report = await walk({
+      const report = await runWizard({
         ui,
         launch: scratch.launch(script),
         cwd: empty.dir,
         signal: new AbortController().signal,
       });
 
-      expect(ui.record.asked).toEqual(["prompts-pointer"]);
+      expect(ui.record.asked).toEqual([]);
       expect(report).toEqual({ kind: "no-agent-context" });
       expect(buildExitLine(report)).toBe(
-        "Egma found no voice agent to test. Run egma again where your agent is defined.",
+        "Egma could not find a voice agent. Use its folder or configure it in the UI.",
       );
       expect(buildExitNotice(report)).toBeNull();
     } finally {
-      await empty.remove();
-    }
-  });
-
-  it("stops asking after the pointer, even when the pointer leads nowhere either", async () => {
-    const alsoEmpty = await makeWorkspace({ "notes.txt": "nothing\n" });
-    const empty = await makeWorkspace({ "README.md": "# nothing here yet\n" });
-
-    try {
-      const script = await scratch.script({
-        reportFile: reportFile(),
-        steps: REPORTS_NOTHING,
-      });
-
-      const ui = new HeadlessUI({ answers: { "prompts-pointer": alsoEmpty.dir } });
-      const report = await walk({
-        ui,
-        launch: scratch.launch(script),
-        cwd: empty.dir,
-        signal: new AbortController().signal,
-      });
-
-      expect(ui.record.asked).toEqual(["prompts-pointer"]);
-      expect(report).toEqual({ kind: "no-agent-context" });
-    } finally {
-      await alsoEmpty.remove();
       await empty.remove();
     }
   });
@@ -265,7 +227,7 @@ describe("finding the voice agent", () => {
     });
 
     const ui = new HeadlessUI();
-    const report = await walk({
+    const report = await runWizard({
       ui,
       launch: scratch.launch(script),
       cwd: repo.dir,
@@ -293,7 +255,7 @@ describe("finding the voice agent", () => {
     });
 
     const ui = new HeadlessUI();
-    const report = await walk({
+    const report = await runWizard({
       ui,
       launch: scratch.launch(script),
       cwd: repo.dir,
@@ -328,7 +290,7 @@ describe("finding the voice agent", () => {
       const script = await scratch.script({ reportFile: reportFile(), steps: REPORTS_NOTHING });
 
       const ui = new HeadlessUI();
-      await walk({
+      await runWizard({
         ui,
         launch: scratch.launch(script),
         cwd: empty.dir,
@@ -361,7 +323,7 @@ describe("finding the voice agent", () => {
     });
 
     const ui = new HeadlessUI();
-    await walk({
+    await runWizard({
       ui,
       launch: scratch.launch(script),
       cwd: repo.dir,
@@ -380,7 +342,7 @@ describe("finding the voice agent", () => {
 
     const kept: string[] = [];
     const ui = new HeadlessUI();
-    await walk({
+    await runWizard({
       ui,
       launch: scratch.launch(script),
       cwd: repo.dir,
@@ -394,7 +356,7 @@ describe("finding the voice agent", () => {
 
   it("prints what to paste when there is no coding agent on the machine", async () => {
     const ui = new HeadlessUI();
-    const report = await walk({
+    const report = await runWizard({
       ui,
       launch: {
         id: "not-here",

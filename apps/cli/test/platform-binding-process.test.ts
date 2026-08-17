@@ -76,6 +76,7 @@ describe("commands after a repository is bound", () => {
           {
             agent_id: "synthetic-retell-agent",
             agent_name: "Bound receptionist",
+            channel: "chat",
             response_engine: { type: "retell-llm", llm_id: "synthetic-llm" },
           },
         ],

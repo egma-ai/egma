@@ -11,12 +11,13 @@ import path from "node:path";
 import process from "node:process";
 
 import {
-  DEFAULT_DRIVEN_AGENT_ID,
-  REGISTRY_SNAPSHOT_MIRRORED_ON,
-  UnlaunchableDrivenAgentError,
-  launchForId,
+  discoverCodingAgents,
+  installedCodingAgent,
+  supportedCodingAgentId,
+  SUPPORTED_CODING_AGENT_IDS,
   type DrivenAgentLaunch,
-} from "./acp/registry.ts";
+  type InstalledCodingAgent,
+} from "./acp/coding-agents.ts";
 import {
   AGENT_VARIABLE,
   argumentRefusal,
@@ -62,9 +63,10 @@ import {
 import { RETELL_API } from "./retell/client.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
-import type { WalkPlatform } from "./wizard/login-step.ts";
+import type { WizardPlatform } from "./wizard/login-step.ts";
 import { pasteFallbackMessage } from "./wizard/no-coding-agent.ts";
 import type { StopReason } from "./wizard/stop.ts";
+import type { WizardCodingAgent } from "./wizard/wizard-flow.ts";
 
 /**
  * The wizard's machinery arrives through a dynamic import, and the verbs never
@@ -78,13 +80,13 @@ import type { StopReason } from "./wizard/stop.ts";
  */
 async function wizardMachinery(): Promise<{
   readonly startTui: typeof import("./ui/tui/start-tui.ts").startTui;
-  readonly walk: typeof import("./wizard/walk.ts").walk;
+  readonly runWizard: typeof import("./wizard/wizard-flow.ts").runWizard;
 }> {
-  const [{ startTui }, { walk }] = await Promise.all([
+  const [{ startTui }, { runWizard }] = await Promise.all([
     import("./ui/tui/start-tui.ts"),
-    import("./wizard/walk.ts"),
+    import("./wizard/wizard-flow.ts"),
   ]);
-  return { startTui, walk };
+  return { startTui, runWizard };
 }
 
 /**
@@ -159,7 +161,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let version = false;
   let verb: Verb | null = null;
   let headless = false;
-  let drivenAgentId = DEFAULT_DRIVEN_AGENT_ID;
+  let drivenAgentId = "claude";
   let drivenAgentNamed = false;
   let cwd: string | null = null;
   let url: string | null = null;
@@ -234,7 +236,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
 
 export function helpText(): string {
   return [
-    "Egma — walk from a voice agent to graded results.",
+    "Egma — take a voice agent to graded results.",
     "",
     "Usage:",
     "  egma [options]           The wizard.",
@@ -275,8 +277,8 @@ export function helpText(): string {
     "                                  work with nobody watching.",
     "",
     "Options:",
-    "  --coding-agent <id>  Which coding agent to drive, named as the agent",
-    `                       registry names it. Default: ${DEFAULT_DRIVEN_AGENT_ID}`,
+    "  --coding-agent <id>  Use one installed coding agent without asking.",
+    `                       ${SUPPORTED_CODING_AGENT_IDS.join(", ")}`,
     "  --cwd <path>         The folder to work in. Default: this folder.",
     "  --url <address>      Which Egma instance this one command talks to. It is the only",
     "                       way to name one, so a command that should reach that",
@@ -391,7 +393,7 @@ export function helpText(): string {
     "  5 Egma would not start the run, and said why",
     "  6 a simulation errored, so nothing concluded   130 stopped part way",
     "",
-    `The agent registry was mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
+    "The wizard finds supported coding agents already installed on this machine.",
   ].join("\n");
 }
 
@@ -411,21 +413,45 @@ export function version(): string {
   return (JSON.parse(manifest) as { version?: string }).version ?? "0.0.0";
 }
 
-function launchFrom(invocation: Invocation): DrivenAgentLaunch {
+function commandedLaunchFrom(invocation: Invocation): DrivenAgentLaunch | null {
   const [command, ...args] = invocation.drivenAgentCommand;
-  if (command !== undefined) {
-    // egma was told a command, not an agent, so the command is all it can
-    // honestly call the thing — unless the developer also said which agent it
-    // is, in which case that is what it is and egma may act on it.
-    return {
-      id: invocation.drivenAgentNamed ? invocation.drivenAgentId : "named-command",
-      name: path.basename(command),
-      command,
-      args,
-      env: {},
-    };
-  }
-  return launchForId(invocation.drivenAgentId);
+  if (command === undefined) return null;
+  // egma was told a command, not an agent, so the command is all it can
+  // honestly call the thing — unless the developer also said which supported
+  // agent it stands in for. This is an internal scripted-agent seam.
+  const supported = supportedCodingAgentId(invocation.drivenAgentId);
+  return {
+    id: invocation.drivenAgentNamed && supported !== null ? supported : "named-command",
+    name: path.basename(command),
+    command,
+    args,
+    env: {},
+  };
+}
+
+function installedAgentLines(installed: readonly InstalledCodingAgent[]): string[] {
+  return installed.map(
+    (agent) => `  ${agent.id}  ${agent.name} ${agent.version}  ${agent.executable}`,
+  );
+}
+
+function noSelectedCodingAgent(
+  requested: string | null,
+  installed: readonly InstalledCodingAgent[],
+): string {
+  const first =
+    requested === null
+      ? "Egma needs --coding-agent when more than one supported coding agent is installed."
+      : `Egma could not find an installed supported coding agent called "${requested}".`;
+  return [
+    first,
+    "",
+    ...(installed.length === 0
+      ? ["No supported coding agents were found."]
+      : ["Installed coding agents:", ...installedAgentLines(installed)]),
+    "",
+    `Supported ids: ${SUPPORTED_CODING_AGENT_IDS.join(", ")}.`,
+  ].join("\n");
 }
 
 /** What the whole walk answers with, which is not what `egma login` answers. */
@@ -450,6 +476,7 @@ function walkExitCode(report: ExitReport): number {
     case "interrupted":
       return 130;
     case "no-agent-context":
+    case "unsupported-agent-platform":
     // The coding agent stopped the work itself. Nothing was found, and the run
     // did not do what it set out to do.
     case "coding-agent-stopped":
@@ -573,7 +600,7 @@ async function runHeadless(
   invocation: Invocation,
   launch: DrivenAgentLaunch,
   cwd: string,
-  platform: WalkPlatform,
+  platform: WizardPlatform,
 ): Promise<number> {
   const controller = new AbortController();
   const stop = (reason: StopReason): void => controller.abort(reason);
@@ -581,13 +608,13 @@ async function runHeadless(
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
 
-  const { walk } = await wizardMachinery();
+  const { runWizard } = await wizardMachinery();
   const ui = new HeadlessUI({
     write: (line) => process.stdout.write(`${line}\n`),
     answers: headlessAnswers(invocation, process.env),
   });
   try {
-    const report = await walk({
+    const report = await runWizard({
       ui,
       launch,
       cwd,
@@ -605,12 +632,12 @@ async function runHeadless(
   }
 }
 
-async function runWizard(
-  launch: DrivenAgentLaunch,
+async function runInteractiveWizard(
+  codingAgent: WizardCodingAgent,
   cwd: string,
-  platform: WalkPlatform,
+  platform: WizardPlatform,
 ): Promise<number> {
-  const { startTui, walk } = await wizardMachinery();
+  const { startTui, runWizard } = await wizardMachinery();
   const controller = new AbortController();
   const tui = startTui({ stop: (reason) => controller.abort(reason) });
 
@@ -621,9 +648,9 @@ async function runWizard(
   process.on("SIGTERM", onSignal);
 
   try {
-    const report = await walk({
+    const report = await runWizard({
       ui: tui.ui,
-      launch,
+      codingAgent,
       cwd,
       signal: controller.signal,
       platform,
@@ -846,7 +873,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   // keystroke of consent, the coding agent it will drive — is settled here,
   // before a single network read, and what comes out is either the rest of the
   // walk or nothing at all.
-  let theWizard: ((platform: WalkPlatform) => Promise<number>) | null = null;
+  let theWizard: ((platform: WizardPlatform) => Promise<number>) | null = null;
   if (invocation.verb === null) {
     // Consent is checked before a network read. A piped bare command cannot
     // start either the wizard or platform selection.
@@ -857,20 +884,49 @@ export async function main(argv: readonly string[]): Promise<void> {
       return;
     }
 
-    let launch: DrivenAgentLaunch;
-    try {
-      launch = launchFrom(invocation);
-    } catch (error) {
-      if (error instanceof UnlaunchableDrivenAgentError) {
-        process.stdout.write(`${error.message}\n\n${pasteFallbackMessage()}\n`);
-        return;
+    const commanded = commandedLaunchFrom(invocation);
+    let codingAgent: WizardCodingAgent;
+    if (commanded !== null) {
+      codingAgent = { kind: "selected", launch: commanded };
+    } else {
+      const installed = await discoverCodingAgents();
+      if (invocation.drivenAgentNamed) {
+        const selected = installedCodingAgent(installed, invocation.drivenAgentId);
+        if (selected === null) {
+          process.stdout.write(
+            `${noSelectedCodingAgent(invocation.drivenAgentId, installed)}\n\n${pasteFallbackMessage()}\n`,
+          );
+          return;
+        }
+        codingAgent = { kind: "selected", launch: selected.launch };
+      } else if (invocation.headless) {
+        if (installed.length === 0) {
+          process.stdout.write(`${pasteFallbackMessage()}\n`);
+          return;
+        }
+        if (installed.length > 1) {
+          process.stderr.write(`${noSelectedCodingAgent(null, installed)}\n`);
+          process.exitCode = 1;
+          return;
+        }
+        codingAgent = { kind: "selected", launch: installed[0]!.launch };
+      } else {
+        if (installed.length === 0) {
+          process.stdout.write(`${pasteFallbackMessage()}\n`);
+          return;
+        }
+        codingAgent = { kind: "choose", installed };
       }
-      throw error;
     }
-    theWizard = async (platform) =>
-      invocation.headless
-        ? runHeadless(invocation, launch, cwd, platform)
-        : runWizard(launch, cwd, platform);
+    if (invocation.headless) {
+      if (codingAgent.kind !== "selected") {
+        throw new Error("A headless wizard reached coding-agent selection.");
+      }
+      const launch = codingAgent.launch;
+      theWizard = (platform) => runHeadless(invocation, launch, cwd, platform);
+    } else {
+      theWizard = (platform) => runInteractiveWizard(codingAgent, cwd, platform);
+    }
   }
 
   // Which egma, chosen once for every path below out of what is already on this

@@ -30,7 +30,7 @@ export function simulationLine(row: SimulationRow): string {
  * without parsing anything.
  */
 export function changeLines(change: RunChange): readonly string[] {
-  const lines = [simulationLine(change.row)];
+  const lines = change.statusChanged ? [simulationLine(change.row)] : [];
   if (change.verdictLanded && change.row.verdict !== null) {
     lines.push(`verdict: ${change.row.name} ${change.row.persona} ${change.row.verdict}`);
     if (change.row.reason !== null) lines.push(`reason: ${change.row.reason}`);

@@ -1,8 +1,8 @@
 /**
  * The smoke check: one task on the real Claude Code adapter, on this machine.
  *
- * Nothing here is scripted or faked. egma starts the adapter the agent registry
- * names, drives a real task on the developer's own Claude login, and the check
+ * Nothing here is scripted or faked. egma starts the installed Claude Code
+ * profile, drives a real task on the developer's own Claude login, and the check
  * passes only if the run finishes after exactly one keystroke — which is the
  * proof that no permission question was ever raised, because a question would
  * have left the wizard waiting for a second one that never comes.
@@ -17,6 +17,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { discoverCodingAgents, installedCodingAgent } from "../src/acp/coding-agents.ts";
 import { runInTerminal } from "../test/support/pty.ts";
 import { RETELL_FIXTURE_REPO } from "../test/support/workspace.ts";
 import { say, waitUntil } from "./support/report.ts";
@@ -34,12 +35,14 @@ async function main(): Promise<void> {
   await writeFile(path.join(dir, ".env"), "SMOKE_SECRET=never-read-this\n", "utf8");
 
   say(`Folder: ${dir}`);
-  say("Starting: egma, driving the coding agent the registry calls claude-acp.");
+  const claude = installedCodingAgent(await discoverCodingAgents(), "claude");
+  if (claude === null) throw new Error("Claude Code is not installed on this machine.");
+  say(`Starting: egma, driving ${claude.name} (${claude.id}).`);
 
   const started = Date.now();
   const terminal = runInTerminal({
     command: process.execPath,
-    args: [CLI_ENTRY, "--cwd", dir],
+    args: [CLI_ENTRY, "--cwd", dir, "--coding-agent", claude.id],
     cwd: dir,
     cols: 100,
     rows: 30,

@@ -1,5 +1,5 @@
 /**
- * The walk, end to end, with a scripted agent and nobody watching.
+ * The wizard flow, end to end, with a scripted agent and nobody watching.
  *
  * No model, no terminal, no human — and no assertion about the order egma does
  * things in. What is checked is what a developer could check afterwards: which
@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import type { GateId } from "../src/ui/wizard-ui.ts";
 import { buildExitLine } from "../src/wizard/exit-line.ts";
-import { walk } from "../src/wizard/walk.ts";
+import { runWizard } from "../src/wizard/wizard-flow.ts";
 import {
   MANIFEST,
   isAlive,
@@ -76,7 +76,7 @@ describe("one task, driven on a scripted agent", () => {
     });
 
     const ui = new HeadlessUI();
-    const report = await walk({
+    const report = await runWizard({
       ui,
       launch: workspace.launch(script),
       cwd: workspace.dir,
@@ -113,7 +113,7 @@ describe("one task, driven on a scripted agent", () => {
       ],
     });
 
-    await walk({
+    await runWizard({
       ui: new HeadlessUI(),
       launch: workspace.launch(script),
       cwd: workspace.dir,
@@ -141,7 +141,7 @@ describe("one task, driven on a scripted agent", () => {
     });
 
     const ui = new HeadlessUI();
-    await walk({
+    await runWizard({
       ui,
       launch: workspace.launch(script),
       cwd: workspace.dir,
@@ -216,7 +216,7 @@ describe("one task, driven on a scripted agent", () => {
     });
 
     const ui = new HeadlessUI();
-    await walk({
+    await runWizard({
       ui,
       launch: workspace.launch(script),
       cwd: workspace.dir,
@@ -250,7 +250,7 @@ describe("one task, driven on a scripted agent", () => {
     });
 
     const ui = new HeadlessUI();
-    await walk({
+    await runWizard({
       ui,
       launch: workspace.launch(script),
       cwd: workspace.dir,
@@ -289,7 +289,7 @@ describe("one task, driven on a scripted agent", () => {
 
     const ui = new HeadlessUI();
     const controller = new AbortController();
-    const running = walk({
+    const running = runWizard({
       ui,
       launch: workspace.launch(script),
       cwd: workspace.dir,
@@ -345,7 +345,7 @@ describe("one task, driven on a scripted agent", () => {
     })({ write: (line) => lines.push(line) });
 
     let asked = 0;
-    const running = walk({
+    const running = runWizard({
       ui,
       launch: workspace.launch(script),
       cwd: workspace.dir,

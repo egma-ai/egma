@@ -20,7 +20,7 @@ import { LEARN_CARDS, CARD_WIDTH, cardAt } from "../src/wizard/teaching.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { exitLines } from "../src/wizard/exit-line.ts";
 import { alreadyAsked } from "../src/wizard/login-step.ts";
-import { walk } from "../src/wizard/walk.ts";
+import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -45,6 +45,7 @@ const ACCOUNT: FakeRetellScript = {
     {
       agent_id: "agent_quillfeather_order_line",
       agent_name: "order-line",
+      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_quillfeather" },
     },
   ],
@@ -264,7 +265,7 @@ describe("the pane, while the files land", () => {
       try {
         await second.signIn(elsewhere.url, elsewhere.device.mint());
         const ui = new HeadlessUI({ answers: { "retell-key": KEY, reach: "text" } });
-        const report = await walk({
+        const report = await runWizard({
           ui,
           launch: second.launch(await scriptFor(second)),
           cwd: second.dir,
