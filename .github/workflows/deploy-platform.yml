@@ -39,6 +39,10 @@ permissions:
   # What lets this job prove which repository and which ref it is, to AWS,
   # without a stored key. The same posture release-cli.yml takes with npm.
   id-token: write
+  # What lets the changes job ask which commit the last successful deploy
+  # carried — the diff base below, and the reason a superseded run's work is
+  # never lost.
+  actions: read
 
 concurrency:
   # Two deployments at once would race over the same containers, and the loser
@@ -70,6 +74,16 @@ jobs:
         # that are this pipeline. The bias is broad on purpose — a too-broad
         # match costs a harmless no-op deploy, a too-narrow one misses a real
         # deploy, and only one of those pages somebody.
+        #
+        # The diff base is the commit the last successful deploy run carried,
+        # not the commit this push replaced. The queue replaces a superseded
+        # pending run, so a run that never executes must have its changes
+        # carried by whichever run executes next — and a failed deploy's
+        # changes ride along the same way. Every executed run owns the whole
+        # delta since the platform last moved. The list below has a twin in
+        # the web job's yield step; change one, change both.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -78,14 +92,24 @@ jobs:
             echo "Dispatched by hand: the whole pipeline runs."
             exit 0
           fi
-          before="${{ github.event.before }}"
-          if [ -z "$before" ] || ! git cat-file -e "$before^{commit}" 2>/dev/null; then
+          base=$(curl -sS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-platform.yml/runs?branch=main&status=success&per_page=1" \
+            | python3 -c 'import json,sys; runs=json.load(sys.stdin).get("workflow_runs",[]); print(runs[0]["head_sha"] if runs else "")')
+          if [ -n "$base" ]; then
+            echo "Diffing against the last successful deploy run: $base"
+          else
+            base="${{ github.event.before }}"
+            echo "No successful deploy run yet; diffing against the pushed-over commit: $base"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
             echo "platform=true" >> "$GITHUB_OUTPUT"
             echo "web=true" >> "$GITHUB_OUTPUT"
-            echo "No usable before-commit (a new branch, or history rewritten): the whole pipeline runs."
+            echo "No usable base commit (first run, or history rewritten): the whole pipeline runs."
             exit 0
           fi
-          changed=$(git diff --name-only "$before" "${{ github.sha }}")
+          changed=$(git diff --name-only "$base" "${{ github.sha }}")
           printf 'Changed:\n%s\n' "$changed"
           platform=false
           web=false
@@ -289,11 +313,53 @@ jobs:
       )
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Yield when a newer merge owns the hook
+        id: yield
+        # The hook deploys the latest commit of main — not necessarily this
+        # run's commit. If main has moved past this run to a commit that will
+        # itself deploy (its run is behind this one in the queue), firing now
+        # would put that newer web live before its own API: exactly the
+        # ordering this pipeline exists to prevent. So yield, and let that
+        # run fire after its deploy. If main moved by commits that deploy
+        # nothing, fire — nobody else will. The path list is the twin of the
+        # changes job's; change one, change both. If the newer run fails its
+        # gate, the hook waits for the next green run, whose diff base
+        # carries everything outstanding.
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          head=$(git rev-parse origin/main)
+          if [ "$head" = "${{ github.sha }}" ]; then
+            echo "fire=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          deployable=false
+          while IFS= read -r path; do
+            case "$path" in
+              apps/api/*|apps/grader/*|apps/simulator/*|packages/*) deployable=true ;;
+              docker-compose.yml|docker-compose.managed.yml|.env.example) deployable=true ;;
+              pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) deployable=true ;;
+              .github/workflows/deploy-platform.yml|.github/workflows/test.yml) deployable=true ;;
+              apps/web/*|tools/*) deployable=true ;;
+            esac
+          done <<< "$(git diff --name-only "${{ github.sha }}" "$head")"
+          if [ "$deployable" = "true" ]; then
+            echo "main moved to $head with deployable changes; that run fires the hook after its own deploy."
+            echo "fire=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "main moved to $head by commits that deploy nothing; this run still owns the hook."
+            echo "fire=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Tell Vercel to ship
-        # The hook deploys the latest commit of main, which is at least this
-        # one. Auto-deploy for main is off in apps/web/vercel.json, so this
-        # call is the only road to production for the web — which is the whole
-        # point: the page can never beat the route it calls.
+        if: steps.yield.outputs.fire == 'true'
+        # Auto-deploy for main is off in apps/web/vercel.json, so this call is
+        # the only road to production for the web — which is the whole point:
+        # the page can never beat the route it calls.
         env:
           HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
         run: |
