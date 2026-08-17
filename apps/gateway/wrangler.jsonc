@@ -22,8 +22,12 @@
   "observability": { "enabled": false },
   "logpush": false,
 
-  // No bindings. The gateway keeps nothing: no KV, no D1, no R2, no Durable
-  // Object, no queue and no cache. A binding added here would be a place a
-  // payload could come to rest, so adding one is a decision to argue for.
+  // The one binding, and it stores nothing: the runtime's own name for the
+  // build that is answering, read back on the health check so that a gradual
+  // rollout is observable from outside and a rollback is checkable rather than
+  // claimed. There is no KV, no D1, no R2, no Durable Object, no queue and no
+  // cache — each of those would be a place a payload could come to rest.
+  "version_metadata": { "binding": "EGMA_GATEWAY_VERSION" },
+
   "vars": {}
 }

@@ -40,12 +40,31 @@ export type GatewayHost = {
   socketHostFor(request: Request): SocketHost;
   /** Keeps the record-writing alive after the response has gone. */
   waitUntil(work: Promise<unknown>): void;
+  /**
+   * Which build of the application answered, where the host knows.
+   *
+   * On the health check and nowhere else. A deployment that is rolling one
+   * version out beside another needs to be able to see which one served a
+   * request — otherwise a canary is a percentage nobody can observe and a
+   * rollback is a claim nobody can check.
+   */
+  readonly version?: string | undefined;
 };
 
-const HEALTH = new Response(JSON.stringify({ status: "ok" }), {
-  status: 200,
-  headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-});
+/**
+ * Built per request rather than once.
+ *
+ * A Worker's global scope runs before any request exists and is not allowed to
+ * do work — the runtime refuses a module that builds a response there, which is
+ * the sort of thing that is only ever discovered at deploy time. Nothing in the
+ * gateway is built at module scope for that reason.
+ */
+function healthy(version: string | undefined): Response {
+  return new Response(JSON.stringify({ status: "ok", ...(version === undefined ? {} : { version }) }), {
+    status: 200,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+  });
+}
 
 export async function handle(request: Request, host: GatewayHost): Promise<Response> {
   const requestId = newRequestId();
@@ -83,7 +102,7 @@ export async function handle(request: Request, host: GatewayHost): Promise<Respo
         message: `${HEALTH_PATH} answers GET`,
       });
     }
-    return HEALTH.clone();
+    return healthy(host.version);
   }
 
   if (matched.kind === "no-such-route") {

@@ -24,7 +24,8 @@ path — and none of the four is built out of anything a caller sends.
 | `/cartesia/tts/websocket` | `GET` | WebSocket | Cartesia | `tts` | `wss://api.cartesia.ai/tts/websocket` |
 
 `GET /health` answers `{"status":"ok"}` without a credential and without
-reaching a provider. Everything else is refused.
+reaching a provider, and names the build that answered where the host knows one.
+Everything else is refused.
 
 **The public path is the provider's own path under the provider's own name**,
 which is what lets a shipped provider adapter reach the gateway by being told a
@@ -142,6 +143,7 @@ except where a default is written below.
 | `EGMA_GATEWAY_MAX_FRAME_BYTES` | `1048576` | The largest single frame |
 | `EGMA_GATEWAY_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARN` or `ERROR` |
 | `EGMA_GATEWAY_PORT` | an unused port | Local host only |
+| `EGMA_GATEWAY_VERSION` | absent | Not written by a deployment: the runtime's read-only name for the build that is answering, bound on Cloudflare and reported by the health check |
 
 The three `_HOME` names are **deployment configuration and never a caller's**.
 They exist so the deterministic suite can point a route at a strict local server
@@ -156,10 +158,18 @@ A missing required name stops the gateway at startup, in a sentence naming it.
 
 `wrangler.jsonc` beside this file is the application's own shape: the entry
 point, the runtime date, and `observability.enabled: false` together with
-`logpush: false`, which is where **payload logging is off** is true. There are no
-bindings — no KV, no D1, no R2, no Durable Object, no queue — because the
-gateway keeps nothing and a binding would be a place a payload could come to
-rest.
+`logpush: false`, which is where **payload logging is off** is true.
+
+There is one binding and it stores nothing: `version_metadata`, the runtime's
+own name for the build that is answering, which the health check reports so that
+a gradual rollout is observable from outside and a rollback is checkable rather
+than claimed. There is no KV, no D1, no R2, no Durable Object, no queue and no
+cache, because each of those would be a place a payload could come to rest.
+
+Because the deployed host is one Worker script, a rollout is Cloudflare's own
+versions and gradual deployments: upload a version, put a small share of traffic
+on it, watch the health check say which build answered, and roll back by
+deploying the previous version at 100%.
 
 ```sh
 # from the repository root

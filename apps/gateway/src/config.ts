@@ -142,6 +142,14 @@ export const OPTIONAL_NAMES = [
   "EGMA_GATEWAY_MAX_FRAME_BYTES",
   "EGMA_GATEWAY_LOG_LEVEL",
   "EGMA_GATEWAY_PORT",
+  /**
+   * Not a value a deployment writes: the runtime's own read-only name for the
+   * build that is answering, where a host offers one. It is declared here
+   * anyway, because it is a name the application reads out of what its host
+   * hands it, and an undeclared one of those is exactly what this list exists
+   * to make impossible.
+   */
+  "EGMA_GATEWAY_VERSION",
 ] as const;
 
 /**

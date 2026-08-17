@@ -94,9 +94,12 @@ describe("the deployment configuration this repository ships", () => {
     expect(wrangler).toMatch(/"logpush"\s*:\s*false/);
   });
 
-  it("declares the deployed entry point and no storage binding at all", async () => {
+  it("declares the deployed entry point, and the one binding that stores nothing", async () => {
     const wrangler = await readFile(path.join(HERE, "wrangler.jsonc"), "utf8");
     expect(wrangler).toMatch(/"main"\s*:\s*"src\/worker\.ts"/);
+    // Read-only metadata about the build that is answering, so a rollout can be
+    // watched from outside. Every binding below is a place a payload could rest.
+    expect(wrangler).toMatch(/"version_metadata"\s*:\s*\{\s*"binding"/);
     for (const binding of [
       "kv_namespaces",
       "d1_databases",

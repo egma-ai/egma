@@ -40,6 +40,8 @@ declare class WebSocketPair {
 type CloudflareWebSocket = WebSocket & { accept(): void };
 type CloudflareResponseInit = ResponseInit & { webSocket?: WebSocket };
 type ExecutionContext = { waitUntil(work: Promise<unknown>): void };
+/** What the runtime says about the build that is answering. Read-only. */
+type VersionMetadata = { id?: string; tag?: string };
 
 /** Cloudflare's socket, as the relay wants to see it. */
 function asDuplex(socket: CloudflareWebSocket): Duplex {
@@ -100,14 +102,20 @@ function socketHostFor(): SocketHost {
 }
 
 export default {
-  async fetch(request: Request, env: Environment, ctx: ExecutionContext): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Environment & { EGMA_GATEWAY_VERSION?: VersionMetadata },
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const config = loadConfig(env);
+    const build = env.EGMA_GATEWAY_VERSION;
     return handle(request, {
       config,
       verifier: staticSecretVerifier(config),
       log: makeLog(config.logLevel),
       socketHostFor: () => socketHostFor(),
       waitUntil: (work) => ctx.waitUntil(work),
+      ...(build?.id === undefined ? {} : { version: build.tag ?? build.id }),
     });
   },
 };
