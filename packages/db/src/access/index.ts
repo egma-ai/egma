@@ -283,6 +283,7 @@ export {
   MAXIMUM_WINDOW_MILLISECONDS,
   type ListTracesOptions,
   type ReadTraceOptions,
+  type ReportedOnTrace,
   type TimeWindow,
   type TraceDetail,
   type TraceFacts,

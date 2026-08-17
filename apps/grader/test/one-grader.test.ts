@@ -32,7 +32,8 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
       {
         measure: "turn_response_latency",
         unit: "milliseconds" as const,
-        derived: false,
+        origin: "timed" as const,
+        reportedBy: "",
         samples: [{ value: 900, spanId: "0000000000000001" }],
       },
     ],
@@ -174,7 +175,8 @@ describe("a simulation that never ran", () => {
           {
             measure: "turn_response_latency",
             unit: "milliseconds" as const,
-            derived: false,
+            origin: "timed" as const,
+            reportedBy: "",
             samples: [{ value: 10, spanId: "0000000000000001" }],
           },
         ],

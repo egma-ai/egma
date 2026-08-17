@@ -34,6 +34,15 @@ import type { Execution, Judgment } from "./contract.ts";
  * made — and the rationale says which measurement decided, so nobody has to
  * guess.
  *
+ * **Who measured is on the row, and not in the sentence.** The measure module
+ * reads three sources — egma's own timing spans, a derivation off a recognised
+ * framework's spans, and the block an agent platform reported about its own
+ * conversation — and every measurement carries which one it came from. The
+ * bound is applied identically whoever took the number, and so is the rationale:
+ * one sentence shape for all three, because a verdict says what was measured and
+ * against what. The provenance stays machine-readable on the measure for any
+ * surface that later asks for it.
+ *
  * ## What it says when it cannot say anything
  *
  * - **The conversation's spans do not carry the measure.** `skipped`, out of
@@ -246,6 +255,13 @@ function boundIn(entry: Readonly<Record<string, string | number>>): Bounded | un
  * because "the worst of eleven turns was 2.4 seconds" and "the one turn took 2.4
  * seconds" are different things to go and look at, and a rationale that hid the
  * difference would leave a developer opening the wrong transcript.
+ *
+ * It says nothing about **who measured**. A number egma timed, a number egma
+ * worked out and a number a platform reported are held to the bound the same
+ * way, and they are read the same way: the two sentence shapes here are the ones
+ * they have always been, word for word, whatever the source. Provenance lives on
+ * the measure itself, where a surface can ask for it without a rationale having
+ * to carry it.
  */
 function rationaleFor(
   asked: Bounded,
@@ -257,9 +273,10 @@ function rationaleFor(
     measured.samples.length === 1
       ? `was ${worst} ${measured.unit}`
       : `was ${worst} ${measured.unit} at its worst, across ${measured.samples.length} measurements`;
-  return held
-    ? `${asked.metric} ${taken}, within the bound of ${asked.bound}.`
-    : `${asked.metric} ${taken}, over the bound of ${asked.bound}.`;
+  const against = held
+    ? `within the bound of ${asked.bound}`
+    : `over the bound of ${asked.bound}`;
+  return `${asked.metric} ${taken}, ${against}.`;
 }
 
 /** egma could not make this check. Never `failed`: nothing is said about the agent. */

@@ -743,6 +743,121 @@ describe("a duration that the reading arithmetic cannot hold", () => {
   });
 });
 
+/**
+ * The reported-measurements block, which is the one thing a read takes off a
+ * payload.
+ *
+ * Everything else about the payload is deliberately not returned — it is the
+ * largest column on the row and nothing renders it — so what is asked here is
+ * that the exception stays the size it was argued to be: one root row, one
+ * egma-owned key, and an answer of `undefined` for every shape that is not a
+ * block. Never a throw, because a vendor's bad write must not cost a customer
+ * their transcript.
+ */
+describe("the block a platform reported on the root span", () => {
+  const REPORTED = "0a0a1111111111111111111111111111";
+  const UNREPORTED = "0b0b1111111111111111111111111111";
+  const MALFORMED = "0c0c1111111111111111111111111111";
+
+  /** A root the way a platform normalizer files one: parentless, and carrying
+   * the egma-owned corner of an otherwise vendor-owned payload. */
+  function aReportedRoot(traceId: string, normalised: unknown): NewSpan {
+    return span({
+      traceId,
+      spanId: spanId(),
+      parentSpanId: "",
+      name: "retell_call",
+      kind: "conversation",
+      payload: JSON.stringify({
+        call_id: "call_c0ffee",
+        recording_url: "https://example.invalid/one.wav",
+        egma_normalised: normalised,
+      }),
+    });
+  }
+
+  beforeAll(async () => {
+    await appendSpans(at(acme, SUPPORT), [
+      aReportedRoot(REPORTED, {
+        degraded: false,
+        reported_measurements: {
+          version: 1,
+          reported_by: "retell",
+          measurements: [
+            {
+              measure: "turn_response_latency",
+              unit: "milliseconds",
+              values: [517, 2145],
+            },
+          ],
+        },
+      }),
+      // The same payload corner without a block in it, which is every trace
+      // filed before a platform reported anything.
+      aReportedRoot(UNREPORTED, { degraded: false }),
+      // And a block of a version this code has never seen, which is the shape a
+      // reader has to be able to tell from a block it simply predates.
+      aReportedRoot(MALFORMED, {
+        reported_measurements: { version: 99, reported_by: "", measurements: 7 },
+      }),
+    ]);
+  });
+
+  it("is read back with the root span it rode in on", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), REPORTED, {
+      window: WINDOW,
+    });
+
+    expect(detail?.reported).toEqual({
+      spanId: detail?.spans[0]?.spanId,
+      reportedBy: "retell",
+      measurements: [
+        {
+          measure: "turn_response_latency",
+          unit: "milliseconds",
+          values: [517, 2145],
+        },
+      ],
+    });
+  });
+
+  it("is absent on a root that carries no block, and the trace reads as ever", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), UNREPORTED, {
+      window: WINDOW,
+    });
+
+    expect(detail?.spanCount).toBe(1);
+    expect(detail?.reported).toBeUndefined();
+  });
+
+  it("is absent rather than fatal when the block is one nothing can read", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), MALFORMED, {
+      window: WINDOW,
+    });
+
+    // The transcript is unharmed, which is the half that was never in doubt.
+    expect(detail?.spanCount).toBe(1);
+    expect(detail?.reported).toBeUndefined();
+  });
+
+  /**
+   * The payload itself is still not returned. One key of one row is the whole
+   * exception, and a span in the transcript carries no payload at all — which
+   * is what keeps a trace read from shipping megabytes of a vendor's own
+   * document to a page that renders none of it.
+   */
+  it("does not put the payload on a span, block or no block", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), REPORTED, {
+      window: WINDOW,
+    });
+
+    for (const each of everySpanOf(detail)) {
+      expect(Object.keys(each)).not.toContain("payload");
+      expect(JSON.stringify(each)).not.toContain("recording_url");
+    }
+  });
+});
+
 describe("a page token", () => {
   it("survives a round trip and resumes exactly where the page stopped", async () => {
     const context = at(acme, undefined);

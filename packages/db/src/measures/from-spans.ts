@@ -3,11 +3,19 @@ import {
   type CatalogedMeasure,
 } from "@egma/simulation-contract";
 
-import type { TraceSpan } from "../access/traces.ts";
+import type { ReportedOnTrace, TraceSpan } from "../access/traces.ts";
 
 /**
- * The shared measure module: a conversation's spans in, the measure catalog's
- * numbers out.
+ * The shared measure module: a conversation in, the measure catalog's numbers
+ * out.
+ *
+ * **Three sources, one answer per measure.** A measure egma timed itself wins;
+ * a measure worked out from a recognised framework's own spans comes next; what
+ * the agent platform reported about its own conversation comes last. Every step
+ * of the chain is absolute — nothing is averaged with anything and nothing is
+ * appended to anything — and every number says which step it came from, because
+ * a developer reading a verdict is entitled to know whether egma watched it
+ * happen or was told about it.
  *
  * **One computation, and that is the whole reason this file exists.** The
  * metrics display reads through it and so does the grader that bounds a
@@ -19,12 +27,15 @@ import type { TraceSpan } from "../access/traces.ts";
  * settle the disagreement against, which is precisely the false trust this
  * product exists to kill.
  *
- * **The source is not an input, and cannot become one.** What goes in is spans;
- * what comes out is what those spans carry. A simulation's telemetry and a real
- * caller's arrive at the same OTLP door and land in the same table, so
- * "identical spans, identical numbers" is a property of this function's
- * signature rather than a promise somebody has to keep — there is nowhere here
- * for `source` to be read even by a caller who wanted to.
+ * **The source is not an input, and cannot become one.** What goes in is a
+ * conversation's spans, and what a platform reported about it; what comes out is
+ * what those carry. A simulation's telemetry and a real caller's arrive at the
+ * same OTLP door and land in the same table, so "identical input, identical
+ * numbers" is a property of this function's signature rather than a promise
+ * somebody has to keep — there is nowhere here for `source` to be read even by a
+ * caller who wanted to. The reported block is not a way in for it: it is what a
+ * platform said about one conversation, read on its own terms and last of the
+ * three, and a simulation carrying one would be read exactly the same way.
  *
  * **The catalog decides what is computed and how.** Every measure carries its
  * span-level definition beside its name
@@ -41,10 +52,10 @@ import type { TraceSpan } from "../access/traces.ts";
 
 /**
  * The part of a trace this reads: its spans, however they were arranged for a
- * transcript.
+ * transcript, and what its platform reported about it.
  *
  * Structural rather than `TraceDetail` itself, so a caller holding a trace hands
- * it straight over and a test can hand over the two lists — and so that adding a
+ * it straight over and a test can hand over the lists — and so that adding a
  * fact to a trace read is not a change to this arithmetic. A trace read hands
  * back the turns lifted out for the transcript and everything filed beside them,
  * with children hanging beneath both; every span is under one of the two, once.
@@ -52,6 +63,20 @@ import type { TraceSpan } from "../access/traces.ts";
 export type SpannedConversation = {
   readonly turns: readonly TraceSpan[];
   readonly spans: readonly TraceSpan[];
+  /**
+   * What the platform measured about this conversation itself, when the trace
+   * read found a block on its root span.
+   *
+   * **Not spans, and that is the honest shape.** These numbers were never
+   * events egma watched happen; they are what somebody else says happened, and
+   * dressing them as spans would fabricate a granularity the platform never
+   * gave. So they arrive beside the spans rather than among them, they are read
+   * last, and every number worked out from them says so.
+   *
+   * Optional, because a conversation is a conversation without one — every
+   * simulation, and every platform egma reads no numbers from.
+   */
+  readonly reported?: ReportedOnTrace | undefined;
 };
 
 /**
@@ -74,16 +99,33 @@ export type MeasuredFromSpans = {
   /** The catalog's own unit, so nothing downstream has to look it up again. */
   readonly unit: CatalogedMeasure["unit"];
   /**
-   * Whether this number was worked out from a framework's own spans rather than
-   * read off a timing span egma's vocabulary names.
+   * Which of the three sources this number came from: a timing span egma's own
+   * vocabulary names, a derivation off a recognised framework's own spans, or
+   * the platform's own reported block.
    *
    * A fact about *this* conversation and not about the measure, which is why it
    * rides the answer instead of sitting in the catalog: the same measure is
-   * timed on a simulation and derived on a stock LiveKit call. A page saying
-   * where a number came from is the difference between a verdict a developer
-   * trusts and one they have to go and check.
+   * timed on a simulation, derived on a stock LiveKit call, and reported on a
+   * Retell one. A page saying where a number came from is the difference
+   * between a verdict a developer trusts and one they have to go and check —
+   * and `reported` is the value that most needs saying out loud, because a
+   * platform's measurement of its own agent is a different kind of evidence
+   * from egma's observation of it.
+   *
+   * Not the catalog's own `origin`, which says where a measure arrives from in
+   * general — a timing span or a terminal fact. This says who measured this
+   * one, on this conversation.
    */
-  readonly derived: boolean;
+  readonly origin: "timed" | "derived" | "reported";
+  /**
+   * Who reported it — `retell`, exactly as the connection type names the
+   * platform — and the empty string for every measure egma measured itself.
+   *
+   * Empty rather than absent, so that reading it is never a narrowing: anything
+   * printing a platform's name asks `origin === "reported"` first, and there is
+   * one question to ask rather than two that could come to disagree.
+   */
+  readonly reportedBy: string;
   /**
    * One measurement, or the whole series for a measure taken once a turn, in
    * the order they were taken.
@@ -144,6 +186,7 @@ export function measuresFromSpans(
 ): readonly MeasuredFromSpans[] {
   const timed = timingSpansByName(conversation);
   const derived = derivedFromFrameworkSpans(conversation);
+  const reported = conversation.reported;
 
   const measured: MeasuredFromSpans[] = [];
   for (const cataloged of MEASURE_CATALOG) {
@@ -152,7 +195,8 @@ export function measuresFromSpans(
       measured.push({
         measure: cataloged.measure,
         unit: cataloged.unit,
-        derived: false,
+        origin: "timed",
+        reportedBy: "",
         samples: found,
       });
       continue;
@@ -163,12 +207,32 @@ export function measuresFromSpans(
     // measurement somebody instrumented on purpose. Deriving beside it would
     // double the samples of one turn and quietly move every percentile.
     const worked = derived.get(cataloged.measure) ?? [];
-    if (worked.length === 0) continue;
+    if (worked.length > 0) {
+      measured.push({
+        measure: cataloged.measure,
+        unit: cataloged.unit,
+        origin: "derived",
+        reportedBy: "",
+        samples: worked,
+      });
+      continue;
+    }
+    // **And the platform's own numbers are last, for the same reason and by the
+    // same absolute rule.** egma watching the conversation outranks the
+    // platform grading its own homework, so a measure egma timed or derived is
+    // never joined by what the platform said about it: one answer per measure,
+    // never averaged and never appended. Last is not least — for a Retell trace
+    // it is the only source there is, and the whole difference between a
+    // production conversation with a verdict and one with a polite silence.
+    if (reported === undefined) continue;
+    const said = reportedSamplesOf(cataloged, reported);
+    if (said.length === 0) continue;
     measured.push({
       measure: cataloged.measure,
       unit: cataloged.unit,
-      derived: true,
-      samples: worked,
+      origin: "reported",
+      reportedBy: reported.reportedBy,
+      samples: said,
     });
   }
   return measured;
@@ -273,6 +337,79 @@ function samplesOf(
 }
 
 /* ------------------------------------------------------------------- *
+ * The reported measures: what the platform said, read as the catalog's
+ * numbers.
+ * ------------------------------------------------------------------- */
+
+/**
+ * One cataloged measure's samples out of the platform's reported block, or
+ * nothing where the block does not hold that measure.
+ *
+ * **The name and the unit both have to match, and the unit is not a
+ * formality.** A platform that reports its end-to-end latency in seconds under
+ * the catalog's own name is reporting something real; reading `2.145` as
+ * milliseconds would hand a grader a conversation that answered in two
+ * milliseconds, and a two-second bound would pass what it exists to fail. A
+ * number in the wrong unit is worse than no number, so such a measurement is
+ * skipped in silence and the measure comes back absent — which is a `skipped`
+ * check rather than a false pass, and the difference the verdict vocabulary is
+ * built on. Converting it instead would be egma inventing a fact about a unit
+ * nobody in this repository declared.
+ *
+ * **A platform-prefixed name never matches**, because no catalog measure is
+ * called `retell/llm_latency`. Those entries stay in the block for the day a
+ * display asks for them, and are deliberately not folded into the catalog
+ * answer beside a stage that means something else.
+ *
+ * **Every sample cites the root span the block rode in on.** These numbers
+ * describe the whole conversation and happened at no single moment inside it,
+ * so the root is the only span that can honestly be pointed at — and a verdict
+ * citing it opens the trace the measurement is about rather than a turn picked
+ * to look precise.
+ *
+ * **A measurement that runs backwards is not kept, and the rule is the
+ * derivation's own.** A real conversation on a real Retell account reports an
+ * end-to-end sample of −2103 ms; the derivation above already refuses a
+ * negative for the reason that applies here word for word — a wait that ran
+ * backwards is not a fast answer, and a number that is wrong is worse than a
+ * measurement that is missing. It is worse than harmless in this arm: the worst
+ * sample decides a bound, so a negative can never fail one and would sit in the
+ * series holding it trivially, then drag every mean and percentile down the day
+ * a grader can ask for one. A reported **zero** stays, and the difference is
+ * real — zero is what the platform says it measured, not the placeholder pair a
+ * zero-width turn would have produced. The block on the payload is untouched by
+ * any of this: the writer keeps everything the platform said, and the fold
+ * refuses what cannot be true.
+ *
+ * A measurement whose every value runs backwards contributes nothing, so the
+ * measure is absent exactly as it is for one the platform never took.
+ *
+ * The order is the platform's own, exactly as a timed series is the order it
+ * was taken in: the block carries raw measurements rather than a summary, so
+ * read forwards it is the conversation read forwards.
+ */
+function reportedSamplesOf(
+  cataloged: CatalogedMeasure,
+  reported: ReportedOnTrace,
+): readonly Sample[] {
+  // The first match wins where a block somehow names one measure twice in one
+  // unit. A normalizer maps each of its own stages once, so nothing writes such
+  // a block — and the reader stays lenient rather than refusing, exactly as the
+  // contract's parse does: a duplicate is one platform's bookkeeping mistake,
+  // and answering with the first of two identical-looking series beats
+  // answering a customer with nothing.
+  const said = reported.measurements.find(
+    (measurement) =>
+      measurement.measure === cataloged.measure &&
+      measurement.unit === cataloged.unit,
+  );
+  if (said === undefined) return [];
+  return said.values
+    .filter((value) => value >= 0)
+    .map((value) => ({ value, spanId: reported.spanId }));
+}
+
+/* ------------------------------------------------------------------- *
  * The derived measures: a framework's own spans, read as the catalog's
  * numbers.
  * ------------------------------------------------------------------- */
@@ -309,6 +446,12 @@ function derivedFromFrameworkSpans(
 
   for (const span of everySpanIn(conversation)) {
     if (span.kind === HUMAN_TURN || span.kind === AGENT_TURN) {
+      // **Every turn joins the list, whatever its timings are worth.** What this
+      // list carries is the conversational order, and the walk below reads it
+      // for who answered whom — so a turn held out of it stops being a barrier
+      // between the turns around it, and two people's waits become one. Which
+      // measurements a turn is fit to produce is a question for the measure that
+      // produces them, one at a time, and never for membership here.
       turns.push(timed(span));
       continue;
     }
@@ -356,6 +499,22 @@ function put(
  * should have failed — a number that is wrong is worse than a measurement that
  * is missing, so the overlapping turn contributes nothing and the turns around
  * it still count.
+ *
+ * **A zero read off a turn that had no width is two placeholders agreeing, and
+ * is not kept either.** Retell publishes no per-turn timing, so its normalizer
+ * opens every turn at the production trace's own start and closes it in the
+ * same instant — placeholders, said plainly in
+ * `apps/api/src/retell/normalise.ts`. Subtract one from the next and the answer
+ * is zero, every time, for the arithmetic's own reasons and not the agent's: a
+ * series a bound cannot fail, so a trace whose worst wait was really 2145 ms
+ * holds a two-second bound with "0 milliseconds at its worst" as its rationale,
+ * which is the false pass this product exists to kill.
+ *
+ * **It is the pair that says so, and never the width alone.** A chat simulation
+ * writes turns of no width too — a typed message is one instant and there is
+ * nothing to measure a duration of — but at real, distinct instants, so the gap
+ * it answers across is observed and every sample of it stands. Only a zero
+ * whose own turn also had no width has nothing behind it on either side.
  */
 function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
   const samples: Sample[] = [];
@@ -365,6 +524,7 @@ function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
     if (answered === undefined) continue;
     const latency = milliseconds(answered.startedAt - turn.endedAt);
     if (latency < 0) continue;
+    if (latency === 0 && turn.duration === 0n) continue;
     samples.push({ value: latency, spanId: answered.spanId });
   }
   return samples;
