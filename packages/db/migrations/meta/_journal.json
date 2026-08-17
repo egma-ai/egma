@@ -246,13 +246,6 @@
       "when": 1786923110581,
       "tag": "0034_watch_production",
       "breakpoints": true
-    },
-    {
-      "idx": 35,
-      "version": "7",
-      "when": 1786955176141,
-      "tag": "0035_restore_audio_rollback_column",
-      "breakpoints": true
     }
   ]
 }
