@@ -450,8 +450,6 @@ function aSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
     toolResult: "",
     providerCallId: "",
     connectionType: "retell",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     runId: "",
     agentId: "",
     agentVersionId: "",

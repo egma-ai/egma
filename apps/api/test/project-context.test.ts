@@ -441,7 +441,6 @@ describe("a browser working in a project that is not the first", () => {
       endingReason: "agent_ended",
       turnCount: 6,
       recordingReference: `${conversation}/dual-channel.wav`,
-      measuredAudioBandHertz: 8000,
     });
 
     const asked = await api.app.inject({
@@ -905,7 +904,6 @@ describe("a key for the whole organization, where the organization holds two pro
       endingReason: "agent_ended",
       turnCount: 6,
       recordingReference: `${conversation}/dual-channel.wav`,
-      measuredAudioBandHertz: 8000,
     });
 
     const asked = await api.app.inject({

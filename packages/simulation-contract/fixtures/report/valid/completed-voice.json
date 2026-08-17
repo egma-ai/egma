@@ -14,7 +14,6 @@
         "ended_at": "2026-08-05T09:04:32.007000Z",
         "turn_count": 22,
         "audio": {
-          "measured_sample_rate_hz": 8000,
           "recording": "sim_01K3XQ7M4E8YB2FVN0H9TZQWES/dual-channel.wav"
         },
         "provider_reference": "CA7e2b9c1d4f6a8e0b2d4f6a8e0b2d4f6a"

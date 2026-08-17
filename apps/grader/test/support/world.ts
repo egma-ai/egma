@@ -632,8 +632,6 @@ function simulationSpan(
     // instrumentation's scope name, and only LiveKit's is one egma knows —
     // this world reaches its agent over a Retell chat connection.
     connectionType: "",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     // Resolved by the door from egma's own row, never from the payload.
     runId: simulation.runId,
     agentId: simulation.agentId,
@@ -844,8 +842,6 @@ function productionSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
     toolResult: "",
     providerCallId: `room-${traceId.slice(-6)}`,
     connectionType: "livekit",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     // Empty, as the door writes them: a trace arriving there was not started by
     // egma, so there is no run and no agent behind it.
     runId: "",

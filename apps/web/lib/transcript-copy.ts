@@ -366,11 +366,6 @@ export const RECORDING = {
     "Egma's own audio of this exchange. Left channel is the human side, " +
     "right channel is the agent.",
   /**
-   * Two bands are two units — the narrow band a telephone carries strips what
-   * an audio grader reads — so a reader listening is told which one this is.
-   */
-  band: (hertz: number) => `Heard at ${String(hertz)} Hz.`,
-  /**
    * For a browser that cannot play the element at all. It names an owner like
    * every other line here: a reader whose browser refuses one of the two
    * audios on this page still has to know which one it refused.

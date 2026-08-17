@@ -571,21 +571,10 @@ no platform to be handed anything by, so there set `EGMA_SIMULATOR_TTS_PROVIDER`
 `EGMA_SIMULATOR_STT_PROVIDER`, their key and `EGMA_SIMULATOR_VAD_PROVIDER=silero`
 before you expect a conversation.
 
-**A phone line is 8 kHz and OpenAI returns 24 kHz whatever is asked of it**, so
-Egma converts what it receives down to the band the line really carries. That
-conversion is not decoration: audio relabelled instead of converted is a voice
-three times too deep and three times too slow, and every measurement taken off
-it is wrong by the same factor.
-
-What a simulation's record stamps as its band is read off the frames that
-arrived rather than copied from a constant in Egma — but be clear about what
-that does and does not prove. The bridge resamples what the carrier sends down
-to the band the pipeline was assembled at *before* Egma sees a frame, so on a
-phone call the measured band is 8 kHz whether the carrier negotiated narrowband
-or G.722. The measurement catches Egma's own path going wrong; it cannot report
-what the carrier chose. That is the safe direction — a wideband leg is
-understated rather than a narrowband one overstated — and it is the reason a
-band is never compared across connection types.
+Pipecat and the transport own any media conversion. Egma does not force or
+report a processing rate. The WAV header is the only sample-rate fact Egma
+writes. It tells a player how to play the recording; it does not describe the
+connection's codec or acoustic quality.
 
 Every variable this section mentions is in `.env.example` with its default and
 whether it is required. Anything set to something unusable stops the simulator
@@ -867,8 +856,11 @@ A few things worth knowing about what happens next:
 - **Nothing is invented and nothing is dropped.** One span in is one row; what
   the columns have no place for — every attribute, event and resource field —
   is kept verbatim on the row it came on.
-- **A retry is free.** An exporter re-sending a batch it never heard back about
-  sends identical bytes, and identical bytes are stored once.
+- **A recent exact retry is free.** ClickHouse suppresses a byte-identical
+  insert block while that block remains in its recent deduplication window.
+  A later repeat can append, and regrouping, reordering, or changing any
+  evidence creates a different block that also appends, even when span ids
+  repeat.
 - **Sending traces is a write**, so a key acts at the role of whoever minted it:
   a `member` or an `admin` exports, and a key held by a `viewer` is refused.
   Demoting somebody stops their exporters on the next request, with no key
@@ -1154,8 +1146,11 @@ ClickHouse's schema lives beside it in `packages/db/clickhouse-migrations`,
 numbered the same way, applied on the same boot by the same mechanism, and
 hand-written rather than generated. Two things it asks for that Postgres does
 not: statements are separated by `--> statement-breakpoint`, because ClickHouse
-runs one per request, and every statement must say `IF NOT EXISTS`, because there
-is no transaction to roll a half-applied file back with.
+runs one per request, and every schema change must carry the safe guard for its
+operation — `IF NOT EXISTS` for creates and additions, and `IF EXISTS` for
+modifications, renames, and drops. ClickHouse has no transaction that can roll
+back a half-applied file, so the next boot must be able to run each statement
+again safely.
 
 ## License
 

@@ -223,8 +223,6 @@ function aSpan(over: Partial<NewSpan> & { readonly traceId: string }): NewSpan {
     toolResult: "",
     providerCallId: "",
     connectionType: "livekit",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     runId: "",
     agentId: "",
     agentVersionId: "",

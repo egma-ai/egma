@@ -8,11 +8,9 @@ one connection block. What a spec names is a number.
 
 The call itself is a media backend's job — see
 :mod:`egma_simulator.media`, whose docstring is the whole brief for one.
-This module owns the *lifecycle* above that seam: dial, hear the answer,
-carry the persona's speech out and the far end's speech back, notice the
-far end hanging up, end deliberately, and offer the bridge's own
-identifier for the call as the provider reference, the way the chat plug
-offers Retell's chat id.
+This module owns the lifecycle above that seam: dial, hear the answer,
+notice the far end hanging up, end deliberately, and offer the backend's
+own identifier for the call as the provider reference.
 
 Its config keys, like every plug's, are its own:
 
@@ -25,7 +23,7 @@ Its config keys, like every plug's, are its own:
   deployment does not use is refused: a script nobody reads was written
   by mistake.
 
-Which bridge places the call is the deployment's, not the spec's, and so
+Which media backend places the call is the deployment's, not the spec's, and so
 is the trunk: both are checked once at startup and arrive here already
 good. A spec that names a number on a simulator configured to place no
 calls is refused with the variable to set.
@@ -33,33 +31,15 @@ calls is refused with the variable to set.
 Credentials are refused outright. A phone connection carries no secret of
 its own.
 
-## The band a call is carried at
+## Media
 
-The line is *driven* at :data:`TELEPHONY_BAND_HZ`, and there is no way to
-ask for another. That is the band a call over the public telephone network
-really is, and the bridge resamples what it receives down to it — which
-can only remove what was never there rather than invent detail.
-
-**What a record stamps is read back off the audio, never off that
-constant.** ``measured_band_hz`` answers with the band the far end's
-frames really arrived at, and it is ``None`` until some have. The two
-agree in every configuration that works; a configuration where they do not
-is one where a score would mean something it does not, and the record has
-to be able to say so.
-
-A trunk that negotiates wideband is understated by this rather than
-overstated, which is the safe direction: reading 8 kHz off a call that
-was wideband costs a comparison, and reading 16 kHz off a call that was
-not would make a score mean something it does not.
+The stock Pipecat LiveKit transport owns call input, output, conversion,
+and pacing. Egma does not select or expose a processing rate.
 
 ## Where a turn begins and ends
 
-Nowhere in here. A phone line carries no end-of-turn signal in it, so this
-plug declares none: it is a **duplex line**, driven one slice of audio at
-a time with both directions open at once, and where the turns fall is the
-conductor's reading of that audio. What every plug over a live line shares
-— turning a bridge's own frames into slices of the same width — is
-:mod:`egma_simulator.plugs.media_line`.
+Nowhere in here. A phone line carries no end-of-turn signal. The one
+running Pipecat pipeline reads turns from the transport's frames.
 """
 
 from __future__ import annotations
@@ -67,17 +47,11 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import MediaSettings
-from ..media import BACKENDS, MediaBackendError, backend_for
+from ..media import BACKENDS, MediaBackendError, VoiceMedia, backend_for
 from . import PlugError
-from .media_line import MediaLine
-
-TELEPHONY_BAND_HZ = 8000
-"""The band a phone call is carried at, and the only one. See the module
-docstring: a band that could be asked for would be a band declared, and
-what a record stamps has to be a band the audio really carried."""
 
 BACKEND_VARIABLE = "EGMA_SIMULATOR_MEDIA_BACKEND"
-"""Where a deployment says which bridge places its calls. Named in the
+"""Where a deployment says which media backend places its calls. Named in the
 refusal a simulator that cannot place one gives."""
 
 RINGING_SECONDS = 60.0
@@ -108,7 +82,7 @@ class PhoneCall:
         # stand in front of its tools.
         del simulation_id, mock_tools
 
-        # Which bridge and which trunk this call goes over, resolved by
+        # Which media backend and trunk this call goes over, resolved by
         # assembly from this container's own configuration and the
         # platform's carrier on the work order. Read here rather than
         # worked out here: a plug that reached for an environment variable
@@ -184,7 +158,6 @@ class PhoneCall:
             )
 
         self._number = number.strip()
-        self._band_hz = TELEPHONY_BAND_HZ
         # Building the backend here, before any pipeline starts, is what
         # makes config the driver cannot use an honest refusal rather than
         # a failure part-way through a call.
@@ -192,37 +165,21 @@ class PhoneCall:
             factory,
             settings=settings,
             config=script,
-            band_hz=self._band_hz,
             caller_id=caller_id,
         )
-        self._line: MediaLine | None = None
+        self._media: VoiceMedia | None = None
         self._reference: str | None = None
 
     @property
     def provider_reference(self) -> str | None:
-        """The bridge's own identifier for this call, once there is one."""
+        """The backend's own identifier for this call, once there is one."""
         return self._reference
-
-    @property
-    def sample_rate_hz(self) -> int:
-        return self._band_hz
-
-    @property
-    def measured_band_hz(self) -> int | None:
-        """The band this call really carried, read off the audio itself.
-
-        ``None`` until audio has flowed, and never a copy of
-        :attr:`sample_rate_hz`: a record that stamped the band it asked
-        for would say the same thing whether the path was right or wrong,
-        which is the one thing a measurement must not do.
-        """
-        return None if self._line is None else self._line.measured_band_hz
 
     @property
     def far_end_left(self) -> bool:
         """Whether the far end has hung up. On a call that is the whole of
         what "the agent ended the exchange" means."""
-        return self._line is not None and self._line.far_end_left
+        return self._media is not None and self._media.ended.is_set()
 
     @property
     def backend(self) -> object:
@@ -234,38 +191,30 @@ class PhoneCall:
         """
         return self._backend
 
+    async def prepare(self) -> VoiceMedia:
+        """Build the media transport before the Pipecat pipeline starts."""
+        try:
+            self._media = await self._backend.create_transport()
+            return self._media
+        except MediaBackendError as refused:
+            raise PlugError(str(refused), ending=refused.ending) from refused
+
     async def open(self) -> None:
         """Place the call and wait for somebody to pick it up.
 
         Nothing is heard here. The line is open the moment somebody
-        answers, and every sample either side says after that crosses it
-        through :meth:`exchange` — including the greeting, which on a real
-        call is simply the first thing the far end happens to say.
+        answers. The running Pipecat transport then carries both sides,
+        including a greeting from the far end.
         """
         try:
-            session = await self._backend.create_session()
             await self._backend.dial(self._number)
             self._reference = await self._backend.wait_answered(RINGING_SECONDS)
-            self._line = MediaLine(session, band_hz=self._band_hz)
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused
 
-    async def exchange(self, outgoing: bytes) -> bytes:
-        """One slice of the call, both directions at once."""
-        line = self._line
-        if line is None:
-            raise PlugError("the phone line was driven before the call was answered")
-        try:
-            return await line.carry(outgoing)
-        except MediaBackendError as failed:
-            # A line that goes wrong mid-call is the backend's to name and
-            # the plug's to carry: a fault, never a phone nobody answered,
-            # because somebody did answer it.
-            raise PlugError(str(failed), ending=failed.ending) from failed
-
     async def close(self) -> None:
         """Hang up. Safe from every state, including never having dialled."""
-        self._line = None
+        self._media = None
         await self._backend.teardown()
 
 

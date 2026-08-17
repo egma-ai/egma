@@ -470,8 +470,8 @@ async function simulatorExport(
   // looked at and will refuse forever — costs exactly that group, counted and
   // answered as rejected below so the sender stops resending it. A store that
   // merely *fails* still escapes as the error it is: the whole document comes
-  // back as a retry, and the groups that landed re-append idempotently — the
-  // resend's identical flushes carry identical dedup tokens.
+  // back as a retry. Groups that landed are sent again as the same deterministic
+  // blocks, which is the recent exact-repeat case ClickHouse can suppress.
   const storeRefused: { spans: number; firstMessage: string } = {
     spans: 0,
     firstMessage: "",

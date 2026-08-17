@@ -6,8 +6,8 @@ itself as OTLP span batches. Both are stamped and serialized at the moment
 they happen; the serialized bytes are appended to a local write-ahead log
 and then posted by a single sender task, so delivery is ordered and a
 resend replays byte-identical documents — ids and timestamps included,
-which is what lets the control plane dedup on event ids and the trace
-store dedup on span ids. The report schema is applied to every report
+which lets the control plane dedup report event ids and ClickHouse suppress a
+recent exact repeat of an insert block. The report schema is applied to every report
 document before it is logged or sent: an invalid report is a bug in this
 process, and it fails here, loudly, rather than at the receiver.
 
@@ -130,9 +130,8 @@ class Reporter:
         """The platform's own identifier for the exchange, once the plug
         offers one; rides the terminal facts."""
         self.audio: dict | None = None
-        """The contract's audio block — the band measured at execution and
-        the recording's reference — for a voice simulation; ``None`` for a
-        chat one, where there is no audio to measure."""
+        """The recording reference for a voice simulation; ``None`` for a
+        chat simulation, which has no simulator recording."""
         self.mock_tool_coverage: dict | None = None
         """Which of the agent's tools mock tools answered for, and which
         ran their own implementations.
@@ -157,20 +156,24 @@ class Reporter:
         validate_report(document)
         self._log_and_queue(Destination.REPORT, document)
 
-    def spans(self, document: dict) -> None:
+    def spans(self, serialized: bytes) -> None:
         """Take one span batch into the same log and the same ordered queue.
 
         This is the whole of what makes the ordering guarantee true: a
         batch handed over here is ahead of every document minted after it,
-        the terminal report included. The batch is not schema-validated —
-        it is an OTLP export document, which the vocabulary's golden
-        fixtures pin and the ingest door checks — but it travels on exactly
-        the report's terms.
+        the terminal report included. The OpenTelemetry SDK has already
+        serialized these bytes. They are logged and retried without being
+        decoded or changed.
         """
-        self._log_and_queue(Destination.SPANS, document)
+        self._log_serialized_and_queue(Destination.SPANS, serialized)
 
     def _log_and_queue(self, destination: Destination, document: dict) -> None:
         serialized = json.dumps(document, separators=(",", ":")).encode()
+        self._log_serialized_and_queue(destination, serialized)
+
+    def _log_serialized_and_queue(
+        self, destination: Destination, serialized: bytes
+    ) -> None:
         self._append_to_wal(serialized)
         if self._sender is None:
             self._sender = asyncio.create_task(
@@ -236,7 +239,12 @@ class Reporter:
                 return
             except DocumentRejected as refusal:
                 # The control plane refused the document outright. Resending
-                # the same bytes cannot succeed; the WAL holds the record.
+                # the same bytes cannot succeed; the WAL holds the record. A
+                # refused span export ends ordered delivery, because sending a
+                # later terminal report would claim that incomplete evidence
+                # had already landed.
+                if destination is Destination.SPANS:
+                    self.abandoned = True
                 logger.error(
                     "control plane refused a %s document for %s: %s",
                     destination.value,

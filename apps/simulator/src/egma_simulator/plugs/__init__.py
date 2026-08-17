@@ -56,27 +56,14 @@ platform is ever dialled.
 
 ## Chat or voice: same job, different currency
 
-A chat plug exchanges text. A **voice plug exchanges audio** — that is the
-whole difference, and it is the plug's difference alone. Between a voice
-plug and the persona brain sit the speech legs, assembled around it per
-simulation: the persona's words are spoken into audio before they reach
-the plug, and the audio that comes back is transcribed before anyone else
-sees it. So a voice plug never handles text, the persona never handles
-audio, and neither of them learns about the other.
+A chat plug exchanges text. A voice plug prepares one Pipecat transport.
+The running Pipecat pipeline owns incoming audio, speech processing,
+persona output, conversion, pacing, and recording. The plug owns only the
+platform lifecycle and provider reference.
 
-There are two seams and no more: :class:`PlatformPlug` (chat, and what the
-walk drives) and :class:`DuplexLine` (voice, and what the voice conductor
-drives). A plug implements the one for the modality it speaks and refuses
-the other at construction.
-
-A voice plug's whole difference from a chat one is that both directions of
-the line are open at once. So a duplex line is not asked for a turn: it is
-driven one slice of audio at a time, the persona's speech out and the far
-end's speech in, and where the turns fall is the conductor's reading of
-that audio rather than anything the plug declares. That is true of the
-loopback counterpart, of a phone call and of a room alike — a live line
-carries no end-of-turn signal in it, and neither does a fake one, which is
-what makes CI's voice simulations representative of real ones.
+There are two seams: :class:`PlatformPlug` for chat and
+:class:`VoiceConnection` for voice. A plug implements the one for its
+modality and refuses the other at construction.
 
 ## The lifecycle a conductor drives
 
@@ -100,18 +87,9 @@ A chat plug's is three steps, for one simulation, in order, always:
    cancel directive, and after a fault. Make it safe to call in every one
    of those states.
 
-A duplex line's is three steps too, and none of them turn-shaped, because
-nothing on a real line is: ``open`` reaches the platform and answers with
-nothing at all, ``exchange`` is called once per slice for as long as the
-exchange lasts, and ``close`` tears it down. A greeting is not a step
-here — it is simply the first thing the far end happens to say, and it
-crosses the line like every other sample.
-
-Either way the plug declares ``sample_rate_hz`` — **the band it actually
-carries**, after whatever negotiation the platform does, not the band the
-config asked for. The legs are assembled at that band and the simulation's
-audio facts are measured from what flowed, so a plug that returns a
-hopeful number is lying on the record.
+A voice connection also has three steps. ``prepare`` returns the transport
+processors without opening the platform. ``open`` connects or dials.
+``close`` tears it down. It exposes no PCM exchange and no processing rate.
 
 ``provider_reference`` is the platform's own identifier for the exchange —
 a chat id, a telephony leg id — reported with the terminal facts as the
@@ -143,22 +121,15 @@ None of the three is ever graded as the agent failing: each of them
 means the exchange did not happen, so there is nothing to grade.
 
 A cancel directive or a tripped limit stops the exchange at whatever call
-is in flight — ``open``, ``deliver`` or ``exchange`` — as an
+is in flight — ``prepare``, ``open``, or ``deliver`` — as an
 ``asyncio.CancelledError`` inside the plug: let it propagate, and rely on
 ``close()`` for teardown.
 
 ## Pacing
 
-A real platform takes real time to answer; that is the plug's time to
-take, inside ``deliver``. Fakes that answer instantly make some walks
-untestable (nothing can be canceled mid-flight), which is why the scripted
-counterpart takes a ``turn_seconds`` knob.
-
-A voice plug has a second, better way to be slow: the quiet before an
-agent starts speaking belongs in the audio, because that is where it is on
-a real call and where the measurement of it is read from. On a duplex line
-that quiet is simply the slices the far end says nothing in, which costs a
-deterministic test no time at all and a live call exactly what it costs.
+A real platform takes real time to answer. For chat, that time is inside
+``deliver``. For voice, the running Pipecat transport carries media while
+the persona model and speech services work.
 
 ## Registration
 
@@ -175,6 +146,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from ..contract import ERROR
+from ..media import VoiceMedia
 
 
 @dataclass(frozen=True)
@@ -252,58 +224,29 @@ class PlatformPlug(Protocol):
 
 
 @runtime_checkable
-class DuplexLine(Protocol):
-    """The seam a full-duplex voice connection is reached through.
+class VoiceConnection(Protocol):
+    """The seam a voice conductor gives to its one Pipecat pipeline.
 
-    **Checkable at runtime, and used that way.** Assembly asks a plug
-    whether it is one of these before handing it to the voice conductor,
-    so the verbs below are what a voice connection has to grow rather
-    than a promise made in prose.
-
-    Both directions are open at once, and the line is driven one slice at
-    a time: :meth:`exchange` takes the slice the persona is saying right
-    now and answers with the slice the far end said in the same moment.
-    Neither side is a turn, and neither side announces one — turn-taking
-    is the conductor's reading of the audio, which is what makes it
-    possible for the two speakers to overlap at all.
-
-    **Every slice is the same number of samples in both directions, and
-    quiet is audio.** A speaker saying nothing sends silence rather than
-    nothing, because the count of samples that have crossed the line *is*
-    the conversation's clock: every utterance in the record is a pair of
-    positions on it, so a line that skipped its quiet would leave the two
-    speakers on two different clocks.
-
-    ``sample_rate_hz`` is the band the line is *driven* at: the speech
-    legs are assembled at it and every slice is cut to it.
-    ``measured_band_hz`` is the band the audio really arrived at, read
-    back off what flowed, and ``None`` until something has — it is what a
-    record stamps, so that a measured band can never be a copy of a
-    configured one. ``far_end_left`` is true once the far end is off the
-    line, which is what "the agent ended the exchange" means on a voice
-    connection.
+    ``prepare`` constructs the transport processors before the pipeline
+    starts. ``open`` waits until that already-running transport reaches the
+    far end. No PCM exchange, processing rate, or second media clock crosses
+    this seam.
     """
 
     @property
     def provider_reference(self) -> str | None: ...
 
     @property
-    def sample_rate_hz(self) -> int: ...
-
-    @property
-    def measured_band_hz(self) -> int | None: ...
-
-    @property
     def far_end_left(self) -> bool: ...
 
-    async def open(self) -> None: ...
+    async def prepare(self) -> VoiceMedia: ...
 
-    async def exchange(self, outgoing: bytes) -> bytes: ...
+    async def open(self) -> None: ...
 
     async def close(self) -> None: ...
 
 
-PlugFactory = Callable[..., PlatformPlug | DuplexLine]
+PlugFactory = Callable[..., PlatformPlug | VoiceConnection]
 """What the registry hands back: called with ``modality=``, ``config=``,
 ``credentials=``, ``simulation_id=``, ``mock_tools=`` and ``media=``
 keywords, it returns one plug for one simulation — in practice, the plug

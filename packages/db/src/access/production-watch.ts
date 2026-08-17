@@ -16,7 +16,7 @@ import { within } from "./within.ts";
 
 /**
  * Watching somebody else's platform: which connections are switched on, and
- * the ledger that makes a conversation land exactly once however it arrived.
+ * the ledger that chooses one live writer however a conversation arrived.
  *
  * What the tables *are* is `schema/production.ts`; this file is how they are
  * reached.
@@ -426,8 +426,8 @@ export async function advanceProductionCursor(
  * a write and holds the payload to write it from; this re-stamps `claimed_at`
  * and hands the payload back, so the caller normalises the identical input into
  * the identical batch. A crash between the append and the mark replays the same
- * append, which ClickHouse's block-level insert dedup absorbs — so exactly one
- * copy survives either window.
+ * append. ClickHouse normally suppresses a recent byte-identical retry, but a
+ * replay after that deduplication window can append a second copy.
  *
  * Re-stamping under `for update skip locked` is what keeps two API replicas
  * from replaying one conversation at the same moment. It is the grading claim's

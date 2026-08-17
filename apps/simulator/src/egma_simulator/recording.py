@@ -1,10 +1,8 @@
-"""One voice simulation's recording: two channels, and what they measured.
+"""One voice simulation's canonical two-channel recording.
 
 Every voice simulation leaves the same evidence behind, whoever conducted
-it: a dual-channel WAV with one speaker to a channel, and the two facts a
-report carries about it — the band the audio was really carried at, and
-where the file went. Both conductors write one, so the writing lives here
-rather than inside either of them.
+it: a dual-channel WAV with one speaker to a channel and a storage
+reference. The WAV header is the recording's only sample-rate fact.
 
 The channel order is the transcript's own: the persona first, the agent
 under test second, so the file needs no legend to be read.
@@ -31,17 +29,13 @@ the transcript's own order."""
 
 @dataclass(frozen=True)
 class AudioFacts:
-    """What a voice simulation measured about its own audio."""
+    """The stored recording produced by a voice simulation."""
 
-    measured_sample_rate_hz: int
     recording: str
 
     def as_report(self) -> dict:
         """The contract's audio block, exactly."""
-        return {
-            "measured_sample_rate_hz": self.measured_sample_rate_hz,
-            "recording": self.recording,
-        }
+        return {"recording": self.recording}
 
 
 def dual_channel_wav(
@@ -54,10 +48,8 @@ def dual_channel_wav(
     transcript looks wrong. The shorter track is padded with quiet so a
     file never runs out halfway through the exchange.
 
-    On a full-duplex line the two tracks are the same length by
-    construction — every slice carries both directions, quiet included —
-    so the file is a faithful clock and two speakers talking over each
-    other are audible as exactly that.
+    Pipecat's recorder aligns and pads the two tracks on one timeline, so
+    two speakers talking over each other remain audible as exactly that.
     """
     frames = max(len(persona_audio), len(agent_audio)) // SAMPLE_WIDTH_BYTES
     interleaved = array("h", bytes(frames * 2 * SAMPLE_WIDTH_BYTES))

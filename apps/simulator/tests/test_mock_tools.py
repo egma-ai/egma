@@ -401,6 +401,7 @@ async def opened(
         mock_tools=seam if seam is not None else MockToolSeam(mock_tools),
         driver=stub.driver,
     )
+    await plug.prepare()
     await plug.open()
     return plug
 

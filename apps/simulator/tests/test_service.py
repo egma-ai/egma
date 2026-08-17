@@ -127,6 +127,22 @@ def test_a_spec_naming_an_unplugged_connection_type_is_refused(tmp_path, caplog)
     assert "no platform plug" in caplog.text
 
 
+def test_an_id_that_would_make_an_invalid_otel_trace_is_refused_before_running(
+    tmp_path, caplog
+):
+    service = a_service(tmp_path, capacity=2)
+    executor = RecordingExecutor(capacity=2)
+
+    invalid = scripted_spec("sim_00000000000000000000000000")
+    good = scripted_spec("sim-valid-after-zero")
+    service._accept([invalid, good], executor)
+
+    assert [spec.simulation_id for spec in executor.accepted] == [
+        "sim-valid-after-zero"
+    ]
+    assert "all-zero OpenTelemetry trace id" in caplog.text
+
+
 class RefusingClient:
     """A control plane that turns down every claim the same way.
 

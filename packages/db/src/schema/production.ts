@@ -17,10 +17,10 @@ import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
 /**
  * What egma writes down while it is watching somebody else's platform.
  *
- * Two tables, and they answer two different questions. The claim is how a
- * production trace is written **exactly once** although two transports carry
- * it; the refusal counter is how a delivery that belonged to nobody is
- * remembered without being stored.
+ * Two tables, and they answer two different questions. The claim chooses one
+ * live writer when two transports carry a production trace; the refusal
+ * counter is how a delivery that belonged to nobody is remembered without
+ * being stored.
  */
 
 /** How a production trace reached egma. Delivery, and nothing else. */
@@ -47,16 +47,16 @@ export type ProductionClaimStatus = (typeof PRODUCTION_CLAIM_STATUSES)[number];
  * holds. First insert wins; the loser's insert conflicts and it walks away.
  * Two transports racing on one conversation are settled by the constraint
  * rather than by timing, which is the grading queue's own insert-first-wins
- * pattern reused, and it makes a duplicate unrepresentable rather than merely
- * unlikely.
+ * pattern reused. It prevents a live transport race; recovery across Postgres
+ * and ClickHouse is separately at-least-once.
  *
  * **The payload is on the claim because the claim is the recovery point.** The
  * order across the two stores is claim (here) → append (ClickHouse) → mark
  * written (here). A crash anywhere in the middle leaves a claimed-but-unwritten
  * row, and a sweep re-claims it and replays it *from this payload* — so the
- * retry normalises identical input into an identical batch, and ClickHouse's
- * block-level insert dedup absorbs an append that had already landed. Neither
- * store needs a transaction spanning the other.
+ * retry normalises identical input into an identical batch. ClickHouse can
+ * suppress a recent byte-identical append. A later replay may append another
+ * copy. Neither store needs a transaction spanning the other.
  */
 export const productionTraceClaim = pgTable(
   "production_trace_claim",

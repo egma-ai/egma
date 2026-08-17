@@ -13,7 +13,6 @@
       ],
       "ends_after_replies": true,
       "answer_delay_seconds": 0.4,
-      "sample_rate_hz": 8000,
       "provider_reference": "loopback-voice-hurried-1"
     },
     "credentials": null

@@ -10,11 +10,11 @@ for every modality, forever — it never learns which of these it is in.
 **Who conducts is what a spec selects here, and there are two answers.**
 A chat simulation is walked a turn at a time by :mod:`egma_simulator.walk`.
 A voice simulation is conducted by :mod:`egma_simulator.conductor` — a
-real Pipecat pipeline on a full-duplex line, with the voice activity
+real Pipecat pipeline on a full-duplex transport, with the voice activity
 detector and the turn model deciding where turns fall instead of a loop.
-There is no third answer and no adapter between them: every voice
-connection wears :class:`~egma_simulator.plugs.DuplexLine`, whether the
-line is a fake on this machine, a phone call, or a room.
+There is no third answer and no byte adapter between them: every voice
+connection gives the conductor one Pipecat transport, whether it is a
+local fixture, a phone call, or a room.
 
 Constructing is validation and nothing else, which is what makes a spec
 that cannot be conducted an honest failure before anything is dialled.
@@ -29,7 +29,7 @@ from .blob import BlobStore
 from .conductor import DEFAULT_CONDUCT, ConductParameters, VoiceConductor
 from .config import MediaSettings
 from .mock_tools import ExchangedToolCall, MockToolSeam
-from .plugs import DuplexLine, PlatformPlug, PlugError, plug_for
+from .plugs import PlatformPlug, PlugError, VoiceConnection, plug_for
 from .recording import RECORDING_NAME
 from .spec import SimulationSpec
 from .speech import SCRIPTED_PAIR, SpeechProviders, voice_from_traits
@@ -39,12 +39,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Assembled:
-    """One simulation's pipeline: who conducts it, and what it measured.
+    """One simulation's pipeline: who conducts it, and what it recorded.
 
     Exactly one of the two is filled in. ``plug`` is what the walk drives,
     which is a chat platform and only ever that. ``conductor`` is the
-    voice conductor, which needs no plug of its own because it holds the
-    line.
+    voice conductor, which owns the plug's Pipecat transport.
     """
 
     plug: PlatformPlug | None = None
@@ -123,17 +122,17 @@ def assemble(
     if spec.modality != "voice":
         return Assembled(plug=plug, mock_tools=mock_tools)
 
-    if not isinstance(plug, DuplexLine):
+    if not isinstance(plug, VoiceConnection):
         # Unreachable through the shipped registry, and kept because the
         # alternative is a voice simulation with nobody to conduct it,
         # discovered somewhere far away from the plug that was wrong.
         raise PlugError(
             f"the plug for connection type {spec.connection_type!r} speaks "
-            "voice but is not a full-duplex line, so nothing can conduct it"
+            "voice but is not a Pipecat voice connection, so nothing can conduct it"
         )
     return Assembled(
         conductor=VoiceConductor(
-            line=plug,
+            connection=plug,
             voice=voice_from_traits(spec.persona_traits),
             speech=speech,
             blobs=blobs,

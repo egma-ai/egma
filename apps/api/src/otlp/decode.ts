@@ -48,6 +48,16 @@ export type OtlpEvent = {
   readonly timeUnixNano?: string;
   readonly name?: string;
   readonly attributes?: readonly OtlpAttribute[];
+  readonly droppedAttributesCount?: number;
+};
+
+export type OtlpLink = {
+  readonly traceId?: string;
+  readonly spanId?: string;
+  readonly traceState?: string;
+  readonly attributes?: readonly OtlpAttribute[];
+  readonly droppedAttributesCount?: number;
+  readonly flags?: number;
 };
 
 export type OtlpStatus = {
@@ -62,20 +72,26 @@ export type OtlpSpan = {
   readonly spanId?: string;
   readonly parentSpanId?: string;
   readonly name?: string;
-  readonly kind?: string;
+  /** Symbolic from external exporters, numeric from Egma's canonical JSON. */
+  readonly kind?: string | number;
   readonly startTimeUnixNano?: string;
   readonly endTimeUnixNano?: string;
   readonly attributes?: readonly OtlpAttribute[];
   readonly events?: readonly OtlpEvent[];
-  readonly links?: readonly unknown[];
+  readonly links?: readonly OtlpLink[];
   readonly status?: OtlpStatus;
   readonly traceState?: string;
+  readonly droppedAttributesCount?: number;
+  readonly droppedEventsCount?: number;
+  readonly droppedLinksCount?: number;
+  readonly flags?: number;
 };
 
 export type OtlpScope = {
   readonly name?: string;
   readonly version?: string;
   readonly attributes?: readonly OtlpAttribute[];
+  readonly droppedAttributesCount?: number;
 };
 
 export type OtlpScopeSpans = {
@@ -86,6 +102,7 @@ export type OtlpScopeSpans = {
 
 export type OtlpResource = {
   readonly attributes?: readonly OtlpAttribute[];
+  readonly droppedAttributesCount?: number;
 };
 
 export type OtlpResourceSpans = {
@@ -121,7 +138,8 @@ export function encodingOf(contentType: string | undefined): OtlpEncoding | null
  *
  * The ids are the one place the two encodings disagree — protobuf carries raw
  * bytes, and OTLP/JSON writes hex rather than base64 — so this is where the
- * disagreement is settled, once, at the edge.
+ * disagreement is settled, once, at the edge. Link trace and span ids follow
+ * the same rule.
  */
 function hex(base64: string | undefined): string {
   return base64 === undefined || base64 === ""
@@ -137,8 +155,8 @@ function hex(base64: string | undefined): string {
  * recorded start time — the one value the trace store requires be replayed
  * byte-identically. `bytes: String` because that is what the JSON mapping does
  * with a `bytes` field, so an attribute carrying binary reads the same in both
- * encodings; the three id fields are the mapping's own exception and are hexed
- * below.
+ * encodings; span and link identity fields are the mapping's own exception and
+ * are hexed below.
  */
 function fromProtobuf(body: Uint8Array): OtlpExport {
   let decoded: unknown;
@@ -169,8 +187,8 @@ function fromProtobuf(body: Uint8Array): OtlpExport {
       scopeSpans?: {
         scope?: OtlpScope;
         schemaUrl?: string;
-        // The three ids arrive base64, as every other `bytes` field now does,
-        // and are the only ones the JSON mapping writes differently.
+        // Span and link ids arrive base64, as every other `bytes` field now
+        // does, and are the only ones the JSON mapping writes differently.
         spans?: OtlpSpan[];
       }[];
     }[];
@@ -186,6 +204,15 @@ function fromProtobuf(body: Uint8Array): OtlpExport {
           traceId: hex(span.traceId),
           spanId: hex(span.spanId),
           parentSpanId: hex(span.parentSpanId),
+          ...(span.links === undefined
+            ? {}
+            : {
+                links: span.links.map((link) => ({
+                  ...link,
+                  traceId: hex(link.traceId),
+                  spanId: hex(link.spanId),
+                })),
+              }),
         })),
       })),
     })),
