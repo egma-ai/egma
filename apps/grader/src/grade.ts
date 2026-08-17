@@ -29,7 +29,7 @@ import {
   type Judgment,
   type Reading,
 } from "./graders/index.ts";
-import { JUDGE_MAKERS, judgeOnce, type JudgeMakers } from "./judge/index.ts";
+import { JUDGE_MAKERS, judgesOnce, type JudgeMakers } from "./judge/index.ts";
 import { applicableGraders, applicableProductionGraders } from "./resolve.ts";
 
 /**
@@ -155,11 +155,14 @@ export async function gradeClaim(
 
   const makers = options.makers ?? JUDGE_MAKERS;
 
-  // The project's judge, shared by everything on this conversation that judges
-  // and resolved only if something does. Nothing here decides whether it is
-  // needed — the things that judge ask, and a conversation where none of them
-  // does never opens the envelope.
-  const judge = judgeOnce(claim.auth);
+  // The judges this conversation may be judged by, each source resolved only
+  // if something asks for it. Nothing here decides whether one is needed — the
+  // things that judge ask, and a conversation where none of them does never
+  // opens an envelope at all. Which source answers is the grader's own fact:
+  // a version that selected its model spends the organization's credential for
+  // that provider, and one that did not is judged by the project's setting
+  // exactly as it always was.
+  const judges = judgesOnce(claim.auth);
 
   // The definitions, read through the copies' pointers and remembered for the
   // length of this conversation. Two copies of one entry cost one read; nothing
@@ -183,13 +186,17 @@ export async function gradeClaim(
           await judgmentsOf(grader, await definitionOf(grader), {
             conversation,
             judging: {
-              judge,
+              judges,
               makers,
-              // This version's own judge, or null for the project's default. It
-              // is judged content, frozen on the version beside the config, so
-              // a verdict decided by it stays readable as "decided by this
-              // model" long after the project's default moved on.
-              model: grader.judgeModel,
+              // The two model fields this version froze, handed on together
+              // because which of them answers is the resolution's decision and
+              // not this file's. Both are judged content, frozen beside the
+              // config, so a verdict decided by either stays readable as
+              // "decided by this model" long after anything else moved on.
+              grader: {
+                graderModel: grader.graderModel,
+                judgeModel: grader.judgeModel,
+              },
             },
             reading,
           })
