@@ -309,19 +309,12 @@ function derivedFromFrameworkSpans(
 
   for (const span of everySpanIn(conversation)) {
     if (span.kind === HUMAN_TURN || span.kind === AGENT_TURN) {
-      // **A turn of zero width was never timed, and nothing is read off it.**
-      // Retell publishes no per-turn timing, so its normalizer opens every turn
-      // at the production trace's own start and closes it in the same instant —
-      // placeholders, said plainly in `apps/api/src/retell/normalise.ts`. Read
-      // as geometry they describe an agent that answered instantly every time:
-      // a series of zeroes that holds any bound put to it, so a trace whose
-      // worst wait was really 2145 ms passes a two-second bound with "0
-      // milliseconds at its worst" as the rationale. It is the negative guard
-      // below, stated one step earlier — a number worked out from a turn nobody
-      // timed is not a measurement, and a wrong number is worse than a missing
-      // one. A framework that does time its turns loses nothing by it: a turn
-      // that happened has width.
-      if (BigInt(span.durationNanoseconds) === 0n) continue;
+      // **Every turn joins the list, whatever its timings are worth.** What this
+      // list carries is the conversational order, and the walk below reads it
+      // for who answered whom — so a turn held out of it stops being a barrier
+      // between the turns around it, and two people's waits become one. Which
+      // measurements a turn is fit to produce is a question for the measure that
+      // produces them, one at a time, and never for membership here.
       turns.push(timed(span));
       continue;
     }
@@ -369,6 +362,22 @@ function put(
  * should have failed — a number that is wrong is worse than a measurement that
  * is missing, so the overlapping turn contributes nothing and the turns around
  * it still count.
+ *
+ * **A zero read off a turn that had no width is two placeholders agreeing, and
+ * is not kept either.** Retell publishes no per-turn timing, so its normalizer
+ * opens every turn at the production trace's own start and closes it in the
+ * same instant — placeholders, said plainly in
+ * `apps/api/src/retell/normalise.ts`. Subtract one from the next and the answer
+ * is zero, every time, for the arithmetic's own reasons and not the agent's: a
+ * series a bound cannot fail, so a trace whose worst wait was really 2145 ms
+ * holds a two-second bound with "0 milliseconds at its worst" as its rationale,
+ * which is the false pass this product exists to kill.
+ *
+ * **It is the pair that says so, and never the width alone.** A chat simulation
+ * writes turns of no width too — a typed message is one instant and there is
+ * nothing to measure a duration of — but at real, distinct instants, so the gap
+ * it answers across is observed and every sample of it stands. Only a zero
+ * whose own turn also had no width has nothing behind it on either side.
  */
 function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
   const samples: Sample[] = [];
@@ -378,6 +387,7 @@ function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
     if (answered === undefined) continue;
     const latency = milliseconds(answered.startedAt - turn.endedAt);
     if (latency < 0) continue;
+    if (latency === 0 && turn.duration === 0n) continue;
     samples.push({ value: latency, spanId: answered.spanId });
   }
   return samples;
