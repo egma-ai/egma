@@ -353,7 +353,6 @@ async def one_iteration(
     legs = build_legs(
         providers,
         voice=PersonaVoice(voice_id=CARTESIA_VOICE, provider="cartesia", speed=None),
-        sample_rate_hz=BAND_HZ,
     )
 
     ears = _Collector()
