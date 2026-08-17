@@ -273,20 +273,12 @@ export type Seen = {
 
 export function providerOf(standing: Standing, route: Route): ProviderView {
   if (route.transport === "socket") {
-    const upstream =
-      route.provider === "deepgram"
-        ? standing.deepgram
-        : route.provider === "cartesia"
-          ? standing.cartesia
-          : undefined;
-    if (upstream !== undefined) {
-      return { attempts: upstream.attempts, last: () => upstream.seen.at(-1) };
-    }
-    return {
-      attempts: standing.openai.socketAttempts,
-      last: () => standing.openai.sockets.at(-1),
-    };
+    const upstream = socketUpstreamOf(standing, route);
+    return { attempts: upstream.attempts, last: () => upstream.seen.at(-1) };
   }
+  // Every HTTP row this gateway carries is OpenAI's, and `withUpstream` refuses
+  // to build a world for one that is not — so a second HTTP provider arrives
+  // here as a failing test rather than as a silent read of the wrong records.
   return { attempts: standing.openai.attempts, last: () => standing.openai.seen.at(-1) };
 }
 

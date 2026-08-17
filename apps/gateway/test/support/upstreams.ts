@@ -369,7 +369,13 @@ export async function startProviderUpstream(
   };
 }
 
-/** A provider that answers one HTTP path and nothing else. */
+/**
+ * A provider that answers one HTTP path and nothing else.
+ *
+ * Kept beside the general starter for the callers outside this suite — the
+ * control plane's 2x2 access matrix stands its provider stand-ins up with it —
+ * so a provider with one path does not have to be described as a list of one.
+ */
 export async function startHttpUpstream(plan: HttpUpstreamPlan): Promise<HttpUpstream> {
   return startProviderUpstream({ http: [plan] });
 }

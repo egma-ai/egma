@@ -26,7 +26,18 @@ from egma_simulator.config import (
     DEFAULT_STT_MODEL,
     SimulatorConfig,
 )
+from egma_simulator.plugs.phone import TELEPHONY_BAND_HZ
+from egma_simulator.speech import (
+    DEFAULT_CARTESIA_VOICE_ID,
+    PersonaVoice,
+    SpeechFault,
+    SpeechProviders,
+    _ears,
+    _mouth,
+    voice_from_traits,
+)
 
+A_KEY = "sk-only-this-test-holds-this-one"
 
 def _speaking(leg):
     """The provider's own service inside the openai mouth's little pipeline.
@@ -41,18 +52,6 @@ def _speaking(leg):
     found = [one for one in leg._processors if isinstance(one, OpenAITTSService)]
     assert len(found) == 1
     return found[0]
-from egma_simulator.plugs.phone import TELEPHONY_BAND_HZ
-from egma_simulator.speech import (
-    DEFAULT_CARTESIA_VOICE_ID,
-    PersonaVoice,
-    SpeechFault,
-    SpeechProviders,
-    _ears,
-    _mouth,
-    voice_from_traits,
-)
-
-A_KEY = "sk-only-this-test-holds-this-one"
 
 
 # -- The cartesia mouth -------------------------------------------------------
@@ -323,7 +322,9 @@ def test_a_model_id_this_release_has_never_heard_of_still_reaches_the_provider()
     authority, so the id crosses and the provider decides.
     """
     listening, _ = _ears(
-        SpeechProviders(stt="deepgram", stt_key=A_KEY, stt_model="a-model-shipped-next-year"),
+        SpeechProviders(
+            stt="deepgram", stt_key=A_KEY, stt_model="a-model-shipped-next-year"
+        ),
         TELEPHONY_BAND_HZ,
     )
     assert listening._settings.model == "a-model-shipped-next-year"
@@ -455,7 +456,9 @@ def test_a_selected_openai_stt_persona_listens_on_the_proved_adapter(monkeypatch
         ),
     )
     monkeypatch.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", "https://control.example")
-    providers = SpeechProviders.for_simulation(SimulatorConfig.from_env(), None, selected)
+    providers = SpeechProviders.for_simulation(
+        SimulatorConfig.from_env(), None, selected
+    )
 
     assert providers.stt == "openai_realtime"
     leg, _ = _ears(providers, TELEPHONY_BAND_HZ)

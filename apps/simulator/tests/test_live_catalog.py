@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import credential
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
@@ -68,6 +69,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.workers.runner import WorkerRunner
 
 from egma_simulator.model import OpenAICompatibleModel
+from egma_simulator.spec import GATEWAY_ROUTE
 from egma_simulator.speech import (
     SAMPLE_WIDTH_BYTES,
     SELECTED_STT_LEG,
@@ -75,7 +77,6 @@ from egma_simulator.speech import (
     SpeechProviders,
     build_legs,
 )
-from egma_simulator.spec import GATEWAY_ROUTE
 
 BAND_HZ = 16_000
 """The band this proof runs at. Wideband, so neither leg is asked to
@@ -149,18 +150,14 @@ PROVIDER_KEY_NAMES = {
 }
 
 
-def _credential(name: str) -> str | None:
+def _credential(name: str) -> str:
     """A credential, preferring the test-only spelling of its name.
 
-    The same shape every other opt-in file here uses, so a machine that
-    keeps its test credentials apart from its working ones does not have
-    to choose between them.
+    The suite's own reader, so a machine that keeps its test credentials
+    apart from its working ones does not have to choose between them, and
+    so every opt-in file here answers the same way.
     """
-    for spelling in (f"TEST_{name}", name):
-        value = os.environ.get(spelling, "").strip()
-        if value:
-            return value
-    return None
+    return credential(f"TEST_{name}", name)
 
 
 @dataclass(frozen=True)
@@ -194,7 +191,7 @@ def _reaches(entry: Entry) -> list[Reach]:
     return reaches
 
 
-def _gateway_credential() -> str | None:
+def _gateway_credential() -> str:
     """What this run presents to the Egma model gateway.
 
     **Two shapes, because the product has two**, and either one proves the
@@ -212,7 +209,7 @@ def _gateway_credential() -> str | None:
     signing = _credential("EGMA_GATEWAY_INTERNAL_KEY")
     organization = os.environ.get("EGMA_GATEWAY_ORGANIZATION_ID", "").strip()
     if not signing or not organization:
-        return None
+        return ""
 
     payload = (
         base64.urlsafe_b64encode(
