@@ -1,5 +1,5 @@
 import { newId } from "@egma/ids";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, sql } from "drizzle-orm";
 
 import { db, type Transaction } from "../client.ts";
 import { managedDeployment } from "../managed-deployment.ts";
@@ -88,7 +88,7 @@ export type ModelUpgradeReport = {
  * two finer locks would still both read "nothing has been upgraded" and both
  * write.
  */
-const UPGRADING_MODEL_SETUP = "egma:upgrade-model-setup";
+export const UPGRADING_MODEL_SETUP = "egma:upgrade-model-setup";
 
 /**
  * The one grader type that asks a model at all.
@@ -156,7 +156,10 @@ const SETTING_KEYS: readonly {
 ];
 
 /** The settings this upgrade reads, by name, with their stored hints. */
-type Settings = ReadonlyMap<string, { readonly value: string; readonly hint: string }>;
+type Settings = ReadonlyMap<
+  string,
+  { readonly value: string; readonly hint: string; readonly changedAt: Date }
+>;
 
 /**
  * A non-secret setting's whole value, read off its hint.
@@ -355,9 +358,15 @@ async function readSettings(tx: Transaction): Promise<Settings> {
       name: platformSetting.name,
       value: platformSetting.value,
       hint: platformSetting.hint,
+      changedAt: platformSetting.updatedAt,
     })
     .from(platformSetting);
-  return new Map(rows.map((row) => [row.name, { value: row.value, hint: row.hint }]));
+  return new Map(
+    rows.map((row) => [
+      row.name,
+      { value: row.value, hint: row.hint, changedAt: row.changedAt },
+    ]),
+  );
 }
 
 /**
@@ -388,6 +397,8 @@ async function collectCandidates(
     credentials: string;
     credentialsHint: string;
     shape: CredentialEnvelopeShape;
+    /** The source row's own `updated_at`, which is how a rotation is noticed. */
+    sourceChangedAt: Date;
   }[] = [];
 
   for (const { key, provider, job } of SETTING_KEYS) {
@@ -407,6 +418,7 @@ async function collectCandidates(
       // A platform setting seals the value itself. Recorded rather than
       // converted, so nothing is opened while the keys are being collected.
       shape: "bare_value",
+      sourceChangedAt: sealed.changedAt,
     });
   }
 
@@ -416,6 +428,7 @@ async function collectCandidates(
       provider: judgeCredential.provider,
       credentials: judgeCredential.credentials,
       hint: judgeCredential.credentialsHint,
+      changedAt: judgeCredential.updatedAt,
     })
     .from(judgeCredential)
     .where(
@@ -433,6 +446,7 @@ async function collectCandidates(
       credentials: row.credentials,
       credentialsHint: row.hint,
       shape: "key_document",
+      sourceChangedAt: row.changedAt,
     });
   }
 
@@ -442,6 +456,7 @@ async function collectCandidates(
       provider: judgeConfiguration.provider,
       credentials: judgeConfiguration.credentials,
       hint: judgeConfiguration.credentialsHint,
+      changedAt: judgeConfiguration.updatedAt,
     })
     .from(judgeConfiguration)
     .where(
@@ -460,6 +475,7 @@ async function collectCandidates(
       credentials: row.credentials,
       credentialsHint: row.hint ?? "",
       shape: "key_document",
+      sourceChangedAt: row.changedAt,
     });
   }
 
@@ -477,18 +493,39 @@ async function collectCandidates(
         credentials: one.credentials,
         credentialsHint: one.credentialsHint,
         shape: one.shape,
+        sourceChangedAt: one.sourceChangedAt,
       })),
     )
-    // The source is the identity, so a second run over the same deployment
-    // writes nothing — and a key rotated in its original row is not a new
-    // candidate, because it is the same source.
-    .onConflictDoNothing({
+    /**
+     * The source row is the identity, and the copy **tracks** it.
+     *
+     * A key rotated in its original row is not a new candidate — it is the same
+     * source saying something different — so the copy is refreshed rather than
+     * discarded. Discarding it was the fault: `writePlatformSettings` and
+     * `editJudgeCredential` are both open during the compatibility period, so
+     * an operator really can rotate one, and a copy frozen at the old value
+     * left this organization spending a key that had been revoked.
+     *
+     * **Guarded by the source's own clock and by nothing else.** No plaintext,
+     * no ciphertext, no hint: the source says when it last changed and the copy
+     * remembers when it was taken. Two seals of one key differ anyway, so a
+     * ciphertext comparison would answer "changed" every time and rewrite every
+     * row on every boot.
+     */
+    .onConflictDoUpdate({
       target: [
         modelCredentialCandidate.organizationId,
         modelCredentialCandidate.provider,
         modelCredentialCandidate.source,
         modelCredentialCandidate.sourceName,
       ],
+      set: {
+        credentials: sql`excluded.credentials`,
+        credentialsHint: sql`excluded.credentials_hint`,
+        shape: sql`excluded.shape`,
+        sourceChangedAt: sql`excluded.source_changed_at`,
+      },
+      setWhere: sql`${modelCredentialCandidate.sourceChangedAt} < excluded.source_changed_at`,
     })
     .returning({ id: modelCredentialCandidate.id });
 
@@ -524,6 +561,8 @@ async function activateSoleCandidates(
       credentials: modelCredentialCandidate.credentials,
       hint: modelCredentialCandidate.credentialsHint,
       shape: modelCredentialCandidate.shape,
+      sourceChangedAt: modelCredentialCandidate.sourceChangedAt,
+      activatedAt: modelCredentialCandidate.activatedAt,
     })
     .from(modelCredentialCandidate)
     .where(eq(modelCredentialCandidate.organizationId, organizationId))
@@ -536,6 +575,51 @@ async function activateSoleCandidates(
 
   const activated: string[] = [];
   const actions: { kind: ModelUpgradeActionKind; subject: string }[] = [];
+
+  /**
+   * A rotated source reaches the credential that is tracking it, whatever else
+   * is true of its provider.
+   *
+   * **Keyed on provenance and on nothing else**, which is what makes it safe to
+   * do before any of the rules below: the credential names the one candidate it
+   * follows, so a provider with two stored keys is not ambiguous here even
+   * though it is ambiguous for *activation*. A credential an administrator
+   * typed holds null and is unreachable from this statement.
+   *
+   * Guarded by when the source last moved, so a boot that rotated nothing
+   * leaves `updated_at` alone — a person reads it as "when the stored key last
+   * changed".
+   */
+  for (const candidate of candidates) {
+    if (candidate.activatedAt === null) continue;
+    if (!isModelProvider(candidate.provider)) continue;
+
+    let envelope: string;
+    try {
+      envelope = asACredential(candidate);
+    } catch {
+      continue;
+    }
+
+    const [rotated] = await tx
+      .update(modelProviderCredential)
+      .set({
+        credentials: envelope,
+        credentialsHint: candidate.hint,
+        revision: newId("rev"),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(modelProviderCredential.organizationId, organizationId),
+          eq(modelProviderCredential.upgradedFrom, candidate.id),
+          lt(modelProviderCredential.updatedAt, candidate.sourceChangedAt),
+        ),
+      )
+      .returning({ id: modelProviderCredential.id });
+
+    if (rotated !== undefined) activated.push(candidate.provider);
+  }
 
   for (const [provider, forProvider] of [...byProvider].sort()) {
     /**
@@ -601,6 +685,18 @@ async function activateSoleCandidates(
       continue;
     }
 
+    /**
+     * **Activation happens once per candidate, and only once.**
+     *
+     * A candidate already stamped is never inserted again. That is what stops
+     * an administrator who *removed* the credential being overruled by the next
+     * restart putting it back — the row is gone, the stamp says the upgrade has
+     * already had its turn, and their removal stands. Keeping such a credential
+     * *current* is the refresh above, which needs the row to still be there and
+     * to still be tracking this candidate.
+     */
+    if (sole.activatedAt !== null) continue;
+
     const [written] = await tx
       .insert(modelProviderCredential)
       .values({
@@ -610,6 +706,10 @@ async function activateSoleCandidates(
         credentials: envelope,
         credentialsHint: sole.hint,
         revision: newId("rev"),
+        // Which stored key this credential is following, so a rotation of that
+        // source can find it again and an administrator's own key never can be
+        // found this way at all.
+        upgradedFrom: sole.id,
         createdBy: null,
       })
       .onConflictDoNothing({

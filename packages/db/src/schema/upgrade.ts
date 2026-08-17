@@ -126,9 +126,31 @@ export const modelCredentialCandidate = pgTable(
      */
     shape: text("shape").notNull(),
     /**
+     * When the row this was copied from last changed, as that row's own
+     * `updated_at` said at the moment of the copy.
+     *
+     * **This is what makes a rotated legacy key reach the copy**, and it is a
+     * timestamp rather than a comparison of what is inside the envelopes for a
+     * reason the specification is explicit about: nothing in this upgrade may
+     * read a secret to decide anything, and two seals of one key differ anyway
+     * because the nonce is fresh on every write. So the question asked is "has
+     * the source row been written since this copy was taken", which the source
+     * answers about itself.
+     *
+     * An operator really can rotate one during the compatibility period —
+     * `writePlatformSettings` and `editJudgeCredential` are both still open —
+     * and a copy that ignored it would leave the organization spending a key
+     * that has been revoked.
+     */
+    sourceChangedAt: moment("source_changed_at").notNull(),
+    /**
      * When this candidate became the organization's active model-provider
      * credential, or null while it has not. Null on every candidate of a
      * provider that had more than one.
+     *
+     * **It is also what makes activation happen once.** A candidate already
+     * stamped is never inserted again, so an administrator who *removed* the
+     * credential is not overruled by the next restart putting it back.
      */
     activatedAt: moment("activated_at"),
     createdAt: createdAt(),

@@ -237,7 +237,18 @@ export async function storeModelProviderCredential(
       // check already did.
       const [rotated] = await tx
         .update(modelProviderCredential)
-        .set({ ...envelope, revision: newId("rev"), updatedAt: now })
+        .set({
+          ...envelope,
+          revision: newId("rev"),
+          // **Theirs from now on.** This row may have been written by the
+          // upgrade from a legacy key it found, and while that is true a
+          // rotation of that legacy row still reaches it. An administrator
+          // typing a key here is a later and better answer than any legacy row
+          // can offer, so the provenance is given up and nothing the upgrade
+          // does can touch this credential again.
+          upgradedFrom: null,
+          updatedAt: now,
+        })
         .where(eq(modelProviderCredential.id, existing.id))
         .returning(COLUMNS);
 

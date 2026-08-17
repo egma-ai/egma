@@ -669,6 +669,22 @@ describe("running the upgrade again", () => {
   });
 });
 
+/**
+ * Until a backend is waiting on the upgrade's advisory lock, which is how this
+ * test knows the recording has really begun and really stopped.
+ */
+async function waitingOnTheUpgradeLock(): Promise<void> {
+  for (let tries = 0; tries < 200; tries += 1) {
+    const { rows } = await client.sql<{ count: string }>(
+      `select count(*) as count from pg_locks
+        where locktype = 'advisory' and not granted`,
+    );
+    if (Number(rows[0]?.count) > 0) return;
+    await new Promise((settle) => setTimeout(settle, 10));
+  }
+  throw new Error("nothing ever waited on the upgrade lock");
+}
+
 describe("the completion marker", () => {
   /**
    * The marker is about *work*, not about every outstanding decision. This
@@ -742,6 +758,92 @@ describe("the completion marker", () => {
     expect(recorded.completed).toBe(true);
     expect(recorded.completedAt).toBeInstanceOf(Date);
     expect(recorded.outstanding).toEqual([]);
+  });
+
+  /**
+   * The stamp and its conditions are one moment, proved by making them two.
+   *
+   * **The interleaving, with no threads.** Another replica commits a
+   * selection-free persona while the stamp is being written — legal authoring
+   * for the whole compatibility period. The old shape read the conditions,
+   * found them clear, and then wrote: anything committing in between was
+   * memorialised as a moment that never held. This holds that window open on
+   * purpose: a second connection takes the upgrade's own advisory lock, writes
+   * the persona, and only then commits — so `recordModelUpgradeCompletion`
+   * blocks at the lock, and by the time its one statement runs the persona is
+   * committed and visible to it.
+   *
+   * A check made *before* that statement would have passed. The statement
+   * refuses anyway, because the conditions are in its own `where`.
+   */
+  it("refuses the stamp in the write, even when a check before it would have passed", async () => {
+    // Clear right now, which is the "check that would have passed".
+    expect((await readModelUpgradeCompletion()).outstanding).toEqual([]);
+    await client.sql(
+      "update platform_instance set model_upgrade_completed_at = null",
+    );
+
+    const other = await openSingleConnection(database.url);
+    try {
+      await other.sql("begin");
+      await other.sql(
+        "select pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+        ["egma:upgrade-model-setup"],
+      );
+
+      // Blocked at the lock, and deliberately not awaited yet.
+      const recording = recordModelUpgradeCompletion();
+
+      // Waited for rather than assumed. Without this the insert could land
+      // before the recording's transaction had even opened, and the case would
+      // pass on a shape that reads its conditions before it writes — which is
+      // exactly the shape it exists to refuse.
+      await waitingOnTheUpgradeLock();
+
+      // The other replica's ordinary authoring write, committed while the
+      // recording waits.
+      const personaId = newId("prs");
+      const versionId = newId("prsv");
+      await other.sql(
+        `insert into persona (id, organization_id, project_id, name, current_version_id, revision)
+         values ($1, $2, $3, $4, $5, $6)`,
+        [personaId, acme.organization, acme.project, "Raced in", versionId, newId("rev")],
+      );
+      await other.sql(
+        `insert into persona_version (id, persona_id, version, traits, models)
+         values ($1, $2, 1, $3, null)`,
+        [versionId, personaId, JSON.stringify(RITA)],
+      );
+      await other.sql("commit");
+
+      const settled = await recording;
+
+      expect(settled.completed).toBe(false);
+      expect(settled.outstanding).toEqual(["personas"]);
+      expect(settled.completedAt).toBeNull();
+      const { rows } = await client.sql<{ count: string }>(
+        "select count(*) as count from platform_instance where model_upgrade_completed_at is not null",
+      );
+      expect(Number(rows[0]?.count)).toBe(0);
+
+      // Put right again, so what follows is about the marker rather than about
+      // this case's leftovers.
+      await editPersona(actingAsAcme(), personaId, {
+        models: {
+          llm: { provider: "openai", model: "gpt-4o-mini" },
+          stt: { provider: "deepgram", model: "nova-3-general" },
+          tts: {
+            provider: "cartesia",
+            model: "sonic-3.5",
+            voiceId: "a-voice-somebody-chose",
+            speed: 1,
+          },
+        },
+      });
+      await recordModelUpgradeCompletion();
+    } finally {
+      await other.close();
+    }
   });
 
   it("stays written, and a second recording does not move it", async () => {

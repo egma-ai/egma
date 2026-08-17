@@ -1,8 +1,9 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { db } from "../client.ts";
 import { platformInstance } from "../schema/platform.ts";
 import { platformInstanceId } from "./instance.ts";
+import { UPGRADING_MODEL_SETUP } from "./model-upgrade.ts";
 
 /**
  * Whether this installation has finished moving onto model selections — the one
@@ -93,43 +94,59 @@ export type ModelUpgradeCompletion = {
   readonly outstanding: readonly UpgradeCondition[];
 };
 
+/**
+ * The four conditions, as one SQL expression each.
+ *
+ * **Written once and used twice**: to *report* what is standing, and — inside
+ * the very statement that writes the stamp — to decide whether it may be
+ * written at all. A second copy of these predicates is a second thing that can
+ * disagree with the one that actually gates the marker, and the one that gates
+ * it is the one that matters.
+ */
+const CONDITIONS = {
+  personas: sql`exists (
+    select 1 from persona p
+      join persona_version v on v.id = p.current_version_id
+     where v.models is null
+  )`,
+  graders: sql`exists (
+    select 1 from grader g
+      join grader_version gv on gv.id = g.current_version_id
+     where g.type = 'llm_as_judge'
+       and g.deleted_at is null and gv.grader_model is null
+  )`,
+  simulations: sql`exists (
+    select 1 from simulation s
+      join persona_version v on v.id = s.persona_version_id
+     where s.status in ('queued', 'claimed', 'running') and v.models is null
+  )`,
+  grading: sql`exists (
+    select 1 from grading_job j
+      join simulation s on s.id = j.simulation_id
+      join grading_plan p on p.run_id = s.run_id
+     where j.status in ('pending', 'claimed')
+       and (
+         jsonb_array_length(p.judge_credential_ids) > 0
+         or exists (
+           select 1
+             from jsonb_array_elements(p.groups) as grp
+             cross join lateral jsonb_array_elements(grp->'items') as item
+             join grader_version gv on gv.id = item->>'graderVersionId'
+            where item->'judge'->>'tag' = 'configured'
+              and gv.grader_model is null
+         )
+       )
+  )`,
+} as const satisfies Record<UpgradeCondition, unknown>;
+
 /** Whether each condition still has work behind it. */
 async function outstandingConditions(): Promise<readonly UpgradeCondition[]> {
   const { rows } = (await db().execute(sql`
     select
-      exists (
-        select 1 from persona p
-          join persona_version v on v.id = p.current_version_id
-         where v.models is null
-      ) as personas,
-      exists (
-        select 1 from grader g
-          join grader_version gv on gv.id = g.current_version_id
-         where g.type = 'llm_as_judge'
-           and g.deleted_at is null and gv.grader_model is null
-      ) as graders,
-      exists (
-        select 1 from simulation s
-          join persona_version v on v.id = s.persona_version_id
-         where s.status in ('queued', 'claimed', 'running') and v.models is null
-      ) as simulations,
-      exists (
-        select 1 from grading_job j
-          join simulation s on s.id = j.simulation_id
-          join grading_plan p on p.run_id = s.run_id
-         where j.status in ('pending', 'claimed')
-           and (
-             jsonb_array_length(p.judge_credential_ids) > 0
-             or exists (
-               select 1
-                 from jsonb_array_elements(p.groups) as grp
-                 cross join lateral jsonb_array_elements(grp->'items') as item
-                 join grader_version gv on gv.id = item->>'graderVersionId'
-                where item->'judge'->>'tag' = 'configured'
-                  and gv.grader_model is null
-             )
-           )
-      ) as grading
+      ${CONDITIONS.personas} as personas,
+      ${CONDITIONS.graders} as graders,
+      ${CONDITIONS.simulations} as simulations,
+      ${CONDITIONS.grading} as grading
   `)) as unknown as { rows: readonly Record<string, boolean>[] };
 
   const [answer] = rows;
@@ -203,24 +220,72 @@ export async function recordModelUpgradeCompletion(): Promise<ModelUpgradeComple
   // route nobody has called yet.
   await platformInstanceId();
 
-  const now = new Date();
-  const [written] = await db()
-    .update(platformInstance)
-    .set({ modelUpgradeCompletedAt: now })
-    .where(
-      and(
-        eq(platformInstance.singleton, true),
-        isNull(platformInstance.modelUpgradeCompletedAt),
-      ),
-    )
-    .returning({ completedAt: platformInstance.modelUpgradeCompletedAt });
+  /**
+   * The conditions and the stamp, decided by **one statement**.
+   *
+   * **A read followed by a write is two moments, and the stamp is a permanent
+   * record of one.** Another replica serving this database can commit a
+   * selection-free persona between them — ordinary authoring, still legal for
+   * the whole compatibility period — and the timestamp would then memorialise a
+   * state that never simultaneously held. Nothing is *stranded* by that,
+   * because every read re-evaluates and the cleanup release is required to as
+   * well; but a permanent record of a moment that never happened is still
+   * wrong, and it is a record operators and a later release read.
+   *
+   * So the conditions are re-asserted in the `where` of the update that writes
+   * the stamp. One statement takes one snapshot: work committed before it began
+   * is seen and the stamp is refused, and work committed after it began was not
+   * yet true at the moment the stamp names. Either way the timestamp is honest.
+   *
+   * The advisory lock is the upgrade act's own, so a boot's upgrade and the
+   * marker that follows it cannot interleave with another replica's.
+   */
+  return db().transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${UPGRADING_MODEL_SETUP}::text, 0))`,
+    );
 
-  return {
-    completed: true,
-    // The row a concurrent boot stamped first, where this update matched
-    // nothing: two replicas finishing together settle on one moment rather than
-    // on whichever wrote last.
-    completedAt: written?.completedAt ?? (await storedMarker()),
-    outstanding: [],
-  };
+    const { rows } = (await tx.execute(sql`
+      update platform_instance
+         set model_upgrade_completed_at = now()
+       where singleton
+         and model_upgrade_completed_at is null
+         and not ${CONDITIONS.personas}
+         and not ${CONDITIONS.graders}
+         and not ${CONDITIONS.simulations}
+         and not ${CONDITIONS.grading}
+      returning model_upgrade_completed_at
+    `)) as unknown as {
+      // A raw statement, so the driver hands back what Postgres wrote rather
+      // than what a typed column read would have parsed. Read as a string and
+      // turned into the moment it names, once, here.
+      rows: readonly { model_upgrade_completed_at: string }[];
+    };
+
+    const [stamped] = rows;
+    if (stamped !== undefined) {
+      return {
+        completed: true,
+        completedAt: new Date(stamped.model_upgrade_completed_at),
+        outstanding: [],
+      };
+    }
+
+    // Nothing was written, and there are two ways that happens: a concurrent
+    // boot stamped it first, or a condition stopped holding between the report
+    // above and this statement. Reading both back says which, and neither is a
+    // fault.
+    const [row] = await tx
+      .select({ completedAt: platformInstance.modelUpgradeCompletedAt })
+      .from(platformInstance)
+      .where(eq(platformInstance.singleton, true))
+      .limit(1);
+    const settled = row?.completedAt ?? null;
+    const standing = await outstandingConditions();
+    return {
+      completed: settled !== null && standing.length === 0,
+      completedAt: settled,
+      outstanding: standing,
+    };
+  });
 }

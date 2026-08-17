@@ -1,6 +1,7 @@
 import { newId } from "@egma/ids";
 import {
   activateCredentialCandidate,
+  createJudgeCredential,
   createPersona,
   getGrader,
   getPersona,
@@ -11,11 +12,14 @@ import {
   PREDEFINED_GRADERS,
   readModelAccess,
   readModelUpgradeCompletion,
+  resolveModelProviderKeys,
+  storeModelProviderCredential,
   seedPlatformSettings,
   seedRunningGraders,
   setJudgeConfiguration,
   upgradeModelSetup,
   useLibraryEntry,
+  writePlatformSettings,
   type AuthContext,
   type PersonaTraits,
 } from "@egma/db";
@@ -64,6 +68,20 @@ function acting(
 }
 
 const ONE_TEAM = { singleOrganization: true };
+
+/** The one context a stored provider key may be opened for. */
+function theSimulatorIn(tenant: {
+  organization: string;
+  project: string;
+}): AuthContext {
+  return {
+    userId: "simulator",
+    organizationId: tenant.organization,
+    projectId: tenant.project,
+    role: "viewer",
+    via: "simulator",
+  };
+}
 const SEVERAL_TEAMS = { singleOrganization: false };
 
 const SELF_HOSTED = {
@@ -435,3 +453,180 @@ async function firstPersona(tenant: {
   if (row === undefined) throw new Error("no persona was seeded");
   return row;
 }
+
+/**
+ * A legacy key rotated after the upgrade has already run.
+ *
+ * **Both doors are still open during the compatibility period** — an owner
+ * rotates a deployment key through `writePlatformSettings`, and an admin
+ * rotates a judge key through `editJudgeCredential` — so an installation whose
+ * key was revoked and replaced must not go on spending the revoked one. The
+ * copy tracks its source, and the credential the upgrade wrote tracks the copy.
+ */
+describe("a legacy key rotated after the upgrade has run", () => {
+  const solo = { organization: newId("org"), project: newId("prj") };
+
+  beforeAll(async () => {
+    holdManagedDeployment(SELF_HOSTED);
+    await database.drop();
+    database = await createConnectedDatabase("model_upgrade_rotation");
+    await seedUser(database, ada, "ada@acme.example");
+    await seedOrganization(database, solo.organization, [
+      { id: solo.project, slug: "main" },
+    ]);
+    await seedPlatformSettings({
+      persona_model_provider: "openai",
+      persona_model: "gpt-4o-mini",
+      persona_model_key: "sk-sentinel-rotation-model-key-OLD1",
+      speech_to_text_provider: "deepgram",
+      speech_to_text_model: "nova-3-general",
+      speech_to_text_key: "dg-sentinel-rotation-listening-OLD2",
+      text_to_speech_provider: "cartesia",
+      text_to_speech_model: "sonic-3.5",
+      text_to_speech_key: "ct-sentinel-rotation-speaking-OLD3",
+    });
+    await upgradeModelSetup(ONE_TEAM);
+  });
+
+  it("reaches the copy and the credential the upgrade wrote", async () => {
+    expect(
+      (await listCredentialCandidates(acting(solo))).find(
+        (one) => one.provider === "deepgram",
+      )?.hint,
+    ).toBe("OLD2");
+
+    // The door an operator really rotates a deployment key through.
+    await writePlatformSettings(acting(solo), ONE_TEAM, {
+      speech_to_text_key: "dg-sentinel-rotation-listening-NEW9",
+    });
+    const report = await upgradeModelSetup(ONE_TEAM);
+
+    const candidate = (await listCredentialCandidates(acting(solo))).find(
+      (one) => one.provider === "deepgram",
+    );
+    expect(candidate?.hint).toBe("NEW9");
+    expect(candidate?.active).toBe(true);
+    expect(report.activated).toEqual(["deepgram"]);
+
+    // And what a claim would spend is the new key, opened through the one door
+    // that opens one.
+    const resolved = await resolveModelProviderKeys(theSimulatorIn(solo), [
+      "deepgram",
+    ]);
+    expect(resolved.keys.get("deepgram")).toBe(
+      "dg-sentinel-rotation-listening-NEW9",
+    );
+  });
+
+  it("writes nothing at all when nothing rotated", async () => {
+    const before = await database.sql(
+      `select
+         (select count(*) from model_credential_candidate) as candidates,
+         (select max(updated_at) from model_provider_credential) as touched`,
+    );
+
+    const again = await upgradeModelSetup(ONE_TEAM);
+    const after = await database.sql(
+      `select
+         (select count(*) from model_credential_candidate) as candidates,
+         (select max(updated_at) from model_provider_credential) as touched`,
+    );
+
+    expect(again.activated).toEqual([]);
+    expect(again.candidates).toEqual([]);
+    // `updated_at` is what a person reads as "when the stored key last
+    // changed", so a boot that rotated nothing must not move it.
+    expect(after.rows[0]).toEqual(before.rows[0]);
+  });
+
+  /**
+   * The rule that must never bend: an administrator's own key is theirs.
+   *
+   * They typed it through Model providers, which is a later and better answer
+   * than any legacy row can offer — so a legacy rotation afterwards moves the
+   * copy and leaves the credential exactly where they put it.
+   */
+  it("never overwrites a key an administrator typed", async () => {
+    await storeModelProviderCredential(acting(solo), {
+      provider: "deepgram",
+      key: "dg-sentinel-rotation-typed-by-a-person-Z9",
+    });
+
+    await writePlatformSettings(acting(solo), ONE_TEAM, {
+      speech_to_text_key: "dg-sentinel-rotation-listening-LATER",
+    });
+    const report = await upgradeModelSetup(ONE_TEAM);
+
+    // The copy moved, because it tracks its source and always will.
+    expect(
+      (await listCredentialCandidates(acting(solo))).find(
+        (one) => one.provider === "deepgram",
+      )?.hint,
+    ).toBe("ATER");
+    // The credential did not, because it is no longer the upgrade's to move.
+    expect(report.activated).toEqual([]);
+    const resolved = await resolveModelProviderKeys(theSimulatorIn(solo), [
+      "deepgram",
+    ]);
+    expect(resolved.keys.get("deepgram")).toBe(
+      "dg-sentinel-rotation-typed-by-a-person-Z9",
+    );
+  });
+
+  /**
+   * A provider that has grown a second stored key **activates** nothing new,
+   * and the credential it already has goes on following the key it named.
+   *
+   * The two questions are different and only one of them is ambiguous. *Which
+   * account does this organization use* has two answers once there are two
+   * candidates, so nothing may be activated from them. *Which stored key is
+   * this credential following* has exactly one answer, written on the
+   * credential itself — so a rotation of that source still reaches it, and the
+   * revoked-key failure this whole fix is about does not come back the moment
+   * somebody adds a judge credential.
+   */
+  it("activates nothing more, and still follows the key its credential names", async () => {
+    // The first upgrade activated OpenAI from the one key there was; a judge
+    // credential added afterwards makes two, and the choice reopens.
+    await createJudgeCredential(acting(solo), {
+      label: "Acme's own judge key",
+      provider: "openai",
+      key: "sk-sentinel-rotation-judge-OLD4",
+    });
+    await upgradeModelSetup(ONE_TEAM);
+    // No action, and that is right rather than a gap: this organization already
+    // has an OpenAI credential, so "which of these do you use" is answered by
+    // the row that exists. The action is for a provider with two stored keys
+    // and *nothing* chosen.
+    expect(
+      (await listModelUpgradeActions(acting(solo))).map((one) => one.subject),
+    ).not.toContain("openai");
+
+    await writePlatformSettings(acting(solo), ONE_TEAM, {
+      persona_model_key: "sk-sentinel-rotation-model-key-NEW5",
+    });
+    const report = await upgradeModelSetup(ONE_TEAM);
+
+    const openai = (await listCredentialCandidates(acting(solo))).filter(
+      (one) => one.provider === "openai",
+    );
+    // The rotated copy is current, because a copy always tracks its source.
+    expect(openai.map((one) => one.hint).sort()).toEqual(["NEW5", "OLD4"]);
+    // Exactly one is active — the one the credential names — and no second
+    // credential was created from the newcomer.
+    expect(openai.filter((one) => one.active)).toHaveLength(1);
+    const { rows } = await database.sql(
+      "select count(*) as count from model_provider_credential where provider = 'openai'",
+    );
+    expect(Number((rows[0] as { count: string }).count)).toBe(1);
+    // And the key a claim would spend is the rotated one, because the
+    // credential says which stored key it follows and that one moved.
+    const resolved = await resolveModelProviderKeys(theSimulatorIn(solo), [
+      "openai",
+    ]);
+    expect(resolved.keys.get("openai")).toBe(
+      "sk-sentinel-rotation-model-key-NEW5",
+    );
+    expect(report.activated).toEqual(["openai"]);
+  });
+});

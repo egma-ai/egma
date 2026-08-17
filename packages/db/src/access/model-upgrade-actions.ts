@@ -240,6 +240,11 @@ export async function activateCredentialCandidate(
       );
     }
 
+    // Opened once, here, and checked on the way through — so a stored key that
+    // will not open is refused at the moment somebody chooses it rather than at
+    // the first simulation that selects its provider.
+    const envelope = asACredential(candidate);
+
     const now = new Date();
     await tx
       .insert(modelProviderCredential)
@@ -247,9 +252,15 @@ export async function activateCredentialCandidate(
         id: newId("mpc"),
         organizationId: auth.organizationId,
         provider: candidate.provider,
-        credentials: asACredential(candidate),
+        credentials: envelope,
         credentialsHint: candidate.hint,
         revision: newId("rev"),
+        // What they chose is *this stored key*, so the credential goes on
+        // tracking it: rotating that legacy row at its source is a rotation of
+        // the thing they picked, and reaches the next claim. Typing a key into
+        // the form beside this is the other decision, and that one gives the
+        // provenance up.
+        upgradedFrom: candidate.id,
         createdBy: auth.userId,
       })
       .onConflictDoUpdate({
@@ -258,9 +269,10 @@ export async function activateCredentialCandidate(
           modelProviderCredential.provider,
         ],
         set: {
-          credentials: asACredential(candidate),
+          credentials: envelope,
           credentialsHint: candidate.hint,
           revision: newId("rev"),
+          upgradedFrom: candidate.id,
           updatedAt: now,
         },
       });

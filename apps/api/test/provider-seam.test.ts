@@ -121,7 +121,12 @@ describe("the provider's footprint on the schema", () => {
     // Who supplies the organization's model credentials, and the credentials
     // themselves. Both are Egma's own, and the auth provider reaches neither.
     "model_access",
+    // What the upgrade onto model selections found and what it would not
+    // decide: a legacy provider key copied sealed, and one sentence naming a
+    // choice somebody has to make. Egma's own, like everything else here.
+    "model_credential_candidate",
     "model_provider_credential",
+    "model_upgrade_action",
     "organization",
     "organization_settings",
     "persona",
