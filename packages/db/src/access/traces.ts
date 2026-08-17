@@ -1,4 +1,9 @@
 import { traceStore } from "../clickhouse/client.ts";
+import {
+  REPORTED_MEASUREMENTS_PAYLOAD_PATH,
+  reportedMeasurementsOf,
+  type ReportedMeasurement,
+} from "../measures/reported.ts";
 import type { AuthContext } from "./context.ts";
 import { UnreadableTraceQueryError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
@@ -72,6 +77,21 @@ export const MAXIMUM_SPANS_PER_TRACE = 10_000;
 
 const SPANS_TABLE = "spans";
 const TURNS_TABLE = "turns";
+
+/**
+ * Where the reported-measurements block rides, as the two payload keys a read
+ * has to walk to reach it.
+ *
+ * Split from the path the contract itself exports rather than written out a
+ * second time here: the normalizers write to
+ * `REPORTED_MEASUREMENTS_PAYLOAD_PATH` and this is that same string read
+ * backwards, so a writer's spelling and this reader's cannot come apart. The
+ * defaults cover a path that is not two segments — which a literal constant
+ * cannot become, and which would otherwise have this asking the store for a key
+ * called `undefined`.
+ */
+const [NORMALISED_KEY = "", REPORTED_KEY = ""] =
+  REPORTED_MEASUREMENTS_PAYLOAD_PATH.split(".");
 
 /**
  * A window of time, closed at the start and open at the end, counted in
@@ -208,6 +228,31 @@ export type TraceSpan = {
   readonly spans: readonly TraceSpan[];
 };
 
+/**
+ * What the agent platform measured about this trace, as the root span carried
+ * it.
+ *
+ * The block itself is `packages/db/src/measures/reported.ts` — one neutral
+ * shape every platform's normalizer writes and nothing downstream has to know a
+ * vendor to read. What this adds is the one fact a reader of the payload has
+ * and a reader of the block does not: **which span it rode in on**.
+ */
+export type ReportedOnTrace = {
+  /**
+   * The root span the block was written on.
+   *
+   * An aggregate describes the whole trace and happened at no single moment
+   * inside it, so the root is the only span a measurement taken from this block
+   * can honestly cite. Carried here rather than looked up again later, because
+   * the row that held the block is the row that knows.
+   */
+  readonly spanId: string;
+  /** The platform that measured — `retell`. Provenance, and the word a
+   * rationale prints. */
+  readonly reportedBy: string;
+  readonly measurements: readonly ReportedMeasurement[];
+};
+
 export type TraceDetail = TraceFacts & {
   /**
    * The transcript in the order it happened: every `turn:` span, each carrying
@@ -232,6 +277,22 @@ export type TraceDetail = TraceFacts & {
    * the transcript is.
    */
   readonly truncated: boolean;
+  /**
+   * What the platform reported about this trace, when its root span carries a
+   * block that reads.
+   *
+   * **Absent is the ordinary answer, and never an error.** A simulation has no
+   * platform to report anything; a platform egma reads no numbers from reports
+   * nothing; and a root that never arrived, a payload with no egma-owned corner
+   * in it, and a block that is malformed all land here the same way, because a
+   * trace is still a trace whatever a vendor wrote in one key of one row.
+   *
+   * The numbers are read by the shared measure module and by nothing else: a
+   * display and a verdict both reach them through that one arithmetic rather
+   * than through this field, so provenance and priority are decided in one
+   * place for every source.
+   */
+  readonly reported?: ReportedOnTrace | undefined;
 };
 
 /* ------------------------------------------------------------------- *
@@ -767,6 +828,17 @@ function isTurn(kind: string): boolean {
  * not build, because nothing consumes it yet and an endpoint with no caller is a
  * contract nobody has checked.
  *
+ * **One key of one row is the exception, and it is the narrow consumer that
+ * paragraph said did not exist yet.** The reported-measurements block rides the
+ * root span's payload, so the third query below reads
+ * `JSONExtractRaw(payload, 'egma_normalised')` off the earliest root and
+ * nothing beside it: one row, and only the corner of it egma itself wrote. The
+ * extraction happens in ClickHouse rather than here, so the vendor's own
+ * document never crosses the wire at all — which is what keeps the paragraph
+ * above true in the shape that mattered, rather than merely in its letter. A
+ * trace whose platform reported nothing pays one cheap lookup for an empty
+ * string.
+ *
  * Absent when the window holds no span of that trace for this customer — which is
  * also the answer another customer gets for a trace id they guessed correctly,
  * because the organization leads the filing order and their query never reaches
@@ -788,14 +860,17 @@ export async function readTrace(
        and trace_id = {trace_id:String}`;
   const parameters = { ...tenancy.parameters, trace_id: traceId };
 
-  // Two reads of the same window, and the second is not the first's leftovers.
+  // Three reads of the same window, and none of them is another's leftovers.
   // The rows build the tree and stop at the cap; the aggregate counts the whole
   // trace, so that a transcript which had to stop somewhere still reports what
   // it stopped short of. It is the list's own aggregate, scoped to one trace,
   // over a window the sort key has already pruned to this organization, this
-  // project and these minutes — one cheap pass, and asked in parallel with the
-  // rows because neither answer is the other's input.
-  const [summaries, rows] = await Promise.all([
+  // project and these minutes — one cheap pass. The third reads the block the
+  // platform reported, off one row and one key of it. All three are asked in
+  // parallel because no answer is another's input, and all three carry the same
+  // tenancy and the same window, so the third can no more reach another
+  // customer's row than the first two can.
+  const [summaries, rows, roots] = await Promise.all([
     rowsOf<SummaryRow>(
       `select
        trace_id,
@@ -825,6 +900,26 @@ export async function readTrace(
      limit ${MAXIMUM_SPANS_PER_TRACE + 1}`,
       parameters,
     ),
+    rowsOf<RootSliceRow>(
+      // **The egma-owned slice of one root's payload, and never the payload.**
+      // A root is the span that named no parent — the door normalises an
+      // unusable one to `''`, and every normalizer writes its root that way —
+      // so this asks for the parentless rows and keeps the earliest, exactly as
+      // the measure module's own derivation picks its root: a trace holding more
+      // than one is a flush whose parent never came, and the conversation began
+      // at the first of them. The span id is the tie-break the row order already uses,
+      // so two readings of one trace answer with one span rather than with
+      // whichever row came back first.
+      `select
+       span_id,
+       JSONExtractRaw(payload, '${NORMALISED_KEY}') as normalised
+     from ${SPANS_TABLE}
+     where ${where}
+       and parent_span_id = ''
+     order by started_at asc, span_id asc
+     limit 1`,
+      parameters,
+    ),
   ]);
 
   const facts = summaries[0];
@@ -833,7 +928,57 @@ export async function readTrace(
   const truncated = rows.length > MAXIMUM_SPANS_PER_TRACE;
   const kept = truncated ? rows.slice(0, MAXIMUM_SPANS_PER_TRACE) : rows;
 
-  return { ...factsOf(traceId, facts), ...transcriptOf(kept), truncated };
+  return {
+    ...factsOf(traceId, facts),
+    ...transcriptOf(kept),
+    truncated,
+    reported: reportedOn(roots[0]),
+  };
+}
+
+/** The root span's id, and the egma-owned slice of its payload as raw JSON. */
+type RootSliceRow = {
+  readonly span_id: string;
+  readonly normalised: string;
+};
+
+/**
+ * The reported-measurements block off the trace's root, or nothing at all.
+ *
+ * **Nothing at all is a first-class answer here and is never an error.** No
+ * root row, no egma-owned slice, no block inside it, a slice that is not JSON,
+ * a block of a version this code predates — every one of them is a trace that
+ * reported nothing, which is what almost every trace in the store is. A read
+ * that threw on any of them would turn one bad write by one vendor into a
+ * transcript nobody can open, and the transcript is the part that was never in
+ * doubt.
+ *
+ * The parse of the block itself is `reportedMeasurementsOf` and is deliberately
+ * not repeated here: this walks two payload keys and hands over what it found,
+ * and the contract decides what a block is.
+ */
+function reportedOn(row: RootSliceRow | undefined): ReportedOnTrace | undefined {
+  if (row === undefined || row.normalised === "") return undefined;
+
+  let slice: unknown;
+  try {
+    slice = JSON.parse(row.normalised);
+  } catch {
+    return undefined;
+  }
+  if (typeof slice !== "object" || slice === null || Array.isArray(slice)) {
+    return undefined;
+  }
+
+  const block = reportedMeasurementsOf(
+    (slice as Record<string, unknown>)[REPORTED_KEY],
+  );
+  if (block === undefined) return undefined;
+  return {
+    spanId: row.span_id,
+    reportedBy: block.reportedBy,
+    measurements: block.measurements,
+  };
 }
 
 /**

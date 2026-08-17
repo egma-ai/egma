@@ -34,6 +34,14 @@ import type { Execution, Judgment } from "./contract.ts";
  * made — and the rationale says which measurement decided, so nobody has to
  * guess.
  *
+ * **And it says who measured, when that was not egma.** The measure module
+ * reads three sources — egma's own timing spans, a derivation off a recognised
+ * framework's spans, and the block an agent platform reported about its own
+ * conversation — and a verdict decided by the third names the platform in its
+ * rationale. The bound is applied identically whoever took the number; what
+ * changes is that the record does not let a platform's account of its own agent
+ * pass silently as egma's observation of it.
+ *
  * ## What it says when it cannot say anything
  *
  * - **The conversation's spans do not carry the measure.** `skipped`, out of
@@ -246,6 +254,10 @@ function boundIn(entry: Readonly<Record<string, string | number>>): Bounded | un
  * because "the worst of eleven turns was 2.4 seconds" and "the one turn took 2.4
  * seconds" are different things to go and look at, and a rationale that hid the
  * difference would leave a developer opening the wrong transcript.
+ *
+ * And it says **who measured, when it was not egma** — see `whoMeasured` below.
+ * The two sentence shapes are otherwise the ones they have always been, word
+ * for word, so a verdict on a conversation egma timed reads exactly as it did.
  */
 function rationaleFor(
   asked: Bounded,
@@ -257,9 +269,31 @@ function rationaleFor(
     measured.samples.length === 1
       ? `was ${worst} ${measured.unit}`
       : `was ${worst} ${measured.unit} at its worst, across ${measured.samples.length} measurements`;
-  return held
-    ? `${asked.metric} ${taken}, within the bound of ${asked.bound}.`
-    : `${asked.metric} ${taken}, over the bound of ${asked.bound}.`;
+  const against = held
+    ? `within the bound of ${asked.bound}`
+    : `over the bound of ${asked.bound}`;
+  return `${asked.metric} ${taken}, ${against}${whoMeasured(measured)}.`;
+}
+
+/**
+ * The clause that names the platform, on a verdict decided by a number egma did
+ * not take.
+ *
+ * **A verdict computed from what a platform reported has to say so.** The
+ * number is real and the bound is real, but the evidence is the platform's
+ * account of its own agent rather than something egma watched happen — and the
+ * two are not the same kind of fact. A developer deciding whether to believe a
+ * failing check needs to know which one they are holding, and a rationale is the
+ * only place on a verdict row where that can be said in words a person reads.
+ *
+ * Nothing at all for a measure egma timed or derived, so those rationales are
+ * byte-for-byte what they were. The empty reporter is guarded too: the contract
+ * refuses a block without one, and a clause reading "as reported by" with
+ * nothing after it would be worse than the silence.
+ */
+function whoMeasured(measured: MeasuredFromSpans): string {
+  if (measured.origin !== "reported" || measured.reportedBy === "") return "";
+  return `, as reported by ${measured.reportedBy} — the platform's own measurement, not Egma's observation`;
 }
 
 /** egma could not make this check. Never `failed`: nothing is said about the agent. */

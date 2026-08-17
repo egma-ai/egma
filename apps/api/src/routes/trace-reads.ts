@@ -352,7 +352,24 @@ function describedMeasures(
       // consumer integrated against still means exactly what it did, and a
       // measure timed by egma's own vocabulary carries `false` here as it
       // always implicitly did.
-      derived: measured.derived,
+      //
+      // **The module now says which of three sources measured, and this field
+      // stays the boolean it has always been.** A client that integrated
+      // against "true means egma worked it out rather than reading its own
+      // timing span" is told exactly that, and a reported measure is not a
+      // measure egma timed — so `true` is the honest answer for it too. Which
+      // of the two non-timed sources it was is `reported_by` below, where a
+      // reader who wants the distinction can have it without every existing
+      // reader's meaning shifting under them.
+      derived: measured.origin !== "timed",
+      // **Only on a measure a platform reported, and absent everywhere else.**
+      // Simulation traffic is byte-for-byte what it was before this field
+      // existed, which is the criterion this branch exists to hold: a field
+      // present-but-empty on every simulation would be a wire change on traffic
+      // nothing new happened to. Present, it names the platform that measured.
+      ...(measured.origin === "reported"
+        ? { reported_by: measured.reportedBy }
+        : {}),
       samples: measured.samples.map((sample) => sample.value),
       span_ids: measured.samples.map((sample) => sample.spanId),
       // The one number a bound is held against, and where it happened. Null is

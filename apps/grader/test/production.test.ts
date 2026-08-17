@@ -264,7 +264,8 @@ describe("a production trace whose root span closes", () => {
       {
         measure: "turn_response_latency",
         unit: "milliseconds",
-        derived: true,
+        origin: "derived",
+        reportedBy: "",
         samples: [{ value: 1_000, spanId: expect.any(String) }],
       },
     ]);
