@@ -1079,17 +1079,24 @@ describe("adding a connection", () => {
     fireEvent.change(await screen.findByLabelText("Platform"), {
       target: { value: "livekit" },
     });
+    expect((screen.getByLabelText("Dispatch method") as HTMLSelectElement).value)
+      .toBe("named");
+    expect(
+      (screen.getByRole("button", { name: "Add connection" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
       target: { value: "wss://rooms.example.test" },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit agent name (optional)"), {
+    fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
       target: { value: "front-desk" },
     });
     expect(
       screen.getByText(
-        "The LiveKit worker dispatch name. Leave it empty for automatic dispatch.",
+        "Enter the exact agent name registered by the deployed LiveKit worker. A different name prevents the agent from joining the room.",
       ),
     ).toBeTruthy();
+    expect(screen.queryByLabelText("LiveKit agent name (optional)")).toBeNull();
     const metadata = screen.getByLabelText("Room metadata (optional)");
     fireEvent.change(metadata, {
       target: { value: '{"tenant":"acme"}' },
@@ -1115,6 +1122,59 @@ describe("adding a connection", () => {
         agentName: "front-desk",
         metadata: '{"tenant":"acme"}',
       },
+      credentials: {
+        apiKey: "livekit-key",
+        apiSecret: "livekit-secret",
+      },
+    });
+  });
+
+  it("makes automatic LiveKit dispatch an explicit choice that stores no agent name", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    fireEvent.change(await screen.findByLabelText("Platform"), {
+      target: { value: "livekit" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
+      target: { value: "must-not-be-sent" },
+    });
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "automatic" },
+    });
+    expect(screen.queryByLabelText("LiveKit agent name")).toBeNull();
+    expect(
+      screen.getByText(
+        "LiveKit sends the room to any available agent that accepts automatic dispatch. Egma stores no agent name.",
+      ),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
+      target: { value: "wss://rooms.example.test" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API key"), {
+      target: { value: "livekit-key" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API secret"), {
+      target: { value: "livekit-secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
+      type: "livekit",
+      modality: "voice",
+      config: { url: "wss://rooms.example.test" },
       credentials: {
         apiKey: "livekit-key",
         apiSecret: "livekit-secret",
@@ -1294,6 +1354,85 @@ describe("one connection's page", () => {
     expect(sent[0]?.body).toEqual({
       name: "Primary Retell connection",
       config: { retellAgentId: "agent_moved" },
+      expected_revision: "rev_con_one",
+    });
+  });
+
+  it("edits named and automatic LiveKit dispatch as two explicit modes", async () => {
+    const named = {
+      ...CONNECTION,
+      type: "livekit",
+      variant_id: "livekit.key_pair",
+      modality: "voice",
+      config: {
+        url: "wss://example.livekit.cloud",
+        agentName: "front-desk",
+      },
+    };
+    answersWith(named);
+    render(<ConnectionDetailPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect((screen.getByLabelText("Dispatch method") as HTMLSelectElement).value)
+      .toBe("named");
+    expect((screen.getByLabelText("LiveKit agent name") as HTMLInputElement).value)
+      .toBe("front-desk");
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "automatic" },
+    });
+    expect(screen.queryByLabelText("LiveKit agent name")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
+      name: "staging",
+      config: { url: "wss://example.livekit.cloud" },
+      expected_revision: "rev_con_one",
+    });
+
+    cleanup();
+    const automatic = {
+      ...named,
+      config: { url: "wss://example.livekit.cloud" },
+    };
+    answersWith(automatic);
+    render(<ConnectionDetailPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect((screen.getByLabelText("Dispatch method") as HTMLSelectElement).value)
+      .toBe("automatic");
+    expect(screen.queryByLabelText("LiveKit agent name")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "named" },
+    });
+    const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(save.title).toContain("exact LiveKit agent name");
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "automatic" },
+    });
+    expect(
+      (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "named" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
+      target: { value: "customer-support" },
+    });
+    const enabledSave = screen.getByRole("button", {
+      name: "Save",
+    }) as HTMLButtonElement;
+    expect(enabledSave.disabled).toBe(false);
+    fireEvent.click(enabledSave);
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
+      name: "staging",
+      config: {
+        url: "wss://example.livekit.cloud",
+        agentName: "customer-support",
+      },
       expected_revision: "rev_con_one",
     });
   });

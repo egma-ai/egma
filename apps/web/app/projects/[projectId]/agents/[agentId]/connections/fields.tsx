@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import {
   Field,
   Help,
@@ -111,6 +113,7 @@ export function ConnectionFields({
   draft,
   onChange,
   credentialsEditable,
+  beforeCredentialFields,
 }: {
   readonly variant: ConnectionVariant;
   readonly draft: Draft;
@@ -125,12 +128,14 @@ export function ConnectionFields({
    * connection has no credential", which for most shapes is false.
    */
   readonly credentialsEditable: boolean;
+  /** Provider-specific setup that belongs after target fields and before secrets. */
+  readonly beforeCredentialFields?: ReactNode;
 }) {
   const setConfig = (key: string, value: string) =>
     onChange({ ...draft, config: { ...draft.config, [key]: value } });
   const setCredential = (field: string, value: string) =>
     onChange({ ...draft, credentials: { ...draft.credentials, [field]: value } });
-  const beforeCredentials = variant.fields.filter(
+  const targetFields = variant.fields.filter(
     (field) => field.after_credentials !== true,
   );
   const afterCredentials = variant.fields.filter(
@@ -139,7 +144,7 @@ export function ConnectionFields({
 
   return (
     <>
-      {beforeCredentials.map((field) => (
+      {targetFields.map((field) => (
         <ConfigControl
           key={field.key}
           field={field}
@@ -147,6 +152,8 @@ export function ConnectionFields({
           onChange={(value) => setConfig(field.key, value)}
         />
       ))}
+
+      {beforeCredentialFields}
 
       {credentialsEditable && variant.credential_rule !== "forbidden" ? (
         <>

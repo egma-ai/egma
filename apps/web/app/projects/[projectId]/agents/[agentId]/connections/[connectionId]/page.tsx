@@ -42,6 +42,13 @@ import {
   useShellSession,
 } from "../../../../../../../ui/shell.tsx";
 import { ConnectionFields, type Draft } from "../fields.tsx";
+import {
+  configForLiveKitDispatch,
+  liveKitDispatchForm,
+  LiveKitDispatchSetup,
+  savedLiveKitDispatch,
+  type LiveKitDispatch,
+} from "../livekit-dispatch.tsx";
 import styles from "./connection.module.css";
 
 type DetailFact = {
@@ -324,19 +331,44 @@ function EditConnection({
     config: { ...connection.config },
     credentials: {},
   });
+  const initialLiveKitDispatch = savedLiveKitDispatch(connection.config);
+  const [livekitDispatch, setLivekitDispatch] =
+    useState<LiveKitDispatch>(initialLiveKitDispatch);
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [nameProblem, setNameProblem] = useState<string | null>(null);
+  const liveKitForm = liveKitDispatchForm({
+    type: connection.type,
+    variant,
+    config: draft.config,
+    mode: livekitDispatch,
+  });
   const changed =
     name !== connection.name ||
+    livekitDispatch !== initialLiveKitDispatch ||
     JSON.stringify(draft.config) !== JSON.stringify(connection.config);
   useUnsavedChanges(changed && !saving, saving);
+
+  function chooseLiveKitDispatch(next: LiveKitDispatch): void {
+    setLivekitDispatch(next);
+    setDraft((current) => ({
+      ...current,
+      config: configForLiveKitDispatch(current.config, next),
+    }));
+  }
 
   async function save(): Promise<void> {
     if (saving) return;
     const wantedName = name.trim();
     if (wantedName === "") {
       setNameProblem("A connection needs a name.");
+      return;
+    }
+    if (!liveKitForm.ready) {
+      setRefused({
+        error: "unprocessable",
+        message: "Enter the exact LiveKit agent name, or choose automatic dispatch.",
+      });
       return;
     }
 
@@ -390,14 +422,38 @@ function EditConnection({
             {nameProblem === null ? null : <Problem>{nameProblem}</Problem>}
           </Field>
           <ConnectionFields
-            variant={variant}
+            variant={liveKitForm.variant ?? variant}
             draft={draft}
             onChange={setDraft}
             credentialsEditable={false}
+            beforeCredentialFields={
+              !liveKitForm.enabled ? undefined : (
+                <LiveKitDispatchSetup
+                  mode={liveKitForm.mode}
+                  agentName={liveKitForm.agentName}
+                  onModeChange={chooseLiveKitDispatch}
+                  onAgentNameChange={(agentName) =>
+                    setDraft((current) => ({
+                      ...current,
+                      config: { ...current.config, agentName },
+                    }))
+                  }
+                />
+              )
+            }
           />
           {refused === null ? null : <Problem>{refused.message}</Problem>}
           <FormActions>
-            <Button type="submit" weight="strong" disabled={saving || !changed}>
+            <Button
+              type="submit"
+              weight="strong"
+              disabled={saving || !changed || !liveKitForm.ready}
+              why={
+                liveKitForm.ready
+                  ? undefined
+                  : "Enter the exact LiveKit agent name, or choose automatic dispatch."
+              }
+            >
               {saving ? "Saving…" : "Save"}
             </Button>
             <Button onClick={dismiss}>Cancel</Button>

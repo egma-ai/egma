@@ -46,6 +46,13 @@ import {
 } from "../../../../../../../ui/shell.tsx";
 import { AgentOnboardingProgress } from "../../../onboarding-progress.tsx";
 import { ConnectionFields, type Draft } from "../fields.tsx";
+import {
+  configForLiveKitDispatch,
+  liveKitDispatchForm,
+  LiveKitDispatchSetup,
+  newLiveKitDispatch,
+  type LiveKitDispatch,
+} from "../livekit-dispatch.tsx";
 
 /** Provider setup first, then only the fields that provider actually needs. */
 export default function NewConnectionPage() {
@@ -84,6 +91,8 @@ function NewConnection({
   const [modality, setModality] = useState("");
   const [name, setName] = useState("");
   const [draft, setDraft] = useState<Draft>({ config: {}, credentials: {} });
+  const [livekitDispatch, setLivekitDispatch] =
+    useState<LiveKitDispatch>(newLiveKitDispatch);
 
   const [retellKey, setRetellKey] = useState("");
   const [retellAgents, setRetellAgents] = useState<readonly RetellVoiceAgent[] | null>(
@@ -136,8 +145,15 @@ function NewConnection({
   const described = typeNamed(catalog, provider ?? "");
   const variant = described?.variants.find((one) => one.id === variantId);
   const chosenRetell = retellAgents?.find((one) => one.id === retellAgentId);
+  const liveKitForm = liveKitDispatchForm({
+    type: described?.type,
+    variant,
+    config: draft.config,
+    mode: livekitDispatch,
+  });
   const changed =
     name !== "" ||
+    livekitDispatch !== newLiveKitDispatch() ||
     retellKey !== "" ||
     retellAgents !== null ||
     Object.values(draft.config).some((value) => value !== "") ||
@@ -152,6 +168,7 @@ function NewConnection({
     setVariantId(chosen?.variants[0]?.id ?? null);
     setModality(voiceFirst(chosen?.modalities ?? []));
     setDraft({ config: {}, credentials: {} });
+    setLivekitDispatch(newLiveKitDispatch());
     setRetellKey("");
     setRetellAgents(null);
     setRetellAgentId("");
@@ -163,6 +180,15 @@ function NewConnection({
   function chooseVariant(next: string): void {
     setVariantId(next);
     setDraft({ config: {}, credentials: {} });
+    setLivekitDispatch(newLiveKitDispatch());
+  }
+
+  function chooseLiveKitDispatch(next: LiveKitDispatch): void {
+    setLivekitDispatch(next);
+    setDraft((current) => ({
+      ...current,
+      config: configForLiveKitDispatch(current.config, next),
+    }));
   }
 
   function chooseRetellAgent(next: string, agents = retellAgents): void {
@@ -337,7 +363,12 @@ function NewConnection({
       </ProductPage>
     );
   }
-  if (catalog === null || described === undefined || variant === undefined) {
+  if (
+    catalog === null ||
+    described === undefined ||
+    variant === undefined ||
+    liveKitForm.variant === undefined
+  ) {
     return (
       <ProductPage>
         {header}
@@ -348,11 +379,17 @@ function NewConnection({
     );
   }
 
-  const canSubmit =
+  const retellReady =
     described.type !== "retell" ||
     (chosenRetell !== undefined &&
       retellNumber !== "" &&
       retellKey.trim() !== "");
+  const canSubmit = retellReady && liveKitForm.ready;
+  const submitWhy = !retellReady
+    ? "Load the Retell account, then select a voice agent and phone number."
+    : !liveKitForm.ready
+      ? "Enter the exact LiveKit agent name, or choose automatic dispatch."
+      : undefined;
 
   return (
     <ProductPage>
@@ -432,10 +469,25 @@ function NewConnection({
               ) : null}
 
               <ConnectionFields
-                variant={variant}
+                variant={liveKitForm.variant}
                 draft={draft}
                 onChange={setDraft}
                 credentialsEditable
+                beforeCredentialFields={
+                  !liveKitForm.enabled ? undefined : (
+                    <LiveKitDispatchSetup
+                      mode={liveKitForm.mode}
+                      agentName={liveKitForm.agentName}
+                      onModeChange={chooseLiveKitDispatch}
+                      onAgentNameChange={(agentName) =>
+                        setDraft((current) => ({
+                          ...current,
+                          config: { ...current.config, agentName },
+                        }))
+                      }
+                    />
+                  )
+                }
               />
             </>
           )}
@@ -446,11 +498,7 @@ function NewConnection({
               type="submit"
               weight="strong"
               disabled={saving || !canSubmit}
-              why={
-                canSubmit
-                  ? undefined
-                  : "Load the Retell account, then select a voice agent and phone number."
-              }
+              why={submitWhy}
             >
               {saving ? "Adding…" : "Add connection"}
             </Button>
