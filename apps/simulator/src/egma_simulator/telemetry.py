@@ -279,14 +279,14 @@ def _ensure_sdk_enabled() -> None:
     if os.environ.get("OTEL_SDK_DISABLED", "").lower().strip() == "true":
         raise RuntimeError(
             "OTEL_SDK_DISABLED cannot be true in the simulator because every "
-            "terminal result requires complete trace evidence"
+            "terminal lifecycle report requires complete trace evidence"
         )
 
 
 _ensure_sdk_enabled()
 _EXPORTER = SimulationExporter()
 _PROCESSOR = SimulationSpanProcessor(_EXPORTER)
-# Evaluation evidence must not inherit process-wide truncation settings. The
+# Simulation trace evidence must not inherit process-wide truncation settings. The
 # SDK uses these model-specific limits for every span, event, and link;
 # ``UNSET`` means no limit and, because every argument is explicit, bypasses
 # all OTEL_*_LIMIT environment variables. ``max_attributes`` is only the SDK's

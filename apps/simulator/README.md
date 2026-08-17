@@ -118,8 +118,8 @@ has no place to put them even by accident.
 
 ## The conversation, as spans
 
-Every turn, tool call and measurement is authored through the OpenTelemetry
-SDK (`spans.py`) and streamed to the control plane's OTLP ingest while
+The OpenTelemetry SDK (`spans.py`) authors every turn, tool call, and
+measurement and streams them to the control plane's OTLP ingest while
 the simulation runs — the same door a customer's own agent exports to, so
 a simulation is readable the way a production trace is readable, live and
 partial included. The vocabulary — the scope, the span names, the
@@ -133,9 +133,10 @@ Three things about it are worth knowing before reading the code:
 - **Delivery is the reporter's.** The SDK's official OTLP encoder feeds span batches
   through the same write-ahead log and the same single ordered sender the
   lifecycle documents ride. A resend is byte-identical, which lets ClickHouse
-  suppress a recent exact block repeat, and the terminal report is made only
-  after every span before it was accepted — when the control plane records a
-  simulation terminal, the conversation is already stored.
+  suppress a recent exact block repeat. Later, regrouped, reordered, or changed
+  blocks can append. The reporter creates the terminal report only after the
+  ingest accepts every earlier span, so the control plane can read the trace
+  when it records the terminal state.
 - **A timing span's own duration is the measurement.** A span named for a
   measure opens one measurement before the moment it was taken, so the
   number is the interval in nanoseconds and there is no second field to
@@ -148,8 +149,8 @@ Three things about it are worth knowing before reading the code:
 
 Pipecat's native service tracing is on and keeps its own scope and fields.
 Pipecat interaction-cycle turn tracking stays off. Only Egma's
-`human_turn` and `agent_turn` spans make transcript lines, because they are
-authored where the conversation is observed and can represent overlap.
+`human_turn` and `agent_turn` spans make transcript lines. Egma authors those
+spans where it observes the exchange, so they can represent overlap.
 
 The simulator reaches the ingest at the control-plane URL it already has.
 There is no second address to configure.

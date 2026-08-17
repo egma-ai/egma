@@ -15,9 +15,9 @@
 -- applies this migration. The raw OTLP payload is the only persisted copy.
 
 ALTER TABLE spans
-    MODIFY COLUMN audio_sample_rate_hz UInt32 EPHEMERAL
+    MODIFY COLUMN IF EXISTS audio_sample_rate_hz UInt32 EPHEMERAL
 ;
 --> statement-breakpoint
 ALTER TABLE spans
-    MODIFY COLUMN audio_encoding LowCardinality(String) EPHEMERAL
+    MODIFY COLUMN IF EXISTS audio_encoding LowCardinality(String) EPHEMERAL
 ;

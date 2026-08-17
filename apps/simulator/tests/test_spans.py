@@ -575,7 +575,7 @@ def test_the_sdk_mints_span_ids_instead_of_replaying_derived_ids():
     owned by the OpenTelemetry SDK. Durable retry replays serialized bytes;
     conducting the same words again is new evidence with new span ids."""
 
-    def conversation() -> list[dict]:
+    def emit_once() -> list[dict]:
         spans, sink, clock = emitter()
         spans.opened()
         clock.tick(1.0)
@@ -584,8 +584,8 @@ def test_the_sdk_mints_span_ids_instead_of_replaying_derived_ids():
         spans.sealed()
         return sink.documents
 
-    first = [span for document in conversation() for span in spans_of(document)]
-    again = [span for document in conversation() for span in spans_of(document)]
+    first = [span for document in emit_once() for span in spans_of(document)]
+    again = [span for document in emit_once() for span in spans_of(document)]
 
     assert {span["traceId"] for span in first + again} == {WORKED_EXAMPLE_TRACE}
     assert {span["spanId"] for span in first}.isdisjoint(
@@ -720,7 +720,7 @@ async def test_concurrent_simulations_keep_their_contexts_and_exports_isolated()
     ready = 0
     both_ready = asyncio.Event()
 
-    async def conversation(simulation_id: str, words: str) -> tuple[str, Sink]:
+    async def emit_one(simulation_id: str, words: str) -> tuple[str, Sink]:
         nonlocal ready
         spans, sink, _clock = emitter(simulation_id)
         spans.opened()
@@ -737,8 +737,8 @@ async def test_concurrent_simulations_keep_their_contexts_and_exports_isolated()
         return simulation_id, sink
 
     results = await asyncio.gather(
-        conversation("sim-concurrent-a", "alpha"),
-        conversation("sim-concurrent-b", "bravo"),
+        emit_one("sim-concurrent-a", "alpha"),
+        emit_one("sim-concurrent-b", "bravo"),
     )
 
     for simulation_id, sink in results:

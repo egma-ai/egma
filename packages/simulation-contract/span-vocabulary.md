@@ -43,15 +43,16 @@ OpenTelemetry resource does. It decides nothing.
 
 ## Trace identity
 
-The trace id is derived from the simulation id, deterministically, so the
-conversation's spans and its verdicts can always find each other:
+The simulator deterministically derives the trace id from the simulation id,
+so the conversation's spans and its verdicts can always find each other:
 
 - **trace id** — the simulation id's own 128 bits: the 26 Crockford base32
   characters after `sim_` decoded to a 128-bit integer, written as 32 lowercase
   hex characters. `sim_01K3XQ7M4E8YB2FVN0H9TZQWER` is trace
   `0198fb73d08e479627eea08a75fbf1d8`, always. OpenTelemetry reserves the
-  all-zero trace id as invalid, so the otherwise well-shaped all-zero
-  simulation id is refused before the simulator reports it as running.
+  all-zero trace id as invalid, so the simulator refuses the otherwise
+  well-shaped all-zero simulation id before it reports the simulation as
+  running.
 - **span ids** — minted by the OpenTelemetry SDK when the span is authored and
   unique within the trace. A retry replays the already-serialized bytes, ids
   and timestamps included. A new execution, even of the same words, receives
@@ -146,9 +147,9 @@ takes thin arguments for an agent that passed none.
   simulator sends as its Egma-authored record: turns and a first-response
   measurement while the conversation runs, tool calls and a per-turn
   measurement as they happen, and the closing turn with the root last. Together
-  they are the whole trace;
-  resending any flush byte-identically is suppressed by ClickHouse's recent
-  exact-block check. Changed content is retained even if its ids match.
+  they are the whole trace. ClickHouse's recent exact-block check suppresses a
+  byte-identical resend. ClickHouse retains changed content even if its ids
+  match.
 - `voice-overlapping-turns.json` — a mid-conversation voice flush where the
   persona starts speaking before the agent finishes: two turns whose intervals
   cross, with the two speech-duration measures beside them.

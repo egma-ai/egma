@@ -113,7 +113,7 @@ describe("the trace store's migration files", () => {
    * before somebody writes the bare `CREATE` that only fails on the second boot
    * of a machine they are not looking at.
    */
-  it("create nothing that a second run would trip over", async () => {
+  it("guards every schema change so a second run cannot trip over it", async () => {
     for (const migration of await readMigrations(
       CLICKHOUSE_MIGRATIONS_DIRECTORY,
     )) {
@@ -123,8 +123,10 @@ describe("the trace store's migration files", () => {
             /^CREATE (?:TABLE|VIEW|MATERIALIZED VIEW|DICTIONARY|FUNCTION) IF NOT EXISTS /i,
           );
         }
-        // A column added later has to survive the re-run on the same terms.
+        // Each column operation has to survive the re-run on its own terms.
         expect(statement).not.toMatch(/\bADD COLUMN\b(?! IF NOT EXISTS)/i);
+        expect(statement).not.toMatch(/\bMODIFY COLUMN\b(?! IF EXISTS)/i);
+        expect(statement).not.toMatch(/\bRENAME COLUMN\b(?! IF EXISTS)/i);
         expect(statement).not.toMatch(/\bDROP COLUMN\b(?! IF EXISTS)/i);
       }
     }

@@ -830,8 +830,11 @@ A few things worth knowing about what happens next:
 - **Nothing is invented and nothing is dropped.** One span in is one row; what
   the columns have no place for — every attribute, event and resource field —
   is kept verbatim on the row it came on.
-- **A retry is free.** An exporter re-sending a batch it never heard back about
-  sends identical bytes, and identical bytes are stored once.
+- **A recent exact retry is free.** ClickHouse suppresses a byte-identical
+  insert block while that block remains in its recent deduplication window.
+  A later repeat can append, and regrouping, reordering, or changing any
+  evidence creates a different block that also appends, even when span ids
+  repeat.
 - **Sending traces is a write**, so a key acts at the role of whoever minted it:
   a `member` or an `admin` exports, and a key held by a `viewer` is refused.
   Demoting somebody stops their exporters on the next request, with no key
@@ -1117,8 +1120,11 @@ ClickHouse's schema lives beside it in `packages/db/clickhouse-migrations`,
 numbered the same way, applied on the same boot by the same mechanism, and
 hand-written rather than generated. Two things it asks for that Postgres does
 not: statements are separated by `--> statement-breakpoint`, because ClickHouse
-runs one per request, and every statement must say `IF NOT EXISTS`, because there
-is no transaction to roll a half-applied file back with.
+runs one per request, and every schema change must carry the safe guard for its
+operation — `IF NOT EXISTS` for creates and additions, and `IF EXISTS` for
+modifications, renames, and drops. ClickHouse has no transaction that can roll
+back a half-applied file, so the next boot must be able to run each statement
+again safely.
 
 ## License
 
