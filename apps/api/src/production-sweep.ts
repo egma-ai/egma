@@ -1,4 +1,5 @@
 import {
+  advanceProductionCursor,
   resolveRetellWatch,
   sweepStaleProductionClaims,
   type RetellWatchTarget,
@@ -170,6 +171,16 @@ export type PollOptions = {
     target: RetellWatchTarget,
     call: RetellCall,
   ) => Promise<WriteOutcome>;
+  /**
+   * How many conversations one page asks for, and how many pages one tick
+   * drains. The defaults are the product's, and it never passes anything else.
+   *
+   * A test hands in small ones so that "a backlog longer than one tick can page
+   * through" is nine conversations rather than two thousand — the behaviour
+   * under test is the relationship between the two numbers, not their size.
+   */
+  readonly pageSize?: number;
+  readonly mostPages?: number;
 };
 
 export async function pollConnection(
@@ -179,6 +190,8 @@ export async function pollConnection(
 ): Promise<PolledConnection> {
   const write =
     options.write ?? ((into, call) => writeRetellCall(into, call, "pull"));
+  const pageSize = options.pageSize ?? PAGE_SIZE;
+  const mostPages = options.mostPages ?? MOST_PAGES_PER_TICK;
 
   let written = 0;
   let degraded = 0;
@@ -194,9 +207,24 @@ export async function pollConnection(
    */
   const askFrom = target.cursor;
 
-  // The local mirror of what has been written this tick. The persisted cursor
-  // is moved by the write itself, inside the transaction that marks the claim.
+  /**
+   * How far this tick has finished looking.
+   *
+   * **Moved by an accounted-for conversation, not by a written one**, and the
+   * difference is what stops the poller freezing behind a healthy webhook. Every
+   * conversation a webhook stored is already claimed by the time the poller
+   * reaches it, so a mirror that only moved on this loop's own writes stood
+   * still while the backlog past the cursor grew — and once that backlog passed
+   * what one tick can page through, a conversation the webhook missed beyond it
+   * was never reached again. The claim is the write duty: whoever holds it
+   * writes the spans, or the lease sweep replays them from the payload on it.
+   *
+   * A conversation whose end nobody reported still never moves this, because
+   * the instant would be egma's stand-in rather than an answer.
+   */
   let since = target.cursor;
+  /** Where the row stands, so a page that moved nothing writes nothing. */
+  let persistedThrough = target.cursor;
 
   /**
    * Where the previous page stopped, in the provider's own terms.
@@ -216,13 +244,14 @@ export async function pollConnection(
    */
   let paginationKey: string | undefined;
 
-  for (let page = 0; page < MOST_PAGES_PER_TICK; page += 1) {
+  for (let page = 0; page < mostPages; page += 1) {
     const answer = await listEndedCalls(
       target.apiKey,
       {
         retellAgentId: target.retellAgentId,
         since: askFrom,
         ...(paginationKey === undefined ? {} : { paginationKey }),
+        limit: pageSize,
       },
       reach,
     );
@@ -252,12 +281,12 @@ export async function pollConnection(
 
     for (const call of calls) {
       const outcome = await write({ ...target, cursor: since }, call);
-      if (outcome.kind !== "written") continue;
-
-      written += 1;
-      if (outcome.degraded) degraded += 1;
-      // The mirror follows the persisted cursor's own rule: only an end the
-      // provider actually reported moves it.
+      if (outcome.kind === "written") {
+        written += 1;
+        if (outcome.degraded) degraded += 1;
+      }
+      // Written or already claimed — either way this conversation is accounted
+      // for. Only an end the provider actually reported moves the mirror.
       if (
         outcome.endReported &&
         (since === null || outcome.endedAt.getTime() > since.getTime())
@@ -266,8 +295,31 @@ export async function pollConnection(
       }
     }
 
+    /**
+     * The row catches up with the page, once, at the end of it.
+     *
+     * A conversation this loop wrote moved the row already, inside the
+     * transaction that marked its claim — that per-item checkpoint is what
+     * makes a sweep killed mid-page resume rather than restart, and it is
+     * untouched. This is the other half: the conversations that were already
+     * accounted for, which no write transaction was going to move the row past.
+     *
+     * Once per page rather than once per item, because a page of already-stored
+     * conversations would otherwise be a hundred round trips to say what one
+     * says. It is safe to batch precisely because it is not a checkpoint: a tick
+     * that dies before it simply leaves the row where the last write put it, and
+     * the next tick pages the same ground again and finds the same answers.
+     */
+    if (
+      since !== null &&
+      (persistedThrough === null || since.getTime() > persistedThrough.getTime())
+    ) {
+      await advanceProductionCursor(target.auth, target.connectionId, since);
+      persistedThrough = since;
+    }
+
     // A short page is the end of the backlog, whatever was in it.
-    if (calls.length < PAGE_SIZE) break;
+    if (calls.length < pageSize) break;
 
     // Retell resumes from the last call of the page it just answered, in its
     // own order rather than in the order this loop wrote them.

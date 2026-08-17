@@ -1254,6 +1254,92 @@ describe("a sweep killed between two items of one page", () => {
   });
 });
 
+describe("a backlog longer than one tick can page through", () => {
+  it("carries the cursor forward on ticks that write nothing, until it reaches what the webhook missed", async () => {
+    const target = await targetFor(acmeWired);
+    const at = (await cursorOf(acmeWired.connectionId))?.getTime() ?? 0;
+    expect(at).toBeGreaterThan(0);
+
+    // Two pages of two, so one tick can look at four conversations. The
+    // behaviour under test is the relationship between the page budget and the
+    // backlog, not the size of either — at the product's own numbers this same
+    // shape is two thousand conversations.
+    const BUDGET = { pageSize: 2, mostPages: 2 } as const;
+    const PER_TICK = BUDGET.pageSize * BUDGET.mostPages;
+
+    // Eight conversations the webhook already stored. Each is claimed, so the
+    // poller writes none of them — and before this, none of them moved the
+    // cursor either, so the poller looked at the same first four for ever.
+    const backlog = Array.from({ length: 8 }, (_, index) =>
+      callFixture(`call_frontier_${index}`, at + 1_000 * (index + 1), {
+        transcript_object: [],
+      }),
+    );
+    for (const call of backlog) {
+      expect((await writeRetellCall(target, call, "webhook")).kind).toBe(
+        "written",
+      );
+    }
+
+    // And one beyond the backlog that the webhook did not deliver. It sits
+    // further out than one tick's whole budget, which is the case the page cap
+    // used to make permanently unreachable.
+    const missed = callFixture("call_beyond_the_frontier", at + 9_000, {
+      transcript_object: [],
+    });
+    expect(backlog.length + 1).toBeGreaterThan(PER_TICK);
+    retell.calls.set(SHARED_AGENT, [...backlog, missed]);
+
+    // Tick one: nothing to write, and the cursor moves anyway — the ledger owns
+    // the write duty for every conversation it stepped over.
+    const first = await pollConnection(
+      await targetFor(acmeWired),
+      { url: retell.url },
+      BUDGET,
+    );
+    expect(first.written).toBe(0);
+    expect((await cursorOf(acmeWired.connectionId))?.getTime()).toBe(
+      at + 1_000 * PER_TICK,
+    );
+
+    // Tick two: still nothing written, still catching up.
+    const second = await pollConnection(
+      await targetFor(acmeWired),
+      { url: retell.url },
+      BUDGET,
+    );
+    expect(second.written).toBe(0);
+    expect((await cursorOf(acmeWired.connectionId))?.getTime()).toBe(
+      at + 1_000 * (PER_TICK + 3),
+    );
+
+    // Tick three reaches past the frontier and writes the conversation the
+    // webhook missed. The cap bounds how much work one tick does; it no longer
+    // bounds what is reachable.
+    const third = await pollConnection(
+      await targetFor(acmeWired),
+      { url: retell.url },
+      BUDGET,
+    );
+    expect(third.written).toBe(1);
+    expect((await cursorOf(acmeWired.connectionId))?.getTime()).toBe(at + 9_000);
+
+    const stored = (await tracesOf(acme)).filter(
+      (one) => one.provider_call_id === "call_beyond_the_frontier",
+    );
+    expect(stored).toHaveLength(1);
+
+    // And nothing the webhook had already stored was written a second time on
+    // the way past it.
+    const frontier = (await tracesOf(acme)).filter((one) =>
+      String(one.provider_call_id).startsWith("call_frontier_"),
+    );
+    expect(frontier).toHaveLength(backlog.length);
+
+    retell.calls.clear();
+  });
+});
+
 /* ------------------------------------------------------------------- *
  * Switching off.
  * ------------------------------------------------------------------- */

@@ -361,6 +361,40 @@ export async function finishProductionTrace(
 }
 
 /**
+ * Everything this connection produced at or before `through` is accounted for.
+ *
+ * **Accounted for, which is a wider word than written, and deliberately.** A
+ * conversation the poller writes is written by the poller; a conversation the
+ * poller finds already claimed is owed to whoever holds the claim, and the
+ * lease sweep replays it from the payload on that claim if they never deliver.
+ * Either way the ledger owns the duty, and the cursor's job is only to say
+ * where the poller has finished looking.
+ *
+ * That distinction is what keeps the poller from freezing behind a healthy
+ * webhook. Every conversation a webhook stored is already claimed when the
+ * poller reaches it, so a cursor that moved only on the poller's own writes
+ * stood still while the backlog past it grew — and once that backlog passed
+ * what one tick can page through, a conversation the webhook happened to miss
+ * beyond it was unreachable for good.
+ *
+ * Forward only, like every other move of this cursor, and never to an instant
+ * the provider did not report — that rule belongs to the caller, which knows
+ * whether the instant it holds is an answer or a stand-in for one.
+ */
+export async function advanceProductionCursor(
+  auth: AuthContext,
+  connectionId: string,
+  through: Date,
+): Promise<void> {
+  await db()
+    .update(connection)
+    .set({
+      productionCursor: sql`greatest(${connection.productionCursor}, ${through.toISOString()}::timestamptz)`,
+    })
+    .where(within(auth, connection, eq(connection.id, connectionId)));
+}
+
+/**
  * The claims whose append never landed, re-taken so this pass owns them.
  *
  * **The lease is what makes a crash cost nothing.** A transport that died

@@ -358,6 +358,7 @@ export type {
  * then done under, and the four below take one.
  */
 export {
+  advanceProductionCursor,
   claimProductionTrace,
   countRetellWebhookRefusal,
   finishProductionTrace,

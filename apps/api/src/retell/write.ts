@@ -47,8 +47,22 @@ export type WriteOutcome =
       /** Whether the provider reported that end, or egma stood in for one. */
       readonly endReported: boolean;
     }
-  /** Somebody else holds the claim — the other transport, or an earlier tick. */
-  | { readonly kind: "already"; readonly traceId: string };
+  /**
+   * Somebody else holds the claim — the other transport, or an earlier tick.
+   *
+   * It carries the same two instants a write does, because **an already-claimed
+   * conversation is an accounted-for conversation**: the claim is the write
+   * duty, and whoever holds it writes the spans or the lease sweep replays them
+   * from the payload on the claim. So a poller may move its cursor past this
+   * exactly as it moves past its own writes, and the two answers have to look
+   * the same for it to be able to.
+   */
+  | {
+      readonly kind: "already";
+      readonly traceId: string;
+      readonly endedAt: Date;
+      readonly endReported: boolean;
+    };
 
 /**
  * Store one Retell conversation under one connection, or find out it is
@@ -86,7 +100,12 @@ export async function writeRetellCall(
   // The loser of the race, and the ordinary answer at the boundary of every
   // resumed sweep. Nothing is written and nothing is wrong.
   if (claim === undefined) {
-    return { kind: "already", traceId: normalised.traceId };
+    return {
+      kind: "already",
+      traceId: normalised.traceId,
+      endedAt: normalised.endedAt,
+      endReported: normalised.endReported,
+    };
   }
 
   await appendSpans(target.auth, normalised.spans);

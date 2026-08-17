@@ -283,6 +283,7 @@ const CONTEXT_REQUIRING = [
   // arrived: the claim a transport takes on an identity, and the mark that
   // moves the connection's cursor once the spans are stored. Both take the
   // context the watch resolver handed out.
+  "advanceProductionCursor",
   "claimProductionTrace",
   "finishProductionTrace",
   "recordRetellWebhookDelivery",
