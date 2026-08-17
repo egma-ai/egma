@@ -1650,7 +1650,12 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
           )
           .toBe(75);
       } finally {
-        await page.unroute(`${running.store.publicUrl}/**`);
+        // Removed with `behavior: "wait"`, not the default: the player keeps
+        // fetching the store while it plays, so a handler can be mid-continue
+        // at exactly this moment, and a default removal races it over one
+        // request. This is the page's only route here, so removing all of
+        // them is the same removal with the safe semantics.
+        await page.unrouteAll({ behavior: "wait" });
       }
 
       // The other conversation of the same run never connected, so it wrote no
@@ -3690,8 +3695,18 @@ describe("the complete product, walked in order in a second project", () => {
           const theAgentsRead = (asked: URL) =>
             asked.pathname === "/api/agents";
           await walk.route(theAgentsRead, async (route) => {
+            // The real answer is fetched at once; only its delivery is held.
+            // The shorter spelling — await the gate, then `route.continue()`
+            // — parks the request itself across the release and removal
+            // below, and a continue that loses that race kills the fetch. A
+            // killed fetch carries no error for the page to react to, so it
+            // renders as "Loading agents…" until the poll gives up — which
+            // is exactly how this step once failed on a tree that passed
+            // this same suite twice. Fetch-then-fulfil parks nothing: one
+            // pending request until `release()`, then one delivery.
+            const answer = await route.fetch();
             await held;
-            return route.continue();
+            return route.fulfill({ response: answer });
           });
           try {
             await walk.goto(at("agents"));
@@ -3700,9 +3715,8 @@ describe("the complete product, walked in order in a second project", () => {
               .toContain("Loading");
           } finally {
             release();
-            // Wait for the held handler to finish before removing it. The
-            // default removal can continue the request itself, after which the
-            // released handler tries to continue the same route a second time.
+            // Wait for the handler to finish its delivery before removing it
+            // — a removal mid-delivery would strand the request it holds.
             await walk.unrouteAll({ behavior: "wait" });
           }
           await saysWithin(walk, "The Support line");
