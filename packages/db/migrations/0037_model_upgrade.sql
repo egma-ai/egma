@@ -9,6 +9,13 @@
 --    plaintext, ciphertext or hints, and none of the three may be used to infer
 --    that two keys are equal. A sole candidate for a provider may become that
 --    organization's active credential; two mean an administrator chooses.
+--    Its `shape` column records what is *inside* the copy, because the two
+--    legacy stores do not agree: every credential table seals a `{ key }`
+--    document so the envelope can grow a field, and the deployment's own
+--    settings seal the value itself because a setting is one value. Recording
+--    it is what lets collection open nothing at all — the translation happens
+--    once, when a candidate becomes an active credential and has to be written
+--    in the shape that store reads.
 --  * `model_upgrade_action` is a decision the upgrade refused to make on
 --    somebody's behalf — a provider with two candidates, a persona whose voice
 --    provider disagrees with the deployment's, a grader with no effective
@@ -38,11 +45,13 @@ CREATE TABLE "model_credential_candidate" (
 	"source_name" text NOT NULL,
 	"credentials" text NOT NULL,
 	"credentials_hint" text NOT NULL,
+	"shape" text NOT NULL,
 	"activated_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "model_credential_candidate_one_per_source" UNIQUE("organization_id","provider","source","source_name"),
 	CONSTRAINT "model_credential_candidate_id_prefix" CHECK ("model_credential_candidate"."id" ~ '^mcc_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "model_credential_candidate_source_allowed" CHECK ("model_credential_candidate"."source" in ('platform_setting', 'judge_credential', 'judge_configuration'))
+	CONSTRAINT "model_credential_candidate_source_allowed" CHECK ("model_credential_candidate"."source" in ('platform_setting', 'judge_credential', 'judge_configuration')),
+	CONSTRAINT "model_credential_candidate_shape_allowed" CHECK ("model_credential_candidate"."shape" in ('key_document', 'bare_value'))
 );
 --> statement-breakpoint
 CREATE TABLE "model_upgrade_action" (

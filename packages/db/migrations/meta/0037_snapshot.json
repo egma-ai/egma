@@ -1,5 +1,5 @@
 {
-  "id": "0c93b505-c23e-41c9-8c4c-5e30be35236b",
+  "id": "dcb0ae34-9e70-4e47-9d1a-6216830e5729",
   "prevId": "4a5d3363-2612-445c-ac48-95f3604ad245",
   "version": "7",
   "dialect": "postgresql",
@@ -1730,6 +1730,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "shape": {
+          "name": "shape",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "activated_at": {
           "name": "activated_at",
           "type": "timestamp with time zone",
@@ -1782,6 +1788,10 @@
         "model_credential_candidate_source_allowed": {
           "name": "model_credential_candidate_source_allowed",
           "value": "\"model_credential_candidate\".\"source\" in ('platform_setting', 'judge_credential', 'judge_configuration')"
+        },
+        "model_credential_candidate_shape_allowed": {
+          "name": "model_credential_candidate_shape_allowed",
+          "value": "\"model_credential_candidate\".\"shape\" in ('key_document', 'bare_value')"
         }
       },
       "isRLSEnabled": false

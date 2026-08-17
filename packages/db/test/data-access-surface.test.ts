@@ -560,6 +560,10 @@ const THE_MODEL_CATALOG = [
   // choose. Closed lists for the same reason `ENDING_REPAIRS` is one: a screen
   // draws a link from the word, and an unknown one would be a button nowhere.
   "CREDENTIAL_CANDIDATE_SOURCES",
+  // What is inside one copied envelope. Two legacy stores seal two different
+  // plaintexts under one format, and a copy that did not record which would be
+  // a credential nothing could open.
+  "CREDENTIAL_ENVELOPE_SHAPES",
   "MODEL_UPGRADE_ACTIONS",
   // What still stands between this installation and the removal of the legacy
   // paths, as four words rather than one boolean — somebody deciding whether an

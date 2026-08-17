@@ -49,6 +49,26 @@ export type CredentialCandidateSource =
   (typeof CREDENTIAL_CANDIDATE_SOURCES)[number];
 
 /**
+ * What is *inside* one copied envelope, which is not the same question in every
+ * legacy store.
+ *
+ * **Two stores, two shapes, and finding this out late would have been a broken
+ * credential rather than a broken build.** Every credential table in this schema
+ * seals a small document, `{ key }`, so that the envelope can grow a field
+ * without a format guess. The deployment's own settings seal the value itself,
+ * because a platform setting is one value and there was never a second field to
+ * name. Both are sealed under the same master key with the same envelope
+ * format; what differs is the plaintext they hold.
+ *
+ * So the shape is recorded with the copy, and it is read exactly once — when a
+ * candidate becomes an organization's active credential and has to be written
+ * in the shape that store reads. Collection itself opens nothing.
+ */
+export const CREDENTIAL_ENVELOPE_SHAPES = ["key_document", "bare_value"] as const;
+export type CredentialEnvelopeShape =
+  (typeof CREDENTIAL_ENVELOPE_SHAPES)[number];
+
+/**
  * One legacy provider key, copied here sealed exactly as it was stored.
  *
  * **Copied rather than moved, and the difference is the compatibility period.**
@@ -99,6 +119,13 @@ export const modelCredentialCandidate = pgTable(
     /** The last characters of the key, as the row it came from already held. */
     credentialsHint: text("credentials_hint").notNull(),
     /**
+     * What the envelope holds inside. See `CREDENTIAL_ENVELOPE_SHAPES`: the
+     * credential stores seal `{ key }` and the deployment's own settings seal
+     * the value itself, and a copy that did not record which would be a
+     * credential nothing could open.
+     */
+    shape: text("shape").notNull(),
+    /**
      * When this candidate became the organization's active model-provider
      * credential, or null while it has not. Null on every candidate of a
      * provider that had more than one.
@@ -110,6 +137,9 @@ export const modelCredentialCandidate = pgTable(
     prefixCheck("model_credential_candidate_id_prefix", table.id, "mcc"),
     oneOf("model_credential_candidate_source_allowed", table.source, [
       ...CREDENTIAL_CANDIDATE_SOURCES,
+    ]),
+    oneOf("model_credential_candidate_shape_allowed", table.shape, [
+      ...CREDENTIAL_ENVELOPE_SHAPES,
     ]),
     /**
      * One candidate per legacy row, which is what makes re-running the upgrade

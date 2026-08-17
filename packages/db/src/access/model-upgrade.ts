@@ -24,8 +24,10 @@ import {
   modelCredentialCandidate,
   modelUpgradeAction,
   type CredentialCandidateSource,
+  type CredentialEnvelopeShape,
   type ModelUpgradeActionKind,
 } from "../schema/upgrade.ts";
+import { openCredentials, sealCredentials } from "../sealing.ts";
 import type { DeploymentTenancy } from "./platform-settings.ts";
 import { traitsFromRow } from "./personas.ts";
 
@@ -385,6 +387,7 @@ async function collectCandidates(
     sourceName: string;
     credentials: string;
     credentialsHint: string;
+    shape: CredentialEnvelopeShape;
   }[] = [];
 
   for (const { key, provider, job } of SETTING_KEYS) {
@@ -401,6 +404,9 @@ async function collectCandidates(
       sourceName: key,
       credentials: sealed.value,
       credentialsHint: sealed.hint,
+      // A platform setting seals the value itself. Recorded rather than
+      // converted, so nothing is opened while the keys are being collected.
+      shape: "bare_value",
     });
   }
 
@@ -426,6 +432,7 @@ async function collectCandidates(
       sourceName: row.label,
       credentials: row.credentials,
       credentialsHint: row.hint,
+      shape: "key_document",
     });
   }
 
@@ -452,6 +459,7 @@ async function collectCandidates(
       sourceName: row.projectId,
       credentials: row.credentials,
       credentialsHint: row.hint ?? "",
+      shape: "key_document",
     });
   }
 
@@ -468,6 +476,7 @@ async function collectCandidates(
         sourceName: one.sourceName,
         credentials: one.credentials,
         credentialsHint: one.credentialsHint,
+        shape: one.shape,
       })),
     )
     // The source is the identity, so a second run over the same deployment
@@ -514,6 +523,7 @@ async function activateSoleCandidates(
       provider: modelCredentialCandidate.provider,
       credentials: modelCredentialCandidate.credentials,
       hint: modelCredentialCandidate.credentialsHint,
+      shape: modelCredentialCandidate.shape,
     })
     .from(modelCredentialCandidate)
     .where(eq(modelCredentialCandidate.organizationId, organizationId))
@@ -555,7 +565,7 @@ async function activateSoleCandidates(
         id: newId("mpc"),
         organizationId,
         provider,
-        credentials: sole.credentials,
+        credentials: asACredential(sole),
         credentialsHint: sole.hint,
         revision: newId("rev"),
         createdBy: null,
@@ -578,6 +588,35 @@ async function activateSoleCandidates(
   }
 
   return { activated, actions };
+}
+
+/**
+ * One candidate's envelope, in the shape the credential store reads.
+ *
+ * **This is the one place the upgrade opens a secret, and it opens it to *use*
+ * it rather than to learn anything about it.** A credential sealed by the judge
+ * or credential stores already holds `{ key }` and is copied across untouched.
+ * A deployment setting seals the value itself, so becoming a credential means
+ * being written in the credential store's shape — which cannot be done without
+ * the plaintext, however briefly.
+ *
+ * Nothing is compared, nothing is logged, and nothing is returned: the
+ * plaintext exists for the length of one re-seal and the fresh envelope is what
+ * lands. Leaving the bare value in the credential column instead would put two
+ * shapes in one column and make every later reader guess which it had.
+ */
+export function asACredential(candidate: {
+  readonly credentials: string;
+  readonly shape: string;
+}): string {
+  if (candidate.shape === "key_document") return candidate.credentials;
+  const opened = openCredentials(candidate.credentials);
+  if (typeof opened !== "string" || opened === "") {
+    throw new Error(
+      "a stored deployment setting did not hold a value this upgrade could make a credential of; the row needs repairing before it can be used",
+    );
+  }
+  return sealCredentials({ key: opened });
 }
 
 /** Why one persona could not be given an explicit successor. */

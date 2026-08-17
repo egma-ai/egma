@@ -164,6 +164,20 @@ type Body = Record<string, unknown>;
  */
 function platformBlock(
   held: PlatformSettingValues,
+  /**
+   * Whether this persona chose its own models.
+   *
+   * **A persona with selections is sent no deployment-wide model or speech
+   * settings at all**, and that is the specification's line about where those
+   * rows go — the model, speech and voice-activity settings leave the
+   * deployment's own store, and the carrier and media settings stay. It matters
+   * beyond tidiness: those three settings carry three provider keys, and a work
+   * order whose every leg is already authorized by the selections' own
+   * credentials would be putting three more secrets on the wire with nothing to
+   * spend them on. A simulation on the compatibility path still receives all of
+   * it, unchanged, because that is what the compatibility path is.
+   */
+  chosen: boolean,
 ): Record<string, unknown> | undefined {
   // Written out setting by setting rather than folded over the catalog, for
   // the reason `config.ts` reads each variable by name: this is where a
@@ -193,7 +207,9 @@ function platformBlock(
     trunk_password: held.carrier_trunk_password,
   });
 
-  const platform = onlyWhatIsHeld({ model, speech, carrier });
+  const platform = chosen
+    ? onlyWhatIsHeld({ carrier })
+    : onlyWhatIsHeld({ model, speech, carrier });
   // A platform that has configured nothing sends no block at all, so a spec
   // it assembles is byte for byte the spec it was before these settings
   // existed — which is what makes every fixture written before today still
@@ -520,14 +536,6 @@ async function assembledSpec(
     };
   }
 
-  // Read for **each** simulation and never cached, which is the whole point
-  // of the settings living in the store: an operator who replaces a spent key
-  // has it in effect on the next simulation, with no container restarted and
-  // nothing to remember to do. One more small select is nothing beside
-  // conducting a conversation over a telephone connection, and a measurement
-  // may ask for caching later — nothing has yet.
-  const platform = platformBlock(await resolvePlatformSettings(claim.auth));
-
   if (!runs.has(claim.runId)) {
     runs.set(claim.runId, await getRun(claim.auth, claim.runId));
   }
@@ -566,6 +574,21 @@ async function assembledSpec(
     personaVersion.models === null
       ? undefined
       : await modelsBlock(claim, personaVersion.models);
+
+  // Read for **each** simulation and never cached, which is the whole point
+  // of the settings living in the store: an operator who replaces a spent key
+  // has it in effect on the next simulation, with no container restarted and
+  // nothing to remember to do. One more small select is nothing beside
+  // conducting a conversation over a telephone connection, and a measurement
+  // may ask for caching later — nothing has yet.
+  //
+  // After the selections, because what this may carry depends on whether the
+  // persona made any: one that did is sent the carrier settings and none of the
+  // model or speech ones.
+  const platform = platformBlock(
+    await resolvePlatformSettings(claim.auth),
+    models !== undefined,
+  );
 
   const spec = {
     contract_version:

@@ -11,6 +11,7 @@ import {
 } from "../schema/upgrade.ts";
 import { newId } from "@egma/ids";
 import { isModelProvider, type ModelProvider } from "../models/catalog.ts";
+import { asACredential } from "./model-upgrade.ts";
 import type { AuthContext } from "./context.ts";
 import { UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
@@ -198,6 +199,7 @@ export async function activateCredentialCandidate(
         provider: modelCredentialCandidate.provider,
         credentials: modelCredentialCandidate.credentials,
         hint: modelCredentialCandidate.credentialsHint,
+        shape: modelCredentialCandidate.shape,
       })
       .from(modelCredentialCandidate)
       .where(
@@ -226,7 +228,7 @@ export async function activateCredentialCandidate(
         id: newId("mpc"),
         organizationId: auth.organizationId,
         provider: candidate.provider,
-        credentials: candidate.credentials,
+        credentials: asACredential(candidate),
         credentialsHint: candidate.hint,
         revision: newId("rev"),
         createdBy: auth.userId,
@@ -237,7 +239,7 @@ export async function activateCredentialCandidate(
           modelProviderCredential.provider,
         ],
         set: {
-          credentials: candidate.credentials,
+          credentials: asACredential(candidate),
           credentialsHint: candidate.hint,
           revision: newId("rev"),
           updatedAt: now,

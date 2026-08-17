@@ -842,9 +842,11 @@ export {
 } from "./model-upgrade-actions.ts";
 export type {
   CredentialCandidateSource,
+  CredentialEnvelopeShape,
   ModelUpgradeActionKind,
 } from "../schema/upgrade.ts";
 export {
   CREDENTIAL_CANDIDATE_SOURCES,
+  CREDENTIAL_ENVELOPE_SHAPES,
   MODEL_UPGRADE_ACTIONS,
 } from "../schema/upgrade.ts";
