@@ -231,10 +231,7 @@ async def test_a_phone_spec_dials_converses_records_and_tears_down(tmp_path: Pat
     assert "://" not in audio["recording"]
     recording = (tmp_path / audio["recording"]).read_bytes()
     assert channels_of(recording)[2] > 0
-    assert_one_speaker_to_a_channel(
-        recording,
-        [turn for turn in run.turns if turn[1] != GOODBYE],
-    )
+    assert_one_speaker_to_a_channel(recording, run.turns)
 
 
 async def test_the_far_end_hanging_up_keeps_its_last_words_and_recording(
