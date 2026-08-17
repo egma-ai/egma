@@ -109,6 +109,24 @@ export const modelProviderCredential = pgTable(
     credentialsHint: text("credentials_hint").notNull(),
     /** The opaque token an edit has to name to be allowed to land. */
     revision: idText("revision").notNull(),
+    /**
+     * Which stored legacy key this credential is *tracking*, or null for a key
+     * an administrator typed.
+     *
+     * **Provenance, so a rotation can reach it and an administrator can never
+     * be overruled by one.** The upgrade activates a sole candidate and writes
+     * its identifier here; when that candidate's source row is rotated, the
+     * refresh finds this credential by that identifier and moves it too, which
+     * is ordinary rotation reaching the next claim. The moment an administrator
+     * writes a key through Model providers this becomes null, and nothing the
+     * upgrade does can touch the row again — their choice is the later and
+     * better answer, and it wins forever.
+     *
+     * Not a foreign key, deliberately: it is a record of where a secret came
+     * from, and a candidate deleted long afterwards must neither take a working
+     * credential with it nor be refused deletion because of one.
+     */
+    upgradedFrom: idText("upgraded_from"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),

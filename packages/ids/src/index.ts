@@ -70,6 +70,21 @@ export const ID_PREFIXES = [
    * revoking one has to be able to name something that is not the secret.
    */
   "ifk",
+  /**
+   * One legacy provider key the upgrade found and copied, sealed, as a
+   * candidate for its provider. Its own identity because an administrator
+   * choosing between two of them has to name one, and the only other thing on
+   * the row that could name it is four characters of a secret.
+   */
+  "mcc",
+  /**
+   * One decision the upgrade onto model selections refused to make: a provider
+   * with two candidate keys, a persona or grader with no unambiguous successor,
+   * an organization on a deployment that copies nothing into it. Its own
+   * identity because a screen lists them and somebody clears them one at a
+   * time.
+   */
+  "mua",
   "mck",
   "ste",
   "run",

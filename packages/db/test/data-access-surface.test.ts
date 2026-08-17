@@ -295,6 +295,22 @@ const CONTEXT_REQUIRING = [
   "listTests",
   "listTraces",
   "markSimulationCanceled",
+  // What the upgrade onto model selections left for this organization: the
+  // decisions it refused to make, the stored keys it found, and the one door
+  // that makes one of them active. Reading an action is every role's, because
+  // it is the reason somebody's run reported what it reported; the keys and the
+  // choice between them are an admin's, on the row of the permission table that
+  // already names provider credentials.
+  "activateCredentialCandidate",
+  "listCredentialCandidates",
+  "listModelUpgradeActions",
+  // The upgrade itself and its marker: the deployment finishing a change the
+  // release shipped, and the one fact the later removal is allowed to act on.
+  // None of the three takes a context, because none of them is about anybody on
+  // this deployment — see the lint rule's own note.
+  "readModelUpgradeCompletion",
+  "recordModelUpgradeCompletion",
+  "upgradeModelSetup",
   "readOrganization",
   "readOrganizationSettings",
   // The deployment's own settings, on the judge configuration's exact terms:
@@ -540,6 +556,19 @@ const THE_MODEL_CATALOG = [
   "RECOMMENDED_PERSONA_MODELS",
   "SPEED_RANGE",
   "DEFAULT_MODEL_ACCESS",
+  // Where the upgrade found a legacy key, and what it left for somebody to
+  // choose. Closed lists for the same reason `ENDING_REPAIRS` is one: a screen
+  // draws a link from the word, and an unknown one would be a button nowhere.
+  "CREDENTIAL_CANDIDATE_SOURCES",
+  // What is inside one copied envelope. Two legacy stores seal two different
+  // plaintexts under one format, and a copy that did not record which would be
+  // a credential nothing could open.
+  "CREDENTIAL_ENVELOPE_SHAPES",
+  "MODEL_UPGRADE_ACTIONS",
+  // What still stands between this installation and the removal of the legacy
+  // paths, as four words rather than one boolean — somebody deciding whether an
+  // old worker can be drained needs to know which.
+  "UPGRADE_CONDITIONS",
 ];
 
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */

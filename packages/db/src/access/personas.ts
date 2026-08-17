@@ -326,7 +326,7 @@ function describedTraitsFromRow(
  * later, and an old version must stay readable exactly as it was written —
  * so the provider is taken on trust once it is a string.
  */
-function traitsFromRow(value: unknown, versionId: string): PersonaTraits {
+export function traitsFromRow(value: unknown, versionId: string): PersonaTraits {
   const malformed = () =>
     new Error(
       `version ${versionId} holds traits in a shape Egma never writes; the row needs repairing before anybody can read it`,

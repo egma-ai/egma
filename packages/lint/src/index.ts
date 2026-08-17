@@ -248,18 +248,36 @@ const WORK_DISPATCHING = [
  * *ever* held a copy rather than whether it holds one now, so a team that
  * switched theirs off is not overruled at the next start.
  *
+ * `upgradeModelSetup` was added on 2026-08-17 with managed model access, and it
+ * is the same act again on the personas and graders a deployment already had:
+ * a release before the model catalog existed left every one of them resolving
+ * through deployment-wide settings, and this gives each an explicit successor
+ * from what that deployment was already configured with. It names no customer
+ * because the configuration it reads belongs to none — which is exactly why it
+ * copies nothing at all on a deployment serving several organizations. Its one
+ * parameter is what kind of deployment this is, so a test can hand in either.
+ *
+ * `readModelUpgradeCompletion` and `recordModelUpgradeCompletion` are the
+ * marker beside it, and they are the strongest case in this list: whether *this
+ * installation* has finished spans every organization on it, so there is no
+ * organization a caller could name and no context under which the question
+ * would even be well posed. Neither takes an argument at all.
+ *
  * The rule enforces the second half of that the same way it does for work
  * dispatch: nothing here may be handed an `organizationId` or a `projectId`. A
  * function here that grew one would be an ordinary cross-tenant *write* wearing
  * an exemption, which is worse than the read work dispatch guards against.
  *
- * A fifth name here is a decision somebody has to make on purpose.
+ * An eighth name here is a decision somebody has to make on purpose.
  */
 const DEPLOYMENT_CONFIGURING = [
+  "readModelUpgradeCompletion",
+  "recordModelUpgradeCompletion",
   "seedDefaultJudge",
   "seedGraderLibrary",
   "seedPlatformSettings",
   "seedRunningGraders",
+  "upgradeModelSetup",
 ];
 
 /**

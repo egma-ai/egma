@@ -122,6 +122,20 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
         "additionalProperties",
         "gateway",
     ),
+    # A version-2 document is one whose persona selected its own models, and
+    # those selections carry the credentials that authorize every leg — so the
+    # deployment's own model and speech settings beside them would be three
+    # more provider keys on the wire with nothing to spend them on.
+    "spec-v2/platform-carrying-model-settings.json": (
+        "/platform",
+        "additionalProperties",
+        "model",
+    ),
+    "spec-v2/platform-carrying-speech-settings.json": (
+        "/platform",
+        "additionalProperties",
+        "speech",
+    ),
     "spec-v2/unknown-field.json": ("", "additionalProperties", "agent_id"),
     "report/completed-claiming-never-ran.json": (
         "/events/0/facts/ending",

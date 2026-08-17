@@ -77,6 +77,15 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // The organization's judge credentials: the keys egma judges with, and the
   // one place any of them is stored.
   judge_credential: "jcr",
+  // One legacy provider key the upgrade found and copied, sealed, as a
+  // candidate for its provider. Its own identity because an administrator
+  // choosing between two of them has to name one, and the only other thing on
+  // the row that could name it is four characters of a secret.
+  model_credential_candidate: "mcc",
+  // One decision the upgrade refused to make on somebody's behalf. Its own
+  // identity because a screen lists them and somebody clears them one at a
+  // time.
+  model_upgrade_action: "mua",
   mock_tool: "mck",
   // The scope's junction, pinning the mock tool it narrows — the shape the
   // persona junction has, for the same reason.

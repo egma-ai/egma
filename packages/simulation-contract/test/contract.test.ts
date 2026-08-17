@@ -224,6 +224,22 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     at: "/models",
     keyword: "oneOf",
   },
+  // A version-2 document is one whose persona selected its own models, and
+  // those selections carry the credentials that authorize every leg — so the
+  // deployment's own model and speech settings beside them would be three more
+  // provider keys on the wire with nothing to spend them on. Refused rather
+  // than carried and ignored, because a document that may hold two answers is
+  // one every reader has to decide between.
+  "spec-v2/platform-carrying-model-settings.json": {
+    at: "/platform",
+    keyword: "additionalProperties",
+    property: "model",
+  },
+  "spec-v2/platform-carrying-speech-settings.json": {
+    at: "/platform",
+    keyword: "additionalProperties",
+    property: "speech",
+  },
   "spec-v2/unknown-field.json": {
     at: "",
     keyword: "additionalProperties",
@@ -293,7 +309,8 @@ describe("the two schemas, as one contract", () => {
   });
 
   /**
-   * Version 2 is version 1 with one block added, and this is what says so.
+   * Version 2 is version 1 with one block added and one block narrowed, and
+   * this is what says so.
    *
    * Written out rather than derived, because the two schemas are two frozen
    * documents on purpose: a reader has to be able to see the whole of what a
@@ -308,7 +325,7 @@ describe("the two schemas, as one contract", () => {
    * who has that version in front of them, so a sentence reworded in one and
    * not the other is the documents doing their job rather than drifting.
    */
-  it("differ by the models block and by nothing else", () => {
+  it("differ by the models block, the narrowed platform block, and nothing else", () => {
     /** Every `description`, anywhere, gone — see the note above. */
     const withoutProse = (node: unknown): unknown => {
       if (Array.isArray(node)) return node.map(withoutProse);
@@ -330,10 +347,21 @@ describe("the two schemas, as one contract", () => {
       const properties = clone.properties as Record<string, unknown>;
       delete properties.contract_version;
       delete properties.models;
+      // The second difference, and it is pinned on its own below rather than
+      // compared here: a version-2 document's persona selected its own models,
+      // so the deployment's model and speech settings have nothing to decide
+      // and are refused rather than carried. The carrier settings stay, because
+      // how a call reaches the telephone network is the deployment's and a
+      // persona cannot select it.
+      delete properties.platform;
       clone.required = (clone.required as string[]).filter(
         (name) => name !== "models",
       );
       const defs = clone.$defs as Record<string, unknown>;
+      // The two version 1 defines for the blocks version 2 refuses, gone with
+      // the property that referenced them.
+      delete defs.platform_model;
+      delete defs.platform_speech;
       for (const added of [
         "models",
         "model_selection",
@@ -353,6 +381,35 @@ describe("the two schemas, as one contract", () => {
     };
 
     expect(stripped(specSchemaV2)).toEqual(stripped(specSchema));
+  });
+
+  /**
+   * The narrowing itself, pinned where deleting it fails something.
+   *
+   * Version 1 hands a simulator the deployment's model, speech and carrier
+   * settings. Version 2 is a document whose persona selected its own models and
+   * whose selections carry the credentials that authorize every leg — so the
+   * first two would be three provider keys travelling with nothing to spend
+   * them on, and a reader holding both would have to decide which answer wins.
+   * Version 2 carries the carrier settings and refuses the rest.
+   */
+  it("narrow the platform block on version 2 to the carrier settings alone", () => {
+    const blockOf = (schema: Record<string, unknown>): readonly string[] => {
+      const platform = (
+        schema.properties as Record<string, Record<string, unknown> | undefined>
+      ).platform;
+      return Object.keys(
+        (platform?.properties as Record<string, unknown> | undefined) ?? {},
+      ).sort();
+    };
+
+    expect(blockOf(specSchema)).toEqual(["carrier", "model", "speech"]);
+    expect(blockOf(specSchemaV2)).toEqual(["carrier"]);
+    // Closed, so the two it drops are refused rather than ignored.
+    expect(
+      (specSchemaV2.properties as Record<string, Record<string, unknown>>)
+        .platform?.additionalProperties,
+    ).toBe(false);
   });
 
   /**

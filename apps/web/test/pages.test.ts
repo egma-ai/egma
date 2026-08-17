@@ -386,6 +386,58 @@ describe("the pages", () => {
   });
 
   /**
+   * Every API path the Model providers screen reaches, held against the rules
+   * that forward them — matched the way Next matches, rather than looked for as
+   * a substring.
+   *
+   * **A `toContain` on this file cannot fail in the way that matters.** The
+   * failure is a path the page fetches and the config does not forward: Next
+   * serves its own 404 HTML, the read comes back unusable, and a section whose
+   * whole job is to make an outstanding choice visible renders nothing at all
+   * and says nothing about why. That is exactly what happened to
+   * `/api/model-upgrade` and `/api/model-credential-candidates/:id`, and a
+   * string check for a path nobody had added would have passed by not being
+   * written. So the paths come off the module the page imports them from, and
+   * each is matched against the config's real sources.
+   */
+  it("forward every path the model screens fetch, matched as Next matches", async () => {
+    const config = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const sources = [...config.matchAll(/source:\s*"([^"]+)"/gu)].map(
+      (found) => found[1] ?? "",
+    );
+
+    /** Next's own rule: a bare source is exact, and `:path*` covers a prefix. */
+    const forwarded = (asked: string): boolean =>
+      sources.some((source) => {
+        if (!source.startsWith("/api/")) return false;
+        const wildcard = source.indexOf("/:");
+        return wildcard === -1
+          ? source === asked
+          : asked.startsWith(source.slice(0, wildcard) + "/");
+      });
+
+    const model = await import("../lib/model-access.ts");
+    const asked = [
+      model.MODEL_ACCESS_PATH,
+      model.MODEL_CATALOG_PATH,
+      model.MODEL_PROVIDER_CREDENTIALS_PATH,
+      model.modelProviderCredentialPath("openai"),
+      model.MANAGED_ACCESS_PATH,
+      model.MODEL_UPGRADE_PATH,
+      model.credentialCandidatePath("mcc_01M08M1BTYEBDV6F0WAF91MVBZ"),
+    ];
+
+    for (const one of asked) {
+      expect(forwarded(one), `${one} is fetched and forwarded nowhere`).toBe(
+        true,
+      );
+    }
+    // And the check itself can fail, which is the whole reason it is written
+    // this way rather than as a list of substrings.
+    expect(forwarded("/api/a-door-egma-does-not-have")).toBe(false);
+  });
+
+  /**
    * The Settings pages reach four more of the API's paths, and none of them is
    * served by this process. Without the rules the pages would post at Next and
    * read its 404 page as egma's refusal.

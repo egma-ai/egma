@@ -1,8 +1,12 @@
 import { newId } from "@egma/ids";
 import {
+  appendVerdicts,
   connectManagedAccess,
+  completeSimulation,
   createPersona,
   getSimulation,
+  listGraders,
+  startSimulation,
   RECOMMENDED_GRADER_MODEL,
   RECOMMENDED_PERSONA_MODELS,
   storeModelProviderCredential,
@@ -181,6 +185,8 @@ type World = {
   readonly ada: Customer;
   readonly key: string;
   readonly connectionId: string;
+  readonly agentId: string;
+  readonly agentVersionId: string;
   readonly versionId: string;
   readonly serviceToken: string;
 };
@@ -189,7 +195,15 @@ type World = {
 async function aCustomer(
   label: string,
   deployment: ManagedDeployment,
-  options: { readonly validateInferenceKey?: (key: string) => Promise<never> } = {},
+  options: {
+    readonly validateInferenceKey?: (key: string) => Promise<never>;
+    /**
+     * A real trace store, for the one case that reads a *verdict* back. It is
+     * opt-in because it costs a migrated store per case, and three of the four
+     * cells are settling which account paid rather than what was decided.
+     */
+    readonly traceStore?: boolean;
+  } = {},
 ): Promise<World> {
   api = await createApi(label, {
     managedDeployment: deployment,
@@ -216,14 +230,20 @@ async function aCustomer(
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
+  const agent = registered.body.agent as { id: string; version_id: string };
   return {
     ada,
     key,
     connectionId: (registered.body.connection as { id: string }).id,
+    agentId: agent.id,
+    agentVersionId: agent.version_id,
     versionId: String(pushed.body.version_id),
     serviceToken: api.config.simulatorServiceToken,
   };
 }
+
+/** The run every work order in this file came from, for the read-back below. */
+let lastRunId: string | undefined;
 
 /** One work order, off the door the shipped simulator knocks on. */
 async function oneWorkOrder(world: World): Promise<Record<string, unknown>> {
@@ -233,6 +253,7 @@ async function oneWorkOrder(world: World): Promise<Record<string, unknown>> {
     idempotency_key: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+  lastRunId = String(started.body.id);
 
   const claimed = await api.app.inject({
     method: "POST",
@@ -335,6 +356,66 @@ function opened(socket: WebSocket): Promise<void> {
   });
 }
 
+/**
+ * The same conversation read back through the doors a person reads it through.
+ *
+ * **This is the half the matrix used to skip**, and skipping it left the whole
+ * proof one seam short of what the specification asks for: it settled what the
+ * *simulator* was handed and said nothing about what the product then shows.
+ * Two things are asserted, and the second is the one that matters most.
+ *
+ * The conversation is visible, filed under its run, pinned to the persona
+ * version the work order carried — so the selections that executed and the
+ * version a page names are the same version.
+ *
+ * And **no credential of any kind appears in either answer**. A work order
+ * legitimately carries provider keys, and an inference or gateway credential
+ * under managed access; a public read may carry none of them. That is a
+ * different door with a different rule, and only reading it can say so.
+ */
+async function readBackThroughThePublicPaths(
+  world: World,
+  spec: Record<string, unknown>,
+  secrets: readonly string[],
+): Promise<void> {
+  const simulationId = String(spec.simulation_id);
+
+  const conversation = await ask(
+    api.app,
+    "GET",
+    `/api/simulations/${simulationId}`,
+    world.key,
+  );
+  expect(conversation.statusCode, JSON.stringify(conversation.body)).toBe(200);
+  expect(conversation.body.id).toBe(simulationId);
+  expect(conversation.body.run_id).toBe(lastRunId);
+  const shownPersona = conversation.body.persona as {
+    version_id: string;
+    traits: unknown;
+  };
+  // The version the work order executed is the version the page names, and the
+  // traits it carried are the traits the page shows — two doors, one pin.
+  expect(shownPersona.version_id).toMatch(/^prsv_/u);
+  expect(shownPersona.traits).toEqual(
+    (spec.persona as { traits: unknown }).traits,
+  );
+  // Unjudged, because nothing has graded it. Said as a state rather than as a
+  // verdict, which is the distinction the whole verdict vocabulary rests on: a
+  // conversation nothing has looked at has not failed.
+  expect(conversation.body.verdict).not.toBe("failed");
+
+  const run = await ask(api.app, "GET", `/api/runs/${String(lastRunId)}`, world.key);
+  expect(run.statusCode, JSON.stringify(run.body)).toBe(200);
+  expect(run.body.id).toBe(lastRunId);
+
+  const shown = `${JSON.stringify(conversation.body)}${JSON.stringify(run.body)}`;
+  for (const secret of secrets) {
+    expect(shown, `a public read showed ${secret.slice(0, 12)}…`).not.toContain(
+      secret,
+    );
+  }
+}
+
 const HOSTED = (gatewayAddress: string): ManagedDeployment => ({
   hosted: true,
   gatewayAddress,
@@ -397,6 +478,14 @@ describe("hosted Egma, managed by Egma", () => {
     expect(JSON.stringify(openai?.seen)).not.toContain(
       models.gateway?.credential,
     );
+
+    await readBackThroughThePublicPaths(world, spec, [
+      String(models.gateway?.credential),
+      EGMA_PROVIDER_KEY.openai,
+      EGMA_PROVIDER_KEY.deepgram,
+      EGMA_PROVIDER_KEY.cartesia,
+      INTERNAL_KEY,
+    ]);
   });
 
   /**
@@ -434,10 +523,16 @@ describe("hosted Egma, managed by Egma", () => {
     const pushed = await ask(api.app, "POST", "/api/tests", key, RESCHEDULING);
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
+    const seededAgent = registered.body.agent as {
+      id: string;
+      version_id: string;
+    };
     const spec = await oneWorkOrder({
       ada,
       key,
       connectionId: (registered.body.connection as { id: string }).id,
+      agentId: seededAgent.id,
+      agentVersionId: seededAgent.version_id,
       versionId: String(pushed.body.version_id),
       serviceToken: api.config.simulatorServiceToken,
     });
@@ -502,6 +597,93 @@ describe("hosted Egma, managed by Egma", () => {
   });
 });
 
+/**
+ * The other half of the public read: a verdict, decided and then read back the
+ * way a person reads one.
+ *
+ * **One case rather than four**, because what differs between the four cells is
+ * which account paid for the model call — and a verdict row does not record
+ * that and must not. What this settles is the seam the other three do not
+ * reach: a judgment written by the grading engine comes back through the public
+ * simulation interface as a verdict on that conversation, with the grader
+ * version that decided it, and with no credential anywhere near it.
+ */
+describe("hosted Egma, managed, read back as a verdict", () => {
+  it("shows the judgment through the public simulation interface", async () => {
+    const address = await standUpProviders(undefined);
+    const world = await aCustomer("matrix_hosted_verdict", HOSTED(address), {
+      traceStore: true,
+    });
+
+    const spec = await oneWorkOrder(world);
+    const simulationId = String(spec.simulation_id);
+    const engine = {
+      userId: "engine",
+      organizationId: world.ada.organizationId,
+      projectId: world.ada.projectId,
+      role: "viewer" as const,
+      via: "engine" as const,
+    };
+
+    // The conversation conducted and reported, through the same two doors the
+    // simulator lands one with. A verdict on a conversation still in flight is
+    // not something the product shows, and asserting one would be asserting a
+    // state that cannot happen.
+    const admin = contextFor(world.ada, "admin");
+    await startSimulation(admin, simulationId, "sim-1");
+    await completeSimulation(admin, simulationId, "sim-1", {
+      endingReason: "persona_concluded",
+      turnCount: 4,
+    });
+
+    // The project's own seeded grader, at the version this run pinned — read
+    // through the ordinary door rather than invented, so the verdict names a
+    // grader that really judges here.
+    const [judging] = (await listGraders(engine)).items;
+    expect(judging, "the seeded grader is missing").toBeDefined();
+
+    await appendVerdicts(engine, [
+      {
+        // Verdicts are filed under the simulation's own id — the public read
+        // asks for them by it — while the *trace* beside them is filed under
+        // the derived one. Two grains, two keys, and only one of them is this.
+        traceId: simulationId,
+        graderId: String(judging?.id),
+        graderVersionId: String(judging?.versionId),
+        assertion: "0",
+        source: "simulation",
+        verdict: "passed",
+        score: 1,
+        rationale: "the new time was read back before the call ended",
+        citedSpanIds: [],
+        runId: String(lastRunId),
+        agentId: world.agentId,
+        agentVersionId: world.agentVersionId,
+        judgedAtMicroseconds: BigInt(Date.now()) * 1000n,
+      },
+    ]);
+
+    const conversation = await ask(
+      api.app,
+      "GET",
+      `/api/simulations/${simulationId}`,
+      world.key,
+    );
+
+    expect(conversation.statusCode, JSON.stringify(conversation.body)).toBe(200);
+    // The judgment, as the page shows it: a verdict rather than a raw row, and
+    // the counts it was folded from.
+    expect(conversation.body.verdict).toBe("passed");
+    expect((conversation.body.counts as { passed: number }).passed).toBe(1);
+    // And still no credential of any kind, on the door that now carries a
+    // judgment as well as a conversation.
+    const shown = JSON.stringify(conversation.body);
+    for (const secret of [INTERNAL_KEY, ...Object.values(EGMA_PROVIDER_KEY)]) {
+      expect(shown).not.toContain(secret);
+    }
+  });
+});
+
 describe("hosted Egma, customer-owned", () => {
   it("calls the providers directly with the organization's own keys", async () => {
     await standUpDirectProviders();
@@ -532,6 +714,8 @@ describe("hosted Egma, customer-owned", () => {
     expect(openai?.seen[0]?.headers["authorization"]).toBe(
       `Bearer ${CUSTOMER_KEY.openai}`,
     );
+
+    await readBackThroughThePublicPaths(world, spec, Object.values(CUSTOMER_KEY));
   });
 });
 
@@ -604,6 +788,13 @@ describe("a self-hosted deployment, managed by Egma", () => {
         expect(asked.body).toBe("");
         expect(asked.credential).toBe(secret);
       }
+
+      await readBackThroughThePublicPaths(world, spec, [
+        secret,
+        EGMA_PROVIDER_KEY.openai,
+        EGMA_PROVIDER_KEY.deepgram,
+        EGMA_PROVIDER_KEY.cartesia,
+      ]);
     } finally {
       await cloud.stop();
     }
@@ -637,6 +828,8 @@ describe("a self-hosted deployment, customer-owned", () => {
     expect(deepgram?.seen[0]?.headers["authorization"]).toBe(
       `Token ${CUSTOMER_KEY.deepgram}`,
     );
+
+    await readBackThroughThePublicPaths(world, spec, Object.values(CUSTOMER_KEY));
   });
 });
 

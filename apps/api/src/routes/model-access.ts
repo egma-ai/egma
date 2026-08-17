@@ -1,25 +1,32 @@
 import {
+  activateCredentialCandidate,
   connectManagedAccess,
   disconnectManagedAccess,
   IdentityConflictError,
+  listCredentialCandidates,
   listModelProviderCredentials,
+  listModelUpgradeActions,
   managedAccessAvailable,
   managedDeployment,
   ManagedAccessBoundElsewhereError,
   ManagedAccessNotConnectedError,
+  NotPermittedError,
   MODEL_ACCESS_MODES,
   MODEL_JOBS,
   PROVIDER_CATALOG,
   RECOMMENDED_ENTRY,
   readManagedAccessConnection,
   readModelAccess,
+  readModelUpgradeCompletion,
   removeModelProviderCredential,
   RESERVED_PROVIDER_JOBS,
   setModelAccess,
   storeModelProviderCredential,
   UnprocessableInputError,
   type AuthContext,
+  type CredentialCandidate,
   type ModelProviderCredential,
+  type ModelUpgradeAction,
 } from "@egma/db";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
@@ -117,6 +124,18 @@ export const MODEL_PROVIDER_CREDENTIALS_PATH = "/api/model-provider-credentials"
 export const MODEL_PROVIDER_CREDENTIAL_PATH =
   "/api/model-provider-credentials/:provider";
 export const MANAGED_ACCESS_PATH = "/api/managed-access";
+/**
+ * What the upgrade onto model selections left for this organization, and where
+ * this installation stands on finishing it.
+ *
+ * One read rather than three, because a person meets all of it in one place: a
+ * banner saying what has still to be chosen, the stored keys to choose between,
+ * and — for whoever is deciding whether an old worker can be drained — whether
+ * anything still needs the legacy paths at all.
+ */
+export const MODEL_UPGRADE_PATH = "/api/model-upgrade";
+/** One stored key the upgrade found, named to be made the active one. */
+export const MODEL_CREDENTIAL_CANDIDATE_PATH = "/api/model-credential-candidates/:id";
 
 type Body = Record<string, unknown>;
 
@@ -162,6 +181,37 @@ function described(credential: ModelProviderCredential): Record<string, unknown>
     hint: credential.hint,
     revision: credential.revision,
     updated_at: credential.updatedAt.toISOString(),
+  };
+}
+
+/** One outstanding decision on the wire. Egma's own words, and no secret. */
+function describedAction(action: ModelUpgradeAction): Record<string, unknown> {
+  return {
+    id: action.id,
+    kind: action.kind,
+    subject: action.subject,
+    subject_name: action.subjectName,
+    detail: action.detail,
+    created_at: action.createdAt.toISOString(),
+  };
+}
+
+/**
+ * One stored key on the wire: whose provider it is for, where it was found,
+ * four characters of it, and whether it is the one being spent.
+ *
+ * The envelope is absent from this shape rather than blanked, exactly as it is
+ * from a credential's.
+ */
+function describedCandidate(candidate: CredentialCandidate): Record<string, unknown> {
+  return {
+    id: candidate.id,
+    provider: candidate.provider,
+    source: candidate.source,
+    source_name: candidate.sourceName,
+    hint: candidate.hint,
+    active: candidate.active,
+    selectable: candidate.selectable,
   };
 }
 
@@ -322,6 +372,74 @@ export async function modelAccessRoutes(
    * connect, so a route that accepted a pasted key there would be a second
    * authentication story nobody asked for.
    */
+  /**
+   * What the upgrade left to decide, and whether this installation is finished.
+   *
+   * **Readable at every role, and the candidates are not.** Which persona is
+   * still on the old path is the reason somebody's run reported what it
+   * reported, so anybody who can read the organization can see it. Which stored
+   * keys exist to choose between is the same kind of fact as a credential's
+   * hint, so it is an admin's — and a member gets an empty list rather than a
+   * refusal, because the rest of the answer is theirs to read.
+   *
+   * **The completion facts are the deployment's**, not this organization's.
+   * They are here because this is the read the screen already makes, and
+   * because an operator draining old workers has to be able to ask somewhere.
+   */
+  app.get(MODEL_UPGRADE_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const [actions, completion] = await Promise.all([
+      listModelUpgradeActions(auth),
+      readModelUpgradeCompletion(),
+    ]);
+    const candidates =
+      auth.role === "admin" ? await listCredentialCandidates(auth) : [];
+
+    return reply.send({
+      actions: actions.map(describedAction),
+      candidates: candidates.map(describedCandidate),
+      /**
+       * Whether every persona and grader on this installation carries explicit
+       * selections and nothing nonterminal still needs the legacy paths. It is
+       * what the release that removes them is gated on, and it is the honest
+       * answer to "can these old workers go".
+       */
+      completed: completion.completed,
+      completed_at: completion.completedAt?.toISOString() ?? null,
+      outstanding: completion.outstanding,
+    });
+  });
+
+  /**
+   * Make one of the stored keys this organization's credential for its
+   * provider.
+   *
+   * The envelope moves sealed; nothing is opened, nothing is shown back, and no
+   * persona or grader version is minted — a credential is operational state and
+   * never authored behavior.
+   */
+  app.put(MODEL_CREDENTIAL_CANDIDATE_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { id } = request.params as { id: string };
+
+    try {
+      const chosen = await activateCredentialCandidate(auth, id);
+      return reply.send({ provider: chosen.provider, hint: chosen.hint });
+    } catch (refusal) {
+      // Who may do this is `manage_organization`, and the data-access layer
+      // already owns that decision — the same row of the permission table that
+      // names provider credentials. A role literal here would be a second copy
+      // of it, free to drift from the one that is actually enforced.
+      if (refusal instanceof NotPermittedError) {
+        return refuseRole(reply, auth, "choose a stored provider key");
+      }
+      if (refusal instanceof UnprocessableInputError) {
+        return unprocessable(reply, refusal.message);
+      }
+      throw refusal;
+    }
+  });
+
   app.put(MANAGED_ACCESS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
