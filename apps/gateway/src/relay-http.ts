@@ -25,6 +25,17 @@ import { downstreamHeaders, upstreamAddress, upstreamHeaders, upstreamRequestId 
 
 export type HttpOutcome = {
   readonly response: Response;
+  /**
+   * How the exchange ended, read after it has.
+   *
+   * **A getter rather than a value, and the difference is a real bug that was
+   * here.** The provider's status is known when its headers arrive, which on a
+   * streamed answer is at the very beginning; a stream that was then cancelled
+   * by the caller or cut off by a bound was recorded as `ok`, because the
+   * status it was frozen at was `200`. What ended the exchange is not knowable
+   * until the exchange has ended, so this is read at the same moment the record
+   * is written.
+   */
   readonly statusClass: StatusClass;
   readonly upstreamRequestId?: string;
   readonly openMs: number;
@@ -103,6 +114,8 @@ export async function relayHttp(
   const openMs = Date.now() - startedAt;
   let firstOutputMs: number | undefined;
   let bytes = 0;
+  let crossedWhole = false;
+  let endedBadly: StatusClass | undefined;
 
   /**
    * A pass-through that counts and times, and holds nothing.
@@ -131,6 +144,7 @@ export async function relayHttp(
       controller.enqueue(chunk);
     },
     flush() {
+      crossedWhole = true;
       stopTimers();
       settle();
     },
@@ -138,10 +152,15 @@ export async function relayHttp(
 
   // A caller who went away mid-stream ends the exchange here: the abort stops
   // the provider's work, and the record is written with what had crossed rather
-  // than waiting for a stream nobody is reading any more.
+  // than waiting for a stream nobody is reading any more. Which of the two it
+  // was is decided here, where it is still knowable — the caller's own signal
+  // means they left, and this gateway's own timer means a bound was reached.
   abort.signal.addEventListener(
     "abort",
     () => {
+      if (!crossedWhole) {
+        endedBadly = request.signal.aborted ? "cancelled" : "timed-out";
+      }
       stopTimers();
       settle();
     },
@@ -150,9 +169,12 @@ export async function relayHttp(
 
   const body = upstream.body === null ? null : upstream.body.pipeThrough(counter);
   if (upstream.body === null) {
+    crossedWhole = true;
     stopTimers();
     settle();
   }
+
+  const providersOwn = upstreamRequestId(upstream.headers);
 
   return {
     response: new Response(body, {
@@ -160,10 +182,10 @@ export async function relayHttp(
       statusText: upstream.statusText,
       headers: downstreamHeaders(upstream.headers),
     }),
-    statusClass: classOf(upstream.status),
-    ...(upstreamRequestId(upstream.headers) === undefined
-      ? {}
-      : { upstreamRequestId: upstreamRequestId(upstream.headers) as string }),
+    get statusClass() {
+      return endedBadly ?? classOf(upstream.status);
+    },
+    ...(providersOwn === undefined ? {} : { upstreamRequestId: providersOwn }),
     openMs,
     get firstOutputMs() {
       return firstOutputMs;
@@ -182,7 +204,7 @@ export async function relayHttp(
  * opinion in front of a customer, and none of those is theirs to see.
  */
 function refused(startedAt: number, statusClass: StatusClass, _error: unknown): HttpOutcome {
-  const said: Record<StatusClass, { status: number; code: string; message: string }> = {
+  const said: Partial<Record<StatusClass, { status: number; code: string; message: string }>> = {
     cancelled: {
       status: 499,
       code: "caller_went_away",
@@ -193,29 +215,15 @@ function refused(startedAt: number, statusClass: StatusClass, _error: unknown): 
       code: "provider_timed_out",
       message: "the provider did not answer within the gateway's bound",
     },
-    unreachable: {
-      status: 502,
-      code: "provider_unreachable",
-      message: "the provider could not be reached",
-    },
-    ok: { status: 502, code: "provider_unreachable", message: "the provider could not be reached" },
-    "provider-refused": {
-      status: 502,
-      code: "provider_unreachable",
-      message: "the provider could not be reached",
-    },
-    "provider-failed": {
-      status: 502,
-      code: "provider_unreachable",
-      message: "the provider could not be reached",
-    },
-    refused: {
-      status: 502,
-      code: "provider_unreachable",
-      message: "the provider could not be reached",
-    },
   };
-  const chosen = said[statusClass];
+  // Only three things reach here — a caller who left, a bound that was reached,
+  // and a provider that could not be spoken to at all — so the third is the
+  // fallback rather than four more rows saying the same sentence.
+  const chosen = said[statusClass] ?? {
+    status: 502,
+    code: "provider_unreachable",
+    message: "the provider could not be reached",
+  };
   return {
     response: new Response(
       JSON.stringify({ error: { code: chosen.code, message: chosen.message } }),

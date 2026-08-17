@@ -96,10 +96,12 @@ export type OperationalRecord = {
 /**
  * A record, built out of the allowed fields and out of nothing else.
  *
- * The filter is not belt-and-braces over the type: a value reaching here from a
- * provider's header or a caller's query is `unknown` at the moment it is put in
- * a bag, and this is what makes it impossible for such a value to arrive under
- * a name nobody agreed to.
+ * **It takes and returns loose bags on purpose, and the filter between them is
+ * the point.** A value reaching here came out of a provider's header or a
+ * caller's query and is `unknown` at that moment, and a typed argument would
+ * only move the cast somewhere else. What makes a field impossible under a name
+ * nobody agreed to is this loop over `RECORD_FIELDS`, not a type. The shape a
+ * reader should have in mind is `OperationalRecord` above.
  */
 export function operationalRecord(
   parts: Partial<Record<RecordField, unknown>>,

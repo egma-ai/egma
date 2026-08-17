@@ -147,6 +147,28 @@ export async function handle(request: Request, host: GatewayHost): Promise<Respo
    * it worked, and the expensive version of this failure is the one where they
    * go on believing it.
    */
+  /**
+   * A subprotocol is a slot a credential travels in, so asking for one is
+   * refused rather than quietly ignored.
+   *
+   * `Sec-WebSocket-Protocol: token, <key>` is Deepgram's own documented carrier
+   * for a client that cannot set a header. None of the shipped routes
+   * negotiates a subprotocol, so there is nothing a caller can legitimately be
+   * asking for here — and the two outcomes for a caller who asks anyway are to
+   * drop it silently, which leaves them believing a credential was honoured, or
+   * to say so. The gateway says so, exactly as it does for an attempt to name
+   * an organization.
+   */
+  if (route.transport === "socket" && (request.headers.get("sec-websocket-protocol") ?? "") !== "") {
+    write("refused", { provider: route.provider, job: route.job });
+    return refusalResponse({
+      status: 400,
+      code: "subprotocol_not_negotiated",
+      message:
+        "no route on the Egma model gateway negotiates a WebSocket subprotocol, and a requested one is a slot a provider credential travels in",
+    });
+  }
+
   const intrusion = identityIntrusion(url, request.headers);
   if (intrusion !== null) {
     write("refused", { provider: route.provider, job: route.job });
@@ -172,14 +194,13 @@ export async function handle(request: Request, host: GatewayHost): Promise<Respo
     });
   }
 
+  const named = providerModel(url, route);
   const who = {
     organizationId: verified.organizationId,
     inferenceKeyId: verified.inferenceKeyId,
     provider: route.provider,
     job: route.job,
-    ...(providerModel(url, route) === undefined
-      ? {}
-      : { providerModelId: providerModel(url, route) as string }),
+    ...(named === undefined ? {} : { providerModelId: named }),
   };
 
   if (route.transport === "socket") {

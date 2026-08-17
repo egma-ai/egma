@@ -101,31 +101,96 @@ describe("caller-supplied provider authorization", () => {
     expect(JSON.stringify(seen?.headers)).not.toContain(CALLER_PROVIDER_KEY);
   });
 
-  it("never reaches a socket provider, in a header or in a query", async () => {
+  it("never reaches a socket provider, in a header, a query, or a subprotocol", async () => {
+    /**
+     * Every slot at once, and each one was a real hole.
+     *
+     * `?api_key=` and `?token=` are not this route's own credential parameter,
+     * so the first version of this gateway forwarded both straight through.
+     * `Sec-WebSocket-Protocol: token, <key>` is Deepgram's own documented
+     * carrier for a client that cannot set a header, so a forwarded subprotocol
+     * list is a forwarded key. The `xi-api-key` header belongs to a provider
+     * this gateway does not even ship, which is exactly why a list of the three
+     * it does ship was the wrong shape for the rule.
+     */
+    const deepgramsSoFar = standing.deepgram.seen.length;
+    const cartesiasSoFar = standing.cartesia.seen.length;
     const listening = openSocket(
       standing.world,
-      `/deepgram/v1/listen?model=nova-3-general&api_key=${CALLER_PROVIDER_KEY}`,
+      `/deepgram/v1/listen?model=nova-3-general&api_key=${CALLER_PROVIDER_KEY}` +
+        `&token=${CALLER_PROVIDER_KEY}&access_token=${CALLER_PROVIDER_KEY}` +
+        `&keyterm=${encodeURIComponent("a word the caller really said")}`,
       {
         headers: {
           "egma-inference-key": GATEWAY_SECRET,
           authorization: `Token ${CALLER_PROVIDER_KEY}`,
+          "xi-api-key": CALLER_PROVIDER_KEY,
+          "anthropic-api-key": CALLER_PROVIDER_KEY,
+          "x-auth-token": CALLER_PROVIDER_KEY,
         },
       },
     );
     await watch(listening).opened;
-    const seen = await standing.deepgram.opened();
+    // This connection, not the first one this world ever accepted.
+    const seen = await eventually(() =>
+      standing.deepgram.seen.length > deepgramsSoFar
+        ? standing.deepgram.seen[deepgramsSoFar]
+        : undefined,
+    );
+
     expect(seen.headers["authorization"]).toBe(`Token ${EGMA_PROVIDER_KEY.deepgram}`);
+    expect(JSON.stringify(seen.headers)).not.toContain(CALLER_PROVIDER_KEY);
+    expect(seen.query.toString()).not.toContain(CALLER_PROVIDER_KEY);
+    expect(seen.query.get("api_key")).toBeNull();
+    expect(seen.query.get("token")).toBeNull();
+    expect(seen.query.get("access_token")).toBeNull();
+    // The subprotocol carrier is refused outright rather than stripped; see
+    // socket-relay.test.ts. Nothing reaches the provider through it either way.
+    expect(seen.protocols).toEqual([]);
+    // And the provider's own parameters, which are not credentials however much
+    // one of them starts with the same three letters, are untouched.
+    expect(seen.query.get("model")).toBe("nova-3-general");
+    expect(seen.query.get("keyterm")).toBe("a word the caller really said");
     listening.close(1000, "done");
 
     const speaking = openSocket(
       standing.world,
-      `/cartesia/tts/websocket?api_key=${CALLER_PROVIDER_KEY}&egma_inference_key=${GATEWAY_SECRET}`,
+      `/cartesia/tts/websocket?api_key=${CALLER_PROVIDER_KEY}` +
+        `&egma_inference_key=${GATEWAY_SECRET}&cartesia_version=2025-04-16`,
     );
     await watch(speaking).opened;
-    const spoke = await standing.cartesia.opened();
+    const spoke = await eventually(() =>
+      standing.cartesia.seen.length > cartesiasSoFar
+        ? standing.cartesia.seen[cartesiasSoFar]
+        : undefined,
+    );
     expect(spoke.query.get("api_key")).toBe(EGMA_PROVIDER_KEY.cartesia);
     expect(spoke.query.getAll("api_key")).toHaveLength(1);
+    expect(spoke.query.get("cartesia_version")).toBe("2025-04-16");
     speaking.close(1000, "done");
+  });
+
+  it("never reaches an HTTP provider under any name a credential goes by", async () => {
+    const answered = await ask(
+      {
+        "egma-inference-key": GATEWAY_SECRET,
+        authorization: `Bearer ${CALLER_PROVIDER_KEY}`,
+        "xi-api-key": CALLER_PROVIDER_KEY,
+        "anthropic-api-key": CALLER_PROVIDER_KEY,
+        "x-goog-api-key": CALLER_PROVIDER_KEY,
+        "x-auth-token": CALLER_PROVIDER_KEY,
+        "x-session-secret": CALLER_PROVIDER_KEY,
+      },
+      `?api_key=${CALLER_PROVIDER_KEY}&token=${CALLER_PROVIDER_KEY}` +
+        `&access_token=${CALLER_PROVIDER_KEY}&stream_options=include_usage`,
+    );
+    expect(answered.status).toBe(200);
+
+    const seen = standing.openai.seen.at(-1);
+    expect(seen?.headers["authorization"]).toBe(`Bearer ${EGMA_PROVIDER_KEY.openai}`);
+    expect(JSON.stringify(seen?.headers)).not.toContain(CALLER_PROVIDER_KEY);
+    expect(seen?.query.toString()).not.toContain(CALLER_PROVIDER_KEY);
+    expect(seen?.query.get("stream_options")).toBe("include_usage");
   });
 });
 

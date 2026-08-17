@@ -24,8 +24,13 @@ import { upstreamAddress, upstreamHeaders, upstreamRequestId } from "./wire.ts";
  * gateway would then have to hold, bound, and eventually drop. Opening the
  * provider first makes the caller's `101` mean what it says: everything between
  * the persona and the provider is up. It also lets the subprotocol the provider
- * selected be the subprotocol the caller is told about, rather than a guess
- * made before anybody had chosen.
+ * selected be the subprotocol the caller is told about, rather than a guess made
+ * before anybody had chosen.
+ *
+ * **What the provider is offered comes from the route, never from the caller.**
+ * A subprotocol list is one of the places a provider takes a key — Deepgram
+ * documents `token, <key>` for clients that cannot set a header — so forwarding
+ * the caller's would be forwarding a credential. See `Route.upstreamProtocols`.
  *
  * The cost is that the caller waits for the provider's handshake, which is the
  * truth about how long the path took to open and is exactly what the latency
@@ -74,22 +79,60 @@ export async function relaySocket(
 ): Promise<SocketRelay> {
   const startedAt = Date.now();
   const url = new URL(request.url);
-  const offered = (request.headers.get("sec-websocket-protocol") ?? "")
-    .split(",")
-    .map((one) => one.trim())
-    .filter((one) => one !== "");
+
+  /**
+   * The caller going away, from the moment the request arrived.
+   *
+   * **The window this covers is the upstream handshake**, which is the one
+   * stretch of a relayed socket where nothing else is watching: the caller's own
+   * socket does not exist yet, so a caller who gave up during it would leave the
+   * provider's socket open and paid for until the idle bound noticed, two
+   * minutes later. Everything after this window is covered by the close
+   * handlers, which is why this listener is removed as soon as it closes.
+   */
+  const abandoned = new AbortController();
+  const giveUp = (): void => abandoned.abort();
+  if (request.signal.aborted) giveUp();
+  request.signal.addEventListener("abort", giveUp, { once: true });
+  const stopWatchingForAbandonment = (): void =>
+    request.signal.removeEventListener("abort", giveUp);
+
+  const connecting = host.connectUpstream(
+    upstreamAddress(url, route, config),
+    upstreamHeaders(request.headers, route, config),
+    route.upstreamProtocols ?? [],
+  );
+
+  /**
+   * A handshake nobody is waiting for any more.
+   *
+   * Giving up on the wait does not cancel the work: the provider may still
+   * complete the handshake a moment later, and an open socket with nothing on
+   * the other end of it is a provider resource this gateway is holding for no
+   * reason. So whichever way the wait ended, the late arrival is closed.
+   */
+  let stillWanted = true;
+  void connecting.then(
+    (late) => {
+      if (!stillWanted) late.socket.close(CLOSE_GOING_AWAY, "nobody is waiting for this");
+    },
+    () => undefined,
+  );
 
   let upstream: UpstreamSocket;
   try {
-    upstream = await withinMs(
-      host.connectUpstream(
-        upstreamAddress(url, route, config),
-        upstreamHeaders(request.headers, route, config),
-        offered,
-      ),
-      config.firstOutputTimeoutMs,
-    );
+    upstream = await withinMs(connecting, config.firstOutputTimeoutMs, abandoned.signal);
   } catch (error) {
+    stillWanted = false;
+    stopWatchingForAbandonment();
+    if (error instanceof Abandoned) {
+      throw new SocketRefused(
+        "cancelled",
+        499,
+        "caller_went_away",
+        "the caller closed the connection before the provider answered",
+      );
+    }
     if (error instanceof Timeout) {
       throw new SocketRefused(
         "timed-out",
@@ -119,6 +162,27 @@ export async function relaySocket(
   }
 
   const openMs = Date.now() - startedAt;
+  const providersOwn = upstreamRequestId(upstream.headers);
+
+  /**
+   * The caller gave up while the provider was still shaking hands.
+   *
+   * The provider's socket exists and nobody is on the other end of it, so it is
+   * closed here rather than left for the idle bound. `1001` is the honest code:
+   * the endpoint that wanted this is going away.
+   */
+  if (abandoned.signal.aborted) {
+    stopWatchingForAbandonment();
+    upstream.socket.close(CLOSE_GOING_AWAY, "the caller went away");
+    throw new SocketRefused(
+      "cancelled",
+      499,
+      "caller_went_away",
+      "the caller closed the connection before the provider answered",
+    );
+  }
+  stopWatchingForAbandonment();
+
   const accepted = host.acceptClient(upstream.protocol);
 
   let bytesToProvider = 0;
@@ -174,9 +238,7 @@ export async function relaySocket(
     }
     settle({
       statusClass,
-      ...(upstreamRequestId(upstream.headers) === undefined
-        ? {}
-        : { upstreamRequestId: upstreamRequestId(upstream.headers) as string }),
+      ...(providersOwn === undefined ? {} : { upstreamRequestId: providersOwn }),
       openMs,
       ...(firstOutputMs === undefined ? {} : { firstOutputMs }),
       bytesToProvider,
@@ -247,17 +309,31 @@ export async function relaySocket(
 }
 
 class Timeout extends Error {}
+class Abandoned extends Error {}
 
-function withinMs<T>(work: Promise<T>, ms: number): Promise<T> {
+/**
+ * The handshake, or the two ways of not waiting for it.
+ *
+ * The work is not cancelled by either — a host that has already opened a socket
+ * still returns it, and the caller of this closes it. What this decides is only
+ * whether anybody is still waiting.
+ */
+function withinMs<T>(work: Promise<T>, ms: number, abandoned?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Timeout()), ms);
+    const gaveUp = (): void => reject(new Abandoned());
+    abandoned?.addEventListener("abort", gaveUp, { once: true });
+    const done = (): void => {
+      clearTimeout(timer);
+      abandoned?.removeEventListener("abort", gaveUp);
+    };
     work.then(
       (value) => {
-        clearTimeout(timer);
+        done();
         resolve(value);
       },
       (error: unknown) => {
-        clearTimeout(timer);
+        done();
         reject(error instanceof Error ? error : new Error(String(error)));
       },
     );

@@ -240,13 +240,20 @@ describe("when the exchange does not go well", () => {
     giveUp.abort();
 
     const written = await eventually(() =>
-      records(standing?.world as never).find(
-        (line) => line["statusClass"] === "cancelled" || line["statusClass"] === "ok",
-      ),
+      records(standing?.world as never).find((line) => line["provider"] === "openai"),
     );
-    // Whichever way the runtime reported it, the exchange is over long before
-    // the provider's five slow pieces would have finished, and there was one
-    // attempt at the provider and no second one.
+    /**
+     * `cancelled`, and not `ok`.
+     *
+     * The provider's status is known when its headers arrive, which on a
+     * streamed answer is at the very beginning — so a record frozen at that
+     * moment says `200`, and a stream the caller walked out on is filed as a
+     * completed one. That is the failure this assertion exists for, and
+     * accepting either answer here is what hid it.
+     */
+    expect(written["statusClass"]).toBe("cancelled");
+    // One attempt at the provider and no second one, and the exchange ended
+    // long before the provider's five slow pieces would have finished.
     expect(standing.openai.attempts()).toBe(1);
     expect(written["bytesFromProvider"]).toBeLessThan(20);
   });

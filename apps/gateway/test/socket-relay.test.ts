@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ROUTES } from "../src/routes.ts";
 import {
   CALLER_PROVIDER_KEY,
   EGMA_PROVIDER_KEY,
@@ -108,29 +109,37 @@ describe("a relayed socket", () => {
     socket.close(1000, "done");
   });
 
-  it("offers the caller's subprotocols to the provider and answers with the one it chose", async () => {
-    standing = await standUp({
-      deepgram: {
-        path: "/v1/listen",
-        expect: {
-          at: "header",
-          name: "authorization",
-          value: `Token ${EGMA_PROVIDER_KEY.deepgram}`,
-        },
-        selectProtocol: "the-second-one",
-      },
-    });
+  it("offers the provider no subprotocol of the caller's, because one of them is how a key travels", async () => {
+    /**
+     * `Sec-WebSocket-Protocol: token, <key>` is Deepgram's own documented way
+     * for a client that cannot set a header to send its key. A relay that
+     * forwarded a caller's requested list would therefore be forwarding a
+     * caller's credential, on a route whose whole job is to remove one — so the
+     * list the provider is offered comes from the route table and the caller's
+     * is dropped.
+     */
+    standing = await standUp();
+    const before = standing.deepgram.attempts();
     const socket = openSocket(standing.world, "/deepgram/v1/listen", {
       headers: AUTHENTICATED,
-      protocols: ["the-first-one", "the-second-one"],
+      protocols: ["token", "a-key-a-caller-brought"],
     });
-    await watch(socket).opened;
-    const provider = await standing.deepgram.opened();
 
-    expect(provider.protocols).toEqual(["the-first-one", "the-second-one"]);
-    expect(socket.protocol).toBe("the-second-one");
+    // Refused rather than dropped: a caller who put a key here believes it was
+    // honoured, and the expensive version of this is the one where they go on
+    // believing it. The provider is never asked.
+    await expect(watch(socket).opened).rejects.toThrow(/400/);
+    expect(standing.deepgram.attempts()).toBe(before);
+  });
 
-    socket.close(1000, "done");
+  it("has no shipped route that offers one, so nothing is offered at all today", () => {
+    // The mechanism exists for the day a provider's own auth subprotocol has to
+    // be injected from a deployment's credential. Until then this is the
+    // assertion that keeps the answer at "none", and it fails the day somebody
+    // adds one without meaning to.
+    for (const route of ROUTES) {
+      expect(route.upstreamProtocols ?? []).toEqual([]);
+    }
   });
 });
 
@@ -196,6 +205,40 @@ describe("the bounds a shared gateway has to have", () => {
     const socket = openSocket(standing.world, "/deepgram/v1/listen", { headers: AUTHENTICATED });
     await expect(watch(socket).opened).rejects.toThrow(/504/);
     expect(Date.now() - startedAt).toBeLessThan(3_000);
+  });
+
+  it("closes the provider's socket when the caller gives up during the handshake", async () => {
+    /**
+     * The one window where nothing else is watching. The caller's own socket
+     * does not exist yet, so a caller who walks away here used to leave the
+     * provider's socket open — and paid for — until the idle bound noticed it
+     * two minutes later. The bound below is a fraction of that on purpose: what
+     * is being proved is promptness, not eventual cleanup.
+     */
+    standing = await standUp({
+      deepgram: {
+        path: "/v1/listen",
+        expect: {
+          at: "header",
+          name: "authorization",
+          value: `Token ${EGMA_PROVIDER_KEY.deepgram}`,
+        },
+        silentForMs: 500,
+      },
+      settings: { EGMA_GATEWAY_SOCKET_IDLE_TIMEOUT_MS: "120000" },
+    });
+    const socket = openSocket(standing.world, "/deepgram/v1/listen", { headers: AUTHENTICATED });
+    const seen = watch(socket);
+    seen.opened.catch(() => undefined);
+    // Gone before the provider has finished shaking hands.
+    await new Promise((wait) => setTimeout(wait, 100));
+    socket.terminate();
+
+    const closed = await eventually(() => standing?.deepgram.seen.at(0)?.closedWith, 5_000);
+    expect(closed.code).toBe(1001);
+
+    const written = await eventually(() => records(standing?.world as never).at(-1));
+    expect(written["statusClass"]).toBe("cancelled");
   });
 
   it("closes a socket that has carried nothing for too long", async () => {

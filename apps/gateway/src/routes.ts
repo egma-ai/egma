@@ -48,6 +48,21 @@ export type Route = {
     | { readonly at: "header"; readonly name: string; readonly scheme: string }
     | { readonly at: "query"; readonly name: string };
   /**
+   * The WebSocket subprotocols this route offers the provider, and the whole of
+   * what is ever offered.
+   *
+   * **The caller's requested list is not forwarded, and that is a rule about
+   * credentials rather than about protocols.** `Sec-WebSocket-Protocol: token,
+   * <key>` is Deepgram's own documented way for a client that cannot set a
+   * header to send its key, so a subprotocol list carried through from a caller
+   * is caller-supplied provider authorization carried through from a caller.
+   * None of the shipped routes negotiates one, so all three are empty; a route
+   * that one day needs the provider's own auth subprotocol declares it here and
+   * the gateway builds it out of the deployment's credential, never out of the
+   * request.
+   */
+  readonly upstreamProtocols?: readonly string[];
+  /**
    * The query parameter that names the provider model, where the provider puts
    * it in the address.
    *

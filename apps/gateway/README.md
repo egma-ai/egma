@@ -54,10 +54,31 @@ The credential may arrive in either of two places:
   compatibility carrier, so an adapter that offers no header hook can be handed
   the Egma credential where it expects a provider key.
 
-Either way **the caller's value stops at the gateway**. Every provider
-authorization input — `Authorization`, `api-key`, `x-api-key`, the `api_key`
-query parameter, `Cookie` — is removed before the upstream request is built, and
-Egma's own provider credential is put in the provider's native slot.
+Either way **the caller's value stops at the gateway**, and so does anything
+else that reads like a credential.
+
+The rule is a shape rather than a list, applied to every header name and every
+query parameter name on every route: a name whose parts include `api-key`,
+`apikey`, `key`, `token`, `auth`, `authorization`, `authentication`, `secret`,
+`credential`, `password`, `bearer`, `signature`, `sig` or `session` is **not
+forwarded**. `Cookie` goes with them. A word has to stand as a whole part of the
+name, separated by `-` or `_` or at an end, so Deepgram's `keyterm` and
+`keywords` — which carry a customer's own words — are untouched while `key` and
+`api_key` are not.
+
+A list of the three providers' own names would have been the wrong shape, and
+was: it is exactly the set a well-behaved caller uses, and therefore exactly the
+set an ill-behaved one avoids.
+
+**A requested WebSocket subprotocol is refused, not stripped.**
+`Sec-WebSocket-Protocol: token, <key>` is Deepgram's own documented carrier for
+a client that cannot set a header, so a forwarded subprotocol list is a
+forwarded credential. No shipped route negotiates a subprotocol, so there is
+nothing a caller can legitimately be asking for; an upgrade that asks anyway is
+refused with `subprotocol_not_negotiated` rather than quietly having its
+credential dropped. What the provider is offered comes from the route table.
+
+Egma's own provider credential is then put in the provider's native slot.
 
 **The organization comes from the verifier and from nowhere else.** `egma-` is
 the gateway's own header namespace and `egma_` its own query namespace; the
@@ -71,9 +92,8 @@ A withdrawn credential therefore takes effect on the next connection.
 ## What crosses unchanged
 
 Everything else. The method, the path mapping, the query, the content type, the
-provider-native headers, the requested WebSocket subprotocols, the request body,
-the response status, the response headers, the body chunks, the frame order and
-the close codes.
+provider-native headers, the request body, the response status, the response
+headers, the body chunks, the frame order and the close codes.
 
 Two things do not come back: hop-by-hop headers, which describe one connection
 and are meaningless on the next, and `Set-Cookie`.

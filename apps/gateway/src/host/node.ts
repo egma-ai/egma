@@ -56,7 +56,11 @@ function asDuplex(socket: WebSocket): Duplex {
  * be the reason a request stops streaming, because then the suite would be
  * proving early streaming about a host that is not the deployed one.
  */
-function asRequest(node: IncomingMessage, origin: string): Request {
+function asRequest(
+  node: IncomingMessage,
+  origin: string,
+  abort: AbortController = new AbortController(),
+): Request {
   const headers = new Headers();
   for (let index = 0; index < node.rawHeaders.length; index += 2) {
     const name = node.rawHeaders[index];
@@ -64,7 +68,6 @@ function asRequest(node: IncomingMessage, origin: string): Request {
     if (name !== undefined && value !== undefined) headers.append(name, value);
   }
   const hasBody = node.method !== "GET" && node.method !== "HEAD";
-  const abort = new AbortController();
   node.on("aborted", () => abort.abort());
   node.on("close", () => {
     if (!node.readableEnded) abort.abort();
@@ -146,7 +149,14 @@ export function startLocalGateway(
   const upgraded = new Set<NodeDuplex>();
 
   const server: Server = createServer((node, out) => {
-    const request = asRequest(node, origin());
+    // The caller hanging up mid-answer is the response ending before it was
+    // written out. There is no request body left to notice it on — the caller
+    // finished sending long ago — so this is what says they left.
+    const gone = new AbortController();
+    out.on("close", () => {
+      if (!out.writableFinished) gone.abort();
+    });
+    const request = asRequest(node, origin(), gone);
     void handle(request, {
       config,
       verifier,
@@ -164,9 +174,29 @@ export function startLocalGateway(
   server.on("upgrade", (node, socket, head) => {
     const raw = socket as NodeDuplex;
     upgraded.add(raw);
-    raw.on("close", () => upgraded.delete(raw));
+    /**
+     * The caller's own socket going away is the caller going away.
+     *
+     * On an upgrade there is no request body whose end could say so, and the
+     * relay needs to know during the provider's handshake — that is the one
+     * window where nothing else is watching.
+     *
+     * **`end` and `error`, not only `close`.** A caller that walks away during
+     * the handshake leaves this socket half-open: the peer's `FIN` arrives as
+     * `end`, and `close` does not fire until this side is destroyed too — which
+     * is exactly what nothing is going to do while the relay is still waiting
+     * on a provider. Listening only for `close` therefore hears the caller
+     * leave at the moment it has stopped mattering.
+     */
+    const gone = new AbortController();
+    for (const said of ["end", "error", "close"] as const) {
+      raw.on(said, () => {
+        if (said === "close") upgraded.delete(raw);
+        gone.abort();
+      });
+    }
     const made = nodeSocketHost({ node, socket: raw, head });
-    void handle(asRequest(node, origin()), {
+    void handle(asRequest(node, origin(), gone), {
       config,
       verifier,
       log,
@@ -260,7 +290,13 @@ function nodeSocketHost(
       handshaken = true;
       const server = new WebSocketServer({
         noServer: true,
-        ...(protocol === null ? {} : { handleProtocols: () => protocol }),
+        // **Always supplied, including when the answer is "none".** Left out,
+        // this library selects the caller's first requested subprotocol on its
+        // own — which would hand the caller back a subprotocol the provider
+        // never agreed to, out of a list this gateway deliberately did not
+        // forward. `false` is its word for selecting none, and the deployed
+        // host says the same thing by omitting the header.
+        handleProtocols: () => protocol ?? false,
       });
       let accepted: WebSocket | undefined;
       const ready = new Promise<WebSocket>((resolve) => {

@@ -19,10 +19,17 @@ tested rather than asserted.
 **What it measures**, per iteration, on both paths:
 
 ``stt_open`` and ``tts_open``
-    How long each socket took to become usable. The listening leg's is
-    read from the leg itself, which knows when it can hear; the speaking
-    leg's is a handshake to the same address, because that service says
-    nothing about when it connected.
+    How long each socket took to become usable, and both are the same
+    boundary on both paths: a **completed WebSocket handshake** to the
+    address that leg is told, with the credential that leg is given. On
+    the gateway path that boundary includes the gateway opening its own
+    socket to the provider, because the caller's handshake does not
+    complete until it has.
+
+    The listening leg's is read from the leg itself, which knows when it
+    can hear. The speaking leg's service says nothing about when it
+    connected, so the harness opens one to the same address with the same
+    credential and times it.
 
 ``stt_finalization``
     From the last sample of real speech handed over to the final
@@ -66,7 +73,6 @@ import argparse
 import asyncio
 import json
 import os
-import ssl
 import statistics
 import sys
 import time
@@ -75,7 +81,6 @@ from array import array
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import aiohttp
 from pipecat.frames.frames import (
@@ -127,6 +132,7 @@ so both paths and every run hear exactly the same words."""
 
 DEEPGRAM_MODEL = "nova-3-general"
 CARTESIA_MODEL = "sonic-3.5"
+CARTESIA_VERSION = "2025-04-16"
 CARTESIA_VOICE = "5ee9feff-1265-424a-9d7f-8e4d431a12c7"
 LLM_MODEL = os.environ.get("EGMA_LATENCY_LLM_MODEL", "gpt-4o-mini")
 
@@ -204,31 +210,28 @@ class _Collector(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-async def _handshake_ms(address: str) -> float:
-    """How long a socket to this address takes to become usable.
+async def _handshake_ms(session: aiohttp.ClientSession, address: str) -> float:
+    """How long a usable WebSocket to this address takes to exist.
 
-    A plain TCP and TLS handshake to the address a leg is told, which is
-    what "connection open" means on a path where one end is a relay: it is
-    the cost of reaching the endpoint, comparable between the two paths
-    because it is measured the same way on both.
+    **A completed WebSocket handshake, not a TCP and TLS one, and the
+    difference is the whole honesty of this number.** A bare transport
+    handshake to the gateway measures the distance to Cloudflare's nearest
+    location and stops there — it never touches the provider, so it is not
+    the same boundary the direct path's measurement covers, and comparing
+    the two made the gateway look faster than the provider it relays to.
+    Opening a real socket is the same boundary on both paths: on the
+    gateway path it does not complete until the gateway's own socket to
+    the provider has.
+
+    The socket is closed straight away and nothing is sent on it, so it
+    costs a connection and nothing else.
     """
-    parsed = urlsplit(address.replace("wss://", "https://").replace("ws://", "http://"))
-    secure = parsed.scheme == "https"
-    port = parsed.port or (443 if secure else 80)
     began = time.monotonic()
-    reader, writer = await asyncio.open_connection(
-        parsed.hostname,
-        port,
-        ssl=ssl.create_default_context() if secure else None,
-        server_hostname=parsed.hostname if secure else None,
-    )
-    opened = (time.monotonic() - began) * 1000
-    writer.close()
-    try:
-        await writer.wait_closed()
-    except (ConnectionError, ssl.SSLError):
-        pass
-    del reader
+    async with session.ws_connect(
+        address, timeout=aiohttp.ClientWSTimeout(ws_close=15)
+    ) as socket:
+        opened = (time.monotonic() - began) * 1000
+        await socket.close()
     return opened
 
 
@@ -367,7 +370,14 @@ async def one_iteration(
         await legs.ready()
         measured["stt_open"] = (time.monotonic() - opening) * 1000
         measured["tts_open"] = await _handshake_ms(
-            path.tts_url or "wss://api.cartesia.ai/tts/websocket"
+            session,
+            # The address and the credential the speaking leg itself was built
+            # with. Cartesia takes its key in the query, which is also the slot
+            # the gateway reads a caller's inference credential from — so this
+            # is the same handshake the leg makes, made once more with a
+            # stopwatch on it.
+            f"{path.tts_url or 'wss://api.cartesia.ai/tts/websocket'}"
+            f"?api_key={path.tts_key}&cartesia_version={CARTESIA_VERSION}",
         )
 
         # The sentence, at real time, one slice at a time — the way a line

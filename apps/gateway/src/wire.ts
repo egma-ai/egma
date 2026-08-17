@@ -44,22 +44,16 @@ const EGMA_HEADER_PREFIX = "egma-";
 const EGMA_PARAMETER_PREFIX = "egma_";
 
 /**
- * Headers that never cross, whichever route carries them.
+ * Names that never cross, whichever route carries them.
  *
- * Three groups, three reasons. The hop-by-hop names describe *this* connection
- * and are meaningless on the next one. The authorization names are the
- * caller-supplied provider authorization the gateway exists to remove — they go
- * whether or not the caller also used the gateway's own header, so a request
- * carrying a real provider key cannot smuggle it through beside a valid
- * inference credential. `cookie` is neither, and it goes for the same reason as
- * the second group: it is an identity-bearing input, no shipped provider route
- * reads one, and a credential parked in a cookie must not become the exception.
+ * The hop-by-hop names describe *this* connection and are meaningless on the
+ * next one. `cookie` is not hop-by-hop and goes for a different reason: it is an
+ * identity-bearing input, no shipped provider route reads one, and a credential
+ * parked in a cookie must not become the exception that proves the rule below.
  */
 const NEVER_FORWARDED = new Set([
   "connection",
   "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
   "proxy-connection",
   "te",
   "trailer",
@@ -67,12 +61,38 @@ const NEVER_FORWARDED = new Set([
   "upgrade",
   "host",
   "content-length",
-  "authorization",
-  "api-key",
-  "x-api-key",
-  "x-goog-api-key",
   "cookie",
 ]);
+
+/**
+ * What a credential is called, in every slot a caller can put one.
+ *
+ * **A list of the names this gateway's own three providers use would be wrong,
+ * and it was.** The first version of this file removed the `Authorization`
+ * header and the route's own credential query parameter, which is exactly the
+ * set a well-behaved caller uses — and therefore exactly the set an ill-behaved
+ * one avoids. `?api_key=` on the Deepgram route, `?token=`, `xi-api-key:` for a
+ * provider this gateway does not even ship: each of those went straight through
+ * to a provider, beside a valid inference credential, which is the whole thing
+ * "removes caller-supplied provider authorization" exists to prevent.
+ *
+ * So the rule is a shape rather than a list, applied to every header name and
+ * every query parameter name on every route: **nothing that reads like a
+ * credential is forwarded.** The word has to stand as a whole part of the name —
+ * separated by `-` or `_` or at an end — so Deepgram's `keyterm` and `keywords`,
+ * which carry a customer's own words, are untouched while `key` and `api_key`
+ * are not.
+ *
+ * A provider that one day needs a header this pattern eats will need a line in
+ * the route table saying so, which is the right amount of work for putting a
+ * caller-controlled value back on the wire.
+ */
+const CREDENTIAL_SHAPED =
+  /(^|[-_])(api-?keys?|keys?|tokens?|auth|authn|authorization|authentication|secrets?|credentials?|password|passwd|bearer|signature|sig|session)([-_]|$)/;
+
+function looksLikeACredential(name: string): boolean {
+  return CREDENTIAL_SHAPED.test(name.toLowerCase());
+}
 
 /**
  * Response headers that do not come back.
@@ -170,7 +190,9 @@ export function upstreamAddress(url: URL, route: Route, config: Config): URL {
   for (const [name, value] of url.searchParams) {
     const lower = name.toLowerCase();
     if (lower.startsWith(EGMA_PARAMETER_PREFIX)) continue;
-    if (route.credential.at === "query" && lower === route.credential.name) continue;
+    // Every credential-shaped parameter, on every route — not only the one this
+    // route reads its own credential from. See `CREDENTIAL_SHAPED`.
+    if (looksLikeACredential(lower)) continue;
     upstream.searchParams.append(name, value);
   }
   if (route.credential.at === "query") {
@@ -189,12 +211,15 @@ export function upstreamHeaders(headers: Headers, route: Route, config: Config):
     const lower = name.toLowerCase();
     if (NEVER_FORWARDED.has(lower)) continue;
     if (lower.startsWith(EGMA_HEADER_PREFIX)) continue;
+    if (looksLikeACredential(lower)) continue;
     // A socket handshake's own machinery is rebuilt by whatever opens the
     // upstream socket, so passing this connection's copy on would describe the
-    // wrong connection. The subprotocol is the exception and is carried
-    // deliberately by the socket relay, because it is the caller's choice
-    // rather than the transport's bookkeeping.
-    if (lower.startsWith("sec-websocket-") && lower !== "sec-websocket-protocol") continue;
+    // wrong connection. **`Sec-WebSocket-Protocol` goes with the rest of it**,
+    // and that is not bookkeeping — it is Deepgram's own documented carrier for
+    // a key (`token, <key>`) for clients that cannot set a header, so a
+    // forwarded subprotocol list is a forwarded credential. What the provider
+    // is offered instead comes from the route; see `Route.upstreamProtocols`.
+    if (lower.startsWith("sec-websocket-")) continue;
     forwarded.append(name, value);
   }
   if (route.credential.at === "header") {
