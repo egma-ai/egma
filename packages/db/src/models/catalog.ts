@@ -12,9 +12,10 @@
  * provider-job pair becomes visible when all three paths behind it exist:
  * customer-owned execution, managed execution through the Egma model gateway,
  * and a live proof using the recommended default. `RESERVED_PROVIDER_JOBS`
- * below names the pairs the product intends and has not proved, so the roadmap
- * is written down without any of it being selectable — the shape
- * `RESERVED_LIBRARY_TYPES` already uses for the grader types that are coming.
+ * below is the shape a future release names a pair in before it can keep it —
+ * the shape `RESERVED_LIBRARY_TYPES` already uses for the grader types that are
+ * coming — and it is deliberately empty, because a provider this release cannot
+ * live-prove is a provider this release does not mention.
  *
  * **Model IDs and voice IDs are not allowlisted, and that is deliberate.** A
  * release proves one recommended default per entry; a user may type any ID the
@@ -74,9 +75,16 @@ export type ModelProvider = (typeof MODEL_PROVIDERS)[number];
  * What this release proved, and therefore what a persona and a grader may
  * select today.
  *
- * The three are the representative voice path: Deepgram listening, OpenAI
- * thinking, Cartesia speaking. Each was conducted end to end over both access
- * modes and measured against direct provider access before it was written here.
+ * Five entries across three provider accounts: Deepgram or OpenAI listening,
+ * OpenAI thinking, Cartesia or OpenAI speaking. Each was executed end to end
+ * over both access modes and then run live against the real provider with the
+ * recommended default below, on both the direct path and the deployed Egma
+ * model gateway, before it was written here.
+ *
+ * **Order decides the default**, because `RECOMMENDED_ENTRY` takes the first
+ * entry of each job. Deepgram leads STT and Cartesia leads TTS: both are
+ * streaming legs built for a phone line, and both were the measured
+ * representative path.
  */
 export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   {
@@ -92,33 +100,67 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     recommendedModel: "nova-3-general",
   },
   {
+    /**
+     * OpenAI's realtime transcription socket, and **not** its segmented
+     * `audio/transcriptions` endpoint.
+     *
+     * The specification asked for exactly one of the two to be exposed, chosen
+     * by proof rather than by preference, because "OpenAI STT" is not one
+     * transport promise. The segmented interface cannot begin transcribing
+     * until the speaker has stopped, so on a call the whole length of every
+     * agent turn is added to that turn's delay before the persona can start
+     * thinking. The realtime socket answers while the audio is still arriving,
+     * and it did so against the real provider — a first partial transcript
+     * about a second before the utterance ended. So this entry is the socket,
+     * and the other interface is absent rather than second.
+     */
+    provider: "openai",
+    job: "stt",
+    label: "OpenAI",
+    recommendedModel: "gpt-live-transcribe",
+  },
+  {
     provider: "cartesia",
     job: "tts",
     label: "Cartesia",
     recommendedModel: "sonic-3.5",
     recommendedVoiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
   },
+  {
+    /**
+     * OpenAI's speech synthesis. Its voice is a word from the provider's own
+     * short list rather than a minted identifier, which is why the recommended
+     * voice here reads nothing like Cartesia's above — a voice id belongs to
+     * the provider that named it, and handing either one the other's is a
+     * refusal at the first word.
+     */
+    provider: "openai",
+    job: "tts",
+    label: "OpenAI",
+    recommendedModel: "gpt-4o-mini-tts",
+    recommendedVoiceId: "alloy",
+  },
 ];
 
 /**
- * The provider-job pairs the product intends and this release has not proved.
+ * The provider-job pairs a release has named and cannot yet keep.
  *
- * Written down so the shape of the finished catalog is visible and so nobody
- * adds one of these by inventing a name for it. **None of them is selectable**:
- * a name here has no entry above, so a write naming it is refused exactly as a
- * name nobody has ever heard of is.
+ * **Empty, and that is a decision rather than an oversight.** The first catalog
+ * was narrowed to the entries Egma can live-prove with the provider accounts it
+ * holds, and the pairs that left are deferred rather than cancelled: each
+ * returns through its own ticket when a live-proof credential exists, under the
+ * unchanged rule above. Until then Egma does not name them, because a name here
+ * is served to every browser that reads the catalog and reads as a promise
+ * about a date nobody has set.
+ *
+ * The shape stays because the rule it expresses does: a pair named here has no
+ * entry above, so a write naming it is refused exactly as a name nobody has
+ * ever heard of is.
  */
-export const RESERVED_PROVIDER_JOBS = [
-  { provider: "anthropic", job: "llm" },
-  { provider: "google", job: "llm" },
-  { provider: "openai", job: "stt" },
-  { provider: "assemblyai", job: "stt" },
-  { provider: "elevenlabs", job: "tts" },
-  { provider: "openai", job: "tts" },
-] as const satisfies readonly {
+export const RESERVED_PROVIDER_JOBS: readonly {
   readonly provider: string;
   readonly job: ModelJob;
-}[];
+}[] = [];
 
 /**
  * The catalog grouped by model job — the shape a form draws itself from, worked
@@ -187,14 +229,23 @@ function firstEntryFor(job: ModelJob): ProviderCatalogEntry {
  * deployment's.** A work order carries one gateway address; each leg composes
  * its own path onto it. What each suffix is depends on what the shipped
  * provider adapter does with a base: Pipecat's Deepgram service appends
- * `/v1/listen`, so the suffix stops at the provider's name; the OpenAI chat
- * client appends `/chat/completions`, so the suffix carries `/v1`; Cartesia's
- * service takes a whole socket address, so the suffix is the whole path.
+ * `/v1/listen`, so the suffix stops at the provider's name; the OpenAI chat and
+ * speech clients append `/chat/completions` and `/audio/speech`, so the suffix
+ * carries `/v1`; Cartesia's service and OpenAI's realtime transcription service
+ * each take a whole socket address, so the suffix is the whole path.
  */
 export const GATEWAY_ROUTE: Readonly<
   Record<ModelProvider, Partial<Record<ModelJob, string>>>
 > = {
-  openai: { llm: "/openai/v1" },
+  openai: {
+    llm: "/openai/v1",
+    // The realtime transcription service takes a whole socket address and
+    // appends its own `?intent=transcription`, so the suffix is the whole path.
+    stt: "/openai/v1/realtime",
+    // The speech client appends `/audio/speech` to its base, exactly as the
+    // chat client appends `/chat/completions`, so both stop at `/v1`.
+    tts: "/openai/v1",
+  },
   deepgram: { stt: "/deepgram" },
   cartesia: { tts: "/cartesia/tts/websocket" },
 };

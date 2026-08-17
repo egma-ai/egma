@@ -276,7 +276,11 @@ class GatewayAccess:
 
 
 GATEWAY_ROUTE: dict[str, dict[str, str]] = {
-    "openai": {"llm": "/openai/v1"},
+    "openai": {
+        "llm": "/openai/v1",
+        "stt": "/openai/v1/realtime",
+        "tts": "/openai/v1",
+    },
     "deepgram": {"stt": "/deepgram"},
     "cartesia": {"tts": "/cartesia/tts/websocket"},
 }
@@ -286,9 +290,14 @@ GATEWAY_ROUTE: dict[str, dict[str, str]] = {
 this, the control plane's own copy beside the provider catalog, and the
 gateway's route table, which is the authority. The suffix stops where
 the shipped adapter starts appending — Pipecat's Deepgram service adds
-``/v1/listen`` to whatever base it is given, the OpenAI chat client adds
-``/chat/completions``, and Cartesia's service is handed a whole socket
-address — so each entry ends exactly where its adapter takes over.
+``/v1/listen`` to whatever base it is given, the OpenAI chat and speech
+clients add ``/chat/completions`` and ``/audio/speech``, and Cartesia's
+service and OpenAI's realtime transcription service are each handed a
+whole socket address — so each entry ends exactly where its adapter
+takes over.
+
+One provider may do several jobs and reach a different address for each,
+which is why this is a map of maps rather than a map of addresses.
 """
 
 

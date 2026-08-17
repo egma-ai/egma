@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { ROUTES } from "../src/routes.ts";
 import {
   INTERNAL_CREDENTIAL_ID,
   INTERNAL_CREDENTIAL_PREFIX,
@@ -16,6 +17,8 @@ import {
   INTERNAL_KEY,
   openSocket,
   ORGANIZATION,
+  providerOf,
+  reach,
   records,
   standUp,
   watch,
@@ -242,6 +245,59 @@ describe("caller-supplied provider authorization", () => {
     expect(seen?.query.toString()).not.toContain(CALLER_PROVIDER_KEY);
     expect(seen?.query.get("stream_options")).toBe("include_usage");
   });
+});
+
+/**
+ * The same two questions asked of every row in the table, rather than of the
+ * routes somebody remembered to write a test for.
+ *
+ * **Stripping and injection are the gateway's whole reason for existing**, so
+ * they cannot be a property of three routes and a hope about the rest. A route
+ * added to `ROUTES` with its credential slot spelled wrongly fails here on the
+ * day it is added: the stand-in behind it refuses anything but the exact
+ * authorization the real provider would demand, so *reaching it at all* is the
+ * proof that Egma's credential went in — and the caller's sentinel is then
+ * hunted through every header and every query value that arrived.
+ */
+describe("every shipped route, whatever its provider and transport", () => {
+  /** Every name a provider credential has ever gone by, all at once. */
+  const CALLERS_OWN = {
+    authorization: `Bearer ${CALLER_PROVIDER_KEY}`,
+    "x-api-key": CALLER_PROVIDER_KEY,
+    "api-key": CALLER_PROVIDER_KEY,
+    "xi-api-key": CALLER_PROVIDER_KEY,
+    "x-auth-token": CALLER_PROVIDER_KEY,
+    cookie: `session=${CALLER_PROVIDER_KEY}`,
+  } as const;
+
+  const CALLERS_QUERY =
+    `?api_key=${CALLER_PROVIDER_KEY}&token=${CALLER_PROVIDER_KEY}` +
+    `&access_token=${CALLER_PROVIDER_KEY}`;
+
+  for (const route of ROUTES) {
+    it(`takes the caller's provider authorization out of ${route.provider}/${route.job} and puts Egma's in`, async () => {
+      const provider = providerOf(standing, route);
+      const before = provider.attempts();
+
+      await reach(standing, route, {
+        headers: { "egma-inference-key": GATEWAY_SECRET, ...CALLERS_OWN },
+        query: CALLERS_QUERY,
+      });
+
+      // The provider accepted, and it accepts nothing but its own native
+      // authorization — so Egma's credential is what arrived.
+      expect(provider.attempts()).toBe(before + 1);
+
+      const seen = provider.last();
+      expect(JSON.stringify(seen?.headers)).not.toContain(CALLER_PROVIDER_KEY);
+      expect(seen?.query.toString() ?? "").not.toContain(CALLER_PROVIDER_KEY);
+      // And the credential this route really takes carries Egma's value alone,
+      // once, rather than the caller's beside it.
+      if (route.credential.at === "query") {
+        expect(seen?.query.getAll(route.credential.name)).toHaveLength(1);
+      }
+    });
+  }
 });
 
 describe("a connection that is not authorized", () => {

@@ -1,6 +1,7 @@
 import { WebSocket } from "ws";
 
 import { startLocalGateway, type LocalGateway } from "../../src/host/node.ts";
+import type { Route } from "../../src/routes.ts";
 import { makeLog } from "../../src/record.ts";
 import type { Verifier } from "../../src/verify.ts";
 import { startEgmaCloudDoor, type EgmaCloudDoor } from "./egma-cloud.ts";
@@ -9,10 +10,10 @@ import {
   EGMA_PROVIDER_KEY,
   GATEWAY_SECRET,
   INTERNAL_KEY,
-  startHttpUpstream,
+  startProviderUpstream,
   startSocketUpstream,
-  type HttpUpstream,
   type HttpUpstreamPlan,
+  type ProviderUpstream,
   type SocketUpstream,
   type SocketUpstreamPlan,
 } from "./upstreams.ts";
@@ -42,7 +43,16 @@ export type World = {
 };
 
 export type WorldPlan = {
+  /**
+   * OpenAI's chat completions, which is the plan almost every test means when
+   * it says "openai" — the one HTTP row that existed before this provider had
+   * three of them.
+   */
   readonly openai?: HttpUpstreamPlan;
+  /** OpenAI's speech synthesis, on the same address. */
+  readonly openaiSpeech?: HttpUpstreamPlan;
+  /** OpenAI's realtime transcription socket, on the same address. */
+  readonly openaiRealtime?: SocketUpstreamPlan;
   readonly deepgram?: SocketUpstreamPlan;
   readonly cartesia?: SocketUpstreamPlan;
   readonly settings?: Readonly<Record<string, string>>;
@@ -73,17 +83,50 @@ export const OPENAI_PLAN: HttpUpstreamPlan = {
   chunks: ['data: {"choices":[{"delta":{"content":"hello"}}]}\n\n', "data: [DONE]\n\n"],
 };
 
+/**
+ * OpenAI's speech synthesis, which answers raw PCM in pieces.
+ *
+ * Two chunks with a gap, like the completion above and for the same reason: a
+ * speaking leg must have the first audio long before the last of it exists, and
+ * one chunk would prove nothing about when it arrived.
+ */
+export const OPENAI_SPEECH_PLAN: HttpUpstreamPlan = {
+  path: "/v1/audio/speech",
+  expectAuthorization: `Bearer ${EGMA_PROVIDER_KEY.openai}`,
+  chunks: ["first-pcm-frame", "second-pcm-frame"],
+  headers: { "content-type": "audio/pcm" },
+};
+
+/** OpenAI's realtime transcription socket, on OpenAI's own address. */
+export const OPENAI_REALTIME_PLAN: SocketUpstreamPlan = {
+  path: "/v1/realtime",
+  expect: {
+    at: "header",
+    name: "authorization",
+    value: `Bearer ${EGMA_PROVIDER_KEY.openai}`,
+  },
+  echo: true,
+};
+
 export type Standing = {
   readonly world: World;
   /** Where inference keys really live, as far as the gateway is concerned. */
   readonly cloud: EgmaCloudDoor;
-  readonly openai: HttpUpstream;
+  /**
+   * OpenAI: three routes on one address, because that is how the provider is
+   * really arranged. `seen` and `attempts` are its HTTP side; `sockets`,
+   * `socketAttempts` and `opened` are its realtime transcription socket.
+   */
+  readonly openai: ProviderUpstream;
   readonly deepgram: SocketUpstream;
   readonly cartesia: SocketUpstream;
 };
 
 export async function standUp(plan: WorldPlan = {}): Promise<Standing> {
-  const openai = await startHttpUpstream(plan.openai ?? OPENAI_PLAN);
+  const openai = await startProviderUpstream({
+    http: [plan.openai ?? OPENAI_PLAN, plan.openaiSpeech ?? OPENAI_SPEECH_PLAN],
+    socket: plan.openaiRealtime ?? OPENAI_REALTIME_PLAN,
+  });
   const deepgram = await startSocketUpstream(plan.deepgram ?? DEEPGRAM_PLAN);
   const cartesia = await startSocketUpstream(plan.cartesia ?? CARTESIA_PLAN);
   const cloud = await startEgmaCloudDoor();
@@ -203,4 +246,137 @@ export function watch(socket: WebSocket): SocketWatch {
     state.failed = error;
   });
   return state;
+}
+
+/**
+ * What one route's provider saw, whichever provider and transport that is.
+ *
+ * **The seam that makes a table-driven suite possible.** Every route has a
+ * strict stand-in behind it, but they are not the same object: two are
+ * socket-only, one provider carries both transports, and each keeps its own
+ * record of what arrived. A test that wants to say "every shipped route
+ * reaches its provider's own path" has to be able to ask that question once
+ * rather than five times, so this is where the shapes are made one shape.
+ */
+export type ProviderView = {
+  /** How many times this route's provider was reached on this transport. */
+  readonly attempts: () => number;
+  /** What arrived last, or `undefined` where nothing has. */
+  readonly last: () => Seen | undefined;
+};
+
+export type Seen = {
+  readonly path: string;
+  readonly query: URLSearchParams;
+  readonly headers: Readonly<Record<string, string>>;
+};
+
+export function providerOf(standing: Standing, route: Route): ProviderView {
+  if (route.transport === "socket") {
+    const upstream =
+      route.provider === "deepgram"
+        ? standing.deepgram
+        : route.provider === "cartesia"
+          ? standing.cartesia
+          : undefined;
+    if (upstream !== undefined) {
+      return { attempts: upstream.attempts, last: () => upstream.seen.at(-1) };
+    }
+    return {
+      attempts: standing.openai.socketAttempts,
+      last: () => standing.openai.sockets.at(-1),
+    };
+  }
+  return { attempts: standing.openai.attempts, last: () => standing.openai.seen.at(-1) };
+}
+
+/**
+ * Open one shipped route the way the provider's own adapter would, and settle
+ * once the provider has answered.
+ *
+ * A socket route is opened and closed politely; an HTTP route is asked with the
+ * one method it carries and its answer is drained. Nothing here knows which
+ * provider it is talking to — that is the point.
+ */
+export async function reach(
+  standing: Standing,
+  route: Route,
+  options: { readonly headers?: Record<string, string>; readonly query?: string } = {},
+): Promise<void> {
+  const headers = options.headers ?? { "egma-inference-key": GATEWAY_SECRET };
+  const query = options.query ?? "";
+  if (route.transport === "socket") {
+    const socket = openSocket(standing.world, `${route.path}${query}`, { headers });
+    const watching = watch(socket);
+    await watching.opened;
+    socket.close(1000, "done");
+    await eventually(() => (watching.closed === undefined ? undefined : true));
+    return;
+  }
+  const answered = await fetch(`${standing.world.origin}${route.path}${query}`, {
+    method: route.method,
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({ model: "a-small-model", input: "two words" }),
+  });
+  await answered.text();
+}
+
+/**
+ * A world in which one route's provider behaves as a test needs it to.
+ *
+ * **Written from the route rather than from a remembered slot name**, so a
+ * table-driven test can ask every HTTP row the same question without knowing
+ * which provider is behind it or what its stand-in is called here.
+ */
+export function withUpstream(
+  route: Route,
+  behaviour: Omit<HttpUpstreamPlan, "path" | "expectAuthorization">,
+): WorldPlan {
+  if (route.provider !== "openai" || route.transport !== "http") {
+    throw new Error(
+      `this world stands one HTTP provider up, and ${route.provider}/${route.job} is not it; give the route its own stand-in before driving it here`,
+    );
+  }
+  const plan: HttpUpstreamPlan = {
+    path: route.upstreamPath,
+    expectAuthorization: `Bearer ${EGMA_PROVIDER_KEY.openai}`,
+    ...behaviour,
+  };
+  return route.job === "llm" ? { openai: plan } : { openaiSpeech: plan };
+}
+
+/** The same, for a socket row: which stand-in it is, and how it behaves. */
+export function withSocketUpstream(
+  route: Route,
+  behaviour: Omit<SocketUpstreamPlan, "path" | "expect">,
+): WorldPlan {
+  const expect: SocketUpstreamPlan["expect"] =
+    route.credential.at === "header"
+      ? {
+          at: "header",
+          name: route.credential.name,
+          value: `${route.credential.scheme} ${EGMA_PROVIDER_KEY[route.provider]}`,
+        }
+      : { at: "query", name: route.credential.name, value: EGMA_PROVIDER_KEY[route.provider] };
+  const plan: SocketUpstreamPlan = { path: route.upstreamPath, expect, ...behaviour };
+  return route.provider === "deepgram"
+    ? { deepgram: plan }
+    : route.provider === "cartesia"
+      ? { cartesia: plan }
+      : { openaiRealtime: plan };
+}
+
+/** Which stand-in carries one socket route, so a test can read what it saw. */
+export function socketUpstreamOf(standing: Standing, route: Route): SocketUpstream {
+  if (route.provider === "deepgram") return standing.deepgram;
+  if (route.provider === "cartesia") return standing.cartesia;
+  return {
+    origin: standing.openai.origin,
+    seen: standing.openai.sockets,
+    attempts: standing.openai.socketAttempts,
+    opened: standing.openai.opened,
+    stopReading: standing.openai.stopReading,
+    startReading: standing.openai.startReading,
+    stop: standing.openai.stop,
+  };
 }

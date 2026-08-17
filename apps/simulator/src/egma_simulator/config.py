@@ -91,6 +91,14 @@ be able to move without waiting for a release."""
 DEFAULT_CARTESIA_TTS_MODEL = "sonic-3.5"
 """What the cartesia speaking leg asks for when nobody names one."""
 
+DEFAULT_DEEPGRAM_STT_MODEL = "nova-3-general"
+"""What the deepgram listening leg asks for when nobody names one.
+
+Written down here rather than left to the shipped service's own default,
+because until it was, this leg was never told a model at all: a persona
+that selected one and a persona that selected another were transcribed
+by the same model, and neither selection reached the wire."""
+
 # **A model name belongs to the provider that coined it, and every default
 # above is therefore one provider's.** They are separate constants rather
 # than one, because one shared default is a name that is right for exactly

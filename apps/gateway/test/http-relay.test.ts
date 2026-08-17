@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ROUTES } from "../src/routes.ts";
 import {
   EGMA_PROVIDER_KEY,
   eventually,
   GATEWAY_SECRET,
+  providerOf,
   records,
   standUp,
+  withUpstream,
   type Standing,
 } from "./support/world.ts";
+
+/** Every row this gateway carries over ordinary HTTP. */
+const HTTP_ROUTES = ROUTES.filter((route) => route.transport === "http");
 
 /**
  * The LLM leg: a streaming HTTP request that starts moving before either end
@@ -56,39 +62,6 @@ async function readWithTiming(
 }
 
 describe("the provider's answer", () => {
-  it("reaches the caller before the provider has finished it", async () => {
-    standing = await standUp({
-      openai: {
-        path: "/v1/chat/completions",
-        expectAuthorization: `Bearer ${EGMA_PROVIDER_KEY.openai}`,
-        chunks: [
-          'data: {"choices":[{"delta":{"content":"first"}}]}\n\n',
-          'data: {"choices":[{"delta":{"content":"second"}}]}\n\n',
-          "data: [DONE]\n\n",
-        ],
-        gapMs: 300,
-      },
-    });
-
-    const answered = await fetch(`${standing.world.origin}/openai/v1/chat/completions`, {
-      method: "POST",
-      headers: AUTHENTICATED,
-      body: JSON.stringify({ model: "a-small-model", messages: [] }),
-    });
-    const { pieces, text } = await readWithTiming(answered);
-
-    expect(text).toContain("first");
-    expect(text).toContain("[DONE]");
-    // The first piece is there long before the last one exists at all. A
-    // buffering relay would have every piece arriving at the same moment,
-    // after the provider's last gap.
-    const first = pieces[0];
-    const last = pieces.at(-1);
-    expect(first).toBeDefined();
-    expect(last).toBeDefined();
-    expect((last as { at: number }).at - (first as { at: number }).at).toBeGreaterThan(400);
-  });
-
   it("comes back with the provider's own status, headers and body, apart from what never returns", async () => {
     standing = await standUp({
       openai: {
@@ -139,33 +112,6 @@ describe("the caller's request", () => {
     // The provider had the first bytes long before the last ones were written.
     expect(seen?.bodyFirstByteMs).toBeLessThan(200);
     expect(seen?.bodyEndedMs).toBeGreaterThan(350);
-  });
-
-  it("arrives with its method, path, query, content type and body unchanged", async () => {
-    standing = await standUp();
-    const asked = { model: "a-small-model", messages: [{ role: "user", content: "héllo ✅" }] };
-    await fetch(
-      `${standing.world.origin}/openai/v1/chat/completions?stream_options=include_usage&keep=me`,
-      {
-        method: "POST",
-        headers: {
-          ...AUTHENTICATED,
-          "openai-beta": "a provider-native header",
-          "accept": "text/event-stream",
-        },
-        body: JSON.stringify(asked),
-      },
-    );
-
-    const seen = standing.openai.seen.at(-1);
-    expect(seen?.method).toBe("POST");
-    expect(seen?.path).toBe("/v1/chat/completions");
-    expect(seen?.query.get("stream_options")).toBe("include_usage");
-    expect(seen?.query.get("keep")).toBe("me");
-    expect(seen?.headers["openai-beta"]).toBe("a provider-native header");
-    expect(seen?.headers["accept"]).toBe("text/event-stream");
-    expect(seen?.headers["content-type"]).toBe("application/json");
-    expect(seen?.body).toBe(JSON.stringify(asked));
   });
 });
 
@@ -317,4 +263,118 @@ describe("when the exchange does not go well", () => {
     expect(body).not.toContain("127.0.0.1");
     expect(body).not.toContain("ECONNREFUSED");
   });
+});
+
+/**
+ * The same questions asked of every HTTP row, rather than of the one somebody
+ * wrote a test for.
+ *
+ * **A relay is only a relay if it is one for every route it carries.** The
+ * behaviours below are the ones a buffering or a rewriting implementation gets
+ * wrong quietly: a first piece that arrives with the last, a body that reached
+ * the provider changed, a caller who hung up whose work carried on being paid
+ * for, and a provider that went silent forever. Each is asked of every row, so
+ * a route added to the table cannot ship with any of them untested.
+ */
+describe("every HTTP route this gateway carries", () => {
+  for (const route of HTTP_ROUTES) {
+    describe(`${route.provider}/${route.job}`, () => {
+      it("hands the caller the provider's first piece long before its last exists", async () => {
+        standing = await standUp(
+          withUpstream(route, {
+            chunks: ["first-piece", "second-piece", "last-piece"],
+            gapMs: 300,
+          }),
+        );
+
+        const answered = await fetch(`${standing.world.origin}${route.path}`, {
+          method: route.method,
+          headers: AUTHENTICATED,
+          body: JSON.stringify({ model: "a-small-model", input: "two words" }),
+        });
+        const { pieces, text } = await readWithTiming(answered);
+
+        expect(text).toContain("first-piece");
+        expect(text).toContain("last-piece");
+        const first = pieces[0];
+        const last = pieces.at(-1);
+        expect(first).toBeDefined();
+        expect(last).toBeDefined();
+        expect((last as { at: number }).at - (first as { at: number }).at).toBeGreaterThan(400);
+      });
+
+      it("arrives with its method, path, query, content type and body unchanged", async () => {
+        standing = await standUp();
+        const asked = { model: "a-small-model", input: "héllo ✅", speed: 1.25, voice: "a-voice" };
+        await fetch(`${standing.world.origin}${route.path}?stream_options=include_usage&keep=me`, {
+          method: route.method,
+          headers: {
+            ...AUTHENTICATED,
+            "openai-beta": "a provider-native header",
+            accept: "text/event-stream",
+          },
+          body: JSON.stringify(asked),
+        });
+
+        const seen = providerOf(standing, route).last();
+        expect(seen?.path).toBe(route.upstreamPath);
+        expect(seen?.query.get("stream_options")).toBe("include_usage");
+        expect(seen?.query.get("keep")).toBe("me");
+        expect(seen?.headers["openai-beta"]).toBe("a provider-native header");
+        expect(seen?.headers["content-type"]).toBe("application/json");
+        expect(standing.openai.seen.at(-1)?.method).toBe(route.method);
+        // The model, the voice and the speed all ride inside the payload for
+        // these routes, and the payload crosses byte for byte.
+        expect(standing.openai.seen.at(-1)?.body).toBe(JSON.stringify(asked));
+      });
+
+      it("stops the provider's work when the caller hangs up", async () => {
+        standing = await standUp(
+          withUpstream(route, {
+            chunks: ["one", "two", "three", "four", "five"],
+            gapMs: 200,
+          }),
+        );
+
+        const giveUp = new AbortController();
+        const answered = await fetch(`${standing.world.origin}${route.path}`, {
+          method: route.method,
+          headers: AUTHENTICATED,
+          body: JSON.stringify({ model: "a-small-model", input: "two words" }),
+          signal: giveUp.signal,
+        });
+        const reader = (answered.body as ReadableStream<Uint8Array>).getReader();
+        await reader.read();
+        giveUp.abort();
+
+        // The exchange is recorded as the cancellation it was, rather than as
+        // the `200` the headers had already promised.
+        const written = await eventually(() =>
+          records(standing?.world as NonNullable<typeof standing>["world"]).find(
+            (line) => line["statusClass"] === "cancelled" && line["job"] === route.job,
+          ),
+        );
+        expect(written["provider"]).toBe(route.provider);
+      });
+
+      it("gives up on a provider that went quiet, within a finite bound", async () => {
+        standing = await standUp({
+          ...withUpstream(route, { silentForMs: 5_000 }),
+          settings: { EGMA_GATEWAY_FIRST_OUTPUT_TIMEOUT_MS: "300" },
+        });
+
+        const began = Date.now();
+        const answered = await fetch(`${standing.world.origin}${route.path}`, {
+          method: route.method,
+          headers: AUTHENTICATED,
+          body: JSON.stringify({ model: "a-small-model", input: "two words" }),
+        });
+        const body = (await answered.json()) as { error: { code: string } };
+
+        expect(answered.status).toBe(504);
+        expect(body.error.code).toBe("provider_timed_out");
+        expect(Date.now() - began).toBeLessThan(3_000);
+      });
+    });
+  }
 });

@@ -68,6 +68,7 @@ from pipecat.utils.time import time_now_iso8601
 
 from .config import (
     DEFAULT_CARTESIA_TTS_MODEL,
+    DEFAULT_DEEPGRAM_STT_MODEL,
     DEFAULT_REALTIME_STT_MODEL,
     DEFAULT_STT_MODEL,
     DEFAULT_TTS_MODEL,
@@ -588,7 +589,9 @@ class SpeechProviders:
             # protocol moves.
             gateway = models.gateway
             return cls(
-                stt=models.stt.provider,
+                # The proved adapter for the selected provider, which is the
+                # same word for every entry but one. See `SELECTED_STT_LEG`.
+                stt=SELECTED_STT_LEG.get(models.stt.provider, models.stt.provider),
                 tts=models.tts.provider,
                 vad=vad,
                 stt_key=(
@@ -688,6 +691,30 @@ class SpeechProviders:
                         "an Egma credential"
                     )
         return self
+
+
+SELECTED_STT_LEG = {"openai": "openai_realtime"}
+"""Which listening leg serves a catalog STT provider, where they differ.
+
+**"OpenAI STT" is a provider account, not a transport**, and this
+provider offers two interfaces that transcribe: a segmented one that
+posts a finished recording of a turn and waits, and a socket that
+transcribes while the audio is still arriving. The catalog exposes
+exactly one of them — the socket — because the segmented one cannot begin
+until the agent has stopped talking, so on a call the whole length of
+every agent turn is added to that turn's delay. The comparison was run
+against the real provider before this line was written.
+
+**Only a persona's own selection is translated here, and the deployment
+setting of the same name is not.** A self-hoster whose platform settings
+say ``openai`` for speech-to-text has been listening with the segmented
+leg since before selections existed, and quietly moving them onto a
+socket would change what their deployment does with nothing in their
+configuration having moved. So the legacy word keeps its legacy meaning
+and ``openai_realtime`` stays the way to ask for the socket there; what
+this maps is the catalog's word, which is new and means the proved
+adapter.
+"""
 
 
 SCRIPTED_PAIR = SpeechProviders()
@@ -882,6 +909,16 @@ def _ears(
         # address", so a deployment that named none is byte for byte the
         # call this file made before the gateway existed.
         base_url=providers.stt_base_url or "",
+        # **The selected model, which this leg used not to be told at all.**
+        # It listened with whatever this service's own default was, so a
+        # persona that selected `nova-3-general` and one that selected
+        # anything else were transcribed by the same model and neither
+        # selection meant anything. The model rides in the query string
+        # here, which is also the one place the gateway can record which
+        # model an exchange used.
+        settings=DeepgramSTTService.Settings(
+            model=providers.stt_model or DEFAULT_DEEPGRAM_STT_MODEL
+        ),
     )
 
     async def connected() -> None:
@@ -1033,6 +1070,11 @@ def _openai_mouth(
                 # Built at the provider's own band. Handing it the line's
                 # band is what makes it mislabel, so it is never told one.
                 sample_rate=OPENAI_TTS_BAND_HZ,
+                # `None` is this client's own word for "the provider's own
+                # address"; a deployment on managed access names the Egma
+                # model gateway's route for this pair here and nothing
+                # else about the leg moves.
+                base_url=providers.tts_base_url,
                 settings=settings,
             ),
             _BandCorrection(
@@ -1061,6 +1103,10 @@ def _openai_ears(
     return OpenAISTTService(
         api_key=providers.stt_key,
         sample_rate=sample_rate_hz,
+        # `None` is this client's own word for "the provider's own
+        # address", so a deployment that named none is byte for byte the
+        # call this file made before the gateway existed.
+        base_url=providers.stt_base_url,
         settings=OpenAISTTService.Settings(
             model=providers.stt_model or DEFAULT_STT_MODEL
         ),
@@ -1105,6 +1151,17 @@ def _openai_realtime_ears(
     leg = OpenAIRealtimeSTTService(
         api_key=providers.stt_key,
         sample_rate=sample_rate_hz,
+        # This service takes a whole socket address and appends its own
+        # `?intent=transcription`, so a deployment reaching the Egma model
+        # gateway names the gateway's route for this pair and the service
+        # is otherwise untouched. Its own default stands where nobody
+        # named one, rather than an address this file would have to keep
+        # current.
+        **(
+            {"base_url": providers.stt_base_url}
+            if providers.stt_base_url
+            else {}
+        ),
         # False is this service's word for "the detector is in the
         # pipeline, not on the server". Named rather than left to the
         # default, because a release changing it would move where a turn

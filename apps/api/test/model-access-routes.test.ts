@@ -110,7 +110,17 @@ describe("the provider catalog", () => {
     }
   });
 
-  it("names the pairs it has not proved without making any of them selectable", async () => {
+  /**
+   * The narrowing, read the way a browser reads it.
+   *
+   * The first catalog was cut to the entries Egma can live-prove with the
+   * provider accounts it holds, and **a provider Egma cannot prove is a
+   * provider Egma does not mention** — not in the selectable list and not in a
+   * roadmap beside it, because a name served to every browser reads as a
+   * promise about a date nobody has set. So the reserved list is empty today
+   * and the rule it carries still holds: nothing named there is selectable.
+   */
+  it("promises no provider it cannot yet keep, and makes nothing reserved selectable", async () => {
     const { adminKey } = await aCustomer("model_catalog_reserved");
 
     const read = await ask(api.app, "GET", MODEL_CATALOG_PATH, adminKey);
@@ -119,9 +129,15 @@ describe("the provider catalog", () => {
       (one) => `${one.job}:${one.provider}`,
     );
 
-    expect(reserved.length).toBeGreaterThan(0);
     for (const one of reserved) {
       expect(shipped).not.toContain(`${one.job}:${one.provider}`);
+    }
+
+    // The four that left this effort's scope, hunted through the whole answer
+    // rather than through one field of it.
+    const answered = JSON.stringify(read.body).toLowerCase();
+    for (const absent of ["anthropic", "gemini", "assemblyai", "elevenlabs"]) {
+      expect(answered, `${absent} is still named in the catalog answer`).not.toContain(absent);
     }
   });
 
