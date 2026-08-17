@@ -104,6 +104,24 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
     # A chat simulation has no mouth and no ears, so a speech key on its wire
     # is a secret travelling for nothing.
     "spec-v2/chat-carrying-a-speech-key.json": ("/models/stt", "not", None),
+    # Egma's provider credentials stay inside the Egma model gateway, so a
+    # managed work order carrying one is refused before this worker ever holds
+    # it — and managed access with no gateway is a work order with nowhere for
+    # the traffic to go, which must not arrive as a leg quietly calling a
+    # provider directly. Customer-owned with a gateway block is the mirror: Egma
+    # is off the model traffic path there, so the address and the credential are
+    # two things nothing would use and one of them is a credential.
+    "spec-v2/managed-carrying-a-provider-key.json": (
+        "/models/llm",
+        "additionalProperties",
+        "key",
+    ),
+    "spec-v2/managed-without-a-gateway.json": ("/models", "required", "gateway"),
+    "spec-v2/customer-owned-carrying-a-gateway.json": (
+        "/models",
+        "additionalProperties",
+        "gateway",
+    ),
     "spec-v2/unknown-field.json": ("", "additionalProperties", "agent_id"),
     "report/completed-claiming-never-ran.json": (
         "/events/0/facts/ending",

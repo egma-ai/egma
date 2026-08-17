@@ -568,12 +568,33 @@ class SpeechProviders:
         vad = said.vad_provider or config.vad_provider
 
         if models is not None:
+            # **Under managed access both legs are told the gateway's own
+            # address for their provider and handed the gateway's own
+            # credential**, in the same fields they always took a provider
+            # address and a provider key. Each is the same shipped Pipecat
+            # service; nothing about the model, the voice, the band or the
+            # protocol moves.
+            gateway = models.gateway
             return cls(
                 stt=models.stt.provider,
                 tts=models.tts.provider,
                 vad=vad,
-                stt_key=models.stt.key,
-                tts_key=models.tts.key,
+                stt_key=(
+                    models.stt.key if gateway is None else gateway.credential
+                ),
+                tts_key=(
+                    models.tts.key if gateway is None else gateway.credential
+                ),
+                stt_base_url=(
+                    None
+                    if gateway is None
+                    else gateway.base_for(models.stt.provider, "stt")
+                ),
+                tts_base_url=(
+                    None
+                    if gateway is None
+                    else gateway.base_for(models.tts.provider, "tts")
+                ),
                 stt_model=models.stt.model,
                 tts_model=models.tts.model,
                 tts_voice=models.tts.voice_id,

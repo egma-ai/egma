@@ -1,22 +1,36 @@
 {
-  "_why": "Managed access with a provider key on one selection. The whole point of the two closed shapes: Egma's provider credentials stay inside the Egma model gateway, so a managed work order carrying one is refused here rather than arriving at a simulator that had no business holding it.",
   "contract_version": 2,
   "simulation_id": "sim_01K4RD9Q7X2M5NBVE8TJHC3PYW",
   "modality": "voice",
   "connection": {
     "type": "livekit",
-    "config": { "url": "wss://lakeside-dental.livekit.cloud", "agentName": "front-desk" },
-    "credentials": { "apiKey": "APIexample0key0", "apiSecret": "example0secret0value0not0a0real0one" }
+    "config": {
+      "url": "wss://lakeside-dental.livekit.cloud",
+      "agentName": "front-desk"
+    },
+    "credentials": {
+      "apiKey": "APIexample0key0",
+      "apiSecret": "example0secret0value0not0a0real0one"
+    }
   },
   "persona": {
     "traits": {
       "personality": "Retired teacher, 68, calling from a quiet kitchen.",
       "language": "en-GB",
-      "voice": { "provider": "cartesia", "voiceId": "measured-alto-3", "speed": 0.95 }
+      "voice": {
+        "provider": "cartesia",
+        "voiceId": "measured-alto-3",
+        "speed": 0.95
+      }
     }
   },
-  "scenario": { "instructions": "Move Tuesday's check-up to a Thursday." },
-  "limits": { "max_duration_seconds": 300, "max_turns": 40 },
+  "scenario": {
+    "instructions": "Move Tuesday's check-up to a Thursday."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 40
+  },
   "models": {
     "access": "managed",
     "gateway": {
@@ -28,7 +42,10 @@
       "model": "gpt-4o-mini",
       "key": "sk-sentinel-a-key-that-must-never-travel-managed"
     },
-    "stt": { "provider": "deepgram", "model": "nova-3-general" },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3-general"
+    },
     "tts": {
       "provider": "cartesia",
       "model": "sonic-3.5",

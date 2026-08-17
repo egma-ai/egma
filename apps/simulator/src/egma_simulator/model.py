@@ -199,6 +199,25 @@ def _selected_model_client(
     if provider != "openai":
         return ScriptedModel(spec.scenario_instructions)
 
+    # **Under managed access the thinking leg is the same client, told a
+    # different address and handed a different credential.** The gateway
+    # carries this provider's own protocol at this provider's own path, so
+    # nothing about the request changes — which is what keeps a second
+    # provider-adapter layer from growing beside this one.
+    if selected.gateway is not None:
+        base_url = selected.gateway.base_for(provider, "llm")
+        if base_url is None:
+            raise ModelFailure(
+                f"this persona thinks with {provider} through the Egma model "
+                "gateway, and this release carries no language-model route "
+                "for it there"
+            )
+        return OpenAICompatibleModel(
+            base_url=base_url,
+            api_key=selected.gateway.credential,
+            model_name=selected.llm.model,
+        )
+
     if selected.llm.key is None:
         raise ModelFailure(
             f"this persona thinks with {provider}, and the work order carried "

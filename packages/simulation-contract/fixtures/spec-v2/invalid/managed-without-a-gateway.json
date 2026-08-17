@@ -1,26 +1,46 @@
 {
-  "_why": "Managed access with no gateway block. There is nowhere for the traffic to go and nothing to authorize it, so this is refused on the sending side rather than arriving at a simulator that would fall back to calling a provider directly.",
   "contract_version": 2,
   "simulation_id": "sim_01K4RD9Q7X2M5NBVE8TJHC3PYW",
   "modality": "voice",
   "connection": {
     "type": "livekit",
-    "config": { "url": "wss://lakeside-dental.livekit.cloud", "agentName": "front-desk" },
-    "credentials": { "apiKey": "APIexample0key0", "apiSecret": "example0secret0value0not0a0real0one" }
+    "config": {
+      "url": "wss://lakeside-dental.livekit.cloud",
+      "agentName": "front-desk"
+    },
+    "credentials": {
+      "apiKey": "APIexample0key0",
+      "apiSecret": "example0secret0value0not0a0real0one"
+    }
   },
   "persona": {
     "traits": {
       "personality": "Retired teacher, 68, calling from a quiet kitchen.",
       "language": "en-GB",
-      "voice": { "provider": "cartesia", "voiceId": "measured-alto-3", "speed": 0.95 }
+      "voice": {
+        "provider": "cartesia",
+        "voiceId": "measured-alto-3",
+        "speed": 0.95
+      }
     }
   },
-  "scenario": { "instructions": "Move Tuesday's check-up to a Thursday." },
-  "limits": { "max_duration_seconds": 300, "max_turns": 40 },
+  "scenario": {
+    "instructions": "Move Tuesday's check-up to a Thursday."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 40
+  },
   "models": {
     "access": "managed",
-    "llm": { "provider": "openai", "model": "gpt-4o-mini" },
-    "stt": { "provider": "deepgram", "model": "nova-3-general" },
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3-general"
+    },
     "tts": {
       "provider": "cartesia",
       "model": "sonic-3.5",
