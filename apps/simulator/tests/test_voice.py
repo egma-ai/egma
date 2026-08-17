@@ -262,6 +262,36 @@ def test_the_detector_is_chosen_at_assembly_like_every_other_leg(
     assert isinstance(chosen, SileroVADAnalyzer)
 
 
+def test_one_live_simulation_keeps_one_silero_model_state(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A detector starts clean, then keeps its context until this simulation ends."""
+    from pipecat.audio.vad import silero
+
+    now = [0.0]
+    monkeypatch.setattr(silero.time, "time", lambda: now[0])
+    detector = build_vad(SpeechProviders(vad="silero"))
+    detector.set_sample_rate(16000)
+
+    window = b"\0" * detector.num_frames_required() * 2
+    detector.voice_confidence(window)
+
+    resets = 0
+    reset_states = detector._model.reset_states
+
+    def count_reset(batch_size: int = 1) -> None:
+        nonlocal resets
+        resets += 1
+        reset_states(batch_size)
+
+    monkeypatch.setattr(detector._model, "reset_states", count_reset)
+    now[0] = 6.0
+    detector.voice_confidence(window)
+
+    assert resets == 0
+    assert build_vad(SpeechProviders(vad="silero")) is not detector
+
+
 # -- The recording -----------------------------------------------------------
 
 
@@ -317,18 +347,18 @@ async def test_incoming_audio_continues_while_the_persona_thinks(
     conductor = assembled.conductor
     assert conductor is not None
     transport = conductor._connection.transport
-    next_turn = Persona.next_turn
+    reply_to = Persona.reply_to
 
-    async def delayed(persona: Persona, history):
+    async def delayed(persona: Persona, messages):
         before = transport.input_frames
         for _ in range(100):
             await asyncio.sleep(0)
             if transport.input_frames > before:
                 break
         assert transport.input_frames > before
-        return await next_turn(persona, history)
+        return await reply_to(persona, messages)
 
-    monkeypatch.setattr(Persona, "next_turn", delayed)
+    monkeypatch.setattr(Persona, "reply_to", delayed)
     observed = await observe(
         conductor, assembled, spec, controls=WalkControls()
     )
@@ -414,21 +444,75 @@ async def test_every_span_points_at_the_audio_it_names(
     conductor = assembled.conductor
     assert conductor is not None
     transport = conductor._connection.transport
-    next_turn = Persona.next_turn
 
-    async def delayed(persona: Persona, history):
-        before = transport.input_frames
-        for _ in range(100):
-            await asyncio.sleep(0)
-            if transport.input_frames > before:
-                break
-        assert transport.input_frames > before
-        return await next_turn(persona, history)
+    def no_recorder_backpressure(_frame: InputAudioRawFrame) -> asyncio.Event:
+        acknowledged = asyncio.Event()
+        acknowledged.set()
+        return acknowledged
 
-    monkeypatch.setattr(Persona, "next_turn", delayed)
+    monkeypatch.setattr(transport, "wait_for_ack", no_recorder_backpressure)
+    input_processor = transport.media.input[0]
+    push_frame = input_processor.push_frame
+    arrival_clock = [0.0]
+    recording_clock = [0.0]
+    quiet_after_speech = 0
+    inserted_gap = False
+
+    class RecordingTime:
+        @staticmethod
+        def monotonic() -> float:
+            return recording_clock[0]
+
+        @staticmethod
+        def time() -> float:
+            return recording_clock[0]
+
+    from pipecat.audio.resamplers import soxr_stream_resampler
+    from pipecat.frames.frames import InputAudioRawFrame
+    from pipecat.processors.audio import audio_buffer_processor
+
+    monkeypatch.setattr(audio_buffer_processor, "time", RecordingTime)
+    monkeypatch.setattr(soxr_stream_resampler, "time", RecordingTime)
+    process_recording = conductor_module._EvidenceRecorder._process_recording
+    held_one_frame = False
+
+    async def briefly_hold_the_recorder(recorder, frame):
+        nonlocal held_one_frame
+        if isinstance(frame, InputAudioRawFrame) and not held_one_frame:
+            held_one_frame = True
+            await asyncio.sleep(0.3)
+        if isinstance(frame, InputAudioRawFrame):
+            recording_clock[0] = frame.metadata["test.recorded_at"]
+        await process_recording(recorder, frame)
+
+    monkeypatch.setattr(
+        conductor_module._EvidenceRecorder,
+        "_process_recording",
+        briefly_hold_the_recorder,
+    )
+
+    async def carry_one_transport_gap(frame, direction=None):
+        nonlocal inserted_gap, quiet_after_speech
+        if isinstance(frame, InputAudioRawFrame):
+            arrival_clock[0] += frame.num_frames / frame.sample_rate
+            if carries_speech(frame.audio):
+                quiet_after_speech = max(quiet_after_speech, 1)
+            elif quiet_after_speech:
+                quiet_after_speech += 1
+                if quiet_after_speech == 11:
+                    arrival_clock[0] += 1.0
+                    inserted_gap = True
+            frame.metadata["test.recorded_at"] = arrival_clock[0]
+        if direction is None:
+            await push_frame(frame)
+        else:
+            await push_frame(frame, direction)
+
+    monkeypatch.setattr(input_processor, "push_frame", carry_one_transport_gap)
     observed = await observe(
         conductor, assembled, spec, controls=WalkControls()
     )
+    assert inserted_gap
     audio = observed.assembled.audio
     assert audio is not None
     persona_audio, agent_audio, band = channels_of(
@@ -538,19 +622,19 @@ async def test_an_exchange_the_agent_ends_still_leaves_a_recording(
         agent_is_departing(conductor)
         departing.set()
 
-    next_turn = Persona.next_turn
+    reply_to = Persona.reply_to
     model_turns = 0
 
-    async def delayed_after_the_agent_turns(persona: Persona, history):
+    async def delayed_after_the_agent_turns(persona: Persona, messages):
         nonlocal model_turns
         model_turns += 1
         if model_turns > 1:
             thinking_after_agent_turn.set()
             await departing.wait()
-        return await next_turn(persona, history)
+        return await reply_to(persona, messages)
 
     monkeypatch.setattr(VoiceConductor, "agent_is_departing", notice_departure)
-    monkeypatch.setattr(Persona, "next_turn", delayed_after_the_agent_turns)
+    monkeypatch.setattr(Persona, "reply_to", delayed_after_the_agent_turns)
     spec = spec_for(
         scenario="One final point.",
         replies=["All sorted, goodbye now."],

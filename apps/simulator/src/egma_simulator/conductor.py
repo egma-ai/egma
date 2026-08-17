@@ -5,12 +5,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any, cast
 
+from pipecat.audio.resamplers.soxr_stream_resampler import (
+    SOXRStreamAudioResampler,
+)
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     ControlFrame,
@@ -73,6 +77,7 @@ from .walk import (
 logger = logging.getLogger(__name__)
 
 MediaPosition = Fraction
+_INPUT_SOURCE_RANGE = "egma.input_source_range"
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,13 @@ class _AgentFinished(ControlFrame):
     heard_a_turn: bool = True
 
 
+@dataclass(frozen=True)
+class _AgentUtterance:
+    began: MediaPosition
+    ended: MediaPosition
+    observed_through: MediaPosition
+
+
 class _AgentEar(VADProcessor):
     """Track input-media positions while Pipecat detects speech."""
 
@@ -107,7 +119,7 @@ class _AgentEar(VADProcessor):
         self._conductor = conductor
         self.position = Fraction(0)
         self.speaking_since: MediaPosition | None = None
-        self.utterances: list[tuple[MediaPosition, MediaPosition]] = []
+        self.utterances: list[_AgentUtterance] = []
 
     async def broadcast_frame(self, frame_cls: type[Frame], **kwargs: Any) -> None:
         """Track the public VAD boundaries before passing them onward."""
@@ -122,7 +134,13 @@ class _AgentEar(VADProcessor):
                 return
             began = self.speaking_since
             ended = max(began, self.position - _seconds(kwargs.get("stop_secs", 0.0)))
-            self.utterances.append((began, ended))
+            self.utterances.append(
+                _AgentUtterance(
+                    began=began,
+                    ended=ended,
+                    observed_through=self.position,
+                )
+            )
             self.speaking_since = None
         await super().broadcast_frame(frame_cls, **kwargs)
 
@@ -156,9 +174,15 @@ class _AgentEar(VADProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, RemoteParticipantLeftFrame):
             self._conductor.agent_is_departing()
+            await self._conductor.agent_input_is_closing(self.position)
             await self.finalize_active_utterance()
         if isinstance(frame, InputAudioRawFrame):
-            self.position += Fraction(frame.num_frames, frame.sample_rate)
+            source_start = self.position
+            source_end = source_start + Fraction(
+                frame.num_frames, frame.sample_rate
+            )
+            frame.metadata[_INPUT_SOURCE_RANGE] = (source_start, source_end)
+            self.position = source_end
         await super().process_frame(frame, direction)
         if isinstance(frame, InputAudioRawFrame):
             self._conductor.media_advanced()
@@ -177,8 +201,141 @@ class _TurnBoundary(FrameProcessor):
             await self.push_frame(_AgentFinished())
 
 
+@dataclass(frozen=True)
+class _RecordedInputSegment:
+    source_start: MediaPosition
+    source_end: MediaPosition
+    recording_start_sample: int
+    recording_end_sample: int
+
+
 class _EvidenceRecorder(AudioBufferProcessor):
     """Expose Pipecat's canonical recording cursor to the transcript."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._recording_ready = asyncio.Condition()
+        self._resampled_input: dict[int, tuple[int, float]] = {}
+        self._processed_source_end = Fraction(0)
+        self._last_input_frame_duration = Fraction(0)
+        self._input_segments: list[_RecordedInputSegment] = []
+        self._closing_source_end: MediaPosition | None = None
+        self._input_closed = False
+
+    async def _resample_input_audio(self, frame: InputAudioRawFrame) -> bytes:
+        audio = await super()._resample_input_audio(frame)
+        self._resampled_input[frame.id] = (
+            len(audio) // 2,
+            self._input_resampler_delay(),
+        )
+        return audio
+
+    def _input_resampler_delay(self) -> float:
+        """Read the exact pending output from Pipecat's pinned recorder."""
+        resampler = getattr(self, "_input_resampler", None)
+        if not isinstance(resampler, SOXRStreamAudioResampler):
+            raise SpeechFault(
+                "the pinned pipecat release changed its recording resampler"
+            )
+        stream = getattr(resampler, "_soxr_stream", None)
+        if stream is None:
+            return 0.0
+        delay = float(stream.delay())
+        if delay < 0 or not math.isfinite(delay):
+            raise SpeechFault(
+                "the pinned pipecat release returned an invalid resampler delay"
+            )
+        return delay
+
+    @staticmethod
+    def _source_range(
+        frame: InputAudioRawFrame,
+    ) -> tuple[MediaPosition, MediaPosition]:
+        source_range = frame.metadata.get(_INPUT_SOURCE_RANGE)
+        if (
+            not isinstance(source_range, tuple)
+            or len(source_range) != 2
+            or not all(isinstance(value, Fraction) for value in source_range)
+        ):
+            raise SpeechFault("agent audio reached the recorder without its position")
+        return cast(tuple[MediaPosition, MediaPosition], source_range)
+
+    async def _process_recording(self, frame: Frame) -> None:
+        # Input audio is a Pipecat SystemFrame while output audio is a normal
+        # frame, so Pipecat can present both to this processor at once. Keep
+        # each recorder update and its position map indivisible.
+        async with self._recording_ready:
+            if isinstance(frame, InputAudioRawFrame) and self._input_closed:
+                raise SpeechFault("agent audio arrived after its recorded input ended")
+            await super()._process_recording(frame)
+            if not isinstance(frame, InputAudioRawFrame):
+                return
+            source_start, source_end = self._source_range(frame)
+            if source_start != self._processed_source_end or source_end < source_start:
+                raise SpeechFault("agent audio reached the recorder out of order")
+            try:
+                written, pending = self._resampled_input.pop(frame.id)
+            except KeyError as changed:
+                raise SpeechFault(
+                    "the pinned pipecat release skipped its recording resampler"
+                ) from changed
+            if written:
+                represented_end_samples = (
+                    float(source_end * self.sample_rate) - pending
+                )
+                rounded_end = round(represented_end_samples)
+                if abs(represented_end_samples - rounded_end) > 1e-6:
+                    raise SpeechFault(
+                        "pipecat's recording resampler returned an invalid position"
+                    )
+                represented_end = Fraction(rounded_end, self.sample_rate)
+                represented_start = represented_end - Fraction(
+                    written, self.sample_rate
+                )
+                recording_end = len(self._user_audio_buffer) // 2
+                recording_start = recording_end - written
+                if represented_start < 0 or represented_end > source_end:
+                    raise SpeechFault(
+                        "pipecat's recording resampler returned an invalid position"
+                    )
+                if (
+                    self._input_segments
+                    and represented_start < self._input_segments[-1].source_end
+                ):
+                    raise SpeechFault(
+                        "pipecat's recording resampler moved agent audio backwards"
+                    )
+                self._input_segments.append(
+                    _RecordedInputSegment(
+                        source_start=represented_start,
+                        source_end=represented_end,
+                        recording_start_sample=recording_start,
+                        recording_end_sample=recording_end,
+                    )
+                )
+            self._processed_source_end = source_end
+            self._last_input_frame_duration = source_end - source_start
+            self._maybe_close_input()
+            self._recording_ready.notify_all()
+
+    async def close_input_at(self, source_end: MediaPosition) -> None:
+        """Close input after the recorder has written every earlier frame."""
+        async with self._recording_ready:
+            if (
+                self._closing_source_end is not None
+                and self._closing_source_end != source_end
+            ):
+                raise SpeechFault("agent input ended at two different positions")
+            self._closing_source_end = source_end
+            self._maybe_close_input()
+            self._recording_ready.notify_all()
+
+    def _maybe_close_input(self) -> None:
+        if (
+            self._closing_source_end is not None
+            and self._processed_source_end >= self._closing_source_end
+        ):
+            self._input_closed = True
 
     @property
     def bot_position(self) -> MediaPosition:
@@ -187,6 +344,92 @@ class _EvidenceRecorder(AudioBufferProcessor):
         # Pipecat 1.7.0 has no public current-output cursor. This one access is
         # pinned in uv.lock and covered by the frame-level alignment test.
         return Fraction(len(self._bot_audio_buffer) // 2, self.sample_rate)
+
+    @property
+    def position(self) -> MediaPosition:
+        if not self.sample_rate:
+            return Fraction(0)
+        samples = max(len(self._user_audio_buffer), len(self._bot_audio_buffer)) // 2
+        return Fraction(samples, self.sample_rate)
+
+    async def agent_interval(
+        self,
+        source_began: MediaPosition,
+        source_ended: MediaPosition,
+        *,
+        observed_through: MediaPosition,
+    ) -> tuple[MediaPosition, MediaPosition]:
+        """Place one agent turn on Pipecat's canonical recorded track."""
+        async with self._recording_ready:
+            while True:
+                if self._processed_source_end < observed_through:
+                    await self._recording_ready.wait()
+                    continue
+                began = self._agent_position(source_began, at_turn_start=True)
+                ended = self._agent_position(source_ended, at_turn_start=False)
+                if began is not None and ended is not None:
+                    return began, ended
+                if began is None and self._mapped_past(
+                    source_began, at_turn_start=True
+                ):
+                    raise SpeechFault(
+                        "agent turn began in audio Pipecat did not record"
+                    )
+                if ended is None and self._mapped_past(
+                    source_ended, at_turn_start=False
+                ):
+                    raise SpeechFault(
+                        "agent turn ended in audio Pipecat did not record"
+                    )
+                if self._input_closed:
+                    if began is None:
+                        raise SpeechFault(
+                            "agent turn began after Pipecat's recording ended"
+                        )
+                    return began, self._final_agent_end(source_ended)
+                await self._recording_ready.wait()
+
+    def _agent_position(
+        self, source_position: MediaPosition, *, at_turn_start: bool
+    ) -> MediaPosition | None:
+        """At a gap, starts use later audio and ends use earlier audio."""
+        if not self.sample_rate:
+            return None
+        segments = (
+            reversed(self._input_segments)
+            if at_turn_start
+            else self._input_segments
+        )
+        for segment in segments:
+            inside = (
+                segment.source_start <= source_position < segment.source_end
+                if at_turn_start
+                else segment.source_start < source_position <= segment.source_end
+            )
+            if inside:
+                return Fraction(
+                    segment.recording_start_sample, self.sample_rate
+                ) + (source_position - segment.source_start)
+        return None
+
+    def _mapped_past(
+        self, source_position: MediaPosition, *, at_turn_start: bool
+    ) -> bool:
+        if not self._input_segments:
+            return False
+        final_end = self._input_segments[-1].source_end
+        if at_turn_start:
+            return final_end > source_position
+        return final_end >= source_position
+
+    def _final_agent_end(self, source_ended: MediaPosition) -> MediaPosition:
+        if not self.sample_rate or not self._input_segments:
+            raise SpeechFault("agent audio ended before Pipecat recorded it")
+        final = self._input_segments[-1]
+        unrecorded = source_ended - final.source_end
+        if not 0 <= unrecorded <= self._last_input_frame_duration:
+            raise SpeechFault("agent audio ended outside Pipecat's recording")
+        return Fraction(final.recording_end_sample, self.sample_rate)
 
 
 class _PersonaLLMService(LLMService):
@@ -747,12 +990,12 @@ class VoiceConductor:
             return
 
         if self._record.persona_last_stopped_at is None and not ear.utterances:
-            if ear.position >= _seconds(self._parameters.agent_opening_seconds):
+            if self._position >= _seconds(self._parameters.agent_opening_seconds):
                 await self._ask_the_persona(heard_a_turn=False)
             return
         if self._record.persona_last_stopped_at is None:
             return
-        if ear.position - self._record.quiet_since >= _seconds(
+        if self._position - self._record.quiet_since >= _seconds(
             self._parameters.agent_quiet_seconds
         ):
             await self._ask_the_persona(heard_a_turn=False)
@@ -771,8 +1014,17 @@ class VoiceConductor:
             return None
         stopped_at: MediaPosition | None = None
         if heard_a_turn and self._heard_so_far < len(ear.utterances):
-            began = ear.utterances[self._heard_so_far][0]
-            ended = ear.utterances[-1][1]
+            source_began = ear.utterances[self._heard_so_far].began
+            source_ended = ear.utterances[-1].ended
+            observed_through = ear.utterances[-1].observed_through
+            recorder = self._recorder
+            if recorder is None:
+                raise PipelineGone("the agent finished before the recorder started")
+            began, ended = await recorder.agent_interval(
+                source_began,
+                source_ended,
+                observed_through=observed_through,
+            )
             self._heard_so_far = len(ear.utterances)
             stopped_at = ended
             answering = self._record.persona_last_stopped_at is not None
@@ -809,7 +1061,7 @@ class VoiceConductor:
             return None
         self._owes_a_turn = True
         if stopped_at is None:
-            return ear.position
+            return self._position
         return stopped_at + _seconds(self._parameters.persona_pause_seconds)
 
     async def wait_until(self, due: MediaPosition) -> None:
@@ -868,6 +1120,8 @@ class VoiceConductor:
 
     @property
     def _position(self) -> MediaPosition:
+        if self._recorder is not None:
+            return self._recorder.position
         return Fraction(0) if self._ear is None else self._ear.position
 
     async def _took_a_turn(
@@ -917,6 +1171,12 @@ class VoiceConductor:
         self._agent_departed = True
         self._owes_a_turn = False
         self.media_advanced()
+
+    async def agent_input_is_closing(self, source_end: MediaPosition) -> None:
+        """Tell the recorder where the ordered final input frame ended."""
+        if self._recorder is None:
+            raise PipelineGone("agent input ended before the recorder started")
+        await self._recorder.close_input_at(source_end)
 
     def the_brain_failed(self, fault: BaseException) -> None:
         if self._brain_fault is None:
