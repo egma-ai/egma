@@ -134,6 +134,14 @@ export {
   type Sample,
   type SpannedConversation,
 } from "./measures/from-spans.ts";
+export {
+  REPORTED_MEASUREMENTS_PAYLOAD_PATH,
+  REPORTED_MEASUREMENTS_VERSION,
+  reportedMeasurementsOf,
+  reportedMeasurementsPayload,
+  type ReportedMeasurement,
+  type ReportedMeasurements,
+} from "./measures/reported.ts";
 
 /**
  * The two catalogs a form is drawn from, and the readers that hold a key to
