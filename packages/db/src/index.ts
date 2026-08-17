@@ -147,6 +147,23 @@ export {
  * the grading service would be a second answer about one conversation with
  * nothing stored to settle it against.
  */
+/**
+ * Where each provider-job pair is reached **through the Egma model gateway**.
+ *
+ * Here beside the fold and on the fold's exact terms: it reaches no store, takes
+ * no context, and is arithmetic over release catalog data. Exported for the
+ * fold's other reason, sharply — three things have to agree about these paths,
+ * and two of them are in this repository. The grader's judge makers read this;
+ * the simulator's speech legs mirror it in Python; the gateway's own route table
+ * is the authority, and a deterministic test holds the lists against each other.
+ * A second copy written into the grading engine or the claim path would be a
+ * leg quietly pointed at a path the gateway answers `404` for, read by whoever
+ * sees it as the provider being wrong.
+ */
+export {
+  GATEWAY_ROUTE,
+  gatewayAddressFor,
+} from "./models/catalog.ts";
 export {
   everySpanIn,
   measuresFromSpans,

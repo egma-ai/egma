@@ -823,6 +823,8 @@ const THE_FOLD = [
  * for a conversation's tool calls, and two implementations of "every span, once"
  * is one of them quietly missing a list.
  */
+const THE_GATEWAY_ROUTES = ["GATEWAY_ROUTE", "gatewayAddressFor"];
+
 const THE_MEASURES = [
   "everySpanIn",
   "measuresFromSpans",
@@ -845,6 +847,7 @@ describe("the data-access module's surface", () => {
         ...VALUES,
         ...READ_LIMITS,
         ...THE_FOLD,
+        ...THE_GATEWAY_ROUTES,
         ...THE_MEASURES,
         ...THE_MOCKED_WORLD,
         ...THE_PLATFORMS_SETTINGS,

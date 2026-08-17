@@ -93,6 +93,22 @@ export type ResolvedJudge = {
   readonly provider: JudgeProvider;
   readonly model: string;
   readonly key: string;
+  /**
+   * Where this provider is reached, or `undefined` for the provider's own
+   * address.
+   *
+   * **The whole of what managed model access asks of a judge maker.** Under
+   * managed access this is the Egma model gateway's route for the provider, and
+   * `key` is the credential that authorizes the gateway rather than the
+   * provider — the same request, the same body, the same protocol, sent to a
+   * different base and authenticated with a different secret. Nothing else
+   * moves, which is what keeps a second provider-adapter layer from growing
+   * beside the one file per provider that exists now.
+   *
+   * `undefined` is customer-owned access: the provider's own endpoint, with the
+   * organization's own key, and Egma is not on the path at all.
+   */
+  readonly endpoint?: string | undefined;
 };
 
 /**

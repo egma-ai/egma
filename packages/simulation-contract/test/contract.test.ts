@@ -203,6 +203,27 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     at: "/models/stt",
     keyword: "not",
   },
+  // Egma's provider credentials stay inside the Egma model gateway. A managed
+  // work order carrying one is refused on the sending side rather than arriving
+  // at a simulator that had no business holding it.
+  "spec-v2/managed-carrying-a-provider-key.json": {
+    at: "/models",
+    keyword: "oneOf",
+  },
+  // Managed access with nowhere for the traffic to go and nothing to authorize
+  // it. Refused rather than delivered, because the only thing a simulator could
+  // do with it is fall back to calling a provider directly.
+  "spec-v2/managed-without-a-gateway.json": {
+    at: "/models",
+    keyword: "oneOf",
+  },
+  // Customer-owned access is Egma off the model traffic path entirely, so a
+  // gateway address and a gateway credential are two things nothing would use
+  // and one of them is a credential.
+  "spec-v2/customer-owned-carrying-a-gateway.json": {
+    at: "/models",
+    keyword: "oneOf",
+  },
   "spec-v2/unknown-field.json": {
     at: "",
     keyword: "additionalProperties",
@@ -320,6 +341,7 @@ describe("the two schemas, as one contract", () => {
         "managed_selection",
         "speech_selection",
         "managed_speech_selection",
+        "gateway",
       ]) {
         delete defs[added];
       }

@@ -1,0 +1,36 @@
+{
+  "_why": "Customer-owned access with a gateway block. Egma is not on the model traffic path here at all — the simulator calls the providers itself with the organization's own keys — so an address and a credential for the Egma model gateway are two things nothing would use and one of them is a credential.",
+  "contract_version": 2,
+  "simulation_id": "sim_01K4RD9Q7X2M5NBVE8TJHC3PYW",
+  "modality": "voice",
+  "connection": {
+    "type": "livekit",
+    "config": { "url": "wss://lakeside-dental.livekit.cloud", "agentName": "front-desk" },
+    "credentials": { "apiKey": "APIexample0key0", "apiSecret": "example0secret0value0not0a0real0one" }
+  },
+  "persona": {
+    "traits": {
+      "personality": "Retired teacher, 68, calling from a quiet kitchen.",
+      "language": "en-GB",
+      "voice": { "provider": "cartesia", "voiceId": "measured-alto-3", "speed": 0.95 }
+    }
+  },
+  "scenario": { "instructions": "Move Tuesday's check-up to a Thursday." },
+  "limits": { "max_duration_seconds": 300, "max_turns": 40 },
+  "models": {
+    "access": "customer-owned",
+    "gateway": {
+      "address": "https://gateway.egma.ai",
+      "credential": "egma_ik_sentinel-should-not-be-here-Rt7Yu2"
+    },
+    "llm": { "provider": "openai", "model": "gpt-4o-mini", "key": "sk-sentinel-customer-owned-A1B2" },
+    "stt": { "provider": "deepgram", "model": "nova-3-general", "key": "dg-sentinel-customer-owned-C3D4" },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "key": "ct-sentinel-customer-owned-E5F6",
+      "voice_id": "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+      "speed": 1.15
+    }
+  }
+}
