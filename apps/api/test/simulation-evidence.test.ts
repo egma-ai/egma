@@ -95,30 +95,36 @@ type Conducted = {
 };
 
 /**
- * A customer with one run of two conversations, one of them with a transcript
- * filed at the door a simulator files one at.
+ * A customer with one run of two conversations. Evidence reads can also ask
+ * for one transcript filed at the door a simulator files one at. Re-grade
+ * checks use only the Postgres queue, so they do not create a ClickHouse store.
  *
  * Every step goes through the product: the agent is registered over HTTP, the
  * test is pushed over HTTP, the run is started over HTTP, and the conversations
  * are moved with the same data-access calls a simulator makes.
  */
-async function aCustomerWhoHasRun(label: string): Promise<Conducted> {
-  api = await createApi(label, { traceStore: true });
+async function aCustomerWhoHasRun(
+  label: string,
+  options: { readonly withTraceEvidence?: boolean } = {},
+): Promise<Conducted> {
+  api = await createApi(label, { traceStore: options.withTraceEvidence === true });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const who = await standingOf(api.app, ada.cookie, "a terminal");
   const run = await aConductedRun(api.app, who, {
     reference: "sim_01JQ0A2B3C4D5E6F7G8H9J0K/dual-channel.wav",
   });
 
-  await fileTranscriptOf(
-    api.app,
-    run.heard,
-    {
-      human: "I need to move Thursday's clean to next week.",
-      agent: "Of course — Tuesday at four works. You are all set.",
-    },
-    new Date(),
-  );
+  if (options.withTraceEvidence === true) {
+    await fileTranscriptOf(
+      api.app,
+      run.heard,
+      {
+        human: "I need to move Thursday's clean to next week.",
+        agent: "Of course — Tuesday at four works. You are all set.",
+      },
+      new Date(),
+    );
+  }
 
   return { who, ada, run };
 }
@@ -170,7 +176,9 @@ async function theJobOn(
 
 describe("one conversation's evidence, in one read", () => {
   it("carries the pins, the identities, the plan, the judgement and the transcript together", async () => {
-    const { who, run } = await aCustomerWhoHasRun("evidence_one_read");
+    const { who, run } = await aCustomerWhoHasRun("evidence_one_read", {
+      withTraceEvidence: true,
+    });
     await appendVerdicts(who.auth, [machineVerdict(run, run.heard)]);
 
     const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
@@ -241,7 +249,9 @@ describe("one conversation's evidence, in one read", () => {
    * the difference between *nothing was filed* and *nobody said anything*.
    */
   it("says there is no transcript rather than drawing an empty one", async () => {
-    const { who, run } = await aCustomerWhoHasRun("evidence_no_transcript");
+    const { who, run } = await aCustomerWhoHasRun("evidence_no_transcript", {
+      withTraceEvidence: true,
+    });
 
     const read = await request("GET", `/api/simulations/${run.silent}`, who.key);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
@@ -256,7 +266,9 @@ describe("one conversation's evidence, in one read", () => {
    * grading state says the work is outstanding and the verdict stays null.
    */
   it("reports pending grading without turning the page into a failure", async () => {
-    const { who, run } = await aCustomerWhoHasRun("evidence_pending");
+    const { who, run } = await aCustomerWhoHasRun("evidence_pending", {
+      withTraceEvidence: true,
+    });
 
     const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
@@ -486,7 +498,9 @@ describe("judging one conversation again", () => {
   });
 
   it("refuses a viewer, whatever their page offers them", async () => {
-    const { who, ada, run } = await aCustomerWhoHasRun("evidence_regrade_viewer");
+    const { who, ada, run } = await aCustomerWhoHasRun("evidence_regrade_viewer", {
+      withTraceEvidence: true,
+    });
     await finishGrading(who.auth);
     const sam = await colleagueOf(api.app, ada, "sam@acme.example", "viewer");
 
@@ -526,7 +540,9 @@ describe("judging one conversation again", () => {
  */
 describe("the conversation and its spans", () => {
   it("files the transcript under the id derived from the simulation", async () => {
-    const { who, run } = await aCustomerWhoHasRun("evidence_trace_identity");
+    const { who, run } = await aCustomerWhoHasRun("evidence_trace_identity", {
+      withTraceEvidence: true,
+    });
 
     const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
     const transcript = read.body.transcript as { trace_id: string };

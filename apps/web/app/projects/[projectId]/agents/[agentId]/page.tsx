@@ -596,7 +596,12 @@ function ConfirmLifecycle({
           {refused === null ? null : <Problem>{refused.message}</Problem>}
 
           <Actions>
-            <Button weight="strong" disabled={working} onClick={() => void go()}>
+            <Button
+              weight="strong"
+              tone={archiving ? "destructive" : "default"}
+              disabled={working}
+              onClick={() => void go()}
+            >
               {working
                 ? archiving
                   ? "Archiving…"

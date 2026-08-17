@@ -624,7 +624,7 @@ function RunDetailView({
               </p>
               <Actions>
                 <Button onClick={dismiss}>Keep running</Button>
-                <Button weight="strong" disabled={working} onClick={() => void cancel()}>
+                <Button tone="destructive" disabled={working} onClick={() => void cancel()}>
                   {working ? "Canceling…" : "Cancel run"}
                 </Button>
               </Actions>

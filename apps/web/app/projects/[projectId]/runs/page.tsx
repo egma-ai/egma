@@ -479,7 +479,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
             <Actions>
               <Button onClick={() => setOpenRun(null)}>Keep running</Button>
               <Button
-                weight="strong"
+                tone="destructive"
                 disabled={stopping}
                 onClick={() => void stop(opened.id)}
               >

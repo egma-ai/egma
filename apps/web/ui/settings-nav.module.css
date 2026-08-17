@@ -103,7 +103,7 @@
 }
 
 .itemActive {
-  background: var(--surface-soft);
+  background: var(--surface-active);
   color: var(--foreground);
 }
 

@@ -8,6 +8,8 @@ import {
 import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { planSpanInserts } from "../src/access/spans.ts";
+
 import {
   createMigratedTraceStore,
   type MigratedTraceStore,
@@ -21,10 +23,12 @@ import {
  * belong to the module that owns the table, and they are the two Langfuse named
  * as real requirements rather than refinements. A transcript will reach them.
  *
- * Everything here runs against a real ClickHouse. Row counts after a repeat,
- * what a `LowCardinality` column does with a long string, and whether an insert
- * of ten thousand rows arrives whole are engine behaviours, and a substitute
- * would confirm only the strings egma sends.
+ * Every storage assertion here runs against a real ClickHouse. Row counts
+ * after a repeat, what a `LowCardinality` column does with a long string, and
+ * whether an insert of ten thousand rows arrives whole are engine behaviours,
+ * and a substitute would confirm only the strings egma sends. The one pure
+ * planning assertion proves 130 months without repeating an engine behaviour
+ * already proved by the small real multi-month append beside it.
  */
 
 let store: MigratedTraceStore;
@@ -181,7 +185,7 @@ describe("a batch too big for one insert", () => {
    * year of history, or one with a broken clock, is not a client egma may lose
    * a trace over.
    */
-  it("is split by month as well as by size, because an insert may touch a hundred partitions", async () => {
+  it("plans one insert per month without asking ClickHouse to execute every insert", () => {
     const traceId = "aaaa1111222233334444555566667777";
     const months = 130;
     const spans = Array.from({ length: months }, (_, index) =>
@@ -194,11 +198,27 @@ describe("a batch too big for one insert", () => {
       }),
     );
 
+    expect(planSpanInserts(at(acme), spans)).toEqual({
+      spans: months,
+      batches: months,
+    });
+  });
+
+  it("writes a small multi-month batch with every row landing", async () => {
+    const traceId = "bbbb1111222233334444555566667777";
+    const months = 2;
+    const spans = Array.from({ length: months }, (_, index) =>
+      span({
+        traceId,
+        spanId: index.toString(16).padStart(16, "0"),
+        startedAtMicroseconds:
+          BigInt(Date.UTC(2025, index, 1)) * 1000n,
+      }),
+    );
+
     const written = await appendSpans(at(acme), spans);
 
     expect(written.appended).toBe(months);
-    // One block per month: every one of them is inside the engine's limit,
-    // which a single block of all of them would not have been.
     expect(written.batches).toBe(months);
     expect(
       await countOf(

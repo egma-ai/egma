@@ -876,7 +876,7 @@ function ArchiveDialog({
 
           <FormActions>
             <Button
-              weight="strong"
+              tone="destructive"
               disabled={busy || cannotChoose || (persona.is_default && chosen === "")}
               {...(cannotChoose
                 ? {

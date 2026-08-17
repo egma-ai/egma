@@ -18,7 +18,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -73,6 +73,10 @@ const IN_ORDER = [...TESTS].sort();
 
 /** The number the agent under test answers, for the walk that ends in phone. */
 const DIALLED = "+14155550111";
+
+/** Test-only files that release a scripted coding agent after a frame is read. */
+const RELEASE_WRITING = ".fake-agent-release-writing";
+const RELEASE_FOLDER = ".fake-agent-release-folder";
 
 let platform: Platform;
 let workspace: Workspace;
@@ -217,15 +221,14 @@ async function testsInFolder(): Promise<string[]> {
 
 describe("the files arriving", () => {
   it("puts each one on screen as it is written, with what is left to come", async () => {
-    // A real coding agent takes seconds per file. The pauses here are what a
-    // developer would be watching through, and they are what make each state
-    // of the list a thing the screen really held rather than a frame nobody
-    // could have seen.
+    // A real coding agent takes seconds per file. The scripted one stops on a
+    // barrier instead: that makes this a frame the screen really held without
+    // making the suite pay for a clock.
     const run = await toTheGate({}, [
       { kind: "say", text: `egma:plan ${TESTS.join(", ")}\n` },
       ...writes(TESTS[0]),
       { kind: "say", text: `egma:writing ${TESTS[1]}\n` },
-      { kind: "wait", ms: 1_500 },
+      { kind: "wait-for-file", path: RELEASE_WRITING },
       ...writes(TESTS[1]),
       ...TESTS.slice(2).flatMap((name) => writes(name)),
       { kind: "stop", reason: "end_turn" },
@@ -247,29 +250,55 @@ describe("the files arriving", () => {
     expect(pane).toContain(`◻ ${TESTS[4]}`);
 
     // And it keeps moving until the list is the gate's list.
+    await writeFile(path.join(workspace.dir, RELEASE_WRITING), "continue\n", "utf8");
     await showing(run, "5 tests generated", ...GATE_HINTS);
     run.write("q");
     expect(await run.exited).toBe(0);
   });
 
-  it("counts a file once when the agent both announces it and writes it", async () => {
+  it("shows each generated test once, then uploads exactly that list", async () => {
     // Every file here arrives twice over: as a marker line the agent wrote,
     // and as a file the folder poller finds a moment later. Both are the same
     // file, so the count is five and never ten — a developer reading "10/12"
     // off five files would be reading egma's bookkeeping, not their folder.
     const run = await toTheGate();
 
-    const pane = await showing(run, "5 tests generated", ...GATE_HINTS);
-    expect(pane).toContain("5 tests generated");
+    const list = await showing(
+      run,
+      "5 tests generated",
+      'suite "first-suite"',
+      IN_ORDER[0] as string,
+      "default persona",
+      "more (↑↓ browse · e opens in $EDITOR)",
+      "Run these against order-line over retell-1 (retell, chat)?",
+      ...GATE_HINTS,
+    );
+    expect(list).toContain("5 tests generated");
 
     // Ten rows would be the double count, and the screen holds only five names.
     for (const name of IN_ORDER.slice(0, 3)) {
-      expect(pane.split(name).length - 1, name).toBe(1);
+      expect(list.split(name).length - 1, name).toBe(1);
     }
+    expect(list).toContain("… 2 more");
+    expect(list).not.toContain(IN_ORDER[4] as string);
+    expect(list.indexOf("[enter] run")).toBeLessThan(list.indexOf("[e] edit first"));
+    expect(list.indexOf("[e] edit first")).toBeLessThan(list.indexOf("[q] quit"));
+    expect(list).not.toContain("Every simulation dials");
 
     await enterAndLeave(run);
     expect(await run.exited).toBe(0);
-    expect(platform.tests.tests).toHaveLength(5);
+    expect(run.scrollback()).toContain("✓ Your first run is live");
+    expect(run.scrollback()).toContain(
+      "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
+    );
+    expect(platform.tests.tests.map((test) => test.name).sort()).toEqual([...TESTS].sort());
+    for (const name of TESTS) {
+      const held = await readFile(
+        path.join(workspace.dir, "egma", "tests", `${name}.md`),
+        "utf8",
+      );
+      expect(held, name).toMatch(/^version: tstv_/mu);
+    }
   });
 
   it("stops rather than hangs when Ctrl-C lands on the one question it asks", async () => {
@@ -329,7 +358,7 @@ describe("the files arriving", () => {
       { kind: "say", text: `egma:plan ${TESTS.join(", ")}\n` },
       ...writes(TESTS[0]),
       { kind: "say", text: `egma:writing ${TESTS[1]}\n` },
-      { kind: "wait", ms: 60_000 },
+      { kind: "wait-for-file", path: ".fake-agent-never-released" },
       { kind: "stop", reason: "end_turn" },
     ]);
 
@@ -356,14 +385,17 @@ describe("the files arriving", () => {
     // common is a file appearing in the folder, so the folder is what the pane
     // is drawn from and the developer is never left looking at nothing.
     const run = await toTheGate({}, [
-      ...IN_ORDER.slice(0, 3).flatMap((name) => [
-        {
-          kind: "write-file" as const,
-          path: `egma/tests/${name}.md`,
-          content: fileFor(name),
-        },
-        { kind: "wait" as const, ms: 800 },
-      ]),
+      {
+        kind: "write-file",
+        path: `egma/tests/${IN_ORDER[0] as string}.md`,
+        content: fileFor(IN_ORDER[0] as string),
+      },
+      { kind: "wait-for-file", path: RELEASE_FOLDER },
+      ...IN_ORDER.slice(1, 3).map((name) => ({
+        kind: "write-file" as const,
+        path: `egma/tests/${name}.md`,
+        content: fileFor(name),
+      })),
       { kind: "stop", reason: "end_turn" },
     ]);
 
@@ -375,6 +407,7 @@ describe("the files arriving", () => {
       "Progress:",
     );
 
+    await writeFile(path.join(workspace.dir, RELEASE_FOLDER), "continue\n", "utf8");
     await showing(run, "3 tests generated", ...GATE_HINTS);
     run.write("q");
     expect(await run.exited).toBe(0);
@@ -382,30 +415,6 @@ describe("the files arriving", () => {
 });
 
 describe("the gate", () => {
-  it("shows the list with its personas, and says how many more there are", async () => {
-    const run = await toTheGate();
-
-    const list = await showing(
-      run,
-      "5 tests generated",
-      'suite "first-suite"',
-      IN_ORDER[0] as string,
-      "default persona",
-      "more (↑↓ browse · e opens in $EDITOR)",
-      "Run these against order-line over retell-1 (retell, chat)?",
-      ...GATE_HINTS,
-    );
-
-    // The screen is smaller than the list, so it says so rather than pretending.
-    expect(list).toContain("… 2 more");
-    // Three rows, in the folder's own order, and the rest browsed to.
-    for (const name of IN_ORDER.slice(0, 3)) expect(list).toContain(name);
-    expect(list).not.toContain(IN_ORDER[4] as string);
-    // The keys are offered in the order the transcript settled on.
-    expect(list.indexOf("[enter] run")).toBeLessThan(list.indexOf("[e] edit first"));
-    expect(list.indexOf("[e] edit first")).toBeLessThan(list.indexOf("[q] quit"));
-  });
-
   /**
    * The keystroke over a phone connection is the expensive one in this product,
    * and the screen has to say so before it is pressed rather than after.
@@ -441,48 +450,6 @@ describe("the gate", () => {
     );
     run.write("q");
     expect(await run.exited).toBe(0);
-  });
-
-  /**
-   * And the line is about the connection rather than decoration on every gate:
-   * a connection that dials nowhere says nothing about dialling, so a developer
-   * never reads a number that no simulation is going to ring.
-   */
-  it("says nothing about dialling when the connection dials nowhere", async () => {
-    const run = await toTheGate();
-
-    const list = await showing(run, "5 tests generated", ...GATE_HINTS);
-
-    expect(list).toContain("Run these against order-line over retell-1 (retell, chat)?");
-    expect(list).not.toContain("Every simulation dials");
-    run.write("q");
-    expect(await run.exited).toBe(0);
-  });
-
-  it("uploads exactly what was on the list when enter is pressed", async () => {
-    const run = await toTheGate();
-    await showing(run, "5 tests generated", ...GATE_HINTS);
-
-    await enterAndLeave(run);
-
-    expect(await run.exited).toBe(0);
-    // Enter is the end of the gate and the start of the run: the line left
-    // behind is about the run, and it names where the files are anyway.
-    expect(run.scrollback()).toContain("✓ Your first run is live");
-    expect(run.scrollback()).toContain(
-      "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
-    );
-
-    // On the platform, and pinned in the files, which is what makes the next
-    // push checkable.
-    expect(platform.tests.tests.map((test) => test.name).sort()).toEqual([...TESTS].sort());
-    for (const name of TESTS) {
-      const held = await readFile(
-        path.join(workspace.dir, "egma", "tests", `${name}.md`),
-        "utf8",
-      );
-      expect(held, name).toMatch(/^version: tstv_/mu);
-    }
   });
 
   /**
@@ -530,12 +497,12 @@ describe("the gate", () => {
     expect(held).not.toContain("version:");
   });
 
-  it("browses to a test, opens it in $EDITOR, and comes back to the list", async () => {
+  it("opens the selected test with editor arguments, then redraws after its alternate screen", async () => {
     const added = "2. The agent thanks the person.";
-    const editor = await workspace.editor(added);
+    const editor = await workspace.editor(added, { alternateScreen: true });
     const third = path.join(workspace.dir, "egma", "tests", `${IN_ORDER[2] as string}.md`);
 
-    const run = await toTheGate({ EDITOR: editor.command });
+    const run = await toTheGate({ EDITOR: `${editor.command} --wait` });
     await showing(run, "5 tests generated", ...GATE_HINTS);
 
     // Down twice, so the file that opens is the third one and not the first.
@@ -550,11 +517,19 @@ describe("the gate", () => {
     // ran, and the file it was handed is.
     expect(await run.waitFor(() => existsSync(editor.opened))).toBe(true);
     const opened = (await readFile(editor.opened, "utf8")).trim().split("\n");
-    expect(opened).toEqual([third]);
+    expect(opened).toEqual(["--wait", third]);
 
-    // The wizard is drawn again after the editor has gone, which is the whole
-    // of the promise: the terminal was handed over and taken back.
-    await showing(run, "5 tests generated", ...GATE_HINTS);
+    // Every line of the gate is drawn again. A partial diff would leave some of
+    // the editor's alternate screen behind.
+    const back = await showing(
+      run,
+      "5 tests generated",
+      'suite "first-suite"',
+      IN_ORDER[0] as string,
+      "Run these against order-line over retell-1 (retell, chat)?",
+      ...GATE_HINTS,
+    );
+    expect(back).not.toContain("STAND-IN EDITOR HAS THE SCREEN");
 
     await enterAndLeave(run);
     expect(await run.exited).toBe(0);
@@ -576,66 +551,6 @@ describe("the gate", () => {
     await enterAndLeave(run);
     expect(await run.exited).toBe(0);
     expect(platform.tests.tests).toHaveLength(5);
-  });
-
-  /**
-   * `$EDITOR` is a command line and not a command. `code --wait` and `emacs -nw`
-   * are both ordinary settings, and a wizard that spawned the whole string as
-   * one binary name would find nothing on this machine called `code --wait`.
-   */
-  it("honours an $EDITOR that carries arguments of its own", async () => {
-    const added = "2. The agent thanks the person.";
-    const editor = await workspace.editor(added);
-    const first = path.join(workspace.dir, "egma", "tests", `${IN_ORDER[0] as string}.md`);
-
-    const run = await toTheGate({ EDITOR: `${editor.command} --wait` });
-    await showing(run, "5 tests generated", ...GATE_HINTS);
-
-    run.write("e");
-
-    expect(await run.waitFor(() => existsSync(editor.opened))).toBe(true);
-    const given = (await readFile(editor.opened, "utf8")).trim().split("\n");
-    // The flag was passed on as a flag, and the file arrived after it.
-    expect(given).toEqual(["--wait", first]);
-
-    await showing(run, "5 tests generated", ...GATE_HINTS);
-    await enterAndLeave(run);
-    expect(await run.exited).toBe(0);
-    expect(await readFile(first, "utf8")).toContain(added);
-  });
-
-  /**
-   * An editor that takes the whole terminal is the ordinary case, not the odd
-   * one: vim, emacs and nano all paint over whatever was there. The promise the
-   * gate makes is that the wizard comes back afterwards, and only a terminal
-   * can say whether it did.
-   */
-  it("comes back drawn whole after an editor that took the alternate screen", async () => {
-    const added = "2. The agent thanks the person.";
-    const editor = await workspace.editor(added, { alternateScreen: true });
-    const first = path.join(workspace.dir, "egma", "tests", `${IN_ORDER[0] as string}.md`);
-
-    const run = await toTheGate({ EDITOR: editor.command });
-    await showing(run, "5 tests generated", ...GATE_HINTS);
-
-    run.write("e");
-    expect(await run.waitFor(() => existsSync(editor.opened))).toBe(true);
-
-    // Every line of the gate, not just its first: a half-diffed frame would
-    // show the heading and leave the rest as whatever the editor painted.
-    const back = await showing(
-      run,
-      "5 tests generated",
-      'suite "first-suite"',
-      IN_ORDER[0] as string,
-      "Run these against order-line over retell-1 (retell, chat)?",
-      ...GATE_HINTS,
-    );
-    expect(back).not.toContain("STAND-IN EDITOR HAS THE SCREEN");
-
-    await enterAndLeave(run);
-    expect(await run.exited).toBe(0);
-    expect(await readFile(first, "utf8")).toContain(added);
   });
 
   it("says which editor it could not start, and keeps the list waiting", async () => {

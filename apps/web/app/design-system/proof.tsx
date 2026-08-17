@@ -361,7 +361,7 @@ export function DesignSystemProof() {
               </p>
               <div className={styles.dialogActions}>
                 <Button onClick={dismiss}>Cancel</Button>
-                <Button weight="strong" onClick={() => setDialog(false)}>Archive agent</Button>
+                <Button tone="destructive" onClick={() => setDialog(false)}>Archive agent</Button>
               </div>
             </>
           )}

@@ -2892,38 +2892,161 @@ describe("the complete product, walked in order in a second project", () => {
     return found;
   }
 
-  describe("reload, a copied link, Back and Forward", () => {
+  /**
+   * Product controls that this version deliberately does not offer.
+   *
+   * These checks run while the direct-route walk already has the settled page
+   * open. The shell has its own one-time check in that walk; these are the
+   * controls and words that can differ from one page to another.
+   */
+  async function hasNoExcludedPageControls(
+    which: Page,
+    route: ProductRoute,
+  ): Promise<void> {
+    const shown = await which.innerText("main");
+
+    // A test suite is a saved selector over tests and this version has none.
+    expect(shown, route.what).not.toMatch(/\bsuite/iu);
+    // Archive is reversible. No page deletes evidence for good.
+    expect(shown, route.what).not.toMatch(/purge|delete permanently/iu);
+
+    /*
+     * `tag` and `replay` are valid words in some copy, so this checks only
+     * controls that would let somebody use those excluded features.
+     */
+    for (const absent of ["Tags", "Add tag", "New tag", "Replay"]) {
+      expect(
+        await which.getByRole("button", { name: absent }).count(),
+        `${route.what} offers ${absent}`,
+      ).toBe(0);
+      expect(
+        await which.getByRole("link", { name: absent }).count(),
+        `${route.what} links ${absent}`,
+      ).toBe(0);
+      expect(
+        await which.getByLabel(absent, { exact: true }).count(),
+        `${route.what} asks for ${absent}`,
+      ).toBe(0);
+    }
+  }
+
+  /** Nothing in this settled page extends past a phone's right edge. */
+  async function fitsPhoneWidth(which: Page, route: ProductRoute): Promise<void> {
+    const tooWide = await which.evaluate(() => {
+      const document = Reflect.get(globalThis, "document") as {
+        readonly documentElement: {
+          readonly scrollWidth: number;
+          readonly clientWidth: number;
+        };
+        querySelectorAll(selector: string): Iterable<{
+          readonly tagName: string;
+          readonly className: unknown;
+          readonly textContent: string | null;
+          getBoundingClientRect(): {
+            readonly right: number;
+            readonly width: number;
+          };
+        }>;
+      };
+      const root = document.documentElement;
+      const over = root.scrollWidth - root.clientWidth;
+      if (over <= 1) return { over, worst: [] as string[] };
+
+      const found: { how: number; what: string }[] = [];
+      for (const element of document.querySelectorAll("main *")) {
+        const box = element.getBoundingClientRect();
+        const past = Math.round(box.right - root.clientWidth);
+        if (past <= 1) continue;
+        const named =
+          typeof element.className === "string" && element.className !== ""
+            ? `.${element.className.split(/\s+/u).join(".")}`
+            : "";
+        found.push({
+          how: past,
+          what:
+            `${element.tagName.toLowerCase()}${named} ` +
+            `${Math.round(box.width)}px wide, ${past}px past the edge: ` +
+            `“${(element.textContent ?? "").trim().slice(0, 40)}”`,
+        });
+      }
+      found.sort((one, two) => two.how - one.how);
+      return { over, worst: found.slice(0, 3).map((one) => one.what) };
+    });
+    expect(
+      tooWide.over,
+      `${route.what} is wider than the screen — ${tooWide.worst.join(" | ")}`,
+    ).toBeLessThanOrEqual(1);
+  }
+
+  describe("a copied link, reload, Back and Forward", () => {
     /**
-     * Every one of them, opened cold and then reloaded.
+     * Every product route, opened directly once.
      *
-     * **A cold open is what a copied link is.** The context below has no
-     * history in this application and has never followed a link inside it, so
-     * each address is arrived at the way somebody arrives who was sent it —
-     * and what is asserted is that they land on that page, in *this* project,
-     * rather than on the entrance, on a sign-in page, or on the first project's
-     * copy of the same area.
+     * A direct open is what a copied link does. Each address is entered without
+     * following an application link, and the settled page must belong to the
+     * Support project. While that page is open, the same case checks its
+     * page-specific exclusions and resizes it to a phone width. That keeps the
+     * real layout proof without loading all 22 pages two more times.
      *
-     * The reload is the other half of the same promise and is asserted in the
-     * same loop, because it is the same claim: the address holds all the state
-     * there is, so pressing F5 changes nothing.
+     * The shell is shared, so it is checked once. One stateful detail page is
+     * reloaded as the representative proof that the address keeps its state;
+     * focused reload cases elsewhere still prove their own window and theme
+     * state.
      */
     it(
-      "opens every product route cold, and again after a reload",
+      "opens and checks every product route once, and reloads one",
       async () => {
-        const sent = await browser.newContext();
+        const sent = await browser.newContext({
+          viewport: { width: 1280, height: 900 },
+        });
         await sent.addCookies(await walk.context().cookies());
         const opened = await sent.newPage();
         opened.setDefaultTimeout(30_000);
+        const reloadRoute = routeAt(`${origin}${conversation}`);
 
         try {
-          for (const route of everyProductRoute()) {
+          for (const [index, route] of everyProductRoute().entries()) {
+            await opened.setViewportSize({ width: 1280, height: 900 });
             await opened.goto(route.address);
             await landedOn(opened, route);
             expect(opened.url(), route.what).toBe(route.address);
 
-            await opened.reload();
-            await landedOn(opened, route);
-            expect(opened.url(), `${route.what}, reloaded`).toBe(route.address);
+            if (index === 0) {
+              const sidebar = opened.locator("aside");
+              const navigation = await sidebar.innerText();
+              // Monitoring used to be banned here and is deliberately not:
+              // production traffic is a navigation item now — it is what the
+              // monitoring-surface effort added. What stays excluded is a
+              // Simulations area: a simulation is evidence, reached from the
+              // run that produced it. "Simulation runs" is that run surface's
+              // label and carries no "simulations" to trip the ban.
+              expect(navigation).not.toMatch(/simulations/iu);
+              expect(
+                await sidebar
+                  .getByRole("link", { name: "Simulations" })
+                  .count(),
+              ).toBe(0);
+            }
+
+            await hasNoExcludedPageControls(opened, route);
+
+            if (route.address === reloadRoute.address) {
+              await opened.reload();
+              await landedOn(opened, route);
+              expect(opened.url(), `${route.what}, reloaded`).toBe(route.address);
+            }
+
+            // Resize the page that is already open. Do not visit it again.
+            await opened.setViewportSize({ width: 390, height: 844 });
+            if (index === 0) {
+              expect(await opened.locator("aside").isVisible()).toBe(false);
+              expect(
+                await opened
+                  .getByRole("button", { name: "Open product navigation" })
+                  .isVisible(),
+              ).toBe(true);
+            }
+            await fitsPhoneWidth(opened, route);
           }
         } finally {
           await sent.close();
@@ -3465,97 +3588,6 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.setViewportSize({ width: 1280, height: 900 });
     });
 
-    /**
-     * Every surface, at a phone's width, held to the two things a narrow screen
-     * can get wrong: something that has to be scrolled sideways to read, and a
-     * navigation that is simply gone.
-     *
-     * **Sideways scrolling is the one that cannot be seen from a component
-     * test.** A table wider than the screen, an unbreakable identifier, a
-     * fixed-width panel — each of them lays out perfectly in jsdom, which has
-     * no layout at all, and each of them makes a page unusable on a phone.
-     */
-    it(
-      "fits every product page, and puts the navigation behind a control",
-      async () => {
-        await walk.setViewportSize({ width: 390, height: 844 });
-
-        for (const route of everyProductRoute()) {
-          await walk.goto(route.address);
-          // **The page, not only the shell.** The measurement below is a
-          // subtraction over `main`, and an empty `main` overflows nothing —
-          // so a page that had stopped rendering would have passed the one
-          // check on this walk that matters most.
-          await landedOn(walk, route);
-
-          // The sidebar gives way to a top bar, and the way into the product's
-          // areas is a control rather than nothing.
-          expect(await walk.locator("aside").isVisible(), route.what).toBe(false);
-          expect(
-            await walk
-              .getByRole("button", { name: "Open product navigation" })
-              .isVisible(),
-            route.what,
-          ).toBe(true);
-
-          /*
-           * Nothing overflows the width of the screen. One pixel of slack,
-           * because a browser rounds.
-           *
-           * **The failure names what is over the edge.** A bare number sends
-           * whoever reads it hunting through a page for a box they cannot see,
-           * and the box is nearly always one element with one rule on it — so
-           * the widest few are reported with enough of themselves to be found.
-           */
-          const tooWide = await walk.evaluate(() => {
-            const document = Reflect.get(globalThis, "document") as {
-              readonly documentElement: {
-                readonly scrollWidth: number;
-                readonly clientWidth: number;
-              };
-              querySelectorAll(selector: string): Iterable<{
-                readonly tagName: string;
-                readonly className: unknown;
-                readonly textContent: string | null;
-                getBoundingClientRect(): {
-                  readonly right: number;
-                  readonly width: number;
-                };
-              }>;
-            };
-            const root = document.documentElement;
-            const over = root.scrollWidth - root.clientWidth;
-            if (over <= 1) return { over, worst: [] as string[] };
-
-            const found: { how: number; what: string }[] = [];
-            for (const element of document.querySelectorAll("main *")) {
-              const box = element.getBoundingClientRect();
-              const past = Math.round(box.right - root.clientWidth);
-              if (past <= 1) continue;
-              const named =
-                typeof element.className === "string" && element.className !== ""
-                  ? `.${element.className.split(/\s+/u).join(".")}`
-                  : "";
-              found.push({
-                how: past,
-                what:
-                  `${element.tagName.toLowerCase()}${named} ` +
-                  `${Math.round(box.width)}px wide, ${past}px past the edge: ` +
-                  `“${(element.textContent ?? "").trim().slice(0, 40)}”`,
-              });
-            }
-            found.sort((one, two) => two.how - one.how);
-            return { over, worst: found.slice(0, 3).map((one) => one.what) };
-          });
-          expect(
-            tooWide.over,
-            `${route.what} is wider than the screen — ${tooWide.worst.join(" | ")}`,
-          ).toBeLessThanOrEqual(1);
-        }
-      },
-      SETTLE,
-    );
-
     it(
       "restyles one semantic table for a narrow screen",
       async () => {
@@ -3668,7 +3700,10 @@ describe("the complete product, walked in order in a second project", () => {
               .toContain("Loading");
           } finally {
             release();
-            await walk.unroute(theAgentsRead);
+            // Wait for the held handler to finish before removing it. The
+            // default removal can continue the request itself, after which the
+            // released handler tries to continue the same route a second time.
+            await walk.unrouteAll({ behavior: "wait" });
           }
           await saysWithin(walk, "The Support line");
 
@@ -4003,83 +4038,10 @@ describe("the complete product, walked in order in a second project", () => {
    * ------------------------------------------------------------------ */
 
   /**
-   * The exclusions, proved rather than assumed.
-   *
-   * Each of these was decided out of this version, and each is the kind of
-   * thing that arrives by accident: a nav item somebody adds because the page
-   * exists, a field somebody adds because the API takes it. A list of them
-   * checked against what a person can actually see is the cheapest way to keep
-   * a decision from eroding — and it is checked against the *rendered* pages,
-   * so a control that is present but hidden still counts as absent, exactly as
-   * it does to somebody using the product.
+   * Page-specific exclusions. The exclusions shared by all product pages are
+   * checked during the direct-route walk, while each settled page is open.
    */
   describe("what this version deliberately does not have", () => {
-    it(
-      "offers no tags, no suites and no Simulations area",
-      async () => {
-        const sidebar = walk.locator("aside");
-
-        for (const route of everyProductRoute()) {
-          await walk.goto(route.address);
-          // **Every assertion in this loop is an absence, and an absence needs
-          // a page.** A blank `main` has no tags, no suites and no replay on
-          // it either, so what the exclusions are read against has to be the
-          // settled page.
-          await landedOn(walk, route);
-
-          /*
-           * **Monitoring used to be on this list and is deliberately off it.**
-           * Production traffic is a navigation item now — it is what this
-           * effort added — so the sidebar saying the word is the product
-           * working rather than a version leaking something it does not have.
-           * What stays excluded is a **Simulations** area: a simulation is
-           * evidence, reached from the run that produced it, and a top-level
-           * list of every one would be a different product.
-           */
-          const navigation = await sidebar.innerText();
-          expect(navigation, route.what).not.toMatch(/simulations/iu);
-          expect(
-            await sidebar.getByRole("link", { name: "Simulations" }).count(),
-            route.what,
-          ).toBe(0);
-
-          const shown = await walk.innerText("main");
-          // A suite is a saved selector over tests and this version has none —
-          // so no page offers one, and no page asks which one a run is from.
-          expect(shown, route.what).not.toMatch(/\bsuite/iu);
-          // A purge. Archive is reversible and says so; nothing here deletes
-          // evidence for good.
-          expect(shown, route.what).not.toMatch(/purge|delete permanently/iu);
-
-          /*
-           * Tags and an exact replay, asked as controls rather than as words.
-           *
-           * Both words appear legitimately in copy — a persona's language is a
-           * BCP 47 *tag*, and Retry says in as many words that it is **not** an
-           * exact *replay* of the original conditions. A test that banned the
-           * strings would be a test that fails on the sentence proving the
-           * exclusion, so what is asked instead is whether anything on the page
-           * offers to do either.
-           */
-          for (const absent of ["Tags", "Add tag", "New tag", "Replay"]) {
-            expect(
-              await walk.getByRole("button", { name: absent }).count(),
-              `${route.what} offers ${absent}`,
-            ).toBe(0);
-            expect(
-              await walk.getByRole("link", { name: absent }).count(),
-              `${route.what} links ${absent}`,
-            ).toBe(0);
-            expect(
-              await walk.getByLabel(absent, { exact: true }).count(),
-              `${route.what} asks for ${absent}`,
-            ).toBe(0);
-          }
-        }
-      },
-      SETTLE,
-    );
-
     it(
       "keeps an agent's prompt, model and tools where the customer configures them",
       async () => {

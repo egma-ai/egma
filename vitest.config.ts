@@ -65,6 +65,10 @@ export default defineConfig({
     // Every database test owns a freshly created database, so files can run in
     // parallel; within a file the order matters. Root-only, not per project.
     fileParallelism: true,
+    // CI reserves the other two CPUs for Postgres, ClickHouse and Node.
+    // This is root-only: putting it inside a project looks valid but Vitest
+    // ignores it and starts one worker per visible CPU instead.
+    ...(process.env.CI === "true" ? { maxWorkers: 2 } : {}),
     projects: [
       {
         extends: true,
@@ -84,8 +88,12 @@ export default defineConfig({
           // developer runs, and the grader test drives the one its image runs.
           // Building both here keeps two test files from racing to build one.
           globalSetup: [
+            "packages/db/test/support/prepare-database-template.ts",
             "apps/cli/test/support/build-cli.ts",
             "apps/grader/test/support/build-grader.ts",
+          ],
+          setupFiles: [
+            "packages/db/test/support/use-database-template.ts",
           ],
           ...SHARED,
         },

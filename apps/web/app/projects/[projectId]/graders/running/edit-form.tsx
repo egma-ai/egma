@@ -388,7 +388,7 @@ export function SwitchOffPanel({
       <Actions>
         <Button onClick={onCancel}>{SWITCH_OFF.cancel}</Button>
         <Button
-          weight="strong"
+          tone="destructive"
           disabled={busy}
           onClick={() => void switchOff()}
         >

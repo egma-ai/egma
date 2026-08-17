@@ -7,26 +7,28 @@
  */
 
 :root {
-  /* Locked Mistral-inspired palette. */
-  --color-parchment: #fffaeb;
+  /* Locked Egma orange-red palette. */
   --color-paper: #ffffff;
   --color-midnight: #1f1f1f;
   --color-carbon: #000000;
   --color-graphite: #3c3c3c;
-  --color-ember: #fa520f;
-  --color-butter: #fff0c2;
-  --color-honeycomb: #ecdaa2;
+  --color-ember: #ff5229;
+  --color-ember-deep: #c2410c;
+  --color-ember-hover: #a93609;
+  --color-ember-pressed: #872b09;
+  --color-ember-wash: #fff5f2;
 
   /*
-   * Semantic product colors and compatibility aliases.
+   * Semantic product colors and aliases.
    *
-   * Warm yellow is an accent, not the product's default cast. The neutral
-   * canvas and hairline are derived from the locked paper and graphite values;
-   * no new palette color is introduced.
+   * The canvas, routine hover, progress, and read-only surfaces stay neutral.
+   * Pale orange is reserved for selected, current, open, cited, and other
+   * active-attention states.
    */
   --background: color-mix(in srgb, var(--color-graphite) 3%, var(--color-paper));
   --surface: var(--color-paper);
-  --surface-soft: var(--color-butter);
+  --surface-soft: color-mix(in srgb, var(--color-graphite) 6%, var(--color-paper));
+  --surface-active: var(--color-ember-wash);
   --foreground: var(--color-midnight);
   --muted: var(--color-graphite);
   --faint: color-mix(in srgb, var(--color-graphite) 76%, var(--color-paper));
@@ -34,13 +36,16 @@
   --border-strong: var(--color-midnight);
   --focus: var(--color-ember);
   --accent: var(--color-ember);
-  --inverse: var(--color-carbon);
-  --inverse-text: var(--color-paper);
+  --action: var(--color-ember-deep);
+  --action-hover: var(--color-ember-hover);
+  --action-pressed: var(--color-ember-pressed);
+  --action-text: var(--color-paper);
+  --destructive: #b44444;
+  --destructive-hover: #963636;
+  --destructive-pressed: #7e2d2d;
+  --destructive-text: var(--color-paper);
 
-  /*
-   * Product verdicts still need separate status colors during migration.
-   * These old aliases are temporary and must not gain new meanings.
-   */
+  /* Product state colors keep verdict meaning separate from brand meaning. */
   --good: #28775a;
   --warn: #9a691c;
   --bad: #b44444;
@@ -60,13 +65,13 @@
   --space-12: 80px;
   --space-13: 100px;
 
-  /* Provisional component shape, pending direct console evidence. */
+  /* Component shape. */
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-pill: 9999px;
 
-  /* Accepted type scale. Arial remains the licensed fallback. */
+  /* Accepted Arial type scale. */
   --text-caption: 14px;
   --text-body: 16px;
   --text-lead: 24px;
@@ -88,7 +93,7 @@
   --tracking-heading-lg: -1.4px;
   --tracking-display: -2.05px;
 
-  /* Older component names remain valid while their CSS migrates. */
+  /* Compact type aliases used by shared components. */
   --text-2xs: var(--text-caption);
   --text-xs: var(--text-caption);
   --text-sm: var(--text-caption);
@@ -106,7 +111,7 @@
   --control-height: var(--control-lg);
   --tap-target: 44px;
 
-  /* Provisional motion baseline from the Emil design rules. */
+  /* Motion tokens. */
   --duration-press: 120ms;
   --duration-hover: 140ms;
   --duration-popover-in: 180ms;
@@ -131,35 +136,35 @@
   --page-max: 1200px;
   --page-max-wide: 1440px;
 
-  /* Warm elevation is reserved for menus, dialogs, and showcase panels. */
-  --shadow-menu: 0 12px 32px rgb(127 99 21 / 0.14);
+  /* Orange-brown elevation is reserved for menus, dialogs, and showcase panels. */
+  --shadow-menu: 0 12px 32px rgb(122 49 23 / 0.14);
   --shadow-dialog:
-    rgb(127 99 21 / 0.12) -8px 16px 39px 0,
-    rgb(127 99 21 / 0.1) -33px 64px 72px 0;
+    rgb(122 49 23 / 0.12) -8px 16px 39px 0,
+    rgb(122 49 23 / 0.1) -33px 64px 72px 0;
   --shadow-showcase:
-    rgb(127 99 21 / 0.12) -8px 16px 39px 0,
-    rgb(127 99 21 / 0.1) -33px 64px 72px 0,
-    rgb(127 99 21 / 0.06) -73px 144px 97px 0,
-    rgb(127 99 21 / 0.02) -130px 256px 115px 0;
+    rgb(122 49 23 / 0.12) -8px 16px 39px 0,
+    rgb(122 49 23 / 0.1) -33px 64px 72px 0,
+    rgb(122 49 23 / 0.06) -73px 144px 97px 0,
+    rgb(122 49 23 / 0.02) -130px 256px 115px 0;
 }
 
-/*
- * The current dark theme stays available as a compatibility layer. DESIGN.md
- * keeps its redesign provisional until direct console evidence exists.
- */
+/* Dark theme semantic overrides. */
 :root[data-theme="dark"] {
   --background: #151514;
   --surface: #1b1b1a;
   --surface-soft: #222220;
+  --surface-active: color-mix(in srgb, var(--color-ember) 16%, var(--surface));
   --foreground: #f2f2ed;
   --muted: #a3a39b;
   --faint: #82827b;
   --border: #30302d;
   --border-strong: #4a4a44;
-  --focus: #8da0ff;
-  --accent: var(--focus);
-  --inverse: #f4f4ef;
-  --inverse-text: #1a1a18;
+  --focus: var(--color-ember);
+  --accent: var(--color-ember);
+  --action: var(--color-ember-deep);
+  --action-hover: var(--color-ember-hover);
+  --action-pressed: var(--color-ember-pressed);
+  --action-text: var(--color-paper);
   --good: #55bd8c;
   --warn: #d69a38;
   --bad: #e27373;

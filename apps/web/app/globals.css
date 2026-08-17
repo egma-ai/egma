@@ -18,7 +18,7 @@ h1, h2, h3, h4, h5, h6, strong, b { font-weight: 400; }
 a { color: inherit; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-::selection { background: var(--surface-soft); color: var(--foreground); }
+::selection { background: var(--surface-active); color: var(--foreground); }
 
 @supports (appearance: base-select) {
   select, ::picker(select) { appearance: base-select; align-items: center; }
@@ -32,7 +32,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     color: var(--foreground);
   }
   select option { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
-  select option:checked { background: var(--surface-soft); }
+  select option:checked { background: var(--surface-active); }
 }
 
 @media (prefers-reduced-motion: reduce) {
