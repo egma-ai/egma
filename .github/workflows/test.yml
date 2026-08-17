@@ -98,7 +98,11 @@ jobs:
 
   fast:
     name: Fast lane
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # Four CPUs guarantee the two Vitest workers below while leaving Postgres,
+    # ClickHouse and the runner room to work. The old two-CPU tier sometimes got
+    # a free capacity upgrade and sometimes did not, so identical suites varied
+    # between one worker and two.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -164,7 +168,9 @@ jobs:
           # happened. Everywhere else the skip is the promise that contributing
           # costs no new infrastructure.
           EGMA_REQUIRE_OBJECT_STORAGE: ${{ github.base_ref == 'main' && '1' || '' }}
-        run: pnpm test:fast
+        run: |
+          node -e 'const os = require("node:os"); console.log(`Fast Lane capacity: ${os.availableParallelism()} CPUs, 2 Vitest workers`);'
+          pnpm test:fast
 
   browser:
     # **One job, and never sharded.** The real-browser proof is one ordered

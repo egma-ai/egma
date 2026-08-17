@@ -391,7 +391,7 @@ describe("the way into the builder", () => {
     apiAnswers({ "/api/me": { status: 200, body: meWith("viewer") } });
     render(<RunsPage />);
 
-    await screen.findByRole("heading", { name: "Runs" });
+    await screen.findByRole("heading", { name: "Simulation runs" });
     expect(screen.queryAllByRole("link", { name: "Create a run" })).toEqual([]);
   });
 });

@@ -469,6 +469,8 @@ source = { virtual = "." }
 dependencies = [
     { name = "egma" },
     { name = "livekit-agents", extra = ["openai", "silero"] },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
 ]
 
 [package.dev-dependencies]
@@ -483,6 +485,8 @@ dev = [
 requires-dist = [
     { name = "egma", editable = "../../sdks/python" },
     { name = "livekit-agents", extras = ["openai", "silero"], specifier = "==1.6.7" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
 ]
 
 [package.metadata.requires-dev]

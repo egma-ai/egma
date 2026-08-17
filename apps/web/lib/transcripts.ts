@@ -1,3 +1,4 @@
+import { projectPath } from "./project-context.ts";
 import { DEFAULT_WINDOW, WINDOWS, type WindowChoice } from "./transcript-copy.ts";
 
 /**
@@ -281,6 +282,26 @@ function hoursIn(choice: WindowChoice): number {
   return known?.hours ?? fallback?.hours ?? 24;
 }
 
+/**
+ * Whether this is the widest window the control offers.
+ *
+ * It is what separates *nothing here* from *nothing in this hour*. A project
+ * with a week of traffic read at the last hour is an empty list and a healthy
+ * project, and the widest choice is as close to "everything" as this page can
+ * ask for — the store caps a read at thirty-one days, so nothing wider exists
+ * to offer.
+ *
+ * Derived from the offered windows rather than written down, so adding a wider
+ * one moves this with it.
+ */
+export const WIDEST_WINDOW: WindowChoice = WINDOWS.reduce((one, other) =>
+  other.hours > one.hours ? other : one,
+).id;
+
+export function isWidestWindow(choice: WindowChoice): boolean {
+  return choice === WIDEST_WINDOW;
+}
+
 /** The last day, or whichever span of time was chosen instead. */
 export function recentWindow(choice: WindowChoice, now: Date): Window {
   const hours = hoursIn(choice);
@@ -321,11 +342,241 @@ export function windowAround(facts: {
   };
 }
 
-/** Where a row in the list leads, window and all. */
-export function transcriptPath(facts: Facts): string {
+/* ------------------------------------------------------------------ *
+ * The monitoring section: where its pages are, and what they ask for.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The product area production traffic is read in, and the page inside it.
+ *
+ * **Both segments are glossary words.** The store files a trace made of spans
+ * and the API's own paths say so; what a person navigates is *monitoring*, and
+ * what they open is a *transcript*. `dashboard` is reserved beside this one and
+ * nothing claims it — there is no constant for it here on purpose, because a
+ * name in this file is a name something links to.
+ */
+export const MONITORING_SECTION = "monitoring";
+export const TRANSCRIPTS_STEP = "transcripts";
+
+/** The area's own address, which lands on the list below. */
+export function monitoringPath(projectId: string): string {
+  return projectPath(projectId, MONITORING_SECTION);
+}
+
+/** Every production conversation this project recorded. */
+export function transcriptsPath(projectId: string): string {
+  return projectPath(projectId, MONITORING_SECTION, TRANSCRIPTS_STEP);
+}
+
+/** Where a row in the list leads, project and window and all. */
+export function transcriptPath(projectId: string, facts: Facts): string {
   const window = windowAround(facts);
   const query = new URLSearchParams({ from: window.from, to: window.to });
-  return `/traces/${encodeURIComponent(facts.trace_id)}?${query.toString()}`;
+  return `${transcriptsPath(projectId)}/${encodeURIComponent(facts.trace_id)}?${query.toString()}`;
+}
+
+/**
+ * What the store calls the two kinds of traffic, and the one this surface asks
+ * for.
+ *
+ * **Monitoring is production and nothing else.** A simulation has a richer page
+ * of its own inside the run that produced it — the frozen test, the persona, the
+ * graders, the mock tools — so drawing it a second time and poorer, in a mixed
+ * list, is a wrong door. The filter is the server's, in the address of the
+ * request: narrowing what came back would answer differently depending on what
+ * had already been fetched, and would quietly break paging.
+ */
+export const SOURCE_PARAMETER = "source";
+export const PRODUCTION = "production";
+
+/** Which project a read is about, as the v1 contract spells it. */
+export const PROJECT_PARAMETER = "project_id";
+
+const TRACES_ENDPOINT = "/v1/traces";
+
+/**
+ * One page of this project's production conversations.
+ *
+ * Three things ride in the address and each is load-bearing: the **window**,
+ * because the store is filed by time and refuses a read that bounded nothing;
+ * the **project**, read from the page's own address rather than assumed from
+ * whoever is signed in, so that a copied link opens the project it names; and
+ * the **source**, because this surface is production traffic only.
+ */
+export function productionListPath(asking: {
+  readonly window: Window;
+  readonly projectId: string;
+  readonly cursor?: string | null;
+  /**
+   * How many rows are wanted at most. Left out for a page of the list, which
+   * takes whatever the endpoint's own page size is; sent as `1` by the probe
+   * below, which only asks whether anything is there.
+   */
+  readonly limit?: number;
+}): string {
+  const asked = new URLSearchParams({
+    from: asking.window.from,
+    to: asking.window.to,
+    [SOURCE_PARAMETER]: PRODUCTION,
+    [PROJECT_PARAMETER]: asking.projectId,
+  });
+  if (asking.cursor != null && asking.cursor !== "") {
+    asked.set("cursor", asking.cursor);
+  }
+  if (asking.limit !== undefined) asked.set("limit", String(asking.limit));
+  return `${TRACES_ENDPOINT}?${asked.toString()}`;
+}
+
+/**
+ * The one question a quiet page cannot answer from the window it is on: **has
+ * this project ever recorded anything at all?**
+ *
+ * One row is the whole answer — *some* or *none* is the branch, and a count is
+ * not wanted — so it asks for one and reads whether it came back. It is fired
+ * only when the window on screen is empty, and not even then when that window
+ * is already the widest, because the list read has just answered the same
+ * question.
+ */
+export function everRecordedPath(projectId: string, now: Date): string {
+  return productionListPath({
+    window: recentWindow(WIDEST_WINDOW, now),
+    projectId,
+    limit: 1,
+  });
+}
+
+/**
+ * One conversation, in the window it happened in and the project it belongs to.
+ *
+ * No source here, and deliberately: the name already picks out one row, and a
+ * filter on a lookup could only ever turn a transcript somebody was sent into a
+ * page that says it is not there.
+ */
+export function transcriptReadPath(asking: {
+  readonly traceId: string;
+  readonly window: Window;
+  readonly projectId: string;
+}): string {
+  const asked = new URLSearchParams({
+    from: asking.window.from,
+    to: asking.window.to,
+    [PROJECT_PARAMETER]: asking.projectId,
+  });
+  return `${TRACES_ENDPOINT}/${encodeURIComponent(asking.traceId)}?${asked.toString()}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * What to say when the page is quiet.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Which guidance a quiet Monitoring page owes its reader — one of four, and
+ * never two at once.
+ *
+ * Each answers a different question, and showing the wrong one sends somebody
+ * the wrong way for an afternoon:
+ *
+ * - `nothing-in-this-window` — the list is empty because of the **window**, not
+ *   because of the project: something *is* recorded further back. A week of
+ *   traffic read at the last hour is an empty page and a healthy project, and
+ *   greeting it with a setup tutorial tells somebody their working export is
+ *   broken. One line and the way out; nothing else, because nothing else is
+ *   known to be wrong.
+ * - `set-up-capture` — nothing has arrived **anywhere**, at any window this page
+ *   can ask about. The reader has an agent and no export, so what they need is
+ *   the address, the two variables and a key — and the caution about the key
+ *   that fails silently, which rides with the teaching so that every role meets
+ *   it. It does not matter which window is selected: a developer whose first
+ *   ever page is empty is the person this teaching exists for, and the default
+ *   window is where they land.
+ * - `key-names-the-organization` — the same emptiness, with a key that names no
+ *   project actually **visible** to this reader. That key is the one step of
+ *   the setup path that fails in silence: everything is accepted and stored,
+ *   and none of it is in any project, so a correct-looking export shows nothing
+ *   here. Saying "point an export at Egma" to somebody who already did is the
+ *   unhelpful answer, so this replaces the teaching rather than joining it.
+ * - `nothing-watches-production` — traffic is arriving and no grader is scoped
+ *   to it, so verdicts will stay absent. Every new grader defaults to
+ *   simulations, and the seeded expected-behaviors copy is structurally
+ *   simulations-only, so this is the ordinary state rather than the odd one.
+ *
+ * Nothing at all is the fifth answer, and it is the one a healthy project gets:
+ * traffic arriving, something judging it.
+ *
+ * The order is the point. With no traffic, telling somebody that no grader
+ * watches production is noise about a problem they do not have yet.
+ *
+ * **A count nobody answered is `null`, and it is never read as a zero.** A
+ * failed grader read folded into "no grader watches production" would put a
+ * claim on screen that egma has no answer for — the same collapse
+ * `ui/page-state.tsx` forbids between failed and empty — so a supporting read
+ * that did not land means one less thing this page says, and never one more.
+ *
+ * `everRecorded` is that rule at its sharpest, because both of the sentences it
+ * decides between are confident ones. Unanswered, the page falls back to the
+ * window line: *nothing here, try a wider window* is true whatever the answer
+ * would have been, while the teaching would be telling somebody with a working
+ * export to go and build one.
+ */
+export type Quiet =
+  | "nothing-in-this-window"
+  | "set-up-capture"
+  | "key-names-the-organization"
+  | "nothing-watches-production";
+
+export function quietState(seen: {
+  /** How many production conversations this window holds. */
+  readonly listed: number;
+  /**
+   * How many this project holds at the widest window there is — the answer to
+   * *has anything ever arrived* — or `null` where nothing answered.
+   *
+   * Only read when the window on screen is empty, which is the only time the
+   * question is asked.
+   */
+  readonly everRecorded: number | null;
+  /** Visible keys that name no project, or `null` where nothing answered. */
+  readonly organizationWideKeys: number | null;
+  /** Graders whose scope reaches production, or `null` where nothing answered. */
+  readonly watchingProduction: number | null;
+}): Quiet | null {
+  if (seen.listed === 0) {
+    // Nothing answered the wider question, so neither confident sentence is
+    // earned. The window line is true either way.
+    if (seen.everRecorded === null) return "nothing-in-this-window";
+    if (seen.everRecorded > 0) return "nothing-in-this-window";
+
+    return seen.organizationWideKeys !== null && seen.organizationWideKeys > 0
+      ? "key-names-the-organization"
+      : "set-up-capture";
+  }
+  return seen.watchingProduction === 0 ? "nothing-watches-production" : null;
+}
+
+/**
+ * Whether a running grader's verdicts can ever appear beside production
+ * traffic.
+ *
+ * `both` counts, because a copy scoped to both judges production as well as
+ * simulations. `simulations` does not, whatever its sampling rate says.
+ */
+export function watchesProduction(grader: { readonly scope: string }): boolean {
+  return grader.scope === PRODUCTION || grader.scope === "both";
+}
+
+/**
+ * Keys minted against the whole organization, which file outside every project.
+ *
+ * **A revoked one is not one of them.** It authenticates nothing, so it can file
+ * nothing anywhere — and a page that counted it would explain an empty list with
+ * a key somebody already dealt with, which is a wrong answer that looks like a
+ * knowledgeable one.
+ */
+export function namesWholeOrganization(key: {
+  readonly project_id: string | null;
+  readonly revoked_at: string | null;
+}): boolean {
+  return key.project_id === null && key.revoked_at === null;
 }
 
 /* ------------------------------------------------------------------ *

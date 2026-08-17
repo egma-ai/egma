@@ -11,7 +11,7 @@
   margin: 0;
   padding: var(--space-2) var(--space-4);
   border-inline-start: 3px solid var(--accent);
-  background: var(--surface-soft);
+  background: var(--surface-active);
   color: var(--foreground);
   font-size: var(--text-caption);
   line-height: var(--line-caption);

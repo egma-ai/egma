@@ -303,6 +303,12 @@ type InsertBlock = {
   readonly token: string;
 };
 
+/** The observable shape of the pure work done before ClickHouse is asked. */
+export type SpanInsertPlan = {
+  readonly spans: number;
+  readonly batches: number;
+};
+
 /**
  * The block's `insert_deduplication_token`: a digest over whose spans these are
  * and which — the tenancy, then every row's writer-minted ids, in block order.
@@ -383,6 +389,34 @@ function inserts(
 }
 
 /**
+ * Plan the exact inserts without performing I/O.
+ *
+ * This is an internal test seam, not part of the package export. It keeps the
+ * 130-month safety proof on the same serialisation and grouping code that
+ * `appendSpans` uses, without making ClickHouse execute 130 network writes.
+ */
+export function planSpanInserts(
+  auth: AuthContext,
+  spans: readonly NewSpan[],
+): SpanInsertPlan {
+  return {
+    spans: spans.length,
+    batches: preparedInserts(auth, spans).length,
+  };
+}
+
+/** The shared pure preparation behind planning and writing. */
+function preparedInserts(
+  auth: AuthContext,
+  spans: readonly NewSpan[],
+): InsertBlock[] {
+  return inserts(
+    auth,
+    spans.map((span) => serialised(auth, span)),
+  );
+}
+
+/**
  * The refusals that are about the rows rather than about the moment.
  *
  * Named symbolically, because ClickHouse's names are stable and its numbers are
@@ -457,10 +491,7 @@ export async function appendSpans(
 ): Promise<AppendedSpans> {
   if (spans.length === 0) return { appended: 0, batches: 0 };
 
-  const batches = inserts(
-    auth,
-    spans.map((span) => serialised(auth, span)),
-  );
+  const batches = preparedInserts(auth, spans);
   for (const block of batches) {
     // The rows go out as the lines they were already serialised into. The
     // client's own `insert` would take the objects and stringify each one

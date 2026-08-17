@@ -1,7 +1,11 @@
 import { ping, pingClickHouse } from "@egma/db";
 import Fastify, { type FastifyInstance } from "fastify";
 
-import { createIdentity, type Identity } from "./auth/better-auth.ts";
+import {
+  createIdentity,
+  type Identity,
+  type IdentityOptions,
+} from "./auth/better-auth.ts";
 import {
   loggingEmailSender,
   smtpEmailSender,
@@ -91,6 +95,8 @@ export type ServerOptions = {
    * is Retell itself; a test stands a Retell-shaped server on loopback.
    */
   readonly retellReach?: RetellReach;
+  /** Test-only device-flow pace; a production server uses five seconds. */
+  readonly deviceAuthorizationInterval?: IdentityOptions["deviceAuthorizationInterval"];
 };
 
 export type Api = {
@@ -136,6 +142,9 @@ export function buildApi(options: ServerOptions): Api {
     basePath: AUTH_BASE_PATH,
     secret: config.authSecret,
     emailSender,
+    ...(options.deviceAuthorizationInterval === undefined
+      ? {}
+      : { deviceAuthorizationInterval: options.deviceAuthorizationInterval }),
     // The provider says what happened in a sentence and hands the cause along
     // beside it. Pino writes an `Error` as `{}` under any key but `err`, so
     // putting a cause anywhere else leaves an operator reading "Failed to run

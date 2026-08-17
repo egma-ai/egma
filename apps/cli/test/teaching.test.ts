@@ -10,6 +10,7 @@
  * comes out is compared.
  */
 
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -54,6 +55,7 @@ const ACCOUNT: FakeRetellScript = {
 const GENERATE_TASK = "## The words the agent is running on";
 
 const NAMES = ["open-on-sunday", "lost-the-order-number", "wants-it-by-friday"];
+const RELEASE_WRITING = ".fake-agent-release-teaching";
 
 function fileFor(name: string): string {
   return [
@@ -77,13 +79,13 @@ function writes(name: string): FakeStep[] {
 }
 
 /**
- * The one script both runs use.
+ * The script both runs use.
  *
- * It waits between files so that the pane is on screen long enough to be read —
- * and for well under the time one card stays up, which is what makes "the timer
- * never fired" a fact about this run rather than a hope.
+ * A terminal check can hold the scripted coding agent on a file barrier until
+ * it has read the first card. A headless walk needs no barrier. Neither path
+ * waits for a clock.
  */
-function scriptFor(workspace: Workspace): Promise<string> {
+function scriptFor(workspace: Workspace, releaseFile?: string): Promise<string> {
   return workspace.script({
     steps: [
       { kind: "say", text: "egma:found framework retell-sdk\n" },
@@ -94,10 +96,10 @@ function scriptFor(workspace: Workspace): Promise<string> {
         contains: GENERATE_TASK,
         steps: [
           { kind: "say", text: `egma:plan ${NAMES.join(", ")}\n` },
-          ...NAMES.flatMap((name) => [
-            { kind: "wait", ms: 500 } as FakeStep,
-            ...writes(name),
-          ]),
+          ...(releaseFile === undefined
+            ? []
+            : ([{ kind: "wait-for-file", path: releaseFile }] satisfies FakeStep[])),
+          ...NAMES.flatMap((name) => writes(name)),
           { kind: "stop", reason: "end_turn" },
         ],
       },
@@ -186,7 +188,7 @@ describe("the deck", () => {
 
 describe("the pane, while the files land", () => {
   it("is drawn beside them, and the walk ends exactly as it does without it", async () => {
-    const script = await scriptFor(workspace);
+    const script = await scriptFor(workspace, RELEASE_WRITING);
 
     // The gate is not the end of the walk any more: enter starts a run, and
     // the wizard leaves once one verdict has landed. Exactly one is judged on
@@ -242,6 +244,7 @@ describe("the pane, while the files land", () => {
       );
       expect(pane).toContain("behaviors that say what should");
 
+      await writeFile(path.join(workspace.dir, RELEASE_WRITING), "continue\n", "utf8");
       await showing(terminal, "3 tests generated", "[enter] run");
       terminal.write("\r");
 
@@ -302,7 +305,7 @@ describe("the pane, while the files land", () => {
   });
 
   it("gives the whole width to the files when the terminal is too narrow for both", async () => {
-    const script = await scriptFor(workspace);
+    const script = await scriptFor(workspace, RELEASE_WRITING);
     const grading = gradeEveryRun(platform, { atMost: 1 });
 
     const terminal = runInTerminal({
@@ -345,6 +348,7 @@ describe("the pane, while the files land", () => {
       // The work is on screen whole; the teaching is what gives way.
       expect(narrow).not.toContain("One situation to put your agent");
 
+      await writeFile(path.join(workspace.dir, RELEASE_WRITING), "continue\n", "utf8");
       await showing(terminal, "[enter] run");
       terminal.write("\r");
       expect(await terminal.exited).toBe(0);

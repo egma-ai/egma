@@ -88,6 +88,27 @@ Leave it running; Egma's simulations dispatch it per room.
   it joins only rooms whose dispatch asks for `front-desk`. Egma's
   named-`agentName` path.
 
+## Point its telemetry at an Egma
+
+Three standard OpenTelemetry variables, and nothing else. Set them where
+this worker runs and every conversation it holds lands in that project's
+**Monitoring**; leave `OTEL_EXPORTER_OTLP_ENDPOINT` unset and the agent
+builds no exporter at all and behaves exactly as it did before.
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3100
+export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
+export OTEL_SERVICE_NAME=dumb-agent
+```
+
+Three things about those. The endpoint is the **API's** port and carries
+**no `/v1/traces`** on the end — the exporter appends the signal's own
+path. The space in the header is percent-encoded because OpenTelemetry
+does not allow a literal one, and an SDK that refuses the whole variable
+exports nothing and says nothing about it. And the key has to name a
+**project**: a key minted for the whole organization files its telemetry
+outside every project, where no Monitoring page is looking.
+
 ## The suites that simulate against it
 
 Two opt-in tests in `apps/simulator/tests` conduct whole simulations

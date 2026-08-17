@@ -474,6 +474,13 @@ const PASSWORD = "a-long-enough-password";
 
 let acmeKey: string;
 
+/**
+ * The project Ada's browser stands in, which is the one her production traffic
+ * is read in. Filled in once the telemetry has somewhere to go, and read by
+ * every flow below that opens Monitoring.
+ */
+let acme = "";
+
 /** The cookie header a browser would send back, given what it was just set. */
 function cookiesFrom(header: string | null): string {
   return (header ?? "")
@@ -574,6 +581,32 @@ async function signedInBrowser(email: string): Promise<Page> {
   await theirs.getByRole("button", { name: "Sign in" }).click();
   await theirs.waitForURL(new RegExp(`^${origin}/projects/prj_[^/]+/agents$`));
   return theirs;
+}
+
+/**
+ * Where production traffic is read: **Monitoring**, inside a project.
+ *
+ * Written once here rather than at each `goto`, because the whole of this
+ * effort is that these pages moved. The old top-level `/traces` addresses are
+ * gone — not redirected — and a test that still knew how to spell one would go
+ * on proving the page that no longer exists.
+ */
+function monitoringAt(projectId: string): string {
+  return `${origin}/projects/${projectId}/monitoring/transcripts`;
+}
+
+/**
+ * Which project a browser is standing in, read off the address it landed on.
+ *
+ * Asked of the page rather than of the API, because the address is what every
+ * one of these pages reads the project out of — so this is the same answer the
+ * page under test is working from, rather than a second opinion that could
+ * agree with the wrong page.
+ */
+function projectIn(which: Page): string {
+  const found = /\/projects\/(prj_[^/?#]+)/u.exec(which.url())?.[1];
+  expect(found, `${which.url()} names a project`).toBeDefined();
+  return found ?? "";
 }
 
 /** One short exchange as OTLP/JSON, at an instant of the test's choosing. */
@@ -679,20 +712,25 @@ function saysNothingBanned(shown: string): void {
 
 /**
  * The whole slice: a real LiveKit agent's telemetry goes in at the door, and
- * the developer who owns it opens the dashboard and reads the exchange.
+ * the developer who owns it clicks **Monitoring** and reads the exchange.
  *
  * This is the spec's own demo sentence executed rather than described — *run
- * compose, point an agent's export at egma, open the dashboard, read the
- * exchange with its timings*. The fourteen captured bodies are the ones an
- * exporter really sent, replayed byte for byte, and they arrive **through the
- * same origin the dashboard is served from**, which is the deployment a
- * self-hoster actually gets: one address, and the exporter aimed at it.
+ * compose, point an agent's export at egma, open Monitoring, read the exchange
+ * with its timings*. The fourteen captured bodies are the ones an exporter
+ * really sent, replayed byte for byte, and they arrive **through the same
+ * origin the pages are served from**, which is the deployment a self-hoster
+ * actually gets: one address, and the exporter aimed at it.
+ *
+ * **The addresses are inside a project now**, which is the change this effort
+ * made and the reason every `goto` below goes through `monitoringAt`. The old
+ * top-level pages were reachable from nowhere in the product; production
+ * traffic is a navigation item, and its list is a project's own.
  *
  * Ada is the same Ada as above: already signed up, already signed in, already
  * holding an organization. Which is exactly the state somebody is in when they
  * first have telemetry to look at.
  */
-describe("the list of what an organization recorded", () => {
+describe("what a project recorded in production", () => {
   beforeAll(async () => {
     await page.clock.setFixedTime(AT);
 
@@ -700,6 +738,10 @@ describe("the list of what an organization recorded", () => {
       .map((cookie) => `${cookie.name}=${cookie.value}`)
       .join("; ");
     acmeKey = await keyForTheProject(hers, "Acme");
+
+    await page.goto(`${origin}/`);
+    await page.waitForURL(/\/projects\/prj_[^/]+\/agents$/);
+    acme = projectIn(page);
 
     for (const captured of await capturedRequests()) {
       const sent = await fetch(`${origin}/v1/traces`, {
@@ -732,14 +774,43 @@ describe("the list of what an organization recorded", () => {
       await selector.waitFor({ state: "visible" });
       await expect.poll(() => selector.innerText()).toMatch(/acme/i);
 
-      // The four product areas, and Personas beside them. Settings is not one
-      // of them and neither is a simulation.
-      for (const area of ["Agents", "Tests", "Graders", "Runs", "Personas"]) {
+      // The four product areas, and Personas and Graders beside them. Settings
+      // is not one of them and neither is a simulation.
+      for (const area of [
+        "Agents",
+        "Tests",
+        "Simulation runs",
+        "Monitoring",
+        "Personas",
+        "Graders",
+      ]) {
         expect(
           await sidebar.getByRole("link", { name: area, exact: true }).count(),
           area,
         ).toBe(1);
       }
+
+      /*
+       * Monitoring is one click, and the click lands on the transcripts.
+       *
+       * This is the whole of what the effort promised a person: production
+       * traffic used to be reachable at no address the product linked to at
+       * all. So the item is asserted by the address it carries rather than by
+       * its presence — an item pointing at the area's own address would cost a
+       * redirect on every visit, and a reserved neighbour under the same area
+       * could become the landing by accident.
+       */
+      expect(
+        await sidebar
+          .getByRole("link", { name: "Monitoring", exact: true })
+          .getAttribute("href"),
+      ).toBe(`/projects/${project ?? ""}/monitoring/transcripts`);
+
+      // And the runs surface is reached by its new label. `Runs` on its own is
+      // what it said before this effort separated the two kinds of traffic.
+      expect(
+        await sidebar.getByRole("link", { name: "Runs", exact: true }).count(),
+      ).toBe(0);
       expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
       expect(
         await sidebar.getByRole("link", { name: "Simulations" }).count(),
@@ -851,7 +922,7 @@ describe("the list of what an organization recorded", () => {
   it(
     "dresses the window control as this product's own",
     async () => {
-      await page.goto(`${origin}/traces`);
+      await page.goto(monitoringAt(acme));
       await page.waitForSelector("#window");
 
       expect(
@@ -875,13 +946,19 @@ describe("the list of what an organization recorded", () => {
   it(
     "opens on the last day, and shows the exchange the agent just had",
     async () => {
-      await page.goto(`${origin}/traces`);
+      await page.goto(monitoringAt(acme));
 
       await page.waitForSelector("table");
       const shown = await page.innerText("main");
 
+      // The heading is the product's word for this area, and the page says what
+      // it holds before a single row is read.
+      expect(shown).toContain("Monitoring");
+      expect(shown).toContain("What your agents did in production, newest first.");
+
       // The window control is on the default nobody chose, and the capture is
-      // inside it. Nothing was widened to find this row.
+      // inside it — the browser's clock is pinned to the evening of the day the
+      // capture was recorded. Nothing was widened to find this row.
       expect(await page.inputValue("#window")).toBe("24h");
 
       // The facts the list endpoint returns, as columns.
@@ -892,7 +969,22 @@ describe("the list of what an organization recorded", () => {
       );
       expect(shown).toContain(String(FIXTURE_TRACE.spans));
       expect(shown).toContain("livekit");
-      expect(shown).toContain("production");
+
+      /*
+       * **And no column saying `production`.** Every row on this surface is
+       * production by definition — the request narrows to it at the server and
+       * a simulation is read under the run that produced it — so a column
+       * repeating a constant on every line would be furniture. The word is
+       * still a fact about one exchange, and it is asserted where it is shown:
+       * on the transcript, under *Where this came from*.
+       *
+       * Asked of the table rather than of `main`, because the page's own lead
+       * says the word in a sentence and would answer this question wrongly.
+       */
+      expect(await page.locator("thead th").allInnerTexts()).not.toContain(
+        "Source",
+      );
+      expect(await page.innerText("table")).not.toContain("production");
 
       // The first thing the *human* said, which is what somebody scanning a
       // list is looking for — not the greeting the agent opens every one with.
@@ -913,7 +1005,7 @@ describe("the list of what an organization recorded", () => {
   it(
     "marks what failed without anybody having to open anything",
     async () => {
-      await page.goto(`${origin}/traces`);
+      await page.goto(monitoringAt(acme));
       await page.waitForSelector("table");
 
       // Three spans of this capture carry an error status — a model timing out,
@@ -930,10 +1022,87 @@ describe("the list of what an organization recorded", () => {
     SETTLE,
   );
 
+  /**
+   * The one thing that keeps the two kinds of traffic apart, asked on the wire.
+   *
+   * **Monitoring is production and nothing else.** A simulation is read under
+   * the run that produced it — beside the frozen test, the persona, the graders
+   * and the mock-tools record — so drawing it a second time and poorer here
+   * would be a wrong door.
+   *
+   * Asked of the *request* rather than of the rows, and that division is
+   * deliberate. Whether the server honours `source` is the contract's own claim
+   * and is proved exhaustively at the seam in `trace-reads-contract.test.ts`,
+   * including that paging never crosses into a simulation. What no seam test can
+   * reach is whether **this page asks** — a page that narrowed what came back
+   * instead would answer differently depending on what had already been
+   * fetched, and would quietly break paging, while every row on screen still
+   * looked right.
+   *
+   * The project rides along for the same reason: a request that named no
+   * project would let the server pick one, which looks correct in the only
+   * project a new customer has.
+   */
+  it(
+    "asks the store for production only, and for this project",
+    async () => {
+      const asked: URL[] = [];
+      const listen = (request: Request) => {
+        const address = new URL(request.url());
+        if (address.pathname === "/v1/traces") asked.push(address);
+      };
+
+      page.on("request", listen);
+      try {
+        await page.goto(monitoringAt(acme));
+        await page.waitForSelector("table");
+      } finally {
+        page.off("request", listen);
+      }
+
+      expect(asked.length, "the list read the store").toBeGreaterThan(0);
+      for (const one of asked) {
+        expect(one.searchParams.get("source"), one.href).toBe("production");
+        expect(one.searchParams.get("project_id"), one.href).toBe(acme);
+        // And a window on every one of them, because the store is filed by time
+        // and refuses a read that bounded nothing.
+        expect(one.searchParams.get("from"), one.href).not.toBeNull();
+        expect(one.searchParams.get("to"), one.href).not.toBeNull();
+      }
+    },
+    SETTLE,
+  );
+
+  /**
+   * The addresses these pages used to have, which are gone rather than moved.
+   *
+   * They were never linked from the product — a saved `/traces` is a hand-typed
+   * one — so nothing redirects, and what somebody who kept one meets is the
+   * application's own not-found rather than a page that half works.
+   */
+  it(
+    "no longer answers where the old top-level pages were",
+    async () => {
+      for (const gone of [
+        `${origin}/traces`,
+        `${origin}/traces/4d1c0b9a8e7f6a5b4c3d2e1f00998877`,
+      ]) {
+        const answer = await page.goto(gone);
+        expect(answer?.status(), gone).toBe(404);
+        // And not the transcript wearing a 404: neither the list nor the
+        // exchange drew anything here.
+        const shown = await page.innerText("body");
+        expect(shown, gone).not.toContain("The exchange");
+        expect(shown, gone).not.toContain("Hi Kelly, my name is Sam.");
+      }
+    },
+    SETTLE,
+  );
+
   it(
     "keeps the window somebody chose in the address, so a reload stays on it",
     async () => {
-      await page.goto(`${origin}/traces`);
+      await page.goto(monitoringAt(acme));
       await page.waitForSelector("table");
       expect(await page.inputValue("#window")).toBe("24h");
 
@@ -951,7 +1120,7 @@ describe("the list of what an organization recorded", () => {
 
       // A window nobody was offered is not one. Editing the address to a word
       // the store would refuse lands on the default instead of on an error.
-      await page.goto(`${origin}/traces?window=all-of-it`);
+      await page.goto(`${monitoringAt(acme)}?window=all-of-it`);
       await page.waitForSelector("table");
       expect(await page.inputValue("#window")).toBe("24h");
     },
@@ -959,7 +1128,7 @@ describe("the list of what an organization recorded", () => {
   );
 
   it("says nothing the glossary bans", async () => {
-    await page.goto(`${origin}/traces`);
+    await page.goto(monitoringAt(acme));
     await page.waitForSelector("table");
     saysNothingBanned(await page.innerText("main"));
   });
@@ -968,7 +1137,7 @@ describe("the list of what an organization recorded", () => {
 describe("one exchange, read as a transcript", () => {
   /** Following the link out of the list, which is how anybody arrives. */
   async function openIt(): Promise<void> {
-    await page.goto(`${origin}/traces`);
+    await page.goto(monitoringAt(acme));
     await page.waitForSelector("table");
     await page.evaluate(() => {
       const pageDocument = Reflect.get(globalThis, "document") as {
@@ -988,10 +1157,18 @@ describe("one exchange, read as a transcript", () => {
     async () => {
       await openIt();
 
+      // Inside the project and inside its monitoring section, which is what a
+      // row leads to now. The old address was outside every project, so a link
+      // somebody sent opened whichever project the reader was resolved into.
+      const landed = new URL(page.url());
+      expect(landed.pathname).toMatch(
+        new RegExp(`^/projects/${acme}/monitoring/transcripts/[0-9a-f]+$`, "u"),
+      );
+
       // The window rode along in the address. That is the whole reason this
       // page can be a link somebody sends: the endpoint under it requires one,
       // and the row already knew the answer.
-      const asked = new URL(page.url()).searchParams;
+      const asked = landed.searchParams;
       expect(Date.parse(asked.get("from") ?? "")).toBeLessThan(
         Date.parse("2026-08-02T18:04:40.281989Z"),
       );
@@ -1005,7 +1182,20 @@ describe("one exchange, read as a transcript", () => {
       await page.goto(address);
       await page.waitForSelector("text=The exchange");
       await page.getByText("Where this came from", { exact: true }).click();
-      expect(await page.innerText("main")).toContain(FIXTURE_PROVIDER_CALL_ID);
+      const recorded = await page.innerText("main");
+      expect(recorded).toContain(FIXTURE_PROVIDER_CALL_ID);
+
+      /*
+       * **`production`, as a fact about this one exchange.**
+       *
+       * It used to be a column on the list, which is where this assertion was.
+       * The list no longer carries one — every row there is production by
+       * definition — so the word moved here rather than being dropped: this is
+       * a *fact* about a conversation, and a reader correlating it with a
+       * simulation's own page needs to be able to tell which they are reading.
+       */
+      expect(recorded).toContain("Source");
+      expect(recorded).toContain("production");
     },
     SETTLE,
   );
@@ -1155,10 +1345,11 @@ describe("an exchange with nothing timed inside its turns", () => {
       ]);
 
       // Their own browser, because this is a different organization and the two
-      // must never see each other's anything.
+      // must never see each other's anything — and their own project, read off
+      // the address their session landed on rather than borrowed from Ada's.
       const them = await signedInBrowser("bare@sparse.example");
 
-      await them.goto(`${origin}/traces`);
+      await them.goto(monitoringAt(projectIn(them)));
       await them.waitForSelector("table");
 
       const listed = await them.innerText("main");
@@ -1222,7 +1413,7 @@ describe("more exchanges than one page holds", () => {
       );
 
       const them = await signedInBrowser("many@globex.example");
-      await them.goto(`${origin}/traces`);
+      await them.goto(monitoringAt(projectIn(them)));
       await them.waitForSelector("table");
 
       // One page is fifty, which is the contract's default. There is more, and
@@ -1265,7 +1456,7 @@ describe("the saved theme", () => {
   it(
     "starts light, toggles from settings, and survives a reload",
     async () => {
-      await page.goto(`${origin}/traces`);
+      await page.goto(monitoringAt(acme));
       await page.evaluate(() => localStorage.removeItem("egma-theme"));
       await page.reload();
 
@@ -1566,10 +1757,20 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
         at,
       );
 
+      /*
+       * Opened at the transcript's own address inside this project.
+       *
+       * **A simulation opens here, and that is on purpose.** Monitoring's
+       * *list* is production only; one transcript is not filtered, because the
+       * name already picks out a single row and a filter on a lookup could only
+       * ever turn a transcript somebody was sent into a page saying it is not
+       * there. A run's results link one of its conversations to exactly this
+       * page.
+       */
       const openTranscript = async (filed: typeof heard): Promise<void> => {
         const asked = new URLSearchParams({ from: filed.from, to: filed.to });
         await page.goto(
-          `${origin}/traces/${filed.traceId}?${asked.toString()}`,
+          `${monitoringAt(who.auth.projectId ?? "")}/${filed.traceId}?${asked.toString()}`,
         );
         await page.waitForSelector("text=The exchange");
       };
@@ -2691,38 +2892,161 @@ describe("the complete product, walked in order in a second project", () => {
     return found;
   }
 
-  describe("reload, a copied link, Back and Forward", () => {
+  /**
+   * Product controls that this version deliberately does not offer.
+   *
+   * These checks run while the direct-route walk already has the settled page
+   * open. The shell has its own one-time check in that walk; these are the
+   * controls and words that can differ from one page to another.
+   */
+  async function hasNoExcludedPageControls(
+    which: Page,
+    route: ProductRoute,
+  ): Promise<void> {
+    const shown = await which.innerText("main");
+
+    // A test suite is a saved selector over tests and this version has none.
+    expect(shown, route.what).not.toMatch(/\bsuite/iu);
+    // Archive is reversible. No page deletes evidence for good.
+    expect(shown, route.what).not.toMatch(/purge|delete permanently/iu);
+
+    /*
+     * `tag` and `replay` are valid words in some copy, so this checks only
+     * controls that would let somebody use those excluded features.
+     */
+    for (const absent of ["Tags", "Add tag", "New tag", "Replay"]) {
+      expect(
+        await which.getByRole("button", { name: absent }).count(),
+        `${route.what} offers ${absent}`,
+      ).toBe(0);
+      expect(
+        await which.getByRole("link", { name: absent }).count(),
+        `${route.what} links ${absent}`,
+      ).toBe(0);
+      expect(
+        await which.getByLabel(absent, { exact: true }).count(),
+        `${route.what} asks for ${absent}`,
+      ).toBe(0);
+    }
+  }
+
+  /** Nothing in this settled page extends past a phone's right edge. */
+  async function fitsPhoneWidth(which: Page, route: ProductRoute): Promise<void> {
+    const tooWide = await which.evaluate(() => {
+      const document = Reflect.get(globalThis, "document") as {
+        readonly documentElement: {
+          readonly scrollWidth: number;
+          readonly clientWidth: number;
+        };
+        querySelectorAll(selector: string): Iterable<{
+          readonly tagName: string;
+          readonly className: unknown;
+          readonly textContent: string | null;
+          getBoundingClientRect(): {
+            readonly right: number;
+            readonly width: number;
+          };
+        }>;
+      };
+      const root = document.documentElement;
+      const over = root.scrollWidth - root.clientWidth;
+      if (over <= 1) return { over, worst: [] as string[] };
+
+      const found: { how: number; what: string }[] = [];
+      for (const element of document.querySelectorAll("main *")) {
+        const box = element.getBoundingClientRect();
+        const past = Math.round(box.right - root.clientWidth);
+        if (past <= 1) continue;
+        const named =
+          typeof element.className === "string" && element.className !== ""
+            ? `.${element.className.split(/\s+/u).join(".")}`
+            : "";
+        found.push({
+          how: past,
+          what:
+            `${element.tagName.toLowerCase()}${named} ` +
+            `${Math.round(box.width)}px wide, ${past}px past the edge: ` +
+            `“${(element.textContent ?? "").trim().slice(0, 40)}”`,
+        });
+      }
+      found.sort((one, two) => two.how - one.how);
+      return { over, worst: found.slice(0, 3).map((one) => one.what) };
+    });
+    expect(
+      tooWide.over,
+      `${route.what} is wider than the screen — ${tooWide.worst.join(" | ")}`,
+    ).toBeLessThanOrEqual(1);
+  }
+
+  describe("a copied link, reload, Back and Forward", () => {
     /**
-     * Every one of them, opened cold and then reloaded.
+     * Every product route, opened directly once.
      *
-     * **A cold open is what a copied link is.** The context below has no
-     * history in this application and has never followed a link inside it, so
-     * each address is arrived at the way somebody arrives who was sent it —
-     * and what is asserted is that they land on that page, in *this* project,
-     * rather than on the entrance, on a sign-in page, or on the first project's
-     * copy of the same area.
+     * A direct open is what a copied link does. Each address is entered without
+     * following an application link, and the settled page must belong to the
+     * Support project. While that page is open, the same case checks its
+     * page-specific exclusions and resizes it to a phone width. That keeps the
+     * real layout proof without loading all 22 pages two more times.
      *
-     * The reload is the other half of the same promise and is asserted in the
-     * same loop, because it is the same claim: the address holds all the state
-     * there is, so pressing F5 changes nothing.
+     * The shell is shared, so it is checked once. One stateful detail page is
+     * reloaded as the representative proof that the address keeps its state;
+     * focused reload cases elsewhere still prove their own window and theme
+     * state.
      */
     it(
-      "opens every product route cold, and again after a reload",
+      "opens and checks every product route once, and reloads one",
       async () => {
-        const sent = await browser.newContext();
+        const sent = await browser.newContext({
+          viewport: { width: 1280, height: 900 },
+        });
         await sent.addCookies(await walk.context().cookies());
         const opened = await sent.newPage();
         opened.setDefaultTimeout(30_000);
+        const reloadRoute = routeAt(`${origin}${conversation}`);
 
         try {
-          for (const route of everyProductRoute()) {
+          for (const [index, route] of everyProductRoute().entries()) {
+            await opened.setViewportSize({ width: 1280, height: 900 });
             await opened.goto(route.address);
             await landedOn(opened, route);
             expect(opened.url(), route.what).toBe(route.address);
 
-            await opened.reload();
-            await landedOn(opened, route);
-            expect(opened.url(), `${route.what}, reloaded`).toBe(route.address);
+            if (index === 0) {
+              const sidebar = opened.locator("aside");
+              const navigation = await sidebar.innerText();
+              // Monitoring used to be banned here and is deliberately not:
+              // production traffic is a navigation item now — it is what the
+              // monitoring-surface effort added. What stays excluded is a
+              // Simulations area: a simulation is evidence, reached from the
+              // run that produced it. "Simulation runs" is that run surface's
+              // label and carries no "simulations" to trip the ban.
+              expect(navigation).not.toMatch(/simulations/iu);
+              expect(
+                await sidebar
+                  .getByRole("link", { name: "Simulations" })
+                  .count(),
+              ).toBe(0);
+            }
+
+            await hasNoExcludedPageControls(opened, route);
+
+            if (route.address === reloadRoute.address) {
+              await opened.reload();
+              await landedOn(opened, route);
+              expect(opened.url(), `${route.what}, reloaded`).toBe(route.address);
+            }
+
+            // Resize the page that is already open. Do not visit it again.
+            await opened.setViewportSize({ width: 390, height: 844 });
+            if (index === 0) {
+              expect(await opened.locator("aside").isVisible()).toBe(false);
+              expect(
+                await opened
+                  .getByRole("button", { name: "Open product navigation" })
+                  .isVisible(),
+              ).toBe(true);
+            }
+            await fitsPhoneWidth(opened, route);
           }
         } finally {
           await sent.close();
@@ -2741,7 +3065,13 @@ describe("the complete product, walked in order in a second project", () => {
 
         await walk.getByRole("link", { name: "Tests", exact: true }).first().click();
         await walk.waitForURL(at("tests"));
-        await walk.getByRole("link", { name: "Runs", exact: true }).first().click();
+        // **Simulation runs** by its label, `/runs` by its address. The rename
+        // was a label and only a label — the addresses did not move — and this
+        // line is where the two have to be spelled differently on purpose.
+        await walk
+          .getByRole("link", { name: "Simulation runs", exact: true })
+          .first()
+          .click();
         await walk.waitForURL(at("runs"));
 
         await walk.goBack();
@@ -3258,97 +3588,6 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.setViewportSize({ width: 1280, height: 900 });
     });
 
-    /**
-     * Every surface, at a phone's width, held to the two things a narrow screen
-     * can get wrong: something that has to be scrolled sideways to read, and a
-     * navigation that is simply gone.
-     *
-     * **Sideways scrolling is the one that cannot be seen from a component
-     * test.** A table wider than the screen, an unbreakable identifier, a
-     * fixed-width panel — each of them lays out perfectly in jsdom, which has
-     * no layout at all, and each of them makes a page unusable on a phone.
-     */
-    it(
-      "fits every product page, and puts the navigation behind a control",
-      async () => {
-        await walk.setViewportSize({ width: 390, height: 844 });
-
-        for (const route of everyProductRoute()) {
-          await walk.goto(route.address);
-          // **The page, not only the shell.** The measurement below is a
-          // subtraction over `main`, and an empty `main` overflows nothing —
-          // so a page that had stopped rendering would have passed the one
-          // check on this walk that matters most.
-          await landedOn(walk, route);
-
-          // The sidebar gives way to a top bar, and the way into the product's
-          // areas is a control rather than nothing.
-          expect(await walk.locator("aside").isVisible(), route.what).toBe(false);
-          expect(
-            await walk
-              .getByRole("button", { name: "Open product navigation" })
-              .isVisible(),
-            route.what,
-          ).toBe(true);
-
-          /*
-           * Nothing overflows the width of the screen. One pixel of slack,
-           * because a browser rounds.
-           *
-           * **The failure names what is over the edge.** A bare number sends
-           * whoever reads it hunting through a page for a box they cannot see,
-           * and the box is nearly always one element with one rule on it — so
-           * the widest few are reported with enough of themselves to be found.
-           */
-          const tooWide = await walk.evaluate(() => {
-            const document = Reflect.get(globalThis, "document") as {
-              readonly documentElement: {
-                readonly scrollWidth: number;
-                readonly clientWidth: number;
-              };
-              querySelectorAll(selector: string): Iterable<{
-                readonly tagName: string;
-                readonly className: unknown;
-                readonly textContent: string | null;
-                getBoundingClientRect(): {
-                  readonly right: number;
-                  readonly width: number;
-                };
-              }>;
-            };
-            const root = document.documentElement;
-            const over = root.scrollWidth - root.clientWidth;
-            if (over <= 1) return { over, worst: [] as string[] };
-
-            const found: { how: number; what: string }[] = [];
-            for (const element of document.querySelectorAll("main *")) {
-              const box = element.getBoundingClientRect();
-              const past = Math.round(box.right - root.clientWidth);
-              if (past <= 1) continue;
-              const named =
-                typeof element.className === "string" && element.className !== ""
-                  ? `.${element.className.split(/\s+/u).join(".")}`
-                  : "";
-              found.push({
-                how: past,
-                what:
-                  `${element.tagName.toLowerCase()}${named} ` +
-                  `${Math.round(box.width)}px wide, ${past}px past the edge: ` +
-                  `“${(element.textContent ?? "").trim().slice(0, 40)}”`,
-              });
-            }
-            found.sort((one, two) => two.how - one.how);
-            return { over, worst: found.slice(0, 3).map((one) => one.what) };
-          });
-          expect(
-            tooWide.over,
-            `${route.what} is wider than the screen — ${tooWide.worst.join(" | ")}`,
-          ).toBeLessThanOrEqual(1);
-        }
-      },
-      SETTLE,
-    );
-
     it(
       "restyles one semantic table for a narrow screen",
       async () => {
@@ -3461,7 +3700,10 @@ describe("the complete product, walked in order in a second project", () => {
               .toContain("Loading");
           } finally {
             release();
-            await walk.unroute(theAgentsRead);
+            // Wait for the held handler to finish before removing it. The
+            // default removal can continue the request itself, after which the
+            // released handler tries to continue the same route a second time.
+            await walk.unrouteAll({ behavior: "wait" });
           }
           await saysWithin(walk, "The Support line");
 
@@ -3796,75 +4038,10 @@ describe("the complete product, walked in order in a second project", () => {
    * ------------------------------------------------------------------ */
 
   /**
-   * The exclusions, proved rather than assumed.
-   *
-   * Each of these was decided out of this version, and each is the kind of
-   * thing that arrives by accident: a nav item somebody adds because the page
-   * exists, a field somebody adds because the API takes it. A list of them
-   * checked against what a person can actually see is the cheapest way to keep
-   * a decision from eroding — and it is checked against the *rendered* pages,
-   * so a control that is present but hidden still counts as absent, exactly as
-   * it does to somebody using the product.
+   * Page-specific exclusions. The exclusions shared by all product pages are
+   * checked during the direct-route walk, while each settled page is open.
    */
   describe("what this version deliberately does not have", () => {
-    it(
-      "offers no production monitoring, no tags, no suites and no Simulations area",
-      async () => {
-        const sidebar = walk.locator("aside");
-
-        for (const route of everyProductRoute()) {
-          await walk.goto(route.address);
-          // **Every assertion in this loop is an absence, and an absence needs
-          // a page.** A blank `main` has no tags, no suites and no replay on
-          // it either, so what the exclusions are read against has to be the
-          // settled page.
-          await landedOn(walk, route);
-
-          const navigation = await sidebar.innerText();
-          expect(navigation, route.what).not.toMatch(/monitoring/iu);
-          expect(navigation, route.what).not.toMatch(/simulations/iu);
-          expect(
-            await sidebar.getByRole("link", { name: "Simulations" }).count(),
-            route.what,
-          ).toBe(0);
-
-          const shown = await walk.innerText("main");
-          // A suite is a saved selector over tests and this version has none —
-          // so no page offers one, and no page asks which one a run is from.
-          expect(shown, route.what).not.toMatch(/\bsuite/iu);
-          // A purge. Archive is reversible and says so; nothing here deletes
-          // evidence for good.
-          expect(shown, route.what).not.toMatch(/purge|delete permanently/iu);
-
-          /*
-           * Tags and an exact replay, asked as controls rather than as words.
-           *
-           * Both words appear legitimately in copy — a persona's language is a
-           * BCP 47 *tag*, and Retry says in as many words that it is **not** an
-           * exact *replay* of the original conditions. A test that banned the
-           * strings would be a test that fails on the sentence proving the
-           * exclusion, so what is asked instead is whether anything on the page
-           * offers to do either.
-           */
-          for (const absent of ["Tags", "Add tag", "New tag", "Replay"]) {
-            expect(
-              await walk.getByRole("button", { name: absent }).count(),
-              `${route.what} offers ${absent}`,
-            ).toBe(0);
-            expect(
-              await walk.getByRole("link", { name: absent }).count(),
-              `${route.what} links ${absent}`,
-            ).toBe(0);
-            expect(
-              await walk.getByLabel(absent, { exact: true }).count(),
-              `${route.what} asks for ${absent}`,
-            ).toBe(0);
-          }
-        }
-      },
-      SETTLE,
-    );
-
     it(
       "keeps an agent's prompt, model and tools where the customer configures them",
       async () => {

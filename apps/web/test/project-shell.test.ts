@@ -53,7 +53,7 @@ describe("which project a tab is looking at", () => {
   });
 
   it("is nothing at all on a page that names none", () => {
-    expect(projectIdIn("/traces")).toBeNull();
+    expect(projectIdIn("/new-project")).toBeNull();
     expect(projectIdIn("/")).toBeNull();
     expect(projectIdIn("/projects/")).toBeNull();
   });
@@ -77,7 +77,7 @@ describe("which project a tab is looking at", () => {
   });
 
   it("sends a page that never named a project to the new project's landing", () => {
-    expect(inProject("/traces", "prj_2")).toBe("/projects/prj_2/agents");
+    expect(inProject("/new-project", "prj_2")).toBe("/projects/prj_2/agents");
     expect(inProject("/", "prj_2")).toBe("/projects/prj_2/agents");
   });
 
@@ -96,13 +96,81 @@ describe("which project a tab is looking at", () => {
 });
 
 describe("the product navigation", () => {
-  it("offers Agents, Tests and Runs, in that order and no others", () => {
+  it("offers Agents, Tests, Simulation runs and Monitoring, in that order and no others", () => {
     expect(PRIMARY_NAVIGATION.map((item) => item.label)).toEqual([
       "Agents",
       "Tests",
-      "Runs",
+      "Simulation runs",
+      "Monitoring",
     ]);
     expect(PRIMARY_NAVIGATION.map((item) => item.id)).not.toContain("graders");
+  });
+
+  /**
+   * **Simulation runs is a label and only a label.** The addresses do not move,
+   * the stored word stays `run`, and the two surfaces now say which kind of
+   * traffic each one holds — which is the whole reason the rename exists beside
+   * a Monitoring item.
+   */
+  it("renames the runs surface without moving one address", () => {
+    const runs = PRIMARY_NAVIGATION.find((item) => item.id === "runs");
+    expect(runs?.label).toBe("Simulation runs");
+    expect(navigationFor("prj_2").primary.map((link) => link.href)).toContain(
+      "/projects/prj_2/runs",
+    );
+    expect(activeSectionIn("/projects/prj_2/runs/run_9")).toBe("runs");
+  });
+
+  /**
+   * Monitoring is a pillar rather than a library entry, and its item opens the
+   * transcript list directly.
+   *
+   * The area's own address is real and lands there too, so an item pointing at
+   * either would work — but the link is the list, so a navigation click costs no
+   * redirect and the reserved neighbour under this area can never become the
+   * landing by accident.
+   */
+  it("opens the project's transcript list from Monitoring", () => {
+    const monitoring = navigationFor("prj_2").primary.find(
+      (link) => link.id === "monitoring",
+    );
+    expect(monitoring?.label).toBe("Monitoring");
+    expect(monitoring?.href).toBe("/projects/prj_2/monitoring/transcripts");
+  });
+
+  /** And the item stays lit on every page inside the area, list and one alike. */
+  it("keeps every monitoring page under one navigation item", () => {
+    expect(activeSectionIn("/projects/prj_1/monitoring")).toBe("monitoring");
+    expect(activeSectionIn("/projects/prj_1/monitoring/transcripts")).toBe(
+      "monitoring",
+    );
+    expect(
+      activeSectionIn("/projects/prj_1/monitoring/transcripts/5c1e4b0f"),
+    ).toBe("monitoring");
+  });
+
+  /**
+   * `dashboard` is reserved and undecided: nothing ships there, and no link the
+   * navigation offers claims it.
+   */
+  it("claims nothing at the reserved dashboard address", () => {
+    for (const link of navigationFor("prj_2").primary) {
+      expect(link.href, link.id).not.toContain("dashboard");
+    }
+  });
+
+  /**
+   * Both transcript pages are inside a project now, so switching project from
+   * Monitoring lands on the other project's Monitoring rather than throwing
+   * somebody out to Agents — which is what the old top-level addresses did.
+   */
+  it("carries the monitoring area across a change of project", () => {
+    expect(
+      inProject("/projects/prj_1/monitoring/transcripts", "prj_2"),
+    ).toBe("/projects/prj_2/monitoring");
+    expect(
+      inProject("/projects/prj_1/monitoring/transcripts/5c1e4b0f", "prj_2"),
+    ).toBe("/projects/prj_2/monitoring");
   });
 
   /**
@@ -173,7 +241,10 @@ describe("the product navigation", () => {
   it("knows which item an address is under, and says nothing outside the product", () => {
     expect(activeSectionIn("/projects/prj_1/agents")).toBe("agents");
     expect(activeSectionIn("/projects/prj_1/personas/prs_3")).toBe("personas");
+    // The two addresses the transcript pages used to answer at. They are inside
+    // the project now, and nothing here is under them.
     expect(activeSectionIn("/traces")).toBeNull();
+    expect(activeSectionIn("/traces/5c1e4b0f")).toBeNull();
     expect(activeSectionIn("/members")).toBeNull();
   });
 });

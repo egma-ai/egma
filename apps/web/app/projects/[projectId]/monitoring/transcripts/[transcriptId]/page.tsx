@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { Fragment, use, useEffect, useState, type CSSProperties } from "react";
 
-import { GRADING } from "../../../lib/grading-copy.ts";
+import { readJson } from "../../../../../../lib/api.ts";
+import { GRADING } from "../../../../../../lib/grading-copy.ts";
 import {
   DETAIL,
   FACTS,
@@ -13,7 +14,7 @@ import {
   SPEAKERS,
   UNKNOWN_STEP_LABEL,
   stepLabel,
-} from "../../../lib/transcript-copy.ts";
+} from "../../../../../../lib/transcript-copy.ts";
 import {
   everyStep,
   howFarIn,
@@ -23,6 +24,8 @@ import {
   milliseconds,
   somethingFailed,
   stepsInside,
+  transcriptReadPath,
+  transcriptsPath,
   whenItWas,
   turnsCited,
   type Detail,
@@ -30,9 +33,9 @@ import {
   type Measured,
   type Outcome,
   type Step,
-} from "../../../lib/transcripts.ts";
-import { JudgmentCard } from "../../judgment-card.tsx";
-import { RecordingPlayer } from "../../recording-player.tsx";
+} from "../../../../../../lib/transcripts.ts";
+import { JudgmentCard } from "../../../../../judgment-card.tsx";
+import { RecordingPlayer } from "../../../../../recording-player.tsx";
 import {
   AppShell,
   Notice,
@@ -40,7 +43,7 @@ import {
   ProductStatePage,
   StatePage,
   styles,
-} from "../../ui.tsx";
+} from "../../../../../ui.tsx";
 
 type State =
   | { status: "loading" }
@@ -59,12 +62,26 @@ const VIEWS: readonly { readonly id: View; readonly label: string }[] = [
   { id: "execution", label: DETAIL.views.execution },
 ];
 
+/**
+ * One production exchange, read as a **transcript**.
+ *
+ * Re-homed under the project with the rest of the monitoring section, and
+ * unchanged in everything it draws: the turns with their timings, the steps
+ * inside each one, the measures above and the verdicts below.
+ *
+ * **Two things have to be in the address for this page to open at all**, and
+ * both are now there. The window, because a name is not a prefix of the store's
+ * filing order and the read endpoint refuses a lookup that bounded nothing —
+ * the row in the list carries the answer, so nobody types it. And the project,
+ * because a transcript belongs to one: the address names it, the request sends
+ * it, and a link somebody was sent opens the same page for them.
+ */
 export default function TranscriptPage({
   params,
 }: {
-  params: Promise<{ traceId: string }>;
+  params: Promise<{ projectId: string; transcriptId: string }>;
 }) {
-  const { traceId } = use(params);
+  const { projectId, transcriptId } = use(params);
   const [state, setState] = useState<State>({ status: "loading" });
   const [view, setView] = useState<View>("transcript");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -79,29 +96,28 @@ export default function TranscriptPage({
       return undefined;
     }
 
-    const query = new URLSearchParams({ from, to });
-    void fetch(`/v1/traces/${encodeURIComponent(traceId)}?${query.toString()}`)
-      .then(async (answer) => {
+    void readJson<Detail>(
+      transcriptReadPath({
+        traceId: transcriptId,
+        window: { from, to },
+        projectId,
+      }),
+    )
+      .then((answer) => {
         if (!current) return;
-        if (answer.status === 401) {
+        if (answer.status === "signed-out") {
           setState({ status: "signed-out" });
           return;
         }
-        if (answer.status === 404) {
+        if (answer.status === "missing") {
           setState({ status: "missing" });
           return;
         }
-        if (!answer.ok) {
-          const said = (await answer.json().catch(() => ({}))) as {
-            message?: string;
-          };
-          setState({
-            status: "failed",
-            why: said.message ?? DETAIL.unreachable,
-          });
+        if (answer.status === "failed") {
+          setState({ status: "failed", why: answer.refusal.message });
           return;
         }
-        setState({ status: "read", detail: (await answer.json()) as Detail });
+        setState({ status: "read", detail: answer.value });
       })
       .catch(() => {
         if (current) setState({ status: "failed", why: DETAIL.unreachable });
@@ -110,7 +126,7 @@ export default function TranscriptPage({
     return () => {
       current = false;
     };
-  }, [traceId]);
+  }, [projectId, transcriptId]);
 
   if (state.status === "loading") {
     return <ProductStatePage title={DETAIL.title} lead={DETAIL.loading} />;
@@ -131,7 +147,7 @@ export default function TranscriptPage({
     return (
       <ProductStatePage title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
         <p className={styles.linkLine}>
-          <Link href="/traces">{DETAIL.back}</Link>
+          <Link href={transcriptsPath(projectId)}>{DETAIL.back}</Link>
         </p>
       </ProductStatePage>
     );
@@ -141,7 +157,7 @@ export default function TranscriptPage({
     return (
       <ProductStatePage title={DETAIL.missing} lead={DETAIL.missingLead}>
         <p className={styles.linkLine}>
-          <Link href="/traces">{DETAIL.back}</Link>
+          <Link href={transcriptsPath(projectId)}>{DETAIL.back}</Link>
         </p>
       </ProductStatePage>
     );
@@ -152,7 +168,7 @@ export default function TranscriptPage({
       <ProductStatePage title={DETAIL.title}>
         <Notice tone="error">{state.why}</Notice>
         <p className={styles.linkLine}>
-          <Link href="/traces">{DETAIL.back}</Link>
+          <Link href={transcriptsPath(projectId)}>{DETAIL.back}</Link>
         </p>
       </ProductStatePage>
     );
@@ -185,7 +201,7 @@ export default function TranscriptPage({
   return (
     <AppShell>
       <ProductPage wide>
-        <Link className={styles.backLink} href="/traces">← {DETAIL.back}</Link>
+        <Link className={styles.backLink} href={transcriptsPath(projectId)}>← {DETAIL.back}</Link>
         <header className={styles.detailHeader}>
           <div>
             <p className={styles.eyebrow}>{detail.trace.source} / {detail.trace.environment}</p>

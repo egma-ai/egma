@@ -12,4 +12,4 @@ The first open-source platform purpose-built to help teams shipping voice agents
 
 # design system
 
-Before any visual or interaction change, read `DESIGN.md` in full. It is the product design source of truth. Do not change its locked palette, styling architecture, or the Egma logo without explicit developer approval. Type, component shape, dark mode, and measured motion are provisional until the direct Mistral console review defined there; update them only with recorded evidence. In UI review, flag code that does not follow settled `DESIGN.md` decisions.
+Before any visual or interaction change, read `DESIGN.md` in full. It is the product design source of truth. Do not change its locked palette, styling architecture, or the Egma logo without explicit developer approval. Treat its type, component shape, dark mode, and motion rules as current product rules. In UI review, flag code that does not follow `DESIGN.md`.

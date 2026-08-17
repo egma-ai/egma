@@ -209,7 +209,7 @@ function EvidenceView({
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Runs" title="Simulation" />
+        <PageHeader eyebrow="Simulation runs" title="Simulation" />
         <PageBody>
           <Loading what="this simulation" />
         </PageBody>
@@ -220,7 +220,7 @@ function EvidenceView({
   if (answer.status === "missing") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Runs" title="Simulation" />
+        <PageHeader eyebrow="Simulation runs" title="Simulation" />
         <PageBody>
           <NotFound
             message={answer.refusal.message}
@@ -238,7 +238,7 @@ function EvidenceView({
   if (answer.status === "failed") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Runs" title="Simulation" />
+        <PageHeader eyebrow="Simulation runs" title="Simulation" />
         <PageBody>
           <Failure message={answer.refusal.message} onRetry={reload} />
         </PageBody>
@@ -254,7 +254,7 @@ function EvidenceView({
   return (
     <ProductPage wide>
       <PageHeader
-        eyebrow="Runs"
+        eyebrow="Simulation runs"
         title={read.test.name ?? "This simulation executed no stored test"}
         lead={
           <>

@@ -1,7 +1,11 @@
 import { identityId, identityStore } from "@egma/db";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
-import { bearer, deviceAuthorization } from "better-auth/plugins";
+import {
+  bearer,
+  deviceAuthorization,
+  type TimeString,
+} from "better-auth/plugins";
 
 import { DEVICE_CLIENT_ID } from "./device.ts";
 import type { EmailSender } from "./email.ts";
@@ -79,6 +83,12 @@ export type IdentityOptions = {
    * has no implementation until enterprise single sign-on does.
    */
   readonly hooks: Pick<IdentityHooks, "admitIdentity" | "onIdentityCreated">;
+  /**
+   * A test platform can remove the device-flow pace while keeping the real
+   * provider and the real terminal flow. Production leaves this absent and
+   * uses the provider's five-second RFC 8628 default.
+   */
+  readonly deviceAuthorizationInterval?: TimeString;
 };
 
 export type Identity = {
@@ -244,6 +254,9 @@ export function createIdentity(options: IdentityOptions): Identity {
         // rather than producing an authorization the token exchange would then
         // have to disown.
         validateClient: async (clientId) => clientId === DEVICE_CLIENT_ID,
+        ...(options.deviceAuthorizationInterval === undefined
+          ? {}
+          : { interval: options.deviceAuthorizationInterval }),
       }),
       // Only so the session the device grant issues can be presented back as a
       // header, for the one question egma asks it.

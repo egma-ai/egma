@@ -197,14 +197,14 @@ const OFFER_HINTS = ["[p] project", "[g] global", "[s] skip"] as const;
 const SKILL_PATH = path.join(".claude", "skills", "egma", "SKILL.md");
 
 describe("the run screen", () => {
-  it("shows one line per simulation, moving, and marks the first verdict", async () => {
+  it("shows simulations moving, marks the first verdict, then leaves the run going", async () => {
     const run = await toTheRun();
 
     // Every simulation is on screen the moment the run exists, queued.
     await showing(run, "run run_", `${TESTS.length} simulations`, TESTS[0], "queued");
 
-    // One at a time, with pauses a developer would be watching through, so
-    // each of these is a frame the screen really held.
+    // One at a time. Each check waits for the screen event, so each state is a
+    // frame the screen really held without a fixed pause.
     platform.running.advance({ simulation: TESTS[0], status: "claimed" });
     await showing(run, `▶ ${TESTS[0]}`, "dialing…");
 
@@ -232,6 +232,13 @@ describe("the run screen", () => {
     // The other two are still moving, and the screen says the suite is not
     // waiting on this terminal.
     expect(landed).toContain("The suite keeps running on Egma");
+
+    await showing(run, "Install the Egma skill into Claude Code", ...OFFER_HINTS);
+    const held = platform.running.simulationsOf();
+    expect(held.filter((one) => one.verdict !== null)).toHaveLength(1);
+    expect(held.filter((one) => one.verdict === null)).toHaveLength(2);
+    expect(held.filter((one) => one.status === "running")).toHaveLength(1);
+    expect(held.filter((one) => one.status === "queued")).toHaveLength(1);
   });
 
   /**
@@ -271,31 +278,6 @@ describe("the run screen", () => {
     // The first verdict is the first one that landed, whatever it was.
     expect(screen).toContain(`✓ First verdict: ${TESTS[0]} skipped`);
   });
-
-  /**
-   * The wizard does not wait for the suite. One verdict is the whole of what
-   * it waits for; the last question comes next, with two simulations still
-   * going.
-   */
-  it("moves on after the first verdict, with the rest still running", async () => {
-    const run = await toTheRun();
-    await showing(run, "run run_");
-
-    platform.running.advance({ simulation: TESTS[0], status: "claimed" });
-    platform.running.advance({ simulation: TESTS[0], status: "running" });
-    platform.running.advance({
-      simulation: TESTS[0],
-      status: "completed",
-      verdict: "passed",
-    });
-
-    await showing(run, "Install the Egma skill into Claude Code", ...OFFER_HINTS);
-
-    // On the platform, the suite is exactly where it was: one judged, two not.
-    const held = platform.running.simulationsOf();
-    expect(held.filter((one) => one.verdict !== null)).toHaveLength(1);
-    expect(held.filter((one) => one.status === "queued")).toHaveLength(2);
-  });
 });
 
 describe("the skill offer and what is left behind", () => {
@@ -322,17 +304,6 @@ describe("the skill offer and what is left behind", () => {
     await showing(run, "Install the Egma skill into Claude Code", ...OFFER_HINTS);
     return run;
   }
-
-  it("says where each key would write before either key is pressed", async () => {
-    const run = await toTheOffer();
-
-    const offer = await showing(run, "writes nothing at all");
-    expect(offer).toContain(path.join(workspace.dir, SKILL_PATH));
-    expect(offer).toContain(path.join(home, SKILL_PATH));
-    // Nothing has been written yet, whatever the screen is showing.
-    expect(existsSync(path.join(workspace.dir, SKILL_PATH))).toBe(false);
-    expect(existsSync(path.join(home, SKILL_PATH))).toBe(false);
-  });
 
   it("writes the skill into the repository on [p], and says so in scrollback", async () => {
     const run = await toTheOffer();
@@ -369,9 +340,16 @@ describe("the skill offer and what is left behind", () => {
    * Skip is a first-class answer, proved by a sweep of both trees rather than
    * by the absence of an error: not a directory, not an empty file, nothing.
    */
-  it("leaves the machine untouched on [s], and still says so", async () => {
+  it("shows both destinations, then leaves the machine untouched on [s] with full scrollback", async () => {
     const run = await toTheOffer();
     const homeBefore = await filesUnder(home);
+
+    const offer = await showing(run, "writes nothing at all");
+    expect(offer).toContain(path.join(workspace.dir, SKILL_PATH));
+    expect(offer).toContain(path.join(home, SKILL_PATH));
+    expect(existsSync(path.join(workspace.dir, SKILL_PATH))).toBe(false);
+    expect(existsSync(path.join(home, SKILL_PATH))).toBe(false);
+
     run.write("s");
 
     expect(await run.exited).toBe(0);
@@ -383,19 +361,8 @@ describe("the skill offer and what is left behind", () => {
     const left = run.scrollback();
     expect(left).toContain("Nothing was installed.");
     expect(left).toContain("egma --help");
-  });
 
-  /**
-   * The exit block is the whole promise about scrollback: the alternate screen
-   * is thrown away, and these lines are what a developer scrolls back to.
-   */
-  it("leaves the address, the tests and the handoff, each alone on its line", async () => {
-    const run = await toTheOffer();
-    run.write("s");
-    expect(await run.exited).toBe(0);
-
-    const lines = run
-      .scrollback()
+    const lines = left
       .split("\n")
       .map((line) => line.trimEnd())
       .filter((line) => line !== "");
@@ -410,7 +377,7 @@ describe("the skill offer and what is left behind", () => {
     // And nothing rides on it. The browser is already signed in from the
     // approval earlier in this same walk, so no token has to.
     expect(new URL(address).search).toBe("");
-    expect(run.scrollback()).not.toContain("egma_sk_");
+    expect(left).not.toContain("egma_sk_");
 
     expect(lines).toContain(
       "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
