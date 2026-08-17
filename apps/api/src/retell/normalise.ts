@@ -298,8 +298,8 @@ function turnsIn(call: RetellCall): {
  * They describe the call rather than any moment in it, so the root span is the
  * only honest place for them. This keeps the whole object under the vendor's
  * own names, verbatim, which is where a reader who knows Retell will look; the
- * translation into egma's vocabulary is `reportedLatencyOf` below and reads the
- * samples alone.
+ * translation into egma's vocabulary is `reportedLatencyOf` below, and it reads
+ * `values` alone.
  */
 function latencyOf(call: RetellCall): Record<string, unknown> {
   const held = call["latency"];
@@ -384,10 +384,11 @@ const REPORTED_LATENCY_MEASURES: readonly (readonly [
  * platform is one more mapping table in its own normalizer rather than a second
  * parser under the arithmetic every verdict rests on.
  *
- * **The samples, never the summary.** Each stage's `values` are the individual
- * measurements, so "every measurement holds the bound, the worst turn decides"
- * stays truthful and percentile math stays egma's own. A p50 carried as a
- * sample would let one summarised turn pass a bound a real turn failed.
+ * **The individual measurements, never the summary.** Each stage's `values` are
+ * the measurements themselves, so "every measurement holds the bound, the worst
+ * turn decides" stays truthful and percentile math stays egma's own. A p50
+ * carried as a measurement would let one summarised turn pass a bound a real
+ * turn failed.
  *
  * Read defensively, because this is a vendor document: a stage that is missing,
  * a `values` that is not a list, and an entry inside one that is not a finite
@@ -395,13 +396,13 @@ const REPORTED_LATENCY_MEASURES: readonly (readonly [
  * call whose every stage is dropped writes no block at all — absence being the
  * honest shape for a conversation nobody measured.
  *
- * **A sample that is not a number is dropped silently, and that is the
+ * **A measurement that is not a number is dropped silently, and that is the
  * deliberate line.** `degraded` is raised for a payload egma could not read as
  * a conversation — no id, contradictory instants, a transcript that is not one
  * — because that is a trace somebody has to look at. One unreadable entry in a
- * measurement series is not: the other samples are still true, the vendor's
- * whole document is still on the row verbatim, and flagging the trace would
- * spend somebody's attention on a number egma never needed.
+ * stage's list is not: the rest of the list is still true, the vendor's whole
+ * document is still on the row verbatim, and flagging the trace would spend
+ * somebody's attention on a number egma never needed.
  */
 function reportedLatencyOf(
   call: RetellCall,
@@ -415,20 +416,20 @@ function reportedLatencyOf(
     const values = (held as Record<string, unknown>)["values"];
     if (!Array.isArray(values)) continue;
     // In the order Retell reported them, which is the order they happened in.
-    const samples = values.filter(
+    const kept = values.filter(
       (value): value is number =>
         typeof value === "number" && Number.isFinite(value),
     );
-    // Never an empty series: the contract says a measurement holds at least one
-    // sample, and a stage that reported none is a stage nobody reported.
-    if (samples.length === 0) continue;
+    // Never an empty list: the contract says a measurement holds at least one
+    // number, and a stage that reported none is a stage nobody reported.
+    if (kept.length === 0) continue;
     measurements.push({
       measure,
-      // The catalog's own unit for a measure it names, so a bound and a sample
-      // are read in one unit; the platform's honest word for a stage it does
-      // not name.
+      // The catalog's own unit for a measure it names, so a bound and a
+      // measurement are read in one unit; the platform's honest word for a
+      // stage it does not name.
       unit: catalogedMeasure(measure)?.unit ?? MILLISECONDS,
-      values: samples,
+      values: kept,
     });
   }
 

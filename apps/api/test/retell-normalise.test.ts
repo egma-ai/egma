@@ -336,7 +336,7 @@ describe("the reported-measurements block", () => {
     expect(block.reported_by).toBe(spans[0]?.connectionType);
   });
 
-  it("carries the samples, and leaves the summary to the vendor's own block", () => {
+  it("carries the measurements, and leaves the summary to the vendor's own block", () => {
     const corner = normalisedCornerOf(capturedCall());
     const block = corner["reported_measurements"] as {
       measurements: readonly { measure: string; values: readonly number[] }[];
@@ -356,7 +356,7 @@ describe("the reported-measurements block", () => {
       {},
       "sometimes a payload is not the shape it was",
       { e2e: null },
-      // A summary with no samples under it. The percentiles are Retell's own
+      // A summary with no measurements under it. The percentiles are Retell's own
       // arithmetic, and egma reports no measurement it was not handed.
       { e2e: { p50: 820, p90: 2010, num: 4 } },
       { e2e: { values: [] } },
