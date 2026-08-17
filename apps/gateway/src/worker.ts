@@ -1,6 +1,6 @@
-import { type Environment, loadConfig } from "./config.ts";
+import { ConfigurationFault, type Environment, loadConfig } from "./config.ts";
 import { handle } from "./gateway.ts";
-import { makeLog } from "./record.ts";
+import { makeLog, refusalResponse } from "./record.ts";
 import {
   type Duplex,
   type Frame,
@@ -107,7 +107,28 @@ export default {
     env: Environment & { EGMA_GATEWAY_VERSION?: VersionMetadata },
     ctx: ExecutionContext,
   ): Promise<Response> {
-    const config = loadConfig(env);
+    /**
+     * A misconfigured build answers, rather than throwing.
+     *
+     * On this runtime an exception out of the entry point is the platform's own
+     * generic error page and a status nobody can act on — and the way a build
+     * gets here misconfigured is banal: a version uploaded by a step that only
+     * meant to set one secret carries only the bindings that step knew about,
+     * and every request to it fails opaquely. Found exactly that way, on a
+     * canary. So the fault is caught where the configuration is read and comes
+     * back as this gateway's own refusal, with the missing name in it.
+     */
+    let config;
+    try {
+      config = loadConfig(env);
+    } catch (fault) {
+      if (!(fault instanceof ConfigurationFault)) throw fault;
+      return refusalResponse({
+        status: 503,
+        code: "gateway_misconfigured",
+        message: fault.message,
+      });
+    }
     const build = env.EGMA_GATEWAY_VERSION;
     return handle(request, {
       config,

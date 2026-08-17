@@ -187,6 +187,27 @@ describe("the application", () => {
     ).toThrow(ConfigurationFault);
   });
 
+  it("answers safely when its host handed it a build with a name missing", async () => {
+    /**
+     * The deployed entry point, called with an environment that is missing
+     * everything. It is worth its own test because the failure it prevents was
+     * a real one: a version uploaded by a step that only meant to set one
+     * secret carried only the bindings that step knew about, and every request
+     * to it came back as the platform's own generic error page with a status
+     * nobody could act on. This is the same fault, answered.
+     */
+    const worker = (await import("../src/worker.ts")).default;
+    const answered = await worker.fetch(
+      new Request("https://gateway.example/health"),
+      {},
+      { waitUntil: () => undefined },
+    );
+    expect(answered.status).toBe(503);
+    const body = (await answered.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("gateway_misconfigured");
+    expect(body.error.message).toContain("EGMA_GATEWAY_");
+  });
+
   it("runs from the documented configuration and answers its health check", async () => {
     const running = await startLocalGateway({
       EGMA_GATEWAY_ORGANIZATION_SECRET: GATEWAY_SECRET,
