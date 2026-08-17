@@ -342,39 +342,42 @@ describe("the organization a connection acts in", () => {
 
 describe("a credential that stops being good", () => {
   /**
-   * The static verifier a preview deploys cannot revoke, so this is proved with
-   * one of the test's own — which is the point of there being a verifier seam
-   * at all. The store that arrives with real inference keys plugs in here and
-   * this behavior comes with it.
+   * Revocation on the WebSocket transport, against the **real** verifier and a
+   * real revocation.
+   *
+   * The HTTP case one describe down proves the same rule on the same door; this
+   * is the transport where getting it wrong would be invisible, because a
+   * socket that authenticated once could plausibly never be asked again. So the
+   * key is really issued in the Egma Cloud stand-in and really revoked there,
+   * and what is observed is that the connection already open is untouched and
+   * the next one is refused.
    */
   it("keeps an open connection and refuses the next one", async () => {
-    let live = true;
-    const revocable: Verifier = {
-      verify: async (credential): Promise<Verified> =>
-        credential === GATEWAY_SECRET && live
-          ? { organizationId: ORGANIZATION, inferenceKeyId: INFERENCE_KEY_ID }
-          : { refused: "not-recognized" },
-    };
-    const world = await standUp({ verifier: revocable });
+    const world = await standUp();
+    const retired = "egma_ik_sentinel-revocable-on-a-socket-Tt5Uu6";
+    world.cloud.issue(retired, ORGANIZATION, INFERENCE_KEY_ID);
     try {
       const socket = openSocket(world.world, "/deepgram/v1/listen", {
-        headers: { "egma-inference-key": GATEWAY_SECRET },
+        headers: { "egma-inference-key": retired },
       });
       const seen = watch(socket);
       await seen.opened;
 
-      live = false;
+      world.cloud.revoke(retired);
 
       // The open one is untouched: authentication happened when it opened, and
-      // an audio frame does not re-ask.
+      // an audio frame does not re-ask. Nothing was asked of Egma Cloud for
+      // this frame either, which is the same claim from the other side.
+      const askedBefore = world.cloud.asks.length;
       socket.send("still-listening");
       const provider = await world.deepgram.opened();
       await eventually(() => (provider.frames.length > 0 ? provider.frames : undefined));
       expect(provider.frames).toContain("still-listening");
+      expect(world.cloud.asks.length).toBe(askedBefore);
 
-      // The next one is refused.
+      // The next one is refused, with no cache to wait out.
       const again = openSocket(world.world, "/deepgram/v1/listen", {
-        headers: { "egma-inference-key": GATEWAY_SECRET },
+        headers: { "egma-inference-key": retired },
       });
       await expect(watch(again).opened).rejects.toThrow(/401/);
 

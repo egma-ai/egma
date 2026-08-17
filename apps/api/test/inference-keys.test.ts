@@ -145,9 +145,15 @@ describe("the one door an inference key opens", () => {
       headers: { [INFERENCE_KEY_HEADER]: secret },
     });
 
-    const listed = (await ask(api.app, "GET", INFERENCE_KEYS_PATH, adminKey))
-      .body["keys"] as Record<string, unknown>[];
-    expect(listed[0]?.["last_used_at"]).not.toBeNull();
+    // The stamp is written without the connection waiting for it, so the read
+    // that observes it waits here instead.
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const listed = (await ask(api.app, "GET", INFERENCE_KEYS_PATH, adminKey))
+        .body["keys"] as Record<string, unknown>[];
+      if (listed[0]?.["last_used_at"] !== null) return;
+      await new Promise((settle) => setTimeout(settle, 10));
+    }
+    throw new Error("the use stamp never landed");
   });
 
   it("refuses a revoked key on the very next ask", async () => {

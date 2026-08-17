@@ -65,6 +65,9 @@ const MANAGED_DEPLOYMENT = [
   "INTERNAL_GATEWAY_CREDENTIAL_SECONDS",
   "managedDeployment",
   "managedDeploymentFrom",
+  // The TLS floor, shared with the one other place an address managed traffic
+  // reaches is read: an https address, or a loopback one for the suite.
+  "securely",
   "signInternalGatewayCredential",
 ];
 

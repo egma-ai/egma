@@ -670,14 +670,23 @@ function ModelProviders({ projectId }: { readonly projectId: string }) {
 
       {!confirmingDisconnect ? null : (
         <Dialog
-          title="Disconnect Egma?"
+          /*
+           * The key is named, on the same rule the sibling remove-credential
+           * dialog follows: a destructive dialog says which thing it is about.
+           * The safe hint is all there is to name one by — it is the only part
+           * of a connected key anybody can see — and it is exactly enough to
+           * tell an administrator holding two whether this is the one they
+           * meant.
+           */
+          title={`Disconnect Egma (…${managed.hint ?? ""})?`}
           onClose={() => setConfirmingDisconnect(false)}
         >
           {(dismiss) => (
             <>
               <p>
-                This deployment will hold no inference key for the Egma model
-                gateway. While this organization stays on Managed by Egma, every
+                Egma will hold no inference key for this organization. The key
+                ending …{managed.hint} is removed from this deployment, and
+                while this organization stays on Managed by Egma every
                 simulation and every grading job stops with an error naming the
                 missing key.
               </p>

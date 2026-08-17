@@ -7,8 +7,8 @@ import {
   PREDEFINED_GRADERS,
   type PredefinedGrader,
 } from "../grader-library/catalog.ts";
-import { managedDeployment } from "../managed-deployment.ts";
 import { RECOMMENDED_GRADER_MODEL } from "../models/selections.ts";
+import { seedsExplicitSelections } from "./provisioning.ts";
 import { grader, graderVersion } from "../schema/graders.ts";
 import { project } from "../schema/tenancy.ts";
 import type { GraderConfig } from "./graders.ts";
@@ -133,13 +133,18 @@ export async function insertSeededGrader(
      * always did, and an explicit selection there would spend an organization
      * credential nobody has stored and write `errored` verdicts for it.
      *
+     * The rule itself is `seedsExplicitSelections`, shared with the starter
+     * persona rather than spelled again here: a deployment that seeded one and
+     * not the other would make a project whose persona runs and whose grader
+     * cannot judge it.
+     *
      * It lands on the *version*, beside the config, because it is judged
      * content: a verdict written under it stays readable as "decided by this
      * model" long afterwards. The copy still reads its judge prompt through
      * `library_id` and never holds one, so nothing about the pointer rules
      * moves.
      */
-    graderModel: managedDeployment().hosted ? RECOMMENDED_GRADER_MODEL : null,
+    graderModel: seedsExplicitSelections() ? RECOMMENDED_GRADER_MODEL : null,
     createdBy: values.createdBy,
   });
 

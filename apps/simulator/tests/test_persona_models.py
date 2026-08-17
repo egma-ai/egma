@@ -31,7 +31,7 @@ from egma_simulator.spec import (
     SimulationSpec,
     SpeechSelection,
 )
-from egma_simulator.speech import SpeechProviders, voice_for_simulation
+from egma_simulator.speech import SpeechFault, SpeechProviders, voice_for_simulation
 
 A_URL = "http://control-plane.test"
 
@@ -514,3 +514,67 @@ def test_a_claimed_managed_document_becomes_the_gateway_it_carries():
     assert spec.models.llm.key is None
     assert spec.models.stt.key is None
     assert spec.models.tts.key is None
+
+
+def test_a_managed_leg_with_no_gateway_route_is_refused_rather_than_opened(
+    a_container,
+):
+    """The leak this exists to close.
+
+    The key a managed leg holds authorizes the Egma model gateway. Every
+    builder reads a missing base address as "the provider's own", so a leg
+    for a pair the gateway has no route for would open a connection straight
+    to that provider and present an Egma credential as their API key — a
+    third party holding an Egma secret, and a failure that reads as a bad
+    key rather than as a missing route.
+    """
+    no_route = SelectedModels(
+        access="managed",
+        gateway=GatewayAccess(address=THE_GATEWAY, credential=GATEWAY_CREDENTIAL),
+        llm=ModelSelection(provider="openai", model="m"),
+        stt=ModelSelection(provider="deepgram", model="n"),
+        # A leg this simulator really has and the gateway has no route for,
+        # which is exactly the shape a growing provider catalog produces:
+        # ElevenLabs speaks here and is not a shipped gateway route.
+        tts=SpeechSelection(
+            provider="elevenlabs", model="s", voice_id="v", speed=1.0
+        ),
+    )
+    providers = SpeechProviders.for_simulation(a_container, None, no_route)
+
+    with pytest.raises(SpeechFault) as refusal:
+        providers.checked()
+
+    assert "elevenlabs" in str(refusal.value)
+    assert "tts" in str(refusal.value)
+    # And the sentence says what was avoided, so nobody reads it as the
+    # provider rejecting a key.
+    assert "route" in str(refusal.value)
+
+
+def test_a_chat_simulation_is_not_refused_over_a_leg_it_never_builds(a_container):
+    """The refusal above is at build time and not at resolution, for the
+    reason every other speech check is: a chat simulation has no mouth and no
+    ears, and must not fail over a route it was never going to use."""
+    no_route = SelectedModels(
+        access="managed",
+        gateway=GatewayAccess(address=THE_GATEWAY, credential=GATEWAY_CREDENTIAL),
+        llm=ModelSelection(provider="openai", model="m"),
+        stt=ModelSelection(provider="deepgram", model="n"),
+        tts=SpeechSelection(
+            provider="deepgram", model="s", voice_id="v", speed=1.0
+        ),
+    )
+
+    # Resolving is what a chat simulation does; building is what it does not.
+    providers = SpeechProviders.for_simulation(a_container, None, no_route)
+
+    assert providers.managed is True
+    assert providers.tts_base_url is None
+
+
+def test_a_managed_pair_the_gateway_carries_passes_the_same_check(a_container):
+    providers = SpeechProviders.for_simulation(a_container, None, MANAGED).checked()
+
+    assert providers.stt_base_url == f"{THE_GATEWAY}/deepgram"
+    assert providers.tts_base_url == f"{THE_GATEWAY}/cartesia/tts/websocket"

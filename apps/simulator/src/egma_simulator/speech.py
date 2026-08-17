@@ -508,6 +508,18 @@ class SpeechProviders:
     so a mouth and a pair of ears are told two different addresses.
     """
 
+    managed: bool = False
+    """Whether these legs reach their providers through the Egma model gateway.
+
+    **It exists so that a leg with no gateway route can be refused rather
+    than built.** Under managed access the value in ``stt_key`` and
+    ``tts_key`` authorizes the gateway and nothing else, and every builder
+    below reads a missing base address as "the provider's own" — so without
+    this flag a pair the gateway has no route for would open a connection
+    straight to the provider and present an Egma credential as that
+    company's API key. See :meth:`checked`.
+    """
+
     stt_model: str | None = None
     tts_model: str | None = None
     tts_voice: str | None = None
@@ -595,6 +607,10 @@ class SpeechProviders:
                     if gateway is None
                     else gateway.base_for(models.tts.provider, "tts")
                 ),
+                # **What says these keys are the gateway's rather than a
+                # provider's**, so a leg with no route can be refused instead
+                # of built. See `checked`.
+                managed=gateway is not None,
                 stt_model=models.stt.model,
                 tts_model=models.tts.model,
                 tts_voice=models.tts.voice_id,
@@ -645,6 +661,32 @@ class SpeechProviders:
                     "speech leg this simulator has; it speaks and listens "
                     f"with {', '.join(allowed)}"
                 )
+
+        # **A managed leg with no gateway route is refused, never sent
+        # straight to the provider.** The key these legs hold authorizes the
+        # Egma model gateway; a builder handed no address falls back to the
+        # provider's own, which would put an ``egma_ig_`` or ``egma_ik_``
+        # value on a third party's wire as their API key. The thinking leg
+        # already refuses exactly this case in ``model.py``, and the grader's
+        # resolver answers ``NoJudge`` for it; speech was the one that did
+        # not.
+        #
+        # Here rather than where the legs are resolved, for this method's own
+        # reason one paragraph up: a chat simulation has no mouth and no ears
+        # and must not fail over a route it was never going to use.
+        if self.managed:
+            for job, provider, base in (
+                ("stt", self.stt, self.stt_base_url),
+                ("tts", self.tts, self.tts_base_url),
+            ):
+                if base is None:
+                    raise SpeechFault(
+                        f"this persona uses {provider} for {job} through the "
+                        "Egma model gateway, and this release carries no "
+                        "route for that pair there; the leg is refused "
+                        "rather than opened straight at the provider holding "
+                        "an Egma credential"
+                    )
         return self
 
 

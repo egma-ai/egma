@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ModelProvidersPage from "../app/projects/[projectId]/settings/model-providers/page.tsx";
@@ -188,5 +188,30 @@ describe("a self-hosted deployment with a key connected", () => {
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeDefined();
     // Managed access is chosen, so the provider rows are not the story here.
     expect(screen.queryByLabelText("Model providers")).toBeNull();
+  });
+
+  it("names the key in the disconnect dialog, because a destructive one must", async () => {
+    await open(
+      accessAnswer({
+        mode: "managed",
+        managed_available: true,
+        managed: {
+          connected: true,
+          hint: "A1B2",
+          cloud_organization_id: "org_cloud_1",
+          connected_at: "2026-08-17T10:00:00.000Z",
+        },
+      }),
+    );
+
+    screen.getByRole("button", { name: "Disconnect" }).click();
+
+    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    // The safe hint is the only part of a connected key anybody can see, and
+    // it is exactly enough to tell an administrator holding two which one this
+    // is about.
+    expect(within(dialog).getAllByText(/A1B2/).length).toBeGreaterThan(0);
+    // And it says what stops, rather than only what is removed.
+    expect(within(dialog).getByText(/stops with an error/)).toBeDefined();
   });
 });

@@ -64,6 +64,12 @@ const STARTER_TRAITS: PersonaTraits = {
 /**
  * Whether a project's seeded objects are born with explicit model selections.
  *
+ * **One function, and both seeders read it.** The starter persona is written
+ * here and the mandatory grader copy is written in `seeded-graders.ts`; a
+ * deployment that seeded one and not the other would produce a project whose
+ * persona runs and whose grader cannot judge it, or the reverse. The rule is
+ * one sentence and it is written once.
+ *
  * **Hosted Egma yes, a self-hosted deployment no, and the split is the whole
  * of what makes a hosted first run need no setup.** A hosted organization is on
  * Managed by Egma from the moment it exists, so a seeded persona that selects
@@ -81,7 +87,7 @@ const STARTER_TRAITS: PersonaTraits = {
  * verdicts. Seeding nothing keeps them exactly as they are, and giving their
  * *existing* personas and graders explicit successors is the migration's job.
  */
-function seedsExplicitSelections(): boolean {
+export function seedsExplicitSelections(): boolean {
   return managedDeployment().hosted;
 }
 

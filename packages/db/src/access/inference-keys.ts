@@ -227,6 +227,7 @@ export async function resolveInferenceKey(
     .select({
       id: inferenceKey.id,
       organizationId: inferenceKey.organizationId,
+      lastUsedAt: inferenceKey.lastUsedAt,
     })
     .from(inferenceKey)
     .where(and(eq(inferenceKey.hash, hash), isNull(inferenceKey.revokedAt)))
@@ -234,10 +235,43 @@ export async function resolveInferenceKey(
 
   if (row === undefined) return undefined;
 
-  await db()
-    .update(inferenceKey)
-    .set({ lastUsedAt: new Date() })
-    .where(eq(inferenceKey.id, row.id));
-
+  noteUsed(row.id, row.lastUsedAt);
   return { inferenceKeyId: row.id, organizationId: row.organizationId };
+}
+
+/**
+ * How stale the stamp may be before it is worth a write.
+ *
+ * The column answers one question — is anybody still using this key — and a
+ * minute's resolution answers it exactly as well as a millisecond's. What the
+ * coarseness buys is the hot path: a voice simulation opens several connections
+ * and every one of them lands on this row, so a write per connection is every
+ * connection on one key queueing behind the same row lock.
+ */
+const USE_STAMP_WINDOW_MS = 60_000;
+
+/**
+ * Write down that a key was used, without a connection waiting for it.
+ *
+ * **Two ways this stays off the hot path, and both are needed.** It is skipped
+ * entirely while the stamp is fresh, so a busy key writes once a minute rather
+ * than once a connection — which is what stops every connection on one key
+ * contending on one row. And what is left is not awaited: a caller is a voice
+ * connection opening, and the answer it is waiting for is already in hand.
+ *
+ * A failure is swallowed on purpose. This column exists so an operator can see
+ * a key nobody needs; a key that works must not stop working because a
+ * bookkeeping write did not land.
+ */
+function noteUsed(inferenceKeyId: string, lastUsedAt: Date | null): void {
+  const now = Date.now();
+  if (lastUsedAt !== null && now - lastUsedAt.getTime() < USE_STAMP_WINDOW_MS) {
+    return;
+  }
+
+  void db()
+    .update(inferenceKey)
+    .set({ lastUsedAt: new Date(now) })
+    .where(eq(inferenceKey.id, inferenceKeyId))
+    .catch(() => undefined);
 }

@@ -141,6 +141,20 @@ async function storedEnvelope(
   return rows[0]?.credentials;
 }
 
+/** The stamp, once the write that is deliberately not awaited has landed. */
+async function eventuallyStamped(inferenceKeyId: string): Promise<Date> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const { rows } = await database.sql<{ last_used_at: Date | null }>(
+      "select last_used_at from inference_key where id = $1",
+      [inferenceKeyId],
+    );
+    const stamped = rows[0]?.last_used_at;
+    if (stamped instanceof Date) return stamped;
+    await new Promise((settle) => setTimeout(settle, 10));
+  }
+  throw new Error("the use stamp never landed");
+}
+
 /** The hash a route computes before it ever calls the store. */
 function hashed(secret: string): string {
   return createHash("sha256").update(secret, "utf8").digest("hex");
@@ -253,6 +267,42 @@ describe("one inference key resolved by its hash", () => {
     });
   });
 
+  it("does not make a connection wait on writing down that it was used", async () => {
+    const secret = "egma_ik_sentinel-hot-path-Zz1Xx2";
+    const created = await createInferenceKey(actingAsAcme(), {
+      name: "Hot path",
+      hash: hashed(secret),
+      prefix: "egma_ik_",
+      displaySuffix: "Xx2",
+    });
+
+    // The answer a connection is waiting for is in hand before the stamp is
+    // written: the read is what the caller awaits, and the write is not
+    // awaited at all.
+    const resolved = await resolveInferenceKey(hashed(secret));
+    expect(resolved?.inferenceKeyId).toBe(created.id);
+
+    // A second open a moment later writes nothing, because the stamp is
+    // fresh — which is what stops every connection on one key queueing behind
+    // one row lock. Observed as the stamp not moving.
+    const first = await database.sql<{ last_used_at: Date | null }>(
+      "select last_used_at from inference_key where id = $1",
+      [created.id],
+    );
+    // The first write may still be in flight; wait for it to land at all.
+    const landed = await eventuallyStamped(created.id);
+    expect(landed).toBeInstanceOf(Date);
+
+    await resolveInferenceKey(hashed(secret));
+    await new Promise((settle) => setTimeout(settle, 50));
+    const again = await database.sql<{ last_used_at: Date | null }>(
+      "select last_used_at from inference_key where id = $1",
+      [created.id],
+    );
+    expect(again.rows[0]?.last_used_at?.getTime()).toBe(landed.getTime());
+    expect(first.rows.length).toBe(1);
+  });
+
   it("marks it used, so a key nobody needs is visible as one", async () => {
     const secret = "egma_ik_sentinel-used-N3P4";
     const created = await createInferenceKey(actingAsAcme(), {
@@ -262,6 +312,9 @@ describe("one inference key resolved by its hash", () => {
       displaySuffix: "N3P4",
     });
     await resolveInferenceKey(hashed(secret));
+    // The write is deliberately not awaited by the caller, so the read that
+    // observes it waits for it here instead.
+    await eventuallyStamped(created.id);
 
     const listed = (await listInferenceKeys(actingAsAcme())).find(
       (key) => key.id === created.id,

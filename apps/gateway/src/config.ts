@@ -262,12 +262,30 @@ function validationUrl(environment: Environment): string | undefined {
       `EGMA_GATEWAY_VALIDATION_URL must be an absolute address, and "${written}" is not`,
     );
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new ConfigurationFault(
-      `EGMA_GATEWAY_VALIDATION_URL must be an http or https address, and "${written}" is not`,
-    );
-  }
-  return written;
+  /**
+   * **`https:` unless it is loopback**, and both halves are deliberate.
+   *
+   * The credential a caller presented travels to this address on every
+   * connection open. A plain-text address puts every customer's inference key
+   * on the wire for anybody on the path — and a deployment that fell back to
+   * `http:` by a typo would leak them silently rather than fail. Loopback is
+   * carved out because the deterministic suite stands a real Egma Cloud on
+   * `127.0.0.1` over real sockets, and a test that needed a certificate to
+   * prove a verifier would be proving TLS setup instead.
+   */
+  if (parsed.protocol === "https:") return written;
+  // Anchored at both ends: a prefix test on `127.` would call
+  // `127.0.0.1.attacker.example` loopback, and a host somebody else controls
+  // would become a legal plain-text destination for every customer's key.
+  const bare = parsed.hostname.replace(/^\[|\]$/g, "");
+  const loopback =
+    bare === "localhost" ||
+    bare === "::1" ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare);
+  if (parsed.protocol === "http:" && loopback) return written;
+  throw new ConfigurationFault(
+    `EGMA_GATEWAY_VALIDATION_URL must be an https address — every customer's inference key travels to it — and "${written}" is not. Only a loopback address may be http:, which is what the deterministic suite uses.`,
+  );
 }
 
 function positiveWholeNumber(

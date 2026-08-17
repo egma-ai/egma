@@ -1,4 +1,4 @@
-import type { PlatformSettingValues } from "@egma/db";
+import { securely, type PlatformSettingValues } from "@egma/db";
 
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
@@ -217,6 +217,7 @@ function smtpSettings(
  */
 const DEFAULT_EGMA_CLOUD_URL = "https://app.egma.ai";
 
+
 export function loadConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Config {
@@ -356,7 +357,10 @@ export function loadConfig(
     baseUrl,
     authSecret,
     encryptionKey,
-    egmaCloudOrigin: environment.EGMA_CLOUD_URL?.trim() || DEFAULT_EGMA_CLOUD_URL,
+    egmaCloudOrigin: securely(
+      "EGMA_CLOUD_URL",
+      environment.EGMA_CLOUD_URL?.trim() || DEFAULT_EGMA_CLOUD_URL,
+    ),
     singleOrganization: flag(environment, "EGMA_SINGLE_ORGANIZATION", true),
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,

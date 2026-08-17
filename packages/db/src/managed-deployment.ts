@@ -153,13 +153,82 @@ export function signInternalGatewayCredential(
 export function managedDeploymentFrom(
   environment: Readonly<Record<string, string | undefined>>,
 ): ManagedDeployment {
-  const hosted = (environment["EGMA_HOSTED"] ?? "").trim().toLowerCase();
+  const said = (environment["EGMA_HOSTED"] ?? "").trim().toLowerCase();
+  const hosted = said === "true" || said === "1" || said === "yes";
   const address = environment["EGMA_MODEL_GATEWAY_URL"]?.trim();
   const internal = environment["EGMA_GATEWAY_INTERNAL_KEY"]?.trim();
+
+  /**
+   * **A hosted deployment with no signing key refuses to start.**
+   *
+   * The two are one setting wearing two names: hosted Egma authorizes its own
+   * managed work by signing a credential, and a hosted deployment that lost
+   * the key it signs with would come up looking healthy, provision every new
+   * organization onto Managed by Egma, and fail every one of their claims. The
+   * shape of that failure is the reason it is loud here: a missing signing key
+   * reads downstream as "this deployment was never told where its gateway is",
+   * which sends an operator to the wrong setting.
+   *
+   * Loud at boot rather than at the first claim, on the master key's exact
+   * terms one file over.
+   */
+  if (hosted && (internal === undefined || internal === "")) {
+    throw new Error(
+      "EGMA_HOSTED is on and EGMA_GATEWAY_INTERNAL_KEY is not set. A hosted deployment authorizes its own managed model traffic by signing a credential with that key, so without it every organization it creates starts on Managed by Egma and every one of their simulations fails at the gateway. Set it, or turn EGMA_HOSTED off.",
+    );
+  }
+
   return {
-    hosted: hosted === "true" || hosted === "1" || hosted === "yes",
-    gatewayAddress: address === undefined || address === "" ? undefined : address,
+    hosted,
+    gatewayAddress:
+      address === undefined || address === ""
+        ? undefined
+        : securely("EGMA_MODEL_GATEWAY_URL", address),
     internalGatewayKey:
       internal === undefined || internal === "" ? undefined : internal,
   };
+}
+
+/**
+ * An address managed traffic may be sent to, or a refusal.
+ *
+ * **`https:` unless it is loopback**, and both halves are deliberate. Managed
+ * traffic carries a credential that authorizes Egma's provider accounts, and a
+ * plain-text address puts that credential on the wire for anybody on the path;
+ * a deployment that fell back to `http:` by a typo would leak it silently
+ * rather than fail. Loopback is carved out because the deterministic suite runs
+ * a real gateway on `127.0.0.1` over real sockets — and a test that had to be
+ * given a certificate to prove a relay would be proving TLS setup instead.
+ */
+export function securely(name: string, address: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(address);
+  } catch {
+    throw new Error(`${name} must be an absolute address, and "${address}" is not`);
+  }
+  if (parsed.protocol === "https:") return address;
+  if (parsed.protocol === "http:" && isLoopback(parsed.hostname)) return address;
+  throw new Error(
+    `${name} must be an https address — it carries a credential that authorizes Egma's provider accounts, and a plain-text one puts that credential on the wire. Only a loopback address may be http:, which is what the deterministic suite uses.`,
+  );
+}
+
+/**
+ * The one place `http:` is allowed.
+ *
+ * **Anchored at both ends, and that is not pedantry.** A prefix test on
+ * `127.` calls `127.0.0.1.attacker.example` loopback, and a host somebody else
+ * controls would then be a legal plain-text destination for a credential that
+ * authorizes Egma's provider accounts. So the whole hostname has to be the
+ * loopback name or a complete loopback address, and nothing that merely starts
+ * like one.
+ */
+export function isLoopback(hostname: string): boolean {
+  const bare = hostname.replace(/^\[|\]$/g, "");
+  return (
+    bare === "localhost" ||
+    bare === "::1" ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare)
+  );
 }
