@@ -64,6 +64,7 @@ const MANAGED_DEPLOYMENT = [
   "INTERNAL_GATEWAY_CREDENTIAL_PREFIX",
   "INTERNAL_GATEWAY_CREDENTIAL_SECONDS",
   "managedDeployment",
+  "managedDeploymentFrom",
   "signInternalGatewayCredential",
 ];
 

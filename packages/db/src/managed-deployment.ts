@@ -139,3 +139,27 @@ export function signInternalGatewayCredential(
   );
   return `${INTERNAL_GATEWAY_CREDENTIAL_PREFIX}${encoded}.${signature}`;
 }
+
+/**
+ * The three names a deployment answers, read once and in one place.
+ *
+ * **One reader rather than one per service**, because the control plane and the
+ * grading engine both prepare managed work and a name spelled differently in
+ * two `config.ts` files is a deployment where the grader and the simulator
+ * disagree about who Egma is. `EGMA_GATEWAY_INTERNAL_KEY` is deliberately the
+ * same name the gateway itself reads: it is one secret, shared by the two ends
+ * of one wire, and two names for it would be two things to rotate.
+ */
+export function managedDeploymentFrom(
+  environment: Readonly<Record<string, string | undefined>>,
+): ManagedDeployment {
+  const hosted = (environment["EGMA_HOSTED"] ?? "").trim().toLowerCase();
+  const address = environment["EGMA_MODEL_GATEWAY_URL"]?.trim();
+  const internal = environment["EGMA_GATEWAY_INTERNAL_KEY"]?.trim();
+  return {
+    hosted: hosted === "true" || hosted === "1" || hosted === "yes",
+    gatewayAddress: address === undefined || address === "" ? undefined : address,
+    internalGatewayKey:
+      internal === undefined || internal === "" ? undefined : internal,
+  };
+}

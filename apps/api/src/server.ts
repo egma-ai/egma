@@ -22,7 +22,12 @@ import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { judgeRoutes } from "./routes/judge.ts";
 import { meRoutes } from "./routes/me.ts";
-import { modelAccessRoutes } from "./routes/model-access.ts";
+import { validateAtEgmaCloud } from "./auth/egma-cloud.ts";
+import { inferenceKeyRoutes } from "./routes/inference-keys.ts";
+import {
+  modelAccessRoutes,
+  type ModelAccessRoutesOptions,
+} from "./routes/model-access.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { organizationRoutes } from "./routes/organization.ts";
 import { personaRoutes } from "./routes/personas.ts";
@@ -98,6 +103,13 @@ export type ServerOptions = {
   readonly retellReach?: RetellReach;
   /** Test-only device-flow pace; a production server uses five seconds. */
   readonly deviceAuthorizationInterval?: IdentityOptions["deviceAuthorizationInterval"];
+  /**
+   * How an inference key is validated at Egma Cloud when an administrator
+   * connects one. Absent reaches the real Egma Cloud over the network; the
+   * deterministic suite hands in one pointed at a real API of its own, so the
+   * self-hosted half of the four-way matrix is proved without a network.
+   */
+  readonly validateInferenceKey?: ModelAccessRoutesOptions["validate"];
 };
 
 export type Api = {
@@ -313,6 +325,19 @@ export function buildApi(options: ServerOptions): Api {
   // providers are configured is anybody's, and committing the organization's
   // provider account is an admin's.
   void app.register(modelAccessRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    // The one outbound ask this product makes on a person's behalf, handed in
+    // rather than reached for, so the deterministic suite can stand a real Egma
+    // Cloud in front of it with no network.
+    validate: options.validateInferenceKey ?? validateAtEgmaCloud(config.egmaCloudOrigin),
+  });
+
+  // The inference keys hosted Egma mints, and the one door an inference key
+  // itself opens. Its own group because half of it is not a product route at
+  // all: the validation door establishes no context, takes no session and no
+  // product key, and answers one fact about one credential.
+  void app.register(inferenceKeyRoutes, {
     provider: identity.provider,
     rateLimit,
   });

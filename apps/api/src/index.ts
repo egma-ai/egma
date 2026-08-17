@@ -3,6 +3,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  managedDeploymentFrom,
   runClickHouseMigrations,
   runMigrations,
   seedDefaultJudge,
@@ -27,6 +28,11 @@ const traceMigrations = await runClickHouseMigrations(config.clickhouseUrl);
 connect({
   databaseUrl: config.databaseUrl,
   encryptionKey: config.encryptionKey,
+  // What kind of deployment this is, and where its managed model traffic goes.
+  // Read through the shared reader rather than out of this file's own config,
+  // so that the grading engine beside it cannot spell a name differently and
+  // end up disagreeing about who Egma is.
+  managedDeployment: managedDeploymentFrom(process.env),
 });
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 

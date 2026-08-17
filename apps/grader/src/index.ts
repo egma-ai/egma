@@ -3,6 +3,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  managedDeploymentFrom,
 } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
@@ -40,6 +41,10 @@ connect({
   ...(config.encryptionKey === undefined
     ? {}
     : { encryptionKey: config.encryptionKey }),
+  // The same three names the control plane reads, read the same way. A grader
+  // that resolved a different gateway address from the simulator beside it
+  // would judge a conversation on an account nobody chose.
+  managedDeployment: managedDeploymentFrom(process.env),
 });
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 

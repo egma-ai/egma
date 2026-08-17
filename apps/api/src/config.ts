@@ -70,6 +70,16 @@ export type Config = {
    */
   readonly rateLimitPerMinute: number;
   /**
+   * Where Egma Cloud answers when this deployment validates an inference key.
+   *
+   * A deployment setting rather than something an administrator types beside
+   * the key, because pointing one installation at a stranger's Egma Cloud is
+   * not a per-organization choice — and because a self-hoster who never uses
+   * managed access sets none of this. `undefined` means every paste is reported
+   * as unreachable rather than quietly connected.
+   */
+  readonly egmaCloudOrigin: string | undefined;
+  /**
    * What the simulator shows this API to claim simulation work — `egma_st_`
    * and then a secret, the same value both containers read. Absent means the
    * service will not start: the claim answers carry customers' live provider
@@ -197,6 +207,16 @@ function smtpSettings(
  * The service refuses to start rather than run misconfigured, so a bad
  * self-host is loud instead of silent.
  */
+/**
+ * Where Egma Cloud answers, for a deployment that names none.
+ *
+ * The same address the CLI falls back to and for the same reason: hosted Egma
+ * is at one place, everybody who connects managed access is connecting to that
+ * place, and a self-hoster who never uses managed access never notices this
+ * value. A deployment pointing at a staging Egma Cloud sets `EGMA_CLOUD_URL`.
+ */
+const DEFAULT_EGMA_CLOUD_URL = "https://app.egma.ai";
+
 export function loadConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Config {
@@ -336,6 +356,7 @@ export function loadConfig(
     baseUrl,
     authSecret,
     encryptionKey,
+    egmaCloudOrigin: environment.EGMA_CLOUD_URL?.trim() || DEFAULT_EGMA_CLOUD_URL,
     singleOrganization: flag(environment, "EGMA_SINGLE_ORGANIZATION", true),
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,

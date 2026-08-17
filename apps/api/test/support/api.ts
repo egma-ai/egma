@@ -5,6 +5,7 @@ import {
   disconnectClickHouse,
   seedGraderLibrary,
   seedPlatformSettings,
+  type ManagedDeployment,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -147,6 +148,22 @@ export type TestApiOptions = {
    * not read the log has no reason to collect one.
    */
   readonly logTo?: { write(line: string): void };
+  /**
+   * What kind of deployment this instance is, where its managed model traffic
+   * goes, and the key it signs its own gateway credentials with.
+   *
+   * Off by default, which is the ordinary self-hosted deployment with nothing
+   * connected. A test that is about managed access says which of the two
+   * deployments it is standing in, because that is the difference the whole
+   * area turns on.
+   */
+  readonly managedDeployment?: ManagedDeployment;
+  /**
+   * How this instance validates a pasted inference key. A test hands in one
+   * pointed at a real Egma Cloud of its own, so the self-hosted managed path is
+   * proved over a real door with no network.
+   */
+  readonly validateInferenceKey?: ServerOptions["validateInferenceKey"];
 };
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
@@ -172,6 +189,11 @@ export async function createApi(
     databaseUrl: database.url,
     maxConnections: 4,
     encryptionKey: TEST_ENCRYPTION_KEY,
+    managedDeployment: options.managedDeployment ?? {
+      hosted: false,
+      gatewayAddress: undefined,
+      internalGatewayKey: undefined,
+    },
   });
 
   const traceStore =
@@ -232,6 +254,9 @@ export async function createApi(
     ...(options.retellReach === undefined
       ? {}
       : { retellReach: options.retellReach }),
+    ...(options.validateInferenceKey === undefined
+      ? {}
+      : { validateInferenceKey: options.validateInferenceKey }),
     // The production sweep's loop is never wanted in a route test: a suite that
     // wants one drives `runProductionSweep` itself, where it can say when a
     // tick happens instead of waiting for one.

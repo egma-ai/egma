@@ -16,6 +16,7 @@ export {
   INTERNAL_GATEWAY_CREDENTIAL_PREFIX,
   INTERNAL_GATEWAY_CREDENTIAL_SECONDS,
   managedDeployment,
+  managedDeploymentFrom,
   signInternalGatewayCredential,
   type ManagedDeployment,
 } from "./managed-deployment.ts";
