@@ -3,6 +3,7 @@ import {
   connectManagedAccess,
   createPersona,
   getSimulation,
+  RECOMMENDED_GRADER_MODEL,
   RECOMMENDED_PERSONA_MODELS,
   storeModelProviderCredential,
   type ManagedDeployment,
@@ -13,6 +14,8 @@ import { WebSocket } from "ws";
 
 import { startLocalGateway, type LocalGateway } from "../../gateway/src/host/node.ts";
 import { makeLog } from "../../gateway/src/record.ts";
+import { judgesOnce, NoJudge } from "../../grader/src/judge/index.ts";
+import { scriptedJudge } from "../../grader/test/support/scripted-judge.ts";
 import { startEgmaCloudDoor } from "../../gateway/test/support/egma-cloud.ts";
 import {
   EGMA_PROVIDER_KEY,
@@ -253,7 +256,13 @@ type Models = {
   readonly gateway?: { readonly address: string; readonly credential: string };
   readonly llm: { readonly provider: string; readonly model: string; readonly key?: string };
   readonly stt: { readonly provider: string; readonly model: string; readonly key?: string };
-  readonly tts: { readonly provider: string; readonly model: string; readonly key?: string };
+  readonly tts: {
+    readonly provider: string;
+    readonly model: string;
+    readonly key?: string;
+    readonly voice_id: string;
+    readonly speed: number;
+  };
 };
 
 /**
@@ -390,15 +399,106 @@ describe("hosted Egma, managed by Egma", () => {
     );
   });
 
-  it("starts a new project managed, so its seeded persona and grader need no setup", async () => {
+  /**
+   * The zero-setup first run, from a project nobody has touched.
+   *
+   * **Nothing in this case authors a persona or a grader.** It signs up,
+   * registers an agent, writes one test naming nobody, and starts a run — so
+   * the persona and the grader that execute are the ones project creation
+   * seeded. That is the promise the whole effort is for, and it is the only
+   * case here that would still pass if every Models form were deleted.
+   */
+  it("completes a first run on its seeded persona and grader, with nothing configured", async () => {
     const address = await standUpProviders(undefined);
-    const world = await aCustomer("matrix_hosted_defaults", HOSTED(address));
+    api = await createApi("matrix_hosted_first_run", {
+      managedDeployment: HOSTED(address),
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
 
-    const read = await ask(api.app, "GET", "/api/model-access", world.key);
-    expect(read.body["mode"]).toBe("managed");
-    expect(read.body["managed_available"]).toBe(true);
-    // And nothing at all was configured to get there.
-    expect(read.body["credentials"]).toEqual([]);
+    // Managed by Egma before anybody opens a settings screen, and no
+    // credential stored anywhere.
+    const access = await ask(api.app, "GET", "/api/model-access", key);
+    expect(access.body["mode"]).toBe("managed");
+    expect(access.body["managed_available"]).toBe(true);
+    expect(access.body["credentials"]).toEqual([]);
+
+    const registered = await ask(api.app, "POST", "/api/agents", key, {
+      name: "Front desk",
+      connection: RETELL_VOICE,
+    });
+    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+
+    // A test that names no persona, which is what makes the seeded one the
+    // one that runs.
+    const pushed = await ask(api.app, "POST", "/api/tests", key, RESCHEDULING);
+    expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
+
+    const spec = await oneWorkOrder({
+      ada,
+      key,
+      connectionId: (registered.body.connection as { id: string }).id,
+      versionId: String(pushed.body.version_id),
+      serviceToken: api.config.simulatorServiceToken,
+    });
+    expect(specComplaints(spec)).toEqual([]);
+    const models = spec.models as Models;
+
+    // The seeded persona chose for itself, so the work order carries its
+    // selections rather than falling back to deployment settings hosted Egma
+    // does not have.
+    expect(models.access).toBe("managed");
+    expect(models.gateway?.address).toBe(address);
+    expect(models.llm.provider).toBe(RECOMMENDED_PERSONA_MODELS.llm.provider);
+    expect(models.stt.model).toBe(RECOMMENDED_PERSONA_MODELS.stt.model);
+    expect(models.tts.voice_id).toBe(RECOMMENDED_PERSONA_MODELS.tts.voiceId);
+    expect(models.llm.key).toBeUndefined();
+
+    // And every leg of it really conducts, through the real gateway, on Egma's
+    // own provider accounts.
+    expect(
+      (
+        await conductEveryLeg(models, {
+          openai: openai?.origin ?? "",
+          deepgram: deepgram?.origin ?? "",
+          cartesia: cartesia?.origin ?? "",
+        })
+      ).thought,
+    ).toBe(200);
+    expect(openai?.seen[0]?.headers["authorization"]).toBe(
+      `Bearer ${EGMA_PROVIDER_KEY.openai}`,
+    );
+
+    // The seeded grader has chosen its judge model too, so a verdict needs no
+    // setup either — resolved through the engine's own door, which is the seam
+    // the grading service reaches it by. The maker is a recorder rather than a
+    // real provider: what is being asked here is which account and which
+    // address a seeded grader is pointed at, not what a model says.
+    const recorder = scriptedJudge({ answers: {} });
+    const judged = await judgesOnce({
+      userId: "engine",
+      organizationId: ada.organizationId,
+      projectId: ada.projectId,
+      role: "viewer",
+      via: "engine",
+    }).judgeFor(
+      { graderModel: RECOMMENDED_GRADER_MODEL, judgeModel: null },
+      recorder.makers,
+    );
+
+    expect(judged).not.toBeInstanceOf(NoJudge);
+    const asked = recorder.configured.at(-1) as {
+      provider: string;
+      model: string;
+      key: string;
+      endpoint: string;
+    };
+    expect(asked.provider).toBe(RECOMMENDED_GRADER_MODEL.provider);
+    expect(asked.model).toBe(RECOMMENDED_GRADER_MODEL.model);
+    // Egma's own signed credential and the gateway's route for it — never an
+    // organization credential, because none was ever stored.
+    expect(asked.key.startsWith("egma_ig_")).toBe(true);
+    expect(asked.endpoint).toBe(`${address}/openai/v1`);
   });
 });
 

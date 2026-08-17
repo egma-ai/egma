@@ -7,6 +7,8 @@ import {
   PREDEFINED_GRADERS,
   type PredefinedGrader,
 } from "../grader-library/catalog.ts";
+import { managedDeployment } from "../managed-deployment.ts";
+import { RECOMMENDED_GRADER_MODEL } from "../models/selections.ts";
 import { grader, graderVersion } from "../schema/graders.ts";
 import { project } from "../schema/tenancy.ts";
 import type { GraderConfig } from "./graders.ts";
@@ -117,6 +119,27 @@ export async function insertSeededGrader(
     version: 1,
     config: NOTHING_TO_FILL_IN,
     judgeModel: null,
+    /**
+     * **The release's proved judge model, on a deployment that can execute it.**
+     *
+     * Hosted Egma is on Managed by Egma from the moment an organization exists,
+     * so this grader can ask a model on Egma's own account with nothing
+     * configured — which is what makes a hosted first run produce a verdict
+     * rather than a row saying no judge was set. The starter persona one file
+     * over is given its selections by the same rule and for the same reason.
+     *
+     * `null` everywhere else, and that is the compatibility path rather than an
+     * omission: a self-hosted deployment's project judge decides exactly as it
+     * always did, and an explicit selection there would spend an organization
+     * credential nobody has stored and write `errored` verdicts for it.
+     *
+     * It lands on the *version*, beside the config, because it is judged
+     * content: a verdict written under it stays readable as "decided by this
+     * model" long afterwards. The copy still reads its judge prompt through
+     * `library_id` and never holds one, so nothing about the pointer rules
+     * moves.
+     */
+    graderModel: managedDeployment().hosted ? RECOMMENDED_GRADER_MODEL : null,
     createdBy: values.createdBy,
   });
 

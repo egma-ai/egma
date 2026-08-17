@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import { managedDeployment } from "../managed-deployment.ts";
+import { RECOMMENDED_PERSONA_MODELS } from "../models/selections.ts";
 import { judgeConfiguration } from "../schema/graders.ts";
 import { modelAccess } from "../schema/models.ts";
 import { persona, personaVersion } from "../schema/personas.ts";
@@ -60,6 +61,30 @@ const STARTER_TRAITS: PersonaTraits = {
  * `provisioning-starter-persona.test.ts` compares these rows against ones
  * `createPersona` wrote, and fails on a column only one of them fills.
  */
+/**
+ * Whether a project's seeded objects are born with explicit model selections.
+ *
+ * **Hosted Egma yes, a self-hosted deployment no, and the split is the whole
+ * of what makes a hosted first run need no setup.** A hosted organization is on
+ * Managed by Egma from the moment it exists, so a seeded persona that selects
+ * Deepgram, OpenAI and Cartesia can be executed at once, on Egma's provider
+ * accounts, with nothing pasted and nothing edited. That is the promise this
+ * whole area exists to keep, and a seeded persona with no selections would
+ * break it at the last step: it would resolve through deployment-wide model
+ * settings, and hosted Egma has none.
+ *
+ * A self-hosted deployment gets the opposite answer for the opposite reason.
+ * Those deployments hold deployment-wide model settings and a platform judge,
+ * and usually no organization credential — so a seeded persona with explicit
+ * selections would fail its first claim naming a provider nobody had been
+ * asked for, and a seeded grader with an explicit model would write `errored`
+ * verdicts. Seeding nothing keeps them exactly as they are, and giving their
+ * *existing* personas and graders explicit successors is the migration's job.
+ */
+function seedsExplicitSelections(): boolean {
+  return managedDeployment().hosted;
+}
+
 async function insertStarterPersona(
   on: Queryable,
   values: {
@@ -86,6 +111,12 @@ async function insertStarterPersona(
     personaId: id,
     version: 1,
     traits: STARTER_TRAITS,
+    // **The release's proved defaults, on a deployment that can execute them.**
+    // `null` is the compatibility path and stays the answer everywhere else;
+    // see `seedsExplicitSelections`. The traits' own `voice` is not read when a
+    // version carries selections — the TTS selection is the one source — so the
+    // legacy field above serves the deployments that have no selections.
+    models: seedsExplicitSelections() ? RECOMMENDED_PERSONA_MODELS : null,
     createdBy: values.createdBy,
   });
 
