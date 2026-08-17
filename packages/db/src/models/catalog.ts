@@ -78,7 +78,7 @@ export type ModelProvider = (typeof MODEL_PROVIDERS)[number];
  * thinking, Cartesia speaking. Each was conducted end to end over both access
  * modes and measured against direct provider access before it was written here.
  */
-export const PROVIDER_CATALOG = [
+export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   {
     provider: "openai",
     job: "llm",
@@ -98,7 +98,7 @@ export const PROVIDER_CATALOG = [
     recommendedModel: "sonic-3.5",
     recommendedVoiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
   },
-] as const satisfies readonly ProviderCatalogEntry[];
+];
 
 /**
  * The provider-job pairs the product intends and this release has not proved.

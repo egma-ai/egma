@@ -22,6 +22,7 @@ import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { judgeRoutes } from "./routes/judge.ts";
 import { meRoutes } from "./routes/me.ts";
+import { modelAccessRoutes } from "./routes/model-access.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { organizationRoutes } from "./routes/organization.ts";
 import { personaRoutes } from "./routes/personas.ts";
@@ -304,6 +305,16 @@ export function buildApi(options: ServerOptions): Api {
     ...(config.defaultJudge === undefined
       ? {}
       : { defaultJudge: config.defaultJudge }),
+  });
+
+  // Who supplies the keys this organization's model traffic spends, the keys
+  // themselves, and the catalog a persona and a grader select from. Its own
+  // group beside the judge's above and for the same reason: reading which
+  // providers are configured is anybody's, and committing the organization's
+  // provider account is an admin's.
+  void app.register(modelAccessRoutes, {
+    provider: identity.provider,
+    rateLimit,
   });
 
   // What this deployment has been configured with, as an owner reads and
