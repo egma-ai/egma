@@ -1,4 +1,5 @@
 import {
+  appendVerdicts,
   createAgent,
   createPersona,
   createProject,
@@ -6,6 +7,7 @@ import {
   startRun,
   type AuthContext,
 } from "@egma/db";
+import { newId } from "@egma/ids";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -1129,4 +1131,109 @@ describe("a read with no usable credential", () => {
       expect(invented.statusCode).toBe(401);
     }
   });
+});
+
+/**
+ * **What egma judged a production conversation, found where egma filed it.**
+ *
+ * A simulation's verdicts are filed under its simulation id and its spans under
+ * the same 128 bits written as hex, so the read derives one from the other. The
+ * derivation is a pure bit conversion and therefore succeeds for *every* trace
+ * id — including a customer's own production trace, which converts to a
+ * perfectly well-formed simulation id nothing ever minted.
+ *
+ * That is the bug this describes. The read looked under the phantom id, found
+ * nothing, and answered "nothing was judged" while the real verdict rows sat in
+ * the store under the trace id it had been handed. A live call caught it: a
+ * passed latency verdict, written by the grader, invisible on the transcript.
+ *
+ * A judgment egma wrote and then could not find is the exact false trust this
+ * product exists to kill, so it is pinned here, at the read, through the routes.
+ */
+describe("a production conversation egma judged", () => {
+  const JUDGED_TRACE = "cc000000000000000000000000000001";
+  const JUDGED_AT = "2026-06-01T11:00:00Z";
+  const GRADER = newId("grd");
+  const GRADER_VERSION = newId("grv");
+
+  beforeAll(async () => {
+    await ingest(
+      api.app,
+      acme.secret,
+      syntheticExport({
+        traceId: JUDGED_TRACE,
+        startedAt: new Date(JUDGED_AT),
+        humanSaid: "How long will the wait be?",
+      }),
+    );
+
+    // Written the way the grader writes one: under the **trace id**, because a
+    // production conversation is not a simulation and has no simulation id.
+    await appendVerdicts(contextFor(acme, "admin"), [
+      {
+        traceId: JUDGED_TRACE,
+        graderId: GRADER,
+        graderVersionId: GRADER_VERSION,
+        assertion: "turn_response_latency",
+        source: "production",
+        verdict: "passed",
+        score: 1,
+        rationale: "every turn was answered inside the bound.",
+        citedSpanIds: [],
+        runId: "",
+        agentId: "",
+        agentVersionId: "",
+        judgedAtMicroseconds: BigInt(Date.parse(JUDGED_AT)) * 1000n,
+      },
+    ]);
+  });
+
+  it("shows the judgment on its transcript, rather than nothing at all", async () => {
+    const read = await readTraceOverHttp(
+      api.app,
+      acme.secret,
+      JUDGED_TRACE,
+      DAY,
+    );
+    expect(read.statusCode, read.body).toBe(200);
+
+    const detail = read.json() as {
+      trace: { source: string };
+      simulation_id: string | null;
+      verdicts: readonly { assertion: string; verdict: string }[];
+      outcome: { verdict: string; counts: Record<string, number> } | null;
+    };
+
+    // A production conversation, and it names no simulation — which is exactly
+    // the case the lookup used to get wrong.
+    expect(detail.trace.source).toBe("production");
+    expect(detail.simulation_id).toBeNull();
+
+    expect(detail.verdicts).toHaveLength(1);
+    expect(detail.verdicts[0]?.assertion).toBe("turn_response_latency");
+    expect(detail.verdicts[0]?.verdict).toBe("passed");
+  });
+
+  it("folds a real outcome, and never a skipped nothing", async () => {
+    const read = await readTraceOverHttp(
+      api.app,
+      acme.secret,
+      JUDGED_TRACE,
+      DAY,
+    );
+    expect(read.statusCode, read.body).toBe(200);
+
+    const outcome = (
+      read.json() as {
+        outcome: { verdict: string; counts: Record<string, number> } | null;
+      }
+    ).outcome;
+
+    // Present, decided, and counting the row — the three things the phantom
+    // lookup destroyed, in the order somebody reading the page notices them.
+    expect(outcome).not.toBeNull();
+    expect(outcome?.verdict).toBe("passed");
+    expect(outcome?.counts.passed).toBe(1);
+  });
+
 });
