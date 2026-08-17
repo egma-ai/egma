@@ -11,8 +11,8 @@ import {
  *
  * No stores, no keys, no network: one Retell call object in, the settled span
  * shape out. A replay after a crash re-normalises the payload on the claim, and
- * it has to keep the same rows and block boundaries so the current rollout
- * bridge repeats the prior release's recent block token.
+ * it has to keep the same rows and block boundaries so ClickHouse sees a
+ * byte-identical recent block.
  */
 
 const FILED_INTO = {
@@ -85,8 +85,8 @@ describe("the trace identity", () => {
     expect(once.spans.map((span) => span.spanId)).toEqual(
       again.spans.map((span) => span.spanId),
     );
-    // Byte-identical, which is the property a replay after a crash needs: the
-    // store recognises a repeated block by the ids in it.
+    // Byte-identical, which is the property a replay after a crash needs for
+    // the store's recent-block backstop.
     expect(asBytes(once.spans)).toBe(asBytes(again.spans));
   });
 

@@ -438,6 +438,8 @@ describe("changed evidence that reuses span ids", () => {
         kind: "turn:human",
         text: "changed evidence",
       }),
+    ]);
+    await appendSpans(at(acme, SUPPORT), [
       span({
         traceId: REUSED,
         spanId: child,
@@ -446,9 +448,8 @@ describe("changed evidence that reuses span ids", () => {
         kind: "model",
       }),
     ]);
-    // The extra child makes this a different block token during the temporary
-    // rolling-deploy bridge. Both reused-id rows therefore exist in storage,
-    // and this suite can still prove that the reader does not collapse them.
+    // The changed block is different evidence, so both reused-id rows exist in
+    // storage and this suite can prove that the reader does not collapse them.
     // Force the parts together. The response order must come from stored
     // content, not whichever source part ClickHouse happens to read first.
     await store.command("optimize table spans final");

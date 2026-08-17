@@ -54,10 +54,9 @@ export type ProductionClaimStatus = (typeof PRODUCTION_CLAIM_STATUSES)[number];
  * order across the two stores is claim (here) → append (ClickHouse) → mark
  * written (here). A crash anywhere in the middle leaves a claimed-but-unwritten
  * row, and a sweep re-claims it and replays it *from this payload* — so the
- * retry normalises identical input into an identical batch. During one rollout,
- * ClickHouse can suppress that append while the prior release's compatibility
- * token remains in its recent deduplication window. A later replay may append
- * another copy. Neither store needs a transaction spanning the other.
+ * retry normalises identical input into an identical batch. ClickHouse can
+ * suppress a recent byte-identical append. A later replay may append another
+ * copy. Neither store needs a transaction spanning the other.
  */
 export const productionTraceClaim = pgTable(
   "production_trace_claim",

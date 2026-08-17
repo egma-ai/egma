@@ -96,10 +96,9 @@ export function traceIdFor(connectionId: string, callId: string): string {
  * A span id inside one trace: sixteen hex characters, derived from the trace
  * and the span's own place in it.
  *
- * Derived rather than random so a replay after a crash produces the same block
- * identity. During the current rollout bridge, ClickHouse can suppress that
- * recent retry with the prior release's token. This is not a global or
- * permanent duplicate guarantee.
+ * Derived rather than random so a replay after a crash produces the same
+ * byte-identical block. ClickHouse can suppress that recent retry. This is not
+ * a global or permanent duplicate guarantee.
  */
 function spanIdFor(traceId: string, within: string): string {
   return createHash("sha256")
@@ -330,8 +329,8 @@ function span(fields: Partial<NewSpan> & Pick<NewSpan, "traceId" | "spanId" | "n
  * One Retell call object as the spans that will be filed for it.
  *
  * `now` is injected so a payload with no timestamps normalises to the same
- * spans twice. A deterministic replay keeps the same block identity for the
- * current rolling-deploy bridge. Nothing else in here reads a clock.
+ * spans twice. A deterministic replay keeps the block byte-identical. Nothing
+ * else in here reads a clock.
  */
 export function normaliseRetellCall(
   call: RetellCall,

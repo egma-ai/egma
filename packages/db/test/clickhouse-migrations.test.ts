@@ -332,17 +332,6 @@ describe("the schema a boot leaves behind", () => {
     return (name) => columns.find((column) => column.name === name)?.type;
   }
 
-  async function defaultKindsOf(
-    table: string,
-  ): Promise<(name: string) => string | undefined> {
-    const columns = await store.rows<{ name: string; default_kind: string }>(
-      `select name, default_kind from system.columns
-        where database = '${store.name}' and table = '${table}'`,
-    );
-    return (name) =>
-      columns.find((column) => column.name === name)?.default_kind;
-  }
-
   it("files spans by organization, project, minute, trace and span", async () => {
     const spans = await tableNamed("spans");
     expect(spans?.engine).toBe("MergeTree");
@@ -369,7 +358,6 @@ describe("the schema a boot leaves behind", () => {
 
   it("keeps the provider's payload verbatim beside the normalised columns", async () => {
     const typeOf = await typesOf("spans");
-    const defaultKindOf = await defaultKindsOf("spans");
 
     expect(typeOf("payload")).toBe("String");
     expect(typeOf("trace_id")).toBe("String");
@@ -382,29 +370,8 @@ describe("the schema a boot leaves behind", () => {
     expect(typeOf("started_at")).toBe("DateTime64(6, 'UTC')");
     expect(typeOf("provider_call_id")).toBe("String");
     expect(typeOf("connection_type")).toBe("LowCardinality(String)");
-    // These names remain input-only during a rolling-deploy compatibility
-    // window. EPHEMERAL values are accepted from an old writer but cannot be
-    // selected and are never stored; `payload` is their only persisted home.
-    expect(typeOf("audio_sample_rate_hz")).toBe("UInt32");
-    expect(defaultKindOf("audio_sample_rate_hz")).toBe("EPHEMERAL");
-    expect(typeOf("audio_encoding")).toBe("LowCardinality(String)");
-    expect(defaultKindOf("audio_encoding")).toBe("EPHEMERAL");
-  });
-
-  it("accepts retired audio fields from an older API without storing them", async () => {
-    await store.append("spans", [
-      {
-        audio_sample_rate_hz: 48_000,
-        audio_encoding: "pcm_s16le",
-      },
-    ]);
-
-    expect(
-      await store.rows<{ count: number }>("select count() as count from spans"),
-    ).toEqual([{ count: 1 }]);
-    await expect(
-      store.rows("select audio_sample_rate_hz, audio_encoding from spans"),
-    ).rejects.toThrow();
+    expect(typeOf("audio_sample_rate_hz")).toBeUndefined();
+    expect(typeOf("audio_encoding")).toBeUndefined();
   });
 
   it("carries a materialised view at turn grain, filed the same way", async () => {

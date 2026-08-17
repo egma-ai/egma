@@ -544,7 +544,7 @@ function protobufBodyOf(fixtureJson: string): Buffer {
 }
 
 describe("the same path in the other encoding", () => {
-  it("retains changed protobuf evidence when its block identity also changed", async () => {
+  it("retains changed protobuf evidence that reuses span ids", async () => {
     const before = await countOf(
       `select count() as n from spans where trace_id = '${VOICE_TRACE}'`,
     );
@@ -598,16 +598,6 @@ describe("the same path in the other encoding", () => {
         },
       ],
     });
-    changed.resourceSpans[0]?.scopeSpans[0]?.spans.push({
-      traceId: VOICE_TRACE,
-      spanId: "bb20000000000007",
-      parentSpanId: "bb20000000000001",
-      name: "new-native-evidence",
-      kind: "SPAN_KIND_INTERNAL",
-      startTimeUnixNano: "1785924902300000000",
-      endTimeUnixNano: "1785924902400000000",
-      status: { code: "STATUS_CODE_UNSET" },
-    });
     const resent = await post(
       protobufBodyOf(JSON.stringify(changed)),
       SERVICE_TOKEN,
@@ -626,10 +616,9 @@ describe("the same path in the other encoding", () => {
       await countOf(
         `select count() as n from spans where trace_id = '${VOICE_TRACE}'`,
       ),
-    ).toBe(before * 2 + 1);
-    // The added span gives this request a different compatibility token. The
-    // stored changed rows then reach the dependent view too; the reader does
-    // not collapse their reused span ids.
+    ).toBe(before * 2);
+    // Changed rows reach the dependent view too. The reader does not collapse
+    // their reused span ids.
     expect(
       await countOf(
         `select count() as n from turns where trace_id = '${VOICE_TRACE}'`,

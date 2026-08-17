@@ -147,12 +147,10 @@ takes thin arguments for an agent that passed none.
   simulator sends as its Egma-authored record: turns and a first-response
   measurement while the conversation runs, tool calls and a per-turn
   measurement as they happen, and the closing turn with the root last. Together
-  they are the whole trace. During the current rolling-deploy bridge,
-  ClickHouse suppresses a recent block with the same ordered ids. Changed
-  content is retained when it arrives in a differently grouped block, and the
-  reader never collapses stored rows by span id. Removing the temporary token
-  bridge requires a separate cutover after old writers and retries have drained
-  and rollback is closed.
+  they are the whole trace. ClickHouse suppresses a recent byte-identical
+  block. Changed, regrouped, or reordered content is a different block and is
+  retained even when span ids repeat; the reader never collapses stored rows by
+  span id.
 - `voice-overlapping-turns.json` — a mid-conversation voice flush where the
   persona starts speaking before the agent finishes: two turns whose intervals
   cross, with the two speech-duration measures beside them.

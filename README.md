@@ -856,13 +856,11 @@ A few things worth knowing about what happens next:
 - **Nothing is invented and nothing is dropped.** One span in is one row; what
   the columns have no place for — every attribute, event and resource field —
   is kept verbatim on the row it came on.
-- **A recent exact retry is free.** During the current rolling-deploy bridge,
-  Egma keeps the prior release's block token and input shape. ClickHouse can
-  therefore suppress a recent retry that moves between old and new API
-  replicas. The token is not permanent: a later, regrouped, or reordered repeat
-  can append, and there is no read-time per-span deduplication. Removing the
-  bridge requires a separate cutover after old writers and pending retries have
-  drained and rollback is closed.
+- **A recent exact retry is free.** ClickHouse suppresses a byte-identical
+  insert block while that block remains in its recent deduplication window.
+  A later repeat can append, and regrouping, reordering, or changing any
+  evidence creates a different block that also appends, even when span ids
+  repeat.
 - **Sending traces is a write**, so a key acts at the role of whoever minted it:
   a `member` or an `admin` exports, and a key held by a `viewer` is refused.
   Demoting somebody stops their exporters on the next request, with no key

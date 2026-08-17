@@ -425,13 +425,6 @@ export const simulation = pgTable(
     cancelRequestedAt: moment("cancel_requested_at"),
     startedAt: moment("started_at"),
     endedAt: moment("ended_at"),
-    /**
-     * Deprecated deploy and rollback bridge. Older API replicas can still
-     * write this field while a mixed release is running. Current code does
-     * not read it, write it, or expose it as product evidence. Remove it only
-     * after the older release and its rollback window are no longer supported.
-     */
-    measuredAudioBandHertz: integer("measured_audio_band_hertz"),
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
     /**
@@ -597,8 +590,7 @@ export const simulation = pgTable(
     check(
       "simulation_report_only_when_ended",
       sql`${table.endedAt} is not null
-        or (${table.recordingReference} is null
-          and ${table.measuredAudioBandHertz} is null)`,
+        or ${table.recordingReference} is null`,
     ),
     // The two summary facts are terminal facts too; a check of their own
     // beside the report's rather than a rewrite of it, because they arrived
@@ -618,17 +610,11 @@ export const simulation = pgTable(
       "simulation_mock_tool_coverage_only_when_ended",
       sql`${table.endedAt} is not null or ${table.mockToolCoverage} is null`,
     ),
-    // A chat has no audio, so the row refuses both a recording and a value
-    // from the temporary old-writer compatibility field.
+    // A chat has no audio, so its row refuses a recording.
     check(
       "simulation_audio_facts_are_voice_facts",
       sql`${table.modality} = 'voice'
-        or (${table.measuredAudioBandHertz} is null
-          and ${table.recordingReference} is null)`,
-    ),
-    check(
-      "simulation_audio_band_is_a_rate",
-      sql`${table.measuredAudioBandHertz} is null or ${table.measuredAudioBandHertz} > 0`,
+        or ${table.recordingReference} is null`,
     ),
     // The tenancy triangle, edge by edge, exactly as the run's: project of
     // the organization, agent of the project, connection of the agent — and

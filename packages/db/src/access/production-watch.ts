@@ -426,9 +426,8 @@ export async function advanceProductionCursor(
  * a write and holds the payload to write it from; this re-stamps `claimed_at`
  * and hands the payload back, so the caller normalises the identical input into
  * the identical batch. A crash between the append and the mark replays the same
- * append. During this rollout, ClickHouse suppresses a retry carrying the prior
- * release's compatibility token, but a replay after that deduplication window
- * can append a second copy.
+ * append. ClickHouse normally suppresses a recent byte-identical retry, but a
+ * replay after that deduplication window can append a second copy.
  *
  * Re-stamping under `for update skip locked` is what keeps two API replicas
  * from replaying one conversation at the same moment. It is the grading claim's
