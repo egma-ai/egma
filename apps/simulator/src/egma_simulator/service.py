@@ -31,6 +31,7 @@ simulator itself, and never a capacity slot that no longer comes back.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Protocol
@@ -506,9 +507,32 @@ class SimulatorService:
         self._claim_failure_began = 0.0
         self._claim_failure_said_at = 0.0
         self._claim_failure_count = 0
+        self._stop = asyncio.Event()
+
+    def request_stop(self) -> None:
+        """Ask for the drain: claim nothing new, finish the work in flight.
+
+        ``run()`` returns once the last in-flight simulation has reported.
+        This is what a deploy calls (through SIGTERM) so that replacing the
+        container costs nobody their call. Cancellation remains the hard
+        stop.
+        """
+        self._stop.set()
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop.is_set()
 
     async def run(self) -> None:
-        """Claim and conduct until cancelled. Cancellation is the only exit."""
+        """Claim and conduct until stopped or cancelled.
+
+        Two stops, meaning different things. ``request_stop()`` is the
+        drain: claiming ends, the simulations in flight finish and report,
+        and this returns when the last one has. Cancellation is the hard
+        stop it always was: in-flight exchanges are torn down and nothing
+        terminal is invented for them — the control plane's orphan sweep
+        records what a disappearing simulator means.
+        """
         config = self._config
         async with ControlPlaneClient(
             config.control_plane_url,
@@ -525,9 +549,34 @@ class SimulatorService:
                 config.control_plane_url,
                 config.capacity,
             )
+            claiming = asyncio.ensure_future(
+                self._claim_forever(client, executor)
+            )
+            stop = asyncio.ensure_future(self._stop.wait())
             try:
-                await self._claim_forever(client, executor)
+                await asyncio.wait(
+                    {claiming, stop}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if claiming.done():
+                    # The loop never returns; it only ends by a fault it
+                    # could not absorb. Await it so the fault is said.
+                    await claiming
+                in_flight = config.capacity - executor.free_capacity
+                if in_flight:
+                    logger.info(
+                        "stop requested; claiming nothing new, "
+                        "%d simulation(s) finishing",
+                        in_flight,
+                    )
+                claiming.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await claiming
+                # The drain, without the cancel that used to precede it:
+                # the running tasks are the calls being finished.
+                await executor.drain()
             finally:
+                stop.cancel()
+                claiming.cancel()
                 executor.cancel_all()
                 await executor.drain()
 

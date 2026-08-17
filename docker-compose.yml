@@ -460,6 +460,13 @@ services:
     build:
       context: .
       dockerfile: apps/simulator/Dockerfile
+    # A stopping simulator finishes the simulations it holds before it
+    # exits: the first stop signal ends claiming, not conversations. Ten
+    # minutes is a ceiling, not a wait — an idle simulator stops at once,
+    # and no call outlives ten minutes. Past the ceiling Docker kills the
+    # container and the control plane's sweep records what remained. The
+    # default grace is ten seconds, which would kill mid-sentence.
+    stop_grace_period: 10m
     environment:
       # Where it claims, heartbeats and reports. The API and the simulator
       # meet inside this network, so this is the service name rather than
