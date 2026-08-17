@@ -1,6 +1,11 @@
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
-import { createClient, type ClickHouseClient } from "@clickhouse/client";
+import {
+  ClickHouseError,
+  createClient,
+  type ClickHouseClient,
+} from "@clickhouse/client";
 
 import {
   pendingMigrations,
@@ -50,6 +55,17 @@ const BOOKKEEPING_TABLE = "egma_meta_migration";
  */
 const STATEMENT_SEPARATOR = "--> statement-breakpoint";
 
+/**
+ * Replicated ClickHouse tables publish an ALTER to shared metadata before each
+ * replica necessarily observes it. A following ALTER can therefore receive
+ * CANNOT_ASSIGN_ALTER with an explicit instruction to retry. Ten seconds of
+ * bounded backoff fits inside the deployment health window without turning an
+ * unrelated migration error into a loop.
+ */
+const REPLICA_CATCHUP_ATTEMPTS = 8;
+const REPLICA_CATCHUP_FIRST_WAIT_MS = 250;
+const REPLICA_CATCHUP_MAX_WAIT_MS = 2_000;
+
 export async function runClickHouseMigrations(
   clickhouseUrl: string,
   directory: string = CLICKHOUSE_MIGRATIONS_DIRECTORY,
@@ -69,6 +85,40 @@ function statementsOf(migration: Migration): string[] {
     .split(STATEMENT_SEPARATOR)
     .map((statement) => statement.trim().replace(/;$/, ""))
     .filter((statement) => statement.replace(/--[^\n]*/g, "").trim() !== "");
+}
+
+function replicaIsCatchingUp(cause: unknown): cause is ClickHouseError {
+  return (
+    cause instanceof ClickHouseError &&
+    cause.code === "517" &&
+    cause.type === "CANNOT_ASSIGN_ALTER"
+  );
+}
+
+async function applyStatement(
+  client: ClickHouseClient,
+  statement: string,
+): Promise<void> {
+  for (let attempt = 1; attempt <= REPLICA_CATCHUP_ATTEMPTS; attempt += 1) {
+    try {
+      await client.command({ query: statement });
+      return;
+    } catch (cause) {
+      if (
+        !replicaIsCatchingUp(cause) ||
+        attempt === REPLICA_CATCHUP_ATTEMPTS
+      ) {
+        throw cause;
+      }
+
+      await sleep(
+        Math.min(
+          REPLICA_CATCHUP_FIRST_WAIT_MS * 2 ** (attempt - 1),
+          REPLICA_CATCHUP_MAX_WAIT_MS,
+        ),
+      );
+    }
+  }
 }
 
 async function apply(
@@ -105,7 +155,7 @@ async function apply(
   for (const migration of pendingMigrations(migrations, alreadyApplied)) {
     for (const statement of statementsOf(migration)) {
       try {
-        await client.command({ query: statement });
+        await applyStatement(client, statement);
       } catch (cause) {
         throw new Error(`migration ${migration.name} failed`, { cause });
       }
