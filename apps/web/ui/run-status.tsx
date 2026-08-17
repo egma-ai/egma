@@ -126,10 +126,33 @@ const RUN_STATUS_MARK: Readonly<Record<RunStatusWord, StateMarkKind>> = {
   canceled: "stopped",
 };
 
-export function RunStatus({ status }: { readonly status: RunStatusWord }) {
+export function RunStatus({
+  status,
+  compact = false,
+}: {
+  readonly status: RunStatusWord;
+  readonly compact?: boolean;
+}) {
+  const mark = (
+    <StateMark
+      kind={RUN_STATUS_MARK[status]}
+      moving={status === "running"}
+    />
+  );
+  if (compact) {
+    return (
+      <InlineState
+        tone={RUN_STATUS_TONE[status]}
+        title={RUN_STATUS_MEANING[status]}
+      >
+        {mark}
+        {status}
+      </InlineState>
+    );
+  }
   return (
     <Badge tone={RUN_STATUS_TONE[status]} title={RUN_STATUS_MEANING[status]}>
-      <StateMark kind={RUN_STATUS_MARK[status]} moving={status === "running"} />
+      {mark}
       {status}
     </Badge>
   );

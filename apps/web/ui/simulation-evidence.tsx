@@ -21,7 +21,7 @@ import { humanizeIdentifier, milliseconds } from "../lib/transcripts.ts";
 import { Button } from "./controls.tsx";
 import { Dialog } from "./dialog.tsx";
 import { VerdictBadge } from "./run-status.tsx";
-import styles from "./simulation-evidence-review.module.css";
+import styles from "./simulation-evidence.module.css";
 
 type RecordingStatus = "absent" | "loading" | "ready" | "failed";
 
@@ -217,13 +217,13 @@ export function useSimulationEvidenceRecording(
     let current = true;
     let context: AudioContext | null = null;
     const closeContext = (): void => {
-      const owned = context;
+      const ownedContext = context;
       context = null;
-      if (owned === null) return;
+      if (ownedContext === null) return;
       try {
-        void owned.close().catch(() => undefined);
+        void ownedContext.close().catch(() => undefined);
       } catch {
-        // Cleanup is best-effort. The page no longer owns this context.
+        // Cleanup must remain safe when the browser already closed the context.
       }
     };
     const attempt = resolvedAttempt.current;
@@ -371,7 +371,7 @@ export function useSimulationEvidenceRecording(
   };
 }
 
-type ReviewAssertion = {
+type EvidenceAssertion = {
   readonly key: string;
   readonly expected: string;
   readonly finding: string | null;
@@ -380,12 +380,12 @@ type ReviewAssertion = {
   readonly superseded: readonly EvidenceVerdict[];
 };
 
-type ReviewGrader = {
+type EvidenceGrader = {
   readonly key: string;
   readonly name: string;
   readonly required: boolean;
   readonly verdict: VerdictWord | null;
-  readonly assertions: readonly ReviewAssertion[];
+  readonly assertions: readonly EvidenceAssertion[];
 };
 
 function sameWords(left: string, right: string): boolean {
@@ -428,12 +428,12 @@ function readableAssertion(
   return `Criterion ${String(fallbackPosition)}`;
 }
 
-function reviewRow(
+function evidenceRow(
   row: JudgedAssertion,
   expected: readonly string[],
   fallbackPosition: number,
   evidence: SimulationEvidence,
-): ReviewAssertion {
+): EvidenceAssertion {
   return {
     key: row.key,
     expected: readableAssertion(row, expected, fallbackPosition),
@@ -449,10 +449,12 @@ function reviewRow(
 }
 
 /** Human-named grader groups, including expected behaviors awaiting judgment. */
-function reviewGraders(evidence: SimulationEvidence): readonly ReviewGrader[] {
+function evidenceGraders(
+  evidence: SimulationEvidence,
+  judged: readonly JudgedAssertion[],
+): readonly EvidenceGrader[] {
   if (evidence.grading === "not_required") return [];
   const expected = evidence.test.expected_behaviors ?? [];
-  const judged = judgedAssertions(evidence.verdicts);
   const planItems = evidence.grading_plan?.items ?? [];
   const ids = new Set<string>([
     ...planItems.map((item) => item.grader_id),
@@ -482,7 +484,7 @@ function reviewGraders(evidence: SimulationEvidence): readonly ReviewGrader[] {
     const rows = judged.filter((item) => item.graderId === id);
     const expectedGroup = isExpectedBehaviors(planItem?.name, rows) || id === expectedId;
     const used = new Set<string>();
-    const assertions: ReviewAssertion[] = expectedGroup
+    const assertions: EvidenceAssertion[] = expectedGroup
       ? expected.map((behavior, at) => {
           const position = at + 1;
           const row = rows.find(
@@ -503,12 +505,12 @@ function reviewGraders(evidence: SimulationEvidence): readonly ReviewGrader[] {
             };
           }
           used.add(row.key);
-          return reviewRow(row, expected, position, evidence);
+          return evidenceRow(row, expected, position, evidence);
         })
       : [];
     rows.forEach((row, at) => {
       if (!used.has(row.key)) {
-        assertions.push(reviewRow(row, expected, at + 1, evidence));
+        assertions.push(evidenceRow(row, expected, at + 1, evidence));
       }
     });
 
@@ -689,7 +691,7 @@ function ChatTranscript({
 }) {
   if (transcript.turns.length === 0) {
     return (
-      <div className={styles.reviewState}>
+      <div className={styles.emptyState}>
         <strong>Nothing was said</strong>
         <p>Egma filed no spoken turns for this simulation.</p>
       </div>
@@ -732,7 +734,7 @@ function verdictWord(verdict: VerdictWord): string {
 }
 
 function graderSummary(
-  grader: ReviewGrader,
+  grader: EvidenceGrader,
   stillJudging: boolean,
 ): string {
   const passed = grader.assertions.filter(
@@ -769,7 +771,7 @@ function GraderGroup({
   stillJudging,
   onReadTurn,
 }: {
-  readonly grader: ReviewGrader;
+  readonly grader: EvidenceGrader;
   readonly stillJudging: boolean;
   readonly onReadTurn: (turn: number) => void;
 }) {
@@ -850,13 +852,15 @@ function GraderGroup({
  * The grader review stays on the page. Audio and readable speech live in the
  * shared right-side sheet so a long recording never sets the page's height.
  */
-function SimulationEvidenceLayout({
+function SimulationEvidencePanel({
   evidence,
+  assertions,
   recording,
   evidenceOpen,
   onEvidenceChange,
 }: {
   readonly evidence: SimulationEvidence;
+  readonly assertions: readonly JudgedAssertion[];
   readonly recording: SimulationEvidenceRecording;
   readonly evidenceOpen: boolean;
   readonly onEvidenceChange: (open: boolean) => void;
@@ -866,7 +870,7 @@ function SimulationEvidenceLayout({
     evidence.grading_jobs.some((job) =>
       ["pending", "claimed"].includes(job.status),
     );
-  const graders = reviewGraders(evidence);
+  const graders = evidenceGraders(evidence, assertions);
   const simulationActive = ["queued", "claimed", "running"].includes(
     evidence.status,
   );
@@ -891,7 +895,7 @@ function SimulationEvidenceLayout({
   }
 
   return (
-    <section className={styles.reviewLayout} aria-label="Simulation evidence">
+    <section className={styles.review} aria-label="Simulation evidence">
       <section className={`${styles.pane} ${styles.graderPane}`} aria-labelledby="evidence-graders">
         <header className={styles.paneHead}>
           <div>
@@ -912,12 +916,12 @@ function SimulationEvidenceLayout({
           </p>
         ) : null}
         {evidence.grading === "not_required" ? (
-          <div className={styles.reviewState}>
+          <div className={styles.emptyState}>
             <strong>There was nothing to judge</strong>
             <p>Egma did not conduct this simulation, so it filed no grading work.</p>
           </div>
         ) : graders.length === 0 ? (
-          <div className={styles.reviewState}>
+          <div className={styles.emptyState}>
             <strong>{stillJudging ? "Graders are preparing" : "Nobody has judged this yet"}</strong>
             <p>
               {stillJudging
@@ -959,7 +963,7 @@ function SimulationEvidenceLayout({
             <section className={styles.transcriptBlock} aria-labelledby="evidence-transcript">
               <h3 id="evidence-transcript">Transcript</h3>
               {evidence.transcript === null ? (
-                <div className={styles.reviewState}>
+                <div className={styles.emptyState}>
                   <strong>No transcript was filed</strong>
                   <p>
                     Egma has no speech for this simulation. It may not have started,
@@ -988,9 +992,11 @@ function SimulationEvidenceLayout({
 export function SimulationEvidenceReview({
   evidence,
   recording,
+  assertions = judgedAssertions(evidence.verdicts),
 }: {
   readonly evidence: SimulationEvidence;
   readonly recording: SimulationEvidenceRecording;
+  readonly assertions?: readonly JudgedAssertion[];
 }) {
   const [evidenceOpen, setEvidenceOpen] = useState(true);
 
@@ -999,8 +1005,9 @@ export function SimulationEvidenceReview({
   return (
     <div className={styles.review}>
       <SimulationEvidenceSummary evidence={evidence} />
-      <SimulationEvidenceLayout
+      <SimulationEvidencePanel
         evidence={evidence}
+        assertions={assertions}
         recording={recording}
         evidenceOpen={evidenceOpen}
         onEvidenceChange={setEvidenceOpen}

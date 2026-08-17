@@ -31,7 +31,7 @@ import { mintKey, NEUTRAL_TRAITS, request as ask } from "./traces.ts";
  * feed would prove nothing. What lands on the row is what a real report lands.
  */
 
-/** A voice connection that needs no carrier, so a run over it starts anywhere. */
+/** A voice connection that needs no live worker in these route-only tests. */
 const A_VOICE_AGENT = {
   type: "livekit",
   modality: "voice",
@@ -333,7 +333,7 @@ export async function aConductedRun(
   const runs = (conducted += 1);
 
   const registered = await ask(app, "POST", "/api/agents", who.key, {
-    name: `Front desk ${modality} ${runs}`,
+    name: `Front desk ${modality} ${String(runs)}`,
     connection: modality === "voice" ? A_VOICE_AGENT : A_CHAT_AGENT,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);

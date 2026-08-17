@@ -672,7 +672,7 @@ describe("the pages", () => {
       "utf8",
     );
     const evidenceReview = await readFile(
-      path.join(WEB, "ui/simulation-evidence-review.tsx"),
+      path.join(WEB, "ui/simulation-evidence.tsx"),
       "utf8",
     );
 

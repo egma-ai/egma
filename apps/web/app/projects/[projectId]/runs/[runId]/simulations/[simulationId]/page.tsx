@@ -9,6 +9,7 @@ import { roleOf } from "../../../../../../../lib/me.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
 import {
+  judgedAssertions,
   REGRADE_IS_NOT_A_REPLAY,
   simulationPath,
   simulationRegradePath,
@@ -35,7 +36,7 @@ import {
 import {
   SimulationEvidenceReview,
   useSimulationEvidenceRecording,
-} from "../../../../../../../ui/simulation-evidence-review.tsx";
+} from "../../../../../../../ui/simulation-evidence.tsx";
 import {
   AppShell,
   PageBody,
@@ -254,6 +255,7 @@ function EvidenceView({
   }
 
   const read = answer.value;
+  const assertions = judgedAssertions(read.verdicts);
   return (
     <ProductPage wide>
       <PageHeader
@@ -340,7 +342,11 @@ function EvidenceView({
           </Problem>
         )}
 
-        <SimulationEvidenceReview evidence={read} recording={recording} />
+        <SimulationEvidenceReview
+          evidence={read}
+          recording={recording}
+          assertions={assertions}
+        />
 
       </PageBody>
 

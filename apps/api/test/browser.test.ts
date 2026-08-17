@@ -1,12 +1,8 @@
-import { seedPlatformSettings } from "@egma/db";
 import { newId } from "@egma/ids";
 import type { Browser, Page, Request } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import {
-  asSecond,
-  relativeViewerInstant,
-} from "../../web/lib/instants.ts";
+import { asSecond } from "../../web/lib/instants.ts";
 import { PLATFORM_IDENTITY_PATH } from "../src/routes/platform.ts";
 import { openBrowser } from "./support/browser.ts";
 import {
@@ -72,9 +68,7 @@ let origin: string;
 const BROWSER_RETELL_KEY = "retell-browser-fixture-key-WXYZ";
 const BROWSER_RETELL_AGENT = "agent_in_retell_journey";
 const BROWSER_RETELL_NUMBER = "+14155550100";
-
-/** The platform facts a completed self-host phone setup stores. */
-const BROWSER_PHONE_IS_SET_UP = {
+const BROWSER_PHONE_SETTINGS = {
   carrier_trunk_address: "browser-fixture.pstn.twilio.com",
   carrier_trunk_number: "+14155550101",
   text_to_speech_provider: "openai",
@@ -151,9 +145,9 @@ beforeAll(async () => {
   instance = await startInstance("browser", {
     traces: true,
     retellFetch: browserRetellFetch,
+    platformSettings: BROWSER_PHONE_SETTINGS,
     ...(storage.available ? { blob: storage.store } : {}),
   });
-  await seedPlatformSettings(BROWSER_PHONE_IS_SET_UP);
   origin = instance.origin;
 
   browser = await openBrowser();
@@ -339,9 +333,9 @@ describe("adding a colleague, with no mail configured", () => {
       await page.goto(`${origin}/members`);
       await page.waitForURL(/\/projects\/prj_[^/]+\/settings\/people$/);
       expect(await page.getByText("Invite somebody").count()).toBe(0);
-      // People and invitations are two views of the same settings surface.
-      // The semantic tab is what makes that relationship clear to a keyboard
-      // user and to assistive technology.
+      // People and invitations are two views of this settings page. The tab
+      // keeps that navigation clear without making either view look like a
+      // form choice.
       await page.getByRole("tab", { name: "Invitations" }).click();
       await page.waitForSelector("text=Invite somebody");
 
@@ -1151,20 +1145,15 @@ describe("what a project recorded in production", () => {
       // capture was recorded. Nothing was widened to find this row.
       expect(await page.inputValue("#window")).toBe("24h");
 
-      // The visible date is readable at a glance. The exact evidence stays on
-      // the semantic time element for copying, inspection and accessibility.
-      const started = page.locator("tbody tr time").first();
-      expect(await started.innerText()).toBe(
-        relativeViewerInstant(FIXTURE_TRACE.started_at, AT.getTime()),
+      // The facts the list endpoint returns, as columns.
+      const started = page.locator("tbody time").first();
+      expect(await started.innerText()).toBe("2 hours ago");
+      expect(await started.getAttribute("title")).toBe(
+        asSecond(FIXTURE_TRACE.started_at),
       );
       expect(await started.getAttribute("datetime")).toBe(
         FIXTURE_TRACE.started_at,
       );
-      expect(await started.getAttribute("title")).toBe(
-        asSecond(FIXTURE_TRACE.started_at),
-      );
-
-      // The other facts the list endpoint returns, as columns.
       expect(shown).toContain("1m 13s");
       expect(shown).toContain(
         `${FIXTURE_TRACE.humanTurns} human · ${FIXTURE_TRACE.agentTurns} agent`,
@@ -1748,11 +1737,7 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
 
       await page.goto(`${inProject}/simulations/${run.heard}`);
 
-      const evidence = page.getByRole("dialog", {
-        name: "Transcript and audio",
-      });
-      await evidence.waitFor({ timeout: 30_000 });
-      const player = evidence.getByLabel("Simulation recording");
+      const player = page.getByLabel("Simulation recording");
       await player.waitFor({ timeout: 30_000 });
 
       // The link points at the **store**, and never at egma. The bytes do not
@@ -2493,8 +2478,8 @@ describe("the complete product, walked in order in a second project", () => {
           } | null;
         }>;
       };
-      for (const label of document.querySelectorAll("main span")) {
-        if ((label.textContent ?? "").trim() !== "Run") continue;
+      for (const label of document.querySelectorAll("main dt")) {
+        if ((label.textContent ?? "").trim() !== "Status") continue;
         return (label.nextElementSibling?.textContent ?? "").trim();
       }
       return "";
@@ -2614,18 +2599,10 @@ describe("the complete product, walked in order in a second project", () => {
       );
       await walk.getByRole("button", { name: "Register agent" }).click();
 
-      await walk.waitForURL(
-        new RegExp(
-          `/projects/${second}/agents/agt_[^/]+/connections/new\\?onboarding=connection$`,
-        ),
-      );
-      const agentId = /\/agents\/(agt_[^/]+)\//u.exec(walk.url())?.[1];
-      expect(agentId, walk.url()).toBeDefined();
-      agentAddress = at("agents", agentId ?? "");
-
-      // Registration now continues through one setup journey. The connection
-      // form is the second step rather than a dead end on an empty detail page.
-      await walk.getByRole("navigation", { name: "Agent setup" }).waitFor();
+      await walk.waitForURL(/\/agents\/agt_[^/]+\/connections\/new\?onboarding=connection$/);
+      agentAddress = walk
+        .url()
+        .replace(/\/connections\/new\?onboarding=connection$/u, "");
       // The form is drawn from the registry rather than from a list in the
       // browser, so waiting for the first field is waiting for that read.
       await walk.waitForSelector("#connection-type");
@@ -2642,15 +2619,7 @@ describe("the complete product, walked in order in a second project", () => {
       );
       await walk.getByRole("button", { name: "Add connection" }).click();
 
-      await walk.waitForURL(new RegExp(`/agents/${agentId ?? ""}/onboarding$`));
-      await walk.getByRole("navigation", { name: "Agent setup" }).waitFor();
-      // This new project has no tests yet. The setup says that plainly and
-      // lets the person finish instead of inventing a test selection.
-      await saysWithin(walk, "This project has no active tests yet");
-      await walk.getByRole("link", { name: "Finish setup" }).click();
-      await walk.waitForURL(agentAddress);
-      await walk.getByRole("button", { name: "Configuration" }).click();
-      await saysWithin(walk, "Retell staging");
+      await walk.waitForURL(/\/agents\/agt_[^/]+\/onboarding$/);
       // Provider discovery rechecks the route immediately before the write.
       // The resulting connection is only the public phone destination; the
       // Retell key and agent id do not enter the stored connection.
@@ -2671,14 +2640,12 @@ describe("the complete product, walked in order in a second project", () => {
         config: { phoneNumber: BROWSER_RETELL_NUMBER },
         credentials: null,
       });
-      connectionAddress = at(
-        "agents",
-        agentId ?? "",
-        "connections",
-        stored.rows[0]?.id ?? "",
-      );
+      connectionAddress = `${agentAddress}/connections/${stored.rows[0]?.id ?? ""}`;
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
+      await walk.getByRole("link", { name: "Finish setup" }).click();
+      await walk.waitForURL(agentAddress);
+      await saysWithin(walk, "Recent runs");
     },
     SETTLE,
   );
@@ -2785,9 +2752,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(at("tests"));
       await walk.getByRole("link", { name: "Write a test" }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/tests/new$`));
-      // Long lists stay behind searchable selectors. The trigger shows that
-      // the form has loaded; the named choice appears only after it is opened.
-      await saysWithin(walk, "Select agents");
+      await saysWithin(walk, "What should happen");
 
       await walk.fill("#test-name", "Reschedules a booked appointment");
       await walk.fill(
@@ -2797,8 +2762,6 @@ describe("the complete product, walked in order in a second project", () => {
       await walk
         .getByRole("textbox", { name: "Expected behavior 1" })
         .fill("confirms the new time back before finishing");
-      // Agent and persona lists can be long. Open each searchable selector,
-      // choose the named row, then close the menu through its own action.
       await walk.getByRole("button", { name: "Choose agents" }).click();
       await walk.getByRole("checkbox", { name: "The Support line" }).click();
       await walk.getByRole("button", { name: "Done" }).click();
@@ -2850,19 +2813,17 @@ describe("the complete product, walked in order in a second project", () => {
 
       await walk.getByRole("button", { name: "Start run" }).click();
       const confirmation = walk.getByRole("dialog", { name: "Start this run?" });
-      await confirmation.waitFor();
-      await confirmation.getByText("1 simulation will be conducted.").waitFor();
-      const started = walk.waitForResponse(
+      await confirmation
+        .getByText("1 simulation will be conducted.")
+        .waitFor();
+      const startResponse = walk.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
           new URL(response.url()).pathname === "/api/runs",
       );
       await confirmation.getByRole("button", { name: "Start run" }).click();
-      const startedResponse = await started;
-      expect(
-        startedResponse.status(),
-        await startedResponse.text(),
-      ).toBe(201);
+      const started = await startResponse;
+      expect(started.status(), await started.text()).toBe(201);
       await walk.waitForURL(
         new RegExp(`/projects/${second}/runs/run_[^/]+$`),
       );
@@ -3039,7 +3000,7 @@ describe("the complete product, walked in order in a second project", () => {
         address: `${agentAddress}/connections/new`,
         // The form is drawn from the registry, so this field exists only once
         // that read has landed.
-        says: "Retell API key",
+        says: "Platform",
       },
       {
         what: "one connection",
@@ -3054,9 +3015,7 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Write a test",
         address: at("tests", "new"),
-        // Long agent lists stay behind a searchable selector. Its trigger is
-        // present only after the form has taken over the route.
-        says: "Select agents",
+        says: "What should happen",
       },
       {
         what: "one test",
@@ -3096,7 +3055,7 @@ describe("the complete product, walked in order in a second project", () => {
         address: at("runs", "new"),
         // The whole page waits on the agents read, so its own sentence is
         // drawn only after that read answers.
-        says: "A run executes a selection of tests against one agent",
+        says: "Choose one agent, one connection and the tests to run.",
       },
       {
         what: "one run",
@@ -3651,83 +3610,45 @@ describe("the complete product, walked in order in a second project", () => {
       SETTLE,
     );
 
-    /**
-     * **A status, measured on the list and on the page the list links to.**
-     *
-     * The case above compares five lists with each other, which is the shape a
-     * copied *table* would break. It cannot say anything about the parts that
-     * appear on one list and one detail page — a status, a verdict, a measure —
-     * and those are named in this criterion too. A run's machinery word is the
-     * one to take: it is drawn by the same component in both places, and it is
-     * the word this product most has to keep telling apart from a conversation's
-     * and from a verdict, so a second implementation of it anywhere is exactly
-     * the thing worth catching.
-     */
+    /** The same shared status meaning appears in list and compact detail forms. */
     it(
-      "measures the same status on a list and on the page it links to",
+      "keeps one status meaning on a list and on the page it links to",
       async () => {
-        // The run's own `completed`, taken by the sentence that belongs to a
-        // *run's* machinery rather than by a colour or a hashed class.
         const theRunsStatus = 'main span[title^="The machinery finished"]';
-
-        /**
-         * One badge's shape, or an empty string while there is not one to
-         * measure.
-         *
-         * **Empty rather than thrown, because the run's page redraws itself.**
-         * It follows the run while the run moves, so the element a locator
-         * resolves can be detached by React before the measurement runs — and a
-         * detached element answers a zero box and a style declaration with
-         * nothing in it. That is a measurement of nothing, not a difference
-         * between two pages, so it is polled past rather than compared.
-         */
-        const shapeOf = async (): Promise<string> =>
+        const stateOf = async (): Promise<string> =>
           walk
             .locator(theRunsStatus)
             .first()
             .evaluate((element) => {
-              const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
-                target: unknown,
-              ) => {
-                readonly paddingTop: string;
-                readonly paddingRight: string;
-                readonly fontSize: string;
-                readonly textTransform: string;
-                readonly borderRadius: string;
-              };
-              const read = styleOf(element);
-              const box = element.getBoundingClientRect();
-              if (box.height === 0) return "";
-              return [
-                Math.round(box.height),
-                read.paddingTop,
-                read.paddingRight,
-                read.fontSize,
-                read.textTransform,
-                read.borderRadius,
-              ].join("/");
+              if (element.getBoundingClientRect().height === 0) return "";
+              return JSON.stringify({
+                meaning: element.getAttribute("title"),
+                text: element.textContent?.trim(),
+                moving:
+                  element.querySelector('[data-motion="active"]') !== null,
+              });
             })
             .catch(() => "");
 
-        const settledShape = async (): Promise<string> => {
-          let shape = "";
+        const settledState = async (): Promise<string> => {
+          let state = "";
           await expect
             .poll(
               async () => {
-                shape = await shapeOf();
-                return shape;
+                state = await stateOf();
+                return state;
               },
               { timeout: 30_000 },
             )
             .not.toBe("");
-          return shape;
+          return state;
         };
 
         await walk.goto(at("runs"));
-        const onTheList = await settledShape();
+        const onTheList = await settledState();
 
         await walk.goto(runAddress);
-        const onThePage = await settledShape();
+        const onThePage = await settledState();
 
         expect(onThePage, `${onTheList} on the list`).toBe(onTheList);
       },
@@ -4211,11 +4132,7 @@ describe("the complete product, walked in order in a second project", () => {
       "reaches the recording controls with the keyboard",
       async () => {
         await walk.goto(`${origin}${conversation}`);
-        const evidence = walk.getByRole("dialog", {
-          name: "Transcript and audio",
-        });
-        await evidence.waitFor({ timeout: 30_000 });
-        const player = evidence.getByLabel("Simulation recording");
+        const player = walk.getByLabel("Simulation recording");
         await player.waitFor({ timeout: 30_000 });
 
         expect(await player.getAttribute("controls")).not.toBeNull();

@@ -42,6 +42,7 @@ import {
 } from "../../../../../ui/relative-time.tsx";
 import {
   GradingState,
+  RunStatus,
   SimulationStatus,
   VerdictBadge,
 } from "../../../../../ui/run-status.tsx";
@@ -92,83 +93,6 @@ type Moved = {
   readonly verdict: VerdictWord | null;
   readonly reason: string | null;
 };
-
-type SummaryTone = "neutral" | "warn";
-
-const RUN_SUMMARY: Readonly<
-  Record<
-    RunDetail["status"],
-    {
-      readonly mark: string;
-      readonly tone: SummaryTone;
-      readonly meaning: string;
-    }
-  >
-> = {
-  pending: {
-    mark: "○",
-    tone: "neutral",
-    meaning: "Nothing has started yet.",
-  },
-  running: {
-    mark: "↻",
-    tone: "neutral",
-    meaning: "Egma is conducting this run.",
-  },
-  completed: {
-    mark: "✓",
-    tone: "neutral",
-    meaning:
-      "The run finished. The verdict separately says what the graders decided.",
-  },
-  canceled: {
-    mark: "×",
-    tone: "warn",
-    meaning: "This run was stopped before all work finished.",
-  },
-};
-
-function SummaryState({
-  mark,
-  text,
-  tone = "neutral",
-  meaning,
-  active = false,
-}: {
-  readonly mark: string;
-  readonly text: string;
-  readonly tone?: SummaryTone;
-  readonly meaning: string;
-  readonly active?: boolean;
-}) {
-  return (
-    <span
-      className={styles.summaryState}
-      data-active={active ? "true" : undefined}
-      data-motion={active ? "active" : undefined}
-      data-tone={tone}
-      title={meaning}
-    >
-      <span className={styles.summaryMark} aria-hidden="true">
-        {mark}
-      </span>
-      {text}
-    </span>
-  );
-}
-
-function RunSummaryState({ status }: { readonly status: RunDetail["status"] }) {
-  const shown = RUN_SUMMARY[status];
-  return (
-    <SummaryState
-      active={status === "running"}
-      mark={shown.mark}
-      meaning={shown.meaning}
-      text={status}
-      tone={shown.tone}
-    />
-  );
-}
 
 function RunDetailView({
   projectId,
@@ -551,13 +475,13 @@ function RunDetailView({
             <div className={styles.overviewFact}>
               <dt>Status</dt>
               <dd>
-                <RunSummaryState status={status} />
+                <RunStatus status={status} compact />
               </dd>
             </div>
             <div className={styles.overviewFact}>
               <dt>Grading</dt>
               <dd>
-                {String(read.graded_count)} of {String(read.gradable_count)} judged
+                {read.graded_count} of {read.gradable_count} judged
               </dd>
             </div>
             <div className={styles.overviewFact}>

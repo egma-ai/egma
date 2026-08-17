@@ -8,6 +8,7 @@ import {
   disconnect,
   disconnectClickHouse,
   seedGraderLibrary,
+  seedPlatformSettings,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -104,6 +105,8 @@ export type InstanceOptions = {
    * one place is what keeps this arrangement from proving the wrong thing.
    */
   readonly blob?: Config["blob"];
+  /** Deployment settings required by flows that exercise the phone adapter. */
+  readonly platformSettings?: Config["platformSettings"];
   /**
    * Every raw HTTP request, before Fastify or authentication can refuse it.
    * Test evidence only: this listener changes no production server.
@@ -188,6 +191,9 @@ export async function startInstance(
   // instance that skipped this would refuse the first signup that reached it,
   // for a reason no test here is about.
   await seedGraderLibrary();
+  if (options.platformSettings !== undefined) {
+    await seedPlatformSettings(options.platformSettings);
+  }
 
   const withPages = options.web ?? true;
   const apiPort = await freePort();
