@@ -583,6 +583,7 @@ async def main() -> int:
         "summary": {name: summarise(runs) for name, runs in results.items()},
         "runs": results,
     }
+    asked.out.parent.mkdir(parents=True, exist_ok=True)
     asked.out.write_text(json.dumps(report, indent=2))
     print(f"\nwrote {asked.out}")
 
