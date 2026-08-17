@@ -65,7 +65,7 @@ export type HttpUpstream = {
 };
 
 export type HttpUpstreamPlan = {
-  /** The one path this provider answers, exactly. */
+  /** One path this provider answers, exactly. */
   readonly path: string;
   readonly expectAuthorization: string;
   /**
@@ -89,94 +89,6 @@ export type HttpUpstreamPlan = {
    */
   readonly breakAfterChunks?: number;
 };
-
-export async function startHttpUpstream(plan: HttpUpstreamPlan): Promise<HttpUpstream> {
-  const seen: SeenHttp[] = [];
-  let attempts = 0;
-  /** Deliberately delayed answers, so a stop does not wait one out. */
-  const timers = new Set<ReturnType<typeof setTimeout>>();
-
-  const server: Server = createServer((request: IncomingMessage, response: ServerResponse) => {
-    attempts += 1;
-    const startedAt = Date.now();
-    const url = new URL(request.url ?? "/", "http://upstream");
-    const headers: Record<string, string> = {};
-    for (const [name, value] of Object.entries(request.headers)) {
-      if (typeof value === "string") headers[name] = value;
-    }
-    const record: SeenHttp = {
-      method: request.method ?? "",
-      path: url.pathname,
-      query: url.searchParams,
-      headers,
-      bodyFirstByteMs: undefined,
-      bodyEndedMs: undefined,
-      body: "",
-    };
-    seen.push(record);
-
-    request.on("data", (chunk: Buffer) => {
-      record.bodyFirstByteMs ??= Date.now() - startedAt;
-      record.body += chunk.toString("utf8");
-    });
-
-    request.on("end", () => {
-      record.bodyEndedMs = Date.now() - startedAt;
-
-      if (url.pathname !== plan.path) {
-        response.writeHead(404).end("no such path here");
-        return;
-      }
-      if (headers["authorization"] !== plan.expectAuthorization) {
-        response.writeHead(401, { "content-type": "application/json" });
-        response.end(JSON.stringify({ error: "this is not the authorization this provider takes" }));
-        return;
-      }
-
-      const answer = (): void => {
-        response.writeHead(plan.status ?? 200, {
-          "content-type": "text/event-stream",
-          "x-request-id": "upstream-request-id-1",
-          ...(plan.headers ?? {}),
-        });
-        const chunks = plan.chunks ?? ["done"];
-        let index = 0;
-        const push = (): void => {
-          if (plan.breakAfterChunks !== undefined && index >= plan.breakAfterChunks) {
-            response.socket?.destroy();
-            return;
-          }
-          if (index >= chunks.length) {
-            response.end();
-            return;
-          }
-          response.write(chunks[index]);
-          index += 1;
-          setTimeout(push, plan.gapMs ?? 0);
-        };
-        push();
-      };
-
-      if (plan.silentForMs !== undefined) timers.add(setTimeout(answer, plan.silentForMs));
-      else answer();
-    });
-  });
-
-  await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
-  const { port } = server.address() as AddressInfo;
-  return {
-    origin: `http://127.0.0.1:${port}`,
-    seen,
-    attempts: () => attempts,
-    stop: () =>
-      new Promise<void>((done) => {
-        for (const timer of timers) clearTimeout(timer);
-        timers.clear();
-        server.closeAllConnections();
-        server.close(() => done());
-      }),
-  };
-}
 
 export type SeenSocket = {
   readonly path: string;
@@ -223,26 +135,133 @@ export type SocketUpstreamPlan = {
   readonly selectProtocol?: string;
 };
 
-export async function startSocketUpstream(plan: SocketUpstreamPlan): Promise<SocketUpstream> {
-  const seen: SeenSocket[] = [];
+/**
+ * One provider, standing where the real one stands: every path it answers on
+ * one address, HTTP and WebSocket alike.
+ *
+ * **One address, because a provider has one.** OpenAI carries three of this
+ * gateway's routes — a chat completion, a speech synthesis, and a realtime
+ * transcription socket — and all three live on `api.openai.com`. A stand-in
+ * that gave each of them its own origin would let a route reach a server no
+ * caller could have confused with another, and the deployment configuration
+ * that names one home per provider would be untested. So the paths share a
+ * server here exactly as they share a host there, and a route that reached the
+ * wrong one is caught by the strictness below rather than by luck.
+ */
+export type ProviderUpstreamPlan = {
+  readonly http?: readonly HttpUpstreamPlan[];
+  readonly socket?: SocketUpstreamPlan;
+};
+
+export type ProviderUpstream = HttpUpstream & {
+  /** The socket side of the same provider, where the plan carries one. */
+  readonly sockets: SeenSocket[];
+  readonly socketAttempts: () => number;
+  readonly opened: () => Promise<SeenSocket>;
+  readonly stopReading: () => void;
+  readonly startReading: () => void;
+};
+
+export async function startProviderUpstream(
+  plan: ProviderUpstreamPlan,
+): Promise<ProviderUpstream> {
+  const seen: SeenHttp[] = [];
+  const sockets: SeenSocket[] = [];
   let attempts = 0;
+  let socketAttempts = 0;
+  /** Deliberately delayed answers, so a stop does not wait one out. */
+  const timers = new Set<ReturnType<typeof setTimeout>>();
   let announce: (record: SeenSocket) => void = () => {};
   let firstOpen = new Promise<SeenSocket>((resolve) => {
     announce = resolve;
   });
 
-  const sockets = new WebSocketServer({
-    noServer: true,
-    ...(plan.selectProtocol === undefined
-      ? {}
-      : {
-          handleProtocols: (offered: Set<string>) =>
-            offered.has(plan.selectProtocol as string) ? (plan.selectProtocol as string) : false,
-        }),
-  });
+  const socketPlan = plan.socket;
+  const accepting =
+    socketPlan === undefined
+      ? undefined
+      : new WebSocketServer({
+          noServer: true,
+          ...(socketPlan.selectProtocol === undefined
+            ? {}
+            : {
+                handleProtocols: (offered: Set<string>) =>
+                  offered.has(socketPlan.selectProtocol as string)
+                    ? (socketPlan.selectProtocol as string)
+                    : false,
+              }),
+        });
 
-  const server: Server = createServer((_request, response) => {
-    response.writeHead(426).end("this address is a websocket address");
+  const server: Server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    if (plan.http === undefined || plan.http.length === 0) {
+      response.writeHead(426).end("this address is a websocket address");
+      return;
+    }
+    attempts += 1;
+    const startedAt = Date.now();
+    const url = new URL(request.url ?? "/", "http://upstream");
+    const headers: Record<string, string> = {};
+    for (const [name, value] of Object.entries(request.headers)) {
+      if (typeof value === "string") headers[name] = value;
+    }
+    const record: SeenHttp = {
+      method: request.method ?? "",
+      path: url.pathname,
+      query: url.searchParams,
+      headers,
+      bodyFirstByteMs: undefined,
+      bodyEndedMs: undefined,
+      body: "",
+    };
+    seen.push(record);
+
+    request.on("data", (chunk: Buffer) => {
+      record.bodyFirstByteMs ??= Date.now() - startedAt;
+      record.body += chunk.toString("utf8");
+    });
+
+    request.on("end", () => {
+      record.bodyEndedMs = Date.now() - startedAt;
+
+      const answering = (plan.http ?? []).find((one) => one.path === url.pathname);
+      if (answering === undefined) {
+        response.writeHead(404).end("no such path here");
+        return;
+      }
+      if (headers["authorization"] !== answering.expectAuthorization) {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "this is not the authorization this provider takes" }));
+        return;
+      }
+
+      const answer = (): void => {
+        response.writeHead(answering.status ?? 200, {
+          "content-type": "text/event-stream",
+          "x-request-id": "upstream-request-id-1",
+          ...(answering.headers ?? {}),
+        });
+        const chunks = answering.chunks ?? ["done"];
+        let index = 0;
+        const push = (): void => {
+          if (answering.breakAfterChunks !== undefined && index >= answering.breakAfterChunks) {
+            response.socket?.destroy();
+            return;
+          }
+          if (index >= chunks.length) {
+            response.end();
+            return;
+          }
+          response.write(chunks[index]);
+          index += 1;
+          setTimeout(push, answering.gapMs ?? 0);
+        };
+        push();
+      };
+
+      if (answering.silentForMs !== undefined) {
+        timers.add(setTimeout(answer, answering.silentForMs));
+      } else answer();
+    });
   });
 
   /**
@@ -251,72 +270,73 @@ export async function startSocketUpstream(plan: SocketUpstreamPlan): Promise<Soc
    * did not hold them would wait out a deliberately silent handshake.
    */
   const raw = new Set<Duplex>();
-  const timers = new Set<ReturnType<typeof setTimeout>>();
 
-  server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-    attempts += 1;
-    raw.add(socket);
-    socket.on("close", () => raw.delete(socket));
-    const url = new URL(request.url ?? "/", "http://upstream");
-    const headers: Record<string, string> = {};
-    for (const [name, value] of Object.entries(request.headers)) {
-      if (typeof value === "string") headers[name] = value;
-    }
-    const protocols = (headers["sec-websocket-protocol"] ?? "")
-      .split(",")
-      .map((one) => one.trim())
-      .filter((one) => one !== "");
+  if (socketPlan !== undefined && accepting !== undefined) {
+    server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+      socketAttempts += 1;
+      raw.add(socket);
+      socket.on("close", () => raw.delete(socket));
+      const url = new URL(request.url ?? "/", "http://upstream");
+      const headers: Record<string, string> = {};
+      for (const [name, value] of Object.entries(request.headers)) {
+        if (typeof value === "string") headers[name] = value;
+      }
+      const protocols = (headers["sec-websocket-protocol"] ?? "")
+        .split(",")
+        .map((one) => one.trim())
+        .filter((one) => one !== "");
 
-    const refuse = (status: number, why: string): void => {
-      socket.write(`HTTP/1.1 ${status} ${why}\r\nconnection: close\r\n\r\n`);
-      socket.destroy();
-    };
+      const refuse = (status: number, why: string): void => {
+        socket.write(`HTTP/1.1 ${status} ${why}\r\nconnection: close\r\n\r\n`);
+        socket.destroy();
+      };
 
-    if (plan.refuseWith !== undefined) {
-      refuse(plan.refuseWith, "refused on purpose");
-      return;
-    }
-    if (url.pathname !== plan.path) {
-      refuse(404, "no such path here");
-      return;
-    }
-    const offered =
-      plan.expect.at === "header"
-        ? (headers[plan.expect.name] ?? "")
-        : (url.searchParams.get(plan.expect.name) ?? "");
-    if (offered !== plan.expect.value) {
-      refuse(401, "this is not the authorization this provider takes");
-      return;
-    }
+      if (socketPlan.refuseWith !== undefined) {
+        refuse(socketPlan.refuseWith, "refused on purpose");
+        return;
+      }
+      if (url.pathname !== socketPlan.path) {
+        refuse(404, "no such path here");
+        return;
+      }
+      const offered =
+        socketPlan.expect.at === "header"
+          ? (headers[socketPlan.expect.name] ?? "")
+          : (url.searchParams.get(socketPlan.expect.name) ?? "");
+      if (offered !== socketPlan.expect.value) {
+        refuse(401, "this is not the authorization this provider takes");
+        return;
+      }
 
-    const record: SeenSocket = {
-      path: url.pathname,
-      query: url.searchParams,
-      headers,
-      protocols,
-      frames: [],
-      closedWith: undefined,
-      socket: undefined,
-    };
+      const record: SeenSocket = {
+        path: url.pathname,
+        query: url.searchParams,
+        headers,
+        protocols,
+        frames: [],
+        closedWith: undefined,
+        socket: undefined,
+      };
 
-    const accept = (): void => {
-      sockets.handleUpgrade(request, socket, head, (accepted: WebSocket) => {
-        record.socket = accepted;
-        seen.push(record);
-        announce(record);
-        accepted.on("message", (data: Buffer, isBinary: boolean) => {
-          record.frames.push(isBinary ? Buffer.from(data) : data.toString("utf8"));
-          if (plan.echo === true) accepted.send(data, { binary: isBinary });
+      const accept = (): void => {
+        accepting.handleUpgrade(request, socket, head, (accepted: WebSocket) => {
+          record.socket = accepted;
+          sockets.push(record);
+          announce(record);
+          accepted.on("message", (data: Buffer, isBinary: boolean) => {
+            record.frames.push(isBinary ? Buffer.from(data) : data.toString("utf8"));
+            if (socketPlan.echo === true) accepted.send(data, { binary: isBinary });
+          });
+          accepted.on("close", (code: number, reason: Buffer) => {
+            record.closedWith = { code, reason: reason.toString() };
+          });
         });
-        accepted.on("close", (code: number, reason: Buffer) => {
-          record.closedWith = { code, reason: reason.toString() };
-        });
-      });
-    };
+      };
 
-    if (plan.silentForMs !== undefined) timers.add(setTimeout(accept, plan.silentForMs));
-    else accept();
-  });
+      if (socketPlan.silentForMs !== undefined) timers.add(setTimeout(accept, socketPlan.silentForMs));
+      else accept();
+    });
+  }
 
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
   const { port } = server.address() as AddressInfo;
@@ -324,18 +344,20 @@ export async function startSocketUpstream(plan: SocketUpstreamPlan): Promise<Soc
     origin: `http://127.0.0.1:${port}`,
     seen,
     attempts: () => attempts,
+    sockets,
+    socketAttempts: () => socketAttempts,
     opened: () => firstOpen,
     stopReading: () => {
-      for (const record of seen) record.socket?.pause();
+      for (const record of sockets) record.socket?.pause();
     },
     startReading: () => {
-      for (const record of seen) record.socket?.resume();
+      for (const record of sockets) record.socket?.resume();
     },
     stop: () =>
       new Promise<void>((done) => {
         for (const timer of timers) clearTimeout(timer);
         timers.clear();
-        for (const record of seen) record.socket?.terminate();
+        for (const record of sockets) record.socket?.terminate();
         for (const socket of raw) socket.destroy();
         raw.clear();
         server.closeAllConnections();
@@ -344,5 +366,30 @@ export async function startSocketUpstream(plan: SocketUpstreamPlan): Promise<Soc
           announce = resolve;
         });
       }),
+  };
+}
+
+/**
+ * A provider that answers one HTTP path and nothing else.
+ *
+ * Kept beside the general starter for the callers outside this suite — the
+ * control plane's 2x2 access matrix stands its provider stand-ins up with it —
+ * so a provider with one path does not have to be described as a list of one.
+ */
+export async function startHttpUpstream(plan: HttpUpstreamPlan): Promise<HttpUpstream> {
+  return startProviderUpstream({ http: [plan] });
+}
+
+/** A provider that answers one WebSocket path and nothing else. */
+export async function startSocketUpstream(plan: SocketUpstreamPlan): Promise<SocketUpstream> {
+  const upstream = await startProviderUpstream({ socket: plan });
+  return {
+    origin: upstream.origin,
+    seen: upstream.sockets,
+    attempts: upstream.socketAttempts,
+    opened: upstream.opened,
+    stopReading: upstream.stopReading,
+    startReading: upstream.startReading,
+    stop: upstream.stop,
   };
 }

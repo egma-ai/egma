@@ -8,10 +8,14 @@ import {
   GATEWAY_SECRET,
   openSocket,
   records,
+  socketUpstreamOf,
   standUp,
   watch,
   type Standing,
 } from "./support/world.ts";
+
+/** Every row this gateway carries over a WebSocket. */
+const SOCKET_ROUTES = ROUTES.filter((route) => route.transport === "socket");
 
 /**
  * The two speech legs: sockets that carry audio one way and words the other,
@@ -406,4 +410,124 @@ describe("when the provider refuses the connection", () => {
     expect(standing.deepgram.attempts()).toBe(before.deepgram);
     expect(standing.openai.attempts()).toBe(before.openai);
   });
+});
+
+/**
+ * The same questions asked of every socket row.
+ *
+ * **What a relayed socket promises is the same promise on every route it
+ * carries**: frames in the order they were sent, in both directions, until one
+ * end hangs up — and then the hang-up itself crossing, with its own code. A
+ * row whose provider is reached with the wrong path or whose close code is
+ * rewritten is a voice simulation that ends silently rather than visibly, so
+ * every row is asked rather than the two somebody wrote tests for.
+ */
+describe("every socket route this gateway carries", () => {
+  for (const route of SOCKET_ROUTES) {
+    describe(`${route.provider}/${route.job}`, () => {
+      it("carries frames both ways, in order, text and binary alike", async () => {
+        standing = await standUp();
+        const socket = openSocket(standing.world, route.path, { headers: AUTHENTICATED });
+        const seen = watch(socket);
+        await seen.opened;
+        const provider = await socketUpstreamOf(standing, route).opened();
+
+        const sent: (string | Buffer)[] = [];
+        for (let index = 0; index < 10; index += 1) {
+          const frame = Buffer.from([index, index, index, index]);
+          sent.push(frame);
+          socket.send(frame);
+          if (index === 5) {
+            sent.push('{"type":"a native control message"}');
+            socket.send('{"type":"a native control message"}');
+          }
+        }
+
+        await eventually(() =>
+          provider.frames.length === sent.length ? provider.frames : undefined,
+        );
+        expect(provider.frames.map(String)).toEqual(sent.map(String));
+
+        // The strict stand-ins echo, so the same order comes back the other way
+        // — which is the half a relay that buffered would get wrong.
+        await eventually(() => (seen.frames.length === sent.length ? seen.frames : undefined));
+        expect(seen.frames.map(String)).toEqual(sent.map(String));
+
+        socket.close(1000, "done");
+      });
+
+      it("arrives at the provider with its own path, query and native headers", async () => {
+        standing = await standUp();
+        const socket = openSocket(
+          standing.world,
+          `${route.path}?intent=transcription&model=a-model-id&sample_rate=16000`,
+          { headers: { ...AUTHENTICATED, "user-agent": "pipecat-shaped-client/1.0" } },
+        );
+        await watch(socket).opened;
+        const provider = await socketUpstreamOf(standing, route).opened();
+
+        expect(provider.path).toBe(route.upstreamPath);
+        expect(provider.query.get("intent")).toBe("transcription");
+        expect(provider.query.get("model")).toBe("a-model-id");
+        expect(provider.query.get("sample_rate")).toBe("16000");
+        expect(provider.headers["user-agent"]).toBe("pipecat-shaped-client/1.0");
+
+        socket.close(1000, "done");
+      });
+
+      it("refuses a caller's subprotocol rather than forwarding it, and never asks the provider", async () => {
+        standing = await standUp();
+        const upstream = socketUpstreamOf(standing, route);
+        const before = upstream.attempts();
+        const socket = openSocket(standing.world, route.path, {
+          headers: AUTHENTICATED,
+          protocols: ["token", "a-key-a-caller-brought"],
+        });
+
+        await expect(watch(socket).opened).rejects.toThrow(/400/);
+        expect(upstream.attempts()).toBe(before);
+      });
+
+      it("closes the provider's side with the caller's own code", async () => {
+        standing = await standUp();
+        const socket = openSocket(standing.world, route.path, { headers: AUTHENTICATED });
+        await watch(socket).opened;
+        const provider = await socketUpstreamOf(standing, route).opened();
+
+        socket.close(4001, "the simulation ended");
+
+        const how = await eventually(() => provider.closedWith);
+        expect(how.code).toBe(4001);
+        expect(how.reason).toBe("the simulation ended");
+      });
+
+      it("closes the caller's side when the provider goes away", async () => {
+        standing = await standUp();
+        const socket = openSocket(standing.world, route.path, { headers: AUTHENTICATED });
+        const seen = watch(socket);
+        await seen.opened;
+        const provider = await socketUpstreamOf(standing, route).opened();
+
+        provider.socket?.close(1011, "the provider gave up");
+
+        const how = await eventually(() => seen.closed);
+        expect(how.code).toBe(1011);
+        expect(how.reason).toBe("the provider gave up");
+      });
+
+      it("closes a socket that sends one frame bigger than the bound, and carries it nowhere", async () => {
+        standing = await standUp({ settings: { EGMA_GATEWAY_MAX_FRAME_BYTES: "4096" } });
+        const socket = openSocket(standing.world, route.path, { headers: AUTHENTICATED });
+        const seen = watch(socket);
+        await seen.opened;
+        const provider = await socketUpstreamOf(standing, route).opened();
+
+        socket.send(Buffer.alloc(8192, 7));
+
+        const how = await eventually(() => seen.closed);
+        expect(how.code).toBe(1009);
+        expect(provider.frames).toHaveLength(0);
+      });
+    });
+  }
 });

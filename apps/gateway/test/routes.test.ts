@@ -5,6 +5,8 @@ import {
   eventually,
   GATEWAY_SECRET,
   openSocket,
+  providerOf,
+  reach,
   records,
   standUp,
   watch,
@@ -36,40 +38,108 @@ afterAll(async () => {
 const AUTHENTICATED = { "egma-inference-key": GATEWAY_SECRET };
 
 describe("the shipped routes", () => {
-  it("are exactly three provider and model-job pairs, one for each shipped job", () => {
+  it("are exactly the provider and model-job pairs this release proved", () => {
     expect(
       ROUTES.map((route) => `${route.provider}/${route.job} ${route.method} ${route.path}`).sort(),
     ).toEqual([
       "cartesia/tts GET /cartesia/tts/websocket",
       "deepgram/stt GET /deepgram/v1/listen",
       "openai/llm POST /openai/v1/chat/completions",
+      "openai/stt GET /openai/v1/realtime",
+      "openai/tts POST /openai/v1/audio/speech",
     ]);
   });
 
-  it("each carry the provider's own path onto the provider's own address", async () => {
-    const { world, openai, deepgram, cartesia } = standing;
+  /**
+   * **Driven from the table itself rather than route by route**, so a row added
+   * to `ROUTES` without a provider behind it fails here rather than shipping as
+   * a path that answers `404` in a customer's voice simulation. Every check
+   * below is the same question asked of every row.
+   */
+  for (const route of ROUTES) {
+    describe(`${route.provider}/${route.job}`, () => {
+      it("carries the provider's own path onto the provider's own address", async () => {
+        const provider = providerOf(standing, route);
+        await reach(standing, route);
+        expect(provider.last()?.path).toBe(route.upstreamPath);
+      });
 
-    const answered = await fetch(`${world.origin}/openai/v1/chat/completions`, {
-      method: "POST",
-      headers: { ...AUTHENTICATED, "content-type": "application/json" },
-      body: JSON.stringify({ model: "a-small-model", messages: [] }),
-    });
-    expect(answered.status).toBe(200);
-    expect(openai.seen.at(-1)?.path).toBe("/v1/chat/completions");
+      it("refuses the methods it does not carry, without asking the provider", async () => {
+        const provider = providerOf(standing, route);
+        const before = provider.attempts();
+        for (const method of ["PUT", "DELETE", "PATCH"] as const) {
+          const answered = await fetch(`${standing.world.origin}${route.path}`, {
+            method,
+            headers: AUTHENTICATED,
+          });
+          expect(answered.status).toBe(405);
+          await answered.text();
+        }
+        expect(provider.attempts()).toBe(before);
+      });
 
-    const listening = openSocket(world, "/deepgram/v1/listen?model=nova-3-general", {
-      headers: AUTHENTICATED,
-    });
-    await watch(listening).opened;
-    expect((await deepgram.opened()).path).toBe("/v1/listen");
-    listening.close(1000, "done");
+      it("refuses the transport it does not carry, without asking the provider", async () => {
+        const provider = providerOf(standing, route);
+        const before = provider.attempts();
 
-    const speaking = openSocket(world, "/cartesia/tts/websocket?cartesia_version=2025-04-16", {
-      headers: AUTHENTICATED,
+        if (route.transport === "socket") {
+          const answered = await fetch(`${standing.world.origin}${route.path}`, {
+            method: route.method,
+            headers: AUTHENTICATED,
+          });
+          // A socket route asked without an upgrade: the row was found and
+          // used wrongly, which is a different answer from a row nobody ships.
+          expect(answered.status).toBe(400);
+          await answered.text();
+        } else {
+          const socket = openSocket(standing.world, route.path, { headers: AUTHENTICATED });
+          await expect(watch(socket).opened).rejects.toThrow();
+        }
+
+        expect(provider.attempts()).toBe(before);
+      });
+
+      it("is refused with a suffix on it, so no row is a prefix anybody can extend", async () => {
+        const provider = providerOf(standing, route);
+        const before = provider.attempts();
+        const answered = await fetch(`${standing.world.origin}${route.path}/extra`, {
+          method: route.method,
+          headers: AUTHENTICATED,
+        });
+        expect(answered.status).toBe(404);
+        await answered.text();
+        expect(provider.attempts()).toBe(before);
+      });
     });
-    await watch(speaking).opened;
-    expect((await cartesia.opened()).path).toBe("/tts/websocket");
-    speaking.close(1000, "done");
+  }
+});
+
+describe("a route this world stands no provider up for", () => {
+  /**
+   * The check that keeps the table above worth running.
+   *
+   * Every question in that table is asked through `providerOf`. If that lookup
+   * answered with whichever stand-in happened to be there, a row added for a
+   * provider nobody stood up would *pass* all of them — against a provider it
+   * never reached, with records it never wrote. The suite would grow a row and
+   * lose a guarantee in the same commit. So the lookups refuse, and this is
+   * where that refusal is pinned.
+   */
+  const unshipped = {
+    path: "/nobody/v1/anything",
+    method: "POST",
+    transport: "http",
+    provider: "nobody",
+    job: "llm",
+    upstreamPath: "/v1/anything",
+    credential: { at: "header", name: "authorization", scheme: "Bearer" },
+  } as unknown as (typeof ROUTES)[number];
+
+  it("is refused by the lookups rather than answered with another provider's records", () => {
+    expect(() => providerOf(standing, unshipped)).toThrow(/stands up no/);
+    expect(() =>
+      providerOf(standing, { ...unshipped, transport: "socket", method: "GET" }),
+    ).toThrow(/stands up no/);
   });
 });
 
@@ -90,7 +160,6 @@ describe("everything that is not a shipped route", () => {
       status: 405,
     },
     { what: "a traversal out of a route", path: "/deepgram/v1/../../v1/models", status: 404 },
-    { what: "a route with a suffix", path: "/openai/v1/chat/completions/extra", status: 404 },
     { what: "the gateway's own root", path: "/", status: 404 },
   ] as const;
 
@@ -104,33 +173,6 @@ describe("everything that is not a shipped route", () => {
     });
   }
 
-  it("refuses a shipped route asked with the wrong method, without asking the provider", async () => {
-    const before = standing.openai.attempts();
-    const answered = await fetch(`${standing.world.origin}/openai/v1/chat/completions`, {
-      method: "GET",
-      headers: AUTHENTICATED,
-    });
-    expect(answered.status).toBe(405);
-    expect(standing.openai.attempts()).toBe(before);
-  });
-
-  it("refuses an upgrade on a route that does not carry one", async () => {
-    const before = standing.openai.attempts();
-    const socket = openSocket(standing.world, "/openai/v1/chat/completions", {
-      headers: AUTHENTICATED,
-    });
-    await expect(watch(socket).opened).rejects.toThrow();
-    expect(standing.openai.attempts()).toBe(before);
-  });
-
-  it("refuses an ordinary request on a route that only carries a socket", async () => {
-    const before = standing.deepgram.attempts();
-    const answered = await fetch(`${standing.world.origin}/deepgram/v1/listen`, {
-      headers: AUTHENTICATED,
-    });
-    expect(answered.status).toBe(400);
-    expect(standing.deepgram.attempts()).toBe(before);
-  });
 });
 
 describe("the health check", () => {

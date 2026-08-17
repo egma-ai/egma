@@ -21,12 +21,15 @@ import pytest
 
 from egma_simulator.config import (
     DEFAULT_CARTESIA_TTS_MODEL,
+    DEFAULT_DEEPGRAM_STT_MODEL,
     DEFAULT_REALTIME_STT_MODEL,
     DEFAULT_STT_MODEL,
+    SimulatorConfig,
 )
 from egma_simulator.plugs.phone import TELEPHONY_BAND_HZ
 from egma_simulator.speech import (
     DEFAULT_CARTESIA_VOICE_ID,
+    PersonaVoice,
     SpeechFault,
     SpeechProviders,
     _ears,
@@ -35,6 +38,20 @@ from egma_simulator.speech import (
 )
 
 A_KEY = "sk-only-this-test-holds-this-one"
+
+def _speaking(leg):
+    """The provider's own service inside the openai mouth's little pipeline.
+
+    That mouth is a service and a band correction wired together, and a
+    Pipeline wraps whatever it is given in a source and a sink — so the
+    service is found by what it is rather than by where it sits, which is
+    what keeps this reading right when the wrapping changes.
+    """
+    from pipecat.services.openai.tts import OpenAITTSService
+
+    found = [one for one in leg._processors if isinstance(one, OpenAITTSService)]
+    assert len(found) == 1
+    return found[0]
 
 
 # -- The cartesia mouth -------------------------------------------------------
@@ -202,6 +219,9 @@ def test_the_realtime_ears_refuse_without_a_key_rather_than_at_the_first_turn():
 # -- Where a leg is reached ---------------------------------------------------
 
 A_GATEWAY = "https://a-gateway.example"
+A_SOCKET_GATEWAY = "wss://a-gateway.example"
+"""The same address, in the scheme a socket client will open. See
+:func:`egma_simulator.speech._socket_address`."""
 
 
 def test_the_cartesia_mouth_is_reached_where_the_deployment_says():
@@ -223,7 +243,8 @@ def test_the_cartesia_mouth_is_reached_where_the_deployment_says():
         TELEPHONY_BAND_HZ,
     )
 
-    assert leg._url == f"{A_GATEWAY}/cartesia/tts/websocket"
+    # The address it was told, in the scheme a socket client will open.
+    assert leg._url == f"{A_SOCKET_GATEWAY}/cartesia/tts/websocket"
 
 
 def test_the_cartesia_mouth_speaks_to_its_own_provider_when_nobody_named_an_address():
@@ -260,3 +281,272 @@ def test_the_deepgram_ears_listen_at_their_own_provider_when_nobody_named_an_add
     )
 
     assert "deepgram.com" in leg._client._client_wrapper.get_environment().production
+
+
+# -- What a selected model, voice and speed really reach ----------------------
+
+
+def test_the_deepgram_ears_are_told_which_model_to_listen_with():
+    """The hole this test closed, and it is worth saying plainly.
+
+    This leg used to be built with a key, a band and an address and
+    *nothing else*. It listened with whatever the shipped service's own
+    default was, so a persona that selected ``nova-3-general`` and one
+    that selected anything else were transcribed by the same model and
+    neither selection reached the wire. A model that does not reach the
+    provider is a catalog entry that does not mean anything.
+    """
+    leg, _ = _ears(
+        SpeechProviders(stt="deepgram", stt_key=A_KEY, stt_model="nova-2-phonecall"),
+        TELEPHONY_BAND_HZ,
+    )
+
+    assert leg._settings.model == "nova-2-phonecall"
+
+
+def test_the_deepgram_ears_ask_for_this_providers_model_when_nobody_named_one():
+    leg, _ = _ears(SpeechProviders(stt="deepgram", stt_key=A_KEY), TELEPHONY_BAND_HZ)
+
+    assert leg._settings.model == DEFAULT_DEEPGRAM_STT_MODEL
+
+
+def test_a_model_id_this_release_has_never_heard_of_still_reaches_the_provider():
+    """Egma allowlists no model id, and this is where that is true or not.
+
+    A release proves one recommended default per catalog entry; a user may
+    type any id the shipped adapter accepts. A leg that quietly replaced
+    an unfamiliar id with its own default would make the catalog a list of
+    every model Egma knows about, which is a list that is wrong the week
+    after it ships — and its wrongness would read as "Egma does not
+    support this model" for a model that works. The provider is the
+    authority, so the id crosses and the provider decides.
+    """
+    listening, _ = _ears(
+        SpeechProviders(
+            stt="deepgram", stt_key=A_KEY, stt_model="a-model-shipped-next-year"
+        ),
+        TELEPHONY_BAND_HZ,
+    )
+    assert listening._settings.model == "a-model-shipped-next-year"
+
+    speaking, spoken_with, _ = _mouth(
+        SpeechProviders(
+            tts="cartesia",
+            tts_key=A_KEY,
+            tts_model="sonic-not-yet-released",
+            tts_voice="a-voice-minted-this-morning",
+        ),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+    assert speaking._settings.model == "sonic-not-yet-released"
+    assert spoken_with.voice_id == "a-voice-minted-this-morning"
+
+
+def test_the_realtime_ears_are_reached_where_the_deployment_says():
+    """The listening half of managed access for this provider.
+
+    This service takes a whole socket address and appends its own
+    ``?intent=transcription``, so the gateway's route for the pair is the
+    whole of what it is told. Until it was told one, a managed persona
+    that selected OpenAI to listen with would have opened a socket
+    straight at the provider holding an Egma gateway credential.
+    """
+    leg, _ = _ears(
+        SpeechProviders(
+            stt="openai_realtime",
+            stt_key=A_KEY,
+            stt_base_url=f"{A_GATEWAY}/openai/v1/realtime",
+        ),
+        TELEPHONY_BAND_HZ,
+    )
+
+    assert leg._base_url == f"{A_SOCKET_GATEWAY}/openai/v1/realtime"
+
+
+def test_the_realtime_ears_listen_at_their_own_provider_when_nobody_named_an_address():
+    leg, _ = _ears(
+        SpeechProviders(stt="openai_realtime", stt_key=A_KEY), TELEPHONY_BAND_HZ
+    )
+
+    assert "openai.com" in leg._base_url
+
+
+def test_the_segmented_ears_are_reached_where_the_deployment_says():
+    leg, _ = _ears(
+        SpeechProviders(
+            stt="openai", stt_key=A_KEY, stt_base_url=f"{A_GATEWAY}/openai/v1"
+        ),
+        TELEPHONY_BAND_HZ,
+    )
+
+    assert str(leg._client.base_url).rstrip("/") == f"{A_GATEWAY}/openai/v1"
+
+
+def test_the_openai_mouth_is_reached_where_the_deployment_says():
+    leg, _, _ = _mouth(
+        SpeechProviders(
+            tts="openai", tts_key=A_KEY, tts_base_url=f"{A_GATEWAY}/openai/v1"
+        ),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+
+    assert str(_speaking(leg)._client.base_url).rstrip("/") == f"{A_GATEWAY}/openai/v1"
+
+
+def test_the_openai_mouth_speaks_to_its_own_provider_when_nobody_named_an_address():
+    leg, _, _ = _mouth(
+        SpeechProviders(tts="openai", tts_key=A_KEY),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+
+    assert "openai.com" in str(_speaking(leg)._client.base_url)
+
+
+def test_a_named_model_voice_and_speed_reach_the_openai_mouth():
+    """All three of the things a TTS selection carries, on one leg.
+
+    Speed is the one that fails silently when it is wrong: a persona
+    authored to speak quickly and a persona authored to speak slowly
+    sound identical, and nothing anywhere says so.
+    """
+    leg, spoken_with, _ = _mouth(
+        SpeechProviders(
+            tts="openai", tts_key=A_KEY, tts_model="tts-1-hd", tts_voice="onyx"
+        ),
+        PersonaVoice(voice_id="onyx", provider="openai", speed=1.25),
+        TELEPHONY_BAND_HZ,
+    )
+
+    speaking = _speaking(leg)
+    assert speaking._settings.model == "tts-1-hd"
+    assert speaking._settings.voice == "onyx"
+    assert speaking._settings.speed == 1.25
+    assert spoken_with.voice_id == "onyx"
+
+
+def test_a_selected_openai_stt_persona_listens_on_the_proved_adapter(monkeypatch):
+    """The catalog's word, and the leg it means.
+
+    "OpenAI STT" is a provider account rather than a transport, and this
+    provider has two interfaces that transcribe. The catalog exposes the
+    socket, because the segmented one cannot begin until the speaker has
+    stopped. What a persona selected is ``openai``; what gets built has to
+    be the socket, or the entry means the interface it was measured
+    against and rejected.
+    """
+    from egma_simulator.spec import (
+        ModelSelection,
+        SelectedModels,
+        SpeechSelection,
+    )
+
+    selected = SelectedModels(
+        access="customer-owned",
+        llm=ModelSelection(provider="openai", model="a-model", key=A_KEY),
+        stt=ModelSelection(provider="openai", model="gpt-live-transcribe", key=A_KEY),
+        tts=SpeechSelection(
+            provider="cartesia",
+            model="sonic-3.5",
+            key=A_KEY,
+            voice_id="a-voice",
+            speed=1.0,
+        ),
+    )
+    monkeypatch.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", "https://control.example")
+    providers = SpeechProviders.for_simulation(
+        SimulatorConfig.from_env(), None, selected
+    )
+
+    assert providers.stt == "openai_realtime"
+    leg, _ = _ears(providers, TELEPHONY_BAND_HZ)
+    assert type(leg).__name__ == "OpenAIRealtimeSTTService"
+    assert leg._settings.model == "gpt-live-transcribe"
+
+
+# -- The scheme a socket client will actually open ---------------------------
+
+
+def test_a_socket_leg_is_given_an_address_it_can_open():
+    """The bug this closes never said anything, which is why it is here.
+
+    A gateway address is written ``https://``, because that is how anybody
+    writes an address and because the control plane refuses a plain-text
+    one. The two legs that are handed a *whole socket address* pass it to a
+    library that raises ``InvalidURI`` for any scheme that is not ``ws`` or
+    ``wss`` — and both legs catch their own connection failures, so a
+    deployment on managed access saw a leg that never connected rather than
+    an address that could never have been opened. Found by running the
+    catalog's own live proof through the deployed gateway.
+    """
+    speaking, _, _ = _mouth(
+        SpeechProviders(
+            tts="cartesia",
+            tts_key=A_KEY,
+            tts_base_url="https://gateway.example/cartesia/tts/websocket",
+        ),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+    assert speaking._url == "wss://gateway.example/cartesia/tts/websocket"
+
+    listening, _ = _ears(
+        SpeechProviders(
+            stt="openai_realtime",
+            stt_key=A_KEY,
+            stt_base_url="https://gateway.example/openai/v1/realtime",
+        ),
+        TELEPHONY_BAND_HZ,
+    )
+    assert listening._base_url == "wss://gateway.example/openai/v1/realtime"
+
+
+def test_an_address_already_written_as_a_socket_is_left_alone():
+    """The third case, and the one a translation gets wrong quietly.
+
+    Both shipped socket adapters default to a ``wss://`` address of their
+    own, and a deployment or a harness may name one directly. A conversion
+    that only knew how to rewrite ``http`` schemes would be fine; one that
+    assumed it was always handed an ``https`` address and sliced a fixed
+    number of characters off the front would mangle this and say nothing.
+    So what is asserted is that an address already in the scheme a socket
+    client opens crosses untouched.
+    """
+    speaking, _, _ = _mouth(
+        SpeechProviders(
+            tts="cartesia",
+            tts_key=A_KEY,
+            tts_base_url="wss://gateway.example/cartesia/tts/websocket",
+        ),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+    assert speaking._url == "wss://gateway.example/cartesia/tts/websocket"
+
+    listening, _ = _ears(
+        SpeechProviders(
+            stt="openai_realtime",
+            stt_key=A_KEY,
+            stt_base_url="ws://127.0.0.1:8787/openai/v1/realtime",
+        ),
+        TELEPHONY_BAND_HZ,
+    )
+    assert listening._base_url == "ws://127.0.0.1:8787/openai/v1/realtime"
+
+
+def test_a_loopback_gateway_keeps_its_own_scheme_rather_than_gaining_tls():
+    """The deterministic suite runs a real gateway on `127.0.0.1` over plain
+    HTTP, and a leg that upgraded that to `wss` would be asking for a
+    certificate nobody issued."""
+    speaking, _, _ = _mouth(
+        SpeechProviders(
+            tts="cartesia",
+            tts_key=A_KEY,
+            tts_base_url="http://127.0.0.1:8787/cartesia/tts/websocket",
+        ),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+    assert speaking._url == "ws://127.0.0.1:8787/cartesia/tts/websocket"

@@ -97,6 +97,38 @@ beforeAll(async () => {
   answers.push(spoke.frames.map(String).join("\n"));
   speaking.close(1000, "done");
 
+  // One transcribing socket on the other listening route, carrying the same
+  // audio and the same transcript back. Two providers do this job and both
+  // must be as content-free as the other.
+  const transcribing = openSocket(standing.world, "/openai/v1/realtime?intent=transcription", {
+    headers: { "egma-inference-key": GATEWAY_SECRET },
+  });
+  const transcribed = watch(transcribing);
+  await transcribed.opened;
+  transcribing.send(JSON.stringify({ type: "input_audio_buffer.append", audio: PAYLOAD.transcript }));
+  await eventually(() => (transcribed.frames.length >= 1 ? transcribed.frames : undefined));
+  answers.push(transcribed.frames.map(String).join("\n"));
+  transcribing.close(1000, "done");
+
+  // One speaking exchange on the other speaking route, whose words, voice and
+  // speed all ride inside a payload this gateway does not read.
+  const synthesised = await fetch(`${standing.world.origin}/openai/v1/audio/speech`, {
+    method: "POST",
+    headers: {
+      "egma-inference-key": GATEWAY_SECRET,
+      "content-type": "application/json",
+      authorization: `Bearer ${CALLER_PROVIDER_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "a-speech-model",
+      input: PAYLOAD.speech,
+      voice: PAYLOAD.voice,
+      speed: 1.25,
+      response_format: "pcm",
+    }),
+  });
+  answers.push(await synthesised.text());
+
   // And one refusal, so a refused connection's record is scanned too.
   const refused = await fetch(`${standing.world.origin}/openai/v1/chat/completions`, {
     method: "POST",
@@ -105,7 +137,7 @@ beforeAll(async () => {
   });
   answers.push(await refused.text());
 
-  await eventually(() => (records(standing.world).length >= 4 ? true : undefined));
+  await eventually(() => (records(standing.world).length >= 6 ? true : undefined));
 });
 
 afterAll(async () => {

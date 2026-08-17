@@ -68,6 +68,7 @@ from pipecat.utils.time import time_now_iso8601
 
 from .config import (
     DEFAULT_CARTESIA_TTS_MODEL,
+    DEFAULT_DEEPGRAM_STT_MODEL,
     DEFAULT_REALTIME_STT_MODEL,
     DEFAULT_STT_MODEL,
     DEFAULT_TTS_MODEL,
@@ -588,7 +589,9 @@ class SpeechProviders:
             # protocol moves.
             gateway = models.gateway
             return cls(
-                stt=models.stt.provider,
+                # The proved adapter for the selected provider, which is the
+                # same word for every entry but one. See `SELECTED_STT_LEG`.
+                stt=SELECTED_STT_LEG.get(models.stt.provider, models.stt.provider),
                 tts=models.tts.provider,
                 vad=vad,
                 stt_key=(
@@ -688,6 +691,30 @@ class SpeechProviders:
                         "an Egma credential"
                     )
         return self
+
+
+SELECTED_STT_LEG = {"openai": "openai_realtime"}
+"""Which listening leg serves a catalog STT provider, where they differ.
+
+**"OpenAI STT" is a provider account, not a transport**, and this
+provider offers two interfaces that transcribe: a segmented one that
+posts a finished recording of a turn and waits, and a socket that
+transcribes while the audio is still arriving. The catalog exposes
+exactly one of them — the socket — because the segmented one cannot begin
+until the agent has stopped talking, so on a call the whole length of
+every agent turn is added to that turn's delay. The comparison was run
+against the real provider before this line was written.
+
+**Only a persona's own selection is translated here, and the deployment
+setting of the same name is not.** A self-hoster whose platform settings
+say ``openai`` for speech-to-text has been listening with the segmented
+leg since before selections existed, and quietly moving them onto a
+socket would change what their deployment does with nothing in their
+configuration having moved. So the legacy word keeps its legacy meaning
+and ``openai_realtime`` stays the way to ask for the socket there; what
+this maps is the catalog's word, which is new and means the proved
+adapter.
+"""
 
 
 SCRIPTED_PAIR = SpeechProviders()
@@ -882,6 +909,16 @@ def _ears(
         # address", so a deployment that named none is byte for byte the
         # call this file made before the gateway existed.
         base_url=providers.stt_base_url or "",
+        # **The selected model, which this leg used not to be told at all.**
+        # It listened with whatever this service's own default was, so a
+        # persona that selected `nova-3-general` and one that selected
+        # anything else were transcribed by the same model and neither
+        # selection meant anything. The model rides in the query string
+        # here, which is also the one place the gateway can record which
+        # model an exchange used.
+        settings=DeepgramSTTService.Settings(
+            model=providers.stt_model or DEFAULT_DEEPGRAM_STT_MODEL
+        ),
     )
 
     async def connected() -> None:
@@ -968,7 +1005,11 @@ def _cartesia_mouth(
         # This service takes a whole socket address rather than a base, so
         # a deployment that named none gets the service's own default
         # rather than one this file would then have to keep current.
-        **({"url": providers.tts_base_url} if providers.tts_base_url else {}),
+        **(
+            {"url": _socket_address(providers.tts_base_url)}
+            if providers.tts_base_url
+            else {}
+        ),
         # One persona turn is one whole thing to say, so it goes over in
         # one piece rather than a sentence at a time — the same choice the
         # elevenlabs mouth makes above, for the same reason: the default
@@ -1010,6 +1051,7 @@ def _openai_mouth(
     resampler before it leaves this processor. Conversion, not relabelling.
     """
     from pipecat.services.openai.tts import OpenAITTSService
+    from pipecat.services.tts_service import TextAggregationMode
 
     if not providers.tts_key:
         raise SpeechFault("the openai speaking leg was chosen without a key")
@@ -1033,7 +1075,20 @@ def _openai_mouth(
                 # Built at the provider's own band. Handing it the line's
                 # band is what makes it mislabel, so it is never told one.
                 sample_rate=OPENAI_TTS_BAND_HZ,
+                # `None` is this client's own word for "the provider's own
+                # address"; a deployment on managed access names the Egma
+                # model gateway's route for this pair here and nothing
+                # else about the leg moves.
+                base_url=providers.tts_base_url,
                 settings=settings,
+                # One persona turn is one whole thing to say — the same
+                # choice the cartesia and elevenlabs mouths make, and this
+                # leg was the one that did not make it. The default waits
+                # for sentence-ending punctuation and adds that wait to
+                # every sentence of every turn, so two visible catalog
+                # entries for the same job would have answered a caller at
+                # two different speeds for no reason anybody chose.
+                text_aggregation_mode=TextAggregationMode.TOKEN,
             ),
             _BandCorrection(
                 spoken_at_hz=OPENAI_TTS_BAND_HZ, carried_at_hz=sample_rate_hz
@@ -1061,6 +1116,10 @@ def _openai_ears(
     return OpenAISTTService(
         api_key=providers.stt_key,
         sample_rate=sample_rate_hz,
+        # `None` is this client's own word for "the provider's own
+        # address", so a deployment that named none is byte for byte the
+        # call this file made before the gateway existed.
+        base_url=providers.stt_base_url,
         settings=OpenAISTTService.Settings(
             model=providers.stt_model or DEFAULT_STT_MODEL
         ),
@@ -1105,6 +1164,17 @@ def _openai_realtime_ears(
     leg = OpenAIRealtimeSTTService(
         api_key=providers.stt_key,
         sample_rate=sample_rate_hz,
+        # This service takes a whole socket address and appends its own
+        # `?intent=transcription`, so a deployment reaching the Egma model
+        # gateway names the gateway's route for this pair and the service
+        # is otherwise untouched. Its own default stands where nobody
+        # named one, rather than an address this file would have to keep
+        # current.
+        **(
+            {"base_url": _socket_address(providers.stt_base_url)}
+            if providers.stt_base_url
+            else {}
+        ),
         # False is this service's word for "the detector is in the
         # pipeline, not on the server". Named rather than left to the
         # default, because a release changing it would move where a turn
@@ -1209,6 +1279,33 @@ class _BandCorrection(FrameProcessor):
             taken, self.spoken_at_hz, self.carried_at_hz
         )
         return converted or None
+
+
+def _socket_address(base: str | None) -> str | None:
+    """One address, written in the scheme a socket client will open.
+
+    **A gateway address is written the way anybody writes an address —
+    ``https://`` — and a WebSocket client refuses that outright.** The
+    library every shipped socket adapter uses raises ``InvalidURI`` for any
+    scheme that is not ``ws`` or ``wss``, and the adapters swallow the
+    failure into their own error path, so what a deployment sees is a leg
+    that never connects rather than an address that was never openable.
+
+    Most adapters never meet this, because they take a *base* and derive
+    their own socket address from it — Pipecat's Deepgram service is handed
+    ``https://…/deepgram`` and reaches ``wss://…/deepgram/v1/listen`` on its
+    own. The two that are handed a whole socket address are the two that
+    call this, which is why the conversion lives beside them rather than in
+    the work order: the work order carries one address per provider-job
+    pair, and which scheme an adapter needs is the adapter's own fact.
+    """
+    if base is None:
+        return None
+    if base.startswith("https://"):
+        return f"wss://{base[len('https://'):]}"
+    if base.startswith("http://"):
+        return f"ws://{base[len('http://'):]}"
+    return base
 
 
 def _voice_from(

@@ -17,9 +17,16 @@ import type { ModelJob, Provider } from "./config.ts";
  * gateway by being told a different base address and nothing else. Pipecat's
  * Deepgram service appends `/v1/listen` to whatever base it is given, so the
  * base is `…/deepgram`; the OpenAI chat client appends `/chat/completions` to
- * its base, so the base is `…/openai/v1`; Cartesia's service is told a whole
- * socket address, so that is the row's own path. Nothing here translates a
- * protocol, and nothing here has to.
+ * its base and the OpenAI speech client appends `/audio/speech`, so the base is
+ * `…/openai/v1` for both; Cartesia's service and OpenAI's realtime
+ * transcription service are each told a whole socket address, so that is the
+ * row's own path. Nothing here translates a protocol, and nothing here has to.
+ *
+ * **One provider may hold several rows, and they share one upstream home.**
+ * OpenAI does three of the shipped jobs on one host, over two transports. That
+ * is a fact about the provider rather than a convenience here: the deployment
+ * configures one address per provider, so a route cannot be pointed somewhere
+ * its provider's other routes are not.
  */
 
 export type Transport = "http" | "socket";
@@ -96,6 +103,31 @@ export const ROUTES: readonly Route[] = [
     credential: { at: "header", name: "authorization", scheme: "Bearer" },
   },
   {
+    /**
+     * OpenAI's realtime transcription socket, which is the adapter this
+     * release's catalog exposes for OpenAI STT.
+     *
+     * **A socket rather than the segmented HTTP endpoint, and the choice was
+     * measured rather than assumed.** The other OpenAI transcription interface
+     * posts a finished recording of a turn and waits, so it cannot begin until
+     * the agent has stopped talking and the length of every agent turn is added
+     * to that turn's delay. This one transcribes while the audio is still
+     * arriving. The comparison was run against the real provider before this
+     * row was written.
+     *
+     * The caller's `?intent=transcription` crosses unchanged, exactly as every
+     * other query value does: it is the provider's own parameter and this
+     * gateway reads none of them.
+     */
+    path: "/openai/v1/realtime",
+    method: "GET",
+    transport: "socket",
+    provider: "openai",
+    job: "stt",
+    upstreamPath: "/v1/realtime",
+    credential: { at: "header", name: "authorization", scheme: "Bearer" },
+  },
+  {
     path: "/cartesia/tts/websocket",
     method: "GET",
     transport: "socket",
@@ -103,6 +135,25 @@ export const ROUTES: readonly Route[] = [
     job: "tts",
     upstreamPath: "/tts/websocket",
     credential: { at: "query", name: "api_key" },
+  },
+  {
+    /**
+     * OpenAI's speech synthesis, which streams its audio over ordinary HTTP
+     * rather than a socket — so this row is a streaming HTTP row and the
+     * relay's own early-forwarding rule is what makes the first audio arrive
+     * before the last is synthesised.
+     *
+     * The model, the voice and the speed all travel inside the payload, which
+     * this gateway does not read; the record therefore names no model for this
+     * route, which is the honest answer rather than a parsed one.
+     */
+    path: "/openai/v1/audio/speech",
+    method: "POST",
+    transport: "http",
+    provider: "openai",
+    job: "tts",
+    upstreamPath: "/v1/audio/speech",
+    credential: { at: "header", name: "authorization", scheme: "Bearer" },
   },
 ];
 
