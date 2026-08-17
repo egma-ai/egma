@@ -10,6 +10,16 @@ import {
 import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
 import { AuthShell, Notice, styles } from "../ui.tsx";
 
+function PasswordVisibilityIcon({ visible }: { readonly visible: boolean }) {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path d="M2.5 12s3.4-5.5 9.5-5.5 9.5 5.5 9.5 5.5-3.4 5.5-9.5 5.5S2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="2.75" />
+      {visible ? <path d="m4 4 16 16" /> : null}
+    </svg>
+  );
+}
+
 /**
  * Signing in, for the second machine and everybody who arrived by invitation.
  *
@@ -86,12 +96,15 @@ export default function SignInPage() {
               value={password}
               onChange={setPassword}
             />
-            <Button
-              ariaControls="password"
+            <button
+              className={styles.passwordToggle}
+              type="button"
+              aria-label={passwordVisible ? "Hide password" : "Show password"}
+              aria-controls="password"
               onClick={() => setPasswordVisible((visible) => !visible)}
             >
-              {passwordVisible ? "Hide password" : "Show password"}
-            </Button>
+              <PasswordVisibilityIcon visible={passwordVisible} />
+            </button>
           </div>
         </Field>
 

@@ -18,8 +18,10 @@
 .emphasizedEmail { color: var(--foreground); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 4px; }
 .authCard form { max-width: none; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .authCard form + .linkLine { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--border); }
-.passwordControl { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
-.passwordControl > :first-child { min-width: 0; }
+.passwordControl { position: relative; min-width: 0; }
+.passwordControl input { min-width: 0; padding-right: calc(var(--tap-target) + var(--space-2)); }
+.passwordToggle { position: absolute; top: 50%; right: 4px; display: grid; width: var(--control-md); height: var(--control-md); padding: 0; transform: translateY(-50%); place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.passwordToggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
 
 .codeInput input { font-family: var(--mono); font-size: var(--text-lead); letter-spacing: .18em; text-align: center; text-transform: uppercase; }
 .buttonRow { display: flex; gap: var(--space-3); }
@@ -205,6 +207,7 @@
 /* Hover feedback belongs only to a device that can keep a fine pointer there. */
 @media (hover: hover) and (pointer: fine) {
   .themeToggle:hover { border-color: var(--foreground); background: var(--surface-soft); }
+  .passwordToggle:hover { background: var(--surface-soft); color: var(--foreground); }
   .linkLine a:hover { text-decoration-thickness: 2px; }
   .timelineRow:hover, .executionRow:hover { background: var(--surface-soft); }
   .traceViewTabs button:hover { color: var(--foreground); }
@@ -212,6 +215,7 @@
 }
 
 @media (pointer: coarse) {
+  .passwordToggle { right: 0; width: var(--tap-target); height: var(--tap-target); }
   :is(.linkLine a, .traceViewTabs button, .inspectorLink a) { min-height: var(--tap-target); align-items: center; }
   :is(.linkLine a, .inspectorLink a) { display: inline-flex; }
   .issueNavigator button { width: var(--tap-target); height: var(--tap-target); }

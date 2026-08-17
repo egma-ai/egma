@@ -48,6 +48,8 @@ describe("the shared controls on access pages", () => {
     const showPassword = screen.getByRole("button", { name: "Show password" });
     expect(showPassword.getAttribute("type")).toBe("button");
     expect(showPassword.getAttribute("aria-controls")).toBe("password");
+    expect(showPassword.textContent).toBe("");
+    expect(showPassword.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
 
     fireEvent.change(email, { target: { value: "ada@example.com" } });
     fireEvent.change(password, { target: { value: "correct horse" } });
@@ -58,7 +60,10 @@ describe("the shared controls on access pages", () => {
     expect(password.getAttribute("type")).toBe("text");
     expect((password as HTMLInputElement).value).toBe("correct horse");
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
+    const hidePassword = screen.getByRole("button", { name: "Hide password" });
+    expect(hidePassword.textContent).toBe("");
+    expect(hidePassword.querySelectorAll("path")).toHaveLength(2);
+    fireEvent.click(hidePassword);
     expect(password.getAttribute("type")).toBe("password");
     expect(screen.getByRole("button", { name: "Sign in" }).getAttribute("type")).toBe("submit");
     expect(screen.getByRole("link", { name: "Sign up" })).toBeTruthy();
