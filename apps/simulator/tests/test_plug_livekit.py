@@ -214,8 +214,8 @@ async def test_the_pinned_reader_keeps_livekit_frames_buffered_before_eos():
     client = input_transport._client
 
     # This is the exact private Pipecat 1.7.0 seam the production guard pins.
-    # Only its faulty stream reader is replaced; conversion, iteration, and
-    # stream close stay on Pipecat's installed implementations.
+    # The faulty reader and close coordinator are wrapped; conversion,
+    # iteration, and pipeline push stay on Pipecat's installed implementations.
     assert (
         input_transport._audio_in_task_handler.__func__
         is LiveKitInputTransport._audio_in_task_handler
@@ -224,10 +224,7 @@ async def test_the_pinned_reader_keeps_livekit_frames_buffered_before_eos():
         client.get_next_audio_frame.__func__
         is LiveKitTransportClient.get_next_audio_frame
     )
-    assert (
-        client._close_audio_stream.__func__
-        is LiveKitTransportClient._close_audio_stream
-    )
+    assert client._close_audio_stream.__self__ is room._input_drain
     await client._process_audio_stream(stream, AGENT_IDENTITY)
 
     assert client._audio_queue.qsize() == 2
@@ -236,9 +233,13 @@ async def test_the_pinned_reader_keeps_livekit_frames_buffered_before_eos():
     assert client._audio_queue.get_nowait() == (second, AGENT_IDENTITY)
     client._audio_queue.task_done()
 
+    with pytest.raises(RuntimeError, match="input stream could not be read"):
+        await client._process_audio_stream(object(), AGENT_IDENTITY)
+    assert media.failed.is_set()
 
-async def test_pipecat_17_departure_waits_for_both_inbound_audio_queues():
-    """One departure follows both real Pipecat queues and one timeline ack."""
+
+async def test_pipecat_17_unsubscribe_drains_before_participant_departure():
+    """Unsubscribe preserves buffered audio; only later departure ends."""
     from livekit import rtc
     from livekit.rtc._utils import RingQueue
     from pipecat.frames.frames import AudioRawFrame
@@ -249,10 +250,10 @@ async def test_pipecat_17_departure_waits_for_both_inbound_audio_queues():
 
     class Handle:
         def __init__(self) -> None:
-            self.disposed = False
+            self.disposals = 0
 
         def dispose(self) -> None:
-            self.disposed = True
+            self.disposals += 1
 
     room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
     media = room.create_transport()
@@ -270,20 +271,20 @@ async def test_pipecat_17_departure_waits_for_both_inbound_audio_queues():
         return AudioRawFrame(audio=bytes(320), sample_rate=16000, num_channels=1)
 
     input_transport._convert_livekit_audio_to_pipecat = gated_conversion
-    receiving = asyncio.create_task(input_transport._audio_in_task_handler())
 
     order: list[str] = []
     forwarding_started = asyncio.Event()
     forward = asyncio.Event()
 
     async def forward_input() -> None:
-        frame = await input_transport._audio_in_queue.get()
-        forwarding_started.set()
-        await forward.wait()
-        order.append(type(frame).__name__)
-        input_transport._audio_in_queue.task_done()
+        for index in range(2):
+            frame = await input_transport._audio_in_queue.get()
+            if index == 0:
+                forwarding_started.set()
+            await forward.wait()
+            order.append(type(frame).__name__)
+            input_transport._audio_in_queue.task_done()
 
-    forwarding = asyncio.create_task(forward_input())
     marker_started = asyncio.Event()
     acknowledge = asyncio.Event()
     markers: list[object] = []
@@ -305,7 +306,7 @@ async def test_pipecat_17_departure_waits_for_both_inbound_audio_queues():
     source = asyncio.get_running_loop().create_future()
     source.set_result(None)
     stream._task = source
-    final_audio = rtc.AudioFrameEvent(
+    first_audio = rtc.AudioFrameEvent(
         rtc.AudioFrame(
             data=bytes(320),
             sample_rate=16000,
@@ -313,10 +314,35 @@ async def test_pipecat_17_departure_waits_for_both_inbound_audio_queues():
             samples_per_channel=160,
         )
     )
-    stream._queue.put(final_audio)
+    second_audio = rtc.AudioFrameEvent(
+        rtc.AudioFrame(
+            data=bytes(320),
+            sample_rate=16000,
+            num_channels=1,
+            samples_per_channel=160,
+        )
+    )
+    stream._queue.put(first_audio)
+    stream._queue.put(second_audio)
     stream._queue.put(None)
     reader = asyncio.create_task(client._process_audio_stream(stream, AGENT_IDENTITY))
     client._audio_streams[AGENT_IDENTITY] = (stream, reader)
+
+    # Track unsubscribe happens first for mute and republish. It must drain the
+    # old stream without claiming that the participant left.
+    await client._close_audio_stream(AGENT_IDENTITY)
+    await client._close_audio_stream(AGENT_IDENTITY)
+    await asyncio.sleep(0)
+
+    assert client._audio_queue.qsize() == 2
+    assert reader.done() and not reader.cancelled()
+    assert stream._ffi_handle.disposals == 1
+    assert not markers
+    assert not media.ended.is_set()
+    assert not media.failed.is_set()
+
+    receiving = asyncio.create_task(input_transport._audio_in_task_handler())
+    forwarding = asyncio.create_task(forward_input())
     await conversion_started.wait()
 
     first = asyncio.create_task(drain.participant_left(AGENT_IDENTITY, media.ended))
@@ -338,10 +364,10 @@ async def test_pipecat_17_departure_waits_for_both_inbound_audio_queues():
     acknowledge.set()
     await asyncio.wait_for(asyncio.gather(first, second), timeout=1.0)
     assert media.ended.is_set()
+    assert not media.failed.is_set()
     assert len(markers) == 1
-    assert order == ["UserAudioRawFrame", "departure"]
-    assert stream._ffi_handle.disposed
-    assert reader.done() and not reader.cancelled()
+    assert order == ["UserAudioRawFrame", "UserAudioRawFrame", "departure"]
+    assert stream._ffi_handle.disposals == 1
 
     await forwarding
     receiving.cancel()
