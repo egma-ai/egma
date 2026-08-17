@@ -43,8 +43,15 @@
  * grader reads became one derived from the trace rather than one carried
  * separately. No measure joined or left; what each of them *means* is now said
  * precisely enough to compute, which is exactly what this number is for.
+ *
+ * **3** is where three of them gained a second span-level definition: computed
+ * from a recognised framework's own spans, for a conversation that timed none
+ * itself. No measure joined or left and no timed number changed, but a
+ * conversation that answered "nothing measured" at version 2 answers with
+ * three latencies at version 3 — which is a measure changing what it means to a
+ * consumer, and this number is what tells them so.
  */
-export const MEASURE_CATALOG_VERSION = 2;
+export const MEASURE_CATALOG_VERSION = 3;
 
 /**
  * How a measure is reduced to the one number a threshold is applied to.

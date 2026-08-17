@@ -641,6 +641,26 @@ describe("measures derived from a recognised framework's own spans", () => {
   });
 
   /**
+   * A caller who says "hello" and then "are you there" before the agent replies
+   * has taken two turns and been answered once. Counting the one reply for both
+   * would file the same wait twice — the same number in the series twice over,
+   * a worse worst on the page, and a bound failed by a duplicate. The first turn
+   * measures nothing, because the wait it would have measured ended when the
+   * caller spoke again rather than when the agent did.
+   */
+  it("answers only the nearest human turn when the caller spoke twice", async () => {
+    const trace = await aLiveKitCall([
+      { who: "human", from: 0, to: 1_000 },
+      { who: "human", from: 2_000, to: 3_000 },
+      { who: "agent", from: 3_200, to: 5_000, spoke: [[3_500, 5_000]] },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    // One sample, and it is the second turn's: 3500 − 3000.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([500]);
+  });
+
+  /**
    * The agent talking over the caller is an interruption, not a fast answer.
    * The measurement runs backwards, so it is dropped — and the turns around it
    * are still measured, which is the half that matters.

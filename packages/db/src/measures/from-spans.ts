@@ -422,14 +422,24 @@ function agentSpeechDuration(turns: readonly TimedSpan[]): readonly Sample[] {
  * Where the agent's answer to the human turn at `at` began.
  *
  * The next agent turn's first speech, or that turn's own start when it carried
- * none. `undefined` when the human had the last word, which is a turn nobody
- * answered rather than a turn answered slowly.
+ * none. `undefined` when nobody answered — the human had the last word, or said
+ * something else first.
+ *
+ * **An agent turn answers only the nearest human turn before it, so the walk
+ * stops at the next human turn rather than reading past it.** A caller who says
+ * "hello" and then "are you there" before the agent replies has taken two turns
+ * and been answered once, and letting the one reply count for both would file
+ * the same wait twice — the same number in the series twice over, a worse worst
+ * on a page, and, in the limit, a bound failed by a duplicate. The unanswered
+ * first turn measures nothing, which is what actually happened: the wait it
+ * would have measured ended when the caller spoke again, not when the agent did.
  */
 function answeringSpeech(
   turns: readonly TimedSpan[],
   at: number,
 ): { readonly startedAt: bigint; readonly spanId: string } | undefined {
   for (const turn of turns.slice(at + 1)) {
+    if (turn.kind === HUMAN_TURN) return undefined;
     if (turn.kind !== AGENT_TURN) continue;
     return turn.speech[0] ?? { startedAt: turn.startedAt, spanId: turn.spanId };
   }

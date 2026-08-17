@@ -1,6 +1,6 @@
 # The measure catalog
 
-**Catalog version: 2**
+**Catalog version: 3**
 
 Every measure a conversation produces, named once and defined once, so that a
 grader references a known measure instead of guessing a string — and so that the
@@ -139,7 +139,7 @@ the store gains these on the next read.
 
 | Measure | Derived from the LiveKit scope as | Taken |
 | --- | --- | --- |
-| `turn_response_latency` | From each `turn:human` span's **end** to the start of the next `turn:agent` span's first `speaking` child — or to that agent turn's own start when it carried no `speaking` child. The next agent turn is the next one by start time, which is the order a transcript reads in. | One sample per human turn, in conversation order. A human turn nobody answered, and one whose sample runs backwards, contribute none. |
+| `turn_response_latency` | From each `turn:human` span's **end** to the start of the next `turn:agent` span's first `speaking` child — or to that agent turn's own start when it carried no `speaking` child. The next agent turn is the next one by start time, which is the order a transcript reads in. **An agent turn answers only the nearest human turn before it: a human turn followed by another human turn before any agent turn was not answered, and measures nothing.** | One sample per human turn, in conversation order. A human turn nobody answered, one the caller spoke over with a second turn, and one whose sample runs backwards contribute none. |
 | `first_response_latency` | From the `root` span's start to the start of the first `turn:agent` span's first `speaking` child. A first agent turn that never spoke has no first word to have waited for, and nothing is measured. | Once. |
 | `agent_speech_duration` | The sum of a `turn:agent` span's own `speaking` children's durations — so a turn that thought for two seconds and then talked for one spoke for one. | One sample per agent turn **that spoke**. A turn with no speech in it has no speech duration; a zero would measure something that never happened. |
 
