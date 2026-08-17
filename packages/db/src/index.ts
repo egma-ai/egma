@@ -1,4 +1,24 @@
 export { connect, disconnect, ping, type ConnectOptions } from "./client.ts";
+/**
+ * What kind of deployment this is, and how its own connections to the Egma
+ * model gateway are signed.
+ *
+ * Here beside `connect` rather than on the data-access surface because it
+ * reaches no store and takes no context: it is deployment configuration handed
+ * in at boot, and the format of the internal gateway credential, which the
+ * gateway's verifier reads at the other end of the wire. Exported because it is
+ * the **one** place that format is written down on this side; a second spelling
+ * of it anywhere would be a credential one half of Egma could mint and the
+ * other half could not read.
+ */
+export {
+  holdManagedDeployment,
+  INTERNAL_GATEWAY_CREDENTIAL_PREFIX,
+  INTERNAL_GATEWAY_CREDENTIAL_SECONDS,
+  managedDeployment,
+  signInternalGatewayCredential,
+  type ManagedDeployment,
+} from "./managed-deployment.ts";
 export {
   MIGRATIONS_DIRECTORY,
   readMigrations,

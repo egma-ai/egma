@@ -3,6 +3,11 @@ import { sql } from "drizzle-orm";
 import pg from "pg";
 
 import * as schema from "./schema/index.ts";
+import {
+  holdManagedDeployment,
+  releaseManagedDeployment,
+  type ManagedDeployment,
+} from "./managed-deployment.ts";
 import { holdMasterKey, releaseMasterKey } from "./sealing.ts";
 
 /**
@@ -29,12 +34,27 @@ export type ConnectOptions = {
    * one, everything runs except sealing and unsealing a credential.
    */
   readonly encryptionKey?: string;
+  /**
+   * What this deployment is, where the Egma model gateway answers, and — on
+   * hosted Egma — the key its own gateway credentials are signed with.
+   *
+   * Here beside the master key rather than read from the environment where it
+   * is used, for the master key's reason: two processes prepare managed work —
+   * the control plane's claim door and the grading engine — and a value each of
+   * them read separately is a value the two can disagree about. Absent means a
+   * deployment that has not been told, which is a visible infrastructure error
+   * at the claim that needed it and never a quiet fallback.
+   */
+  readonly managedDeployment?: ManagedDeployment;
 };
 
 export function connect(options: ConnectOptions): void {
   if (pool !== undefined) throw new Error("already connected to Postgres");
   if (options.encryptionKey !== undefined) {
     holdMasterKey(options.encryptionKey);
+  }
+  if (options.managedDeployment !== undefined) {
+    holdManagedDeployment(options.managedDeployment);
   }
   pool = new pg.Pool({
     connectionString: options.databaseUrl,
@@ -58,6 +78,7 @@ export async function disconnect(): Promise<void> {
   database = undefined;
   databaseUrl = undefined;
   releaseMasterKey();
+  releaseManagedDeployment();
   await open?.end();
 }
 

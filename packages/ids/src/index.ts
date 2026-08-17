@@ -63,6 +63,13 @@ export const ID_PREFIXES = [
    * something that is not the secret.
    */
   "mpc",
+  /**
+   * An organization's inference key for the Egma model gateway, as hosted Egma
+   * files it. Its own identity because an organization may hold several at once
+   * — that is what makes rotation overlap safely — and because an administrator
+   * revoking one has to be able to name something that is not the secret.
+   */
+  "ifk",
   "mck",
   "ste",
   "run",

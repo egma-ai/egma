@@ -8,6 +8,7 @@ import {
 import { isModelProvider, type ModelProvider } from "../models/catalog.ts";
 import { openCredentials } from "../sealing.ts";
 import type { AuthContext } from "./context.ts";
+import { managedAccessAvailable } from "./managed-access.ts";
 import { ManagedAccessNotConnectedError, UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
@@ -94,9 +95,11 @@ function validMode(mode: string): ModelAccessMode {
  * **`managed` is refused while nothing is connected**, and that refusal is the
  * self-hosted rule the specification names: an organization may not select
  * Egma's provider accounts until it holds an inference key for the Egma model
- * gateway. Nothing in this release connects one, so nothing in this release may
- * select managed access — said in a sentence that names what is missing rather
- * than by leaving the value quietly unwritable.
+ * gateway. On hosted Egma there is nothing to connect — the deployment operates
+ * the gateway and signs its own credentials — so managed access is always
+ * selectable there, and this refusal never fires. On a self-hosted deployment
+ * it fires until an administrator connects a key, said in a sentence that names
+ * what is missing rather than by leaving the value quietly unwritable.
  */
 export async function setModelAccess(
   auth: AuthContext,
@@ -105,7 +108,7 @@ export async function setModelAccess(
   authorize(auth, "manage_organization", here(auth));
 
   const valid = validMode(mode);
-  if (valid === "managed") {
+  if (valid === "managed" && !(await managedAccessAvailable(auth))) {
     throw new ManagedAccessNotConnectedError();
   }
 

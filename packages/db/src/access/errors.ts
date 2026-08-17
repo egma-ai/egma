@@ -1170,28 +1170,57 @@ export function refuseRetry(
 export class ManagedAccessNotConnectedError extends Error {
   constructor() {
     super(
-      "managed model access sends this organization's model traffic through the Egma model gateway, and this organization has connected no inference key for it. Choose Customer-owned and add a credential for each provider your personas and graders select.",
+      "managed model access sends this organization's model traffic through the Egma model gateway, and this organization has connected no inference key for it. Create one in Egma Cloud and connect it under Model providers, or choose Customer-owned and add a credential for each provider your personas and graders select.",
     );
     this.name = "ManagedAccessNotConnectedError";
   }
 }
 
 /**
- * A simulation or a grading job selected managed model access on a deployment
- * that has no Egma model gateway connection behind it.
+ * An inference key was pasted whose Egma Cloud organization is not the one this
+ * deployment is already bound to.
  *
- * **A tripwire rather than a fault, and it is typed so it lands as one.** No
- * door in this release can store `managed` — the setting refuses it by name —
- * so a claim that reaches this has found a row nothing should have written.
- * Saying so as an infrastructure error naming the mode, with somewhere to go,
- * is what keeps it from arriving as a bare dispatch failure with nothing on it
- * a person could act on. The release that connects a gateway is the one that
- * makes this reachable and answers it.
+ * **Refused rather than obeyed, and this is the binding doing its job.** A
+ * deployment that switched accounts on a paste would move every later
+ * simulation's spend onto a different customer's provider account, silently,
+ * from one text field. So the second organization's key is turned away while
+ * the first binding stands, and the way to change it is to disconnect
+ * deliberately first.
+ *
+ * The sentence names the bound organization, because "this key belongs to
+ * somebody else" is unhelpful to the administrator who holds keys for two.
+ */
+export class ManagedAccessBoundElsewhereError extends Error {
+  /** The Egma Cloud organization this deployment is bound to. */
+  readonly cloudOrganizationId: string;
+
+  constructor(cloudOrganizationId: string) {
+    super(
+      `this deployment's managed access is bound to Egma Cloud organization ${cloudOrganizationId}, and this key belongs to another one. Disconnect managed access first if you mean to move this deployment to a different Egma Cloud organization.`,
+    );
+    this.name = "ManagedAccessBoundElsewhereError";
+    this.cloudOrganizationId = cloudOrganizationId;
+  }
+}
+
+/**
+ * A simulation or a grading job selected managed model access on a deployment
+ * that does not know where the Egma model gateway is.
+ *
+ * **Egma misconfigured, not the customer unconfigured**, and the two are kept
+ * apart on purpose: `ManagedAccessNotConnectedError` is an administrator with
+ * one thing to paste, and this is a deployment started without the address its
+ * managed traffic goes to. Telling an administrator to connect a key they have
+ * already connected would send them looking in the wrong place.
+ *
+ * An infrastructure error either way, and never a fallback: a simulation
+ * quietly conducted straight against a provider on somebody else's account
+ * would be worse than one that stopped and said why.
  */
 export class ManagedAccessUnavailableError extends Error {
   constructor() {
     super(
-      "this organization is on managed model access, which sends its model traffic through the Egma model gateway, and this deployment has no connection to one. Choose Customer-owned under Model providers and add a credential for each provider your personas and graders select.",
+      "this organization is on managed model access, which sends its model traffic through the Egma model gateway, and this deployment has not been told where that gateway is. This is a deployment setting rather than something to fix under Model providers.",
     );
     this.name = "ManagedAccessUnavailableError";
   }

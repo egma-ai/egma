@@ -48,6 +48,16 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // identity because a rotation replaces the whole envelope and the row has to
   // keep the identity it had.
   model_provider_credential: "mpc",
+  // One inference key for the Egma model gateway, as hosted Egma files it: a
+  // hash and its lifecycle, never a readable copy. Its own identity because an
+  // organization holds several at once — that is what makes rotation overlap —
+  // and because revoking one has to name something that is not the secret.
+  inference_key: "ifk",
+  // The one inference key a self-hosted organization has connected, sealed.
+  // Keyed by the organization, whose identity it carries, for `model_access`'s
+  // exact reason: one answer per customer, so there is no second identifier to
+  // mint and none to name wrongly.
+  managed_access_key: "org",
   membership: "mbr",
   invitation: "inv",
   api_key: "key",
