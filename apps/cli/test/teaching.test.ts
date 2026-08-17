@@ -241,6 +241,7 @@ describe("the pane, while the files land", () => {
         "Writing tests for your voice agent.",
         "A test",
         "One situation to put your agent",
+        "behaviors that say what should",
         "Progress:",
       );
       expect(pane).toContain("behaviors that say what should");
