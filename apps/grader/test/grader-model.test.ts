@@ -1,14 +1,19 @@
+import { newId } from "@egma/ids";
 import {
   claimGradingJobs,
+  connectManagedAccess,
+  disconnectManagedAccess,
   getGrader,
+  holdManagedDeployment,
   GRADING_CAPABILITIES,
   readVerdicts,
   removeModelProviderCredential,
+  setModelAccess,
   storeModelProviderCredential,
   type AuthContext,
   type RecordedVerdict,
 } from "@egma/db";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
   aConversation,
@@ -364,5 +369,142 @@ describe("a credential the organization does not hold", () => {
         key: THE_ORGANIZATIONS_KEY,
       });
     }
+  });
+});
+
+describe("a grader on managed model access", () => {
+  /**
+   * The grader's half of the two model-access modes, at the seam a judge is
+   * actually resolved at.
+   *
+   * **What changes is a base address and one credential, and nothing else.**
+   * The maker is handed the Egma model gateway's route for the provider and the
+   * credential that authorizes the gateway rather than the provider — the same
+   * request, the same body, the same protocol. That is the whole reason the
+   * grader needed no second provider adapter for managed access, and the
+   * assertion below is what says the claim is true rather than intended.
+   */
+  const THE_GATEWAY = "https://gateway.egma.test";
+  const THE_PASTED_KEY = "egma_ik_sentinel-grader-managed-P1Q2";
+
+  async function judgeUnderManagedAccess(name: string): Promise<{
+    readonly configured: readonly Record<string, unknown>[];
+    readonly resolved: unknown;
+  }> {
+    const graderId = await seedGrader(
+      world,
+      aJudgedCopy({ name, graderModel: { provider: "openai", model: "gpt-4o" } }),
+    );
+    const grader = await getGrader(world.auth, graderId);
+    const judge = scriptedJudge({ answers: {} });
+    const resolved = await judgesOnce(theEngine()).judgeFor(
+      {
+        graderModel: grader?.graderModel ?? null,
+        judgeModel: grader?.judgeModel ?? null,
+      },
+      judge.makers,
+    );
+    return { configured: judge.configured, resolved };
+  }
+
+  afterEach(async () => {
+    // Back to the deployment every other case in this file stands in.
+    holdManagedDeployment({
+      hosted: false,
+      gatewayAddress: undefined,
+      internalGatewayKey: undefined,
+    });
+    await setModelAccess(world.adminAuth, "customer-owned").catch(() => undefined);
+  });
+
+  it("judges through the gateway with the key its deployment connected", async () => {
+    holdManagedDeployment({
+      hosted: false,
+      gatewayAddress: THE_GATEWAY,
+      internalGatewayKey: undefined,
+    });
+    await connectManagedAccess(world.adminAuth, {
+      key: THE_PASTED_KEY,
+      cloudOrganizationId: newId("org"),
+    });
+    await setModelAccess(world.adminAuth, "managed");
+
+    const { configured, resolved } = await judgeUnderManagedAccess(
+      "Judged through the Egma model gateway",
+    );
+
+    expect(resolved).not.toBeInstanceOf(NoJudge);
+    expect(configured.at(-1)).toEqual({
+      provider: "openai",
+      // The pinned selection is untouched by who supplies the credential.
+      model: "gpt-4o",
+      key: THE_PASTED_KEY,
+      endpoint: `${THE_GATEWAY}/openai/v1`,
+    });
+    // And never the organization's own provider account, which is stored and
+    // deliberately not what a managed grader spends.
+    expect(configured.at(-1)).not.toHaveProperty("key", THE_ORGANIZATIONS_KEY);
+  });
+
+  it("judges through the gateway on hosted Egma with nothing connected at all", async () => {
+    holdManagedDeployment({
+      hosted: true,
+      gatewayAddress: THE_GATEWAY,
+      internalGatewayKey: "sentinel-grader-internal-signing-R3S4",
+    });
+    await setModelAccess(world.adminAuth, "managed");
+
+    const { configured, resolved } = await judgeUnderManagedAccess(
+      "Judged on hosted Egma's own credential",
+    );
+
+    expect(resolved).not.toBeInstanceOf(NoJudge);
+    const asked = configured.at(-1) as { key: string; endpoint: string };
+    expect(asked.endpoint).toBe(`${THE_GATEWAY}/openai/v1`);
+    expect(asked.key.startsWith("egma_ig_")).toBe(true);
+    // The signing key is never any part of what goes out.
+    expect(asked.key).not.toContain("sentinel-grader-internal-signing-R3S4");
+  });
+
+  it("errors rather than judging, when managed access has nothing behind it", async () => {
+    holdManagedDeployment({
+      hosted: false,
+      gatewayAddress: THE_GATEWAY,
+      internalGatewayKey: undefined,
+    });
+    // Reconnected under the binding this world already carries — rotation, not
+    // a move — then disconnected deliberately. The mode is left exactly as it
+    // was, which is what makes the next grading say so instead of quietly
+    // spending somebody's own account.
+    await setModelAccess(world.adminAuth, "managed");
+    await disconnectManagedAccess(world.adminAuth);
+
+    const { resolved } = await judgeUnderManagedAccess(
+      "Judged with nothing connected",
+    );
+
+    // An infrastructure error a person can act on, never a failed verdict: a
+    // check that could not be made did not fail.
+    expect(resolved).toBeInstanceOf(NoJudge);
+    expect(String((resolved as Error).message)).toContain("inference key");
+  });
+
+  it("spends the organization's own account again the moment the mode changes back", async () => {
+    holdManagedDeployment({
+      hosted: true,
+      gatewayAddress: THE_GATEWAY,
+      internalGatewayKey: "sentinel-grader-internal-signing-R3S4",
+    });
+    await setModelAccess(world.adminAuth, "customer-owned");
+
+    const { configured } = await judgeUnderManagedAccess(
+      "Judged back on the organization's account",
+    );
+
+    expect(configured.at(-1)).toEqual({
+      provider: "openai",
+      model: "gpt-4o",
+      key: THE_ORGANIZATIONS_KEY,
+    });
   });
 });

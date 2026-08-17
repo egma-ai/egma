@@ -2,7 +2,9 @@ import { newId } from "@egma/ids";
 import { eq } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
+import { managedDeployment } from "../managed-deployment.ts";
 import { judgeConfiguration } from "../schema/graders.ts";
+import { modelAccess } from "../schema/models.ts";
 import { persona, personaVersion } from "../schema/personas.ts";
 import { organization, project } from "../schema/tenancy.ts";
 import { platformJudgeRow } from "./judges.ts";
@@ -267,6 +269,31 @@ export async function provisionOrganization(
         ? {}
         : { defaultJudge: input.defaultJudge }),
     });
+
+    /**
+     * **A hosted organization starts on managed model access, and a
+     * self-hosted one does not.**
+     *
+     * The whole difference is who can supply a credential without being asked
+     * for one. Hosted Egma operates the Egma model gateway and keeps the
+     * provider accounts behind it, so a new project's seeded default persona
+     * and predefined grader can complete a run before anybody has opened an
+     * account with a model provider — which is the problem this entire area
+     * exists to solve. A self-hosted deployment can supply nothing until an
+     * administrator connects an inference key, so it starts customer-owned and
+     * a missing row reads as exactly that.
+     *
+     * Written here rather than defaulted at read time, because it is a
+     * decision: an organization that later chooses customer-owned must not
+     * quietly go back to managed the next time somebody reads the row.
+     */
+    if (managedDeployment().hosted) {
+      await tx.insert(modelAccess).values({
+        organizationId,
+        mode: "managed",
+        updatedBy: input.ownerUserId,
+      });
+    }
 
     // Everyone is an admin in v1 and roles are invisible, but the permission
     // map is real from the first commit. The creator of an organization is its
