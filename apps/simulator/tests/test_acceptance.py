@@ -703,12 +703,10 @@ async def test_a_voice_spec_reports_a_whole_exchange_and_its_audio(
 
     # Each channel is one speaker, proved by listening to it: what channel
     # 0 says is what the persona said, and what channel 1 says is what the
-    # agent said — every spoken turn of the transcript, on its own side,
-    # and on neither of the other's. The concluding goodbye is the
-    # persona's decision to stop and is not spoken into the transport.
-    assert_one_speaker_to_a_channel(
-        recording, [turn for turn in turns if turn[1] != GOODBYE]
-    )
+    # agent said — every spoken turn of the transcript, including the final
+    # words that conclude the simulation, on its own side and on neither of
+    # the other's.
+    assert_one_speaker_to_a_channel(recording, turns)
 
 
 async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
@@ -736,7 +734,7 @@ async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
     measures = measures_for(records, "sim-voice-measures")
     assert measures.count("time_to_first_word") == 3
     assert measures.count("agent_speech_duration") == 3
-    assert measures.count("persona_speech_duration") == 2
+    assert measures.count("persona_speech_duration") == 3
     # The wall-clock measures every simulation reports are still there:
     # voice adds measurements, it does not replace them.
     assert measures.count("first_response_latency") == 1
@@ -753,10 +751,12 @@ async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
     assert all(number > 0 for number in quiet), quiet
     assert len(quiet) == 3
 
-    # Monotonically ordered: no measurement is stamped before the one the
-    # simulator took ahead of it.
-    stamped = [int(span["endTimeUnixNano"]) for span in timed]
-    assert stamped == sorted(stamped)
+    # Overlap may make different measure families close out of order. Each
+    # individual interval must still point forward on the media clock.
+    assert all(
+        int(span["endTimeUnixNano"]) >= int(span["startTimeUnixNano"])
+        for span in timed
+    )
 
 
 async def test_two_voice_simulations_at_once_keep_their_audio_apart(
@@ -796,12 +796,7 @@ async def test_two_voice_simulations_at_once_keep_their_audio_apart(
         references[simulation_id] = facts["audio"]["recording"]
         recording = simulator.blob(references[simulation_id])
         assert_one_speaker_to_a_channel(
-            recording,
-            [
-                turn
-                for turn in turns_for(records, simulation_id)
-                if turn[1] != GOODBYE
-            ],
+            recording, turns_for(records, simulation_id)
         )
         recordings[simulation_id] = recording
 
@@ -930,7 +925,7 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     measures = measures_for(records, "sim-phone-001")
     assert measures.count("time_to_first_word") == 3
     assert measures.count("agent_speech_duration") == 3
-    assert measures.count("persona_speech_duration") == 2
+    assert measures.count("persona_speech_duration") == 3
     assert measures.count("first_response_latency") == 1
     assert measures.count("turn_response_latency") == 2
     timed = [
@@ -945,8 +940,10 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     ]
     assert all(number > 0 for number in quiet), quiet
     assert len(quiet) == 3
-    stamped = [int(span["endTimeUnixNano"]) for span in timed]
-    assert stamped == sorted(stamped)
+    assert all(
+        int(span["endTimeUnixNano"]) >= int(span["startTimeUnixNano"])
+        for span in timed
+    )
 
     audio = facts["audio"]
     assert set(audio) == {"recording"}
@@ -956,9 +953,7 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     assert "://" not in audio["recording"]
     recording = simulator.blob(audio["recording"])
     assert channels_of(recording)[2] > 0
-    assert_one_speaker_to_a_channel(
-        recording, [turn for turn in turns if turn[1] != GOODBYE]
-    )
+    assert_one_speaker_to_a_channel(recording, turns)
 
     simulator.stop()
     for sentinel in TRUNK_SENTINELS:
@@ -1309,7 +1304,7 @@ async def test_a_voice_simulation_produces_the_same_shapes_plus_its_audio_facts(
     # Plus what only voice can measure, one span per measurement.
     assert names.count("time_to_first_word") == 3
     assert names.count("agent_speech_duration") == 3
-    assert names.count("persona_speech_duration") == 2
+    assert names.count("persona_speech_duration") == 3
 
     def durations(name: str) -> list[int]:
         return [
@@ -1321,11 +1316,9 @@ async def test_a_voice_simulation_produces_the_same_shapes_plus_its_audio_facts(
     # A voice turn has a length, where a chat turn is one instant: what the
     # simulator heard and what it spoke, ear to ear.
     assert all(length > 0 for length in durations("agent_turn"))
-    # Every persona turn the counterpart actually heard, except the last —
-    # the persona's goodbye concludes the scenario, so the walk ends before
-    # it is ever spoken, and a turn nobody said is honestly an instant.
-    assert all(length > 0 for length in durations("human_turn")[:-1])
-    assert durations("human_turn")[-1] == 0
+    # Every persona turn the counterpart actually heard, including the words
+    # that conclude the simulation, has a recorded length.
+    assert all(length > 0 for length in durations("human_turn"))
 
     # Each agent turn has a positive quiet span before its first word.
     # The media-seam tests own the frame-level alignment rule.

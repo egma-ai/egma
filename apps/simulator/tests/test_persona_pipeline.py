@@ -165,14 +165,12 @@ class ConductorProbe:
     async def wait_until(self, _due: Fraction) -> None:
         return None
 
-    def persona_will_speak(self, text: str) -> None:
+    def persona_will_speak(self, text: str, *, concludes: bool = False) -> None:
         self.spoken.append(text)
         self.history.append(Turn("human", text))
-
-    async def persona_concluded(self, text: str) -> None:
-        self.concluded.append(text)
-        self.history.append(Turn("human", text))
-        self.ended.set()
+        if concludes:
+            self.concluded.append(text)
+            self.ended.set()
 
     def the_brain_failed(self, fault: BaseException) -> None:
         self.failures.append(fault)
@@ -184,6 +182,8 @@ class OutputProbe(FrameProcessor):
         super().__init__()
         self.started = asyncio.Event()
         self.responded = asyncio.Event()
+        self.final_responded = asyncio.Event()
+        self.response_count = 0
         self.transcribed = asyncio.Event()
         self.frames: list[Frame] = []
 
@@ -195,7 +195,10 @@ class OutputProbe(FrameProcessor):
         elif isinstance(frame, TranscriptionFrame):
             self.transcribed.set()
         elif isinstance(frame, LLMFullResponseEndFrame):
+            self.response_count += 1
             self.responded.set()
+            if self.response_count == 2:
+                self.final_responded.set()
         await self.push_frame(frame, direction)
 
 
@@ -321,8 +324,10 @@ async def test_the_final_persona_pipeline_uses_pipecats_native_service_spans(
         await worker.queue_frame(VADUserStoppedSpeakingFrame())
         await asyncio.wait_for(output.transcribed.wait(), timeout=2)
         await worker.queue_frame(_AgentFinished())
-        await asyncio.wait_for(conductor.ended.wait(), timeout=2)
+        await asyncio.wait_for(output.final_responded.wait(), timeout=2)
         assert conductor.concluded == ["Goodbye."]
+        spoken = [frame.text for frame in output.frames if isinstance(frame, TextFrame)]
+        assert "Goodbye." in spoken
         assert conductor.failures == []
     finally:
         await worker.queue_frame(EndFrame())
@@ -343,7 +348,7 @@ async def test_the_final_persona_pipeline_uses_pipecats_native_service_spans(
     native = [span for scope, span in exported if scope == "pipecat"]
     assert [span["name"] for span in native].count("llm") == 2
     assert [span["name"] for span in native].count("stt") == 1
-    assert [span["name"] for span in native].count("tts") == 1
+    assert [span["name"] for span in native].count("tts") == 2
     assert {span["traceId"] for span in native} == {trace_id_for("sim-native-model")}
     assert {span["parentSpanId"] for span in native} == {root["spanId"]}
     model_spans = [span for span in native if span["name"] == "llm"]
@@ -356,9 +361,12 @@ async def test_the_final_persona_pipeline_uses_pipecats_native_service_spans(
     # attribute instead of rewriting it to describe a different layer.
     assert {attribute(span, "stream") for span in model_spans} == {True}
     stt_span = next(span for span in native if span["name"] == "stt")
-    tts_span = next(span for span in native if span["name"] == "tts")
+    tts_spans = [span for span in native if span["name"] == "tts"]
     assert attribute(stt_span, "transcript") == "Anything else?"
-    assert attribute(tts_span, "text") == "First response."
+    assert [attribute(span, "text") for span in tts_spans] == [
+        "First response.",
+        "Goodbye.",
+    ]
     assert SECRET.encode() not in b"\n".join(documents)
     assert any(
         attribute(span, "gen_ai.request.model") == model.model_name for span in native

@@ -220,9 +220,10 @@ class OpenAICompatibleModel:
 
         content = self._without_api_key(content)
         concluded = CONCLUDE_MARKER in content
-        return PersonaReply(
-            text=content.replace(CONCLUDE_MARKER, "").strip(), concluded=concluded
-        )
+        text = content.replace(CONCLUDE_MARKER, "").strip()
+        if not text:
+            raise ModelFailure("the model's answer had no words to speak")
+        return PersonaReply(text=text, concluded=concluded)
 
     async def close(self) -> None:
         if self._session is not None:

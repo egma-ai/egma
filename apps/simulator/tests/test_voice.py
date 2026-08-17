@@ -37,7 +37,7 @@ from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import ConductParameters, VoiceConductor
 from egma_simulator.contract import ERROR
-from egma_simulator.media import RemoteParticipantLeftFrame, VoiceMedia
+from egma_simulator.media import VoiceMedia
 from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
@@ -366,7 +366,7 @@ async def test_incoming_audio_continues_while_the_persona_thinks(
 
 
 async def test_both_ends_of_every_turn_are_read_off_the_audio(tmp_path: Path):
-    """Spoken turns stay ordered and a conclusion remains an instant."""
+    """Every transcript turn is spoken and stays ordered on the audio clock."""
     observed = await voice_simulation(
         tmp_path,
         scenario="First point. Second point.",
@@ -374,11 +374,6 @@ async def test_both_ends_of_every_turn_are_read_off_the_audio(tmp_path: Path):
         replies=["Certainly.", "Done."],
     )
     for speaker, text, began, ended in observed.spans:
-        if text == GOODBYE:
-            # Concluded rather than spoken: the scenario ends the moment
-            # the persona decides it, and nothing went on the line.
-            assert began == ended
-            continue
         assert ended > began, (speaker, text)
 
     opened = [began for _speaker, _text, began, _ended in observed.spans]
@@ -409,14 +404,9 @@ async def test_the_recording_holds_each_speaker_on_their_own_channel(
     assert set(audio) == {"recording"}
     assert channels_of(recording)[2] > 0
 
-    # Every turn that was carried is on its own speaker's channel and on
-    # neither of the other's. The persona's concluding goodbye is not among
-    # them: the conductor ends on it without putting it on the line, so it
-    # was never spoken and the recording does not pretend it was.
-    carried = [
-        (speaker, text) for speaker, text in observed.turns if text != GOODBYE
-    ]
-    assert len(carried) == len(observed.turns) - 1
+    # Every transcript turn was carried on its own speaker's channel and on
+    # neither of the other's, including the final words that conclude the run.
+    carried = observed.turns
     assert_one_speaker_to_a_channel(recording, carried)
 
 
@@ -523,7 +513,7 @@ async def test_every_span_points_at_the_audio_it_names(
     heard = speech_in_the_recording(
         (tmp_path / audio["recording"]).read_bytes()
     )
-    spoken = [span for span in observed.spans if span[1] != GOODBYE]
+    spoken = observed.spans
     assert [speaker for speaker, _began, _ended in heard] == [
         speaker for speaker, _text, _began, _ended in spoken
     ]
@@ -577,17 +567,15 @@ async def test_every_turn_is_measured_and_the_measures_never_run_backwards(
     )
     named = observed.named
     agent_turns = sum(1 for speaker, _ in observed.turns if speaker == "agent")
-    persona_turns_spoken = (
-        sum(1 for speaker, _ in observed.turns if speaker == "human") - 1
-    )
+    persona_turns = sum(1 for speaker, _ in observed.turns if speaker == "human")
 
     assert named.count("time_to_first_word") == agent_turns
     assert named.count("agent_speech_duration") == agent_turns
-    assert named.count("persona_speech_duration") == persona_turns_spoken
+    assert named.count("persona_speech_duration") == persona_turns
     # The measures every simulation reports are still there: voice adds
     # measurements, it does not replace them.
     assert named.count("first_response_latency") == 1
-    assert named.count("turn_response_latency") == persona_turns_spoken
+    assert named.count("turn_response_latency") == persona_turns - 1
 
     # Each turn includes real quiet before the first word. The recording
     # alignment check above owns the frame-level timing assertion.
@@ -614,61 +602,43 @@ async def test_every_turn_is_measured_and_the_measures_never_run_backwards(
 async def test_an_exchange_the_agent_ends_still_leaves_a_recording(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    departing = asyncio.Event()
-    thinking_after_agent_turn = asyncio.Event()
-    agent_is_departing = VoiceConductor.agent_is_departing
-
-    def notice_departure(conductor: VoiceConductor) -> None:
-        agent_is_departing(conductor)
-        departing.set()
-
-    reply_to = Persona.reply_to
-    model_turns = 0
-
-    async def delayed_after_the_agent_turns(persona: Persona, messages):
-        nonlocal model_turns
-        model_turns += 1
-        if model_turns > 1:
-            thinking_after_agent_turn.set()
-            await departing.wait()
-        return await reply_to(persona, messages)
-
-    monkeypatch.setattr(VoiceConductor, "agent_is_departing", notice_departure)
-    monkeypatch.setattr(Persona, "reply_to", delayed_after_the_agent_turns)
     spec = spec_for(
         scenario="One final point.",
         replies=["All sorted, goodbye now."],
-        ends_after_replies=True,
+        ends_after_replies=False,
     )
     assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
     conductor = assembled.conductor
     assert conductor is not None
     transport = conductor._connection.transport
-    input_processor = transport.media.input[0]
-    push_frame = input_processor.push_frame
+    persona_stopped = VoiceConductor.persona_stopped
 
-    async def let_the_model_start_before_departure(frame, direction=None):
-        if isinstance(frame, RemoteParticipantLeftFrame):
-            await thinking_after_agent_turn.wait()
-        if direction is None:
-            await push_frame(frame)
-        else:
-            await push_frame(frame, direction)
+    async def agent_departs_as_the_concluding_tts_stops(
+        active: VoiceConductor,
+    ) -> None:
+        if active._pending_persona_concludes:
+            active.agent_is_departing()
+            transport.stop()
+        await persona_stopped(active)
 
     monkeypatch.setattr(
-        input_processor, "push_frame", let_the_model_start_before_departure
+        VoiceConductor,
+        "persona_stopped",
+        agent_departs_as_the_concluding_tts_stops,
     )
     observed = await observe(
         conductor, assembled, spec, controls=WalkControls()
     )
 
-    assert model_turns == 2
     assert observed.conducted.ending == "agent_ended"
     assert observed.conducted.reason == "the agent ended the exchange"
     assert ("agent", "All sorted, goodbye now.") in observed.turns
+    goodbye = next(span for span in observed.spans if span[1] == GOODBYE)
+    assert goodbye[3] > goodbye[2]
     audio = observed.assembled.audio
     assert audio is not None
-    assert (tmp_path / audio["recording"]).exists()
+    recording = (tmp_path / audio["recording"]).read_bytes()
+    assert_one_speaker_to_a_channel(recording, observed.turns)
 
 
 class _ProductionStopScriptedVAD(ScriptedVAD):
@@ -1197,7 +1167,7 @@ async def test_the_speech_legs_need_no_corpus_and_no_download(
     assert audio is not None
     assert_one_speaker_to_a_channel(
         (tmp_path / audio["recording"]).read_bytes(),
-        [turn for turn in observed.turns if turn[1] != GOODBYE],
+        observed.turns,
     )
 
 
@@ -1257,7 +1227,7 @@ async def test_a_counterpart_that_echoes_hands_back_what_it_heard(
     assert audio is not None
     assert_one_speaker_to_a_channel(
         (tmp_path / audio["recording"]).read_bytes(),
-        [turn for turn in observed.turns if turn[1] != GOODBYE],
+        observed.turns,
     )
 
 

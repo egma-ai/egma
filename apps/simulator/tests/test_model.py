@@ -176,6 +176,18 @@ async def test_the_conclude_marker_is_read_and_stripped(model_stub):
     assert CONCLUDE_MARKER not in reply.text
 
 
+async def test_a_conclude_marker_without_words_is_a_model_failure(model_stub):
+    model_stub.answer_with(CONCLUDE_MARKER)
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key="k", model_name="m"
+    )
+    try:
+        with pytest.raises(ModelFailure, match="no words"):
+            await client.reply(system_and_history())
+    finally:
+        await client.close()
+
+
 async def test_a_provider_cannot_echo_its_key_in_a_successful_reply(model_stub):
     secret = "model-key-must-not-be-spoken"
     model_stub.answer_with(f"Provider echoed {secret}.")

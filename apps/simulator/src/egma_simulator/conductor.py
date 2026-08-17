@@ -561,15 +561,14 @@ class _PersonaReplyGate(FrameProcessor):
                     "Pipecat's persona response did not match its model reply"
                 )
             if not self._conductor.is_ending:
-                if reply.concluded:
-                    await self._conductor.persona_concluded(reply.text)
-                else:
-                    await self._conductor.wait_until(due)
-                    if not self._conductor.is_ending:
-                        self._conductor.persona_will_speak(reply.text)
-                        await self.push_frame(LLMFullResponseStartFrame())
-                        await self.push_frame(TextFrame(reply.text))
-                        await self.push_frame(LLMFullResponseEndFrame())
+                await self._conductor.wait_until(due)
+                if not self._conductor.is_ending:
+                    self._conductor.persona_will_speak(
+                        reply.text, concludes=reply.concluded
+                    )
+                    await self.push_frame(LLMFullResponseStartFrame())
+                    await self.push_frame(TextFrame(reply.text))
+                    await self.push_frame(LLMFullResponseEndFrame())
         except asyncio.CancelledError:
             waiting.cancel()
             raise
@@ -715,6 +714,7 @@ class VoiceConductor:
         self._opened_unix_nano = 0
 
         self._pending_persona_text: str | None = None
+        self._pending_persona_concludes = False
         self._persona_began: MediaPosition | None = None
         self._persona_ended: MediaPosition | None = None
 
@@ -1071,8 +1071,9 @@ class VoiceConductor:
                 return
             await self._activity.wait()
 
-    def persona_will_speak(self, text: str) -> None:
+    def persona_will_speak(self, text: str, *, concludes: bool = False) -> None:
         self._pending_persona_text = text
+        self._pending_persona_concludes = concludes
         self._persona_began = None
         self._persona_ended = None
 
@@ -1092,23 +1093,27 @@ class VoiceConductor:
 
     async def persona_stopped(self) -> None:
         text, self._pending_persona_text = self._pending_persona_text, None
+        concludes, self._pending_persona_concludes = (
+            self._pending_persona_concludes,
+            False,
+        )
         if text is None:
             return
-        began = self._persona_began or self._position
-        ended = self._persona_ended or began
+        began = self._persona_began
+        ended = self._persona_ended
         self._persona_began = None
         self._persona_ended = None
+        if began is None or ended is None or ended <= began:
+            raise SpeechFault(
+                "the persona's transcript turn ended without recorded audio"
+            )
         await self._measure("persona_speech_duration", began, ended)
-        await self._took_a_turn("human", text, began, ended)
+        await self._took_a_turn(
+            "human", text, began, ended, apply_turn_limit=not concludes
+        )
         self._record.persona_last_stopped_at = ended
         self._record.quiet_since = max(self._record.quiet_since, ended)
-        self._owes_a_turn = False
-        self.media_advanced()
-
-    async def persona_concluded(self, text: str) -> None:
-        at = self._position
-        await self._took_a_turn("human", text, at, at, apply_turn_limit=False)
-        if self._ending is None:
+        if concludes and not self.is_ending:
             self._ending = PERSONA_CONCLUDED
         self._owes_a_turn = False
         self.media_advanced()
