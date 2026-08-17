@@ -161,6 +161,106 @@ describe("the JSON encoding", () => {
     );
     expect(row).toEqual({ organization_id: organizationId, project_id: projectId });
   });
+
+  it("keeps a Pipecat service span whole without making a transcript turn", async () => {
+    const traceId = "21212121212121212121212121212121";
+    const frameworkSpan = jsonSpan({
+      traceId,
+      spanId: "2121212121212121",
+      parentSpanId: "1010101010101010",
+      name: "tts",
+      // Egma's pinned OTel request encoder is converted with integer enums,
+      // which is the exact simulator document shape this door receives.
+      kind: 3,
+      flags: 257,
+      droppedAttributesCount: 2,
+      droppedEventsCount: 3,
+      droppedLinksCount: 4,
+      attributes: [
+        { key: "gen_ai.provider.name", value: { stringValue: "elevenlabs" } },
+        { key: "settings.sample_rate", value: { intValue: "16000" } },
+      ],
+      status: { code: 2, message: "native status" },
+      events: [
+        {
+          timeUnixNano: "1785693880781989804",
+          name: "audio-ready",
+          droppedAttributesCount: 1,
+          attributes: [
+            { key: "pipecat.event", value: { stringValue: "kept" } },
+          ],
+        },
+      ],
+      links: [
+        {
+          traceId: "31313131313131313131313131313131",
+          spanId: "3131313131313131",
+          traceState: "vendor=kept",
+          flags: 769,
+          droppedAttributesCount: 5,
+          attributes: [
+            { key: "pipecat.link", value: { stringValue: "kept" } },
+          ],
+        },
+      ],
+    });
+    const body = JSON.stringify({
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              {
+                key: "service.name",
+                value: { stringValue: "egma-simulator" },
+              },
+            ],
+          },
+          scopeSpans: [
+            {
+              scope: {
+                name: "pipecat",
+                attributes: [
+                  { key: "scope.native", value: { stringValue: "kept" } },
+                ],
+              },
+              spans: [frameworkSpan],
+            },
+          ],
+        },
+      ],
+    });
+
+    const response = await post(body);
+    expect(response.statusCode).toBe(200);
+
+    const [row] = await store().rows<{
+      kind: string;
+      text: string;
+      payload: string;
+    }>(`select kind, text, payload from spans where trace_id = '${traceId}'`);
+    expect(row?.kind).toBe("other");
+    expect(row?.text).toBe("");
+    expect(JSON.parse(row?.payload ?? "{}")).toEqual({
+      resource: {
+        attributes: [
+          { key: "service.name", value: { stringValue: "egma-simulator" } },
+        ],
+      },
+      resourceSchemaUrl: "",
+      scope: {
+        name: "pipecat",
+        attributes: [
+          { key: "scope.native", value: { stringValue: "kept" } },
+        ],
+      },
+      scopeSchemaUrl: "",
+      span: frameworkSpan,
+    });
+    const [turns] = await store().rows<{ n: number }>(
+      `select count() as n from turns where trace_id = '${traceId}'`,
+    );
+    expect(turns?.n).toBe(0);
+  });
 });
 
 describe("a payload that names a customer", () => {

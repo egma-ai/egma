@@ -1375,10 +1375,10 @@ async def test_a_brain_that_refuses_a_turn_fails_in_its_own_words(
     key is exactly the diagnosis a reader of the record needs, so it
     travels back out whole rather than becoming a duration limit."""
 
-    def refusing_persona(*_args: object, **_kwargs: object):
+    async def refusing_persona(*_args: object, **_kwargs: object):
         raise RuntimeError("model refused: unknown api key")
 
-    monkeypatch.setattr(Persona, "next_turn", refusing_persona)
+    monkeypatch.setattr(Persona, "reply_to", refusing_persona)
 
     with pytest.raises(RuntimeError, match="unknown api key"):
         await voice_simulation(tmp_path, scenario="One point.", replies=["Noted."])

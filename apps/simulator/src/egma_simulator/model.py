@@ -29,6 +29,7 @@ import aiohttp
 
 from .client import UNREACHABLE
 from .config import MODEL_PROVIDERS
+from .redaction import REDACTED
 
 if TYPE_CHECKING:
     from .config import SimulatorConfig
@@ -46,6 +47,9 @@ GOODBYE = "That covers everything I needed. Thank you, goodbye."
 
 MODEL_TIMEOUT_SECONDS = 60.0
 """How long one model call may take before it is a failure, not a wait."""
+
+_SHORT_SECRET_CHARS = r"A-Za-z0-9_-"
+"""Characters that make a short API key part of a larger ordinary token."""
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,9 @@ class ModelClient(Protocol):
     the agent's as ``user`` — and returns the persona's next turn.
     ``close`` releases whatever the client holds; always called once the
     simulation is over."""
+
+    @property
+    def model_name(self) -> str: ...
 
     async def reply(self, messages: list[dict[str, str]]) -> PersonaReply: ...
 
@@ -94,6 +101,10 @@ class ScriptedModel:
 
     def __init__(self, scenario_instructions: str) -> None:
         self._script = split_sentences(scenario_instructions)
+
+    @property
+    def model_name(self) -> str:
+        return "scripted"
 
     async def reply(self, messages: list[dict[str, str]]) -> PersonaReply:
         spoken = sum(1 for message in messages if message["role"] == "assistant")
@@ -127,10 +138,45 @@ class OpenAICompatibleModel:
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self._session: aiohttp.ClientSession | None = None
 
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
     def _live_session(self) -> aiohttp.ClientSession:
         if self._session is None:
             self._session = aiohttp.ClientSession()
         return self._session
+
+    def _provider_detail(self, value: object) -> str:
+        """A bounded provider detail with this client's credential removed.
+
+        Model failures cross Pipecat's traced service seam. Pipecat records
+        exception messages on its native span, before the simulation lifecycle
+        applies its process-wide redactor, so the client must remove the key at
+        the source.
+        """
+        rendered = value if isinstance(value, str) else repr(value)
+        return self._without_api_key(rendered)[:200]
+
+    def _without_api_key(self, text: str) -> str:
+        """Remove this client's bearer key from provider-authored text.
+
+        A one-character development key such as ``k`` must not rewrite every
+        word containing that letter. Short keys are therefore removed when
+        they appear as their own token, which still covers an echoed bearer,
+        JSON value, URL parameter, or provider sentence. Real provider keys are
+        long enough to replace exactly wherever they occur.
+        """
+        if not self._api_key:
+            return text
+        if len(self._api_key) >= 8:
+            return text.replace(self._api_key, REDACTED)
+        return re.sub(
+            rf"(?<![{_SHORT_SECRET_CHARS}]){re.escape(self._api_key)}"
+            rf"(?![{_SHORT_SECRET_CHARS}])",
+            REDACTED,
+            text,
+        )
 
     async def reply(self, messages: list[dict[str, str]]) -> PersonaReply:
         # **The field is absent unless somebody asked for it**, rather than
@@ -152,21 +198,27 @@ class OpenAICompatibleModel:
                 if response.status != 200:
                     raise ModelFailure(
                         f"the model answered {response.status}: "
-                        f"{(await response.text())[:200]}"
+                        f"{self._provider_detail(await response.text())}"
                     )
                 body = await response.json()
         except UNREACHABLE as error:
-            raise ModelFailure(f"the model was unreachable: {error!r}") from error
+            raise ModelFailure(
+                f"the model was unreachable: {self._provider_detail(error)}"
+            ) from None
 
         try:
             content = body["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as unexpected:
             raise ModelFailure(
-                f"the model's answer had no message content: {body!r}"
+                "the model's answer had no message content: "
+                f"{self._provider_detail(body)}"
             ) from unexpected
         if not isinstance(content, str):
-            raise ModelFailure(f"the model's content was not text: {content!r}")
+            raise ModelFailure(
+                f"the model's content was not text: {self._provider_detail(content)}"
+            )
 
+        content = self._without_api_key(content)
         concluded = CONCLUDE_MARKER in content
         return PersonaReply(
             text=content.replace(CONCLUDE_MARKER, "").strip(), concluded=concluded

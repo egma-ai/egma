@@ -764,8 +764,8 @@ describe("the shipped simulator against the real API", () => {
         }
       }
 
-      // Every span landed once. The simulator resends byte-identically and
-      // the store dedups on the ids it minted, so no retry can double a turn.
+      // Every span landed once. The simulator retries the same serialized
+      // bytes, so ClickHouse can suppress a recent exact block repeat.
       expect(new Set(spans.map((span) => span.span_id)).size).toBe(spans.length);
 
       expect(conductedRun.status).toBe("completed");

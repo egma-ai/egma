@@ -9,7 +9,7 @@ import time
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import Any
+from typing import Any, cast
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
@@ -17,8 +17,10 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
     OutputAudioRawFrame,
     StartFrame,
     TextFrame,
@@ -30,16 +32,21 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_start import VADUserTurnStartStrategy
 from pipecat.turns.user_turn_processor import UserTurnProcessor
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.workers.runner import WorkerRunner
 
 from .blob import BlobStore
 from .media import RemoteParticipantLeftFrame, VoiceMedia
+from .model import PersonaReply
 from .persona import Persona, Turn
 from .plugs import PlugError, VoiceConnection
 from .recording import AudioFacts, dual_channel_wav
@@ -182,13 +189,175 @@ class _EvidenceRecorder(AudioBufferProcessor):
         return Fraction(len(self._bot_audio_buffer) // 2, self.sample_rate)
 
 
+class _PersonaLLMService(LLMService):
+    """Run Egma's existing ModelClient through Pipecat's native LLM seam.
+
+    Pipecat owns the service lifecycle, instrumentation scope, span, input and
+    output attributes. The model client still owns the provider request, so a
+    generic OpenAI-compatible gateway sees the same non-streaming body and
+    timeout it saw before this service existed.
+    """
+
+    def __init__(self, *, persona: Persona) -> None:
+        super().__init__(
+            settings=LLMSettings(
+                model=persona.model_name,
+                system_instruction=None,
+                temperature=None,
+                max_tokens=None,
+                top_p=None,
+                top_k=None,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+            )
+        )
+        self._persona = persona
+        self._reply: PersonaReply | None = None
+        self._failure: Exception | None = None
+
+    @traced_llm
+    async def _process_context(self, context: LLMContext) -> None:
+        self._reply = None
+        self._failure = None
+        messages = cast(list[dict[str, str]], context.get_messages())
+        reply = await self._persona.reply_to(messages)
+        self._reply = reply
+        await self.push_frame(LLMTextFrame(reply.text))
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame):
+            await self.push_frame(LLMFullResponseStartFrame())
+            try:
+                await self._process_context(frame.context)
+            except Exception as fault:
+                self._failure = fault
+                await self.push_error(
+                    "the persona model could not answer", exception=fault
+                )
+            finally:
+                await self.push_frame(LLMFullResponseEndFrame())
+            return
+        await self.push_frame(frame, direction)
+
+    def take_reply(self) -> PersonaReply:
+        """The reply whose native end frame just reached the gate."""
+        failure, self._failure = self._failure, None
+        reply, self._reply = self._reply, None
+        if failure is not None:
+            raise failure
+        if reply is None:
+            raise RuntimeError("Pipecat ended a persona response with no reply")
+        return reply
+
+
+class _PersonaReplyGate(FrameProcessor):
+    """Hold model chunks until Egma applies conclusion and speaking timing."""
+
+    def __init__(
+        self, *, service: _PersonaLLMService, conductor: VoiceConductor
+    ) -> None:
+        super().__init__()
+        self._service = service
+        self._conductor = conductor
+        self._waiting: asyncio.Future[None] | None = None
+        self._due: MediaPosition | None = None
+        self._collecting = False
+        self._text: list[str] = []
+
+    async def request(
+        self,
+        messages: list[dict[str, str]],
+        due: MediaPosition,
+        push: Callable[[Frame], Awaitable[None]],
+    ) -> None:
+        if self._waiting is not None:
+            raise RuntimeError("the persona model already has a reply in flight")
+        waiting = asyncio.get_running_loop().create_future()
+        self._waiting = waiting
+        self._due = due
+        try:
+            context = LLMContext(messages=cast(Any, messages))
+            await push(LLMContextFrame(context=context))
+            await waiting
+        except BaseException:
+            if self._waiting is waiting:
+                self._reset()
+            raise
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if direction != FrameDirection.DOWNSTREAM or self._waiting is None:
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._collecting = True
+            self._text = []
+            return
+        if self._collecting and isinstance(frame, LLMTextFrame):
+            self._text.append(frame.text)
+            return
+        if self._collecting and isinstance(frame, LLMFullResponseEndFrame):
+            await self._finish_reply()
+            return
+        await self.push_frame(frame, direction)
+
+    async def _finish_reply(self) -> None:
+        waiting = self._waiting
+        due = self._due
+        assert waiting is not None
+        assert due is not None
+        try:
+            reply = self._service.take_reply()
+            received = "".join(self._text)
+            if received != reply.text:
+                raise RuntimeError(
+                    "Pipecat's persona response did not match its model reply"
+                )
+            if not self._conductor.is_ending:
+                if reply.concluded:
+                    await self._conductor.persona_concluded(reply.text)
+                else:
+                    await self._conductor.wait_until(due)
+                    if not self._conductor.is_ending:
+                        self._conductor.persona_will_speak(reply.text)
+                        await self.push_frame(LLMFullResponseStartFrame())
+                        await self.push_frame(TextFrame(reply.text))
+                        await self.push_frame(LLMFullResponseEndFrame())
+        except asyncio.CancelledError:
+            waiting.cancel()
+            raise
+        except Exception as fault:
+            waiting.set_exception(fault)
+        else:
+            waiting.set_result(None)
+        finally:
+            self._reset()
+
+    def _reset(self) -> None:
+        self._waiting = None
+        self._due = None
+        self._collecting = False
+        self._text = []
+
+
 class _PersonaBrain(FrameProcessor):
     """Run the shared persona brain without stopping input system frames."""
 
-    def __init__(self, *, persona: Persona, conductor: VoiceConductor) -> None:
+    def __init__(
+        self,
+        *,
+        persona: Persona,
+        conductor: VoiceConductor,
+        replies: _PersonaReplyGate,
+    ) -> None:
         super().__init__()
         self._persona = persona
         self._conductor = conductor
+        self._replies = replies
         self._heard: list[str] = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -206,19 +375,11 @@ class _PersonaBrain(FrameProcessor):
             due = await self._conductor.the_agent_finished(said, heard_a_turn)
             if due is None:
                 return
-            reply = await self._persona.next_turn(self._conductor.history)
-            if self._conductor.is_ending:
-                return
-            if reply.concluded:
-                await self._conductor.persona_concluded(reply.text)
-                return
-            await self._conductor.wait_until(due)
-            if self._conductor.is_ending:
-                return
-            self._conductor.persona_will_speak(reply.text)
-            await self.push_frame(LLMFullResponseStartFrame())
-            await self.push_frame(TextFrame(reply.text))
-            await self.push_frame(LLMFullResponseEndFrame())
+            await self._replies.request(
+                self._persona.messages(self._conductor.history),
+                due,
+                self.push_frame,
+            )
         except Exception as fault:
             self._conductor.the_brain_failed(fault)
 
@@ -425,7 +586,9 @@ class VoiceConductor:
         )
         turn_boundary = _TurnBoundary()
         assert self._persona is not None
-        brain = _PersonaBrain(persona=self._persona, conductor=self)
+        model = _PersonaLLMService(persona=self._persona)
+        replies = _PersonaReplyGate(service=model, conductor=self)
+        brain = _PersonaBrain(persona=self._persona, conductor=self, replies=replies)
         recorder = _EvidenceRecorder(num_channels=2, auto_start_recording=True)
         media = self._media
         timeline = _Timeline(self, media, recorder)
@@ -450,6 +613,8 @@ class VoiceConductor:
                 turns,
                 turn_boundary,
                 brain,
+                model,
+                replies,
                 self._legs.tts,
                 *media.output,
                 recorder,
@@ -460,6 +625,10 @@ class VoiceConductor:
             pipeline,
             params=PipelineParams(),
             idle_timeout_secs=None,
+            # Native service spans inherit the simulation root already
+            # attached by RunningSimulation. Pipecat's interaction-cycle
+            # turn tracer stays off: Egma turn spans alone own transcript.
+            enable_tracing=True,
             enable_turn_tracking=False,
             enable_rtvi=False,
         )

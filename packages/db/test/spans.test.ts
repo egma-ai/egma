@@ -80,8 +80,6 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     toolResult: "",
     providerCallId: "room-1",
     connectionType: "livekit",
-    audioSampleRateHz: 0,
-    audioEncoding: "",
     runId: "",
     agentId: "",
     agentVersionId: "",
@@ -366,14 +364,7 @@ describe("sending the same batch twice", () => {
     ).toBe(2);
   });
 
-  /**
-   * The stronger half of the guarantee, and the reason the writer sends an
-   * explicit dedup token rather than leaning on ClickHouse's content hash
-   * alone: identity is the writer-minted ids, not the bytes. A resend that was
-   * re-serialised on the way — different field, same ids — is the same spans
-   * saying the same thing twice, and it lands once.
-   */
-  it("lands a resend once even when its bytes changed, because the ids say it is the same batch", async () => {
+  it("retains changed evidence even when its span ids match an earlier block", async () => {
     const traceId = "aaaa2222aaaa2222aaaa2222aaaa2222";
     const batch = Array.from({ length: 5 }, (_, index) =>
       span({ traceId, spanId: index.toString(16).padStart(16, "0") }),
@@ -389,28 +380,24 @@ describe("sending the same batch twice", () => {
       await countOf(
         `select count() as n from spans where trace_id = '${traceId}'`,
       ),
-    ).toBe(batch.length);
-    // What landed is the first telling, which is the one that was acknowledged.
+    ).toBe(batch.length * 2);
     expect(
       await countOf(
         `select count() as n from spans where trace_id = '${traceId}' ` +
           `and text = 're-serialised on the way'`,
       ),
-    ).toBe(0);
-    // A dropped block feeds the turn view nothing either: the human is not
-    // heard saying the same thing twice because a resend changed its spelling.
+    ).toBe(batch.length);
+    // There is no global or view-time id collapse either. Only a literal
+    // repeat of the same recent insert block is suppressed by ClickHouse.
     expect(
       await countOf(
         `select count() as n from turns where trace_id = '${traceId}'`,
       ),
-    ).toBe(batch.length);
+    ).toBe(batch.length * 2);
   });
 
-  /**
-   * The token says whose spans these are as well as which. Two customers can
-   * mint colliding ids — nothing coordinates them — and the second customer's
-   * telemetry must never be dropped as a duplicate of the first's.
-   */
+  /** Tenant stamps are part of each stored row. Two customers may mint the
+   * same ids, but their insert blocks are still different evidence. */
   it("never mistakes two customers' identical ids for one batch", async () => {
     const traceId = "bbbb3333bbbb3333bbbb3333bbbb3333";
     const batch = [span({ traceId, spanId: "abcdefabcdefabcd" })];

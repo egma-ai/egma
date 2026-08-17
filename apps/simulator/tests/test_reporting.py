@@ -273,8 +273,7 @@ async def test_the_terminal_report_leaves_after_every_span_batch(tmp_path):
 async def test_a_span_batch_that_will_not_land_is_resent_byte_identically(
     tmp_path, quick_backoff
 ):
-    """Same bytes, ids included — which is what lets a store deduping on
-    span ids land nothing twice however many times it hears this."""
+    """Same bytes, ids included — the exact retry ClickHouse suppresses."""
     client = FakeClient()
     client.span_failures_left = 3
     reporter = Reporter(client, "sim-order-3", tmp_path)
@@ -294,9 +293,9 @@ async def test_a_span_batch_that_will_not_land_is_resent_byte_identically(
     assert client.delivered[-1] == batch_attempts[0]
 
 
-async def test_a_refused_span_batch_costs_only_itself(tmp_path):
-    """A 400 from the ingest is terminal for that document, exactly as a
-    report rejection is — and the simulation carries on reporting."""
+async def test_a_refused_span_batch_blocks_the_terminal_report(tmp_path):
+    """A final span rejection keeps the evidence in the log and stops the
+    terminal transition from claiming that a complete trace was accepted."""
 
     class RefusingClient(FakeClient):
         async def spans(self, simulation_id: str, serialized: bytes) -> None:
@@ -316,6 +315,10 @@ async def test_a_refused_span_batch_costs_only_itself(tmp_path):
     reporter.completed("persona_concluded")
     await reporter.close()
 
-    assert reporter.abandoned is False
-    assert client.doors == ["report", "report"]
-    assert json.loads(client.delivered[-1])["events"][0]["status"] == "completed"
+    assert reporter.abandoned is True
+    assert client.doors == ["report"]
+    wal_lines = (tmp_path / wal_filename("sim-order-4")).read_bytes().splitlines()
+    assert [
+        "spans" if "resourceSpans" in json.loads(line) else "report"
+        for line in wal_lines
+    ] == ["report", "spans", "report"]

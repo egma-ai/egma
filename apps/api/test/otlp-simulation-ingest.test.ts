@@ -381,8 +381,8 @@ describe("the contract's golden flushes, posted with the service token", () => {
   /**
    * The dedup round trip at the door: the simulator's sender resends a flush
    * byte-identically until acknowledged, and an acknowledgement it never heard
-   * makes the resend ordinary. Each flush is one insert bearing a token
-   * derived from its writer-minted ids, so the replay lands nothing.
+   * makes the resend ordinary. Deterministic block construction gives
+   * ClickHouse the same recent block again, so this exact replay lands nothing.
    */
   it("land nothing twice when every flush is sent again", async () => {
     const before = await countOf(
@@ -498,9 +498,9 @@ describe("the contract's golden flushes, posted with the service token", () => {
 
 /**
  * The fixture's spans as the protobuf encoding carries them: identical in
- * every field, with the three ids as the bytes the hex spells — which is the
- * one place the two encodings disagree, and exactly what the door's decoder
- * settles back to hex.
+ * every field, with identity fields as the bytes their hex spells — which is
+ * the one place the two encodings disagree, and exactly what the door's decoder
+ * settles back to hex for spans and links.
  */
 function protobufBodyOf(fixtureJson: string): Buffer {
   const parsed = JSON.parse(fixtureJson) as {
@@ -510,6 +510,7 @@ function protobufBodyOf(fixtureJson: string): Buffer {
           traceId?: string;
           spanId?: string;
           parentSpanId?: string;
+          links?: { traceId?: string; spanId?: string }[];
         }[];
       }[];
     }[];
@@ -523,6 +524,15 @@ function protobufBodyOf(fixtureJson: string): Buffer {
         ...(span.parentSpanId === undefined
           ? {}
           : { parentSpanId: Buffer.from(span.parentSpanId, "hex") }),
+        ...(span.links === undefined
+          ? {}
+          : {
+              links: span.links.map((link) => ({
+                ...link,
+                traceId: Buffer.from(link.traceId ?? "", "hex"),
+                spanId: Buffer.from(link.spanId ?? "", "hex"),
+              })),
+            }),
       })) as never;
     }
   }
@@ -534,21 +544,62 @@ function protobufBodyOf(fixtureJson: string): Buffer {
 }
 
 describe("the same path in the other encoding", () => {
-  /**
-   * The strongest form of the dedup question: the voice flush already landed
-   * as JSON, and here it is again as protobuf — different bytes on the wire,
-   * different payload column had it landed, the same writer-minted ids. The
-   * token is derived from the ids, so the cross-encoding resend lands
-   * nothing, which no content hash could have promised.
-   */
-  it("dedups a protobuf resend of a flush that landed as JSON, because identity is the ids", async () => {
+  it("retains changed protobuf evidence that reuses existing span ids", async () => {
     const before = await countOf(
       `select count() as n from spans where trace_id = '${VOICE_TRACE}'`,
     );
+    const turnsBefore = await countOf(
+      `select count() as n from turns where trace_id = '${VOICE_TRACE}'`,
+    );
     expect(before).toBe(4);
+    expect(turnsBefore).toBe(2);
 
+    const changed = JSON.parse(
+      await fixture("valid", "voice-overlapping-turns.json"),
+    ) as {
+      resourceSpans: {
+        scopeSpans: {
+          spans: ({ attributes?: unknown[] } & Record<string, unknown>)[];
+        }[];
+      }[];
+    };
+    const richSpan = changed.resourceSpans[0]?.scopeSpans[0]?.spans[0];
+    if (richSpan === undefined) throw new Error("the fixture is empty");
+    richSpan.attributes?.push({
+      key: "pipecat.changed",
+      value: { stringValue: "retained" },
+    });
+    Object.assign(richSpan, {
+      traceState: "vendor=kept",
+      flags: 257,
+      droppedAttributesCount: 2,
+      droppedEventsCount: 3,
+      droppedLinksCount: 4,
+      events: [
+        {
+          timeUnixNano: "1785924902199999999",
+          name: "model-ready",
+          droppedAttributesCount: 1,
+          attributes: [
+            { key: "pipecat.event", value: { stringValue: "kept" } },
+          ],
+        },
+      ],
+      links: [
+        {
+          traceId: "31313131313131313131313131313131",
+          spanId: "3131313131313131",
+          traceState: "link=kept",
+          flags: 769,
+          droppedAttributesCount: 5,
+          attributes: [
+            { key: "pipecat.link", value: { stringValue: "kept" } },
+          ],
+        },
+      ],
+    });
     const resent = await post(
-      protobufBodyOf(await fixture("valid", "voice-overlapping-turns.json")),
+      protobufBodyOf(JSON.stringify(changed)),
       SERVICE_TOKEN,
       "application/x-protobuf",
     );
@@ -565,7 +616,61 @@ describe("the same path in the other encoding", () => {
       await countOf(
         `select count() as n from spans where trace_id = '${VOICE_TRACE}'`,
       ),
-    ).toBe(before);
+    ).toBe(before * 2);
+    // Only the raw payload changed. ClickHouse carries the changed source
+    // block identity into the dependent view, so its identical projection is
+    // still new evidence; an exact source retry above remains suppressed.
+    expect(
+      await countOf(
+        `select count() as n from turns where trace_id = '${VOICE_TRACE}'`,
+      ),
+    ).toBe(turnsBefore * 2);
+    const turnProjections = await store().rows<Record<string, unknown>>(
+      "select span_id, parent_span_id, toString(started_at) as started_at, " +
+        "duration_ns, kind, source, emitter, environment, connection_type, " +
+        "provider_call_id, run_id, agent_id, text_preview from turns " +
+        `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000002'`,
+    );
+    expect(turnProjections).toHaveLength(2);
+    expect(turnProjections[1]).toEqual(turnProjections[0]);
+
+    const [richRow] = await store().rows<{ payload: string }>(
+      "select payload from spans " +
+        `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000002' ` +
+        `and position(payload, '"pipecat.changed"') > 0`,
+    );
+    const raw = JSON.parse(richRow?.payload ?? "{}") as {
+      span?: Record<string, unknown>;
+    };
+    expect(raw.span).toMatchObject({
+      traceState: "vendor=kept",
+      flags: 257,
+      droppedAttributesCount: 2,
+      droppedEventsCount: 3,
+      droppedLinksCount: 4,
+      events: [
+        {
+          timeUnixNano: "1785924902199999999",
+          name: "model-ready",
+          droppedAttributesCount: 1,
+          attributes: [
+            { key: "pipecat.event", value: { stringValue: "kept" } },
+          ],
+        },
+      ],
+      links: [
+        {
+          traceId: "31313131313131313131313131313131",
+          spanId: "3131313131313131",
+          traceState: "link=kept",
+          flags: 769,
+          droppedAttributesCount: 5,
+          attributes: [
+            { key: "pipecat.link", value: { stringValue: "kept" } },
+          ],
+        },
+      ],
+    });
   });
 
   it("lands a genuinely new protobuf flush, attributed exactly as the JSON ones", async () => {
@@ -587,6 +692,10 @@ describe("the same path in the other encoding", () => {
         kind: "SPAN_KIND_INTERNAL",
         startTimeUnixNano: "1785924902100000000",
         endTimeUnixNano: "1785924902950000000",
+        status: {
+          code: "STATUS_CODE_ERROR",
+          message: "native status",
+        },
       },
     ];
 
@@ -602,18 +711,27 @@ describe("the same path in the other encoding", () => {
       duration_ns: number;
       run_id: string;
       source: string;
+      status: string;
+      payload: string;
     }>(
-      "select kind, duration_ns, run_id, source from spans " +
+      "select kind, duration_ns, run_id, source, status, payload from spans " +
         `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000006'`,
     );
-    expect(rows).toEqual([
-      {
-        kind: "timing",
-        duration_ns: 850_000_000,
-        run_id: voiceRunId,
-        source: "simulation",
-      },
-    ]);
+    const [row] = rows;
+    expect(row).toMatchObject({
+      kind: "timing",
+      duration_ns: 850_000_000,
+      run_id: voiceRunId,
+      source: "simulation",
+      status: "error",
+    });
+    const raw = JSON.parse(row?.payload ?? "{}") as {
+      span?: Record<string, unknown>;
+    };
+    expect(raw.span?.status).toEqual({
+      code: "STATUS_CODE_ERROR",
+      message: "native status",
+    });
   });
 });
 
@@ -818,8 +936,8 @@ describe("a batch carrying two customers' evidence when the store refuses one of
    * The other kind of store trouble stays the error it is: rows a minute of
    * patience would land must reach the sender as a retry, never as a
    * rejection its write-ahead log would believe forever. The resend is safe
-   * on the groups that landed before the fault — identical flushes carry
-   * identical dedup tokens.
+   * on the groups that landed before the fault within ClickHouse's recent
+   * exact-block window.
    */
   it("still answers a store that merely failed as an error the sender will retry", async () => {
     await disconnectClickHouse();

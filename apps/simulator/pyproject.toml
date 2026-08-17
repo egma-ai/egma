@@ -11,7 +11,9 @@ dependencies = [
     "loguru>=0.7.3",
     "nltk>=3.10.2",
     "livekit==1.1.14",
-    "pipecat-ai[deepgram,elevenlabs,livekit]==1.7.0",
+    "opentelemetry-exporter-otlp-proto-common==1.44.0",
+    "opentelemetry-sdk==1.44.0",
+    "pipecat-ai[deepgram,elevenlabs,livekit,tracing]==1.7.0",
     "rfc3339-validator>=0.1.4",
 ]
 

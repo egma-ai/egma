@@ -624,9 +624,6 @@ export function normaliseOtlpExport(
             PROVIDER_CALL_ID_ATTRIBUTES,
           ),
           connectionType: CONNECTION_TYPE_BY_SCOPE[scope?.name ?? ""] ?? "",
-          // Measured, never declared — and nothing on this path measured it.
-          audioSampleRateHz: 0,
-          audioEncoding: "",
           // The run and pins ride the attribution: the door resolved them from
           // egma's own simulation row on the service path, and a customer
           // key's traffic has none — a trace arriving there was not started by

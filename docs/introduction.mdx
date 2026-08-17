@@ -22,7 +22,7 @@ Egma is organized around three internal services that you never configure direct
 
 **The grader** judges conversations. The moment a simulation finishes — or the moment a production call's telemetry goes quiet — the grader claims it, reads the transcript, resolves the graders that apply to it, and writes one verdict row per expected behavior. It runs on its own and scales horizontally — more throughput is simply more copies running in parallel, with nothing in front of them.
 
-**Telemetry ingest** receives your agent's spans. Point your OTLP exporter at Egma's API with a Bearer key and Egma stores every span verbatim. Nothing is invented, nothing is dropped, and a re-sent batch is stored exactly once. Which project the spans belong to comes from the key, never from the payload.
+**Telemetry ingest** receives your agent's spans. Point your OTLP exporter at Egma's API with a Bearer key and Egma keeps each accepted span's native payload intact. ClickHouse can suppress a recent byte-identical retry; changed evidence is retained even when span ids repeat. Which project the spans belong to comes from the key, never from the payload.
 
 ## Integrations
 

@@ -118,8 +118,8 @@ has no place to put them even by accident.
 
 ## The conversation, as spans
 
-Every turn, tool call and measurement is authored as an OpenTelemetry
-span (`spans.py`) and streamed to the control plane's OTLP ingest while
+Every turn, tool call and measurement is authored through the OpenTelemetry
+SDK (`spans.py`) and streamed to the control plane's OTLP ingest while
 the simulation runs — the same door a customer's own agent exports to, so
 a simulation is readable the way a production trace is readable, live and
 partial included. The vocabulary — the scope, the span names, the
@@ -130,11 +130,11 @@ pinned as golden fixtures beside it.
 
 Three things about it are worth knowing before reading the code:
 
-- **Delivery is the reporter's, not an exporter's.** Span batches go
+- **Delivery is the reporter's.** The SDK's official OTLP encoder feeds span batches
   through the same write-ahead log and the same single ordered sender the
-  lifecycle documents ride. So a resend is byte-identical with its ids,
-  which lets the store dedup on them, and the terminal report leaves only
-  after every span before it landed — when the control plane records a
+  lifecycle documents ride. A resend is byte-identical, which lets ClickHouse
+  suppress a recent exact block repeat, and the terminal report is made only
+  after every span before it was accepted — when the control plane records a
   simulation terminal, the conversation is already stored.
 - **A timing span's own duration is the measurement.** A span named for a
   measure opens one measurement before the moment it was taken, so the
@@ -146,9 +146,10 @@ Three things about it are worth knowing before reading the code:
   counted in samples, never stamped off a clock — so whether two turns
   crossed is a fact about what was said rather than about when code ran.
 
-Pipecat's own auto-tracing stays off. Its turn spans carry no text, cannot
-represent two people speaking at once, and ride the stock lossy pipeline;
-what the record needs is authored where the conversation is observed.
+Pipecat's native service tracing is on and keeps its own scope and fields.
+Pipecat interaction-cycle turn tracking stays off. Only Egma's
+`human_turn` and `agent_turn` spans make transcript lines, because they are
+authored where the conversation is observed and can represent overlap.
 
 The simulator reaches the ingest at the control-plane URL it already has.
 There is no second address to configure.

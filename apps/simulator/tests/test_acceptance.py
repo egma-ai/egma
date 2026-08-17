@@ -1233,7 +1233,8 @@ async def test_a_chat_simulation_streams_its_conversation_as_spans(
         if span is not root:
             assert span["parentSpanId"] == root["spanId"]
 
-    # Every flush disjoint from every other, so a resend lands nothing twice.
+    # Every flush owns only newly ended spans. A transport retry reuses that
+    # flush's already-serialized bytes rather than authoring the spans again.
     by_flush: dict[int, set[str]] = {}
     for record in recorded:
         by_flush.setdefault(flush_of(record), set()).add(record["span"]["spanId"])
