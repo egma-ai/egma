@@ -252,6 +252,10 @@ class _Pipecat17InputDrain:
             self._departures[participant_id] = departure
         await asyncio.shield(departure)
 
+    def _require_working_media(self) -> None:
+        if self._failed.is_set():
+            raise RuntimeError("the livekit input failed before participant departure")
+
     async def _finish_departure(
         self, participant_id: str, completed: asyncio.Event
     ) -> None:
@@ -260,7 +264,9 @@ class _Pipecat17InputDrain:
             async with asyncio.timeout(AUDIO_STREAM_CLOSE_SECONDS):
                 if finish is not None:
                     await asyncio.shield(finish)
+                self._require_working_media()
                 await self._audio_queue.join()
+                self._require_working_media()
                 try:
                     input_queue = self._input._audio_in_queue
                 except AttributeError as changed:
@@ -272,6 +278,7 @@ class _Pipecat17InputDrain:
                         "pipecat no longer exposes its audio input queue"
                     )
                 await input_queue.join()
+                self._require_working_media()
                 acknowledged = asyncio.Event()
                 marker = RemoteParticipantLeftFrame(completed=acknowledged)
                 await self._input.push_frame(marker)

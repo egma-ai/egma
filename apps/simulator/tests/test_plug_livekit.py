@@ -233,10 +233,6 @@ async def test_the_pinned_reader_keeps_livekit_frames_buffered_before_eos():
     assert client._audio_queue.get_nowait() == (second, AGENT_IDENTITY)
     client._audio_queue.task_done()
 
-    with pytest.raises(RuntimeError, match="input stream could not be read"):
-        await client._process_audio_stream(object(), AGENT_IDENTITY)
-    assert media.failed.is_set()
-
 
 async def test_pipecat_17_unsubscribe_drains_before_participant_departure():
     """Unsubscribe preserves buffered audio; only later departure ends."""
@@ -373,6 +369,47 @@ async def test_pipecat_17_unsubscribe_drains_before_participant_departure():
     receiving.cancel()
     with pytest.raises(asyncio.CancelledError):
         await receiving
+
+
+async def test_a_swallowed_reader_error_cannot_become_normal_departure():
+    """Pipecat logs reader errors; Egma must still refuse a normal ending."""
+    from pipecat.utils.asyncio.task_manager import TaskManager
+
+    class BrokenStream:
+        async def aclose(self) -> None:
+            pass
+
+    room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    media = room.create_transport()
+    input_transport = media.input[0]
+    input_transport._audio_in_queue = asyncio.Queue()
+    client = input_transport._client
+    stream = BrokenStream()
+    reader = TaskManager().create_task(
+        client._process_audio_stream(stream, AGENT_IDENTITY),
+        "broken-livekit-reader",
+    )
+    client._audio_streams[AGENT_IDENTITY] = (stream, reader)
+    await reader
+    assert reader.result() is None
+    assert media.failed.is_set()
+
+    markers: list[object] = []
+
+    async def catch_marker(frame: object, *_args: object) -> None:
+        markers.append(frame)
+        frame.completed.set()
+
+    input_transport.push_frame = catch_marker
+    transport = room._transport
+    participant_left = transport._event_handlers[
+        "on_participant_disconnected"
+    ].handlers[0]
+    await participant_left(transport, AGENT_IDENTITY)
+
+    assert media.failed.is_set()
+    assert not media.ended.is_set()
+    assert not markers
 
 
 async def test_a_stalled_departure_fails_remotely_but_local_leave_reaps_it():
