@@ -1005,7 +1005,11 @@ def _cartesia_mouth(
         # This service takes a whole socket address rather than a base, so
         # a deployment that named none gets the service's own default
         # rather than one this file would then have to keep current.
-        **({"url": providers.tts_base_url} if providers.tts_base_url else {}),
+        **(
+            {"url": _socket_address(providers.tts_base_url)}
+            if providers.tts_base_url
+            else {}
+        ),
         # One persona turn is one whole thing to say, so it goes over in
         # one piece rather than a sentence at a time — the same choice the
         # elevenlabs mouth makes above, for the same reason: the default
@@ -1047,6 +1051,7 @@ def _openai_mouth(
     resampler before it leaves this processor. Conversion, not relabelling.
     """
     from pipecat.services.openai.tts import OpenAITTSService
+    from pipecat.services.tts_service import TextAggregationMode
 
     if not providers.tts_key:
         raise SpeechFault("the openai speaking leg was chosen without a key")
@@ -1076,6 +1081,14 @@ def _openai_mouth(
                 # else about the leg moves.
                 base_url=providers.tts_base_url,
                 settings=settings,
+                # One persona turn is one whole thing to say — the same
+                # choice the cartesia and elevenlabs mouths make, and this
+                # leg was the one that did not make it. The default waits
+                # for sentence-ending punctuation and adds that wait to
+                # every sentence of every turn, so two visible catalog
+                # entries for the same job would have answered a caller at
+                # two different speeds for no reason anybody chose.
+                text_aggregation_mode=TextAggregationMode.TOKEN,
             ),
             _BandCorrection(
                 spoken_at_hz=OPENAI_TTS_BAND_HZ, carried_at_hz=sample_rate_hz
@@ -1158,7 +1171,7 @@ def _openai_realtime_ears(
         # named one, rather than an address this file would have to keep
         # current.
         **(
-            {"base_url": providers.stt_base_url}
+            {"base_url": _socket_address(providers.stt_base_url)}
             if providers.stt_base_url
             else {}
         ),
@@ -1266,6 +1279,33 @@ class _BandCorrection(FrameProcessor):
             taken, self.spoken_at_hz, self.carried_at_hz
         )
         return converted or None
+
+
+def _socket_address(base: str | None) -> str | None:
+    """One address, written in the scheme a socket client will open.
+
+    **A gateway address is written the way anybody writes an address —
+    ``https://`` — and a WebSocket client refuses that outright.** The
+    library every shipped socket adapter uses raises ``InvalidURI`` for any
+    scheme that is not ``ws`` or ``wss``, and the adapters swallow the
+    failure into their own error path, so what a deployment sees is a leg
+    that never connects rather than an address that was never openable.
+
+    Most adapters never meet this, because they take a *base* and derive
+    their own socket address from it — Pipecat's Deepgram service is handed
+    ``https://…/deepgram`` and reaches ``wss://…/deepgram/v1/listen`` on its
+    own. The two that are handed a whole socket address are the two that
+    call this, which is why the conversion lives beside them rather than in
+    the work order: the work order carries one address per provider-job
+    pair, and which scheme an adapter needs is the adapter's own fact.
+    """
+    if base is None:
+        return None
+    if base.startswith("https://"):
+        return f"wss://{base[len('https://'):]}"
+    if base.startswith("http://"):
+        return f"ws://{base[len('http://'):]}"
+    return base
 
 
 def _voice_from(

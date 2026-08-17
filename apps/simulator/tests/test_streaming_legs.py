@@ -220,6 +220,9 @@ def test_the_realtime_ears_refuse_without_a_key_rather_than_at_the_first_turn():
 # -- Where a leg is reached ---------------------------------------------------
 
 A_GATEWAY = "https://a-gateway.example"
+A_SOCKET_GATEWAY = "wss://a-gateway.example"
+"""The same address, in the scheme a socket client will open. See
+:func:`egma_simulator.speech._socket_address`."""
 
 
 def test_the_cartesia_mouth_is_reached_where_the_deployment_says():
@@ -241,7 +244,8 @@ def test_the_cartesia_mouth_is_reached_where_the_deployment_says():
         TELEPHONY_BAND_HZ,
     )
 
-    assert leg._url == f"{A_GATEWAY}/cartesia/tts/websocket"
+    # The address it was told, in the scheme a socket client will open.
+    assert leg._url == f"{A_SOCKET_GATEWAY}/cartesia/tts/websocket"
 
 
 def test_the_cartesia_mouth_speaks_to_its_own_provider_when_nobody_named_an_address():
@@ -356,7 +360,7 @@ def test_the_realtime_ears_are_reached_where_the_deployment_says():
         TELEPHONY_BAND_HZ,
     )
 
-    assert leg._base_url == f"{A_GATEWAY}/openai/v1/realtime"
+    assert leg._base_url == f"{A_SOCKET_GATEWAY}/openai/v1/realtime"
 
 
 def test_the_realtime_ears_listen_at_their_own_provider_when_nobody_named_an_address():
@@ -457,3 +461,56 @@ def test_a_selected_openai_stt_persona_listens_on_the_proved_adapter(monkeypatch
     leg, _ = _ears(providers, TELEPHONY_BAND_HZ)
     assert type(leg).__name__ == "OpenAIRealtimeSTTService"
     assert leg._settings.model == "gpt-live-transcribe"
+
+
+# -- The scheme a socket client will actually open ---------------------------
+
+
+def test_a_socket_leg_is_given_an_address_it_can_open():
+    """The bug this closes never said anything, which is why it is here.
+
+    A gateway address is written ``https://``, because that is how anybody
+    writes an address and because the control plane refuses a plain-text
+    one. The two legs that are handed a *whole socket address* pass it to a
+    library that raises ``InvalidURI`` for any scheme that is not ``ws`` or
+    ``wss`` — and both legs catch their own connection failures, so a
+    deployment on managed access saw a leg that never connected rather than
+    an address that could never have been opened. Found by running the
+    catalog's own live proof through the deployed gateway.
+    """
+    speaking, _, _ = _mouth(
+        SpeechProviders(
+            tts="cartesia",
+            tts_key=A_KEY,
+            tts_base_url="https://gateway.example/cartesia/tts/websocket",
+        ),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+    assert speaking._url == "wss://gateway.example/cartesia/tts/websocket"
+
+    listening, _ = _ears(
+        SpeechProviders(
+            stt="openai_realtime",
+            stt_key=A_KEY,
+            stt_base_url="https://gateway.example/openai/v1/realtime",
+        ),
+        TELEPHONY_BAND_HZ,
+    )
+    assert listening._base_url == "wss://gateway.example/openai/v1/realtime"
+
+
+def test_a_loopback_gateway_keeps_its_own_scheme_rather_than_gaining_tls():
+    """The deterministic suite runs a real gateway on `127.0.0.1` over plain
+    HTTP, and a leg that upgraded that to `wss` would be asking for a
+    certificate nobody issued."""
+    speaking, _, _ = _mouth(
+        SpeechProviders(
+            tts="cartesia",
+            tts_key=A_KEY,
+            tts_base_url="http://127.0.0.1:8787/cartesia/tts/websocket",
+        ),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+    assert speaking._url == "ws://127.0.0.1:8787/cartesia/tts/websocket"
