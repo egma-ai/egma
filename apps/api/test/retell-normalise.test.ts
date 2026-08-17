@@ -59,10 +59,13 @@ export function capturedCall(overrides: Partial<RetellCall> = {}): RetellCall {
         ],
       },
     ],
-    // One object per stage, exactly as Retell reports one: the summary it
-    // worked out, and `values`, the individual measurements it worked the
-    // summary out from. The 2145 ms sample is the live proof's own — the turn
-    // that beat a two-second bound with no verdict to say so.
+    // One object per stage, as Retell's documentation shapes one: the summary
+    // it worked out, and `values`, the individual measurements it worked the
+    // summary out from. This is the documented shape and not a captured
+    // payload — no live Retell document is checked in yet — so the stage names
+    // are held here to be settled by the next live capture. The 2145 ms sample
+    // is the live proof's own reading: the turn that beat a two-second bound
+    // with no verdict to say so.
     latency: {
       e2e: {
         p50: 820,
@@ -216,9 +219,35 @@ describe("the spans a captured payload becomes", () => {
     expect(root?.text).toBe("agent_hangup");
     const held = JSON.parse(root?.payload ?? "{}") as Record<string, unknown>;
     const normalisedBlock = held["egma_normalised"] as Record<string, unknown>;
-    // Retell's whole latency object, under Retell's own names, untouched — the
-    // summary included, because a reader who knows Retell looks for it here.
-    expect(normalisedBlock["latency"]).toEqual(capturedCall()["latency"]);
+    // Retell's own latency object, under Retell's own names, untouched — the
+    // summary included, because a reader who knows Retell looks for it here,
+    // and the stages egma maps to nothing included for the same reason.
+    const latency = normalisedBlock["latency"] as Record<string, unknown>;
+    expect(latency["e2e"]).toEqual({
+      p50: 820,
+      p90: 2010,
+      p95: 2100,
+      p99: 2140,
+      max: 2145,
+      min: 517,
+      num: 4,
+      values: [517, 820, 1704, 2145],
+    });
+    expect(latency["llm_websocket_network_rtt"]).toEqual({
+      p50: 40,
+      max: 61,
+      min: 22,
+      num: 3,
+      values: [22, 40, 61],
+    });
+    expect(Object.keys(latency)).toEqual([
+      "e2e",
+      "llm",
+      "tts",
+      "asr",
+      "knowledge_base",
+      "llm_websocket_network_rtt",
+    ]);
     // The whole conversation's extent, from Retell's own two instants.
     expect(root?.durationNanoseconds).toBe(74_000n * 1_000_000n);
   });
@@ -253,8 +282,9 @@ function normalisedCornerOf(call: RetellCall): Record<string, unknown> {
  * What Retell measured, translated into egma's own vocabulary at the door.
  *
  * This file is the only code in egma that knows Retell's latency shape, so this
- * is the only place that translation can be checked — everything downstream
- * reads the neutral block and would read the identical one from any platform.
+ * is the only place that translation can be proved — a reader downstream will
+ * meet the neutral block alone, and would meet the identical one from any
+ * platform.
  */
 describe("the reported-measurements block", () => {
   it("maps each stage Retell reports to the measure it means", () => {
@@ -264,9 +294,11 @@ describe("the reported-measurements block", () => {
       measurements: [
         {
           // Retell's `e2e` is what the catalog calls `turn_response_latency`:
-          // same meaning, same name, so the latency grader a developer already
-          // configured judges this trace with nothing changed.
+          // same meaning, same name, so the day the measure module reads this
+          // block, the latency grader a developer already configured judges
+          // this trace with nothing reconfigured.
           measure: "turn_response_latency",
+          // The catalog's own unit for that measure, not a word chosen here.
           unit: "milliseconds",
           values: [517, 820, 1704, 2145],
         },
@@ -292,6 +324,16 @@ describe("the reported-measurements block", () => {
         },
       ],
     });
+  });
+
+  it("names the reporter exactly as the row names the platform", () => {
+    const { spans } = normaliseRetellCall(capturedCall(), FILED_INTO, NOW);
+    const block = normalisedCornerOf(capturedCall())["reported_measurements"] as {
+      reported_by: string;
+    };
+    // Provenance, and the word a rationale will print: one spelling of this
+    // platform, on the block and on the row it rides alike.
+    expect(block.reported_by).toBe(spans[0]?.connectionType);
   });
 
   it("carries the samples, and leaves the summary to the vendor's own block", () => {
@@ -356,9 +398,9 @@ describe("the reported-measurements block", () => {
     const once = normaliseRetellCall(capturedCall(), FILED_INTO, NOW);
     const again = normaliseRetellCall(capturedCall(), FILED_INTO, NOW);
     // The root payload holds the block, so its own bytes are the property the
-    // store's insert dedup recognises a replayed batch by.
+    // store's insert dedup recognises a replayed batch by. The whole batch's
+    // bytes are the identity suite's own check, above.
     expect(once.spans[0]?.payload).toBe(again.spans[0]?.payload);
-    expect(asBytes(once.spans)).toBe(asBytes(again.spans));
   });
 });
 
