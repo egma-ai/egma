@@ -38,6 +38,16 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // organization nor a project.
   platform_setting: "pfs",
   project: "prj",
+  // Who supplies the organization's model credentials. Keyed by the
+  // organization, whose identity it therefore carries — the same shape
+  // `organization_settings` above already has, and for the same reason: there
+  // is one answer per customer, so there is no second identifier to mint and
+  // none to name wrongly.
+  model_access: "org",
+  // One provider account's key, sealed, at most one per provider. Its own
+  // identity because a rotation replaces the whole envelope and the row has to
+  // keep the identity it had.
+  model_provider_credential: "mpc",
   membership: "mbr",
   invitation: "inv",
   api_key: "key",
@@ -241,6 +251,10 @@ describe("every table", () => {
     // went with the redesign. A copy is made by pressing **Use** and deleted
     // whole; there is no live edit for a revision to guard.
     judge_credential: 1,
+    // The token a replacement is written against, so an admin rotating a key
+    // from a page they left open is told the stored key moved rather than
+    // silently landing on top of somebody else's rotation.
+    model_provider_credential: 1,
     project: 1,
     // Two, because a test carries two live tokens that guard two different
     // losses: the identity revision an edit to the name is written against, and

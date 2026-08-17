@@ -35,6 +35,12 @@ import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { inActingProject, within } from "./within.ts";
+import {
+  graderModelFromRow,
+  sameGraderModel,
+  validGraderModel,
+  type GraderModel,
+} from "../models/selections.ts";
 
 /**
  * Reading and writing the **running copies** — what they are is the schema
@@ -161,6 +167,13 @@ export type UseLibraryEntry = LiveSettings & {
   readonly libraryId: string;
   readonly params?: FilledInForm | undefined;
   readonly judgeModel?: JudgeModel | undefined;
+  /**
+   * This copy's own LLM selection, resolved against the organization's model
+   * access when a grading claim is prepared. Absent leaves it on the
+   * compatibility path — the project's judge configuration, exactly as every
+   * grader authored before the model catalog existed.
+   */
+  readonly graderModel?: GraderModel | undefined;
 };
 
 export type Grader = {
@@ -181,6 +194,13 @@ export type Grader = {
   readonly versionId: string;
   readonly config: GraderConfig;
   readonly judgeModel: JudgeModel | null;
+  /**
+   * The current version's own model selection, or `null` on the compatibility
+   * path. `null` is an ordinary state and never a fault: it means this version
+   * was authored before the model catalog existed and is judged through the
+   * project's judge configuration exactly as it always was.
+   */
+  readonly graderModel: GraderModel | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
@@ -214,6 +234,12 @@ export type GraderChanges = {
   readonly params?: FilledInForm;
   readonly config?: GraderConfigInput;
   readonly judgeModel?: JudgeModel | null;
+  /**
+   * This grader's own model selection, whole. Absent means keep what is stored;
+   * a selection that differs from it mints the next version, because what a
+   * verdict was decided by is exactly what a run has to stay pinned to.
+   */
+  readonly graderModel?: GraderModel | null;
 };
 
 /** One version, frozen: the copy exactly as some verdict was decided by it. */
@@ -224,6 +250,8 @@ export type GraderVersion = {
   readonly type: LibraryType;
   readonly config: GraderConfig;
   readonly judgeModel: JudgeModel | null;
+  /** This version's own model selection, or `null` on the compatibility path. */
+  readonly graderModel: GraderModel | null;
   readonly createdAt: Date;
 };
 
@@ -807,10 +835,11 @@ function answer(row: {
   readonly versionId: string;
   readonly config: unknown;
   readonly judgeModel: unknown;
+  readonly graderModel: unknown;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }): Grader {
-  const { type, config, judgeModel, scope, ...rest } = row;
+  const { type, config, judgeModel, graderModel, scope, ...rest } = row;
   return {
     ...rest,
     // The identity row's own enumerated columns are pinned by check
@@ -819,6 +848,7 @@ function answer(row: {
     scope: scope as GraderScope,
     config: configFromRow(config, row.versionId),
     judgeModel: judgeModelFromRow(judgeModel, row.versionId),
+    graderModel: graderModelFromRow(graderModel, row.versionId),
   };
 }
 
@@ -854,6 +884,8 @@ export async function useLibraryEntry(
   const name = input.name === undefined ? undefined : validName(input.name);
   const judgeModel =
     input.judgeModel === undefined ? null : validJudgeModel(input.judgeModel);
+  const graderModel =
+    input.graderModel === undefined ? null : validGraderModel(input.graderModel);
   const required = input.required ?? DEFAULT_REQUIRED;
   const scope = input.scope === undefined ? "simulations" : validScope(input.scope);
   const productionSampleRate =
@@ -905,6 +937,7 @@ export async function useLibraryEntry(
       version: 1,
       config,
       judgeModel,
+      graderModel,
       createdBy: auth.userId,
     });
 
@@ -920,6 +953,7 @@ export async function useLibraryEntry(
     versionId,
     config: written.config,
     judgeModel,
+    graderModel,
   });
 }
 
@@ -935,6 +969,7 @@ function selectWithCurrentVersion() {
       versionId: graderVersion.id,
       config: graderVersion.config,
       judgeModel: graderVersion.judgeModel,
+      graderModel: graderVersion.graderModel,
     })
     .from(grader)
     .innerJoin(graderVersion, eq(grader.currentVersionId, graderVersion.id));
@@ -1003,6 +1038,10 @@ export async function editGrader(
     changes.judgeModel === undefined || changes.judgeModel === null
       ? changes.judgeModel
       : validJudgeModel(changes.judgeModel);
+  const graderModel =
+    changes.graderModel === undefined || changes.graderModel === null
+      ? changes.graderModel
+      : validGraderModel(changes.graderModel);
   // Which of the two names carried the values is settled before anything is
   // read; what those values may hold is the entry's business and is checked
   // below, inside the transaction, by the code Use goes through.
@@ -1029,6 +1068,7 @@ export async function editGrader(
         version: graderVersion.version,
         config: graderVersion.config,
         judgeModel: graderVersion.judgeModel,
+        graderModel: graderVersion.graderModel,
       })
       .from(graderVersion)
       .where(eq(graderVersion.id, currentVersionId))
@@ -1040,6 +1080,10 @@ export async function editGrader(
     const stored = configFromRow(currentVersion.config, currentVersion.id);
     const storedJudgeModel = judgeModelFromRow(
       currentVersion.judgeModel,
+      currentVersion.id,
+    );
+    const storedGraderModel = graderModelFromRow(
+      currentVersion.graderModel,
       currentVersion.id,
     );
 
@@ -1060,10 +1104,16 @@ export async function editGrader(
           );
     const nextJudgeModel =
       judgeModel === undefined ? storedJudgeModel : judgeModel;
+    const nextGraderModel =
+      graderModel === undefined ? storedGraderModel : graderModel;
 
     const mintsVersion =
       !sameConfig(stored, config) ||
-      !sameJudgeModel(storedJudgeModel, nextJudgeModel);
+      !sameJudgeModel(storedJudgeModel, nextJudgeModel) ||
+      // A model edit mints a version on exactly the config's terms: it is what
+      // a verdict was decided by, so a run that pinned this version has to keep
+      // meaning what it meant.
+      !sameGraderModel(storedGraderModel, nextGraderModel);
     const settingsChanged =
       changes.name !== undefined ||
       changes.description !== undefined ||
@@ -1086,6 +1136,7 @@ export async function editGrader(
         versionId: currentVersion.id,
         config: stored,
         judgeModel: storedJudgeModel,
+        graderModel: storedGraderModel,
       };
     }
 
@@ -1100,6 +1151,7 @@ export async function editGrader(
         version,
         config,
         judgeModel: nextJudgeModel,
+        graderModel: nextGraderModel,
         createdBy: auth.userId,
       });
     }
@@ -1127,6 +1179,7 @@ export async function editGrader(
       versionId,
       config,
       judgeModel: nextJudgeModel,
+      graderModel: nextGraderModel,
     });
   });
 }
@@ -1153,6 +1206,7 @@ export async function getGraderVersion(
       type: grader.type,
       config: graderVersion.config,
       judgeModel: graderVersion.judgeModel,
+      graderModel: graderVersion.graderModel,
       createdAt: graderVersion.createdAt,
     })
     .from(graderVersion)
@@ -1168,12 +1222,13 @@ export async function getGraderVersion(
 
   if (row === undefined) return undefined;
 
-  const { type, config, judgeModel, ...rest } = row;
+  const { type, config, judgeModel, graderModel, ...rest } = row;
   return {
     ...rest,
     type: type as LibraryType,
     config: configFromRow(config, row.id),
     judgeModel: judgeModelFromRow(judgeModel, row.id),
+    graderModel: graderModelFromRow(graderModel, row.id),
   };
 }
 

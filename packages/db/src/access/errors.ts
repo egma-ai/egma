@@ -1155,3 +1155,51 @@ export function refuseRetry(
     message: retryUnavailable(runId, resource),
   });
 }
+
+/**
+ * Managed model access was selected by an organization that has connected
+ * nothing to Egma's provider accounts.
+ *
+ * **A refusal rather than a quiet no-op, and it names what is missing.** An
+ * organization spends from Egma's provider accounts through the Egma model
+ * gateway, and reaching that gateway takes an inference key this organization
+ * does not hold. Storing `managed` anyway would leave every claim afterwards
+ * resolving to an access path with no credential behind it — a run that fails
+ * one simulation at a time for a setting that read as saved.
+ */
+export class ManagedAccessNotConnectedError extends Error {
+  constructor() {
+    super(
+      "managed model access sends this organization's model traffic through the Egma model gateway, and this organization has connected no inference key for it. Choose Customer-owned and add a credential for each provider your personas and graders select.",
+    );
+    this.name = "ManagedAccessNotConnectedError";
+  }
+}
+
+/**
+ * A simulation or a grading job could not be prepared, because the organization
+ * holds no credential for a provider its pinned selections name.
+ *
+ * **An infrastructure error, and never a failed verdict.** A test that could not
+ * be conducted did not fail: nothing about the agent was learned, and recording
+ * it as a failure would put a red row on a report for a key somebody has not
+ * pasted yet. It names the model job and the provider so the sentence a person
+ * reads says what to go and add, and it carries them as values so a page can
+ * link to Model providers rather than parse prose.
+ */
+export class ModelProviderCredentialMissingError extends Error {
+  /** The model jobs that could not be resolved, with the provider for each. */
+  readonly needed: readonly { readonly job: string; readonly provider: string }[];
+
+  constructor(needed: readonly { readonly job: string; readonly provider: string }[]) {
+    super(
+      `this organization holds no model-provider credential for ${needed
+        .map((one) => `${one.provider} (${one.job})`)
+        .join(", ")}; add ${
+        needed.length === 1 ? "it" : "them"
+      } under Model providers in Organization settings`,
+    );
+    this.name = "ModelProviderCredentialMissingError";
+    this.needed = needed;
+  }
+}

@@ -47,8 +47,41 @@ function compileFromDisk(schemaFile: string): ValidateFunction {
   return ajv.compile(schema as Record<string, unknown>);
 }
 
-let compiledSpec: ValidateFunction | undefined;
+/**
+ * The spec versions this contract package holds a schema for, oldest first.
+ *
+ * **Two closed documents rather than one with optional fields.** Version 2 adds
+ * the persona's model selections and the keys behind them; a worker that
+ * implements only version 1 must refuse a version-2 document *by its version*
+ * rather than accept it and quietly drop the block it does not understand. That
+ * dropping is the failure this shape exists to make unreachable: the simulation
+ * would be conducted with the deployment's own model settings while the control
+ * plane believed it had sent the persona's, and nothing anywhere would say so.
+ *
+ * The control plane emits the newest version a claiming worker says it speaks,
+ * so during a mixed rollout an old worker keeps receiving version 1 and a new
+ * one receives version 2 — with no drain step required and no document ever
+ * arriving at a worker that cannot read it.
+ */
+export const SPEC_CONTRACT_VERSIONS = [1, 2] as const;
+
+/** One version of the spec direction. */
+export type SpecContractVersion = (typeof SPEC_CONTRACT_VERSIONS)[number];
+
+const SPEC_SCHEMA_FILE: { readonly [V in SpecContractVersion]: string } = {
+  1: "simulation-spec.v1.schema.json",
+  2: "simulation-spec.v2.schema.json",
+};
+
+const compiledSpec = new Map<SpecContractVersion, ValidateFunction>();
 let compiledReport: ValidateFunction | undefined;
+
+/** Whether this number is a spec version this package can check at all. */
+export function isSpecContractVersion(
+  version: unknown,
+): version is SpecContractVersion {
+  return SPEC_CONTRACT_VERSIONS.some((known) => known === version);
+}
 
 /**
  * Everything wrong with a document by one validator's lights, or nothing.
@@ -75,8 +108,54 @@ function complaintsFrom(
  * complaint per attempt that will never be retried.
  */
 export function specComplaints(document: unknown): readonly string[] {
-  compiledSpec ??= compileFromDisk("simulation-spec.v1.schema.json");
-  return complaintsFrom(compiledSpec, document);
+  const version = versionOf(document);
+  if (!isSpecContractVersion(version)) {
+    // Said before any schema is consulted, because no schema could say it
+    // usefully: a document whose version this package does not hold would be
+    // checked against a contract it never claimed to speak, and every complaint
+    // after that would be about the wrong document.
+    return [
+      `/contract_version: must be one of ${SPEC_CONTRACT_VERSIONS.join(", ")}, and this document says ${JSON.stringify(version)}`,
+    ];
+  }
+
+  let compiled = compiledSpec.get(version);
+  if (compiled === undefined) {
+    compiled = compileFromDisk(SPEC_SCHEMA_FILE[version]);
+    compiledSpec.set(version, compiled);
+  }
+  return complaintsFrom(compiled, document);
+}
+
+/**
+ * Everything wrong with this document **read as one named version**, whatever
+ * version it says it is.
+ *
+ * The check a worker that implements one version makes, offered here so the
+ * control plane can prove what an old worker would do with a new document. The
+ * answer is what makes the mixed-rollout rule real rather than intended: a
+ * version-1 worker handed a version-2 document complains loudly, and a
+ * version-1 document that somehow carried a version-2 block is refused for the
+ * block rather than accepted with it silently dropped.
+ */
+export function specComplaintsAsVersion(
+  version: SpecContractVersion,
+  document: unknown,
+): readonly string[] {
+  let compiled = compiledSpec.get(version);
+  if (compiled === undefined) {
+    compiled = compileFromDisk(SPEC_SCHEMA_FILE[version]);
+    compiledSpec.set(version, compiled);
+  }
+  return complaintsFrom(compiled, document);
+}
+
+/** The version a would-be spec claims, whatever shape the rest of it is in. */
+function versionOf(document: unknown): unknown {
+  if (typeof document !== "object" || document === null || Array.isArray(document)) {
+    return undefined;
+  }
+  return (document as Record<string, unknown>)["contract_version"];
 }
 
 /**

@@ -47,8 +47,19 @@ type Fixture = {
   readonly document: Record<string, unknown>;
 };
 
+/**
+ * One folder of golden documents. `spec` is the version-1 spec direction,
+ * `spec-v2` the version-2 one, and `report` the direction that comes back.
+ *
+ * The two spec versions are two folders rather than one because they are two
+ * closed documents: a version-2 document is not a version-1 document with an
+ * extra field, it is a different contract, and a folder that mixed them would
+ * be checked against whichever schema the loop happened to be holding.
+ */
+type Direction = "spec" | "spec-v2" | "report";
+
 async function fixturesUnder(
-  direction: "spec" | "report",
+  direction: Direction,
   expectation: "valid" | "invalid",
 ): Promise<Fixture[]> {
   const directory = path.join(packageRoot, "fixtures", direction, expectation);
@@ -67,6 +78,10 @@ const ajv = new Ajv2020({ strict: true, allErrors: true });
 addFormats(ajv);
 
 const specSchema = await readJson("schemas", "simulation-spec.v1.schema.json");
+const specSchemaV2 = await readJson(
+  "schemas",
+  "simulation-spec.v2.schema.json",
+);
 const reportSchema = await readJson(
   "schemas",
   "simulation-report.v1.schema.json",
@@ -76,6 +91,7 @@ const reportSchema = await readJson(
 // 2020-12, or that trips Ajv's strict mode, fails before any fixture is read.
 const validators = {
   spec: ajv.compile(specSchema),
+  "spec-v2": ajv.compile(specSchemaV2),
   report: ajv.compile(reportSchema),
 } as const;
 
@@ -132,6 +148,60 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     at: "/contract_version",
     keyword: "const",
   },
+  /**
+   * The mixed-rollout guard, as a document.
+   *
+   * A version-1 document carrying version 2's `models` block is exactly what a
+   * control plane that got the negotiation wrong would emit, and the failure it
+   * would cause is the quiet one: a worker that ignored the unknown block would
+   * conduct the simulation with its deployment's own model settings while the
+   * control plane believed it had sent the persona's — same conversation,
+   * different voice, different brain, different bill, nothing saying so. The
+   * version-1 schema closes its top level, so the block is refused loudly here
+   * rather than dropped silently there.
+   */
+  "spec/models-on-the-old-contract.json": {
+    at: "",
+    keyword: "additionalProperties",
+    property: "models",
+  },
+  // Version 2's block is required, because a version-2 document without it is a
+  // version-1 document wearing the wrong number.
+  "spec-v2/models-missing.json": {
+    at: "",
+    keyword: "required",
+    property: "models",
+  },
+  // Under customer-owned access the simulator is calling the provider itself
+  // and has nothing else to authenticate with, so every selection carries its
+  // own key. A selection without one would reach the provider unauthenticated
+  // and fail there, minutes later, naming nothing about configuration.
+  "spec-v2/customer-owned-without-a-key.json": {
+    at: "/models/stt",
+    keyword: "required",
+    property: "key",
+  },
+  // The work order carries the secret itself and never a pointer to one. An
+  // identifier would be a second way to reach a credential — one the simulator
+  // has no database to follow and the control plane would have to keep
+  // resolvable for as long as any worker held it.
+  "spec-v2/models-carrying-a-credential-id.json": {
+    at: "/models",
+    keyword: "additionalProperties",
+    property: "credential_id",
+  },
+  // The persona's pace is bounded by what speech stays intelligible at, in the
+  // same range the authoring door enforces — so a document and a form cannot
+  // come to disagree about what a persona may be saved as.
+  "spec-v2/speaking-faster-than-a-voice-goes.json": {
+    at: "/models/tts/speed",
+    keyword: "maximum",
+  },
+  "spec-v2/unknown-field.json": {
+    at: "",
+    keyword: "additionalProperties",
+    property: "agent_id",
+  },
   "report/completed-claiming-never-ran.json": {
     at: "/events/0/facts/ending",
     keyword: "enum",
@@ -185,12 +255,52 @@ describe("the two schemas, as one contract", () => {
           .contract_version as Record<string, unknown>
       ).const;
     expect(versionOf(specSchema)).toBe(1);
+    expect(versionOf(specSchemaV2)).toBe(2);
     expect(versionOf(reportSchema)).toBe(1);
   });
 
   it("each carry an identity a $ref or an error message can name", () => {
     expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v1");
+    expect(specSchemaV2.$id).toBe("urn:egma:simulation-contract:spec:v2");
     expect(reportSchema.$id).toBe("urn:egma:simulation-contract:report:v1");
+  });
+
+  /**
+   * Version 2 is version 1 with one block added, and this is what says so.
+   *
+   * Written out rather than derived, because the two schemas are two frozen
+   * documents on purpose: a reader has to be able to see the whole of what a
+   * version says without holding the other one in their head. The price is that
+   * they could drift apart in a field neither version meant to change, and this
+   * pins everything except the version, the identity, the prose and the block
+   * that is the point of the second version.
+   */
+  it("differ by the models block and by nothing else", () => {
+    const stripped = (schema: Record<string, unknown>): unknown => {
+      const clone = structuredClone(schema) as Record<string, unknown>;
+      delete clone.$id;
+      delete clone.title;
+      delete clone.description;
+      const properties = clone.properties as Record<string, unknown>;
+      delete properties.contract_version;
+      delete properties.models;
+      clone.required = (clone.required as string[]).filter(
+        (name) => name !== "models",
+      );
+      const defs = clone.$defs as Record<string, unknown>;
+      for (const added of [
+        "models",
+        "model_selection",
+        "managed_selection",
+        "speech_selection",
+        "managed_speech_selection",
+      ]) {
+        delete defs[added];
+      }
+      return clone;
+    };
+
+    expect(stripped(specSchemaV2)).toEqual(stripped(specSchema));
   });
 
   /**
@@ -231,7 +341,7 @@ describe("the two schemas, as one contract", () => {
   });
 });
 
-for (const direction of ["spec", "report"] as const) {
+for (const direction of ["spec", "spec-v2", "report"] as const) {
   describe(`the ${direction} direction`, () => {
     it("accepts every valid golden fixture", async () => {
       const all = await fixturesUnder(direction, "valid");

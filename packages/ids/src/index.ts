@@ -55,6 +55,14 @@ export const ID_PREFIXES = [
    * *reference* to one rather than a second copy of the secret.
    */
   "jcr",
+  /**
+   * An organization's model-provider credential: one provider account's key,
+   * sealed, and at most one active per provider. Its own identity because a
+   * rotation replaces the whole envelope and the row must keep the identity it
+   * had — and because an admin naming one to replace or remove has to name
+   * something that is not the secret.
+   */
+  "mpc",
   "mck",
   "ste",
   "run",

@@ -246,6 +246,13 @@
       "when": 1786923110581,
       "tag": "0034_watch_production",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786961006469,
+      "tag": "0035_customer_owned_model_access",
+      "breakpoints": true
     }
   ]
 }

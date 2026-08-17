@@ -120,7 +120,9 @@ export {
   JudgeNotConfiguredError,
   JudgeProviderMismatchError,
   LastAdminError,
+  ManagedAccessNotConnectedError,
   MockToolTakenError,
+  ModelProviderCredentialMissingError,
   NoCapabilityAdapterError,
   NotPermittedError,
   PersonaNameAmbiguousError,
@@ -584,6 +586,60 @@ export {
   type NewJudgeCredential,
 } from "./judge-credentials.ts";
 export type { JudgeSource } from "../schema/graders.ts";
+
+/**
+ * The organization's model access, and its own provider keys.
+ *
+ * Write-only by construction on the same terms as the judge credentials above:
+ * nothing exported here can answer with a stored key, and the one door to a
+ * plaintext one — `resolveModelProviderKeys` — refuses every context that did
+ * not come from a simulation or a grading claim.
+ */
+export {
+  DEFAULT_MODEL_ACCESS,
+  readModelAccess,
+  resolveModelProviderKeys,
+  setModelAccess,
+  type ModelAccess,
+  type ResolvedProviderKeys,
+} from "./model-access.ts";
+export {
+  listModelProviderCredentials,
+  removeModelProviderCredential,
+  storeModelProviderCredential,
+  type ModelProviderCredential,
+  type ModelProviderCredentialInput,
+} from "./model-provider-credentials.ts";
+export {
+  MODEL_ACCESS_MODES,
+  type ModelAccessMode,
+} from "../schema/models.ts";
+
+/**
+ * The provider catalog and the selections made from it — release data and pure
+ * shapes, reaching no store and taking no context, exactly as the grader
+ * library's catalog beside it does.
+ */
+export {
+  MODEL_JOBS,
+  MODEL_PROVIDERS,
+  PROVIDER_CATALOG,
+  PROVIDERS_BY_JOB,
+  RECOMMENDED_ENTRY,
+  RESERVED_PROVIDER_JOBS,
+  type ModelJob,
+  type ModelProvider,
+  type ProviderCatalogEntry,
+} from "../models/catalog.ts";
+export {
+  RECOMMENDED_GRADER_MODEL,
+  RECOMMENDED_PERSONA_MODELS,
+  SPEED_RANGE,
+  type GraderModel,
+  type ModelSelection,
+  type PersonaModels,
+  type SpeechSelection,
+} from "../models/selections.ts";
 
 export {
   cancelRun,
