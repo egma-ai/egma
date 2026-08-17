@@ -354,14 +354,45 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
           </div>
         ))
       )}
-      {measured.some((one) => one.derived === true) ? (
+      {measured.some(
+        (one) => one.derived === true && one.reported_by === undefined,
+      ) ? (
         <div className={styles.contextFact}>
           <span />
           <strong className={styles.muted}>{MEASURES.derived}</strong>
         </div>
       ) : null}
+      {reportingPlatform(measured) === undefined ? null : (
+        <div className={styles.contextFact}>
+          <span />
+          <strong className={styles.muted}>
+            {MEASURES.reported(reportingPlatform(measured) ?? "")}
+          </strong>
+        </div>
+      )}
     </section>
   );
+}
+
+/**
+ * The agent platform that reported figures on this page, or nothing where none
+ * did.
+ *
+ * One name rather than a list, because there is only ever one to have: the
+ * figures a platform reports ride the one span that opens the exchange, written
+ * by the one platform the exchange happened on. Reading the first is therefore
+ * reading the only one, and a page that listed them would be dressing a
+ * certainty up as a set.
+ */
+function reportingPlatform(
+  measured: readonly Measured[],
+): string | undefined {
+  for (const one of measured) {
+    if (one.reported_by !== undefined && one.reported_by !== "") {
+      return one.reported_by;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -388,7 +419,16 @@ function measurement(one: Measured): string {
   // Said on the figure itself as well as once for the panel, because a page
   // mixing timed and worked-out numbers must let a reader tell which is which
   // without counting rows.
-  const from = one.derived === true ? ` · ${MEASURES.derivedOne}` : "";
+  //
+  // **The platform's mark is asked for first, and it is not the other one
+  // reworded.** A figure a platform reported was not worked out from anything;
+  // saying it was would be this page inventing an observation Egma never made.
+  const from =
+    one.reported_by !== undefined && one.reported_by !== ""
+      ? ` · ${MEASURES.reportedOne(one.reported_by)}`
+      : one.derived === true
+        ? ` · ${MEASURES.derivedOne}`
+        : "";
   if (one.partial === true) return `${shown} · ${MEASURES.partialWorst}${from}`;
   return one.samples.length === 1
     ? `${shown}${from}`
