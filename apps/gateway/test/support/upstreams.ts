@@ -74,6 +74,8 @@ export type HttpUpstreamPlan = {
 export async function startHttpUpstream(plan: HttpUpstreamPlan): Promise<HttpUpstream> {
   const seen: SeenHttp[] = [];
   let attempts = 0;
+  /** Deliberately delayed answers, so a stop does not wait one out. */
+  const timers = new Set<ReturnType<typeof setTimeout>>();
 
   const server: Server = createServer((request: IncomingMessage, response: ServerResponse) => {
     attempts += 1;
@@ -132,7 +134,7 @@ export async function startHttpUpstream(plan: HttpUpstreamPlan): Promise<HttpUps
         push();
       };
 
-      if (plan.silentForMs !== undefined) setTimeout(answer, plan.silentForMs);
+      if (plan.silentForMs !== undefined) timers.add(setTimeout(answer, plan.silentForMs));
       else answer();
     });
   });
@@ -145,6 +147,8 @@ export async function startHttpUpstream(plan: HttpUpstreamPlan): Promise<HttpUps
     attempts: () => attempts,
     stop: () =>
       new Promise<void>((done) => {
+        for (const timer of timers) clearTimeout(timer);
+        timers.clear();
         server.closeAllConnections();
         server.close(() => done());
       }),
@@ -209,8 +213,18 @@ export async function startSocketUpstream(plan: SocketUpstreamPlan): Promise<Soc
     response.writeHead(426).end("this address is a websocket address");
   });
 
+  /**
+   * Raw sockets that were upgraded away from the HTTP server, and timers that
+   * have not fired. Node's own connection tracking loses both, so a stop that
+   * did not hold them would wait out a deliberately silent handshake.
+   */
+  const raw = new Set<Duplex>();
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+
   server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     attempts += 1;
+    raw.add(socket);
+    socket.on("close", () => raw.delete(socket));
     const url = new URL(request.url ?? "/", "http://upstream");
     const headers: Record<string, string> = {};
     for (const [name, value] of Object.entries(request.headers)) {
@@ -268,7 +282,7 @@ export async function startSocketUpstream(plan: SocketUpstreamPlan): Promise<Soc
       });
     };
 
-    if (plan.silentForMs !== undefined) setTimeout(accept, plan.silentForMs);
+    if (plan.silentForMs !== undefined) timers.add(setTimeout(accept, plan.silentForMs));
     else accept();
   });
 
@@ -281,7 +295,11 @@ export async function startSocketUpstream(plan: SocketUpstreamPlan): Promise<Soc
     opened: () => firstOpen,
     stop: () =>
       new Promise<void>((done) => {
+        for (const timer of timers) clearTimeout(timer);
+        timers.clear();
         for (const record of seen) record.socket?.terminate();
+        for (const socket of raw) socket.destroy();
+        raw.clear();
         server.closeAllConnections();
         server.close(() => done());
         firstOpen = new Promise<SeenSocket>((resolve) => {
