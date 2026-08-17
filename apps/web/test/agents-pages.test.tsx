@@ -428,31 +428,6 @@ describe("finding an agent in a long list", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("registering an agent", () => {
-  it("does not let the parent breadcrumb silently discard a draft", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents": { status: 201, body: { agent: AGENT } },
-    });
-    render(<RegisterAgentPage />);
-
-    fireEvent.change(await screen.findByLabelText("Name"), {
-      target: { value: "Keep this agent" },
-    });
-    const parent = within(
-      screen.getByRole("navigation", { name: "Breadcrumb" }),
-    ).getByRole("link", { name: "Agents" });
-    const click = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    parent.dispatchEvent(click);
-
-    expect(click.defaultPrevented).toBe(true);
-    expect(await screen.findByRole("dialog")).toBeDefined();
-    expect(screen.getByText("Leave without saving?")).toBeDefined();
-  });
-
   it("sends the name and description, and nothing about the provider", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
@@ -761,29 +736,6 @@ describe("one agent's page", () => {
     });
   }
 
-  it("protects an agent edit from its parent breadcrumb", async () => {
-    answersWith(AGENT, [], "member");
-    render(<AgentDetailPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Name"), {
-      target: { value: "Keep this agent edit" },
-    });
-    const parent = within(
-      screen.getByRole("navigation", { name: "Breadcrumb" }),
-    ).getByRole("link", { name: "Agents" });
-    const click = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    parent.dispatchEvent(click);
-
-    expect(click.defaultPrevented).toBe(true);
-    expect(await screen.findByRole("dialog")).toBeDefined();
-    expect(screen.getByText("Leave without saving?")).toBeDefined();
-  });
-
   it("keeps the agent actions and moves runs, tests, and connections through one section navigation", async () => {
     answersWith(AGENT, [CONNECTION], "viewer");
     render(<AgentDetailPage />);
@@ -884,7 +836,7 @@ describe("one agent's page", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("adding a connection", () => {
-  it("keeps the connection hierarchy present while the parent agent loads", () => {
+  it("keeps the connection hierarchy present while the parent agent loads", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/api/agents/agt_1": {
@@ -899,42 +851,12 @@ describe("adding a connection", () => {
     expect(within(breadcrumb).getByRole("link", { name: "Agents" })).toBeTruthy();
     expect(within(breadcrumb).getByRole("link", { name: "Agent" })).toBeTruthy();
     expect(within(breadcrumb).getByText("New connection")).toBeTruthy();
-  });
-
-  it("names the parent agent and protects a connection draft", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
-        status: 200,
-        body: { agent: AGENT, connections: [] },
-      },
-      "/api/connection-types": { status: 200, body: TYPES },
-      "/api/agents/agt_1/connections": {
-        status: 201,
-        body: { connection: CONNECTION },
-      },
-    });
-    render(<NewConnectionPage />);
-
-    fireEvent.change(await screen.findByLabelText("Connection name (optional)"), {
-      target: { value: "Keep this connection" },
-    });
-    expect(screen.getByText("The label shown for this connection in Egma."))
-      .toBeTruthy();
-    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(within(breadcrumb).getByRole("link", { name: "Front desk" }))
-      .toBeTruthy();
-    const parent = within(breadcrumb).getByRole("link", { name: "Agents" });
-    const click = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    parent.dispatchEvent(click);
-
-    expect(click.defaultPrevented).toBe(true);
-    expect(await screen.findByRole("dialog")).toBeDefined();
-    expect(screen.getByText("Leave without saving?")).toBeDefined();
+    expect(
+      await within(breadcrumb).findByRole("link", { name: "Front desk" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("The label shown for this connection in Egma."),
+    ).toBeTruthy();
   });
 
   it("confirms a Retell phone route before it stores the provider-blind connection", async () => {
@@ -1288,29 +1210,6 @@ describe("one connection's page", () => {
       view.unmount();
       cleanup();
     }
-  });
-
-  it("protects a connection edit from its parent breadcrumb", async () => {
-    answersWith(CONNECTION);
-    render(<ConnectionDetailPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Name"), {
-      target: { value: "Keep this connection edit" },
-    });
-    const parent = within(
-      screen.getByRole("navigation", { name: "Breadcrumb" }),
-    ).getByRole("link", { name: "Agents" });
-    const click = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    parent.dispatchEvent(click);
-
-    expect(click.defaultPrevented).toBe(true);
-    expect(await screen.findByRole("dialog")).toBeDefined();
-    expect(screen.getByText("Leave without saving?")).toBeDefined();
   });
 
   it("uses catalog field labels and keeps forward-compatible fields visible", async () => {

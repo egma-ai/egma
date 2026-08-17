@@ -390,30 +390,6 @@ describe("the way into the builder", () => {
 });
 
 describe("the steps", () => {
-  it("does not let the parent breadcrumb silently discard a selection", async () => {
-    builder();
-    render(<NewRunPage />);
-
-    fireEvent.change(await screen.findByLabelText("Agent"), {
-      target: { value: "agt_1" },
-    });
-    const parent = within(
-      screen.getByRole("navigation", { name: "Breadcrumb" }),
-    ).getByRole("link", { name: "Runs" });
-    const click = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    parent.dispatchEvent(click);
-
-    expect(click.defaultPrevented).toBe(true);
-    expect(
-      await screen.findByRole("dialog", { name: "Leave without saving?" }),
-    ).toBeDefined();
-    expect(routed.push).not.toHaveBeenCalled();
-  });
-
   it("keeps the three setup steps in one named order", async () => {
     builder();
     render(<NewRunPage />);

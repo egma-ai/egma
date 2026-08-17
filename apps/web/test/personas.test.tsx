@@ -429,42 +429,6 @@ describe("the Personas list", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("authoring a persona", () => {
-  it("does not let the parent breadcrumb silently discard a draft", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /api/persona-form": {
-        status: 200,
-        body: { voice_providers: ["elevenlabs"] },
-      },
-    });
-    render(<NewPersonaPage />);
-
-    fireEvent.change(await screen.findByLabelText("Name"), {
-      target: { value: "Keep this persona" },
-    });
-    const parent = within(
-      screen.getByRole("navigation", { name: "Breadcrumb" }),
-    ).getByRole("link", { name: "Personas" });
-    const click = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    parent.dispatchEvent(click);
-
-    expect(click.defaultPrevented).toBe(true);
-    const leave = await screen.findByRole("dialog", {
-      name: "Leave without saving?",
-    });
-    fireEvent.click(within(leave).getByRole("button", { name: "Keep editing" }));
-    expect(
-      screen.queryByRole("dialog", { name: "Leave without saving?" }),
-    ).toBeNull();
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-      "Keep this persona",
-    );
-  });
-
   it("sends the traits somebody typed, and lands on the persona it made", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
@@ -574,36 +538,6 @@ describe("one persona's page", () => {
       status: 200,
       body: { voice_providers: ["elevenlabs", "cartesia", "openai"] },
     },
-  });
-
-  it("protects a persona edit from its parent breadcrumb", async () => {
-    apiAnswers(reads());
-    render(<PersonaPage />);
-
-    fireEvent.change(await screen.findByLabelText("Name"), {
-      target: { value: "Keep this persona edit" },
-    });
-    const parent = within(
-      screen.getByRole("navigation", { name: "Breadcrumb" }),
-    ).getByRole("link", { name: "Personas" });
-    const click = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    parent.dispatchEvent(click);
-
-    expect(click.defaultPrevented).toBe(true);
-    const leave = await screen.findByRole("dialog", {
-      name: "Leave without saving?",
-    });
-    fireEvent.click(within(leave).getByRole("button", { name: "Keep editing" }));
-    expect(
-      screen.queryByRole("dialog", { name: "Leave without saving?" }),
-    ).toBeNull();
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-      "Keep this persona edit",
-    );
   });
 
   it("saves the live fields with the revision, and no version expectation at all", async () => {

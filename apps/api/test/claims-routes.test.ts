@@ -5,7 +5,7 @@ import {
   listRunEvents,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   acceptsServiceToken,
@@ -42,6 +42,7 @@ import {
 let api: TestApi;
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await api?.close();
 });
 
@@ -718,64 +719,81 @@ describe("a simulation the platform cannot hand over", () => {
     ).toEqual(["claimed", "queued", "claimed", "canceled"]);
   });
 
-  it(
-    "starts independent Retell checks together and bounds a provider that never answers",
-    async () => {
-      let active = 0;
-      let mostActive = 0;
-      let reads = 0;
-      const retellFetch: typeof fetch = async (_input, init) => {
-        reads += 1;
-        active += 1;
-        mostActive = Math.max(mostActive, active);
-        const signal = init?.signal;
-        if (signal === undefined || signal === null) {
-          throw new Error("the Retell check had no deadline");
-        }
-        return new Promise<Response>((_resolve, reject) => {
-          const stopped = (): void => {
-            active -= 1;
-            reject(signal.reason ?? new Error("the Retell check ended"));
-          };
-          if (signal.aborted) stopped();
-          else signal.addEventListener("abort", stopped, { once: true });
-        });
-      };
-      const { key, agentId, connectionId, versionId } =
-        await aCustomerReadyToRun("claims_retell_bounded_batch", {
-          retellFetch,
-        });
-      const second = await ask(api.app, "POST", "/api/agents", key, {
-        name: "Second desk",
-        connection: {
-          ...RETELL,
-          config: { retellAgentId: "agent_in_retell_2" },
-        },
+  it("starts independent Retell checks together and bounds a provider that never answers", async () => {
+    let active = 0;
+    let mostActive = 0;
+    let reads = 0;
+    let bothProviderReadsStarted!: () => void;
+    const providerReadsStarted = new Promise<void>((resolve) => {
+      bothProviderReadsStarted = resolve;
+    });
+    const retellFetch: typeof fetch = async (_input, init) => {
+      reads += 1;
+      active += 1;
+      mostActive = Math.max(mostActive, active);
+      if (reads === 2) bothProviderReadsStarted();
+      const signal = init?.signal;
+      if (signal === undefined || signal === null) {
+        throw new Error("the Retell check had no deadline");
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        const stopped = (): void => {
+          active -= 1;
+          reject(signal.reason ?? new Error("the Retell check ended"));
+        };
+        if (signal.aborted) stopped();
+        else signal.addEventListener("abort", stopped, { once: true });
       });
-      expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
-      const secondAgent = (second.body.agent as { id: string }).id;
-      const secondConnection = (second.body.connection as { id: string }).id;
-      await applyTo(key, versionId, [agentId, secondAgent]);
-      await Promise.all([
-        aQueuedRun(key, connectionId, versionId),
-        aQueuedRun(key, secondConnection, versionId),
-      ]);
-
-      const startedAt = Date.now();
-      const answered = await claim(api.config.simulatorServiceToken, {
-        claimant: "sim-under-test",
-        capacity: 2,
-        wait_seconds: 0,
+    };
+    const { key, agentId, connectionId, versionId } =
+      await aCustomerReadyToRun("claims_retell_bounded_batch", {
+        retellFetch,
       });
+    const second = await ask(api.app, "POST", "/api/agents", key, {
+      name: "Second desk",
+      connection: {
+        ...RETELL,
+        config: { retellAgentId: "agent_in_retell_2" },
+      },
+    });
+    expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
+    const secondAgent = (second.body.agent as { id: string }).id;
+    const secondConnection = (second.body.connection as { id: string }).id;
+    await applyTo(key, versionId, [agentId, secondAgent]);
+    await Promise.all([
+      aQueuedRun(key, connectionId, versionId),
+      aQueuedRun(key, secondConnection, versionId),
+    ]);
 
-      expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-      expect(answered.body.specs).toEqual([]);
-      expect(reads).toBe(2);
-      expect(mostActive).toBe(2);
-      expect(Date.now() - startedAt).toBeLessThan(20_000);
-    },
-    25_000,
-  );
+    const providerDeadlines: number[] = [];
+    const deadlineControllers: AbortController[] = [];
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      providerDeadlines.push(milliseconds);
+      const controller = new AbortController();
+      deadlineControllers.push(controller);
+      return controller.signal;
+    });
+
+    const answering = claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 2,
+      wait_seconds: 0,
+    });
+    await providerReadsStarted;
+
+    expect(reads).toBe(2);
+    expect(mostActive).toBe(2);
+    expect(providerDeadlines).toEqual([15_000, 15_000]);
+
+    for (const controller of deadlineControllers) {
+      controller.abort(new Error("the controlled provider deadline ended"));
+    }
+    const answered = await answering;
+
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+    expect(answered.body.specs).toEqual([]);
+    expect(active).toBe(0);
+  });
 
   it("lands as dispatch_failed at once, while the rest of the batch still dispatches", async () => {
     const { ada, key, agentId, connectionId, versionId } =
