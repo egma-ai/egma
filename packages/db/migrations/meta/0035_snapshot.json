@@ -1,5 +1,5 @@
 {
-  "id": "1bad40c8-48c8-4bcf-9d1d-4cd7543edb59",
+  "id": "7fa9f1c0-23fe-4d53-ac9b-7746cb2c11a4",
   "prevId": "e6634a49-a6ca-4688-8468-8e5688424a06",
   "version": "7",
   "dialect": "postgresql",
@@ -4962,6 +4962,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "ending_detail": {
+          "name": "ending_detail",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ending_repair": {
+          "name": "ending_repair",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "claimed_by": {
           "name": "claimed_by",
           "type": "text",
@@ -5352,6 +5364,14 @@
         "simulation_ending_reason_allowed": {
           "name": "simulation_ending_reason_allowed",
           "value": "\"simulation\".\"ending_reason\" is null or \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached', 'agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed')"
+        },
+        "simulation_ending_repair_allowed": {
+          "name": "simulation_ending_repair_allowed",
+          "value": "\"simulation\".\"ending_repair\" is null or \"simulation\".\"ending_repair\" in ('model_providers')"
+        },
+        "simulation_ending_repair_has_a_reason_to_exist": {
+          "name": "simulation_ending_repair_has_a_reason_to_exist",
+          "value": "\"simulation\".\"ending_repair\" is null or \"simulation\".\"ending_detail\" is not null"
         },
         "simulation_ending_reason_agrees": {
           "name": "simulation_ending_reason_agrees",

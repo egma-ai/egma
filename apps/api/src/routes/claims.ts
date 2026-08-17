@@ -6,14 +6,23 @@ import {
   getPersonaVersion,
   getRun,
   getSimulationTestVersion,
+  ModelProviderCredentialMissingError,
+  readModelAccess,
   resolveMockTools,
+  resolveModelProviderKeys,
   resolvePlatformSettings,
   resolveSimulationConnection,
+  type EndingRepair,
+  type PersonaModels,
   type PlatformSettingValues,
   type Run,
   type SimulationClaim,
 } from "@egma/db";
-import { specComplaints } from "@egma/simulation-contract";
+import {
+  isSpecContractVersion,
+  specComplaints,
+  SPEC_CONTRACT_VERSIONS,
+} from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
 import { acceptsServiceToken } from "../auth/service-token.ts";
@@ -114,8 +123,20 @@ const SIMULATION_LIMITS = {
   voice: { max_duration_seconds: 300, max_turns: 40 },
 } as const;
 
-/** The one contract version this control plane speaks. */
-const CONTRACT_VERSION = 1;
+/**
+ * The contract version a work order is written in, decided by the row rather
+ * than by the deployment.
+ *
+ * **A simulation whose pinned persona selects its own models needs version 2;
+ * one that does not gets version 1, byte for byte as it always did.** So the
+ * version is a property of what has to be said rather than of a flag somebody
+ * flips, and there is no moment at which the deployment is half-migrated in a
+ * way anybody has to reason about. A worker that speaks only version 1 never
+ * claims a row that would need version 2 — the queue filters on exactly that —
+ * so no document ever arrives at a worker that cannot read it.
+ */
+const CONTRACT_VERSION_WITHOUT_MODELS = 1;
+const CONTRACT_VERSION_WITH_MODELS = 2;
 
 type Body = Record<string, unknown>;
 
@@ -189,12 +210,125 @@ function onlyWhatIsHeld<T>(
     : (Object.fromEntries(present) as Record<string, T>);
 }
 
+/**
+ * The models block of one work order: the pinned persona's three selections
+ * and, under customer-owned access, the organization's key for each provider
+ * they name.
+ *
+ * **Resolved when the claim is prepared, never when the run was created.** The
+ * selections come off the version the run pinned, so they are exactly what they
+ * were when somebody pressed start; the credentials and the access mode are
+ * read now, so a key replaced or a mode changed mid-run reaches the next
+ * simulation to be claimed and leaves the ones already conducting alone. That
+ * split is the whole design: authored behavior is pinned, operational state is
+ * current, and neither can be mistaken for the other.
+ *
+ * **Only the providers the selections name.** The keys are asked for by the
+ * three providers this persona actually uses, so an organization holding a
+ * fourth credential does not put it on this wire. Unrelated secrets not
+ * travelling is a property of the argument rather than of a filter somebody
+ * remembered to apply afterwards.
+ */
+async function modelsBlock(
+  claim: SimulationClaim,
+  models: PersonaModels,
+): Promise<Record<string, unknown>> {
+  const access = await readModelAccess(claim.auth);
+
+  if (access.mode === "managed") {
+    // Nothing on this deployment can select managed access yet — the setting
+    // refuses it by name while no inference key is connected — so a row saying
+    // so is a state this control plane cannot honor. Said as an error naming
+    // the mode rather than conducted with no credentials at all.
+    throw new Error(
+      "this organization is on managed model access, and this deployment has no Egma model gateway connection to send its model traffic through",
+    );
+  }
+
+  const resolved = await resolveModelProviderKeys(claim.auth, [
+    models.llm.provider,
+    models.stt.provider,
+    models.tts.provider,
+  ]);
+
+  if (resolved.missing.length > 0) {
+    // Named by model job as well as by provider, because "add an OpenAI key"
+    // is a different sentence from "your persona listens with a provider you
+    // have no key for" — and the person reading it has to know which of their
+    // three selections stopped the simulation.
+    const jobs = [
+      { job: "llm", provider: models.llm.provider },
+      { job: "stt", provider: models.stt.provider },
+      { job: "tts", provider: models.tts.provider },
+    ].filter((one) => resolved.missing.includes(one.provider));
+    throw new ModelProviderCredentialMissingError(jobs);
+  }
+
+  const keyFor = (provider: PersonaModels["llm"]["provider"]): string => {
+    const key = resolved.keys.get(provider);
+    if (key === undefined) {
+      throw new Error(`no ${provider} key was resolved for this simulation`);
+    }
+    return key;
+  };
+
+  return {
+    access: access.mode,
+    llm: {
+      provider: models.llm.provider,
+      model: models.llm.model,
+      key: keyFor(models.llm.provider),
+    },
+    stt: {
+      provider: models.stt.provider,
+      model: models.stt.model,
+      key: keyFor(models.stt.provider),
+    },
+    tts: {
+      provider: models.tts.provider,
+      model: models.tts.model,
+      key: keyFor(models.tts.provider),
+      voice_id: models.tts.voiceId,
+      speed: models.tts.speed,
+    },
+  };
+}
+
+/**
+ * Why one claimed simulation could not become a work order, and — where the
+ * platform knows — which screen the person reading it goes to.
+ *
+ * The repair pointer travels as a word rather than a link, because the address
+ * of a page is the browser's business; it is stored on the simulation so that
+ * somebody opening the run tomorrow gets the same answer the log gave today.
+ */
+type Unbuildable = {
+  readonly unbuildable: string;
+  readonly repair?: EndingRepair | undefined;
+};
+
+/**
+ * Whether assembly gave back a reason instead of a work order.
+ *
+ * A function rather than `"unbuildable" in spec`, because the other half of the
+ * union is an open record: `in` narrows it to "a record that also has this
+ * key", which is true of every record, and the reason would then be read as
+ * `unknown`.
+ */
+function couldNotBeBuilt(
+  answer: Record<string, unknown> | Unbuildable,
+): answer is Unbuildable {
+  return typeof (answer as Unbuildable).unbuildable === "string";
+}
+
 /** What a claim request said, once every field has been read and refused for itself. */
 type ClaimAsk = {
   readonly claimant: string;
   readonly capacity: number;
   /** Seconds this request may be held; already bounded by the cap. */
   readonly holdSeconds: number;
+  /** Which contract versions this simulator implements. */
+  readonly contractVersions: readonly number[];
 };
 
 /**
@@ -242,6 +376,36 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
     };
   }
 
+  /**
+   * Which contract versions this simulator implements.
+   *
+   * **Absent means version 1 alone**, which is what every simulator built
+   * before the second version means by saying nothing — so an old worker
+   * pointed at a new control plane keeps receiving exactly the documents it
+   * always received, with nothing to configure and no drain step.
+   *
+   * A version this control plane does not write is refused rather than
+   * ignored: a worker declaring a version nobody emits has been deployed
+   * against the wrong platform, and finding that out at the claim door is
+   * better than finding it out as an empty queue nobody can explain.
+   */
+  const versions = body.contract_versions;
+  if (versions !== undefined) {
+    if (
+      !Array.isArray(versions) ||
+      versions.length === 0 ||
+      !versions.every((one) => isSpecContractVersion(one))
+    ) {
+      return {
+        refusal:
+          "contract_versions is which versions of the simulation contract " +
+          "this simulator implements, as a non-empty list of whole numbers " +
+          `from ${SPEC_CONTRACT_VERSIONS.join(", ")}. Leave it out and Egma ` +
+          `sends version ${CONTRACT_VERSION_WITHOUT_MODELS}.`,
+      };
+    }
+  }
+
   return {
     claimant: claimant.trim(),
     capacity: Math.min(capacity, LARGEST_CLAIM_CAPACITY),
@@ -249,6 +413,10 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
       wait === undefined ? DEFAULT_HOLD_SECONDS : wait,
       LONGEST_HOLD_SECONDS,
     ),
+    contractVersions:
+      versions === undefined
+        ? [CONTRACT_VERSION_WITHOUT_MODELS]
+        : (versions as readonly number[]),
   };
 }
 
@@ -282,7 +450,7 @@ async function assembledSpec(
    * deployment — two claims naming one run are two conversations of it.
    */
   runs: Map<string, Run | undefined>,
-): Promise<Record<string, unknown> | { readonly unbuildable: string }> {
+): Promise<Record<string, unknown> | Unbuildable> {
   const personaVersion = await getPersonaVersion(
     claim.auth,
     claim.personaVersionId,
@@ -335,8 +503,26 @@ async function assembledSpec(
     delay_milliseconds: mock.delayMilliseconds,
   }));
 
+  /**
+   * The persona's own model selections, or nothing for a version still on the
+   * compatibility path.
+   *
+   * Nothing is the ordinary state of every persona authored before the model
+   * catalog existed, and it is what keeps those personas running: the work
+   * order is written in version 1 and the deployment's own settings decide the
+   * models, exactly as they did. A persona that *has* selections is written in
+   * version 2, and the queue has already made sure this worker can read one.
+   */
+  const models =
+    personaVersion.models === null
+      ? undefined
+      : await modelsBlock(claim, personaVersion.models);
+
   const spec = {
-    contract_version: CONTRACT_VERSION,
+    contract_version:
+      models === undefined
+        ? CONTRACT_VERSION_WITHOUT_MODELS
+        : CONTRACT_VERSION_WITH_MODELS,
     simulation_id: claim.id,
     modality: claim.modality,
     connection: {
@@ -356,6 +542,11 @@ async function assembledSpec(
     // reasoning one line up: a deployment that has configured no settings of
     // its own hands the simulator the document it always handed it.
     ...(platform === undefined ? {} : { platform }),
+    // The persona's own selections, where it has them. A version-1 document
+    // has no place for this block at all — its schema closes the top level —
+    // so a simulation on the compatibility path is byte for byte the work
+    // order it was before persona models existed.
+    ...(models === undefined ? {} : { models }),
   };
   // `mockToolId` is deliberately not among the fields sent. The simulator
   // records which mock tool answered by its tool name, which is the whole
@@ -419,6 +610,7 @@ export async function claimRoutes(
       let claims = await claimSimulations({
         claimant: ask.claimant,
         capacity: ask.capacity,
+        contractVersions: ask.contractVersions,
       });
       while (claims.length === 0 && !gone && Date.now() < deadline) {
         await sleep(Math.min(RECHECK_MILLISECONDS, deadline - Date.now()));
@@ -426,6 +618,7 @@ export async function claimRoutes(
         claims = await claimSimulations({
           claimant: ask.claimant,
           capacity: ask.capacity,
+          contractVersions: ask.contractVersions,
         });
       }
 
@@ -441,11 +634,19 @@ export async function claimRoutes(
         // escape would abort the whole response and withhold every valid
         // claim beside it from a simulator standing ready to conduct them.
         const spec = await assembledSpec(claim, runs).catch(
-          (fault: unknown): { readonly unbuildable: string } => ({
+          (fault: unknown): Unbuildable => ({
             unbuildable: fault instanceof Error ? fault.message : String(fault),
+            // A credential the organization has not stored is a configuration
+            // problem with a screen behind it, so the row that lands says which
+            // screen. Every other fault is Egma being broken, and sending
+            // somebody to Model providers for one of those would be a link that
+            // fixes nothing.
+            ...(fault instanceof ModelProviderCredentialMissingError
+              ? { repair: "model_providers" as const }
+              : {}),
           }),
         );
-        if ("unbuildable" in spec) {
+        if (couldNotBeBuilt(spec)) {
           // Fail loudly on this side and keep dispatching the rest: one
           // corrupt row must not hold up the batch, and the simulator is
           // never handed a document it would have to refuse. The row lands
@@ -464,6 +665,10 @@ export async function claimRoutes(
             claim.auth,
             claim.id,
             claim.claimedBy,
+            // The same sentence the log just carried, kept on the row: a
+            // person opening this run tomorrow must not have to find a log
+            // line from today to learn why one conversation is red.
+            { detail: spec.unbuildable, repair: spec.repair },
           ).catch((fault: unknown) => {
             // The one place left where the sweep is the backstop: a row so
             // broken even its landing throws stays claimed until swept, and

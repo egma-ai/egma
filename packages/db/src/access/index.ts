@@ -614,6 +614,7 @@ export {
   MODEL_ACCESS_MODES,
   type ModelAccessMode,
 } from "../schema/models.ts";
+export { ENDING_REPAIRS, type EndingRepair } from "../schema/runs.ts";
 
 /**
  * The provider catalog and the selections made from it — release data and pure
