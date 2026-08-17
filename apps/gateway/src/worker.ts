@@ -7,7 +7,7 @@ import {
   type SocketHost,
   UpstreamHandshakeRefused,
 } from "./socket.ts";
-import { staticSecretVerifier } from "./verify.ts";
+import { deployedVerifier } from "./verify.ts";
 
 /**
  * The deployed host: the Egma model gateway as a Cloudflare Worker.
@@ -143,7 +143,7 @@ export default {
     const build = env.EGMA_GATEWAY_VERSION;
     return handle(request, {
       config,
-      verifier: staticSecretVerifier(config),
+      verifier: deployedVerifier(config),
       log: makeLog(config.logLevel),
       socketHostFor: () => socketHostFor(),
       waitUntil: (work) => ctx.waitUntil(work),

@@ -44,6 +44,16 @@ export const STATUS_CLASSES = [
   "timed-out",
   /** The provider could not be reached at all. */
   "unreachable",
+  /**
+   * Egma Cloud could not be asked whether the credential is good, so this
+   * connection was neither authorized nor refused.
+   *
+   * Its own class rather than folded into `refused`, for the reason the 503 is
+   * its own answer: a reader counting refusals is counting customers with a
+   * configuration problem, and an outage of Egma's own would otherwise arrive
+   * in that number and look like a hundred people mistyping a key at once.
+   */
+  "authentication-unavailable",
 ] as const;
 export type StatusClass = (typeof STATUS_CLASSES)[number];
 

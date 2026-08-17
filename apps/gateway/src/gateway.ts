@@ -183,6 +183,24 @@ export async function handle(request: Request, host: GatewayHost): Promise<Respo
 
   const verified = await host.verifier.verify(offeredCredential(url, request.headers, route));
   if (!isAuthenticated(verified)) {
+    /**
+     * Three answers rather than two, and the third is the one worth having.
+     *
+     * A credential Egma could not look up is not a bad credential. Answering
+     * 401 when the store is unreachable would send a customer to rotate a key
+     * that was fine, and would hide an Egma outage inside a sentence about
+     * their configuration. So "nobody could say" is a 503 with its own word on
+     * it, and only a store that answered gets to refuse anybody.
+     */
+    if (verified.refused === "unavailable") {
+      write("authentication-unavailable", { provider: route.provider, job: route.job });
+      return refusalResponse({
+        status: 503,
+        code: "gateway_authentication_unavailable",
+        message:
+          "the Egma model gateway could not reach Egma Cloud to check this inference credential, so it does not know whether it is good",
+      });
+    }
     write("refused", { provider: route.provider, job: route.job });
     return refusalResponse({
       status: 401,

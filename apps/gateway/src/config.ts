@@ -118,23 +118,41 @@ const DEFAULT_MAX_BUFFERED_BYTES = 4_194_304;
  */
 const DEFAULT_BUFFER_DRAIN_MS = 10_000;
 
+/**
+ * How long the one validation ask may take before the answer is "nobody knows".
+ *
+ * It happens once, when a connection opens, and a voice caller is already
+ * waiting on it — so it is short. Five seconds is far longer than a control
+ * plane takes to hash a string and read one row, and short enough that a
+ * simulator hearing nothing gets a clear infrastructure error rather than a
+ * hang.
+ */
+const DEFAULT_VALIDATION_TIMEOUT_MS = 5_000;
+
 export type Config = {
   /**
-   * The organization-scoped secret the preview verifier accepts, the
-   * organization it stands for, and the inference-key identifier recorded
-   * against it.
+   * The key hosted Egma signs its own gateway credentials with.
    *
-   * **This is the preview's whole authentication story and it is deliberately
-   * one secret.** Real inference keys — created, shown once, hashed, revoked —
-   * are stored work that belongs to the managed-access ticket that builds the
-   * store. What the gateway needs from that store is one answer: does this
-   * credential authorize a connection, and which organization is it. So the
-   * gateway takes a verifier, this is the verifier a preview deploys, and the
-   * store arrives later behind the same interface with nothing else changing.
+   * **Shared with the control plane and with nobody else.** It is what lets the
+   * gateway check, on its own and without asking anybody, that a connection
+   * claiming to act for an organization was really opened by Egma's own
+   * simulator or grading engine. It is never sent anywhere, never returned, and
+   * never appears in a credential — only a signature made with it does.
    */
-  readonly organizationSecret: string;
-  readonly organizationId: string;
-  readonly inferenceKeyId: string;
+  readonly internalCredentialKey: string | undefined;
+
+  /**
+   * Where Egma Cloud answers whether an inference key is good and whose it is.
+   *
+   * **The gateway keeps no key store, so it asks the one that does.** That is
+   * what makes revocation effective for the next connection — there is no cache
+   * to wait out — and what keeps this application uncoupled from any Cloudflare
+   * storage product. A connection cannot open while that door is unreachable,
+   * which the gateway says as an infrastructure error rather than as a refusal.
+   */
+  readonly validationUrl: string | undefined;
+  /** How long that one ask may take before the answer is "nobody knows". */
+  readonly validationTimeoutMs: number;
 
   /** Egma's own provider credentials, one per shipped provider. */
   readonly providerCredentials: Readonly<Record<Provider, string>>;
@@ -153,9 +171,6 @@ export type Config = {
 
 /** Every name a deployment must supply a value for. */
 export const REQUIRED_NAMES = [
-  "EGMA_GATEWAY_ORGANIZATION_SECRET",
-  "EGMA_GATEWAY_ORGANIZATION_ID",
-  "EGMA_GATEWAY_INFERENCE_KEY_ID",
   "EGMA_GATEWAY_DEEPGRAM_KEY",
   "EGMA_GATEWAY_OPENAI_KEY",
   "EGMA_GATEWAY_CARTESIA_KEY",
@@ -163,6 +178,19 @@ export const REQUIRED_NAMES = [
 
 /** Every name a deployment may supply, and which nothing breaks without. */
 export const OPTIONAL_NAMES = [
+  /**
+   * The two halves of authentication, and each is optional on its own because a
+   * deployment may honestly hold only one.
+   *
+   * A gateway with a signing key and no validation address serves hosted Egma
+   * alone; one with a validation address and no signing key serves self-hosted
+   * installations alone. A gateway with neither authenticates nobody, which is
+   * a strange thing to deploy and not a broken one — every connection is
+   * refused and nothing is silently open. Egma's own deployment sets both.
+   */
+  "EGMA_GATEWAY_INTERNAL_KEY",
+  "EGMA_GATEWAY_VALIDATION_URL",
+  "EGMA_GATEWAY_VALIDATION_TIMEOUT_MS",
   "EGMA_GATEWAY_DEEPGRAM_HOME",
   "EGMA_GATEWAY_OPENAI_HOME",
   "EGMA_GATEWAY_CARTESIA_HOME",
@@ -192,7 +220,7 @@ export const OPTIONAL_NAMES = [
  * and the record writer, which must never be handed one.
  */
 export const SECRET_NAMES = [
-  "EGMA_GATEWAY_ORGANIZATION_SECRET",
+  "EGMA_GATEWAY_INTERNAL_KEY",
   "EGMA_GATEWAY_DEEPGRAM_KEY",
   "EGMA_GATEWAY_OPENAI_KEY",
   "EGMA_GATEWAY_CARTESIA_KEY",
@@ -208,6 +236,38 @@ function required(environment: Environment, name: string): string {
     );
   }
   return value;
+}
+
+function optional(environment: Environment, name: string): string | undefined {
+  const value = environment[name]?.trim();
+  return value === undefined || value === "" ? undefined : value;
+}
+
+/**
+ * Where Egma Cloud is asked about an inference key, checked at boot.
+ *
+ * Checked here rather than at first use, for the provider home's reason: a
+ * value that is not an address would otherwise be discovered by a connection
+ * that fails as "nobody could say whether your key is good", which reads as
+ * Egma Cloud being down.
+ */
+function validationUrl(environment: Environment): string | undefined {
+  const written = optional(environment, "EGMA_GATEWAY_VALIDATION_URL");
+  if (written === undefined) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(written);
+  } catch {
+    throw new ConfigurationFault(
+      `EGMA_GATEWAY_VALIDATION_URL must be an absolute address, and "${written}" is not`,
+    );
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new ConfigurationFault(
+      `EGMA_GATEWAY_VALIDATION_URL must be an http or https address, and "${written}" is not`,
+    );
+  }
+  return written;
 }
 
 function positiveWholeNumber(
@@ -267,9 +327,13 @@ function logLevel(environment: Environment): LogLevel {
 
 export function loadConfig(environment: Environment): Config {
   const config: Config = {
-    organizationSecret: required(environment, "EGMA_GATEWAY_ORGANIZATION_SECRET"),
-    organizationId: required(environment, "EGMA_GATEWAY_ORGANIZATION_ID"),
-    inferenceKeyId: required(environment, "EGMA_GATEWAY_INFERENCE_KEY_ID"),
+    internalCredentialKey: optional(environment, "EGMA_GATEWAY_INTERNAL_KEY"),
+    validationUrl: validationUrl(environment),
+    validationTimeoutMs: positiveWholeNumber(
+      environment,
+      "EGMA_GATEWAY_VALIDATION_TIMEOUT_MS",
+      DEFAULT_VALIDATION_TIMEOUT_MS,
+    ),
     providerCredentials: {
       deepgram: required(environment, "EGMA_GATEWAY_DEEPGRAM_KEY"),
       openai: required(environment, "EGMA_GATEWAY_OPENAI_KEY"),

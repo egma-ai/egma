@@ -3,10 +3,12 @@ import { WebSocket } from "ws";
 import { startLocalGateway, type LocalGateway } from "../../src/host/node.ts";
 import { makeLog } from "../../src/record.ts";
 import type { Verifier } from "../../src/verify.ts";
+import { startEgmaCloudDoor, type EgmaCloudDoor } from "./egma-cloud.ts";
 import {
   CALLER_PROVIDER_KEY,
   EGMA_PROVIDER_KEY,
   GATEWAY_SECRET,
+  INTERNAL_KEY,
   startHttpUpstream,
   startSocketUpstream,
   type HttpUpstream,
@@ -15,7 +17,7 @@ import {
   type SocketUpstreamPlan,
 } from "./upstreams.ts";
 
-export { CALLER_PROVIDER_KEY, EGMA_PROVIDER_KEY, GATEWAY_SECRET };
+export { CALLER_PROVIDER_KEY, EGMA_PROVIDER_KEY, GATEWAY_SECRET, INTERNAL_KEY };
 
 /**
  * One gateway, its providers, and everything that was written down.
@@ -28,7 +30,7 @@ export { CALLER_PROVIDER_KEY, EGMA_PROVIDER_KEY, GATEWAY_SECRET };
  */
 
 export const ORGANIZATION = "org_01K3XQ7M4E8YB2FVN0H9TZQWER";
-export const INFERENCE_KEY_ID = "inference-key-preview-1";
+export const INFERENCE_KEY_ID = "ifk_01K3XQ7M4E8YB2FVN0H9TZQWES";
 
 export type World = {
   readonly origin: string;
@@ -45,10 +47,10 @@ export type WorldPlan = {
   readonly cartesia?: SocketUpstreamPlan;
   readonly settings?: Readonly<Record<string, string>>;
   /**
-   * A verifier of the test's own, for the behavior the preview's static one
-   * cannot show: a credential that stops being good. The gateway takes one
-   * verifier and this is that seam being used exactly as a later store will use
-   * it.
+   * A verifier of the test's own, for the few cases that are about the seam
+   * rather than about either shipped answer. Everything else runs the real
+   * one — hosted Egma's signature, and an inference key asked about at the
+   * Egma Cloud stand-in over a real socket.
    */
   readonly verifier?: Verifier;
 };
@@ -73,6 +75,8 @@ export const OPENAI_PLAN: HttpUpstreamPlan = {
 
 export type Standing = {
   readonly world: World;
+  /** Where inference keys really live, as far as the gateway is concerned. */
+  readonly cloud: EgmaCloudDoor;
   readonly openai: HttpUpstream;
   readonly deepgram: SocketUpstream;
   readonly cartesia: SocketUpstream;
@@ -82,6 +86,8 @@ export async function standUp(plan: WorldPlan = {}): Promise<Standing> {
   const openai = await startHttpUpstream(plan.openai ?? OPENAI_PLAN);
   const deepgram = await startSocketUpstream(plan.deepgram ?? DEEPGRAM_PLAN);
   const cartesia = await startSocketUpstream(plan.cartesia ?? CARTESIA_PLAN);
+  const cloud = await startEgmaCloudDoor();
+  cloud.issue(GATEWAY_SECRET, ORGANIZATION, INFERENCE_KEY_ID);
 
   const raw: string[] = [];
   const lines: Record<string, unknown>[] = [];
@@ -94,9 +100,8 @@ export async function standUp(plan: WorldPlan = {}): Promise<Standing> {
   try {
     gateway = await startLocalGateway(
       {
-        EGMA_GATEWAY_ORGANIZATION_SECRET: GATEWAY_SECRET,
-        EGMA_GATEWAY_ORGANIZATION_ID: ORGANIZATION,
-        EGMA_GATEWAY_INFERENCE_KEY_ID: INFERENCE_KEY_ID,
+        EGMA_GATEWAY_INTERNAL_KEY: INTERNAL_KEY,
+        EGMA_GATEWAY_VALIDATION_URL: cloud.validationUrl,
         EGMA_GATEWAY_DEEPGRAM_KEY: EGMA_PROVIDER_KEY.deepgram,
         EGMA_GATEWAY_OPENAI_KEY: EGMA_PROVIDER_KEY.openai,
         EGMA_GATEWAY_CARTESIA_KEY: EGMA_PROVIDER_KEY.cartesia,
@@ -108,7 +113,7 @@ export async function standUp(plan: WorldPlan = {}): Promise<Standing> {
       { log, ...(plan.verifier === undefined ? {} : { verifier: plan.verifier }) },
     );
   } catch (fault) {
-    await Promise.all([openai.stop(), deepgram.stop(), cartesia.stop()]);
+    await Promise.all([openai.stop(), deepgram.stop(), cartesia.stop(), cloud.stop()]);
     throw fault;
   }
 
@@ -119,9 +124,15 @@ export async function standUp(plan: WorldPlan = {}): Promise<Standing> {
       raw,
       stop: async () => {
         await gateway.stop();
-        await Promise.all([openai.stop(), deepgram.stop(), cartesia.stop()]);
+        await Promise.all([
+          openai.stop(),
+          deepgram.stop(),
+          cartesia.stop(),
+          cloud.stop(),
+        ]);
       },
     },
+    cloud,
     openai,
     deepgram,
     cartesia,

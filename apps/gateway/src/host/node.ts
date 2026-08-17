@@ -12,7 +12,7 @@ import {
   type SocketHost,
   UpstreamHandshakeRefused,
 } from "../socket.ts";
-import { staticSecretVerifier } from "../verify.ts";
+import { deployedVerifier } from "../verify.ts";
 
 /**
  * The local host: the same application, on a developer's machine.
@@ -147,7 +147,7 @@ export function startLocalGateway(
 ): Promise<LocalGateway> {
   const config = loadConfig(environment);
   const log = overrides.log ?? makeLog(config.logLevel);
-  const verifier = overrides.verifier ?? staticSecretVerifier(config);
+  const verifier = overrides.verifier ?? deployedVerifier(config);
   const port = Number(environment["EGMA_GATEWAY_PORT"] ?? 0);
 
   const origin = (): string => `http://127.0.0.1:${(server.address() as { port: number }).port}`;

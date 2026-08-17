@@ -32,8 +32,18 @@ export const EGMA_PROVIDER_KEY = {
 /** What a caller might send that must never reach a provider. */
 export const CALLER_PROVIDER_KEY = "sentinel-caller-provider-key-Do-Not-Forward";
 
-/** The preview's organization-scoped gateway credential, as a test holds it. */
-export const GATEWAY_SECRET = "sentinel-egma-inference-credential-Hs8Nc4";
+/**
+ * One organization's inference key, as a test holds it — a real one, issued in
+ * the Egma Cloud stand-in the gateway asks about it.
+ */
+export const GATEWAY_SECRET = "egma_ik_sentinel-inference-credential-Hs8Nc4";
+
+/**
+ * The key hosted Egma signs its own gateway credentials with, as this
+ * deployment's secret store holds it. Never on a wire; only a signature made
+ * with it is.
+ */
+export const INTERNAL_KEY = "sentinel-internal-gateway-signing-Yb4Fk8";
 
 export type SeenHttp = {
   readonly method: string;
