@@ -932,6 +932,51 @@ describe("measures an agent platform reported about its own conversation", () =>
   });
 
   /**
+   * **A measurement that runs backwards is not kept, exactly as the derivation
+   * does not keep one.** The −2103 below is not invented: a real conversation
+   * on a real Retell account reports it. Folded verbatim it could never fail a
+   * bound — the worst sample decides, and a negative is never the worst — so it
+   * would sit in the series holding every bound trivially, and drag every mean
+   * and percentile the day a grader can ask for one.
+   */
+  it("drops a reported measurement that runs backwards, and keeps the rest", async () => {
+    const trace = await aReportedTrace([
+      {
+        measure: "turn_response_latency",
+        unit: "milliseconds",
+        values: [-2_103, 517, 2_145],
+      },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    expect(measured?.origin).toBe("reported");
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([
+      517, 2_145,
+    ]);
+    // The bound is still held against the worst turn that really happened.
+    expect(
+      measured === undefined ? undefined : worstSampleOf(measured)?.value,
+    ).toBe(2_145);
+
+    // And the block itself is untouched: the writer keeps everything the
+    // platform said, and the fold is what refuses what cannot be true.
+    expect(trace.reported?.measurements[0]?.values).toEqual([
+      -2_103, 517, 2_145,
+    ]);
+  });
+
+  it("answers nothing for a measurement whose every value runs backwards", async () => {
+    const trace = await aReportedTrace([
+      { measure: "turn_response_latency", unit: "milliseconds", values: [-5, -1] },
+    ]);
+
+    // Absent, exactly as a measure the platform never took is — which is a
+    // `skipped` check rather than a bound quietly passed by nothing.
+    expect(measureIn(trace, "turn_response_latency")).toBeUndefined();
+    expect(measuresFromSpans(trace)).toEqual([]);
+  });
+
+  /**
    * **A number in the wrong unit is worse than no number.** Two point one
    * four five seconds read as milliseconds is a conversation that answered
    * instantly, and a two-second bound would pass exactly the turn it exists to
@@ -1195,7 +1240,7 @@ describe("turns of no width at real instants", () => {
     ]);
 
     const measured = measureIn(trace, "turn_response_latency");
-    expect(measured?.derived).toBe(true);
+    expect(measured?.origin).toBe("derived");
     // Each human turn answered 2000 ms later, which is what the instants say
     // and what a chat simulation's evidence carries today.
     expect(measured === undefined ? [] : valuesOf(measured)).toEqual([

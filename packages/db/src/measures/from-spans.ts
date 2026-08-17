@@ -367,6 +367,23 @@ function samplesOf(
  * citing it opens the trace the measurement is about rather than a turn picked
  * to look precise.
  *
+ * **A measurement that runs backwards is not kept, and the rule is the
+ * derivation's own.** A real conversation on a real Retell account reports an
+ * end-to-end sample of −2103 ms; the derivation above already refuses a
+ * negative for the reason that applies here word for word — a wait that ran
+ * backwards is not a fast answer, and a number that is wrong is worse than a
+ * measurement that is missing. It is worse than harmless in this arm: the worst
+ * sample decides a bound, so a negative can never fail one and would sit in the
+ * series holding it trivially, then drag every mean and percentile down the day
+ * a grader can ask for one. A reported **zero** stays, and the difference is
+ * real — zero is what the platform says it measured, not the placeholder pair a
+ * zero-width turn would have produced. The block on the payload is untouched by
+ * any of this: the writer keeps everything the platform said, and the fold
+ * refuses what cannot be true.
+ *
+ * A measurement whose every value runs backwards contributes nothing, so the
+ * measure is absent exactly as it is for one the platform never took.
+ *
  * The order is the platform's own, exactly as a timed series is the order it
  * was taken in: the block carries raw measurements rather than a summary, so
  * read forwards it is the conversation read forwards.
@@ -387,7 +404,9 @@ function reportedSamplesOf(
       measurement.unit === cataloged.unit,
   );
   if (said === undefined) return [];
-  return said.values.map((value) => ({ value, spanId: reported.spanId }));
+  return said.values
+    .filter((value) => value >= 0)
+    .map((value) => ({ value, spanId: reported.spanId }));
 }
 
 /* ------------------------------------------------------------------- *
