@@ -276,10 +276,26 @@ export function providerOf(standing: Standing, route: Route): ProviderView {
     const upstream = socketUpstreamOf(standing, route);
     return { attempts: upstream.attempts, last: () => upstream.seen.at(-1) };
   }
-  // Every HTTP row this gateway carries is OpenAI's, and `withUpstream` refuses
-  // to build a world for one that is not — so a second HTTP provider arrives
-  // here as a failing test rather than as a silent read of the wrong records.
+  if (route.provider !== "openai") throw noStandIn(route);
   return { attempts: standing.openai.attempts, last: () => standing.openai.seen.at(-1) };
+}
+
+/**
+ * What a route with no stand-in behind it earns, on every one of these
+ * lookups.
+ *
+ * **Refused rather than answered with somebody else's records, and that is a
+ * rule about what a green table-driven suite is worth.** These helpers exist so
+ * a row added to `ROUTES` is asked every question the others are asked. A
+ * lookup that fell through to whichever stand-in happened to be there would
+ * make the new row *pass* every one of them — against a provider it never
+ * reached, with records it never wrote. The suite would grow a row and lose a
+ * guarantee in the same commit, and nothing would say so.
+ */
+function noStandIn(route: Route): Error {
+  return new Error(
+    `this world stands up no ${route.transport} provider for ${route.provider}, so ${route.provider}/${route.job} cannot be read here; give the route its own stand-in in \`standUp\` before driving it`,
+  );
 }
 
 /**
@@ -324,11 +340,7 @@ export function withUpstream(
   route: Route,
   behaviour: Omit<HttpUpstreamPlan, "path" | "expectAuthorization">,
 ): WorldPlan {
-  if (route.provider !== "openai" || route.transport !== "http") {
-    throw new Error(
-      `this world stands one HTTP provider up, and ${route.provider}/${route.job} is not it; give the route its own stand-in before driving it here`,
-    );
-  }
+  if (route.provider !== "openai" || route.transport !== "http") throw noStandIn(route);
   const plan: HttpUpstreamPlan = {
     path: route.upstreamPath,
     expectAuthorization: `Bearer ${EGMA_PROVIDER_KEY.openai}`,
@@ -362,6 +374,10 @@ export function withSocketUpstream(
 export function socketUpstreamOf(standing: Standing, route: Route): SocketUpstream {
   if (route.provider === "deepgram") return standing.deepgram;
   if (route.provider === "cartesia") return standing.cartesia;
+  if (route.provider !== "openai") throw noStandIn(route);
+  // OpenAI's socket side, wearing the shape the socket-only stand-ins have, so
+  // a caller reading what a socket row saw does not have to know that this
+  // provider's HTTP rows share the same server.
   return {
     origin: standing.openai.origin,
     seen: standing.openai.sockets,

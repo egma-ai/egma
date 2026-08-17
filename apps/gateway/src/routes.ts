@@ -112,9 +112,8 @@ export const ROUTES: readonly Route[] = [
      * posts a finished recording of a turn and waits, so it cannot begin until
      * the agent has stopped talking and the length of every agent turn is added
      * to that turn's delay. This one transcribes while the audio is still
-     * arriving. The comparison the specification asks for was run against the
-     * real provider, and it is recorded in the planning repository's
-     * provider-catalog proof record.
+     * arriving. The comparison was run against the real provider before this
+     * row was written.
      *
      * The caller's `?intent=transcription` crosses unchanged, exactly as every
      * other query value does: it is the provider's own parameter and this

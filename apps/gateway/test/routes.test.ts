@@ -114,6 +114,35 @@ describe("the shipped routes", () => {
   }
 });
 
+describe("a route this world stands no provider up for", () => {
+  /**
+   * The check that keeps the table above worth running.
+   *
+   * Every question in that table is asked through `providerOf`. If that lookup
+   * answered with whichever stand-in happened to be there, a row added for a
+   * provider nobody stood up would *pass* all of them — against a provider it
+   * never reached, with records it never wrote. The suite would grow a row and
+   * lose a guarantee in the same commit. So the lookups refuse, and this is
+   * where that refusal is pinned.
+   */
+  const unshipped = {
+    path: "/nobody/v1/anything",
+    method: "POST",
+    transport: "http",
+    provider: "nobody",
+    job: "llm",
+    upstreamPath: "/v1/anything",
+    credential: { at: "header", name: "authorization", scheme: "Bearer" },
+  } as unknown as (typeof ROUTES)[number];
+
+  it("is refused by the lookups rather than answered with another provider's records", () => {
+    expect(() => providerOf(standing, unshipped)).toThrow(/stands up no/);
+    expect(() =>
+      providerOf(standing, { ...unshipped, transport: "socket", method: "GET" }),
+    ).toThrow(/stands up no/);
+  });
+});
+
 describe("everything that is not a shipped route", () => {
   /**
    * The table is written as the shapes somebody would really try, rather than

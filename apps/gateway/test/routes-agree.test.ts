@@ -221,8 +221,15 @@ describe("what the catalog offers, and what can execute it", () => {
    * Egma does not name a provider it cannot keep. They are deferred rather than
    * cancelled: each returns through its own ticket with its own live proof, and
    * on that day this list is what has to be edited deliberately.
+   *
+   * **What this scans is the model catalog and everything downstream of it** —
+   * the entries, the reserved list, both copies of the address map, the route
+   * table. It deliberately does not claim to scan every surface in the product:
+   * the pre-catalog persona-traits voice path still offers `elevenlabs`, that
+   * leg still works, and it is the compatibility surface a later ticket
+   * removes. Nothing a persona or a grader selects as a *model* can reach it.
    */
-  it("names no provider this release cannot live-prove, anywhere a browser can read", () => {
+  it("names no provider this release cannot live-prove, anywhere the model catalog reaches", () => {
     const notYet = ["anthropic", "google", "gemini", "assemblyai", "elevenlabs"];
     const named = [
       ...PROVIDER_CATALOG.flatMap((entry) => [entry.provider, entry.label.toLowerCase()]),

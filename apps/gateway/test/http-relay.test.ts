@@ -138,72 +138,6 @@ describe("when the exchange does not go well", () => {
     expect(written["statusClass"]).toBe("provider-refused");
   });
 
-  it("gives up on a provider that went quiet, within a finite bound", async () => {
-    standing = await standUp({
-      openai: {
-        path: "/v1/chat/completions",
-        expectAuthorization: `Bearer ${EGMA_PROVIDER_KEY.openai}`,
-        silentForMs: 30_000,
-      },
-      settings: {
-        EGMA_GATEWAY_FIRST_OUTPUT_TIMEOUT_MS: "400",
-        EGMA_GATEWAY_EXCHANGE_TIMEOUT_MS: "5000",
-      },
-    });
-    const startedAt = Date.now();
-    const answered = await fetch(`${standing.world.origin}/openai/v1/chat/completions`, {
-      method: "POST",
-      headers: AUTHENTICATED,
-      body: "{}",
-    });
-    expect(answered.status).toBe(504);
-    expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expect(standing.openai.attempts()).toBe(1);
-
-    const written = await eventually(() => records(standing?.world as never).at(-1));
-    expect(written["statusClass"]).toBe("timed-out");
-  });
-
-  it("stops the provider's work when the caller hangs up", async () => {
-    standing = await standUp({
-      openai: {
-        path: "/v1/chat/completions",
-        expectAuthorization: `Bearer ${EGMA_PROVIDER_KEY.openai}`,
-        chunks: ["one", "two", "three", "four", "five"],
-        gapMs: 300,
-      },
-    });
-
-    const giveUp = new AbortController();
-    const answered = await fetch(`${standing.world.origin}/openai/v1/chat/completions`, {
-      method: "POST",
-      headers: AUTHENTICATED,
-      body: "{}",
-      signal: giveUp.signal,
-    });
-    const reader = (answered.body as ReadableStream<Uint8Array>).getReader();
-    await reader.read();
-    giveUp.abort();
-
-    const written = await eventually(() =>
-      records(standing?.world as never).find((line) => line["provider"] === "openai"),
-    );
-    /**
-     * `cancelled`, and not `ok`.
-     *
-     * The provider's status is known when its headers arrive, which on a
-     * streamed answer is at the very beginning — so a record frozen at that
-     * moment says `200`, and a stream the caller walked out on is filed as a
-     * completed one. That is the failure this assertion exists for, and
-     * accepting either answer here is what hid it.
-     */
-    expect(written["statusClass"]).toBe("cancelled");
-    // One attempt at the provider and no second one, and the exchange ended
-    // long before the provider's five slow pieces would have finished.
-    expect(standing.openai.attempts()).toBe(1);
-    expect(written["bytesFromProvider"]).toBeLessThan(20);
-  });
-
   it("settles at once when the provider breaks the body it had already started", async () => {
     /**
      * The failure with no status line to report it with. The provider answered
@@ -347,20 +281,34 @@ describe("every HTTP route this gateway carries", () => {
         await reader.read();
         giveUp.abort();
 
-        // The exchange is recorded as the cancellation it was, rather than as
-        // the `200` the headers had already promised.
+        /**
+         * `cancelled`, and not `ok`.
+         *
+         * The provider's status is known when its headers arrive, which on a
+         * streamed answer is at the very beginning — so a record frozen at that
+         * moment says `200`, and a stream the caller walked out on is filed as
+         * a completed one. That is the failure this assertion exists for, and
+         * accepting either answer here is what hid it.
+         */
         const written = await eventually(() =>
           records(standing?.world as NonNullable<typeof standing>["world"]).find(
             (line) => line["statusClass"] === "cancelled" && line["job"] === route.job,
           ),
         );
         expect(written["provider"]).toBe(route.provider);
+        // One attempt at the provider and no second one, and the exchange ended
+        // long before the provider's five slow pieces would have finished.
+        expect(standing.openai.attempts()).toBe(1);
+        expect(written["bytesFromProvider"]).toBeLessThan(20);
       });
 
       it("gives up on a provider that went quiet, within a finite bound", async () => {
         standing = await standUp({
-          ...withUpstream(route, { silentForMs: 5_000 }),
-          settings: { EGMA_GATEWAY_FIRST_OUTPUT_TIMEOUT_MS: "300" },
+          ...withUpstream(route, { silentForMs: 30_000 }),
+          settings: {
+            EGMA_GATEWAY_FIRST_OUTPUT_TIMEOUT_MS: "400",
+            EGMA_GATEWAY_EXCHANGE_TIMEOUT_MS: "5000",
+          },
         });
 
         const began = Date.now();
@@ -373,7 +321,15 @@ describe("every HTTP route this gateway carries", () => {
 
         expect(answered.status).toBe(504);
         expect(body.error.code).toBe("provider_timed_out");
+        // Far inside the whole-exchange bound, so what fired is the
+        // first-output one rather than the backstop behind it.
         expect(Date.now() - began).toBeLessThan(3_000);
+        expect(standing.openai.attempts()).toBe(1);
+
+        const written = await eventually(() =>
+          records(standing?.world as NonNullable<typeof standing>["world"]).at(-1),
+        );
+        expect(written["statusClass"]).toBe("timed-out");
       });
     });
   }

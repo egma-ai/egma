@@ -136,7 +136,7 @@ describe("the provider catalog", () => {
     // The four that left this effort's scope, hunted through the whole answer
     // rather than through one field of it.
     const answered = JSON.stringify(read.body).toLowerCase();
-    for (const absent of ["anthropic", "gemini", "assemblyai", "elevenlabs"]) {
+    for (const absent of ["anthropic", "google", "gemini", "assemblyai", "elevenlabs"]) {
       expect(answered, `${absent} is still named in the catalog answer`).not.toContain(absent);
     }
   });

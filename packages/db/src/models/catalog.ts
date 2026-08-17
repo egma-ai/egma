@@ -63,10 +63,11 @@ export type ProviderCatalogEntry = {
  * The providers a model-provider credential may authorize.
  *
  * **Exactly the providers the catalog can execute.** One provider does several
- * jobs — an OpenAI credential authorizes its LLM work and, when those entries
- * ship, its speech work too — so this is a list of accounts rather than a list
- * of entries. A provider that has no visible entry is not here: storing a
- * credential for it would be Egma taking a secret it has nothing to do with.
+ * jobs — an OpenAI credential authorizes its language-model work and its
+ * listening and speaking work, all three of which this release ships — so this
+ * is a list of accounts rather than a list of entries. A provider that has no
+ * visible entry is not here: storing a credential for it would be Egma taking a
+ * secret it has nothing to do with.
  */
 export const MODEL_PROVIDERS = ["openai", "deepgram", "cartesia"] as const;
 export type ModelProvider = (typeof MODEL_PROVIDERS)[number];

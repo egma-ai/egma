@@ -503,6 +503,39 @@ def test_a_socket_leg_is_given_an_address_it_can_open():
     assert listening._base_url == "wss://gateway.example/openai/v1/realtime"
 
 
+def test_an_address_already_written_as_a_socket_is_left_alone():
+    """The third case, and the one a translation gets wrong quietly.
+
+    Both shipped socket adapters default to a ``wss://`` address of their
+    own, and a deployment or a harness may name one directly. A conversion
+    that only knew how to rewrite ``http`` schemes would be fine; one that
+    assumed it was always handed an ``https`` address and sliced a fixed
+    number of characters off the front would mangle this and say nothing.
+    So what is asserted is that an address already in the scheme a socket
+    client opens crosses untouched.
+    """
+    speaking, _, _ = _mouth(
+        SpeechProviders(
+            tts="cartesia",
+            tts_key=A_KEY,
+            tts_base_url="wss://gateway.example/cartesia/tts/websocket",
+        ),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+    assert speaking._url == "wss://gateway.example/cartesia/tts/websocket"
+
+    listening, _ = _ears(
+        SpeechProviders(
+            stt="openai_realtime",
+            stt_key=A_KEY,
+            stt_base_url="ws://127.0.0.1:8787/openai/v1/realtime",
+        ),
+        TELEPHONY_BAND_HZ,
+    )
+    assert listening._base_url == "ws://127.0.0.1:8787/openai/v1/realtime"
+
+
 def test_a_loopback_gateway_keeps_its_own_scheme_rather_than_gaining_tls():
     """The deterministic suite runs a real gateway on `127.0.0.1` over plain
     HTTP, and a leg that upgraded that to `wss` would be asking for a
