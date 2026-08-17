@@ -53,6 +53,17 @@ function asDuplex(socket: CloudflareWebSocket): Duplex {
     onClose: (handler) =>
       socket.addEventListener("close", (event) => handler(event.code, event.reason)),
     onError: (handler) => socket.addEventListener("error", (event) => handler(event)),
+    bufferedBytes: () => socket.bufferedAmount,
+    /**
+     * No `pauseReading` here, deliberately.
+     *
+     * This runtime delivers frames as events and offers no way to stop taking
+     * them, so there is no read flow control to expose. The aggregate bound
+     * therefore has one outcome on this host rather than two: an exchange whose
+     * far side does not start keeping up within the drain window is closed
+     * loudly. That is the honest behaviour available here, and it is why the
+     * relay treats both methods as optional rather than assuming them.
+     */
   };
 }
 

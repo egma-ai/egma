@@ -46,6 +46,11 @@ function asDuplex(socket: WebSocket): Duplex {
       }),
     onClose: (handler) => socket.on("close", (code: number, reason: Buffer) => handler(code, reason.toString())),
     onError: (handler) => socket.on("error", (error: Error) => handler(error)),
+    bufferedBytes: () => socket.bufferedAmount,
+    // Real read flow control: pausing stops taking frames off the wire, the
+    // peer's own socket fills, and the peer discovers it cannot write.
+    pauseReading: () => socket.pause(),
+    resumeReading: () => socket.resume(),
   };
 }
 
@@ -115,10 +120,18 @@ async function writeResponse(response: Response, node: ServerResponse): Promise<
       // property would be true of the relay and false of what a caller sees.
       node.write(value);
     }
-  } catch {
-    // The caller went away mid-stream; the abort has already been raised.
-  } finally {
     node.end();
+  } catch {
+    /**
+     * The answer stopped part-way, and this must not look like it finished.
+     *
+     * Ending the response here writes the terminating chunk, and the caller's
+     * client then reports a complete body that is missing its second half — a
+     * truncated model answer delivered as a whole one, with a `200` on it.
+     * Destroying the connection leaves the chunked stream unterminated, which
+     * is what tells the caller the truth.
+     */
+    node.destroy();
   }
 }
 
@@ -333,6 +346,11 @@ function nodeSocketHost(
           onMessage: (handler) => onceReady((socket) => asDuplex(socket).onMessage(handler)),
           onClose: (handler) => onceReady((socket) => asDuplex(socket).onClose(handler)),
           onError: (handler) => onceReady((socket) => asDuplex(socket).onError(handler)),
+          // Nothing is buffered before the socket exists, because nothing has
+          // been asked of it that this turn of the loop has not already run.
+          bufferedBytes: () => accepted?.bufferedAmount ?? 0,
+          pauseReading: () => onceReady((socket) => socket.pause()),
+          resumeReading: () => onceReady((socket) => socket.resume()),
         },
         // Node cannot build a `101`, and nothing reads this one: the upgrade
         // handler above knows the handshake happened because it asked.

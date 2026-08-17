@@ -8,9 +8,14 @@ import type { Route } from "./routes.ts";
  * provider receives its own native request, byte for byte, except for
  * authorization and except for the names that belong to egma.** Everything a
  * provider adapter sends — its path, its query, its content type, its
- * provider-specific headers, its subprotocols, its body — arrives at the
- * provider as the adapter wrote it, which is what keeps Pipecat the simulator's
- * provider-adapter layer and keeps this gateway out of the protocol business.
+ * provider-specific headers, its body — arrives at the provider as the adapter
+ * wrote it, which is what keeps Pipecat the simulator's provider-adapter layer
+ * and keeps this gateway out of the protocol business.
+ *
+ * WebSocket subprotocols are the one exception, and they are an exception
+ * because of what they carry rather than what they are: a subprotocol list is
+ * one of the places a provider takes a key. The caller's is neither forwarded
+ * nor stripped — asking for one is refused outright. See `Route.upstreamProtocols`.
  */
 
 /** The header the gateway's own authentication travels in. */

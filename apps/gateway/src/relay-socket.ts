@@ -70,6 +70,11 @@ export class SocketRefused extends Error {
 const CLOSE_GOING_AWAY = 1001;
 const CLOSE_INTERNAL = 1011;
 const CLOSE_TOO_BIG = 1009;
+/** "Try again later" — the honest code for a peer that could not keep up. */
+const CLOSE_OVERLOADED = 1013;
+
+/** How often a held direction asks whether the far side has caught up. */
+const DRAIN_POLL_MS = 20;
 
 export async function relaySocket(
   host: SocketHost,
@@ -226,6 +231,18 @@ export async function relaySocket(
     statusClass = why;
     if (idle !== undefined) clearTimeout(idle);
     clearTimeout(whole);
+    for (const stop of holdings) stop();
+    /**
+     * Reading starts again before anything is closed.
+     *
+     * A closing handshake is two frames, and a socket this relay has stopped
+     * reading cannot receive the second one — so an exchange ended while one
+     * side was held would send its close, never read the reply, and leave that
+     * peer in `CLOSING` until something else gave up. Ending is exactly when
+     * backpressure has stopped being useful.
+     */
+    accepted.socket.resumeReading?.();
+    upstream.socket.resumeReading?.();
     try {
       if (closeUpstream) upstream.socket.close(code, reason);
     } catch {
@@ -250,10 +267,46 @@ export async function relaySocket(
    * One direction, wired.
    *
    * Frames go straight across in the order they arrived — no reordering, no
-   * regrouping, no reading of what is in them. The only thing looked at is how
-   * big one is, and the only reason for that is the bound.
+   * regrouping, no reading of what is in them. Two things are looked at and
+   * neither is the content: how big one frame is, and how much the far side is
+   * still holding.
+   *
+   * **The second is the aggregate bound, and it is the one that matters on a
+   * voice path.** A per-frame bound stops one enormous frame; it does nothing
+   * about a listening leg sending audio continuously into a provider that has
+   * slowed down, which is the ordinary shape of trouble here. Every send on
+   * both hosts is fire-and-forget into a buffer the host owns, so what happens
+   * next is decided entirely by whether anybody is watching that buffer.
+   *
+   * When it crosses the bound the fast side stops being read, which is real
+   * backpressure: the peer's own socket fills and the peer discovers it cannot
+   * write. Crossing is not a failure — a provider that hesitated deserves to be
+   * waited for — so the exchange carries on as soon as the buffer drains, and
+   * no frame is ever dropped. Only a peer that never starts keeping up ends the
+   * exchange, loudly, with the code that says exactly that.
    */
   const carry = (from: Duplex, to: Duplex, count: (bytes: number) => void): void => {
+    let holding = false;
+    let watching: ReturnType<typeof setTimeout> | undefined;
+
+    /** Half the bound: far enough down that it is not crossed again at once. */
+    const drainedTo = Math.max(1, Math.floor(config.maxBufferedBytes / 2));
+
+    const watch = (until: number): void => {
+      watching = undefined;
+      if (over) return;
+      if (to.bufferedBytes() <= drainedTo) {
+        holding = false;
+        from.resumeReading?.();
+        return;
+      }
+      if (Date.now() >= until) {
+        end("refused", CLOSE_OVERLOADED, "the far side is not keeping up");
+        return;
+      }
+      watching = setTimeout(() => watch(until), DRAIN_POLL_MS);
+    };
+
     from.onMessage((frame: Frame) => {
       if (over) return;
       const size = frameBytes(frame);
@@ -267,12 +320,27 @@ export async function relaySocket(
         to.send(frame);
       } catch {
         end("provider-failed", CLOSE_INTERNAL, "the far side would not take the frame");
+        return;
+      }
+      if (!holding && to.bufferedBytes() > config.maxBufferedBytes) {
+        holding = true;
+        from.pauseReading?.();
+        if (watching === undefined) {
+          watching = setTimeout(() => watch(Date.now() + config.bufferDrainMs), DRAIN_POLL_MS);
+        }
       }
     });
     from.onError(() => {
       end("provider-failed", CLOSE_INTERNAL, "the connection failed");
     });
+
+    holdings.push(() => {
+      if (watching !== undefined) clearTimeout(watching);
+    });
   };
+
+  /** What each direction has to stop doing when the exchange ends. */
+  const holdings: (() => void)[] = [];
 
   carry(accepted.socket, upstream.socket, (size) => {
     bytesToProvider += size;

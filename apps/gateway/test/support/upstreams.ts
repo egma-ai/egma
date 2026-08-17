@@ -69,6 +69,15 @@ export type HttpUpstreamPlan = {
   readonly headers?: Readonly<Record<string, string>>;
   /** Hold the answer back this long, to prove a bound is really finite. */
   readonly silentForMs?: number;
+  /**
+   * Break the connection after this many chunks have gone out, so the body
+   * fails *after* its headers arrived.
+   *
+   * The failure a relay is most likely to get wrong: the status line said
+   * `200`, the caller is already reading, and then the provider dies. There is
+   * no status to report it with and no `flush` to notice it in.
+   */
+  readonly breakAfterChunks?: number;
 };
 
 export async function startHttpUpstream(plan: HttpUpstreamPlan): Promise<HttpUpstream> {
@@ -123,6 +132,10 @@ export async function startHttpUpstream(plan: HttpUpstreamPlan): Promise<HttpUps
         const chunks = plan.chunks ?? ["done"];
         let index = 0;
         const push = (): void => {
+          if (plan.breakAfterChunks !== undefined && index >= plan.breakAfterChunks) {
+            response.socket?.destroy();
+            return;
+          }
           if (index >= chunks.length) {
             response.end();
             return;
@@ -172,6 +185,15 @@ export type SocketUpstream = {
   readonly attempts: () => number;
   /** Resolves once a connection has been accepted. */
   readonly opened: () => Promise<SeenSocket>;
+  /**
+   * Stop and start reading, so a test can be a peer that is not keeping up.
+   *
+   * A slow provider is not a rare thing to be — a socket whose consumer is
+   * paused is what any overloaded far end looks like from here — and it is the
+   * only way to ask what a relay does when one side outruns the other.
+   */
+  readonly stopReading: () => void;
+  readonly startReading: () => void;
   stop(): Promise<void>;
 };
 
@@ -293,6 +315,12 @@ export async function startSocketUpstream(plan: SocketUpstreamPlan): Promise<Soc
     seen,
     attempts: () => attempts,
     opened: () => firstOpen,
+    stopReading: () => {
+      for (const record of seen) record.socket?.pause();
+    },
+    startReading: () => {
+      for (const record of seen) record.socket?.resume();
+    },
     stop: () =>
       new Promise<void>((done) => {
         for (const timer of timers) clearTimeout(timer);

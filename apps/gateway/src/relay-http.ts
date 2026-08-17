@@ -143,11 +143,6 @@ export async function relayHttp(
       bytes += chunk.byteLength;
       controller.enqueue(chunk);
     },
-    flush() {
-      crossedWhole = true;
-      stopTimers();
-      settle();
-    },
   });
 
   // A caller who went away mid-stream ends the exchange here: the abort stops
@@ -167,11 +162,48 @@ export async function relayHttp(
     { once: true },
   );
 
-  const body = upstream.body === null ? null : upstream.body.pipeThrough(counter);
+  /**
+   * The pipe is driven here rather than by `pipeThrough`, and the reason is one
+   * failure that has no status line to report it with.
+   *
+   * A provider that answers `200`, sends half its answer and then dies leaves a
+   * relay with nothing to notice: there is no status to classify, and a
+   * transformer's `flush` runs on a clean end and never on a broken one.
+   * `pipeThrough` hands back a readable and swallows the outcome, so the
+   * exchange settled only when this gateway's own exchange bound fired — ten
+   * minutes later, on a record that said `timed-out` about a provider that had
+   * broken in the first second, with the work held open the whole time.
+   *
+   * Driving the pipe means both endings are seen. A clean one settles the
+   * record as it always did; a broken one settles it at once, as a provider
+   * failure, and the error reaches the caller's own stream rather than being
+   * turned into a tidy end that would present half an answer as a whole one.
+   */
+  let body: ReadableStream<Uint8Array> | null = null;
   if (upstream.body === null) {
     crossedWhole = true;
     stopTimers();
     settle();
+  } else {
+    body = counter.readable;
+    void upstream.body.pipeTo(counter.writable, { signal: abort.signal }).then(
+      () => {
+        crossedWhole = true;
+        stopTimers();
+        settle();
+      },
+      () => {
+        if (!crossedWhole && endedBadly === undefined) {
+          endedBadly = request.signal.aborted
+            ? "cancelled"
+            : abort.signal.aborted
+              ? "timed-out"
+              : "provider-failed";
+        }
+        stopTimers();
+        settle();
+      },
+    );
   }
 
   const providersOwn = upstreamRequestId(upstream.headers);

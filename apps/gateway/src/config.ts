@@ -90,6 +90,34 @@ const DEFAULT_SOCKET_IDLE_TIMEOUT_MS = 120_000;
  */
 const DEFAULT_MAX_FRAME_BYTES = 1_048_576;
 
+/**
+ * How much one direction of a relayed socket may be holding for a peer that
+ * has stopped keeping up.
+ *
+ * **The aggregate bound, as against the per-frame one above.** A listening leg
+ * sends audio continuously; a provider that slows down does not say so, it
+ * simply reads more slowly, and every send on both hosts is fire-and-forget
+ * into a buffer the host owns. With only a per-frame bound, a fast talker and a
+ * slow listener grow that buffer until the isolate dies — one exchange taking
+ * down every other exchange sharing it.
+ *
+ * Four mebibytes is over two minutes of one-way telephony audio, so no ordinary
+ * slow moment reaches it, and it is small enough that many exchanges at the
+ * bound still fit in an isolate.
+ */
+const DEFAULT_MAX_BUFFERED_BYTES = 4_194_304;
+
+/**
+ * How long a peer has to start keeping up again before the exchange is ended.
+ *
+ * Crossing the bound is not itself a failure — a provider that paused for a
+ * moment should be waited for, not hung up on — so the gateway stops reading
+ * the fast side and gives the slow one this long to drain. Ten seconds is far
+ * longer than any real hesitation on a voice path and far shorter than holding
+ * a wedged exchange open.
+ */
+const DEFAULT_BUFFER_DRAIN_MS = 10_000;
+
 export type Config = {
   /**
    * The organization-scoped secret the preview verifier accepts, the
@@ -118,6 +146,8 @@ export type Config = {
   readonly firstOutputTimeoutMs: number;
   readonly socketIdleTimeoutMs: number;
   readonly maxFrameBytes: number;
+  readonly maxBufferedBytes: number;
+  readonly bufferDrainMs: number;
   readonly logLevel: LogLevel;
 };
 
@@ -140,6 +170,8 @@ export const OPTIONAL_NAMES = [
   "EGMA_GATEWAY_FIRST_OUTPUT_TIMEOUT_MS",
   "EGMA_GATEWAY_SOCKET_IDLE_TIMEOUT_MS",
   "EGMA_GATEWAY_MAX_FRAME_BYTES",
+  "EGMA_GATEWAY_MAX_BUFFERED_BYTES",
+  "EGMA_GATEWAY_BUFFER_DRAIN_MS",
   "EGMA_GATEWAY_LOG_LEVEL",
   "EGMA_GATEWAY_PORT",
   /**
@@ -267,6 +299,16 @@ export function loadConfig(environment: Environment): Config {
       environment,
       "EGMA_GATEWAY_MAX_FRAME_BYTES",
       DEFAULT_MAX_FRAME_BYTES,
+    ),
+    maxBufferedBytes: positiveWholeNumber(
+      environment,
+      "EGMA_GATEWAY_MAX_BUFFERED_BYTES",
+      DEFAULT_MAX_BUFFERED_BYTES,
+    ),
+    bufferDrainMs: positiveWholeNumber(
+      environment,
+      "EGMA_GATEWAY_BUFFER_DRAIN_MS",
+      DEFAULT_BUFFER_DRAIN_MS,
     ),
     logLevel: logLevel(environment),
   };

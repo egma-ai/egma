@@ -109,12 +109,25 @@ provider is still producing it.
 | First output | 30 s | A provider that accepted the work and then went quiet, including a WebSocket handshake it never completes |
 | Whole exchange | 10 min | An exchange that says a little, forever |
 | Socket idle | 2 min | An abandoned voice socket, where silence in both directions is not a quiet moment |
-| Frame size | 1 MiB | One enormous frame, the only thing on a relayed socket that has to exist in memory in one piece |
+| Frame size | 1 MiB | One enormous frame, the only thing that has to exist in memory in one piece |
+| Buffered per direction | 4 MiB | One peer outrunning the other — a listening leg sending audio continuously into a provider that has slowed down |
+| Drain window | 10 s | A peer that crossed the buffer bound and never starts keeping up |
 
-There is no buffer between the two ends of a relayed socket to bound: neither
-side is open until both are. On the HTTP transport the standard streams supply
-back-pressure, so a slow caller slows the provider rather than filling the
-gateway with the difference.
+**How the buffer bound behaves.** Crossing it is not a failure: a provider that
+hesitated deserves to be waited for. The gateway stops reading the fast side —
+real backpressure, so that peer's own socket fills and it discovers it cannot
+write — and the exchange carries on as soon as the slow side drains. **No frame
+is ever dropped.** Only a peer that is still behind after the drain window ends
+the exchange, with close code `1013` and a `refused` record.
+
+Stopping the read needs read flow control from the host. The local host has it;
+the Cloudflare runtime delivers frames as events and offers none, so there the
+bound has one outcome rather than two — the loud close. Both hosts report how
+much is buffered, which is what the bound is measured against.
+
+On the HTTP transport the standard streams supply back-pressure of their own, so
+a slow caller slows the provider rather than filling the gateway with the
+difference, and there is no buffer size to configure.
 
 ## What it writes down
 
@@ -161,6 +174,8 @@ except where a default is written below.
 | `EGMA_GATEWAY_FIRST_OUTPUT_TIMEOUT_MS` | `30000` | The first-output bound |
 | `EGMA_GATEWAY_SOCKET_IDLE_TIMEOUT_MS` | `120000` | The socket idle bound |
 | `EGMA_GATEWAY_MAX_FRAME_BYTES` | `1048576` | The largest single frame |
+| `EGMA_GATEWAY_MAX_BUFFERED_BYTES` | `4194304` | How much one direction may be holding for a peer that has stopped keeping up |
+| `EGMA_GATEWAY_BUFFER_DRAIN_MS` | `10000` | How long that peer has to start keeping up before the exchange ends |
 | `EGMA_GATEWAY_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARN` or `ERROR` |
 | `EGMA_GATEWAY_PORT` | an unused port | Local host only |
 | `EGMA_GATEWAY_VERSION` | absent | Not written by a deployment: the runtime's read-only name for the build that is answering, bound on Cloudflare and reported by the health check |

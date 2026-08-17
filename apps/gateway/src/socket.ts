@@ -19,6 +19,30 @@ export type Duplex = {
   onMessage(handler: (frame: Frame) => void): void;
   onClose(handler: (code: number, reason: string) => void): void;
   onError(handler: (error: unknown) => void): void;
+  /**
+   * How much this end is holding that it has not managed to send yet.
+   *
+   * **The only thing a relay can know about a peer that has stopped keeping
+   * up.** Every send on both hosts is fire-and-forget into a buffer the host
+   * owns, so this number growing is the single signal that one side is
+   * outrunning the other — and without it there is no aggregate bound to
+   * enforce, only a per-frame one that a fast talker walks straight past.
+   *
+   * A host whose runtime does not report it answers `0`, and the relay's bound
+   * then never fires. That is worth saying out loud rather than assuming: on
+   * such a host the aggregate bound is not enforced.
+   */
+  bufferedBytes(): number;
+  /**
+   * Stop and start taking frames off the wire, where the host can.
+   *
+   * This is real backpressure — the peer's own socket fills and the peer
+   * discovers it cannot write — and it is what lets a slow moment be a slow
+   * moment rather than a closed exchange. Absent on a host with no read flow
+   * control, and the relay then has only the loud close.
+   */
+  pauseReading?(): void;
+  resumeReading?(): void;
 };
 
 export type UpstreamSocket = {

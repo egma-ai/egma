@@ -258,6 +258,51 @@ describe("when the exchange does not go well", () => {
     expect(written["bytesFromProvider"]).toBeLessThan(20);
   });
 
+  it("settles at once when the provider breaks the body it had already started", async () => {
+    /**
+     * The failure with no status line to report it with. The provider answered
+     * `200`, some of the answer crossed, and then it died — so there is no
+     * status to classify and no end of stream to notice. A relay that only
+     * settles its record on a clean finish waits out its own timeout here, and
+     * files a provider that broke as an exchange that ran long.
+     */
+    standing = await standUp({
+      openai: {
+        path: "/v1/chat/completions",
+        expectAuthorization: `Bearer ${EGMA_PROVIDER_KEY.openai}`,
+        chunks: ["first", "second", "third", "fourth"],
+        gapMs: 30,
+        breakAfterChunks: 2,
+      },
+      // Far longer than this test may take: what is being proved is that the
+      // record does not wait for either of them.
+      settings: {
+        EGMA_GATEWAY_EXCHANGE_TIMEOUT_MS: "60000",
+        EGMA_GATEWAY_FIRST_OUTPUT_TIMEOUT_MS: "30000",
+      },
+    });
+
+    const startedAt = Date.now();
+    const answered = await fetch(`${standing.world.origin}/openai/v1/chat/completions`, {
+      method: "POST",
+      headers: AUTHENTICATED,
+      body: "{}",
+    });
+    expect(answered.status).toBe(200);
+
+    // Downstream is terminated rather than left hanging: reading the rest of
+    // the body fails instead of waiting for an end that is never coming.
+    await expect(readWithTiming(answered)).rejects.toThrow();
+
+    const written = await eventually(() =>
+      records(standing?.world as never).find((line) => line["provider"] === "openai"),
+    );
+    expect(written["statusClass"]).toBe("provider-failed");
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    // What had already crossed is on the record rather than being lost with it.
+    expect(written["bytesFromProvider"]).toBeGreaterThan(0);
+  });
+
   it("says a provider is unreachable without saying where it is", async () => {
     standing = await standUp({
       settings: { EGMA_GATEWAY_OPENAI_HOME: "http://127.0.0.1:1" },

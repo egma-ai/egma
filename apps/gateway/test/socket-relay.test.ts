@@ -254,6 +254,98 @@ describe("the bounds a shared gateway has to have", () => {
     expect(written["statusClass"]).toBe("timed-out");
   });
 
+  /**
+   * A talker that does not stop, into a listener that has.
+   *
+   * The volume is deliberately far past the bound: loopback kernel buffers
+   * absorb a couple of megabytes on their own, so a smaller test would pass
+   * against a relay with no bound at all — which is exactly what the first
+   * version of this test did.
+   */
+  const OFFERED_FRAMES = 1024;
+  const FRAME = 32 * 1024;
+
+  async function shoutInto(socket: ReturnType<typeof openSocket>): Promise<void> {
+    const frame = Buffer.alloc(FRAME, 7);
+    for (let index = 0; index < OFFERED_FRAMES; index += 1) {
+      socket.send(frame);
+      // Every so often, so the relay's own turn on the loop actually happens.
+      if (index % 64 === 0) await new Promise((wait) => setTimeout(wait, 10));
+    }
+  }
+
+  it("stops reading a peer that is outrunning the other one, rather than buffering it", async () => {
+    /**
+     * The bound that is not about one frame.
+     *
+     * A listening leg sends audio continuously, and a provider that stops
+     * keeping up does not say so — it simply reads more slowly. Every send on
+     * both hosts is fire-and-forget into a buffer the host owns, so a relay
+     * with no aggregate bound grows that buffer for as long as the fast side
+     * keeps talking, and the first thing anybody learns about it is the isolate
+     * dying.
+     *
+     * What is asserted is where the backpressure ends up. Thirty-two megabytes
+     * are offered into a sixty-four kilobyte bound: if the gateway took them,
+     * the caller would have written them all and be holding nothing. Instead
+     * the caller is left holding most of it, which is what a full pipe feels
+     * like from the far end of it.
+     */
+    standing = await standUp({
+      settings: {
+        EGMA_GATEWAY_MAX_BUFFERED_BYTES: "65536",
+        EGMA_GATEWAY_BUFFER_DRAIN_MS: "60000",
+      },
+    });
+    const socket = openSocket(standing.world, "/deepgram/v1/listen", { headers: AUTHENTICATED });
+    const seen = watch(socket);
+    await seen.opened;
+    const provider = await standing.deepgram.opened();
+
+    standing.deepgram.stopReading();
+    await shoutInto(socket);
+
+    expect(socket.bufferedAmount).toBeGreaterThan(8 * 1024 * 1024);
+    expect(provider.frames.length).toBeLessThan(OFFERED_FRAMES);
+    expect(seen.closed).toBeUndefined();
+
+    // And when the far side starts keeping up again the exchange carries on,
+    // having lost nothing: a held frame is never a dropped frame.
+    standing.deepgram.startReading();
+    await eventually(
+      () => (provider.frames.length === OFFERED_FRAMES ? provider.frames : undefined),
+      30_000,
+    );
+    expect(seen.closed).toBeUndefined();
+    expect(provider.frames.every((one) => one.length === FRAME)).toBe(true);
+
+    socket.close(1000, "done");
+  }, 60_000);
+
+  it("closes a socket whose far side never starts keeping up, loudly", async () => {
+    standing = await standUp({
+      settings: {
+        EGMA_GATEWAY_MAX_BUFFERED_BYTES: "65536",
+        EGMA_GATEWAY_BUFFER_DRAIN_MS: "500",
+      },
+    });
+    const socket = openSocket(standing.world, "/deepgram/v1/listen", { headers: AUTHENTICATED });
+    const seen = watch(socket);
+    await seen.opened;
+    await standing.deepgram.opened();
+
+    standing.deepgram.stopReading();
+    await shoutInto(socket).catch(() => undefined);
+
+    // Never silently dropped and never grown without end: the exchange ends,
+    // with the code that says which of the two happened.
+    const how = await eventually(() => seen.closed, 30_000);
+    expect(how.code).toBe(1013);
+
+    const written = await eventually(() => records(standing?.world as never).at(-1));
+    expect(written["statusClass"]).toBe("refused");
+  }, 60_000);
+
   it("closes a socket that sends one frame bigger than the bound, and carries it nowhere", async () => {
     standing = await standUp({ settings: { EGMA_GATEWAY_MAX_FRAME_BYTES: "1024" } });
     const socket = openSocket(standing.world, "/deepgram/v1/listen", { headers: AUTHENTICATED });
