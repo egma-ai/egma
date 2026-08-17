@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
@@ -18,11 +18,14 @@ import {
   type SimulationStatusWord,
   type VerdictWord,
 } from "../../../../../lib/runs.ts";
+import { simulationRerunPath } from "../../../../../lib/simulations.ts";
 import {
   Actions,
   Button,
+  Field,
   Refused,
   Section,
+  TextInput,
 } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
@@ -173,6 +176,7 @@ function RunDetailView({
   readonly projectId: string;
   readonly runId: string;
 }) {
+  const router = useRouter();
   const { me } = useShellSession();
   // Null until the session read answers. A page that guessed would offer a
   // viewer Cancel, which the server refuses, on every load.
@@ -201,6 +205,12 @@ function RunDetailView({
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [working, setWorking] = useState(false);
+  const [rerunSimulation, setRerunSimulation] =
+    useState<RunSimulation | null>(null);
+  const [rerunName, setRerunName] = useState("");
+  const [rerunKey, setRerunKey] = useState<string | null>(null);
+  const [rerunRefused, setRerunRefused] = useState<Refusal | null>(null);
+  const [rerunWorking, setRerunWorking] = useState(false);
 
   const run = answer?.status === "ready" ? answer.value : null;
 
@@ -231,6 +241,11 @@ function RunDetailView({
   useEffect(() => {
     setRefused(null);
     setConfirmingCancel(false);
+    setRerunSimulation(null);
+    setRerunName("");
+    setRerunKey(null);
+    setRerunRefused(null);
+    setRerunWorking(false);
   }, [runId, projectId]);
 
   useEffect(() => {
@@ -361,6 +376,55 @@ function RunDetailView({
       return;
     }
     reload();
+  }
+
+  function openRerun(simulation: RunSimulation): void {
+    setRerunSimulation(simulation);
+    setRerunName("");
+    setRerunKey(`run:${globalThis.crypto.randomUUID()}`);
+    setRerunRefused(null);
+  }
+
+  function closeRerun(): void {
+    if (rerunWorking) return;
+    setRerunSimulation(null);
+    setRerunName("");
+    setRerunKey(null);
+    setRerunRefused(null);
+  }
+
+  async function rerun(): Promise<void> {
+    const label = rerunName.trim();
+    if (
+      !mayControl ||
+      rerunSimulation === null ||
+      rerunKey === null ||
+      label === "" ||
+      rerunWorking
+    ) {
+      return;
+    }
+
+    setRerunRefused(null);
+    setRerunWorking(true);
+    const answered = await writeJson<{ readonly id: string }>(
+      simulationRerunPath(rerunSimulation.id),
+      {
+        method: "POST",
+        project: projectId,
+        body: { label, idempotency_key: rerunKey },
+      },
+    );
+    setRerunWorking(false);
+    if (answered.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (answered.status !== "ready") {
+      setRerunRefused(answered.refusal);
+      return;
+    }
+    router.push(projectPath(projectId, "runs", answered.value.id));
   }
 
   if (answer === null || answer.status === "signed-out") {
@@ -550,7 +614,11 @@ function RunDetailView({
             <div className={styles.simulationsTable}>
               <DataTable
                 label="Simulations in this run"
-                columns={simulationColumns(projectId, runId)}
+                columns={simulationColumns(
+                  projectId,
+                  runId,
+                  mayControl ? openRerun : undefined,
+                )}
                 rows={simulations}
                 keyOf={(one) => one.id}
                 stretchPrimaryLink
@@ -587,6 +655,54 @@ function RunDetailView({
           )}
         </Dialog>
       ) : null}
+
+      {rerunSimulation === null ? null : (
+        <Dialog title="Run this simulation again?" onClose={closeRerun}>
+          {(dismiss) => (
+            <form
+              className={styles.rerunDialog}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void rerun();
+              }}
+            >
+              <p>
+                This starts one new run under current conditions for this
+                simulation. Egma uses the same agent, connection, test version,
+                and persona. It then resolves the current persona version,
+                graders, connection settings, and mock tools. The original
+                evidence stays unchanged.
+              </p>
+              <Field label="Run name" htmlFor="rerun-name">
+                <TextInput
+                  id="rerun-name"
+                  name="label"
+                  value={rerunName}
+                  required
+                  disabled={rerunWorking}
+                  onChange={setRerunName}
+                />
+              </Field>
+              {rerunRefused === null ? null : (
+                <Refused message={rerunRefused.message} />
+              )}
+              <Actions>
+                <Button disabled={rerunWorking} onClick={() => dismiss()}>
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  weight="strong"
+                  busy={rerunWorking}
+                  disabled={rerunName.trim() === ""}
+                >
+                  {rerunWorking ? "Starting…" : "Run again"}
+                </Button>
+              </Actions>
+            </form>
+          )}
+        </Dialog>
+      )}
     </ProductPage>
   );
 }
@@ -602,8 +718,9 @@ function RunDetailView({
 function simulationColumns(
   projectId: string,
   runId: string,
+  onRerun?: (simulation: RunSimulation) => void,
 ): readonly Column<RunSimulation>[] {
-  return [
+  const result: Column<RunSimulation>[] = [
     {
       key: "test",
       header: "Simulation",
@@ -654,6 +771,29 @@ function simulationColumns(
       cell: (one) => <VerdictBadge verdict={one.verdict} compact />,
     },
   ];
+
+  if (onRerun !== undefined) {
+    result.push({
+      key: "rerun",
+      header: "",
+      width: "108px",
+      cell: (one) =>
+        !isTerminalSimulation(one.status) ? null : (
+          <Button onClick={() => onRerun(one)}>Run again</Button>
+        ),
+    });
+  }
+
+  return result;
+}
+
+function isTerminalSimulation(status: SimulationStatusWord): boolean {
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "canceled" ||
+    status === "skipped"
+  );
 }
 
 function SimulationReason({

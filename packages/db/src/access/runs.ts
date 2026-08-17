@@ -70,6 +70,7 @@ import {
   resolvePersonaVersions,
   resolvePinnedVersions,
   resolveRunPlan,
+  type PinnedVersion,
   validPinnedVersions,
   writeGradingPlan,
 } from "./run-plans.ts";
@@ -174,6 +175,19 @@ export type NewRun = {
    * somebody else's run.
    */
   readonly idempotencyKey?: string | undefined;
+};
+
+/**
+ * The one conversation a simulation re-run carries forward.
+ *
+ * It is deliberately not part of `NewRun`: an ordinary start takes every
+ * persona named by each test version. Only the server-derived re-run path may
+ * narrow that fan-out to the exact persona identity of one source simulation.
+ */
+export type SingleSimulationSelection = {
+  readonly sourceSimulationId: string;
+  readonly testVersionId: string;
+  readonly personaId: string;
 };
 
 /** The connection's non-secret shape as the run executed over it. */
@@ -1056,6 +1070,30 @@ export async function startRun(
   auth: AuthContext,
   input: NewRun,
 ): Promise<StartedRun> {
+  return startRunWithSelection(auth, input);
+}
+
+/**
+ * Start a run containing exactly the one simulation derived by the caller.
+ *
+ * This is exported only for the sibling run-history module and is not exported
+ * from the package. The public data-access operation remains
+ * `rerunSimulation`, which reads every value in `selection` from the source
+ * simulation rather than accepting it from a client.
+ */
+export async function startRunForSimulation(
+  auth: AuthContext,
+  input: NewRun,
+  selection: SingleSimulationSelection,
+): Promise<StartedRun> {
+  return startRunWithSelection(auth, input, selection);
+}
+
+async function startRunWithSelection(
+  auth: AuthContext,
+  input: NewRun,
+  selection?: SingleSimulationSelection,
+): Promise<StartedRun> {
   authorize(auth, "start_and_cancel_runs", here(auth));
 
   const { projectId } = auth;
@@ -1102,13 +1140,13 @@ export async function startRun(
 
   const idempotencyKey = input.idempotencyKey?.trim() || undefined;
   const requestDigest =
-    idempotencyKey === undefined ? undefined : digestOfStart(input);
+    idempotencyKey === undefined ? undefined : digestOfStart(input, selection);
 
   // Asked before the transaction, because the common repeat is a client that
   // never learned its first attempt succeeded: the answer is a read, and there
   // is nothing to write. The insert inside the transaction is what catches the
   // two attempts that arrive at the same instant.
-  const remembered = await runAlreadyStartedFor(auth, input);
+  const remembered = await runAlreadyStartedForSelection(auth, input, selection);
   if (remembered !== undefined) return remembered;
 
   const runId = newId("run");
@@ -1253,9 +1291,12 @@ export async function startRun(
       // The conversations this selection adds up to, in the order they will sit:
       // each version in turn, and inside it each persona in the order the test
       // named them.
-      const wanted = versions.flatMap((version) =>
-        version.personaIds.map((personaId) => ({ version, personaId })),
-      );
+      const wanted =
+        selection === undefined
+          ? versions.flatMap((version) =>
+              version.personaIds.map((personaId) => ({ version, personaId })),
+            )
+          : oneSelectedSimulation(versions, selection);
       if (wanted.length > MOST_SIMULATIONS_PER_RUN) {
         refuseRun(
           "not_admitted",
@@ -1503,6 +1544,29 @@ export async function runAlreadyStartedFor(
   auth: AuthContext,
   input: NewRun,
 ): Promise<StartedRun | undefined> {
+  return runAlreadyStartedForSelection(auth, input);
+}
+
+/**
+ * Recall the one-simulation start produced by this exact derived selection.
+ *
+ * Exported only for the sibling run-history module, like
+ * `startRunForSimulation`. The package's public operation accepts only a source
+ * simulation id and derives this selection from stored evidence.
+ */
+export async function runAlreadyStartedForSimulation(
+  auth: AuthContext,
+  input: NewRun,
+  selection: SingleSimulationSelection,
+): Promise<StartedRun | undefined> {
+  return runAlreadyStartedForSelection(auth, input, selection);
+}
+
+async function runAlreadyStartedForSelection(
+  auth: AuthContext,
+  input: NewRun,
+  selection?: SingleSimulationSelection,
+): Promise<StartedRun | undefined> {
   const { projectId } = auth;
   if (projectId === undefined) return undefined;
   const idempotencyKey = input.idempotencyKey?.trim() || undefined;
@@ -1512,7 +1576,7 @@ export async function runAlreadyStartedFor(
     auth,
     projectId,
     idempotencyKey,
-    digestOfStart(input),
+    digestOfStart(input, selection),
   );
 }
 
@@ -1529,7 +1593,10 @@ export async function runAlreadyStartedFor(
  * the conversations will sit in and a caller who reordered them asked for
  * something different.
  */
-function digestOfStart(input: NewRun): string {
+function digestOfStart(
+  input: NewRun,
+  selection?: SingleSimulationSelection,
+): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
@@ -1537,9 +1604,39 @@ function digestOfStart(input: NewRun): string {
         connection: input.connectionId,
         testVersions: [...input.testVersionIds],
         retryOf: input.retryOfRunId ?? null,
+        only:
+          selection === undefined
+            ? null
+            : {
+                sourceSimulation: selection.sourceSimulationId,
+                testVersion: selection.testVersionId,
+                persona: selection.personaId,
+              },
       }),
     )
     .digest("hex");
+}
+
+function oneSelectedSimulation(
+  versions: readonly PinnedVersion[],
+  selection: SingleSimulationSelection,
+): readonly {
+  readonly version: PinnedVersion;
+  readonly personaId: string;
+}[] {
+  const version = versions.find(
+    (one) => one.versionId === selection.testVersionId,
+  );
+  if (version === undefined || !version.personaIds.includes(selection.personaId)) {
+    refuseRun(
+      "not_admitted",
+      `The source simulation no longer names persona ${selection.personaId} ` +
+        `on test version ${selection.testVersionId}, so ` +
+        `Egma cannot run that same simulation again. The original simulation ` +
+        `was not changed.`,
+    );
+  }
+  return [{ version, personaId: selection.personaId }];
 }
 
 /**

@@ -61,6 +61,18 @@ const RETELL = {
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
+const PHONE = {
+  type: "phone",
+  modality: "voice",
+  config: { phoneNumber: "+15551234567" },
+} as const;
+
+const PHONE_IS_SET_UP = {
+  carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
+  carrier_trunk_number: "+18885550123",
+  text_to_speech_provider: "openai",
+} as const;
+
 const CLAIMANT = "simulator-blue-1";
 
 async function claimOwn(runId: string): Promise<readonly SimulationClaim[]> {
@@ -80,14 +92,25 @@ type Ready = {
   readonly needsAudio: { testId: string; versionId: string };
 };
 
-async function aCustomerWithRuns(label: string): Promise<Ready> {
-  api = await createApi(label);
+async function aCustomerWithRuns(
+  label: string,
+  options: {
+    readonly connection?: Record<string, unknown>;
+    readonly phoneIsSetUp?: boolean;
+  } = {},
+): Promise<Ready> {
+  api = await createApi(
+    label,
+    options.phoneIsSetUp === true
+      ? { platformSettings: PHONE_IS_SET_UP }
+      : {},
+  );
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
   const registered = await request("POST", "/api/agents", key, {
     name: "Front desk",
-    connection: RETELL,
+    connection: options.connection ?? RETELL,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   const agentId = String((registered.body.agent as { id: string }).id);
@@ -562,6 +585,223 @@ describe("retrying a run", () => {
       `/api/runs/${earlier}/retry`,
       grace.secret,
       { idempotency_key: newId("run") },
+    );
+    expect(stranger.statusCode).toBe(404);
+  });
+});
+
+describe("running one simulation again", () => {
+  it("creates one named run from the exact simulation in the address", async () => {
+    const ready = await aCustomerWithRuns("simulation_rerun");
+    const earlier = await startRunOver(ready, [ready.cancels.versionId]);
+    const canceled = await request(
+      "POST",
+      `/api/runs/${earlier}/cancel`,
+      ready.key,
+      {},
+    );
+    expect(canceled.statusCode, JSON.stringify(canceled.body)).toBe(200);
+
+    const sources = canceled.body.simulations as Record<string, unknown>[];
+    const source = sources[1];
+    if (source === undefined) throw new Error("the second simulation is needed");
+
+    const again = await request(
+      "POST",
+      `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`,
+      ready.key,
+      {
+        label: "Deliberate Sam again",
+        idempotency_key: newId("run"),
+      },
+    );
+    expect(again.statusCode, JSON.stringify(again.body)).toBe(201);
+    expect(again.body).toMatchObject({
+      label: "Deliberate Sam again",
+      retry_of_run_id: earlier,
+      expected_simulation_count: 1,
+    });
+    expect(again.body.simulations).toHaveLength(1);
+    expect((again.body.simulations as Record<string, unknown>[])[0]).toMatchObject({
+      test_version_id: ready.cancels.versionId,
+      persona_id: source.persona_id,
+      position: 1,
+    });
+
+    const original = await request("GET", `/api/runs/${earlier}`, ready.key);
+    expect(original.body.status).toBe("canceled");
+    expect(original.body.simulations).toHaveLength(2);
+  });
+
+  it("requires a run name and idempotency key, and waits for a terminal source", async () => {
+    const ready = await aCustomerWithRuns("simulation_rerun_input");
+    const earlier = await startRunOver(ready, [ready.reschedules.versionId]);
+    const read = await request("GET", `/api/runs/${earlier}`, ready.key);
+    const source = (read.body.simulations as Record<string, unknown>[])[0];
+    if (source === undefined) throw new Error("the source simulation is needed");
+    const path =
+      `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`;
+
+    const unnamed = await request("POST", path, ready.key, {
+      idempotency_key: newId("run"),
+    });
+    expect(unnamed.statusCode).toBe(422);
+
+    const unprotected = await request("POST", path, ready.key, {
+      label: "No key",
+    });
+    expect(unprotected.statusCode).toBe(422);
+    expect(unprotected.body.message).toBe(
+      "Starting a run requires an idempotency key. Send one stable key for " +
+        "this start action and try again.",
+    );
+
+    const active = await request("POST", path, ready.key, {
+      label: "Too early",
+      idempotency_key: newId("run"),
+    });
+    expect(active.statusCode).toBe(409);
+    expect(active.body.error).toBe("simulation_rerun_unavailable");
+    expect(String(active.body.message)).toContain("is still queued");
+    expect(String(active.body.message)).not.toContain(String(source.id));
+  });
+
+  it("answers legacy simulation evidence as unprocessable rather than a conflict", async () => {
+    const ready = await aCustomerWithRuns("simulation_rerun_legacy");
+    const earlier = await startRunOver(ready, [ready.reschedules.versionId]);
+    const read = await request("GET", `/api/runs/${earlier}`, ready.key);
+    const source = (read.body.simulations as Record<string, unknown>[])[0];
+    if (source === undefined) throw new Error("the source simulation is needed");
+    await api.database.sql(
+      "update simulation set test_id = null, test_version_id = null where id = $1",
+      [String(source.id)],
+    );
+    await request("POST", `/api/runs/${earlier}/cancel`, ready.key, {});
+
+    const refused = await request(
+      "POST",
+      `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`,
+      ready.key,
+      { label: "Legacy source", idempotency_key: newId("run") },
+    );
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body.error).toBe("unprocessable");
+    expect(String(refused.body.message)).toContain(
+      "does not record the test version it ran",
+    );
+    expect(String(refused.body.message)).not.toContain(String(source.id));
+  });
+
+  it("is idempotent for one source and conflicts when the key names another", async () => {
+    const ready = await aCustomerWithRuns("simulation_rerun_key");
+    const earlier = await startRunOver(ready, [ready.cancels.versionId]);
+    const canceled = await request(
+      "POST",
+      `/api/runs/${earlier}/cancel`,
+      ready.key,
+      {},
+    );
+    const [firstSource, secondSource] = canceled.body.simulations as Record<
+      string,
+      unknown
+    >[];
+    if (firstSource === undefined || secondSource === undefined) {
+      throw new Error("two source simulations are needed");
+    }
+
+    const key = newId("run");
+    const rerun = async (source: Record<string, unknown>, label: string) =>
+      request(
+        "POST",
+        `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`,
+        ready.key,
+        { label, idempotency_key: key },
+      );
+    const first = await rerun(firstSource, "First source");
+    const repeated = await rerun(firstSource, "First source");
+    expect(repeated.body.id).toBe(first.body.id);
+
+    const conflict = await rerun(secondSource, "Second source");
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.body.error).toBe("idempotency_conflict");
+  });
+
+  it("recalls a successful phone rerun before carrier readiness changes can refuse it", async () => {
+    const ready = await aCustomerWithRuns("simulation_rerun_phone_recall", {
+      connection: PHONE,
+      phoneIsSetUp: true,
+    });
+    const earlier = await startRunOver(ready, [ready.reschedules.versionId]);
+    const canceled = await request(
+      "POST",
+      `/api/runs/${earlier}/cancel`,
+      ready.key,
+      {},
+    );
+    const source = (canceled.body.simulations as Record<string, unknown>[])[0];
+    if (source === undefined) throw new Error("the source simulation is needed");
+
+    const path =
+      `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`;
+    const idempotencyKey = newId("run");
+    const first = await request("POST", path, ready.key, {
+      label: "Phone source again",
+      idempotency_key: idempotencyKey,
+    });
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
+
+    // Deployment readiness is mutable and may change after a request lands.
+    // The same request has already spent the carrier, so its key must answer
+    // with that run rather than re-evaluate whether a new call may start.
+    await api.database.sql("delete from platform_setting");
+
+    const repeated = await request("POST", path, ready.key, {
+      label: "Phone source again",
+      idempotency_key: idempotencyKey,
+    });
+    expect(repeated.statusCode, JSON.stringify(repeated.body)).toBe(201);
+    expect(repeated.body.id).toBe(first.body.id);
+
+    // A different key is a first attempt. It still cannot write anything while
+    // the carrier is unavailable.
+    const newAttempt = await request("POST", path, ready.key, {
+      label: "A genuinely new phone run",
+      idempotency_key: newId("run"),
+    });
+    expect(newAttempt.statusCode).toBe(422);
+    expect(newAttempt.body.error).toBe("phone_setup_required");
+    const { rows } = await api.database.sql("select id from run order by id");
+    expect(rows).toHaveLength(2);
+  });
+
+  it("is unavailable to a viewer and reveals no other customer's simulation", async () => {
+    const ready = await aCustomerWithRuns("simulation_rerun_roles");
+    const earlier = await startRunOver(ready, [ready.reschedules.versionId]);
+    await request("POST", `/api/runs/${earlier}/cancel`, ready.key, {});
+    const read = await request("GET", `/api/runs/${earlier}`, ready.key);
+    const source = (read.body.simulations as Record<string, unknown>[])[0];
+    if (source === undefined) throw new Error("the source simulation is needed");
+    const path =
+      `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`;
+
+    const quentin = await colleagueOf(
+      api.app,
+      ready.ada,
+      "sim-viewer@acme.example",
+      "viewer",
+    );
+    const viewer = await request("POST", path, quentin.secret, {
+      label: "Viewer cannot run it",
+      idempotency_key: newId("run"),
+    });
+    expect(viewer.statusCode).toBe(403);
+
+    const grace = await signUp(api.app, "sim@globex.example", "Globex");
+    const stranger = await request(
+      "POST",
+      `/api/simulations/${String(source.id)}/rerun?project=${grace.projectId}`,
+      grace.secret,
+      { label: "Not visible", idempotency_key: newId("run") },
     );
     expect(stranger.statusCode).toBe(404);
   });

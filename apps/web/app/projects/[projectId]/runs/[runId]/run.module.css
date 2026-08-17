@@ -193,6 +193,19 @@
   text-overflow: clip;
 }
 
+.rerunDialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.rerunDialog p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
 @media (min-width: 901px) {
   .simulationsTable :is(th, td) {
     padding-inline: var(--space-2);

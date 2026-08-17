@@ -566,6 +566,7 @@ function detail(
     readonly run?: Record<string, unknown> | readonly Record<string, unknown>[];
     readonly events?: Stubbed | readonly Stubbed[];
     readonly cancel?: Stubbed;
+    readonly rerun?: Stubbed | readonly Stubbed[];
     readonly secondRun?: Record<string, unknown>;
   } = {},
 ): void {
@@ -579,6 +580,10 @@ function detail(
       status: 200,
       body: runDetail({ status: "canceled" }),
     },
+    "/api/simulations/sim_1/rerun": options.rerun ?? {
+      status: 201,
+      body: runDetail({ id: "run_9", label: "LiveKit retry" }),
+    },
     "/api/runs/run_2": {
       status: 200,
       body: options.secondRun ?? runDetail({ id: "run_2", label: "Second" }),
@@ -588,6 +593,119 @@ function detail(
 }
 
 describe("one run's page", () => {
+  it("starts one new run from a terminal simulation and keeps the original evidence", async () => {
+    detail();
+    render(<RunDetailPage />);
+
+    const table = await screen.findByRole("table", {
+      name: "Simulations in this run",
+    });
+    fireEvent.click(within(table).getByRole("button", { name: "Run again" }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Run this simulation again?",
+    });
+    expect(
+      within(dialog).getByText(/starts one new run under current conditions/u),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByText(/original evidence stays unchanged/u),
+    ).toBeTruthy();
+
+    const submit = within(dialog).getByRole("button", { name: "Run again" });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Run name" }), {
+      target: { value: "LiveKit retry" },
+    });
+    fireEvent.click(submit);
+
+    await waitFor(() => {
+      expect(sentWith("/api/simulations/sim_1/rerun", "POST")).toHaveLength(1);
+    });
+    const request = sentWith("/api/simulations/sim_1/rerun", "POST")[0];
+    expect(request?.url).toBe(
+      "/api/simulations/sim_1/rerun?project=prj_1",
+    );
+    expect(request?.body?.label).toBe("LiveKit retry");
+    expect(request?.body?.idempotency_key).toMatch(/^run:/u);
+    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_9");
+
+    // Re-running creates a new run. The original row and its evidence link are
+    // still on this page until navigation completes.
+    expect(
+      within(table).getByRole("link", {
+        name: "Reschedules a booked appointment",
+      }),
+    ).toBeTruthy();
+  });
+
+  it("reuses one rerun intent after a refusal and mints another after the dialog closes", async () => {
+    detail({
+      rerun: [
+        {
+          status: 409,
+          body: { error: "busy", message: "Try this same request again." },
+        },
+        {
+          status: 409,
+          body: { error: "busy", message: "Try this same request again." },
+        },
+        {
+          status: 201,
+          body: runDetail({ id: "run_9", label: "Second intent" }),
+        },
+      ],
+    });
+    render(<RunDetailPage />);
+
+    const table = await screen.findByRole("table", {
+      name: "Simulations in this run",
+    });
+    const rowAction = within(table).getByRole("button", { name: "Run again" });
+    rowAction.focus();
+    fireEvent.click(rowAction);
+    let dialog = await screen.findByRole("dialog", {
+      name: "Run this simulation again?",
+    });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Run name" }), {
+      target: { value: "First intent" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
+    await within(dialog).findByText("Try this same request again.");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
+    await waitFor(() => {
+      expect(sentWith("/api/simulations/sim_1/rerun", "POST")).toHaveLength(2);
+    });
+    const firstKey = sentWith("/api/simulations/sim_1/rerun", "POST")[0]?.body
+      ?.idempotency_key;
+    const retryKey = sentWith("/api/simulations/sim_1/rerun", "POST")[1]?.body
+      ?.idempotency_key;
+    expect(retryKey).toBe(firstKey);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Run this simulation again?" }),
+      ).toBeNull();
+    });
+    expect(document.activeElement).toBe(rowAction);
+    fireEvent.click(rowAction);
+    dialog = await screen.findByRole("dialog", {
+      name: "Run this simulation again?",
+    });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Run name" }), {
+      target: { value: "Second intent" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
+    await waitFor(() => {
+      expect(sentWith("/api/simulations/sim_1/rerun", "POST")).toHaveLength(3);
+    });
+    const reopenedKey = sentWith("/api/simulations/sim_1/rerun", "POST")[2]?.body
+      ?.idempotency_key;
+    expect(reopenedKey).not.toBe(firstKey);
+  });
+
   it("uses the shared parent trail and shows no terminal action", async () => {
     const createdAt = new Date(Date.now() - 5 * 60_000).toISOString();
     detail({ run: runDetail({ created_at: createdAt }) });
@@ -667,7 +785,7 @@ describe("one run's page", () => {
       within(table)
         .getAllByRole("columnheader")
         .map((header) => header.textContent),
-    ).toEqual(["Simulation", "Persona", "Execution", "Verdict"]);
+    ).toEqual(["Simulation", "Persona", "Execution", "Verdict", ""]);
     expect(within(table).getByText("Starter")).toBeTruthy();
     expect(within(table).queryByText("Persona: Starter")).toBeNull();
     expect(within(table).queryByText("Not judged yet")).toBeNull();
@@ -720,6 +838,36 @@ describe("one run's page", () => {
     expect(within(summary).queryByText("retell · chat")).toBeNull();
     expect((await screen.findAllByText("Archived")).length).toBe(2);
     expect(summary.querySelector('[class*="badge"]')).toBeNull();
+  });
+
+  it("does not offer Run again while a simulation is active", async () => {
+    detail({
+      run: runDetail({
+        status: "running",
+        finished_at: null,
+        expected_simulation_count: 1,
+        simulation_counts: { ...NO_SIMULATIONS, running: 1 },
+        graded_count: 0,
+        gradable_count: 0,
+        verdict: null,
+        simulations: [
+          simulationRow({
+            status: "running",
+            grading: "waiting",
+            verdict: null,
+            counts: null,
+            score: null,
+          }),
+        ],
+      }),
+      events: "never",
+    });
+    render(<RunDetailPage />);
+
+    await screen.findByRole("table", { name: "Simulations in this run" });
+    await screen.findAllByText("running");
+    expect(screen.queryByRole("button", { name: "Run again" })).toBeNull();
+    expect(sentWith("/api/simulations/sim_1/rerun", "POST")).toEqual([]);
   });
 
   /**
@@ -796,6 +944,8 @@ describe("one run's page", () => {
 
     expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Run again" })).toBeNull();
+    expect(sentWith("/api/simulations/sim_1/rerun", "POST")).toEqual([]);
     expect(sentWith("/api/runs/run_1/retry", "POST")).toEqual([]);
     expect(sentWith("/api/runs/run_1/cancel", "POST")).toEqual([]);
 
