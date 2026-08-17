@@ -392,6 +392,80 @@ describe("a production trace whose root span closes", () => {
   });
 });
 
+/**
+ * **The acceptance criterion, end to end and through everything.** A managed
+ * platform's conversation is stored the way its normalizer stores one — zero-
+ * width placeholder turns, and the platform's own raw measurements in the block
+ * on the root span — and it comes out the far side as a real verdict.
+ *
+ * This is the whole reason the ticket exists. The live proof of 2026-08-17
+ * captured a Retell conversation whose worst turn took 2145 ms, over the
+ * two-second bound the project already had wired, and no verdict said so: the
+ * trace carried no timing spans, its turns had no width to derive from, and
+ * the numbers Retell itself published were sitting unread on a payload. Nothing
+ * below is mocked between the store and the verdict row.
+ */
+describe("a production trace whose platform reported its own latency", () => {
+  const AS_RETELL_MEASURED = (values: readonly number[]) => ({
+    by: "retell",
+    measurements: [
+      { measure: "turn_response_latency", unit: "milliseconds", values },
+    ],
+  });
+
+  it("fails the bound the platform's own worst measurement missed, and says whose it was", async () => {
+    const graderId = await seedGrader(
+      world,
+      aLatencyCopy({ name: "Two seconds in the wild", scope: "production" }),
+    );
+
+    const { traceId } = await conductProductionTrace(world, {
+      reportedByPlatform: AS_RETELL_MEASURED([517, 2_145]),
+    });
+
+    const mine = (await verdictsOn(world, traceId, 1)).find(
+      (verdict) => verdict.graderId === graderId,
+    );
+
+    // A verdict, and not the `skipped` this conversation used to get — the one
+    // sentence the whole ticket is about.
+    expect(mine).toMatchObject({
+      source: "production",
+      assertion: "turn_response_latency",
+      verdict: "failed",
+      score: 0,
+    });
+    expect(mine?.rationale).toContain("2145 milliseconds at its worst");
+    expect(mine?.rationale).toContain("over the bound of 2000");
+    // And the record says whose measurement decided it, because a platform's
+    // account of its own agent is not egma's observation of it.
+    expect(mine?.rationale).toContain("as reported by retell");
+    expect(mine?.rationale).toContain("not Egma's observation");
+    // Cited on the root span the block rode in on, which is the only span an
+    // aggregate over the whole conversation can honestly point at.
+    expect(mine?.citedSpanIds).toHaveLength(1);
+  });
+
+  it("passes a fast conversation the same way", async () => {
+    const graderId = await seedGrader(
+      world,
+      aLatencyCopy({ name: "Two seconds, and it was quick", scope: "production" }),
+    );
+
+    const { traceId } = await conductProductionTrace(world, {
+      reportedByPlatform: AS_RETELL_MEASURED([412, 517]),
+    });
+
+    const mine = (await verdictsOn(world, traceId, 1)).find(
+      (verdict) => verdict.graderId === graderId,
+    );
+
+    expect(mine).toMatchObject({ verdict: "passed", score: 1 });
+    expect(mine?.rationale).toContain("517 milliseconds at its worst");
+    expect(mine?.rationale).toContain("as reported by retell");
+  });
+});
+
 describe("a production trace whose root span never closes", () => {
   it("is completed by the idle window, and still only judged once", async () => {
     const patient = runService(

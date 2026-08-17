@@ -324,6 +324,26 @@ export const MEASURES = {
     "rather than timed by Egma. Each says which.",
   /** The mark beside one worked-out figure, so a reader need not guess which. */
   derivedOne: "from your framework's timings",
+  /**
+   * Where a number the **platform** measured came from — a different sentence
+   * from the one above, deliberately.
+   *
+   * **These figures were not worked out by Egma at all.** Retell publishes no
+   * per-turn timing, so there is nothing for Egma to work anything out from;
+   * what there is, is Retell's own measurement of its own agent, handed over
+   * and judged as it stands. Saying "worked out from your framework's timings"
+   * about it would claim Egma observed something it never saw — a caveat that
+   * is itself untrue is worse than none, because it is the sentence a developer
+   * decides how much to believe the verdict on.
+   *
+   * The platform's name is filled in from the answer rather than written here:
+   * this page never hardcodes which platforms exist.
+   */
+  reported: (platform: string): string =>
+    `Some figures here were measured by ${platform} and reported to Egma, ` +
+    `not observed by Egma. Each says which.`,
+  /** The mark beside one such figure, so a reader need not guess which. */
+  reportedOne: (platform: string): string => `as reported by ${platform}`,
   /** One measurement is the number; several are the worst of them. */
   worst: "worst",
   counted: (howMany: number): string =>

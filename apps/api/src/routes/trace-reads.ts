@@ -333,7 +333,10 @@ function describedSpan(span: TraceSpan): Record<string, unknown> {
  * the worst of the part egma holds and not of the call — the worst turn of a
  * long conversation is as likely to be past the cut as before it. The grading
  * engine refuses such a trace outright; a display is allowed to show what there
- * is, and is not allowed to show it as though it were the whole call.
+ * is, and is not allowed to show it as though it were the whole call. A measure
+ * the platform reported is the exception and is never partial: it is one row's
+ * account of the whole conversation rather than a series reduced over spans, so
+ * the cap cannot have cut anything off it.
  *
  * The unit rides each measure because the catalog owns it — a client that named
  * one of its own would be a second opinion about something already written
@@ -353,14 +356,13 @@ function describedMeasures(
       // measure timed by egma's own vocabulary carries `false` here as it
       // always implicitly did.
       //
-      // **The module now says which of three sources measured, and this field
-      // stays the boolean it has always been.** A client that integrated
-      // against "true means egma worked it out rather than reading its own
-      // timing span" is told exactly that, and a reported measure is not a
-      // measure egma timed — so `true` is the honest answer for it too. Which
-      // of the two non-timed sources it was is `reported_by` below, where a
-      // reader who wants the distinction can have it without every existing
-      // reader's meaning shifting under them.
+      // **The module now names three sources, and this field stays the boolean
+      // it has always been: false means egma timed it, true means egma did
+      // not.** That is all it has ever been able to say. Which of the two
+      // untimed sources it was — a derivation off the framework's own spans, or
+      // a number the platform handed egma — is `reported_by` below, present
+      // only on the second. A reader wanting the distinction asks that field;
+      // no existing reader's meaning shifts under them.
       derived: measured.origin !== "timed",
       // **Only on a measure a platform reported, and absent everywhere else.**
       // Simulation traffic is byte-for-byte what it was before this field
@@ -380,7 +382,14 @@ function describedMeasures(
         worst === undefined
           ? null
           : { value: worst.value, span_id: worst.spanId },
-      partial: detail.truncated,
+      // **A reported measure is never partial, however much of the trace was
+      // dropped.** The flag says "this number was reduced over a prefix of the
+      // conversation" — true of a series taken off spans when the read stopped
+      // at the cap, and false of a block, which is one platform's account of
+      // the whole conversation written on one row that either arrived or did
+      // not. Stamping the truncation on it would tell a page the worst
+      // measurement might be past the cut when there is no cut it could be past.
+      partial: measured.origin === "reported" ? false : detail.truncated,
     };
   });
 }

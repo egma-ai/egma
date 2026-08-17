@@ -1,5 +1,6 @@
 import { traceStore } from "../clickhouse/client.ts";
 import {
+  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
   REPORTED_MEASUREMENTS_PAYLOAD_PATH,
   reportedMeasurementsOf,
   type ReportedMeasurement,
@@ -79,19 +80,20 @@ const SPANS_TABLE = "spans";
 const TURNS_TABLE = "turns";
 
 /**
- * Where the reported-measurements block rides, as the two payload keys a read
- * has to walk to reach it.
+ * The outer of the two payload keys reaching the block walks — the egma-owned
+ * corner of an otherwise vendor-owned document.
  *
- * Split from the path the contract itself exports rather than written out a
- * second time here: the normalizers write to
- * `REPORTED_MEASUREMENTS_PAYLOAD_PATH` and this is that same string read
- * backwards, so a writer's spelling and this reader's cannot come apart. The
- * defaults cover a path that is not two segments — which a literal constant
- * cannot become, and which would otherwise have this asking the store for a key
- * called `undefined`.
+ * Taken off the path the contract exports rather than written out a second time
+ * here, so a normalizer's spelling and this reader's cannot come apart. The
+ * inner key needs no such derivation: the contract exports it as
+ * `REPORTED_MEASUREMENTS_PAYLOAD_KEY` and this file uses that constant itself.
+ *
+ * The `= ""` is not a case that can arise. Indexing is strictly typed here, so
+ * the first element of a split is `string | undefined` however literal the
+ * string being split was, and a default is how that is answered rather than
+ * asserted away.
  */
-const [NORMALISED_KEY = "", REPORTED_KEY = ""] =
-  REPORTED_MEASUREMENTS_PAYLOAD_PATH.split(".");
+const [NORMALISED_KEY = ""] = REPORTED_MEASUREMENTS_PAYLOAD_PATH.split(".");
 
 /**
  * A window of time, closed at the start and open at the end, counted in
@@ -239,12 +241,13 @@ export type TraceSpan = {
  */
 export type ReportedOnTrace = {
   /**
-   * The root span the block was written on.
+   * The parentless row this block rode in on — the root, as its own platform
+   * wrote it.
    *
    * An aggregate describes the whole trace and happened at no single moment
-   * inside it, so the root is the only span a measurement taken from this block
-   * can honestly cite. Carried here rather than looked up again later, because
-   * the row that held the block is the row that knows.
+   * inside it, so this is the only span a measurement taken from the block can
+   * honestly cite. Carried here rather than looked up again later, because the
+   * row that held the block is the row that knows.
    */
   readonly spanId: string;
   /** The platform that measured — `retell`. Provenance, and the word a
@@ -901,15 +904,24 @@ export async function readTrace(
       parameters,
     ),
     rowsOf<RootSliceRow>(
-      // **The egma-owned slice of one root's payload, and never the payload.**
-      // A root is the span that named no parent — the door normalises an
-      // unusable one to `''`, and every normalizer writes its root that way —
-      // so this asks for the parentless rows and keeps the earliest, exactly as
-      // the measure module's own derivation picks its root: a trace holding more
-      // than one is a flush whose parent never came, and the conversation began
-      // at the first of them. The span id is the tie-break the row order already uses,
-      // so two readings of one trace answer with one span rather than with
-      // whichever row came back first.
+      // **The egma-owned slice of one parentless row's payload, and never the
+      // payload.** Every normalizer writes its root naming no parent, and the
+      // block is written on that row — so what this selects is the parentless
+      // rows, earliest first, and keeps one. Selected by the parent and
+      // deliberately not by a kind: a root wears whatever word its platform
+      // uses, `root` on egma's own traces and `conversation` on a Retell one,
+      // and a reader that named kinds would have to learn a new one per
+      // platform.
+      //
+      // The same predicate also catches a span whose unusable parent id
+      // normalised away at the door — the orphan `transcriptOf` files at the
+      // top, below — so this is honestly *the first parentless row* and not
+      // "the root" by any stronger claim. Nothing is lost by it: a block only
+      // ever rides the row a normalizer wrote it on, and a trace holding
+      // several parentless rows is a flush whose parent never came, which
+      // began at the earliest of them. The span id breaks a tie exactly as the
+      // row order above does, so two readings of one trace answer with one span
+      // rather than with whichever row came back first.
       `select
        span_id,
        JSONExtractRaw(payload, '${NORMALISED_KEY}') as normalised
@@ -971,7 +983,7 @@ function reportedOn(row: RootSliceRow | undefined): ReportedOnTrace | undefined 
   }
 
   const block = reportedMeasurementsOf(
-    (slice as Record<string, unknown>)[REPORTED_KEY],
+    (slice as Record<string, unknown>)[REPORTED_MEASUREMENTS_PAYLOAD_KEY],
   );
   if (block === undefined) return undefined;
   return {

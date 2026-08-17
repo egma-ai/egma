@@ -375,6 +375,12 @@ function reportedSamplesOf(
   cataloged: CatalogedMeasure,
   reported: ReportedOnTrace,
 ): readonly Sample[] {
+  // The first match wins where a block somehow names one measure twice in one
+  // unit. A normalizer maps each of its own stages once, so nothing writes such
+  // a block — and the reader stays lenient rather than refusing, exactly as the
+  // contract's parse does: a duplicate is one platform's bookkeeping mistake,
+  // and answering with the first of two identical-looking series beats
+  // answering a customer with nothing.
   const said = reported.measurements.find(
     (measurement) =>
       measurement.measure === cataloged.measure &&

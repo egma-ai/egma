@@ -18,6 +18,8 @@ import {
   readVerdicts,
   recordProductionTraces,
   PREDEFINED_GRADERS,
+  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
+  reportedMeasurementsPayload,
   seedGraderLibrary,
   seedRunningGraders,
   setJudgeConfiguration,
@@ -28,6 +30,7 @@ import {
   type ExpectedBehavior,
   type GradingJob,
   type NewSpan,
+  type ReportedMeasurement,
   type UseLibraryEntry,
   type RecordedVerdict,
   type Simulation,
@@ -711,6 +714,26 @@ export async function conductProductionTrace(
      * decision to take, and the day it does, these rows are what arrive.
      */
     readonly measured?: Readonly<Record<string, readonly number[]>> | undefined;
+    /**
+     * What the **agent platform** measured about this conversation, filed the
+     * way a managed platform's normalizer files it: the neutral block on the
+     * root span's payload, and turns of zero width beside it.
+     *
+     * **The two go together because on a real platform they always do.** Retell
+     * publishes no per-turn timing, so its normalizer opens every turn where the
+     * trace opened and closes it in the same instant — placeholders — and the
+     * reason the block exists at all is that there is nothing else to measure
+     * from. A harness that wrote the block onto turns egma could read the
+     * geometry of would be testing a conversation no platform produces, and the
+     * derivation would answer first, so the case would prove nothing about the
+     * source it names.
+     */
+    readonly reportedByPlatform?:
+      | {
+          readonly by: string;
+          readonly measurements: readonly ReportedMeasurement[];
+        }
+      | undefined;
   } = {},
 ): Promise<ConductedTrace> {
   nextTraceOrdinal += 1;
@@ -733,6 +756,8 @@ export async function conductProductionTrace(
       ...over,
     });
 
+  const reportedByPlatform = conducting.reportedByPlatform;
+
   said.forEach((turn, at) => {
     const turnSpan = spanning({
       name: turn.speaker === "human" ? "user_turn" : "agent_turn",
@@ -740,6 +765,11 @@ export async function conductProductionTrace(
       text: turn.text,
       startedAtMicroseconds:
         BigInt(startedAt.getTime()) * 1_000n + BigInt(at) * 2_000_000n,
+      // A platform that reports its own numbers publishes no per-turn timing,
+      // so its turns are placeholders of no width — see the option above.
+      ...(reportedByPlatform === undefined
+        ? {}
+        : { durationNanoseconds: 0n }),
     });
     spans.push(turnSpan);
 
@@ -791,6 +821,25 @@ export async function conductProductionTrace(
         name: "agent_session",
         kind: "root",
         durationNanoseconds: 20_000_000_000n,
+        // The block rides here, under the egma-owned corner of a payload that
+        // is otherwise the vendor's own document — written through the
+        // contract's own writer, so this harness cannot spell it differently
+        // from the normalizer it stands in for.
+        ...(reportedByPlatform === undefined
+          ? {}
+          : {
+              payload: JSON.stringify({
+                call_id: `platform-${traceId.slice(-6)}`,
+                egma_normalised: {
+                  degraded: false,
+                  [REPORTED_MEASUREMENTS_PAYLOAD_KEY]:
+                    reportedMeasurementsPayload(
+                      reportedByPlatform.by,
+                      reportedByPlatform.measurements,
+                    ),
+                },
+              }),
+            }),
       }),
     ]);
   }

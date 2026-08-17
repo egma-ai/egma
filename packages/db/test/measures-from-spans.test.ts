@@ -538,6 +538,7 @@ const MILLISECOND = 1_000n;
 async function aLiveKitCall(
   turns: readonly Turn[],
   timed: Measured = {},
+  reported: readonly ReportedMeasurement[] = [],
 ): Promise<TraceDetail> {
   const id = traceId();
   const root = spanId();
@@ -552,6 +553,11 @@ async function aLiveKitCall(
       kind: "root",
       startedAtMicroseconds: at,
       durationNanoseconds: BigInt(ends) * 1_000_000n,
+      // A block on a framework-shaped trace, for the case that asks which of
+      // the two sources wins. Empty by default, which is every other case.
+      ...(reported.length === 0
+        ? {}
+        : { payload: payloadReporting("retell", reported) }),
     }),
   ];
 
@@ -804,19 +810,20 @@ function payloadReporting(
 }
 
 /**
- * A conversation as a managed platform filed it: one root span carrying the
- * block, and nothing else unless a case asks for it.
+ * A trace as a managed platform filed it: one root span carrying the block, and
+ * nothing else unless a case asks for it.
  *
  * The root's kind is the platform normalizer's own — `conversation`, not
  * `root` — which is exactly why the read finds the block by the parent nobody
  * named rather than by a kind.
  */
-async function aReportedCall(
+async function aReportedTrace(
   measurements: readonly ReportedMeasurement[],
   timed: Measured = {},
   reportedBy = "retell",
+  customer: AuthContext = auth,
+  id: string = traceId(),
 ): Promise<TraceDetail> {
-  const id = traceId();
   const root = spanId();
   const at = BigInt(WHEN.getTime()) * 1000n;
 
@@ -853,8 +860,8 @@ async function aReportedCall(
     }
   }
 
-  await appendSpans(auth, spans);
-  const read = await readTrace(auth, id, { window: WINDOW });
+  await appendSpans(customer, spans);
+  const read = await readTrace(customer, id, { window: WINDOW });
   if (read === undefined) throw new Error("the trace store lost the spans");
   return read;
 }
@@ -881,7 +888,7 @@ describe("measures an agent platform reported about its own conversation", () =>
    * the platform measured it and said so in the block.
    */
   it("reads the block off the root when the trace carries nothing else", async () => {
-    const trace = await aReportedCall(AS_RETELL_MEASURED);
+    const trace = await aReportedTrace(AS_RETELL_MEASURED);
     const root = trace.spans[0];
 
     expect(measuresFromSpans(trace)).toEqual([
@@ -916,7 +923,7 @@ describe("measures an agent platform reported about its own conversation", () =>
    * grader bounds; it is captured now and surfaced the day a display asks.
    */
   it("does not answer a platform-prefixed name as a measure", async () => {
-    const trace = await aReportedCall(AS_RETELL_MEASURED);
+    const trace = await aReportedTrace(AS_RETELL_MEASURED);
 
     for (const one of measuresFromSpans(trace)) {
       expect(one.measure.startsWith("retell/")).toBe(false);
@@ -932,7 +939,7 @@ describe("measures an agent platform reported about its own conversation", () =>
    * check rather than a false pass.
    */
   it("skips a measurement stated in a unit the catalog does not use", async () => {
-    const trace = await aReportedCall([
+    const trace = await aReportedTrace([
       { measure: "turn_response_latency", unit: "seconds", values: [2.145] },
     ]);
 
@@ -948,7 +955,7 @@ describe("measures an agent platform reported about its own conversation", () =>
    * every percentile.
    */
   it("lets a measure egma timed itself win over the one the platform reported", async () => {
-    const trace = await aReportedCall(AS_RETELL_MEASURED, {
+    const trace = await aReportedTrace(AS_RETELL_MEASURED, {
       turn_response_latency: [862.5],
     });
 
@@ -959,11 +966,74 @@ describe("measures an agent platform reported about its own conversation", () =>
   });
 
   /**
+   * **Derived beats reported, exactly as timed beats both.** The trace below is
+   * LiveKit-shaped — turns egma can read the geometry of — and its root also
+   * carries a block naming the same measure. egma working a number out from
+   * spans it can see outranks the platform's account of itself, so the answer
+   * is the derived one and the block is not appended to it.
+   */
+  it("lets a measure egma derived win over the one the platform reported", async () => {
+    const trace = await aLiveKitCall(
+      [
+        { who: "human", from: 0, to: 1_000 },
+        { who: "agent", from: 1_100, to: 3_000, spoke: [[1_400, 3_000]] },
+      ],
+      {},
+      [
+        {
+          measure: "turn_response_latency",
+          unit: "milliseconds",
+          values: [517, 2_145],
+        },
+      ],
+    );
+
+    // The block really was read — this is a precedence case, not an absence one.
+    expect(trace.reported?.reportedBy).toBe("retell");
+
+    const measured = measureIn(trace, "turn_response_latency");
+    expect(measured?.origin).toBe("derived");
+    expect(measured?.reportedBy).toBe("");
+    // 1400 − 1000, worked out from the turns, and not the platform's series.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([400]);
+  });
+
+  /**
+   * **The block sits behind the same tenancy wall every other read does.**
+   *
+   * Two customers and one trace id, in one window — the only arrangement that
+   * can tell a real predicate from a lucky one. Without the shared id the wrong
+   * customer's read finds no rows at all and answers `undefined` for a reason
+   * that has nothing to do with the block's own query. Here their read
+   * succeeds on their own rows, and the question is whether somebody else's
+   * block came back with it.
+   */
+  it("never hands one customer the block another customer's trace carries", async () => {
+    const shared = traceId();
+
+    const theirs = await aReportedTrace(
+      AS_RETELL_MEASURED,
+      {},
+      "retell",
+      elsewhere,
+      shared,
+    );
+    expect(theirs.reported?.reportedBy).toBe("retell");
+
+    // The same id, this customer's own rows, and no block written on them.
+    const ours = await aReportedTrace([], {}, "retell", auth, shared);
+
+    expect(ours.traceId).toBe(theirs.traceId);
+    expect(ours.reported).toBeUndefined();
+    expect(measuresFromSpans(ours)).toEqual([]);
+  });
+
+  /**
    * A trace whose root carries no block at all, which is nearly every trace in
    * the store. Nothing is reported, nothing is answered, and nothing throws.
    */
   it("answers nothing for a conversation whose platform reported nothing", async () => {
-    const trace = await aReportedCall([]);
+    const trace = await aReportedTrace([]);
 
     expect(trace.reported).toBeUndefined();
     expect(measuresFromSpans(trace)).toEqual([]);
