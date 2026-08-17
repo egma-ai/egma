@@ -1013,3 +1013,83 @@ describe("a simulation, after the platform's numbers joined the chain", () => {
     ]);
   });
 });
+
+/**
+ * A Retell-shaped production trace: a `conversation` root holding the whole
+ * thing's width, and turns beneath it that hold none.
+ *
+ * Exactly the rows `apps/api/src/retell/normalise.ts` writes. The provider
+ * reports no per-turn timing, so every turn opens where the trace opened and
+ * closes in the same instant, and nothing `speaking` is filed anywhere.
+ */
+async function aRetellTrace(
+  speakers: readonly ("human" | "agent")[],
+): Promise<TraceDetail> {
+  const id = traceId();
+  const root = spanId();
+  const at = BigInt(WHEN.getTime()) * 1000n;
+
+  const spans: NewSpan[] = [
+    span({
+      traceId: id,
+      spanId: root,
+      name: "retell_call",
+      kind: "conversation",
+      connectionType: "retell",
+      startedAtMicroseconds: at,
+      durationNanoseconds: 143_000_000_000n,
+    }),
+  ];
+
+  for (const speaker of speakers) {
+    spans.push(
+      span({
+        traceId: id,
+        spanId: spanId(),
+        parentSpanId: root,
+        name: speaker === "human" ? "human_turn" : "agent_turn",
+        kind: speaker === "human" ? "turn:human" : "turn:agent",
+        connectionType: "retell",
+        startedAtMicroseconds: at,
+        durationNanoseconds: 0n,
+      }),
+    );
+  }
+
+  await appendSpans(auth, spans);
+  const read = await readTrace(auth, id, { window: WINDOW });
+  if (read === undefined) throw new Error("the trace store lost the spans");
+  return read;
+}
+
+/**
+ * **A turn nobody timed measures nothing**, and this is the shape that made the
+ * rule necessary.
+ *
+ * Retell publishes no per-turn timing, so its normalizer writes placeholders and
+ * says so plainly. Read as geometry they describe an agent that answered
+ * instantly every time — a series of zeroes that holds any bound put to it, so a
+ * production trace whose worst wait was really 2145 ms passed a two-second bound
+ * with "0 milliseconds at its worst" as its rationale. A false pass is the exact
+ * false trust this product exists to kill, and it is worse than the `skipped` a
+ * provider reporting no timing has earned.
+ */
+describe("a production trace whose turns were never timed", () => {
+  it("derives nothing at all, so every measure is absent", async () => {
+    const trace = await aRetellTrace([
+      "agent",
+      "human",
+      "agent",
+      "human",
+      "agent",
+    ]);
+
+    // Nothing — not a series of zeroes. A zero here would be a measurement of a
+    // wait nobody observed, and an absent measure is the `skipped` grader that
+    // says so, which is out of the score's denominator rather than a pass.
+    expect(measuresFromSpans(trace)).toEqual([]);
+    for (const measure of SPAN_DERIVED_MEASURES) {
+      expect(measureIn(trace, measure)).toBeUndefined();
+    }
+  });
+});
