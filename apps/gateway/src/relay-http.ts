@@ -58,6 +58,30 @@ export async function relayHttp(
   config: Config,
 ): Promise<HttpOutcome> {
   const startedAt = Date.now();
+
+  /**
+   * The caller who was already gone before this relay was reached.
+   *
+   * **A listener added to a signal that has already aborted never fires**, so
+   * subscribing without checking first loses the abort entirely: the controller
+   * below stays live, the fetch opens a real connection, and a request nobody
+   * is waiting for becomes billable provider work holding a connection until
+   * the whole-exchange bound notices — ten minutes later.
+   *
+   * **The window this covers is authentication, and it grew.** A connection is
+   * authenticated before it reaches here, and for an inference key that means
+   * one request to Egma Cloud every time one opens — hundreds of milliseconds
+   * in which a simulator that gave up has already aborted. `relay-socket.ts`
+   * takes the same precaution for the same reason.
+   *
+   * This transport can go further than that one does, and does: a socket has an
+   * upstream handshake to race, so there the provider is spoken to and then
+   * closed. Here there is nothing to race, so the provider is never spoken to
+   * at all — no request leaves, and the record says `cancelled` because that is
+   * what happened.
+   */
+  if (request.signal.aborted) return refused(startedAt, "cancelled", undefined);
+
   const url = new URL(request.url);
 
   /**
