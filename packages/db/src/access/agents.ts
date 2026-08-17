@@ -682,7 +682,13 @@ async function insertConnection(
       // Created watching means watching from here on, exactly as the edit's
       // off→on edge means it: the cursor opens at the moment of the switch, so
       // whatever the provider already holds from before it stays where it is.
-      ...(admitted.watchProduction ? { productionCursor: new Date() } : {}),
+      //
+      // The database's clock, not this process's, and for the same reason the
+      // edit uses it: the cursor is an inclusive lower bound, so a stamp taken
+      // before the insert lands would put every conversation that ended in
+      // between inside the first sweep's window — traffic from before the
+      // connection consenting to it existed.
+      ...(admitted.watchProduction ? { productionCursor: sql`now()` } : {}),
       createdBy: auth.userId,
     })
     .returning(CONNECTION_COLUMNS)
