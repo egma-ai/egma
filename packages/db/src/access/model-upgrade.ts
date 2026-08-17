@@ -1,5 +1,5 @@
 import { newId } from "@egma/ids";
-import { and, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 import { db, type Transaction } from "../client.ts";
 import { managedDeployment } from "../managed-deployment.ts";
@@ -506,11 +506,35 @@ async function collectCandidates(
      * an operator really can rotate one, and a copy frozen at the old value
      * left this organization spending a key that had been revoked.
      *
-     * **Guarded by the source's own clock and by nothing else.** No plaintext,
-     * no ciphertext, no hint: the source says when it last changed and the copy
-     * remembers when it was taken. Two seals of one key differ anyway, so a
-     * ciphertext comparison would answer "changed" every time and rewrite every
-     * row on every boot.
+     * **Guarded by the source's own clock, and by the safe hint beside it.**
+     *
+     * The clock is the main answer: the source says when it last changed and
+     * the copy remembers when it was taken. What it cannot answer alone is a
+     * rotation landing on the *same stamp* as the write the copy recorded — and
+     * that is far likelier than the column suggests, because every writer of
+     * these rows passes a JavaScript `Date`. `timestamptz` holds microseconds;
+     * a `Date` carries milliseconds, so the last three digits of every one of
+     * these stamps are zero and the real granularity is a millisecond. Two
+     * writes inside one millisecond compare equal, a strict `<` matches
+     * nothing, and the copy silently keeps a key that has been revoked.
+     *
+     * So the hint is asked as well. **This is not the comparison the
+     * specification forbids.** That rule is about deciding whether two
+     * *different sources* hold one account's key — inferring equality between
+     * two secrets nobody may read. This compares one copy against its own
+     * origin, on the four characters already published to every browser that
+     * draws the Model providers screen, to answer "has this row been
+     * rewritten". No secret is read and no two keys are equated.
+     *
+     * A ciphertext comparison would answer the same question and is still
+     * refused: the seal is nonced, so two writes of one key differ, and it
+     * would report "changed" on every boot and rewrite every row forever.
+     *
+     * **Where a rotation collides on both the millisecond and the last four
+     * characters, this copy stays behind until the next write moves either.**
+     * A stated residue rather than a claim of completeness — and far better
+     * than a `>=`, which would rewrite every row on every restart and make
+     * "when the stored key last changed" mean nothing.
      */
     .onConflictDoUpdate({
       target: [
@@ -525,7 +549,8 @@ async function collectCandidates(
         shape: sql`excluded.shape`,
         sourceChangedAt: sql`excluded.source_changed_at`,
       },
-      setWhere: sql`${modelCredentialCandidate.sourceChangedAt} < excluded.source_changed_at`,
+      setWhere: sql`${modelCredentialCandidate.sourceChangedAt} < excluded.source_changed_at
+        or ${modelCredentialCandidate.credentialsHint} <> excluded.credentials_hint`,
     })
     .returning({ id: modelCredentialCandidate.id });
 
@@ -586,9 +611,12 @@ async function activateSoleCandidates(
    * though it is ambiguous for *activation*. A credential an administrator
    * typed holds null and is unreachable from this statement.
    *
-   * Guarded by when the source last moved, so a boot that rotated nothing
-   * leaves `updated_at` alone — a person reads it as "when the stored key last
-   * changed".
+   * Guarded by when the source last moved **or** by its safe hint differing, so
+   * a boot that rotated nothing leaves `updated_at` alone — a person reads it
+   * as "when the stored key last changed" — while a rotation that landed on the
+   * same millisecond as this row's last write is still noticed. See the
+   * collection above for why a millisecond is the real granularity here, and
+   * why asking the hint is not the comparison the specification forbids.
    */
   for (const candidate of candidates) {
     if (candidate.activatedAt === null) continue;
@@ -613,7 +641,10 @@ async function activateSoleCandidates(
         and(
           eq(modelProviderCredential.organizationId, organizationId),
           eq(modelProviderCredential.upgradedFrom, candidate.id),
-          lt(modelProviderCredential.updatedAt, candidate.sourceChangedAt),
+          or(
+            lt(modelProviderCredential.updatedAt, candidate.sourceChangedAt),
+            ne(modelProviderCredential.credentialsHint, candidate.hint),
+          ),
         ),
       )
       .returning({ id: modelProviderCredential.id });

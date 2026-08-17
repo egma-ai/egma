@@ -576,6 +576,75 @@ describe("a legacy key rotated after the upgrade has run", () => {
   });
 
   /**
+   * A rotation that lands on the same stamp as the write the copy recorded.
+   *
+   * **Likelier than the column suggests.** `timestamptz` holds microseconds,
+   * but every writer of these rows passes a JavaScript `Date`, which carries
+   * milliseconds — so the last three digits are always zero and the real
+   * granularity is a millisecond. A strict clock comparison then matches
+   * nothing, and the organization goes on presenting a key that has been
+   * revoked. The stamps are forced equal here rather than raced for, so the
+   * case is about the guard rather than about how fast two writes can be.
+   */
+  it("is noticed even when it lands on the same stamp as the last one", async () => {
+    await writePlatformSettings(acting(solo), ONE_TEAM, {
+      text_to_speech_key: "ct-sentinel-rotation-speaking-SAME",
+    });
+    // The collision, made deterministic: the source now says exactly what the
+    // copy recorded, so nothing about the clock can tell them apart.
+    await database.sql(
+      `update platform_setting set updated_at = (
+         select source_changed_at from model_credential_candidate
+          where provider = 'cartesia')
+        where name = 'text_to_speech_key'`,
+    );
+
+    const report = await upgradeModelSetup(ONE_TEAM);
+
+    expect(
+      (await listCredentialCandidates(acting(solo))).find(
+        (one) => one.provider === "cartesia",
+      )?.hint,
+    ).toBe("SAME");
+    expect(report.activated).toContain("cartesia");
+    const resolved = await resolveModelProviderKeys(theSimulatorIn(solo), [
+      "cartesia",
+    ]);
+    expect(resolved.keys.get("cartesia")).toBe(
+      "ct-sentinel-rotation-speaking-SAME",
+    );
+  });
+
+  /**
+   * The other half of the same guard, and the residue it leaves stated plainly.
+   *
+   * Nothing at all changed, so nothing may be written — that is the property
+   * the whole guard exists to keep, and a `>=` would break it by refreshing
+   * every row on every boot. The cost is the one case neither half catches: a
+   * rotation colliding on the millisecond *and* on the last four characters
+   * stays behind until the next write moves either. Real, narrow, and better
+   * than rewriting every credential's "last changed" on every restart.
+   */
+  it("writes nothing when the clock and the last four characters both match", async () => {
+    const before = await database.sql(
+      `select
+         (select credentials from model_credential_candidate where provider = 'cartesia') as copied,
+         (select updated_at from model_provider_credential where provider = 'cartesia') as touched`,
+    );
+
+    const report = await upgradeModelSetup(ONE_TEAM);
+    const after = await database.sql(
+      `select
+         (select credentials from model_credential_candidate where provider = 'cartesia') as copied,
+         (select updated_at from model_provider_credential where provider = 'cartesia') as touched`,
+    );
+
+    expect(report.activated).toEqual([]);
+    expect(report.candidates).toEqual([]);
+    expect(after.rows[0]).toEqual(before.rows[0]);
+  });
+
+  /**
    * A provider that has grown a second stored key **activates** nothing new,
    * and the credential it already has goes on following the key it named.
    *
