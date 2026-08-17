@@ -112,9 +112,9 @@ describe("the token-endpoint shape", () => {
         variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
         name: "front-desk",
         url: "wss://acme.livekit.cloud",
-        // Nothing is listening here. Registration succeeding proves setup did
-        // not try to dispatch or fetch a token.
-        tokenEndpoint: "https://127.0.0.1:1/livekit/token",
+        // This reserved name cannot resolve. Registration succeeding proves
+        // setup did not try to dispatch or fetch a token.
+        tokenEndpoint: "https://tokens.invalid/livekit/token",
         credentials: liveKitTokenHeaders(HEADERS),
       },
       options(),
@@ -128,27 +128,30 @@ describe("the token-endpoint shape", () => {
       credentialsHint: "Authorization, x-workspace",
       config: {
         url: "wss://acme.livekit.cloud",
-        tokenEndpoint: "https://127.0.0.1:1/livekit/token",
+        tokenEndpoint: "https://tokens.invalid/livekit/token",
       },
     });
     expect(platform.registered.sealed).toEqual([HEADERS]);
   });
 
-  it("allows a token endpoint with no auth headers", async () => {
+  it("registers required token-endpoint auth headers sealed", async () => {
     const result = await connectLiveKit(
       {
         variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
-        name: "private-network-agent",
+        name: "endpoint-agent",
         url: "wss://acme.livekit.cloud",
-        tokenEndpoint: "https://tokens.internal.example/livekit",
+        tokenEndpoint: "https://tokens.example/livekit",
+        credentials: liveKitTokenHeaders(HEADERS),
       },
       options(),
     );
 
     expect(result.kind).toBe("registered");
     if (result.kind !== "registered") return;
-    expect(result.registered.connection.credentialsHint).toBeNull();
-    expect(platform.registered.sealed).toEqual([]);
+    expect(result.registered.connection.credentialsHint).toBe(
+      "Authorization, x-workspace",
+    );
+    expect(platform.registered.sealed).toEqual([HEADERS]);
   });
 
   it("does not silently merge two LiveKit targets that use one name", async () => {
@@ -168,6 +171,7 @@ describe("the token-endpoint shape", () => {
         name: "front-desk",
         url: "wss://second.livekit.cloud",
         tokenEndpoint: "https://tokens.example/livekit",
+        credentials: liveKitTokenHeaders(HEADERS),
       },
       options(),
     );
@@ -223,9 +227,17 @@ describe("the server-owned connection form", () => {
                   label: "Customer token endpoint — Advanced",
                   chosen_by: "tokenEndpoint",
                   fields: [],
-                  credential_rule: "optional",
-                  credential_help: "Optional auth headers.",
-                  credential_fields: [],
+                  credential_rule: "required",
+                  credential_help: "Required auth headers.",
+                  credential_fields: [
+                    {
+                      field: "headers",
+                      label: "Auth headers",
+                      kind: "json",
+                      required: true,
+                      help: "A JSON object of headers.",
+                    },
+                  ],
                 },
               ],
             },

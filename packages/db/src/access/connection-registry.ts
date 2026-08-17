@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 import {
   CONNECTION_TYPES,
   MODALITIES,
@@ -605,9 +607,6 @@ function jsonObjectText(key: string, value: unknown): string {
   return candidate;
 }
 
-/** The two schemes something egma POSTs to is written in. */
-const TOKEN_ENDPOINT_SCHEMES = ["http:", "https:"];
-
 /**
  * Where egma asks the customer for a token, per simulation.
  *
@@ -616,29 +615,45 @@ const TOKEN_ENDPOINT_SCHEMES = ["http:", "https:"];
  * somebody who pasted the wrong one of the two, and finding that out at create
  * costs a sentence where finding it out mid-run costs a simulation.
  *
- * `http` is admitted beside `https` on purpose, because an endpoint on a
- * private network is a real deployment and refusing it would push people onto
- * a public one. What egma will not do is pretend that is the same thing: the
- * hardening recipe in the docs says to put TLS and an auth header in front of
- * it, and says what an open endpoint means.
+ * This value later becomes an outbound request from the simulator. The
+ * platform therefore admits only HTTPS hostnames here. Literal addresses and
+ * localhost names are refused before storage; the simulator resolves the
+ * hostname again at request time and admits only public addresses there. The
+ * second check is load-bearing because DNS can change after this write.
  */
 function tokenEndpointUrl(key: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
-  let scheme: string | undefined;
+  let parsed: URL | undefined;
   try {
-    scheme = new URL(candidate).protocol;
+    parsed = new URL(candidate);
   } catch {
-    scheme = undefined;
+    parsed = undefined;
   }
 
+  const rawHostname = parsed?.hostname ?? "";
+  const hostname = rawHostname
+    .replace(/^\[/, "")
+    .replace(/\]$/, "")
+    .replace(/\.$/, "")
+    .toLowerCase();
+  const hasAmbiguousSyntax =
+    candidate.includes("\\") || /[\u0000-\u001F\u007F]/u.test(candidate);
+
   if (
-    scheme === undefined ||
-    !TOKEN_ENDPOINT_SCHEMES.includes(scheme) ||
-    !candidate.toLowerCase().startsWith(`${scheme}//`)
+    parsed === undefined ||
+    hasAmbiguousSyntax ||
+    parsed.protocol !== "https:" ||
+    !candidate.toLowerCase().startsWith("https://") ||
+    hostname === "" ||
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    isIP(hostname) !== 0 ||
+    parsed.username !== "" ||
+    parsed.password !== ""
   ) {
     throw new AgentWriteRefusedError(
       "not_admitted",
-      `the config's ${key} must be an http or https URL, which looks like ` +
+      `the config's ${key} must be a public https URL, which looks like ` +
         `https://example.com/egma/livekit-token`,
     );
   }
@@ -899,13 +914,13 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "tokenEndpoint",
             label: "Token endpoint",
             kind: "url",
-            help: "Where Egma asks for a room token, once per simulation. Your project's signing secret never leaves you.",
+            help: "The public HTTPS URL where Egma asks for one room token per simulation. Private network addresses are refused.",
           },
         ],
         credentialHelp:
           "This is a customer-operated integration. Auth headers are sent " +
-          "when Egma asks your endpoint for a token. They are optional, " +
-          "because an endpoint reachable only from Egma can be open to it. " +
+          "when Egma asks your public HTTPS endpoint for a token. They are " +
+          "required so another caller cannot mint a room token. " +
           "A read gives back the header names and never their values.",
         credentialFields: [
           {
@@ -916,12 +931,7 @@ export const CONNECTION_REGISTRY: Readonly<
           },
         ],
         credentials: {
-          // Left out on purpose is a real deployment: an endpoint on a private
-          // network can be reachable only from egma and open to it. The docs
-          // say not to, and say what an open endpoint means; the registry does
-          // not turn that advice into a rule it would be lying about, because
-          // it cannot see whose network the endpoint is on.
-          required: "if-sent",
+          required: true,
           fields: ["headers"],
           gate: authHeadersJson,
           // The header names and never their values — see `namesIn`.
@@ -1156,6 +1166,14 @@ export function validCredentials(
   const shape = shapeChosen(descriptor.variants, config);
   const what = nameOf(type, shape);
   const rule = shape.credentials;
+
+  if (
+    credentials === undefined &&
+    rule.required === true &&
+    shape.mixedUp !== undefined
+  ) {
+    throw new AgentWriteRefusedError("not_admitted", shape.mixedUp);
+  }
 
   if (
     shape.mixedUp !== undefined &&

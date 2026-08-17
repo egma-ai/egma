@@ -271,12 +271,11 @@ export async function connectLiveKitStep(
         ),
       };
     } else {
-      const headers = credentials.values["headers"];
       input = {
         ...common,
         variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
         tokenEndpoint: config.values["tokenEndpoint"] ?? "",
-        ...(headers === undefined ? {} : { credentials: liveKitTokenHeaders(headers) }),
+        credentials: liveKitTokenHeaders(credentials.values["headers"] ?? ""),
       };
     }
 

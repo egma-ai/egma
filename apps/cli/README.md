@@ -181,8 +181,8 @@ rules. You then choose one of two setups:
   Give Egma the project URL, API key, and API secret so it can manage room
   tokens for simulations.
 - **Customer token endpoint — Advanced.** You operate an API that gives Egma a
-  short-lived room token for each simulation. Optional auth headers protect
-  that API, and the project signing secret stays on your side.
+  short-lived room token for each simulation. It must be a public HTTPS URL,
+  and auth headers are required. The project signing secret stays on your side.
 
 Secrets are drawn as dots and never enter wizard state, the coding-agent
 context, a repository file, a log, or a command argument. Setup does not contact

@@ -79,10 +79,10 @@ function catalog(): Record<string, unknown> {
               { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server." },
               { key: "tokenEndpoint", label: "Token endpoint", kind: "url", required: true, help: "Where Egma requests one token." },
             ],
-            credential_rule: "optional",
-            credential_help: "Optional endpoint auth headers, stored sealed.",
+            credential_rule: "required",
+            credential_help: "Endpoint auth headers, stored sealed.",
             credential_fields: [
-              { field: "headers", label: "Auth headers", kind: "json", required: false, help: "Optional JSON headers." },
+              { field: "headers", label: "Auth headers", kind: "json", required: true, help: "JSON headers." },
             ],
           },
         ],

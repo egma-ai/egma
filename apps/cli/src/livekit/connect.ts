@@ -43,8 +43,8 @@ export type LiveKitTokenEndpointRegistration = CommonRegistration & {
   readonly variant: typeof LIVEKIT_TOKEN_ENDPOINT_VARIANT;
   /** Egma asks this endpoint for a room token once per simulation. */
   readonly tokenEndpoint: string;
-  /** Optional auth headers for the token endpoint. */
-  readonly credentials?: ConnectionCredentials | undefined;
+  /** Auth headers for the public token endpoint. */
+  readonly credentials: ConnectionCredentials;
 };
 
 export type LiveKitRegistration =

@@ -436,17 +436,23 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     expect(JSON.stringify(rows[0]?.config)).not.toContain("SENTINEL");
   });
 
-  it("lands with no credentials at all, and reads back with no hint", async () => {
+  it("refuses a public endpoint with no auth headers", async () => {
     const agentId = await agentNamed("LiveKit Open Endpoint");
-    const added = await addConnection(
-      actingAsAcme(),
-      agentId,
-      atEndpoint({ credentials: undefined }),
+    await expect(
+      addConnection(
+        actingAsAcme(),
+        agentId,
+        atEndpoint({ credentials: undefined }),
+      ),
+    ).rejects.toThrow(
+      "a livekit connection whose config names a tokenEndpoint asks that " +
+        "endpoint for every token, so it holds no key pair of its own: its " +
+        "credentials are the endpoint's auth headers, shaped { headers }. " +
+        "Send those, or drop the tokenEndpoint and Egma will mint its own " +
+        "tokens from an apiKey and apiSecret.",
     );
 
-    // The unsealing half of this story is the claim door's, and lives with it:
-    // see "a livekit connection's two credential shapes, through the claim".
-    expect(added?.credentialsHint).toBeNull();
+    expect(await listConnections(actingAsAcme(), agentId)).toEqual([]);
   });
 
   /**

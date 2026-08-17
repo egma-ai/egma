@@ -59,9 +59,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+import socket
+from dataclasses import dataclass, field, replace
+from typing import Any
 
-from egma_simulator.media.livekit_room import LiveKitRoomBackend, platform_refusal
+from egma_simulator.media.livekit_room import (
+    LiveKitRoomBackend,
+    RoomSettings,
+    platform_refusal,
+)
 from egma_simulator.media.room import answering
 from egma_simulator.media.scripted import ScriptedSession
 from egma_simulator.mock_tools import (
@@ -231,6 +237,12 @@ class StubRoom:
             )
 
 
+def _test_endpoint_socket(addr_info: tuple[object, ...]) -> socket.socket:
+    """Let the local contract server stand in for a public endpoint in tests."""
+    family, kind, protocol, _canonical_name, _sockaddr = addr_info
+    return socket.socket(family=family, type=kind, proto=protocol)  # type: ignore[arg-type]
+
+
 class RoomStubBackend(LiveKitRoomBackend):
     """The real room driver, with the calls it makes of a LiveKit answered
     here: making the room, dispatching into it, joining it, deleting it.
@@ -243,10 +255,35 @@ class RoomStubBackend(LiveKitRoomBackend):
     """
 
     def __init__(self, stub: RoomStub, **built: object) -> None:
+        settings = built.get("settings")
+        if (
+            isinstance(settings, RoomSettings)
+            and settings.token_endpoint.startswith("https://127.0.0.1:")
+        ):
+            built["settings"] = replace(
+                settings,
+                token_endpoint=settings.token_endpoint.replace(
+                    "https://", "http://", 1
+                ),
+            )
         super().__init__(**built)
         self.stub = stub
         self.agent_is_coming = False
         self._delivered = 0
+
+    def _endpoint_connector(self, aiohttp: Any, resolver: Any) -> tuple[Any, Any]:
+        """Reach this test's loopback HTTP server after production parsing.
+
+        This override is the explicit test-only exception to the production
+        connector's public-address and TLS policy. The request and response
+        still cross a real socket; the fake supplies only the network edge.
+        """
+        connector = aiohttp.TCPConnector(
+            resolver=resolver,
+            socket_factory=_test_endpoint_socket,
+            use_dns_cache=False,
+        )
+        return resolver, connector
 
     @property
     def endpoint_dispatches(self) -> bool:

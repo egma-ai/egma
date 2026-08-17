@@ -684,20 +684,6 @@ describe("a livekit connection's two credential shapes, through the claim", () =
       headers: '{"Authorization":"Bearer acme-endpoint-token-9999"}',
     });
   });
-
-  it("hands back nothing at all when the endpoint needs no header", async () => {
-    const simulationId = await queuedOverLiveKit({
-      config: {
-        url: "wss://acme.livekit.cloud",
-        tokenEndpoint: "https://acme.example/livekit/open",
-      },
-    });
-
-    const claim = await claimOne(simulationId);
-    const reached = await resolveSimulationConnection(claim.auth, claim.id);
-
-    expect(reached?.credentials).toBeNull();
-  });
 });
 
 /**
