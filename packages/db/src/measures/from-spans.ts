@@ -309,6 +309,19 @@ function derivedFromFrameworkSpans(
 
   for (const span of everySpanIn(conversation)) {
     if (span.kind === HUMAN_TURN || span.kind === AGENT_TURN) {
+      // **A turn of zero width was never timed, and nothing is read off it.**
+      // Retell publishes no per-turn timing, so its normalizer opens every turn
+      // at the production trace's own start and closes it in the same instant —
+      // placeholders, said plainly in `apps/api/src/retell/normalise.ts`. Read
+      // as geometry they describe an agent that answered instantly every time:
+      // a series of zeroes that holds any bound put to it, so a trace whose
+      // worst wait was really 2145 ms passes a two-second bound with "0
+      // milliseconds at its worst" as the rationale. It is the negative guard
+      // below, stated one step earlier — a number worked out from a turn nobody
+      // timed is not a measurement, and a wrong number is worse than a missing
+      // one. A framework that does time its turns loses nothing by it: a turn
+      // that happened has width.
+      if (BigInt(span.durationNanoseconds) === 0n) continue;
       turns.push(timed(span));
       continue;
     }
