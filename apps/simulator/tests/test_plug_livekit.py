@@ -1225,7 +1225,7 @@ async def test_the_golden_livekit_fixture_is_a_connection_the_plug_accepts(
 async def test_an_unsafe_token_endpoint_is_refused_before_a_request_leaves_egma(
     token_endpoint: str,
 ):
-    """A legacy stored connection cannot turn into an internal request."""
+    """No stored connection can turn into an internal request."""
     plug = LiveKitRoom(
         modality="voice",
         config={"url": A_URL, "tokenEndpoint": token_endpoint},
@@ -1241,7 +1241,7 @@ async def test_an_unsafe_token_endpoint_is_refused_before_a_request_leaves_egma(
 
 
 def test_a_saved_http_token_endpoint_is_refused_before_auth_headers_leave_egma():
-    """An older record cannot send a secret or token over cleartext."""
+    """A malformed record cannot send a secret or token over cleartext."""
     with pytest.raises(MediaBackendError) as refused:
         RoomSettings.from_connection(
             {
@@ -1455,24 +1455,23 @@ async def test_the_endpoints_auth_headers_are_sent_and_go_nowhere_else(
     assert endpoint.asked[0].header("authorization") == f"Bearer {A_HEADER_SECRET}"
 
 
-async def test_a_legacy_endpoint_with_no_credential_is_still_read_without_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("credentials", [None, {}])
+def test_a_token_endpoint_without_auth_headers_is_refused_before_a_request(
+    credentials: object,
 ):
-    """The runtime can finish a connection stored before headers were required."""
-    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    """Every token endpoint is authenticated; there is no legacy shape."""
     with serving() as endpoint:
-        conducted, _turns, _measures, _assembled = await room_walk(
-            tmp_path,
-            stub,
-            monkeypatch,
-            built_by=livekit_endpoint_spec,
-            token_endpoint=endpoint.url,
-            credentials={},
-            scenario="One point.",
-        )
+        with pytest.raises(PlugError) as refused:
+            LiveKitRoom(
+                modality="voice",
+                config={"url": A_URL, "tokenEndpoint": endpoint.url},
+                credentials=credentials,
+                simulation_id=A_SIMULATION,
+                driver=RoomStub().driver,
+            )
 
-    assert conducted.ending == "persona_concluded"
-    assert endpoint.asked[0].header("authorization") is None
+        assert endpoint.asked == []
+    assert "headers" in str(refused.value)
 
 
 @pytest.mark.parametrize("alias", ["token", "participantToken", "accessToken"])

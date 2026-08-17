@@ -355,8 +355,7 @@ class RoomSettings:
     endpoint_headers: dict[str, str] = field(
         default_factory=dict, repr=False
     )
-    """What egma sends to authenticate itself to that endpoint. Empty
-    only for a connection stored before the platform required headers."""
+    """What egma sends to authenticate itself to that endpoint."""
 
     @property
     def mints_its_own(self) -> bool:
@@ -498,11 +497,11 @@ def _server_url(config: dict[str, Any]) -> str:
 def _token_endpoint_url(endpoint: str) -> str:
     """A stored endpoint in a shape the network guard can enforce.
 
-    New writes admit only public-looking HTTPS hostnames. This reader applies
-    the same transport rule to older stored connections before an auth header
-    or room token can cross the network. Permission to connect is decided
-    later, against the exact socket address; parsing a URL is never permission
-    to reach its host.
+    The platform admits only public-looking HTTPS hostnames. This reader
+    independently applies the same transport rule before an auth header or
+    room token can cross the network. Permission to connect is decided later,
+    against the exact socket address; parsing a URL is never permission to
+    reach its host.
     """
     try:
         parsed = urlsplit(endpoint)
@@ -531,20 +530,15 @@ def _token_endpoint_url(endpoint: str) -> str:
 def _endpoint_headers(credentials: Any) -> dict[str, str]:
     """What egma sends to authenticate itself to a token endpoint.
 
-    The platform requires headers for every new public endpoint. Absence is
-    still read for an older stored connection. What is not accepted is
-    something egma cannot send: a refusal names the field and never quotes the
-    value, because the values are the credential.
+    Every endpoint is public, so every endpoint carries auth headers. A
+    refusal names the field and never quotes the value, because the values are
+    the credential.
     """
-    if credentials is None:
-        return {}
     if not isinstance(credentials, dict):
         raise MediaBackendError(
-            "a livekit connection that names a tokenEndpoint carries that "
-            "endpoint's auth headers, or nothing at all"
+            "a livekit connection that names a tokenEndpoint needs that "
+            "endpoint's auth headers under credentials.headers"
         )
-    if not credentials:
-        return {}
 
     stray = set(credentials) - ENDPOINT_CREDENTIAL_KEYS
     if stray:
