@@ -136,6 +136,17 @@ other collector needs no second setting to be pointed here instead.
 """
 
 
+_exporting = None
+"""The one provider this process ever builds, once the endpoint asks for it.
+
+A worker process can serve one room after another, and `entrypoint` runs
+once per room — so the provider is built on the first job and reused by
+every later one. Rebuilding it per job would install a new batch
+processor, and its exporter thread, every conversation, and never take
+one down.
+"""
+
+
 def export_telemetry(ctx: agents.JobContext) -> None:
     """Send this job's telemetry wherever the environment says, or nowhere.
 
@@ -150,24 +161,31 @@ def export_telemetry(ctx: agents.JobContext) -> None:
     is configured here is exactly what a reader of that page configures,
     and a mistake in it is reproducible from their side.
     """
+    global _exporting
     if os.environ.get(ENDPOINT, "").strip() == "":
         return
 
-    from livekit.agents.telemetry import set_tracer_provider
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-        OTLPSpanExporter,
-    )
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    if _exporting is None:
+        from livekit.agents.telemetry import set_tracer_provider
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-    provider = TracerProvider()
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-    set_tracer_provider(provider)
+        provider = TracerProvider()
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        set_tracer_provider(provider)
+        _exporting = provider
+
+    provider = _exporting
 
     async def flush() -> None:
         # The batch processor exports on a timer, so the last turns of a
         # conversation are still held in it when the job ends. Without
-        # this the goodbye is the part that never arrives.
+        # this the goodbye is the part that never arrives. The flush is
+        # per job on the one shared provider; shutdown belongs to the
+        # process, not to any conversation it served.
         provider.force_flush()
 
     ctx.add_shutdown_callback(flush)
