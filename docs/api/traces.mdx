@@ -60,7 +60,7 @@ curl -X POST https://your-egma-instance/v1/traces \
 ```
 
 <Note>
-  Use your Egma instance's API port for telemetry ingest — port **3100** by default — not the web UI port (3101). These may differ in self-hosted deployments. Check your `EGMA_API_URL` environment variable or ask your administrator if you are unsure which port is which.
+  Prefer your Egma instance's API port for telemetry ingest — port **3100** by default. The web UI port (3101) also reaches this endpoint, because the web application forwards `/v1/traces` to the API, so an exporter pointed at the address you open the dashboard on works; the API is simply one hop shorter. Both may differ in self-hosted deployments — check your `EGMA_API_URL` environment variable, or read the address off the empty **Monitoring** page, which shows the one this deployment answers on.
 </Note>
 
 <Note>
@@ -89,6 +89,10 @@ Returns a paginated list of trace summaries within a time window, ordered newest
 
 <ParamField query="project_id" type="string">
   Filter to a specific project. Omit to read across your whole organization. If your API key is already scoped to a project, this parameter must either match that project or be omitted.
+</ParamField>
+
+<ParamField query="source" type="string">
+  Which kind of traffic to read: `simulation` for a conversation Egma conducted, `production` for one your own agent had. **Omit for both** — an integration written before this parameter existed gets exactly the answer it always got. A value that is neither word is refused rather than ignored, and the refusal names both accepted words. The filter is not remembered by a pagination cursor: send it again with each page, alongside the same `from` and `to`.
 </ParamField>
 
 <ParamField query="limit" type="number">
