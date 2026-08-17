@@ -217,3 +217,47 @@ def test_the_realtime_ears_leave_the_turn_boundary_to_the_detector_in_the_pipeli
 def test_the_realtime_ears_refuse_without_a_key_rather_than_at_the_first_turn():
     with pytest.raises(SpeechFault, match="without a key"):
         _ears(SpeechProviders(stt="openai_realtime"))
+
+
+async def test_realtime_readiness_refuses_if_the_pinned_pipecat_signal_moves(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A dependency rename is an explicit refusal, not a lost first turn."""
+    from pipecat.processors.frame_processor import FrameProcessor
+    from pipecat.services.openai import stt as openai_stt
+
+    class SessionlessRealtimeSTT(FrameProcessor):
+        created: SessionlessRealtimeSTT | None = None
+
+        class Settings:
+            def __init__(self, *, model: str) -> None:
+                self.model = model
+
+        def __init__(self, **_kwargs: object) -> None:
+            super().__init__()
+            self.handlers: dict[str, Any] = {}
+            SessionlessRealtimeSTT.created = self
+
+        def event_handler(self, name: str):
+            def register(handler):
+                self.handlers[name] = handler
+                return handler
+
+            return register
+
+        async def announce_connected(self) -> None:
+            await self.handlers["on_connected"](self)
+
+    monkeypatch.setattr(
+        openai_stt, "OpenAIRealtimeSTTService", SessionlessRealtimeSTT
+    )
+    _leg, connected = _ears(
+        SpeechProviders(stt="openai_realtime", stt_key=A_KEY)
+    )
+    leg = SessionlessRealtimeSTT.created
+    assert leg is not None
+    assert connected is not None
+
+    await leg.announce_connected()
+    with pytest.raises(SpeechFault, match="no longer says when"):
+        await connected()

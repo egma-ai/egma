@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from ..speech import decode_speech, encode_speech, silence
-from . import VoiceMedia
+from . import RemoteParticipantLeftFrame, VoiceMedia
 
 FRAME_SECONDS = 0.02
 TRAILING_SILENCE_SECONDS = 0.6
@@ -232,12 +232,15 @@ class _ScriptedInput(FrameProcessor):
             acknowledged = self._transport.wait_for_ack(frame)
             self._transport.input_frames += 1
             await self.push_frame(frame)
-            await acknowledged.wait()
             if chunk.hang_up_after:
-                # Participant departure follows the final accepted media,
-                # which is the ordering a live room exposes to the pipeline.
-                self._transport.stop()
+                marker = RemoteParticipantLeftFrame(
+                    completed=self._transport.ended
+                )
+                await self.push_frame(marker)
+                await marker.completed.wait()
+                await acknowledged.wait()
                 return
+            await acknowledged.wait()
 
 
 class _ScriptedOutput(FrameProcessor):

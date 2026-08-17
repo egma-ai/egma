@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from importlib import import_module
 from typing import Protocol
 
+from pipecat.frames.frames import ControlFrame, UninterruptibleFrame
+
 from ..contract import ERROR, NOT_ANSWERED
 
 BACKENDS = {
@@ -80,6 +82,13 @@ def sip_refusal(
     )
     named = f"{what}: the carrier answered {said}" if said else what
     return MediaBackendError(f"{named}{f'; {told}' if told else ''}", ending=ending)
+
+
+@dataclass
+class RemoteParticipantLeftFrame(ControlFrame, UninterruptibleFrame):
+    """An ordered marker placed after a remote participant's final audio."""
+
+    completed: asyncio.Event
 
 
 @dataclass(frozen=True)

@@ -39,7 +39,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 from .blob import BlobStore
-from .media import VoiceMedia
+from .media import RemoteParticipantLeftFrame, VoiceMedia
 from .persona import Persona, Turn
 from .plugs import PlugError, VoiceConnection
 from .recording import AudioFacts, dual_channel_wav
@@ -96,6 +96,7 @@ class _AgentEar(VADProcessor):
 
     def __init__(self, *, vad_analyzer: VADAnalyzer, conductor: VoiceConductor) -> None:
         super().__init__(vad_analyzer=vad_analyzer, audio_idle_timeout=0.0)
+        self._analyzer = vad_analyzer
         self._conductor = conductor
         self.position = Fraction(0)
         self.speaking_since: MediaPosition | None = None
@@ -123,11 +124,32 @@ class _AgentEar(VADProcessor):
         return self.speaking_since is not None
 
     async def finalize_active_utterance(self) -> None:
-        """Close speech at the last media position when its participant leaves."""
+        """Close active speech at the final ordered media position."""
         if self.speaking_since is not None:
-            await self.broadcast_frame(VADUserStoppedSpeakingFrame, stop_secs=0.0)
+            # Pipecat 1.7.0 publishes a stop only after the whole VAD quiet
+            # window. On departure that window is incomplete, and it exposes
+            # no public progress value. This pinned counter is the only way to
+            # remove quiet already observed without inventing media. The
+            # abrupt-departure alignment test covers a partial stop window.
+            quiet_windows = getattr(self._analyzer, "_vad_stopping_count", None)
+            if not isinstance(quiet_windows, int):
+                raise SpeechFault(
+                    "this pipecat release no longer exposes the voice "
+                    "detector's partial stop window"
+                )
+            stop_secs = (
+                quiet_windows
+                * self._analyzer.num_frames_required()
+                / self._analyzer.sample_rate
+            )
+            await self.broadcast_frame(
+                VADUserStoppedSpeakingFrame, stop_secs=stop_secs
+            )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        if isinstance(frame, RemoteParticipantLeftFrame):
+            self._conductor.agent_is_departing()
+            await self.finalize_active_utterance()
         if isinstance(frame, InputAudioRawFrame):
             self.position += Fraction(frame.num_frames, frame.sample_rate)
         await super().process_frame(frame, direction)
@@ -185,6 +207,8 @@ class _PersonaBrain(FrameProcessor):
             if due is None:
                 return
             reply = await self._persona.next_turn(self._conductor.history)
+            if self._conductor.is_ending:
+                return
             if reply.concluded:
                 await self._conductor.persona_concluded(reply.text)
                 return
@@ -226,6 +250,9 @@ class _Timeline(FrameProcessor):
             )
         elif isinstance(frame, TTSStoppedFrame):
             await self._conductor.persona_stopped()
+        elif isinstance(frame, RemoteParticipantLeftFrame):
+            frame.completed.set()
+            self._conductor.media_advanced()
         await self.push_frame(frame, direction)
 
 
@@ -321,7 +348,11 @@ class VoiceConductor:
 
     @property
     def is_ending(self) -> bool:
-        return self._ending is not None or self._controls.cause is not None
+        return (
+            self._ending is not None
+            or self._agent_departed
+            or self._controls.cause is not None
+        )
 
     async def conduct(
         self,
@@ -528,15 +559,15 @@ class VoiceConductor:
         self._stop_if_asked()
         media = self._media
         if media is not None and media.failed.is_set():
-            raise PlugError(
-                f"the {media.transport_name} disconnected before the simulation ended"
-            )
+            raise self._transport_lost()
         ear = self._ear
         if ear is None:
             return
         if media is not None and media.ended.is_set() and not self._agent_departed:
             await self._agent_left()
         if self._agent_departed:
+            if media is not None and not media.ended.is_set():
+                return
             if ear.hearing_speech or self._heard_so_far < len(ear.utterances):
                 return
             self._ending = AGENT_ENDED
@@ -597,9 +628,11 @@ class VoiceConductor:
             await self._on_answered()
         if self._ending is not None:
             return None
-        if self._agent_departed or (
-            self._media is not None and self._media.ended.is_set()
-        ):
+        if self._agent_departed:
+            self._owes_a_turn = False
+            self.media_advanced()
+            return None
+        if self._media is not None and self._media.ended.is_set():
             self._agent_departed = True
             self._ending = AGENT_ENDED
             self._owes_a_turn = False
@@ -710,6 +743,12 @@ class VoiceConductor:
     def media_advanced(self) -> None:
         self._activity.set()
 
+    def agent_is_departing(self) -> None:
+        """Stop new persona work while the ordered departure marker drains."""
+        self._agent_departed = True
+        self._owes_a_turn = False
+        self.media_advanced()
+
     def the_brain_failed(self, fault: BaseException) -> None:
         if self._brain_fault is None:
             self._brain_fault = fault
@@ -724,6 +763,16 @@ class VoiceConductor:
     def _stop_if_asked(self) -> None:
         if self._controls.cause is not None:
             raise _Stopped()
+
+    def _transport_lost(self) -> PlugError:
+        transport = (
+            self._media.transport_name
+            if self._media is not None
+            else "voice transport"
+        )
+        return PlugError(
+            f"the {transport} disconnected before the simulation ended"
+        )
 
     async def _agent_left(self) -> None:
         """Finish any active input turn before recording a normal departure."""
@@ -765,10 +814,7 @@ class VoiceConductor:
         if stopped in done:
             raise _Stopped()
         if failed in done:
-            raise PlugError(
-                f"the {self._media.transport_name} disconnected before the "
-                "simulation ended"
-            )
+            raise self._transport_lost()
         if ended is not None and ended in done:
             await self._agent_left()
             return
@@ -788,23 +834,35 @@ class VoiceConductor:
         taking = asyncio.ensure_future(step)
         faulted = asyncio.ensure_future(self._faulted.wait())
         stopped = asyncio.ensure_future(self._controls.guard(_never()))
+        failed = (
+            asyncio.ensure_future(self._media.failed.wait())
+            if self._media is not None
+            else None
+        )
+        waiting = {taking, faulted, stopped, self._running}
+        if failed is not None:
+            waiting.add(failed)
         try:
             done, _pending = await asyncio.wait(
-                {taking, faulted, stopped, self._running},
+                waiting,
                 return_when=asyncio.FIRST_COMPLETED,
             )
         finally:
-            for unfinished in (taking, faulted, stopped):
+            for unfinished in (taking, faulted, stopped, failed):
+                if unfinished is None:
+                    continue
                 if not unfinished.done():
                     unfinished.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await unfinished
-        if taking in done:
-            return taking.result()
         if faulted in done:
             self._raise_fault()
         if stopped in done:
             raise _Stopped()
+        if failed is not None and failed in done:
+            raise self._transport_lost()
+        if taking in done:
+            return taking.result()
         raise PipelineGone("the voice pipeline ended while it was opening")
 
     async def _unless_stopped(self, step: Coroutine[Any, Any, Any]) -> Any:

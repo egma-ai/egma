@@ -23,6 +23,7 @@ job the missing half was, which is not the same answer in both shapes.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import logging
@@ -42,6 +43,7 @@ from token_endpoint_stub import serving
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR, contract_dir
 from egma_simulator.media import MediaBackend, MediaBackendError, VoiceMedia
+from egma_simulator.media import room as room_media
 from egma_simulator.media.livekit_room import (
     LiveKitRoomBackend,
     RoomSettings,
@@ -97,6 +99,7 @@ async def test_room_transport_loss_is_not_remote_participant_departure(
 
         def __init__(self, **_kwargs: object) -> None:
             self.handlers: dict[str, object] = {}
+            self.input_processor = EventInput()
             EventTransport.created = self
 
         def event_handler(self, name: str):
@@ -107,7 +110,7 @@ async def test_room_transport_loss_is_not_remote_participant_departure(
             return register
 
         def input(self) -> object:
-            return object()
+            return self.input_processor
 
         def output(self) -> object:
             return object()
@@ -115,6 +118,26 @@ async def test_room_transport_loss_is_not_remote_participant_departure(
         async def cleanup(self) -> None:
             disconnected = self.handlers["on_disconnected"]
             await disconnected(self)
+
+    class EventClient:
+        def __init__(self) -> None:
+            self._audio_queue: asyncio.Queue[object] = asyncio.Queue()
+            self._audio_streams: dict[str, object] = {}
+
+        async def get_next_audio_frame(self):
+            raise AssertionError("the pinned drain wrapper was not installed")
+            yield
+
+        async def _close_audio_stream(self, _participant_id: str) -> None:
+            raise AssertionError("the pinned drain wrapper was not installed")
+
+    class EventInput:
+        def __init__(self) -> None:
+            self._client = EventClient()
+            self._audio_in_queue: asyncio.Queue[object] = asyncio.Queue()
+
+        async def push_frame(self, frame: object) -> None:
+            frame.completed.set()
 
     monkeypatch.setattr(livekit_transport, "LiveKitTransport", EventTransport)
     room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
@@ -126,15 +149,105 @@ async def test_room_transport_loss_is_not_remote_participant_departure(
     await transport.handlers["on_disconnected"](transport)
     assert media.failed.is_set()
     assert not media.ended.is_set()
+    await transport.handlers["on_connected"](transport)
+    with pytest.raises(MediaBackendError, match="closed the room") as lost:
+        await room.wait_connected()
+    assert lost.value.ending == ERROR
 
+    media.failed.clear()
     await transport.handlers["on_participant_disconnected"](
         transport, AGENT_IDENTITY
     )
     assert media.ended.is_set()
 
-    media.failed.clear()
     await room.leave()
     assert not media.failed.is_set()
+
+
+async def test_pipecat_17_departure_waits_for_both_inbound_audio_queues():
+    """The pinned shim orders departure after conversion and pipeline input."""
+
+    class Stream:
+        def __init__(self) -> None:
+            self.closed = asyncio.Event()
+
+        async def aclose(self) -> None:
+            self.closed.set()
+
+    class Client:
+        def __init__(self) -> None:
+            self._audio_queue: asyncio.Queue[object] = asyncio.Queue()
+            self._audio_streams: dict[str, tuple[Stream, asyncio.Task[None]]] = {}
+
+        async def get_next_audio_frame(self):
+            raise AssertionError("the pinned drain wrapper was not installed")
+            yield
+
+        async def _close_audio_stream(self, _participant_id: str) -> None:
+            raise AssertionError("the pinned drain wrapper was not installed")
+
+    class Input:
+        def __init__(self, client: Client) -> None:
+            self._client = client
+            self._audio_in_queue: asyncio.Queue[object] = asyncio.Queue()
+            self.order: list[str] = []
+
+        async def push_frame(self, frame: object) -> None:
+            self.order.append("departure")
+            frame.completed.set()
+
+    client = Client()
+    input_transport = Input(client)
+    drain = room_media._Pipecat17InputDrain(input_transport)
+    stream = Stream()
+    produced = asyncio.Event()
+
+    async def produce() -> None:
+        await client._audio_queue.put("last audio")
+        produced.set()
+        await stream.closed.wait()
+
+    producer = asyncio.create_task(produce())
+    client._audio_streams[AGENT_IDENTITY] = (stream, producer)
+    converted = asyncio.Event()
+
+    async def convert() -> None:
+        async for frame in client.get_next_audio_frame():
+            await converted.wait()
+            await input_transport._audio_in_queue.put(frame)
+
+    converter = asyncio.create_task(convert())
+    forwarded = asyncio.Event()
+
+    async def forward() -> None:
+        frame = await input_transport._audio_in_queue.get()
+        await forwarded.wait()
+        input_transport.order.append(str(frame))
+        input_transport._audio_in_queue.task_done()
+
+    forwarder = asyncio.create_task(forward())
+    await produced.wait()
+    ended = asyncio.Event()
+    departing = asyncio.create_task(
+        drain.participant_left(AGENT_IDENTITY, ended)
+    )
+
+    await asyncio.sleep(0)
+    assert not ended.is_set()
+    converted.set()
+    await asyncio.sleep(0)
+    assert not ended.is_set()
+    forwarded.set()
+    await asyncio.wait_for(departing, timeout=1.0)
+
+    assert ended.is_set()
+    assert input_transport.order == ["last audio", "departure"]
+    assert stream.closed.is_set()
+    assert producer.done() and not producer.cancelled()
+    await forwarder
+    converter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await converter
 
 
 def livekit_spec(

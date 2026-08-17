@@ -11,7 +11,7 @@ from typing import Any
 
 from ..contract import ERROR
 from ..mock_tools import MockToolRefusal
-from . import MediaBackendError, VoiceMedia
+from . import MediaBackendError, RemoteParticipantLeftFrame, VoiceMedia
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ RpcMethod = Callable[[str], Awaitable[str]]
 ROOM_PREFIX = "egma-sim"
 PERSONA_IDENTITY = "egma-persona"
 CONNECT_SECONDS = 30.0
+AUDIO_STREAM_CLOSE_SECONDS = 2.0
 QUOTED_REFUSAL_CHARS = 200
 
 
@@ -65,6 +66,96 @@ async def first_of(*events: asyncio.Event, within: float) -> bool:
     return bool(done)
 
 
+class _Pipecat17InputDrain:
+    """Order participant departure after Pipecat 1.7.0's inbound queues.
+
+    Pipecat has no public input-drain operation. Its LiveKit client queue also
+    omits ``task_done``, and it cancels the track producer during close. The
+    pinned 1.7.0 shim makes that queue joinable, lets the producer finish, then
+    joins BaseInput before it places one ordinary control frame in the stream.
+    The focused room-driver test must fail if those pinned fields move.
+    """
+
+    def __init__(self, input_transport: object) -> None:
+        try:
+            client = input_transport._client
+            audio_queue = client._audio_queue
+            streams = client._audio_streams
+        except AttributeError as changed:
+            raise MediaBackendError(
+                "pipecat 1.7 no longer exposes the livekit input drain needed "
+                "to order participant departure after audio",
+                ending=ERROR,
+            ) from changed
+        self._input = input_transport
+        self._audio_queue: asyncio.Queue[Any] = audio_queue
+        self._streams: dict[str, tuple[object, asyncio.Task[Any]]] = streams
+        self._closing: dict[str, asyncio.Task[None]] = {}
+        client.get_next_audio_frame = self._tracked_audio_frames
+        client._close_audio_stream = self._finish_stream
+
+    async def _tracked_audio_frames(self):
+        while True:
+            audio = await self._audio_queue.get()
+            try:
+                yield audio
+            finally:
+                self._audio_queue.task_done()
+
+    async def _finish_stream(self, participant_id: str) -> None:
+        closing = self._closing.get(participant_id)
+        if closing is None:
+            closing = asyncio.create_task(
+                self._finish_owned_stream(participant_id),
+                name="livekit-audio-stream-close",
+            )
+            self._closing[participant_id] = closing
+        try:
+            await asyncio.shield(closing)
+        finally:
+            if closing.done() and self._closing.get(participant_id) is closing:
+                self._closing.pop(participant_id, None)
+
+    async def _finish_owned_stream(self, participant_id: str) -> None:
+        entry = self._streams.pop(participant_id, None)
+        if entry is None:
+            return
+        stream, producer = entry
+        try:
+            await asyncio.wait_for(
+                stream.aclose(), timeout=AUDIO_STREAM_CLOSE_SECONDS
+            )
+            await asyncio.wait_for(
+                asyncio.shield(producer), timeout=AUDIO_STREAM_CLOSE_SECONDS
+            )
+        except Exception as unfinished:
+            if not producer.done():
+                producer.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await producer
+            raise RuntimeError(
+                "pipecat did not finish the livekit participant's audio stream"
+            ) from unfinished
+
+    async def participant_left(
+        self, participant_id: str, completed: asyncio.Event
+    ) -> None:
+        await self._finish_stream(participant_id)
+        await self._audio_queue.join()
+        try:
+            input_queue = self._input._audio_in_queue
+        except AttributeError as changed:
+            raise MediaBackendError(
+                "pipecat 1.7 no longer exposes the livekit input drain needed "
+                "to order participant departure after audio",
+                ending=ERROR,
+            ) from changed
+        await input_queue.join()
+        marker = RemoteParticipantLeftFrame(completed=completed)
+        await self._input.push_frame(marker)
+        await marker.completed.wait()
+
+
 class JoinedRoom:
     """One LiveKit transport, owned by the conductor's only pipeline."""
 
@@ -105,6 +196,8 @@ class JoinedRoom:
             params=LiveKitParams(audio_in_enabled=True, audio_out_enabled=True),
         )
         self._transport = transport
+        input_transport = transport.input()
+        input_drain = _Pipecat17InputDrain(input_transport)
 
         @transport.event_handler("on_connected")
         async def _connected(_transport: object) -> None:
@@ -120,8 +213,16 @@ class JoinedRoom:
             self.arrivals.set()
 
         @transport.event_handler("on_participant_disconnected")
-        async def _left(_transport: object, _participant: str) -> None:
-            self.ended.set()
+        async def _left(_transport: object, participant: str) -> None:
+            if self._leaving:
+                return
+            try:
+                await input_drain.participant_left(participant, self.ended)
+            except Exception:
+                logger.warning(
+                    "the livekit input drain failed before participant departure"
+                )
+                self.failed.set()
 
         room = self
 
@@ -135,7 +236,7 @@ class JoinedRoom:
                 await self.push_frame(frame, direction)
 
         return VoiceMedia(
-            input=(transport.input(), _Arrival()),
+            input=(input_transport, _Arrival()),
             output=(transport.output(),),
             ended=self.ended,
             failed=self.failed,
@@ -152,7 +253,7 @@ class JoinedRoom:
                 f"into a room within {CONNECT_SECONDS:.0f}s",
                 ending=ERROR,
             )
-        if not self._connected.is_set():
+        if self.failed.is_set() or not self._connected.is_set():
             raise MediaBackendError(
                 f"the livekit server at {self._url} closed the room while the "
                 "simulator was joining",

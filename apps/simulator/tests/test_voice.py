@@ -20,6 +20,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import (
@@ -28,6 +29,7 @@ from conftest import (
     scripted_spec,
     speech_in_the_recording,
 )
+from pipecat.audio.vad.vad_analyzer import VADState
 from pipecat.frames.frames import TextFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
@@ -35,7 +37,7 @@ from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import ConductParameters, VoiceConductor
 from egma_simulator.contract import ERROR
-from egma_simulator.media import VoiceMedia
+from egma_simulator.media import RemoteParticipantLeftFrame, VoiceMedia
 from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
@@ -526,14 +528,57 @@ async def test_every_turn_is_measured_and_the_measures_never_run_backwards(
 
 
 async def test_an_exchange_the_agent_ends_still_leaves_a_recording(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    observed = await voice_simulation(
-        tmp_path,
-        scenario="A long scenario. With several sentences. That keep coming.",
+    departing = asyncio.Event()
+    thinking_after_agent_turn = asyncio.Event()
+    agent_is_departing = VoiceConductor.agent_is_departing
+
+    def notice_departure(conductor: VoiceConductor) -> None:
+        agent_is_departing(conductor)
+        departing.set()
+
+    next_turn = Persona.next_turn
+    model_turns = 0
+
+    async def delayed_after_the_agent_turns(persona: Persona, history):
+        nonlocal model_turns
+        model_turns += 1
+        if model_turns > 1:
+            thinking_after_agent_turn.set()
+            await departing.wait()
+        return await next_turn(persona, history)
+
+    monkeypatch.setattr(VoiceConductor, "agent_is_departing", notice_departure)
+    monkeypatch.setattr(Persona, "next_turn", delayed_after_the_agent_turns)
+    spec = spec_for(
+        scenario="One final point.",
         replies=["All sorted, goodbye now."],
         ends_after_replies=True,
     )
+    assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+    conductor = assembled.conductor
+    assert conductor is not None
+    transport = conductor._connection.transport
+    input_processor = transport.media.input[0]
+    push_frame = input_processor.push_frame
+
+    async def let_the_model_start_before_departure(frame, direction=None):
+        if isinstance(frame, RemoteParticipantLeftFrame):
+            await thinking_after_agent_turn.wait()
+        if direction is None:
+            await push_frame(frame)
+        else:
+            await push_frame(frame, direction)
+
+    monkeypatch.setattr(
+        input_processor, "push_frame", let_the_model_start_before_departure
+    )
+    observed = await observe(
+        conductor, assembled, spec, controls=WalkControls()
+    )
+
+    assert model_turns == 2
     assert observed.conducted.ending == "agent_ended"
     assert observed.conducted.reason == "the agent ended the exchange"
     assert ("agent", "All sorted, goodbye now.") in observed.turns
@@ -547,7 +592,34 @@ class _ProductionStopScriptedVAD(ScriptedVAD):
 
     def set_sample_rate(self, sample_rate: int) -> None:
         super().set_sample_rate(sample_rate)
-        self.params.stop_secs = CONVERSATION_VAD.stop_secs
+        self.set_params(
+            self.params.model_copy(
+                update={"stop_secs": CONVERSATION_VAD.stop_secs}
+            )
+        )
+
+
+
+async def test_production_stop_window_needs_the_full_declared_quiet_period():
+    """The test detector recalculates its counters after taking live settings."""
+    detector = _ProductionStopScriptedVAD()
+    band = 16000
+    detector.set_sample_rate(band)
+    state = await detector.analyze_audio(encode_speech("a", band))
+    assert state is VADState.SPEAKING
+
+    quiet_windows = round(
+        CONVERSATION_VAD.stop_secs * band / detector.num_frames_required()
+    )
+    for _ in range(quiet_windows - 1):
+        state = await detector.analyze_audio(
+            bytes(detector.num_frames_required() * 2)
+        )
+    assert state is not VADState.QUIET
+    state = await detector.analyze_audio(
+        bytes(detector.num_frames_required() * 2)
+    )
+    assert state is VADState.QUIET
 
 
 class _AbruptDeparture:
@@ -559,7 +631,9 @@ class _AbruptDeparture:
             replies=[],
             answer_delay_seconds=0,
             ends_after_replies=True,
-            hangup_silence_seconds=0,
+            # Short enough that the live 0.8 s VAD is still active, but long
+            # enough to prove partial quiet is removed from the turn boundary.
+            hangup_silence_seconds=0.1,
         )
 
     @property
@@ -584,10 +658,13 @@ async def test_departure_finalizes_the_active_agent_utterance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """A live 0.8 second VAD stop window cannot erase the last words."""
+    opened_unix_nano = 1_800_000_000_000_000_000
+    monkeypatch.setattr(conductor_module, "_now", lambda: opened_unix_nano)
+    detector = _ProductionStopScriptedVAD()
     monkeypatch.setattr(
         conductor_module,
         "build_vad",
-        lambda _speech: _ProductionStopScriptedVAD(),
+        lambda _speech: detector,
     )
     spec = spec_for(scenario="A scenario the agent ends itself.")
     connection = _AbruptDeparture()
@@ -606,6 +683,19 @@ async def test_departure_finalizes_the_active_agent_utterance(
     assert observed.turns == [
         ("agent", "These are my final words before I leave the room now.")
     ]
+    audio = observed.assembled.audio
+    assert audio is not None
+    recording = (tmp_path / audio["recording"]).read_bytes()
+    heard = speech_in_the_recording(recording)
+    assert len(heard) == 1
+    _speaker, recorded_began, recorded_ended = heard[0]
+    _speaker, _text, began, ended = observed.spans[0]
+    _persona, _agent, band = channels_of(recording)
+    transcript_began = round((began - opened_unix_nano) * band / 1_000_000_000)
+    transcript_ended = round((ended - opened_unix_nano) * band / 1_000_000_000)
+    media_frame = round(0.02 * band)
+    assert abs(recorded_began - transcript_began) <= media_frame
+    assert abs(recorded_ended - transcript_ended) <= media_frame
 
 
 class _TransportLost:
@@ -641,6 +731,7 @@ class _TransportLost:
     async def open(self) -> None:
         await self.transport.activate()
         self.failed.set()
+        await asyncio.Event().wait()
 
     async def close(self) -> None:
         self.transport.stop()
@@ -657,11 +748,14 @@ async def test_transport_loss_is_a_platform_fault(tmp_path: Path):
     )
 
     with pytest.raises(PlugError) as lost:
-        await observe(
-            conductor,
-            Assembled(conductor=conductor),
-            spec,
-            controls=WalkControls(),
+        await asyncio.wait_for(
+            observe(
+                conductor,
+                Assembled(conductor=conductor),
+                spec,
+                controls=WalkControls(),
+            ),
+            timeout=1.0,
         )
 
     assert failed_ending(lost.value) == ERROR
@@ -1104,9 +1198,19 @@ REAL_PAIR = SpeechProviders(
 assembled pipeline can be inspected here without a network or an account."""
 
 
-def voice_on_the_leg(legs: SpeechLegs) -> str:
-    """The public voice choice the assembled speech pair reports."""
-    return legs.voice.voice_id
+def capture_construction(
+    monkeypatch: pytest.MonkeyPatch, service: type
+) -> list[dict[str, Any]]:
+    """Remember the public arguments Egma hands a provider service."""
+    calls: list[dict[str, Any]] = []
+    original = service.__init__
+
+    def remember(instance: object, *args: object, **kwargs: Any) -> None:
+        calls.append(kwargs)
+        original(instance, *args, **kwargs)
+
+    monkeypatch.setattr(service, "__init__", remember)
+    return calls
 
 
 @asynccontextmanager
@@ -1138,7 +1242,7 @@ async def test_a_deployment_that_configures_nothing_gets_the_scripted_pair(
         assert isinstance(legs.tts, ScriptedTTS)
         assert isinstance(legs.stt, ScriptedSTT)
         assert isinstance(assembled.conductor.vad, ScriptedVAD)
-        assert voice_on_the_leg(legs) == "warm-alto-2"
+        assert legs.tts.voice.voice_id == "warm-alto-2"
 
 
 async def test_naming_the_providers_puts_their_stock_services_in_the_slots(
@@ -1170,27 +1274,34 @@ async def test_each_leg_is_chosen_on_its_own(tmp_path: Path):
 
 
 async def test_a_real_voice_named_in_the_traits_is_the_one_that_speaks(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
+
+    calls = capture_construction(monkeypatch, ElevenLabsHttpTTSService)
     async with assembled_with(
         REAL_PAIR,
         tmp_path,
         voice={"provider": "elevenlabs", "voiceId": "brisk-tenor-7", "speed": 1.15},
     ) as assembled:
-        assert voice_on_the_leg(assembled.conductor.legs) == "brisk-tenor-7"
+        assert calls[0]["settings"].voice == "brisk-tenor-7"
+        assert calls[0]["settings"].speed == pytest.approx(1.15)
         spoke_with = assembled.conductor.speaking_voice
         assert (spoke_with.voice_id, spoke_with.speed) == ("brisk-tenor-7", 1.15)
 
 
 async def test_a_voice_authored_for_nobody_in_particular_is_still_honored(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """Traits naming a voice and no provider are authoring for whichever
     deployment runs them, so the id is used as written."""
+    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
+
+    calls = capture_construction(monkeypatch, ElevenLabsHttpTTSService)
     async with assembled_with(
         REAL_PAIR, tmp_path, voice={"voiceId": "brisk-tenor-7"}
     ) as assembled:
-        assert voice_on_the_leg(assembled.conductor.legs) == "brisk-tenor-7"
+        assert calls[0]["settings"].voice == "brisk-tenor-7"
         assert assembled.conductor.speaking_voice.voice_id == "brisk-tenor-7"
 
 
@@ -1203,13 +1314,18 @@ async def test_a_voice_authored_for_nobody_in_particular_is_still_honored(
     ],
 )
 async def test_a_persona_with_no_voice_of_this_providers_gets_the_default_english(
-    tmp_path: Path, traits_voice: dict | None, why: str
+    tmp_path: Path,
+    traits_voice: dict | None,
+    why: str,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """Speaking with a sensible default beats failing on a timbre."""
+    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
+
+    calls = capture_construction(monkeypatch, ElevenLabsHttpTTSService)
     overrides = {} if traits_voice is None else {"voice": traits_voice}
     async with assembled_with(REAL_PAIR, tmp_path, **overrides) as assembled:
-        legs = assembled.conductor.legs
-        assert voice_on_the_leg(legs) == DEFAULT_ENGLISH_VOICE_ID, why
+        assert calls[0]["settings"].voice == DEFAULT_ENGLISH_VOICE_ID, why
         assert assembled.conductor.speaking_voice.voice_id == DEFAULT_ENGLISH_VOICE_ID
 
 
