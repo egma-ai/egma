@@ -82,6 +82,7 @@ export const EDIT = {
   groups: {
     general: "General",
     logic: "Grading logic",
+    model: "Model",
     applicability: "Applicability",
     impact: "Impact",
   },
@@ -91,6 +92,21 @@ export const EDIT = {
   nameMeans: "The name shown in this project.",
   description: "Notes",
   descriptionMeans: "Optional context for your team.",
+  modelProvider: "Provider",
+  modelProviderMeans:
+    "Which provider judges with this grader. Its key belongs to the " +
+    "organization and is set under Model providers.",
+  modelId: "Model",
+  modelIdMeans: "The provider's own id. Any model that provider accepts.",
+  /**
+   * What a copy that has chosen nothing reads as.
+   *
+   * A state and not a fault: it is every grader authored before the model
+   * catalog existed, and the project's judge setting decides for it exactly as
+   * it always did.
+   */
+  modelInherited: "Uses this project's judge setting.",
+  modelClear: "Use the project's judge",
   scope: "Applies to",
   scopeMeans: "Choose tests, live traffic, or both.",
   required: "Can fail a run",

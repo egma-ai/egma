@@ -307,6 +307,13 @@ function describedSimulation(
     // send, decided in `http/verdicts.ts` rather than here and again there.
     verdicts: rows.map((its) => describedVerdict(its, words, diagnostic)),
     reason: one.endingReason,
+    // What the reason word cannot say on its own, where Egma has it: one
+    // sentence naming what actually went wrong, and the screen that fixes it.
+    // Null on every conversation that ran — a `dispatch_failed` row is the
+    // platform confessing it could not hand a claimed simulation over, and a
+    // person looking at a red row needs the why and somewhere to go.
+    detail: one.endingDetail,
+    repair: one.endingRepair,
     // Why egma never conducted this conversation, and which capabilities
     // decided it. Null on every conversation that actually happened — the two
     // vocabularies are separate because `reason` is how a conversation ended

@@ -34,6 +34,7 @@ export type SettingsSection =
   | "project"
   | "judge"
   | "organization"
+  | "model-providers"
   | "people"
   | "keys";
 
@@ -51,6 +52,15 @@ const PROJECT_SETTINGS: readonly Item[] = [
 
 const ORGANIZATION_SETTINGS: readonly Item[] = [
   { id: "organization", label: "Organization", rest: ["organization"] },
+  // Who supplies the keys every persona and grader in the organization spends,
+  // and the keys themselves. It sits in this group rather than the one above
+  // because that is exactly what it is: one key serves every project, and
+  // replacing one is felt by all of them at once.
+  {
+    id: "model-providers",
+    label: "Model providers",
+    rest: ["model-providers"],
+  },
   { id: "people", label: "People", rest: ["people"] },
   { id: "keys", label: "API keys", rest: ["keys"] },
 ];

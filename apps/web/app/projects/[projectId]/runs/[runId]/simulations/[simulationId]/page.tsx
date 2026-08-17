@@ -37,6 +37,7 @@ import {
   TextArea,
 } from "../../../../../../../ui/controls.tsx";
 import { Dialog } from "../../../../../../../ui/dialog.tsx";
+import { settingsPath } from "../../../../../../../ui/settings-nav.tsx";
 import {
   ExecutionTimeline,
   GradingPending,
@@ -346,9 +347,30 @@ function EvidenceView({
 
         {read.status !== "failed" ? null : (
           <Problem>
-            {read.reason ?? "Egma could not conduct this simulation."} This is
-            an execution problem, not a failed grader verdict, and it says
-            nothing about the agent.
+            {/*
+              The sentence first, where Egma has one. `dispatch_failed` says a
+              claimed simulation was never handed over and says nothing about
+              why; "this organization holds no Deepgram credential, and this
+              persona listens with Deepgram" is what somebody can act on.
+            */}
+            {read.detail ??
+              read.reason ??
+              "Egma could not conduct this simulation."}{" "}
+            This is an execution problem, not a failed grader verdict, and it
+            says nothing about the agent.
+            {/*
+              And somewhere to go, where a screen fixes it. The word is the
+              platform's and the address is this browser's, so a stored link is
+              never a route the platform has to keep working.
+            */}
+            {read.repair === "model_providers" ? (
+              <>
+                {" "}
+                <ButtonLink href={settingsPath(projectId, "model-providers")}>
+                  Model providers
+                </ButtonLink>
+              </>
+            ) : null}
           </Problem>
         )}
 

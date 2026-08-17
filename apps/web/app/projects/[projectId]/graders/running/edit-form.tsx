@@ -15,6 +15,11 @@ import {
   type GraderParameter,
   type RunningGrader,
 } from "../../../../../lib/graders.ts";
+import {
+  entriesForJob,
+  MODEL_CATALOG_PATH,
+  type ModelCatalog,
+} from "../../../../../lib/model-access.ts";
 import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import {
   Actions,
@@ -28,6 +33,7 @@ import {
   Select,
   TextInput,
 } from "../../../../../ui/controls.tsx";
+import { useProjectRead } from "../../../../../ui/resource.ts";
 import styles from "../graders.module.css";
 import { EntryFields } from "../use-form.tsx";
 
@@ -126,6 +132,10 @@ export function EditForm({
     scope: copy.scope,
     required: copy.required,
     sampleRate: String(copy.production_sample_rate),
+    // Empty strings for a copy on the compatibility path, which is what "this
+    // grader has chosen nothing and the project's judge decides" looks like.
+    modelProvider: copy.model?.provider ?? "",
+    modelId: copy.model?.model ?? "",
   }));
   const [filled, setFilled] = useState<Readonly<Record<string, string>>>(
     initial.filled,
@@ -135,6 +145,37 @@ export function EditForm({
   const [scope, setScope] = useState(initial.scope);
   const [required, setRequired] = useState(initial.required);
   const [sampleRate, setSampleRate] = useState(initial.sampleRate);
+  const [modelProvider, setModelProvider] = useState(initial.modelProvider);
+  const [modelId, setModelId] = useState(initial.modelId);
+
+  /**
+   * The providers that do LLM work, as the server lists them.
+   *
+   * **Read rather than listed here.** A hand-written list is wrong the day the
+   * catalog grows, and wrong silently — the form would go on offering
+   * yesterday's providers and the new one would be unreachable from the only
+   * place a grader's model is chosen.
+   */
+  const { answer: catalog } = useProjectRead<ModelCatalog>(
+    MODEL_CATALOG_PATH,
+    projectId,
+  );
+  const llm = entriesForJob(
+    catalog?.status === "ready" ? catalog.value : undefined,
+    "llm",
+  );
+  /**
+   * The providers a Select may show: the ones the server offers, plus whatever
+   * this grader is already on. A copy authored against a provider that has
+   * since left the catalog still has to be readable and still has to be
+   * editable in every other respect.
+   */
+  const providerChoices = (held: string): readonly string[] => {
+    const offered = llm.map((entry) => entry.provider);
+    return held === "" || offered.includes(held) ? offered : [...offered, held];
+  };
+  const recommendedFor = (provider: string): string | undefined =>
+    llm.find((entry) => entry.provider === provider)?.recommended_model;
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
 
@@ -144,6 +185,8 @@ export function EditForm({
     scope !== initial.scope ||
     required !== initial.required ||
     sampleRate !== initial.sampleRate ||
+    modelProvider !== initial.modelProvider ||
+    modelId !== initial.modelId ||
     params.some(
       (parameter) =>
         (filled[parameter.name] ?? "") !==
@@ -199,6 +242,22 @@ export function EditForm({
           honest reading of a box that says nothing.
         */
         ...(saidRate === undefined ? {} : { production_sample_rate: saidRate }),
+        /*
+          The grader's own model, sent only where this form actually changed
+          it. `null` is a real answer and means *go back to the project's judge
+          setting*, which is a different act from leaving the key out — and
+          leaving it out is what keeps a save about something else from
+          quietly re-deciding which model judges here.
+        */
+        ...(modelProvider === initial.modelProvider &&
+        modelId === initial.modelId
+          ? {}
+          : {
+              model:
+                modelProvider.trim() === ""
+                  ? null
+                  : { provider: modelProvider, model: modelId },
+            }),
         ...(params.length === 0
           ? {}
           : { params: filledParams(params, filled) }),
@@ -259,6 +318,57 @@ export function EditForm({
           named="edit"
           sentence={EDIT.asksNothing}
         />
+      </fieldset>
+
+      <fieldset className={styles.formGroup} disabled={busy}>
+        <legend className={styles.formGroupTitle}>{EDIT.groups.model}</legend>
+        {/*
+          **No key field, and nowhere to put one.** Who pays for a judgment is
+          the organization's model access, under Model providers; a grader
+          names a provider and never a secret, which is what keeps a rotation
+          from minting a grader version.
+
+          An empty provider is the compatibility path said plainly: this copy
+          has chosen nothing and the project's judge setting decides for it.
+        */}
+        <Help>
+          {modelProvider.trim() === ""
+            ? EDIT.modelInherited
+            : EDIT.modelProviderMeans}
+        </Help>
+        <Field
+          label={EDIT.modelProvider}
+          hint={EDIT.modelProviderMeans}
+          htmlFor="edit-model-provider"
+        >
+          <Select
+            id="edit-model-provider"
+            value={modelProvider}
+            options={[
+              { value: "", label: EDIT.modelClear },
+              ...providerChoices(modelProvider).map((provider) => ({
+                value: provider,
+                label: provider,
+              })),
+            ]}
+            onChange={(chosen) => {
+              setModelProvider(chosen);
+              // A model id belongs to the provider it was typed for, so
+              // changing the provider starts the id from that provider's
+              // proved default rather than leaving the old one behind.
+              setModelId(chosen === "" ? "" : (recommendedFor(chosen) ?? ""));
+            }}
+          />
+        </Field>
+        {modelProvider.trim() === "" ? null : (
+          <Field
+            label={EDIT.modelId}
+            hint={EDIT.modelIdMeans}
+            htmlFor="edit-model-id"
+          >
+            <TextInput id="edit-model-id" value={modelId} onChange={setModelId} />
+          </Field>
+        )}
       </fieldset>
 
       <fieldset className={styles.formGroup} disabled={busy}>

@@ -9,12 +9,17 @@ import { roleOf } from "../../../../../lib/me.ts";
 import {
   describedTraits,
   draftOf,
+  modelsDraftOf,
+  modelsFrom,
+  recommendedDraft,
+  sameModelsDraft,
   PERSONA_FORM_PATH,
   personaPath,
   personaUsagePath,
   personaVersionsPath,
   personasPath,
   traitsFrom,
+  type ModelsDraft,
   type Persona,
   type PersonaForm,
   type PersonaPage,
@@ -31,6 +36,7 @@ import {
   ButtonLink,
   Facts,
   Field,
+  Help,
   Form,
   FormActions,
   Refused,
@@ -55,6 +61,7 @@ import {
   useShellSession,
 } from "../../../../../ui/shell.tsx";
 import styles from "../../../../../ui/system.module.css";
+import { ModelFields } from "../models-editor.tsx";
 import { TraitFields } from "../traits-editor.tsx";
 
 /**
@@ -92,6 +99,12 @@ type Draft = {
   readonly name: string;
   readonly description: string;
   readonly traits: TraitsDraft;
+  /**
+   * The three model selections, or `null` for a persona still on the
+   * compatibility path — where the deployment's own settings decide and this
+   * persona has chosen nothing.
+   */
+  readonly models: ModelsDraft | null;
 };
 
 /**
@@ -108,6 +121,7 @@ type Submitted = {
   readonly name?: string;
   readonly description?: string;
   readonly traits?: TraitsDraft;
+  readonly models?: ModelsDraft;
 };
 
 /**
@@ -163,6 +177,23 @@ function adopted(
     }
   }
 
+  /**
+   * The selections, adopted whole rather than field by field.
+   *
+   * They are one decision — a persona thinks, listens and speaks with a set of
+   * choices, and a save sends all of them — so a half-adopted set would be a
+   * combination nobody chose. Only a save that actually carried them adopts,
+   * and only where what is held is still what was sent.
+   */
+  const models =
+    submitted.models !== undefined &&
+    current.models !== null &&
+    sameModelsDraft(current.models, submitted.models)
+      ? fromServer.models === null
+        ? null
+        : modelsDraftOf(fromServer.models)
+      : current.models;
+
   return {
     personaId: current.personaId,
     name: answered(current.name, submitted.name, fromServer.name),
@@ -172,6 +203,7 @@ function adopted(
       fromServer.description ?? "",
     ),
     traits,
+    models,
   };
 }
 
@@ -228,8 +260,10 @@ function PersonaDetail({
     PERSONA_FORM_PATH,
     projectId,
   );
-  const voiceProviders =
-    form?.status === "ready" ? form.value.voice_providers : null;
+  const shape = form?.status === "ready" ? form.value : null;
+  const voiceProviders = shape?.voice_providers ?? null;
+  /** What a persona choosing models for the first time starts from. */
+  const recommended = recommendedDraft(shape ?? undefined);
 
   /**
    * What the two forms are holding.
@@ -256,6 +290,10 @@ function PersonaDetail({
             name: persona.name,
             description: persona.description ?? "",
             traits: draftOf(persona.traits),
+            // Null is the compatibility path and never a fault: this persona
+            // has chosen nothing, and the deployment's own settings decide.
+            models:
+              persona.models === null ? null : modelsDraftOf(persona.models),
           },
     );
   }, [answer]);
@@ -264,9 +302,9 @@ function PersonaDetail({
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
   }, [answer]);
 
-  const [saving, setSaving] = useState<"identity" | "traits" | "lifecycle" | null>(
-    null,
-  );
+  const [saving, setSaving] = useState<
+    "identity" | "traits" | "models" | "lifecycle" | null
+  >(null);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [reading, setReading] = useState<PersonaVersion | null>(null);
   const [archiving, setArchiving] = useState(false);
@@ -317,7 +355,7 @@ function PersonaDetail({
     path: string,
     method: "POST" | "PATCH",
     body: Record<string, unknown>,
-    what: "identity" | "traits" | "lifecycle",
+    what: "identity" | "traits" | "models" | "lifecycle",
     submitted?: Submitted,
   ): Promise<Persona | null> {
     const asked = { projectId, personaId };
@@ -524,6 +562,55 @@ function PersonaDetail({
         </Section>
 
         <Section
+          title="Models"
+          lead="Version content, like the traits above. What this persona thinks, listens and speaks with — three independent choices, and never a key."
+        >
+          {held.models === null ? (
+            <>
+              <Help>
+                <Badge tone="neutral">Not selected</Badge> This persona has
+                chosen no models, so this deployment&apos;s own settings decide
+                what it thinks, listens and speaks with. Choosing here mints a
+                new version and leaves every earlier run pinned to the one it
+                ran against.
+              </Help>
+              {!settled || recommended === null ? null : (
+                <FormActions>
+                  <Button
+                    disabled={!mayAuthor || saving !== null}
+                    {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+                    onClick={() => setHeld({ ...held, models: recommended })}
+                  >
+                    Choose models
+                  </Button>
+                </FormActions>
+              )}
+            </>
+          ) : settled ? (
+            <Form onSubmit={() => void saveModels()}>
+              <ModelFields
+                draft={held.models}
+                form={shape}
+                disabled={!mayAuthor}
+                onChange={(models) => setHeld({ ...held, models })}
+              />
+              <FormActions>
+                <Button
+                  weight="strong"
+                  type="submit"
+                  disabled={!mayAuthor || saving !== null}
+                  {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+                >
+                  {saving === "models" ? "Saving…" : "Save models"}
+                </Button>
+              </FormActions>
+            </Form>
+          ) : (
+            <Loading what="what your role may edit" />
+          )}
+        </Section>
+
+        <Section
           title="Used by"
           lead="The active tests whose current version names this persona. These are exactly what would refuse an Archive."
         >
@@ -654,6 +741,33 @@ function PersonaDetail({
         // The traits and nothing else: a name half-retyped in the form above
         // is not this request's to answer for either.
         { personaId: one.id, traits: held.traits },
+      );
+    }
+
+    /**
+     * The three selections, saved together.
+     *
+     * **One save for all of them**, because they are one decision: a persona
+     * thinks, listens and speaks with a set of choices, and sending half a set
+     * would be a combination nobody chose. A change mints the next version, so
+     * a run that pinned an earlier one keeps meaning what it meant; sending
+     * the selections already stored mints nothing.
+     */
+    async function saveModels(): Promise<void> {
+      if (held === null || held.models === null) return;
+      if (!mayAuthor || saving !== null) return;
+      await write(
+        personaPath(one.id),
+        "PATCH",
+        {
+          expected_revision: one.revision,
+          expected_version_id: one.version_id,
+          models: modelsFrom(held.models),
+        },
+        "models",
+        // The models and nothing else: a name half-retyped in the form above
+        // is not this request's to answer for either.
+        { personaId: one.id, models: held.models },
       );
     }
 

@@ -7,9 +7,12 @@ import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   BLANK_TRAITS,
+  modelsFrom,
   PERSONA_FORM_PATH,
   PERSONAS_PATH,
+  recommendedDraft,
   traitsFrom,
+  type ModelsDraft,
   type Persona,
   type PersonaForm,
   type TraitsDraft,
@@ -23,6 +26,7 @@ import {
   Form,
   FormActions,
   Refused,
+  Section,
   TextInput,
 } from "../../../../../ui/controls.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
@@ -33,6 +37,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
+import { ModelFields } from "../models-editor.tsx";
 import { TraitFields } from "../traits-editor.tsx";
 
 /**
@@ -72,8 +77,21 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
     PERSONA_FORM_PATH,
     projectId,
   );
-  const voiceProviders =
-    form?.status === "ready" ? form.value.voice_providers : null;
+  const shape = form?.status === "ready" ? form.value : null;
+  const voiceProviders = shape?.voice_providers ?? null;
+
+  /**
+   * The selections this persona starts from: the release's proved defaults,
+   * filled in the moment the server says what they are.
+   *
+   * **Held rather than derived on every render**, so that what somebody has
+   * typed survives the form read arriving — and defaulted rather than left
+   * empty, so a first persona runs before anybody opens a provider's
+   * documentation.
+   */
+  const [models, setModels] = useState<ModelsDraft | null>(null);
+  const recommended = recommendedDraft(shape ?? undefined);
+  const settledModels = models ?? recommended;
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
@@ -95,6 +113,12 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
         name,
         description,
         traits: traitsFrom(traits),
+        // Left out entirely while the catalog read has not answered, which is
+        // the honest state: a persona born with providers this browser guessed
+        // would be a selection nobody made.
+        ...(settledModels === null
+          ? {}
+          : { models: modelsFrom(settledModels) }),
       },
     });
 
@@ -162,6 +186,19 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
             voiceProviders={voiceProviders}
             onChange={setTraits}
           />
+
+          <Section
+            title="Models"
+            lead="What this persona thinks, listens and speaks with. Three independent choices, each starting from a default Egma proved."
+          >
+            {settledModels === null ? null : (
+              <ModelFields
+                draft={settledModels}
+                form={shape}
+                onChange={setModels}
+              />
+            )}
+          </Section>
 
           <FormActions>
             <Button

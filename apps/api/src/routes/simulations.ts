@@ -437,6 +437,10 @@ export async function simulationRoutes(
       score: fold.score ?? null,
       counts: fold.counts,
       reason: one.endingReason,
+      // What the reason word cannot say on its own, where Egma has it, and the
+      // screen that fixes it. Null on every conversation that ran.
+      detail: one.endingDetail,
+      repair: one.endingRepair,
       skip_reason: one.skipReason,
       skipped_capabilities:
         one.skippedCapabilities === null ? null : [...one.skippedCapabilities],

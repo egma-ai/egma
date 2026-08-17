@@ -88,6 +88,19 @@ export type RunningGrader = {
   /** What share of live traffic it judges, as a whole percentage. */
   readonly production_sample_rate: number;
   readonly config: { readonly assertions?: readonly unknown[] } | null;
+  /**
+   * This copy's own LLM selection, or `null` for one still on the
+   * compatibility path — where the project's judge setting decides, exactly as
+   * it did before the model catalog existed.
+   *
+   * **There is no key beside it and there never will be.** The key behind the
+   * selection is the organization's, under Model providers, and a grader that
+   * named one would put a secret inside authored content a run then pins.
+   */
+  readonly model: {
+    readonly provider: string;
+    readonly model: string;
+  } | null;
   readonly created_at: string;
   readonly updated_at: string;
 };

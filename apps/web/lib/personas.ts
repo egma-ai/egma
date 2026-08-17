@@ -43,6 +43,8 @@ export type Persona = {
   /** The current version's own id — what a traits write is written against. */
   readonly version_id: string;
   readonly traits: PersonaTraits;
+  /** The current version's model selections, or null on the compatibility path. */
+  readonly models: PersonaModels | null;
   /** The opaque token an identity write or a lifecycle change has to name. */
   readonly revision: string;
   readonly archived_at: string | null;
@@ -63,6 +65,7 @@ export type PersonaVersion = {
   readonly persona_id: string;
   readonly version: number;
   readonly traits: PersonaTraits;
+  readonly models: PersonaModels | null;
   readonly created_at: string;
 };
 
@@ -92,6 +95,55 @@ export const PERSONA_FORM_PATH = "/api/persona-form";
  */
 export type PersonaForm = {
   readonly voice_providers: readonly string[];
+  /**
+   * The providers that do each model job, and the model a release proved for
+   * each — the same catalog Model providers draws itself from, served here so
+   * the persona editor renders from one call rather than two.
+   *
+   * **The browser keeps no copy**, for the reason the voice providers above
+   * are read rather than listed: a second copy is wrong the day the catalog
+   * grows, and wrong silently.
+   */
+  readonly model_catalog: readonly {
+    readonly provider: string;
+    readonly job: "llm" | "stt" | "tts";
+    readonly label: string;
+    readonly recommended_model: string;
+    readonly recommended_voice_id?: string;
+    readonly model_is_free_text: boolean;
+  }[];
+  /** What a persona that has chosen nothing starts from. */
+  readonly recommended_models: {
+    readonly llm: { readonly provider: string; readonly model: string };
+    readonly stt: { readonly provider: string; readonly model: string };
+    readonly tts: {
+      readonly provider: string;
+      readonly model: string;
+      readonly voiceId: string;
+      readonly speed: number;
+    };
+  };
+  /** How far from natural pace speech stays intelligible, as the server bounds it. */
+  readonly speed_range: { readonly slowest: number; readonly fastest: number };
+};
+
+/**
+ * What a persona thinks, listens and speaks with — or `null` for one still on
+ * the compatibility path, where the deployment's own settings decide.
+ *
+ * `null` is an ordinary state and never a fault: it is every persona authored
+ * before the model catalog existed, and a page says so plainly rather than
+ * showing a half-filled form as though somebody had chosen.
+ */
+export type PersonaModels = {
+  readonly llm: { readonly provider: string; readonly model: string };
+  readonly stt: { readonly provider: string; readonly model: string };
+  readonly tts: {
+    readonly provider: string;
+    readonly model: string;
+    readonly voiceId: string;
+    readonly speed: number;
+  };
 };
 
 /**
@@ -235,5 +287,92 @@ export function describedTraits(
     one.value === undefined || one.value.trim() === ""
       ? []
       : [{ label: one.label, value: one.value }],
+  );
+}
+
+/**
+ * The model selections an editor is holding, before anybody decides whether
+ * they differ from what is stored.
+ *
+ * Speed is text here and a number on the wire, for the reason speech rate
+ * already is: what somebody has typed is a string, including the half-typed
+ * `1.` in the middle of typing `1.25`, and coercing on every keystroke is what
+ * makes a field fight back while it is being used.
+ *
+ * **There is no key here and there is nowhere to put one.** Who pays for a
+ * model is the organization's model access; a persona names a provider and
+ * never a secret.
+ */
+export type ModelsDraft = {
+  readonly llmProvider: string;
+  readonly llmModel: string;
+  readonly sttProvider: string;
+  readonly sttModel: string;
+  readonly ttsProvider: string;
+  readonly ttsModel: string;
+  readonly ttsVoiceId: string;
+  readonly ttsSpeed: string;
+};
+
+/** The stored selections, as the editor holds them. */
+export function modelsDraftOf(models: PersonaModels): ModelsDraft {
+  return {
+    llmProvider: models.llm.provider,
+    llmModel: models.llm.model,
+    sttProvider: models.stt.provider,
+    sttModel: models.stt.model,
+    ttsProvider: models.tts.provider,
+    ttsModel: models.tts.model,
+    ttsVoiceId: models.tts.voiceId,
+    ttsSpeed: String(models.tts.speed),
+  };
+}
+
+/**
+ * What a persona that has chosen nothing starts from: the release's proved
+ * defaults, read off the server rather than written here.
+ *
+ * `null` while the form read has not answered, because a draft made of guessed
+ * providers is a form that offers a choice Egma may not ship.
+ */
+export function recommendedDraft(form: PersonaForm | undefined): ModelsDraft | null {
+  const recommended = form?.recommended_models;
+  if (recommended === undefined) return null;
+  return modelsDraftOf(recommended);
+}
+
+/**
+ * The draft, as the wire carries it.
+ *
+ * A speed that is not a number at all is sent as the raw text and the server
+ * answers with the range it accepts. This page holds no second copy of that
+ * rule: a validator here that disagreed with the one that decides would refuse
+ * something Egma would have taken, or take something Egma will refuse.
+ */
+export function modelsFrom(draft: ModelsDraft): Record<string, unknown> {
+  const speed = Number(draft.ttsSpeed);
+  return {
+    llm: { provider: draft.llmProvider, model: draft.llmModel },
+    stt: { provider: draft.sttProvider, model: draft.sttModel },
+    tts: {
+      provider: draft.ttsProvider,
+      model: draft.ttsModel,
+      voiceId: draft.ttsVoiceId,
+      speed: Number.isNaN(speed) ? draft.ttsSpeed : speed,
+    },
+  };
+}
+
+/** Whether two drafts say the same thing, field by field. */
+export function sameModelsDraft(a: ModelsDraft, b: ModelsDraft): boolean {
+  return (
+    a.llmProvider === b.llmProvider &&
+    a.llmModel === b.llmModel &&
+    a.sttProvider === b.sttProvider &&
+    a.sttModel === b.sttModel &&
+    a.ttsProvider === b.ttsProvider &&
+    a.ttsModel === b.ttsModel &&
+    a.ttsVoiceId === b.ttsVoiceId &&
+    a.ttsSpeed === b.ttsSpeed
   );
 }
