@@ -466,6 +466,25 @@ class SpeechProviders:
     :meth:`for_simulation`.
     """
 
+    stt_base_url: str | None = None
+    tts_base_url: str | None = None
+    """Where this leg reaches its provider, or ``None`` for the provider itself.
+
+    **The whole of what managed model access asks of this module.** A
+    deployment whose model traffic goes through the Egma model gateway
+    names the gateway's address for the leg here; the leg is the same
+    shipped Pipecat service, told a different address and handed a
+    different credential in the same field it always took one. Nothing
+    else moves — not the model, not the voice, not the band, not the
+    protocol — which is what keeps a second provider-adapter layer from
+    growing beside Pipecat.
+
+    ``None`` means nobody named one and the leg reaches its own provider,
+    exactly as it always has. An address is one leg's, not one
+    provider's: the gateway's path names the provider and the model job,
+    so a mouth and a pair of ears are told two different addresses.
+    """
+
     stt_model: str | None = None
     tts_model: str | None = None
     tts_voice: str | None = None
@@ -730,7 +749,14 @@ def _ears(
     if not providers.stt_key:
         raise SpeechFault("the deepgram listening leg was chosen without a key")
 
-    leg = DeepgramSTTService(api_key=providers.stt_key, sample_rate=sample_rate_hz)
+    leg = DeepgramSTTService(
+        api_key=providers.stt_key,
+        sample_rate=sample_rate_hz,
+        # Empty is this service's own word for "the provider's own
+        # address", so a deployment that named none is byte for byte the
+        # call this file made before the gateway existed.
+        base_url=providers.stt_base_url or "",
+    )
 
     async def connected() -> None:
         # The service opens its websocket in a background task and drops
@@ -813,6 +839,10 @@ def _cartesia_mouth(
         encoding="pcm_s16le",
         container="raw",
         settings=settings,
+        # This service takes a whole socket address rather than a base, so
+        # a deployment that named none gets the service's own default
+        # rather than one this file would then have to keep current.
+        **({"url": providers.tts_base_url} if providers.tts_base_url else {}),
         # One persona turn is one whole thing to say, so it goes over in
         # one piece rather than a sentence at a time — the same choice the
         # elevenlabs mouth makes above, for the same reason: the default

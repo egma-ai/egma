@@ -197,3 +197,66 @@ def test_the_realtime_ears_leave_the_turn_boundary_to_the_detector_in_the_pipeli
 def test_the_realtime_ears_refuse_without_a_key_rather_than_at_the_first_turn():
     with pytest.raises(SpeechFault, match="without a key"):
         _ears(SpeechProviders(stt="openai_realtime"), TELEPHONY_BAND_HZ)
+
+
+# -- Where a leg is reached ---------------------------------------------------
+
+A_GATEWAY = "https://a-gateway.example"
+
+
+def test_the_cartesia_mouth_is_reached_where_the_deployment_says():
+    """The whole of what managed model access asks of a speech factory.
+
+    A leg reached through the Egma model gateway is the same shipped
+    Pipecat service, told a different address and given a different
+    credential. Nothing else changes — not the model, not the voice, not
+    the band, not the protocol — which is what keeps this repository from
+    growing a second provider-adapter layer beside Pipecat.
+    """
+    leg, _, _ = _mouth(
+        SpeechProviders(
+            tts="cartesia",
+            tts_key=A_KEY,
+            tts_base_url=f"{A_GATEWAY}/cartesia/tts/websocket",
+        ),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+
+    assert leg._url == f"{A_GATEWAY}/cartesia/tts/websocket"
+
+
+def test_the_cartesia_mouth_speaks_to_its_own_provider_when_nobody_named_an_address():
+    leg, _, _ = _mouth(
+        SpeechProviders(tts="cartesia", tts_key=A_KEY),
+        voice_from_traits({}),
+        TELEPHONY_BAND_HZ,
+    )
+
+    assert "cartesia.ai" in leg._url
+
+
+def test_the_deepgram_ears_are_reached_where_the_deployment_says():
+    leg, _ = _ears(
+        SpeechProviders(
+            stt="deepgram", stt_key=A_KEY, stt_base_url=f"{A_GATEWAY}/deepgram"
+        ),
+        TELEPHONY_BAND_HZ,
+    )
+
+    # Read off the address the built client really holds. This provider's
+    # SDK derives both a socket and an HTTP address from one base, so a
+    # release that changes where it keeps them must fail here, loudly,
+    # rather than by a simulation quietly reaching the provider directly
+    # while a deployment believes its traffic goes through the gateway.
+    environment = leg._client._client_wrapper.get_environment()
+    assert environment.production == "wss://a-gateway.example/deepgram"
+    assert environment.base == f"{A_GATEWAY}/deepgram"
+
+
+def test_the_deepgram_ears_listen_at_their_own_provider_when_nobody_named_an_address():
+    leg, _ = _ears(
+        SpeechProviders(stt="deepgram", stt_key=A_KEY), TELEPHONY_BAND_HZ
+    )
+
+    assert "deepgram.com" in leg._client._client_wrapper.get_environment().production
