@@ -717,16 +717,23 @@ export async function conductProductionTrace(
     /**
      * What the **agent platform** measured about this conversation, filed the
      * way a managed platform's normalizer files it: the neutral block on the
-     * root span's payload, and turns of zero width beside it.
+     * root span's payload, and placeholder turns beside it — every one opening
+     * at the conversation's own start, lasting nothing, with no speech inside.
      *
      * **The two go together because on a real platform they always do.** Retell
-     * publishes no per-turn timing, so its normalizer opens every turn where the
-     * trace opened and closes it in the same instant — placeholders — and the
-     * reason the block exists at all is that there is nothing else to measure
-     * from. A harness that wrote the block onto turns egma could read the
-     * geometry of would be testing a conversation no platform produces, and the
-     * derivation would answer first, so the case would prove nothing about the
-     * source it names.
+     * publishes no per-turn timing, so `normaliseRetellCall` has no instant to
+     * open a turn at except the one the conversation opened at, and no width to
+     * give it — and the block exists precisely because there is nothing else to
+     * measure from. A harness writing the block onto turns egma could read the
+     * geometry of would be describing a conversation no platform produces: the
+     * derivation would answer first and outrank the block, and this option
+     * would quietly stop being about the source it names.
+     *
+     * The instants matter as much as the widths, and that is the sharp edge.
+     * Zero-width turns at instants two seconds apart are **chat**-shaped —
+     * really observed, and the derivation is right to measure the gaps between
+     * them. Only turns that share the conversation's own start are the
+     * placeholder signature the guard is allowed to read as "never timed".
      */
     readonly reportedByPlatform?:
       | {
@@ -765,11 +772,22 @@ export async function conductProductionTrace(
       text: turn.text,
       startedAtMicroseconds:
         BigInt(startedAt.getTime()) * 1_000n + BigInt(at) * 2_000_000n,
-      // A platform that reports its own numbers publishes no per-turn timing,
-      // so its turns are placeholders of no width — see the option above.
+      // **The placeholder signature, exactly as `normaliseRetellCall` writes
+      // it: every turn opens at the conversation's own start and lasts
+      // nothing.** Not merely zero-width — zeroing the width while leaving the
+      // turns two seconds apart makes a *chat*-shaped conversation, whose
+      // instants were really observed and whose gaps the derivation is right to
+      // measure. It would answer 2000 ms here, outrank the block, and this
+      // option would silently stop being about the source it names. The two
+      // facts travel together because on a real platform they always do:
+      // Retell publishes no per-turn timing, so there is no instant to open a
+      // turn at except the one the conversation opened at.
       ...(reportedByPlatform === undefined
         ? {}
-        : { durationNanoseconds: 0n }),
+        : {
+            startedAtMicroseconds: BigInt(startedAt.getTime()) * 1_000n,
+            durationNanoseconds: 0n,
+          }),
     });
     spans.push(turnSpan);
 
