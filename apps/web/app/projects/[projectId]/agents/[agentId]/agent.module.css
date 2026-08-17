@@ -1,4 +1,4 @@
-.workspace {
+.layout {
   display: grid;
   grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
   align-items: start;
@@ -69,7 +69,7 @@
 }
 
 @media (max-width: 48rem) {
-  .workspace {
+  .layout {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-6);
   }

@@ -83,6 +83,27 @@ const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
 const COUNTERPART_KEY = "retell-secret-A1B2C3D4WXYZ";
 const REFUSED_KEY = "retell-secret-NOBODY0000000";
 
+/** The provider preflight sees the same chat target as the local counterpart. */
+const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
+  const url = String(input);
+  if (!url.includes("/v2/list-agents")) {
+    throw new Error(`Unexpected Retell read: ${url}`);
+  }
+  return new Response(
+    JSON.stringify({
+      items: [
+        {
+          agent_id: "agent_under_walk",
+          agent_name: "Front desk",
+          channel: "chat",
+        },
+      ],
+      has_more: false,
+    }),
+    { status: 200 },
+  );
+};
+
 /**
  * The Retell plug gives one platform request 60 seconds. Node otherwise closes
  * an idle pooled socket after 5 seconds, so a worker paused under suite load
@@ -476,7 +497,11 @@ beforeAll(async () => {
   await counterpart.start();
   // The trace store gets its schema here, because this walk reads the
   // conversation back out of it rather than only off the row.
-  instance = await startInstance("simulator_walk", { web: false, traces: true });
+  instance = await startInstance("simulator_walk", {
+    web: false,
+    traces: true,
+    retellFetch: RETELL_CHAT_FETCH,
+  });
 }, 120_000);
 
 afterAll(async () => {

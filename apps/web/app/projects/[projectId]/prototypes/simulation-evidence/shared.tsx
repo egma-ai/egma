@@ -13,7 +13,7 @@ import {
   SimulationEvidenceSummary,
   useSimulationEvidenceRecording,
   type SimulationEvidenceRecording,
-} from "../../../../../ui/simulation-evidence-workspace.tsx";
+} from "../../../../../ui/simulation-evidence.tsx";
 import styles from "./prototype.module.css";
 
 export type PrototypeRecording = SimulationEvidenceRecording;

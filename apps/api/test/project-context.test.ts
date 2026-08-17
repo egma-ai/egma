@@ -398,13 +398,16 @@ describe("a browser working in a project that is not the first", () => {
     const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
       name: "Outbound desk",
       connection: {
-        type: "retell",
+        type: "livekit",
         // Voice, because a chat has no audio and would be refused for that
         // reason instead — which is a different sentence and would not say
         // whether the conversation was found.
         modality: "voice",
-        config: { retellAgentId: "agent_in_retell_recording" },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        config: { url: "wss://acme.livekit.cloud" },
+        credentials: {
+          apiKey: "livekit-key-A1B2C3D4WXYZ",
+          apiSecret: "livekit-secret-E5F6G7H8QRST",
+        },
       },
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
@@ -800,12 +803,23 @@ describe("a key for the whole organization, where the organization holds two pro
 
     const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
       name: "Outbound desk",
-      connection: {
-        type: "retell",
-        modality,
-        config: { retellAgentId: `agent_in_retell_${label}` },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
-      },
+      connection:
+        modality === "voice"
+          ? {
+              type: "livekit",
+              modality: "voice",
+              config: { url: "wss://acme.livekit.cloud" },
+              credentials: {
+                apiKey: "livekit-key-A1B2C3D4WXYZ",
+                apiSecret: "livekit-secret-E5F6G7H8QRST",
+              },
+            }
+          : {
+              type: "retell",
+              modality: "chat",
+              config: { retellAgentId: `agent_in_retell_${label}` },
+              credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+            },
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
 

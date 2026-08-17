@@ -56,51 +56,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-/*
- * The run's machinery and its verdict are ordinary labelled facts here.
- * Symbols keep nearby states easy to scan without turning either value into a
- * pill or suggesting that execution and judgment are the same thing.
- */
-.summaryState {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--muted);
-  line-height: var(--line-caption);
-  white-space: nowrap;
-}
-
-.summaryState[data-tone="warn"] {
-  color: var(--warn);
-}
-
-.summaryMark {
-  display: inline-flex;
-  width: 12px;
-  height: 12px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--text-caption);
-  line-height: 1;
-  transform-origin: center;
-}
-
-.summaryState[data-active="true"] .summaryMark {
-  animation: summary-mark-spin calc(var(--duration-drawer-in) * 3) linear
-    infinite;
-}
-
 .archivedNote {
   color: var(--warn);
   font-size: var(--text-caption);
-}
-
-@keyframes summary-mark-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .simulationState {
@@ -215,11 +173,5 @@
 @media (max-width: 900px) {
   .overview {
     padding: var(--space-4);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .summaryState[data-active="true"] .summaryMark {
-    animation: none;
   }
 }

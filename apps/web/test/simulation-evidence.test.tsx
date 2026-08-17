@@ -540,6 +540,7 @@ describe("one simulation's evidence", () => {
         ],
       },
     });
+    let audioContextClosed = false;
     class StereoAudioContext {
       async decodeAudioData() {
         return {
@@ -550,10 +551,19 @@ describe("one simulation's evidence", () => {
         };
       }
 
-      async close() {}
+      close() {
+        if (audioContextClosed) {
+          throw new DOMException(
+            "Cannot close a closed AudioContext.",
+            "InvalidStateError",
+          );
+        }
+        audioContextClosed = true;
+        return Promise.resolve();
+      }
     }
     vi.stubGlobal("AudioContext", StereoAudioContext);
-    render(<SimulationEvidencePage />);
+    const { unmount } = render(<SimulationEvidencePage />);
 
     await screen.findByText("The agent never said the new time back.");
     const workspace = screen.getByRole("region", {
@@ -649,6 +659,7 @@ describe("one simulation's evidence", () => {
     expect(screen.queryByText("Credential")).toBeNull();
     expect(screen.queryByText("Model")).toBeNull();
     expect(screen.queryByText("Score")).toBeNull();
+    expect(() => unmount()).not.toThrow();
   });
 
   it("uses one evidence workspace without separate setup or execution sections", async () => {

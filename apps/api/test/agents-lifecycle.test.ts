@@ -981,7 +981,10 @@ describe("a connection's capability record", () => {
     const agent = await anAgent(ada, "Front desk");
     const spoken = await aConnection(ada, agent.id, {
       name: "by-voice",
+      type: "phone",
       modality: "voice",
+      config: { phoneNumber: "+14155550100" },
+      credentials: undefined,
     });
     const typed = await aConnection(ada, agent.id, {
       name: "by-chat",
@@ -1029,7 +1032,10 @@ describe("a connection's capability record", () => {
     const agent = await anAgent(ada, "Front desk");
     const spoken = await aConnection(ada, agent.id, {
       name: "by-voice",
+      type: "phone",
       modality: "voice",
+      config: { phoneNumber: "+14155550100" },
+      credentials: undefined,
     });
 
     // Before anything looks, every key is unmeasured — including the two the
@@ -1066,7 +1072,7 @@ describe("a connection's capability record", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const agent = await anAgent(ada, "Front desk");
-    const wiring = await aConnection(ada, agent.id, { modality: "voice" });
+    const wiring = await aConnection(ada, agent.id);
 
     /**
      * The property, taken past the shipped adapter: whatever an adapter

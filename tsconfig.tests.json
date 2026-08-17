@@ -9,6 +9,7 @@
     "paths": {
       "@egma/ids": ["./packages/ids/src/index.ts"],
       "@egma/db": ["./packages/db/src/index.ts"],
+      "@egma/retell": ["./packages/retell/src/index.ts"],
       "@egma/simulation-contract": [
         "./packages/simulation-contract/src/index.ts"
       ]

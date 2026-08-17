@@ -198,14 +198,17 @@ describe("one conversation's evidence, in one read", () => {
     expect(persona.traits).not.toBeNull();
 
     // Who it was against, and exactly how egma reached them.
-    expect((read.body.agent as { name: string }).name).toBe("Front desk voice");
+    expect((read.body.agent as { name: string }).name).toMatch(
+      /^Front desk voice \d+$/u,
+    );
     expect((read.body.connection as { name: string }).name).not.toBe(null);
     const snapshot = read.body.connection_snapshot as Record<string, unknown>;
-    expect(snapshot.type).toBe("retell");
+    expect(snapshot.type).toBe("livekit");
     expect(snapshot.modality).toBe("voice");
     // Nothing a credential could ride in. The secret lives in its own sealed
     // column and was never copied into the snapshot.
-    expect(JSON.stringify(snapshot)).not.toContain("retell-secret");
+    expect(JSON.stringify(snapshot)).not.toContain("livekit-key");
+    expect(JSON.stringify(snapshot)).not.toContain("livekit-secret");
 
     // What judged it, and the state that says how much of it can be believed.
     const plan = read.body.grading_plan as { state: string; items: unknown[] };
