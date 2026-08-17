@@ -36,7 +36,12 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../../../ui/shell.tsx";
+import {
+  ExportSetUp,
+  useDeploymentOrigin,
+} from "../../../../../../../ui/export-setup.tsx";
 import { ConnectionFields, type Draft } from "../fields.tsx";
+import monitoring from "../monitoring.module.css";
 
 /**
  * Adding a way for egma to reach an agent.
@@ -89,6 +94,7 @@ function NewConnection({
   const [environment, setEnvironment] = useState("");
   const [draft, setDraft] = useState<Draft>({ config: {}, credentials: {} });
   const [watching, setWatching] = useState(false);
+  const origin = useDeploymentOrigin();
 
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
@@ -134,11 +140,28 @@ function NewConnection({
 
   const mayAuthor = role !== null && canAuthor(role);
   /**
-   * Retell is the one platform Egma can ask for finished production
-   * conversations today, so it is the one type that offers the switch. Another
-   * type showing it would be a promise nothing behind the form can keep.
+   * **Every type gets the same Monitoring heading, in the same place.** What
+   * differs is what enabling monitoring *is* for that platform, and there are
+   * three answers.
+   *
+   * Retell is a platform Egma can ask for finished conversations, so enabling
+   * is a setting Egma stores and acts on — the box below, sent as
+   * `watch_production`.
+   *
+   * LiveKit pushes rather than answers, so there is nothing for Egma to store:
+   * enabling is three things a developer does where their agent runs, and the
+   * box only reveals them. Nothing about it is sent.
+   *
+   * Every other platform gets one honest sentence. A box that could be ticked
+   * and did nothing would be worse than no box at all.
    */
-  const mayWatch = described?.type === "retell";
+  const monitoringKind =
+    described?.type === "retell"
+      ? "stored"
+      : described?.type === "livekit"
+        ? "exported"
+        : "not-yet";
+  const mayWatch = monitoringKind === "stored";
 
   function chooseType(next: string): void {
     setType(next);
@@ -148,9 +171,10 @@ function NewConnection({
     // The keys belong to the shape, so nothing typed under the old one is
     // carried into a form that has no place for it.
     setDraft({ config: {}, credentials: {} });
-    // The switch belongs to the type as well. A box ticked under Retell and
-    // then left behind by a change of type would be consent carried somewhere
-    // it was never given.
+    // The Monitoring box belongs to the type as well. One ticked under Retell
+    // and then left behind by a change of type would be consent carried
+    // somewhere it was never given — and under LiveKit it would leave setup
+    // instructions open for a platform they are not the instructions for.
     setWatching(false);
   }
 
@@ -347,28 +371,67 @@ function NewConnection({
             credentialsEditable
           />
 
-          {/*
-            Off unless somebody ticks it, and both readings are spelled out
-            beside the box: what Egma stores when it is on, and where the line
-            sits — from the moment of the switch, never behind it.
-          */}
-          {mayWatch ? (
-            <Field
-              label="Watch production"
-              hint={
-                watching
-                  ? "Production conversations over this connection appear in Monitoring as transcripts. Egma stores them from the moment you add this connection, and stores nothing from before it."
-                  : "Egma stores none of this connection's production conversations. Switch this on to read them in Monitoring as transcripts, from that moment on."
-              }
-              htmlFor="connection-watch-production"
-            >
-              <Checkbox
-                id="connection-watch-production"
-                checked={watching}
-                onChange={setWatching}
-              />
-            </Field>
-          ) : null}
+          <fieldset className={monitoring.group}>
+            <legend className={monitoring.title}>Monitoring</legend>
+
+            {monitoringKind === "not-yet" ? (
+              /*
+                One sentence, and no control. A box somebody could tick that
+                did nothing would be the product claiming something it cannot
+                do, which is the one thing a page about trust cannot afford.
+              */
+              <p className={monitoring.note}>
+                Egma cannot monitor a {described.label} agent&rsquo;s production
+                conversations yet. Everything else on this form works, and this
+                connection can be used for runs today.
+              </p>
+            ) : (
+              <>
+                {/*
+                  Off unless somebody ticks it, and both readings are spelled
+                  out beside the box: what happens when it is on, and where the
+                  line sits — from this moment, never behind it.
+                */}
+                <Field
+                  label="Enable monitoring"
+                  hint={
+                    monitoringKind === "stored"
+                      ? watching
+                        ? "Production conversations over this connection appear in Monitoring as transcripts. Egma stores them from the moment you add this connection, and stores nothing from before it."
+                        : "Egma stores none of this connection's production conversations. Turn this on to read them in Monitoring as transcripts, from that moment on."
+                      : "A LiveKit agent sends its own production conversations to Egma. Turn this on to see what to set where the agent runs."
+                  }
+                  htmlFor="connection-watch-production"
+                >
+                  <Checkbox
+                    id="connection-watch-production"
+                    checked={watching}
+                    onChange={setWatching}
+                  />
+                </Field>
+
+                {/*
+                  LiveKit pushes, so enabling is not a setting Egma stores —
+                  nothing below is sent with this form. It is the same address,
+                  the same two variables and the same key the quiet Monitoring
+                  page teaches, from the one component that knows them.
+                */}
+                {monitoringKind === "exported" && watching ? (
+                  <>
+                    <p className={monitoring.note}>
+                      Set these where the agent runs. From then on its
+                      production conversations appear in Monitoring as
+                      transcripts — nothing is stored on this connection, and
+                      nothing here is sent with this form.
+                    </p>
+                    {origin === null ? null : (
+                      <ExportSetUp projectId={projectId} origin={origin} />
+                    )}
+                  </>
+                ) : null}
+              </>
+            )}
+          </fieldset>
 
           {described.simulator_adapter ? null : (
             <Problem>

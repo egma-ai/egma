@@ -8,6 +8,9 @@ import NewConnectionPage from "../app/projects/[projectId]/agents/[agentId]/conn
 import RegisterAgentPage from "../app/projects/[projectId]/agents/new/page.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
+// The one place the export setup's words live, so a form asserting them cannot
+// drift from the Monitoring page that teaches the same thing.
+import { QUIET } from "../lib/transcript-copy.ts";
 
 /**
  * The Agents and Connections pages, rendered and driven.
@@ -213,6 +216,35 @@ const TYPES = {
           ],
           credential_rule: "forbidden",
           credential_help: "A phone connection takes no credential.",
+          credential_fields: [],
+        },
+      ],
+    },
+    // The platform that pushes rather than answers, so its Monitoring section
+    // teaches an export instead of storing a setting.
+    {
+      type: "livekit",
+      label: "LiveKit",
+      modalities: ["voice"],
+      topology: "egma-joins-room",
+      simulator_adapter: true,
+      capability_discovery: false,
+      variants: [
+        {
+          id: "livekit.api_key",
+          label: "LiveKit room",
+          chosen_by: null,
+          fields: [
+            {
+              key: "url",
+              label: "LiveKit URL",
+              kind: "text",
+              required: true,
+              help: "Where your LiveKit server answers.",
+            },
+          ],
+          credential_rule: "forbidden",
+          credential_help: "This shape takes no credential.",
           credential_fields: [],
         },
       ],
@@ -668,7 +700,7 @@ describe("adding a connection", () => {
     expect(Object.keys(sent[0]?.body ?? {})).not.toContain("environment");
   });
 
-  it("offers watching only for the type Egma can watch, and offers it off", async () => {
+  it("gives every type one Monitoring section, and says what it is for each", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/api/connection-types": { status: 200, body: TYPES },
@@ -679,20 +711,121 @@ describe("adding a connection", () => {
     });
     render(<NewConnectionPage />);
 
+    // The heading is on every form, so what a developer learns on one type is
+    // where they look on the next. Asked for as the group it is rather than by
+    // its words, because the sidebar's own navigation says Monitoring too.
+    expect(
+      await screen.findByRole("group", { name: "Monitoring" }),
+    ).toBeDefined();
     const watch = (await screen.findByLabelText(
-      "Watch production",
+      "Enable monitoring",
     )) as HTMLInputElement;
     // Nobody has said Egma may store anything yet, so the box arrives empty.
     expect(watch.checked).toBe(false);
 
-    // A phone connection is not something Egma can ask for finished
-    // conversations, so the switch is not on its form at all.
+    // LiveKit keeps the heading and the box; what changes is what ticking it
+    // means.
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "livekit" },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("group", { name: "Monitoring" })).toBeDefined(),
+    );
+    expect(
+      (screen.getByLabelText("Enable monitoring") as HTMLInputElement).checked,
+    ).toBe(false);
+
+    // A phone agent is one Egma cannot monitor yet, and the section says so
+    // rather than offering a box that would do nothing.
     fireEvent.change(screen.getByLabelText("Type"), {
       target: { value: "phone" },
     });
     await waitFor(() =>
-      expect(screen.queryByLabelText("Watch production")).toBeNull(),
+      expect(screen.queryByLabelText("Enable monitoring")).toBeNull(),
     );
+    expect(screen.getByRole("group", { name: "Monitoring" })).toBeDefined();
+    expect(screen.getByText(/cannot monitor a Phone number agent/)).toBeDefined();
+  });
+
+  it("teaches a LiveKit agent the export, and sends nothing about it", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    fireEvent.change(await screen.findByLabelText("Type"), {
+      target: { value: "livekit" },
+    });
+    // Closed until somebody asks: the setup is three things to do elsewhere,
+    // and a form that opened with them would be teaching before it was asked.
+    await waitFor(() =>
+      expect(screen.queryByText(QUIET.setUp.endpoint)).toBeNull(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Enable monitoring"));
+
+    // The three things enabling actually is, from the same component the quiet
+    // Monitoring page draws: this deployment's own address, the two export
+    // lines with the percent-encoded space explained, and the way to a key.
+    expect(await screen.findByText(QUIET.setUp.endpoint)).toBeDefined();
+    expect(screen.getByText(globalThis.location.origin)).toBeDefined();
+    expect(screen.getByText(QUIET.setUp.variables)).toBeDefined();
+    const lines = screen.getByText(/OTEL_EXPORTER_OTLP_ENDPOINT=/);
+    expect(lines.textContent).toContain("OTEL_EXPORTER_OTLP_HEADERS=");
+    expect(lines.textContent).toContain("Bearer%20");
+    const mint = screen.getByRole("link", { name: QUIET.setUp.key });
+    expect(mint.getAttribute("href")).toContain("keys");
+
+    fireEvent.change(screen.getByLabelText("LiveKit URL"), {
+      target: { value: "wss://acme.livekit.cloud" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    // **Nothing about monitoring is sent for LiveKit.** There is no setting for
+    // Egma to store — the agent pushes — and the API refuses the field on any
+    // type but Retell, correctly.
+    expect(Object.keys(sent[0]?.body ?? {})).not.toContain("watch_production");
+    expect(sent[0]?.body).toEqual({
+      type: "livekit",
+      modality: "voice",
+      config: { url: "wss://acme.livekit.cloud" },
+    });
+  });
+
+  it("closes the section again when the type changes under it", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    fireEvent.click(await screen.findByLabelText("Enable monitoring"));
+    expect(
+      (screen.getByLabelText("Enable monitoring") as HTMLInputElement).checked,
+    ).toBe(true);
+
+    // Consent ticked under Retell is never carried to another platform, and
+    // LiveKit's instructions are not left open for a form they do not belong
+    // to.
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "livekit" },
+    });
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Enable monitoring") as HTMLInputElement).checked,
+      ).toBe(false),
+    );
+    expect(screen.queryByText(QUIET.setUp.endpoint)).toBeNull();
   });
 
   // The test above proves the other half: a form nobody ticked sends no
@@ -714,7 +847,7 @@ describe("adding a connection", () => {
     fireEvent.change(screen.getByLabelText("Retell API key"), {
       target: { value: "retell-secret-A1B2C3D4WXYZ" },
     });
-    fireEvent.click(screen.getByLabelText("Watch production"));
+    fireEvent.click(screen.getByLabelText("Enable monitoring"));
     fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
 
     await waitFor(() => expect(sent).toHaveLength(1));

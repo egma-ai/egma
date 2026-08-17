@@ -38,6 +38,10 @@ import {
   type Quiet,
 } from "../../../../../lib/transcripts.ts";
 import { ButtonLink, Select } from "../../../../../ui/controls.tsx";
+import {
+  ExportSetUp,
+  useDeploymentOrigin,
+} from "../../../../../ui/export-setup.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
@@ -50,7 +54,6 @@ import {
   ProductPage,
 } from "../../../../../ui/shell.tsx";
 import { Notice, styles } from "../../../../ui.tsx";
-import setup from "./setup.module.css";
 
 /**
  * **Monitoring**: what this project's agents did in production, newest first.
@@ -453,11 +456,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
  * wrong for as long as it is on screen. Teaching arrives once and complete.
  */
 function SetUp({ projectId }: { readonly projectId: string }) {
-  const [origin, setOrigin] = useState<string | null>(null);
-
-  useEffect(() => {
-    setOrigin(globalThis.location.origin);
-  }, []);
+  const origin = useDeploymentOrigin();
 
   if (origin === null) return null;
 
@@ -465,26 +464,7 @@ function SetUp({ projectId }: { readonly projectId: string }) {
     <Empty
       title={QUIET.setUp.title}
       lead={QUIET.setUp.lead}
-      action={
-        <div className={setup.setUp}>
-          <p className={setup.note}>{QUIET.setUp.endpoint}</p>
-          <pre className={setup.address}>{origin}</pre>
-          <p className={setup.note}>{QUIET.setUp.variables}</p>
-          <pre className={setup.exports}>{QUIET.setUp.exports(origin)}</pre>
-          <p className={setup.note}>{QUIET.setUp.keyLead}</p>
-          <ButtonLink weight="strong" href={settingsPath(projectId, "keys")}>
-            {QUIET.setUp.key}
-          </ButtonLink>
-          {/*
-            The caution, which the state below says louder and to fewer people:
-            the key list answers for an admin and for whoever minted the key,
-            so a member whose project is fed by somebody else's
-            organization-wide key would otherwise never be told what to look
-            at. It is one line here and the whole answer there.
-          */}
-          <p className={setup.note}>{QUIET.setUp.caution}</p>
-        </div>
-      }
+      action={<ExportSetUp projectId={projectId} origin={origin} />}
     />
   );
 }

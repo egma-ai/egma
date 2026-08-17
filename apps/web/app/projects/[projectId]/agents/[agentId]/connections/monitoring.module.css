@@ -1,0 +1,38 @@
+/*
+ * The Monitoring section of the add-a-connection form.
+ *
+ * One heading in one place for every connection type, so that what a developer
+ * learns adding a Retell connection is where they look adding a LiveKit one.
+ * No new colour and no new shape: an ordinary form group, its hairline the same
+ * hairline every other group uses, because this is a group of fields and not a
+ * state anybody has to notice.
+ */
+
+.group {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-5);
+  margin: 0;
+  padding-top: var(--space-5);
+  padding-right: 0;
+  padding-bottom: 0;
+  padding-left: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.title {
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  color: var(--foreground);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+/* What a platform Egma cannot watch yet says, and the copy under a disclosure. */
+.note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
