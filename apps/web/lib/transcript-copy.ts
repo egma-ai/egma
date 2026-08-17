@@ -85,11 +85,15 @@ export const COLUMNS = {
  * 1. **Nothing in this window.** The list is empty because of the window rather
  *    than because of the project — a week of traffic read at the last hour. One
  *    line and the way out, and none of the teaching below: greeting a working
- *    export with a setup tutorial tells somebody their export is broken.
- * 2. **Nothing has arrived at all.** The whole export setup, in the shortest
- *    form there is: the address this deployment listens on, the two variables
- *    that point an agent at it, where to mint the key they carry, and the
- *    caution about the key that fails in silence.
+ *    export with a setup tutorial tells somebody their export is broken. It is
+ *    also what a page says when it could not find out which of the two it was
+ *    looking at, because this line is true either way.
+ * 2. **Nothing has arrived, at any window.** The whole export setup, in the
+ *    shortest form there is: the address this deployment listens on, the two
+ *    variables that point an agent at it, where to mint the key they carry, and
+ *    the caution about the key that fails in silence. Whichever window is
+ *    selected — a developer on their first day lands on the default one, and
+ *    this is the page written for them.
  * 3. **Nothing has arrived, and a key that names the whole organization is
  *    visible.** The one step of that setup that fails silently — everything is
  *    accepted and stored, and none of it is in a project, so a correct-looking

@@ -21,6 +21,7 @@ import {
   type WindowChoice,
 } from "../../../../../lib/transcript-copy.ts";
 import {
+  everRecordedPath,
   howLong,
   isWidestWindow,
   namesWholeOrganization,
@@ -258,6 +259,62 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
   const more = state.status === "loaded" ? state.more : null;
 
   /**
+   * Whether this project has **ever** recorded anything, asked only when the
+   * window on screen holds nothing.
+   *
+   * It is the difference between the two confident sentences a quiet page can
+   * say, and the window alone cannot tell them apart. An empty last hour means
+   * *nothing in this hour* for a project with a week of traffic and *set up your
+   * export* for a project on its first day, and a developer who has just signed
+   * up lands on the default window rather than on the widest — so deciding by
+   * the window alone would put a click between them and the one page written
+   * for them.
+   *
+   * One row is the whole answer, so it asks for one. It is not asked at all
+   * unless the page is empty, and not even then when the window on screen is
+   * already the widest — the list read has just answered the same question.
+   *
+   * `undefined` is still out, `null` is a read that refused, and a number is an
+   * answer. The three are kept apart because `quietState` may never read a
+   * refusal as a zero.
+   */
+  const emptyHere = state.status === "loaded" && state.rows.length === 0;
+  const alreadyWidest = isWidestWindow(choice ?? DEFAULT_WINDOW);
+  const [probed, setProbed] = useState<number | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!emptyHere || alreadyWidest) {
+      setProbed(undefined);
+      return undefined;
+    }
+
+    let current = true;
+    setProbed(undefined);
+
+    void readJson<ListPage>(everRecordedPath(projectId, new Date())).then(
+      (answer) => {
+        if (!current) return;
+        setProbed(answer.status === "ready" ? answer.value.traces.length : null);
+      },
+    );
+
+    return () => {
+      current = false;
+    };
+  }, [emptyHere, alreadyWidest, projectId, attempt]);
+
+  /**
+   * What the probe settled on, with the two cases that need no probe folded in:
+   * a page with rows on it never asks, and a page already on the widest window
+   * has its answer in the list read it just made.
+   */
+  const everRecorded: number | null | undefined = !emptyHere
+    ? 0
+    : alreadyWidest
+      ? 0
+      : probed;
+
+  /**
    * Which of the four quiet states this page is in, or none.
    *
    * Nothing at all while either supporting read is still out, and that wait is
@@ -278,11 +335,14 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
     answer !== null && answer.status === "ready" ? count(answer.value) : null;
 
   const quiet: Quiet | null =
-    state.status !== "loaded" || graders === null || keys === null
+    state.status !== "loaded" ||
+    graders === null ||
+    keys === null ||
+    everRecorded === undefined
       ? null
       : quietState({
           listed: state.rows.length,
-          narrowedWindow: !isWidestWindow(choice ?? DEFAULT_WINDOW),
+          everRecorded,
           organizationWideKeys: counted(
             keys,
             (page) => rowsIn(page.keys).filter(namesWholeOrganization).length,

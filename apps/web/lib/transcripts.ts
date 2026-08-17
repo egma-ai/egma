@@ -294,11 +294,12 @@ function hoursIn(choice: WindowChoice): number {
  * Derived from the offered windows rather than written down, so adding a wider
  * one moves this with it.
  */
+export const WIDEST_WINDOW: WindowChoice = WINDOWS.reduce((one, other) =>
+  other.hours > one.hours ? other : one,
+).id;
+
 export function isWidestWindow(choice: WindowChoice): boolean {
-  const widest = WINDOWS.reduce((one, other) =>
-    other.hours > one.hours ? other : one,
-  );
-  return choice === widest.id;
+  return choice === WIDEST_WINDOW;
 }
 
 /** The last day, or whichever span of time was chosen instead. */
@@ -406,6 +407,12 @@ export function productionListPath(asking: {
   readonly window: Window;
   readonly projectId: string;
   readonly cursor?: string | null;
+  /**
+   * How many rows are wanted at most. Left out for a page of the list, which
+   * takes whatever the endpoint's own page size is; sent as `1` by the probe
+   * below, which only asks whether anything is there.
+   */
+  readonly limit?: number;
 }): string {
   const asked = new URLSearchParams({
     from: asking.window.from,
@@ -416,7 +423,26 @@ export function productionListPath(asking: {
   if (asking.cursor != null && asking.cursor !== "") {
     asked.set("cursor", asking.cursor);
   }
+  if (asking.limit !== undefined) asked.set("limit", String(asking.limit));
   return `${TRACES_ENDPOINT}?${asked.toString()}`;
+}
+
+/**
+ * The one question a quiet page cannot answer from the window it is on: **has
+ * this project ever recorded anything at all?**
+ *
+ * One row is the whole answer — *some* or *none* is the branch, and a count is
+ * not wanted — so it asks for one and reads whether it came back. It is fired
+ * only when the window on screen is empty, and not even then when that window
+ * is already the widest, because the list read has just answered the same
+ * question.
+ */
+export function everRecordedPath(projectId: string, now: Date): string {
+  return productionListPath({
+    window: recentWindow(WIDEST_WINDOW, now),
+    projectId,
+    limit: 1,
+  });
 }
 
 /**
@@ -451,14 +477,18 @@ export function transcriptReadPath(asking: {
  * the wrong way for an afternoon:
  *
  * - `nothing-in-this-window` — the list is empty because of the **window**, not
- *   because of the project. A week of traffic read at the last hour is an empty
- *   page and a healthy project, and greeting it with a setup tutorial tells
- *   somebody their working export is broken. One line and the way out; nothing
- *   else, because nothing else is known to be wrong.
- * - `set-up-capture` — nothing has arrived at the widest window this page can
- *   ask for. The reader has an agent and no export, so what they need is the
- *   address, the two variables and a key — and the caution about the key that
- *   fails silently, which rides with the teaching so that every role meets it.
+ *   because of the project: something *is* recorded further back. A week of
+ *   traffic read at the last hour is an empty page and a healthy project, and
+ *   greeting it with a setup tutorial tells somebody their working export is
+ *   broken. One line and the way out; nothing else, because nothing else is
+ *   known to be wrong.
+ * - `set-up-capture` — nothing has arrived **anywhere**, at any window this page
+ *   can ask about. The reader has an agent and no export, so what they need is
+ *   the address, the two variables and a key — and the caution about the key
+ *   that fails silently, which rides with the teaching so that every role meets
+ *   it. It does not matter which window is selected: a developer whose first
+ *   ever page is empty is the person this teaching exists for, and the default
+ *   window is where they land.
  * - `key-names-the-organization` — the same emptiness, with a key that names no
  *   project actually **visible** to this reader. That key is the one step of
  *   the setup path that fails in silence: everything is accepted and stored,
@@ -481,6 +511,12 @@ export function transcriptReadPath(asking: {
  * claim on screen that egma has no answer for — the same collapse
  * `ui/page-state.tsx` forbids between failed and empty — so a supporting read
  * that did not land means one less thing this page says, and never one more.
+ *
+ * `everRecorded` is that rule at its sharpest, because both of the sentences it
+ * decides between are confident ones. Unanswered, the page falls back to the
+ * window line: *nothing here, try a wider window* is true whatever the answer
+ * would have been, while the teaching would be telling somebody with a working
+ * export to go and build one.
  */
 export type Quiet =
   | "nothing-in-this-window"
@@ -491,15 +527,25 @@ export type Quiet =
 export function quietState(seen: {
   /** How many production conversations this window holds. */
   readonly listed: number;
-  /** Whether the window is narrower than the widest one on offer. */
-  readonly narrowedWindow: boolean;
+  /**
+   * How many this project holds at the widest window there is — the answer to
+   * *has anything ever arrived* — or `null` where nothing answered.
+   *
+   * Only read when the window on screen is empty, which is the only time the
+   * question is asked.
+   */
+  readonly everRecorded: number | null;
   /** Visible keys that name no project, or `null` where nothing answered. */
   readonly organizationWideKeys: number | null;
   /** Graders whose scope reaches production, or `null` where nothing answered. */
   readonly watchingProduction: number | null;
 }): Quiet | null {
   if (seen.listed === 0) {
-    if (seen.narrowedWindow) return "nothing-in-this-window";
+    // Nothing answered the wider question, so neither confident sentence is
+    // earned. The window line is true either way.
+    if (seen.everRecorded === null) return "nothing-in-this-window";
+    if (seen.everRecorded > 0) return "nothing-in-this-window";
+
     return seen.organizationWideKeys !== null && seen.organizationWideKeys > 0
       ? "key-names-the-organization"
       : "set-up-capture";

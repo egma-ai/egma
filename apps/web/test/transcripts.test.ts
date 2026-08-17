@@ -7,6 +7,7 @@ import * as copy from "../lib/transcript-copy.ts";
 import * as gradingCopy from "../lib/grading-copy.ts";
 import {
   assertionHeading,
+  everRecordedPath,
   everyStep,
   howFarIn,
   howLong,
@@ -324,11 +325,11 @@ describe("what the monitoring list asks for", () => {
  * export at egma a second time.
  */
 describe("which guidance a quiet page shows", () => {
-  /** Nothing narrowed, nothing failed: the plain reading of each case. */
+  /** An empty page in a project that has never recorded anything, nothing failed. */
   function seen(overrides: Partial<Parameters<typeof quietState>[0]>) {
     return quietState({
       listed: 0,
-      narrowedWindow: false,
+      everRecorded: 0,
       organizationWideKeys: 0,
       watchingProduction: 0,
       ...overrides,
@@ -337,23 +338,33 @@ describe("which guidance a quiet page shows", () => {
 
   /**
    * **The window is a reason for an empty list, and it is not the project's
-   * fault.** A project with a week of traffic read at the last hour is empty
-   * and healthy, and a setup tutorial there tells somebody their working export
-   * is broken.
+   * fault** — but only where something *is* recorded further back. A project
+   * with a week of traffic read at the last hour is empty and healthy, and a
+   * setup tutorial there tells somebody their working export is broken.
    */
-  it("blames the window when the window is narrowed", () => {
-    expect(seen({ listed: 0, narrowedWindow: true })).toBe(
+  it("blames the window when the project has traffic further back", () => {
+    expect(seen({ listed: 0, everRecorded: 1 })).toBe("nothing-in-this-window");
+    // Even where everything else would have had something to say.
+    expect(seen({ listed: 0, everRecorded: 9, organizationWideKeys: 3 })).toBe(
       "nothing-in-this-window",
     );
-    // Even where everything else would have had something to say.
-    expect(
-      seen({ listed: 0, narrowedWindow: true, organizationWideKeys: 3 }),
-    ).toBe("nothing-in-this-window");
   });
 
-  /** And the widest window is the one where an empty list means the project. */
-  it("teaches the setup only at the widest window this page can ask for", () => {
-    expect(seen({ listed: 0, narrowedWindow: false })).toBe("set-up-capture");
+  /**
+   * **And nothing anywhere is the day-one page, whatever window is selected.**
+   *
+   * A developer who has just signed up lands on the default window, not on the
+   * widest, and an empty page is the one thing standing between them and a
+   * working export. Deciding this by the selected window alone would put a
+   * click in front of the teaching written for exactly this moment — so the
+   * question asked is "has this project ever recorded anything", which the
+   * window cannot answer and one extra read can.
+   */
+  it("teaches the setup whenever nothing has ever arrived, at any window", () => {
+    expect(seen({ listed: 0, everRecorded: 0 })).toBe("set-up-capture");
+  });
+
+  it("knows which window is the widest, so the extra read can be skipped there", () => {
     expect(isWidestWindow("30d")).toBe(true);
     for (const narrower of ["1h", "24h", "7d"] as const) {
       expect(isWidestWindow(narrower), narrower).toBe(false);
@@ -398,6 +409,23 @@ describe("which guidance a quiet page shows", () => {
   });
 
   /**
+   * **The unanswered probe is that rule at its sharpest**, because both
+   * sentences it decides between are confident ones. *Nothing here, try a wider
+   * window* is true whatever the answer would have been; the teaching would be
+   * telling somebody with a working export to go and build one.
+   */
+  it("falls back to the window line, never the teaching, when the probe failed", () => {
+    expect(seen({ listed: 0, everRecorded: null })).toBe(
+      "nothing-in-this-window",
+    );
+    // Including where a visible organization-wide key would otherwise have
+    // spoken: that sentence is about an empty project too.
+    expect(seen({ listed: 0, everRecorded: null, organizationWideKeys: 2 })).toBe(
+      "nothing-in-this-window",
+    );
+  });
+
+  /**
    * With no traffic, telling somebody that no grader watches production is
    * noise about a problem they do not have yet — so the order is fixed and
    * exactly one state can ever be on screen.
@@ -411,12 +439,12 @@ describe("which guidance a quiet page shows", () => {
     ];
 
     for (const listed of [0, 5]) {
-      for (const narrowedWindow of [false, true]) {
+      for (const everRecorded of [0, 7, null]) {
         for (const organizationWideKeys of [0, 2, null]) {
           for (const watchingProduction of [0, 1, null]) {
             const state = quietState({
               listed,
-              narrowedWindow,
+              everRecorded,
               organizationWideKeys,
               watchingProduction,
             });
@@ -425,6 +453,21 @@ describe("which guidance a quiet page shows", () => {
         }
       }
     }
+  });
+
+  /**
+   * The probe asks the widest window for one row, because *some* or *none* is
+   * the whole branch and a count is not wanted.
+   */
+  it("asks the widest window for a single row, and nothing more", () => {
+    const where = everRecordedPath("prj_2", new Date("2026-08-16T12:00:00Z"));
+    const asked = new URLSearchParams(where.slice(where.indexOf("?")));
+
+    expect(asked.get("limit")).toBe("1");
+    expect(asked.get("project_id")).toBe("prj_2");
+    expect(asked.get("source")).toBe("production");
+    // The widest window this page offers, which is thirty days.
+    expect(asked.get("from")).toBe("2026-07-17T12:00:00.000Z");
   });
 
   /**

@@ -118,10 +118,18 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-/** Whatever egma is standing in for, keyed by path, with every ask recorded. */
-function apiAnswers(answers: Record<string, { status: number; body: unknown }>): {
-  readonly asked: string[];
-} {
+type Stubbed = { status: number; body: unknown };
+
+/**
+ * Whatever egma is standing in for, keyed by path, with every ask recorded.
+ *
+ * A path may answer with a function instead, which is how one path answers two
+ * questions: `/v1/traces` carries both the page of the list and the
+ * one-row probe that asks whether anything has ever been recorded.
+ */
+function apiAnswers(
+  answers: Record<string, Stubbed | ((at: URL) => Stubbed)>,
+): { readonly asked: string[] } {
   const asked: string[] = [];
 
   vi.stubGlobal(
@@ -133,7 +141,8 @@ function apiAnswers(answers: Record<string, { status: number; body: unknown }>):
       if (held === undefined) {
         throw new Error(`nothing stubbed for ${at.pathname}`);
       }
-      return json(held.status, held.body);
+      const answer = typeof held === "function" ? held(at) : held;
+      return json(answer.status, answer.body);
     }),
   );
 
@@ -145,28 +154,43 @@ const REFUSED = {
   body: { error: "store_unavailable", message: "Egma could not read that." },
 };
 
+function page(rows: readonly Listed[]): Stubbed {
+  return {
+    status: 200,
+    body: { traces: rows, next_cursor: null, window: { from: "", to: "" } },
+  };
+}
+
 /**
- * One page, with all four reads answered.
+ * One page, with every read answered.
  *
- * `rows`, `graders` and `keys` are the three inputs the quiet states are decided
- * from, so a case says only which of them it is about. Either supporting read
- * can be refused instead, which is a case of its own: a refusal is not a zero.
+ * `rows`, `everRecorded`, `graders` and `keys` are the four inputs the quiet
+ * states are decided from, so a case says only which of them it is about.
+ *
+ * `everRecorded` is the widest-window probe — *has this project ever recorded
+ * anything* — and it defaults to whatever `rows` says, which is the ordinary
+ * case of a project that is empty everywhere or busy everywhere. A case about
+ * the window sets the two apart. Any read can be refused instead, which is a
+ * case of its own: a refusal is not a zero.
  */
 function stub(options: {
   readonly rows?: readonly Listed[];
+  readonly everRecorded?: readonly Listed[] | "refused";
   readonly graders?: readonly ReturnType<typeof grader>[] | "refused";
   readonly keys?: readonly ReturnType<typeof key>[] | "refused";
 }) {
+  const rows = options.rows ?? [];
+  const ever = options.everRecorded ?? rows;
+
   return apiAnswers({
     "/api/me": { status: 200, body: ME },
-    "/v1/traces": {
-      status: 200,
-      body: {
-        traces: options.rows ?? [],
-        next_cursor: null,
-        window: { from: "", to: "" },
-      },
-    },
+    // One path, two questions. The probe is the one asking for a single row.
+    "/v1/traces": (at) =>
+      at.searchParams.get("limit") === "1"
+        ? ever === "refused"
+          ? REFUSED
+          : page(ever)
+        : page(rows),
     "/api/graders":
       options.graders === "refused"
         ? REFUSED
@@ -181,18 +205,31 @@ function stub(options: {
   });
 }
 
+/** Whether the widest-window probe was fired at all. */
+function probed(asked: readonly string[]): readonly string[] {
+  return asked.filter(
+    (one) => one.startsWith("/v1/traces?") && one.includes("limit=1"),
+  );
+}
+
 /**
  * Which window the address this page opens on names.
  *
- * It decides what an empty list *means* — narrowed and empty is a fact about
- * the window, widest and empty is a fact about the project — so every case that
- * is about an empty page has to say which one it is.
+ * Most cases leave it alone, which is the default and the window a developer
+ * who has just signed up actually lands on. It matters to exactly one thing
+ * here: at the widest window the page needs no probe, because the list read it
+ * just made asked the same question.
  */
 function atWindow(choice: string): void {
   globalThis.history.replaceState(null, "", `/?window=${choice}`);
 }
 
-/** The widest the control offers, which is where "nothing here" means the project. */
+/** The default the control settles on when the address names no window. */
+function atNoWindow(): void {
+  globalThis.history.replaceState(null, "", "/");
+}
+
+/** The widest the control offers. */
 const WIDEST = "30d";
 
 /** Which read this page made of the list, as the address it sent. */
@@ -204,7 +241,7 @@ function listedAt(asked: readonly string[]): URLSearchParams {
 beforeEach(() => {
   routed.projectId = "prj_2";
   routed.pathname = "/projects/prj_2/monitoring/transcripts";
-  atWindow(WIDEST);
+  atNoWindow();
 });
 
 afterEach(() => {
@@ -329,16 +366,22 @@ describe("what a quiet Monitoring page says", () => {
   }
 
   /**
-   * **An empty list on a narrowed window is a fact about the window.**
+   * **An empty list is a fact about the window when something is recorded
+   * further back.**
    *
    * A project with a week of traffic, read at the last hour, is empty and
    * perfectly healthy. Greeting that with the setup tutorial tells a developer
    * their working export is broken, so the page says the one thing it knows and
    * points at the control that fixes it.
    */
-  it("blames the window, and teaches nothing, when the window is narrowed", async () => {
+  it("blames the window, and teaches nothing, when there is traffic further back", async () => {
     atWindow("1h");
-    stub({ rows: [], keys: [key(null)], graders: [grader("simulations")] });
+    const { asked } = stub({
+      rows: [],
+      everRecorded: [ONE_ROW],
+      keys: [key(null)],
+      graders: [grader("simulations")],
+    });
     render(<MonitoringTranscriptsPage />);
 
     await screen.findByRole("heading", { name: QUIET.narrowWindow.title });
@@ -346,14 +389,31 @@ describe("what a quiet Monitoring page says", () => {
     // No tutorial, and no sentence about a key — neither is known to be wrong.
     expect(screen.queryByText(/OTEL_EXPORTER_OTLP_ENDPOINT/)).toBeNull();
     expect(screen.getByText(QUIET.narrowWindow.lead)).toBeDefined();
+    // The one extra read it took to know that, asked for a single row.
+    expect(probed(asked)).toHaveLength(1);
   });
 
-  it("teaches the export setup when nothing has been recorded", async () => {
-    stub({ rows: [], keys: [key("prj_2")], graders: [grader("simulations")] });
+  /**
+   * **A first-day project meets the teaching on the window it lands on.**
+   *
+   * The address a developer arrives at names no window, so the page settles on
+   * the default — not the widest — and this is the moment the whole empty state
+   * exists for. Deciding by the selected window alone would put a click between
+   * them and the instructions written for them, so the page asks the wider
+   * question instead.
+   */
+  it("teaches the export setup on the default window when nothing has ever arrived", async () => {
+    const { asked } = stub({
+      rows: [],
+      everRecorded: [],
+      keys: [key("prj_2")],
+      graders: [grader("simulations")],
+    });
     render(<MonitoringTranscriptsPage />);
 
     await screen.findByRole("heading", { name: QUIET.setUp.title });
     expect(guidance()).toEqual(["set-up-capture"]);
+    expect(probed(asked)).toHaveLength(1);
 
     /*
      * The two variables, carrying the address **this deployment** listens on —
@@ -391,25 +451,65 @@ describe("what a quiet Monitoring page says", () => {
    * empty. A supporting read that did not land means one thing less is said.
    */
   it("claims nothing about graders when the grader read was refused", async () => {
-    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: "refused" });
+    const { asked } = stub({
+      rows: [ONE_ROW],
+      keys: [key("prj_2")],
+      graders: "refused",
+    });
     render(<MonitoringTranscriptsPage />);
 
     // The rows are the page, and they arrive whatever the supporting read did.
     await screen.findByRole("table", { name: LIST.tableLabel });
     expect(guidance()).toEqual([]);
+    // And a page with rows on it never asks the wider question.
+    expect(probed(asked)).toEqual([]);
   });
 
   /** And the same for the keys read, which decides between two empty states. */
   it("teaches the setup, claiming no key, when the key read was refused", async () => {
-    stub({ rows: [], keys: "refused", graders: [grader("simulations")] });
+    stub({ rows: [], everRecorded: [], keys: "refused", graders: [] });
     render(<MonitoringTranscriptsPage />);
 
     await screen.findByRole("heading", { name: QUIET.setUp.title });
     expect(guidance()).toEqual(["set-up-capture"]);
   });
 
+  /**
+   * **The refused probe is that rule at its sharpest**, because both sentences
+   * it decides between are confident ones. *Nothing here, try a wider window* is
+   * true whatever the answer would have been; the teaching would be telling
+   * somebody with a working export to go and build one.
+   */
+  it("falls back to the window line, never the teaching, when the probe was refused", async () => {
+    stub({
+      rows: [],
+      everRecorded: "refused",
+      keys: [key(null)],
+      graders: [grader("simulations")],
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByRole("heading", { name: QUIET.narrowWindow.title });
+    expect(guidance()).toEqual(["nothing-in-this-window"]);
+    expect(screen.queryByText(/OTEL_EXPORTER_OTLP_ENDPOINT/)).toBeNull();
+  });
+
+  /**
+   * At the widest window the list read has already answered the wider question,
+   * so nothing is asked twice.
+   */
+  it("asks nothing extra when the window on screen is already the widest", async () => {
+    atWindow(WIDEST);
+    const { asked } = stub({ rows: [], keys: [key("prj_2")], graders: [] });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByRole("heading", { name: QUIET.setUp.title });
+    expect(guidance()).toEqual(["set-up-capture"]);
+    expect(probed(asked)).toEqual([]);
+  });
+
   it("names the organization-wide key instead, when the organization holds one", async () => {
-    stub({ rows: [], keys: [key(null)], graders: [grader("simulations")] });
+    stub({ rows: [], everRecorded: [], keys: [key(null)], graders: [] });
     render(<MonitoringTranscriptsPage />);
 
     await screen.findByRole("heading", { name: QUIET.organizationKey.title });
