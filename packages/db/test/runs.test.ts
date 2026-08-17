@@ -969,14 +969,13 @@ describe("the lifecycle, conducted by a claimant", () => {
     });
     expect(beat).toEqual({ cancelRequested: false });
 
-    // A chat simulation reports no audio facts — the row would refuse them.
+    // A chat simulation reports no recording — the row would refuse one.
     const completed = await completeSimulation(actingAsAcme(), simulationId, simulator, {
       endingReason: "persona_concluded",
       turnCount: 6,
     });
     expect(completed?.status).toBe("completed");
     expect(completed?.endingReason).toBe("persona_concluded");
-    expect(completed?.measuredAudioBandHertz).toBeNull();
 
     const header = await getRun(actingAsAcme(), started.id);
     expect(header?.status).toBe("completed");
@@ -1140,7 +1139,6 @@ describe("the lifecycle, conducted by a claimant", () => {
     const kept = await getSimulation(actingAsAcme(), simulationId);
     expect(kept?.endingReason).toBe("agent_ended");
     expect(kept?.turnCount).toBe(4);
-    expect(kept?.measuredAudioBandHertz).toBeNull();
   });
 });
 
@@ -1227,9 +1225,9 @@ describe("the summary facts a terminal landing carries", () => {
     expect(landed?.providerReference).toBe("chat_1a2b3c4d5e");
   });
 
-  it("lands a voice conversation's band and recording beside them", async () => {
-    // The seeded connection speaks chat, and the row would refuse audio facts
-    // on it — so the voice landing gets a routed phone connection of its own.
+  it("lands a voice conversation's recording beside its summary facts", async () => {
+    // The seeded connection speaks chat, and the row would refuse a recording
+    // on it, so the voice landing gets a routed phone connection of its own.
     const voice = await addConnection(actingAsAcme(), agentId, {
       type: "phone",
       modality: "voice",
@@ -1245,21 +1243,19 @@ describe("the summary facts a terminal landing carries", () => {
 
     const landed = await completeSimulation(actingAsAcme(), simulationId, simulator, {
       endingReason: "agent_ended",
-      measuredAudioBandHertz: 48_000,
       recordingReference: `${simulationId}/dual-channel.wav`,
       turnCount: 22,
       providerReference: "CA7e2b9c1d4f6a8e0b",
     });
 
-    expect(landed?.measuredAudioBandHertz).toBe(48_000);
     expect(landed?.recordingReference).toBe(`${simulationId}/dual-channel.wav`);
     expect(landed?.turnCount).toBe(22);
   });
 
   /**
-   * The coverage stamp is what makes two runs' numbers comparable or not, so
-   * it is held to the same standard as the measured audio band: landed off the
-   * report, kept verbatim, and read back off the one simulation.
+   * The coverage stamp records whether mock tools changed the world this
+   * simulation met. It lands off the report, stays verbatim, and is read back
+   * off the one simulation.
    */
   it("lands the coverage stamp, and reads it back off the simulation alone", async () => {
     const { simulationId } = await runningOne();

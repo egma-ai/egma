@@ -11,12 +11,13 @@ import { useApp, useInput, useStdout } from "ink";
 import { copyLink } from "../../platform/clipboard.ts";
 import { openInEditor } from "./editor.ts";
 import { ExistingTestsScreen } from "./screens/ExistingTestsScreen.tsx";
+import { ConnectionFieldScreen } from "./screens/ConnectionFieldScreen.tsx";
+import { CodingAgentScreen } from "./screens/CodingAgentScreen.tsx";
 import { GateScreen } from "./screens/GateScreen.tsx";
 import { GeneratingScreen } from "./screens/GeneratingScreen.tsx";
 import { IntroScreen } from "./screens/IntroScreen.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { PhoneNumberScreen } from "./screens/PhoneNumberScreen.tsx";
-import { PromptsPointerScreen } from "./screens/PromptsPointerScreen.tsx";
 import { ReachScreen } from "./screens/ReachScreen.tsx";
 import { RetellAgentScreen } from "./screens/RetellAgentScreen.tsx";
 import { RetellKeyScreen } from "./screens/RetellKeyScreen.tsx";
@@ -45,6 +46,15 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
 
   const screen = store.router.resolve(state);
 
+  if (screen === "coding-agent") {
+    return (
+      <CodingAgentScreen
+        state={state}
+        onAnswer={(id) => store.answer("coding-agent", id)}
+        onQuit={onQuit}
+      />
+    );
+  }
   if (screen === "intro") {
     return <IntroScreen state={state} onBegin={() => store.begin()} onQuit={onQuit} />;
   }
@@ -65,16 +75,18 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
       />
     );
   }
-  if (screen === "prompts-pointer") {
-    return (
-      <PromptsPointerScreen
-        onAnswer={(pointer) => store.answer("prompts-pointer", pointer)}
-      />
-    );
-  }
   if (screen === "retell-key") {
     return (
       <RetellKeyScreen state={state} onAnswer={(key) => store.answer("retell-key", key)} />
+    );
+  }
+  if (screen === "connection-field" && state.connectionAsk !== null) {
+    return (
+      <ConnectionFieldScreen
+        key={state.connectionAsk.id}
+        ask={state.connectionAsk}
+        onAnswer={(answer) => store.answer(state.connectionAsk!.id, answer)}
+      />
     );
   }
   if (screen === "retell-agent") {

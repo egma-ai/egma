@@ -74,6 +74,8 @@ function reportFor(outcome: ConnectOutcome, signal: AbortSignal): ExitReport {
         kind: "failed",
         reason: `nobody chose ${outcome.offered.join(" or ")}, so nothing was created.`,
       };
+    case "incompatible-reach":
+      return { kind: "failed", reason: outcome.reason };
     case "no-numbers":
       return { kind: "failed", reason: NO_NUMBERS_LINE };
     case "unchosen-number":
@@ -145,9 +147,9 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
     signal,
     retell: options.retell,
     fetchImpl: options.fetchImpl,
-    say: (line) => {
-      problem = line;
-      ui.pushStatus(line);
+    say: (line, kind) => {
+      if (kind !== "action") problem = line;
+      ui.pushStatus(kind === "action" ? `${ACTION_MARK} ${line}` : line);
     },
     // Both waits are wired to the stop signal, because both park on a person.
     // A screen waiting for a keystroke that will never come is the one place a
@@ -218,11 +220,6 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
     // answer.
     ui.pushStatus(`${ACTION_MARK} Retell agent ${config.name}`);
     ui.pushStatus(`${DETAIL_MARK} ${config.agentId}`);
-    // The number, said on its own line and before the connection line, because
-    // it is the one fact on this screen that will cost somebody money.
-    if (outcome.number !== null) {
-      ui.pushStatus(`${ACTION_MARK} Egma will dial ${outcome.number}.`);
-    }
     ui.pushStatus(
       `${ACTION_MARK} ${registered.agent.name} is on Egma, reachable over ${registered.connection.name} (${registered.connection.type} ${registered.connection.modality}).`,
     );

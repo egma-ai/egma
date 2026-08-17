@@ -1,20 +1,36 @@
 """The span emitter, held to the vocabulary and its golden fixtures.
 
 What these prove is the emitter contract, not the conversation: the trace
-identity a simulation id derives, the ids the emitter mints and replays,
-the shapes a flush carries, and the one rule that makes a timing span a
-measurement — its own duration *is* the number. The fixtures under
-``packages/simulation-contract/fixtures/spans`` are the same document as
-bytes, and this suite reads them rather than restating them, so a shape
-that drifts on either side fails here.
+identity a simulation id derives, SDK-owned span identity, the shapes a flush
+carries, and the one rule that makes a timing span a measurement — its own
+duration *is* the number. The worked examples under
+``packages/simulation-contract/fixtures/spans`` pin the vocabulary and timing;
+the SDK deliberately gives each new execution new span ids and resource facts.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import subprocess
+import sys
 
 import pytest
+from opentelemetry import trace
+from opentelemetry.proto.resource.v1.resource_pb2 import Resource
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+from opentelemetry.trace import (
+    Link,
+    SpanContext,
+    SpanKind,
+    Status,
+    StatusCode,
+    TraceFlags,
+    TraceState,
+)
 
+from egma_simulator import telemetry
 from egma_simulator.contract import contract_dir
 from egma_simulator.spans import (
     SCOPE_NAME,
@@ -24,6 +40,7 @@ from egma_simulator.spans import (
     SpanEmitter,
     trace_id_for,
 )
+from egma_simulator.telemetry import SimulationTraceIdGenerator
 
 # The vocabulary's own worked example, quoted from the document.
 WORKED_EXAMPLE_ID = "sim_01K3XQ7M4E8YB2FVN0H9TZQWER"
@@ -42,8 +59,8 @@ class Sink:
     def __init__(self) -> None:
         self.documents: list[dict] = []
 
-    def __call__(self, document: dict) -> None:
-        self.documents.append(document)
+    def __call__(self, serialized: bytes) -> None:
+        self.documents.append(json.loads(serialized))
 
 
 class Clock:
@@ -59,14 +76,31 @@ class Clock:
         self.at += int(seconds * 1_000_000_000)
 
 
+_OPEN_EMITTERS: list[SpanEmitter] = []
+
+
+@pytest.fixture(autouse=True)
+def release_unsealed_emitters():
+    """Most unit examples inspect a flush without ending a conversation."""
+    yield
+    while _OPEN_EMITTERS:
+        _OPEN_EMITTERS.pop().abort()
+
+
 def emitter(simulation_id: str = WORKED_EXAMPLE_ID) -> tuple[SpanEmitter, Sink, Clock]:
     sink = Sink()
     clock = Clock()
-    return SpanEmitter(simulation_id, flush=sink, clock=clock), sink, clock
+    spans = SpanEmitter(simulation_id, flush=sink, clock=clock)
+    _OPEN_EMITTERS.append(spans)
+    return spans, sink, clock
 
 
 def spans_of(document: dict) -> list[dict]:
     return document["resourceSpans"][0]["scopeSpans"][0]["spans"]
+
+
+def scopes_of(document: dict) -> list[dict]:
+    return document["resourceSpans"][0]["scopeSpans"]
 
 
 def named(document: dict, name: str) -> list[dict]:
@@ -130,9 +164,14 @@ def test_an_id_that_is_not_egmas_own_shape_still_gets_one_trace():
     for opaque in ("sim-chat-001", "", "sim_not-crockford", "sim_" + "Z" * 26):
         derived = trace_id_for(opaque)
         assert len(derived) == 32
-        assert int(derived, 16) >= 0
+        assert int(derived, 16) > 0
         assert derived == trace_id_for(opaque)
     assert trace_id_for("sim-chat-001") != trace_id_for("sim-chat-002")
+
+
+def test_the_all_zero_simulation_id_names_no_valid_otel_trace():
+    with pytest.raises(ValueError, match="all-zero OpenTelemetry trace id"):
+        trace_id_for("sim_00000000000000000000000000")
 
 
 # -- What a flush carries -------------------------------------------------
@@ -145,13 +184,13 @@ def test_a_flush_names_its_simulation_and_rides_the_one_scope():
     spans.flush()
 
     resource = sink.documents[0]["resourceSpans"][0]
-    assert resource["resource"]["attributes"] == [
-        {"key": "service.name", "value": {"stringValue": SERVICE_NAME}},
-        {
-            "key": SIMULATION_ID_ATTRIBUTE,
-            "value": {"stringValue": WORKED_EXAMPLE_ID},
-        },
-    ]
+    resource_attributes = {
+        entry["key"]: entry["value"] for entry in resource["resource"]["attributes"]
+    }
+    assert resource_attributes["service.name"] == {"stringValue": SERVICE_NAME}
+    assert resource_attributes[SIMULATION_ID_ATTRIBUTE] == {
+        "stringValue": WORKED_EXAMPLE_ID
+    }
     assert resource["scopeSpans"][0]["scope"] == {
         "name": SCOPE_NAME,
         "version": SCOPE_VERSION,
@@ -502,6 +541,26 @@ def test_an_empty_flush_sends_nothing():
     assert sink.documents == []
 
 
+def test_a_failed_final_wal_handoff_releases_the_simulation_route():
+    """A WAL write failure blocks terminal delivery but must not leave the
+    process-wide provider claiming that the simulation is still active."""
+
+    def unavailable_wal(_serialized: bytes) -> None:
+        raise OSError("the WAL is unavailable")
+
+    simulation_id = "sim-final-flush-failure"
+    spans = SpanEmitter(simulation_id, flush=unavailable_wal)
+    replacement = SpanEmitter(simulation_id, flush=Sink())
+    spans.opened()
+    try:
+        with pytest.raises(RuntimeError, match="could not write every ended span"):
+            spans.sealed()
+        replacement.opened()
+    finally:
+        spans.abort()
+        replacement.abort()
+
+
 def test_a_conversation_that_authored_nothing_still_says_it_happened():
     """A simulation that failed before its first turn is still a simulation."""
     spans, sink, _clock = emitter()
@@ -511,11 +570,12 @@ def test_a_conversation_that_authored_nothing_still_says_it_happened():
     assert [span["name"] for span in spans_of(sink.documents[0])] == ["simulation"]
 
 
-def test_the_ids_a_conversation_mints_are_stable_across_resends():
-    """The same conversation, replayed: identical ids, so a resend lands
-    nothing twice at a store that dedups on them."""
+def test_the_sdk_mints_span_ids_instead_of_replaying_derived_ids():
+    """Trace identity stays tied to the simulation, while span identity is
+    owned by the OpenTelemetry SDK. Durable retry replays serialized bytes;
+    conducting the same words again is new evidence with new span ids."""
 
-    def conversation() -> list[dict]:
+    def emit_once() -> list[dict]:
         spans, sink, clock = emitter()
         spans.opened()
         clock.tick(1.0)
@@ -524,6 +584,253 @@ def test_the_ids_a_conversation_mints_are_stable_across_resends():
         spans.sealed()
         return sink.documents
 
-    first = conversation()
-    again = conversation()
-    assert json.dumps(first) == json.dumps(again)
+    first = [span for document in emit_once() for span in spans_of(document)]
+    again = [span for document in emit_once() for span in spans_of(document)]
+
+    assert {span["traceId"] for span in first + again} == {WORKED_EXAMPLE_TRACE}
+    assert {span["spanId"] for span in first}.isdisjoint(
+        {span["spanId"] for span in again}
+    )
+
+
+def test_the_identity_adapter_supplies_only_the_simulation_root_trace_id():
+    spans, _sink, _clock = emitter("sim-root-identity-only")
+    spans.opened()
+
+    unrelated_parentless_trace = SimulationTraceIdGenerator().generate_trace_id()
+
+    assert unrelated_parentless_trace != int(spans.trace_id, 16)
+
+
+def test_evidence_sampling_cannot_be_disabled_by_global_otel_settings(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("OTEL_TRACES_SAMPLER", "always_off")
+    assert telemetry._PROVIDER.sampler is ALWAYS_ON
+
+    monkeypatch.setenv("OTEL_SDK_DISABLED", " true ")
+    with pytest.raises(RuntimeError, match="OTEL_SDK_DISABLED"):
+        telemetry._ensure_sdk_enabled()
+
+
+def test_global_otel_limits_cannot_truncate_or_drop_evidence():
+    """A fresh provider ignores host-wide limits that would lose raw fields."""
+    proof = r"""
+import json
+
+from opentelemetry import trace
+from opentelemetry.trace import Link, SpanContext, TraceFlags
+
+from egma_simulator.spans import SpanEmitter
+
+documents = []
+evidence = SpanEmitter("sim-limit-proof", flush=documents.append)
+evidence.opened()
+links = [
+    Link(
+        SpanContext(
+            trace_id=index + 1,
+            span_id=index + 1,
+            is_remote=False,
+            trace_flags=TraceFlags.SAMPLED,
+        ),
+        attributes={"link.first": "unabridged", "link.second": "preserved"},
+    )
+    for index in range(2)
+]
+span = trace.get_tracer("pipecat").start_span(
+    "llm",
+    attributes={"span.first": "unabridged", "span.second": "preserved"},
+    links=links,
+)
+span.add_event(
+    "first",
+    {"event.first": "unabridged", "event.second": "preserved"},
+)
+span.add_event(
+    "second",
+    {"event.first": "unabridged", "event.second": "preserved"},
+)
+span.end()
+evidence.flush()
+evidence.abort()
+document = json.loads(documents[0])
+exported = next(
+    span
+    for resource in document["resourceSpans"]
+    for scoped in resource["scopeSpans"]
+    for span in scoped["spans"]
+    if span["name"] == "llm"
+)
+print(json.dumps(exported))
+"""
+    environment = os.environ.copy()
+    for name in (
+        "OTEL_ATTRIBUTE_COUNT_LIMIT",
+        "OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT",
+        "OTEL_EVENT_ATTRIBUTE_COUNT_LIMIT",
+        "OTEL_LINK_ATTRIBUTE_COUNT_LIMIT",
+        "OTEL_SPAN_EVENT_COUNT_LIMIT",
+        "OTEL_SPAN_LINK_COUNT_LIMIT",
+        "OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+        "OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+    ):
+        environment[name] = "1"
+
+    finished = subprocess.run(
+        [sys.executable, "-c", proof],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    exported = json.loads(finished.stdout)
+
+    assert {
+        entry["key"]: entry["value"]["stringValue"] for entry in exported["attributes"]
+    } == {"span.first": "unabridged", "span.second": "preserved"}
+    assert [event["name"] for event in exported["events"]] == ["first", "second"]
+    assert all(len(event["attributes"]) == 2 for event in exported["events"])
+    assert len(exported["links"]) == 2
+    assert all(len(link["attributes"]) == 2 for link in exported["links"])
+
+
+def test_the_simulation_resource_key_cannot_be_overridden_by_global_attributes():
+    resource = Resource()
+    wrong = resource.attributes.add()
+    wrong.key = SIMULATION_ID_ATTRIBUTE
+    wrong.value.string_value = "sim-wrong"
+    kept = resource.attributes.add()
+    kept.key = "deployment.environment"
+    kept.value.string_value = "test"
+    duplicate = resource.attributes.add()
+    duplicate.key = SIMULATION_ID_ATTRIBUTE
+    duplicate.value.string_value = "sim-also-wrong"
+
+    telemetry._stamp_simulation_id(resource, "sim-right")
+
+    assert [(entry.key, entry.value.string_value) for entry in resource.attributes] == [
+        (SIMULATION_ID_ATTRIBUTE, "sim-right"),
+        ("deployment.environment", "test"),
+    ]
+
+
+async def test_concurrent_simulations_keep_their_contexts_and_exports_isolated():
+    """One provider serves both tasks without mixing trace or attribution."""
+    ready = 0
+    both_ready = asyncio.Event()
+
+    async def emit_one(simulation_id: str, words: str) -> tuple[str, Sink]:
+        nonlocal ready
+        spans, sink, _clock = emitter(simulation_id)
+        spans.opened()
+        ready += 1
+        if ready == 2:
+            both_ready.set()
+        await both_ready.wait()
+        # This tracer is how Pipecat service decorators obtain their spans.
+        with trace.get_tracer("pipecat").start_as_current_span("stt"):
+            await asyncio.sleep(0)
+        spans.turn("human", words)
+        spans.flush()
+        spans.sealed()
+        return simulation_id, sink
+
+    results = await asyncio.gather(
+        emit_one("sim-concurrent-a", "alpha"),
+        emit_one("sim-concurrent-b", "bravo"),
+    )
+
+    for simulation_id, sink in results:
+        expected_trace = trace_id_for(simulation_id)
+        resources = [document["resourceSpans"][0] for document in sink.documents]
+        assert {
+            next(
+                attribute["value"]["stringValue"]
+                for attribute in resource["resource"]["attributes"]
+                if attribute["key"] == SIMULATION_ID_ATTRIBUTE
+            )
+            for resource in resources
+        } == {simulation_id}
+        exported = [
+            span
+            for resource in resources
+            for scoped in resource["scopeSpans"]
+            for span in scoped["spans"]
+        ]
+        assert {span["traceId"] for span in exported} == {expected_trace}
+        assert {span["name"] for span in exported} == {
+            "stt",
+            "human_turn",
+            "simulation",
+        }
+
+
+def test_pipecat_scope_status_event_link_and_attributes_reach_raw_otlp_unchanged():
+    spans, sink, _clock = emitter("sim-framework-fields")
+    spans.opened()
+    linked = SpanContext(
+        trace_id=0x1234567890ABCDEF1234567890ABCDEF,
+        span_id=0x1234567890ABCDEF,
+        is_remote=True,
+        trace_flags=TraceFlags.SAMPLED,
+        trace_state=TraceState((("vendor", "kept"),)),
+    )
+    framework = trace.get_tracer("pipecat").start_span(
+        "tts",
+        kind=SpanKind.CLIENT,
+        attributes={"pipecat.native": "kept", "pipecat.rate": 16_000},
+        links=[Link(linked, attributes={"pipecat.link": "kept"})],
+    )
+    framework.add_event(
+        "audio-ready", {"pipecat.event": "kept"}, timestamp=1_785_920_401_000_000_000
+    )
+    framework.set_status(Status(StatusCode.ERROR, "native status"))
+    framework.end(end_time=1_785_920_402_000_000_000)
+    spans.flush()
+
+    pipecat_scope = next(
+        scoped
+        for document in sink.documents
+        for scoped in scopes_of(document)
+        if scoped["scope"]["name"] == "pipecat"
+    )
+    assert pipecat_scope["scope"] == {"name": "pipecat"}
+    (exported,) = pipecat_scope["spans"]
+    assert exported["name"] == "tts"
+    assert exported["kind"] == 3
+    # The low byte says sampled. The simulation-derived trace id is not random;
+    # the high bit says the local/remote state is known (and the missing second
+    # bit says this context is local).
+    assert exported["flags"] == 257
+    assert attribute(exported, "pipecat.native") == "kept"
+    assert (
+        next(
+            item["value"]["intValue"]
+            for item in exported["attributes"]
+            if item["key"] == "pipecat.rate"
+        )
+        == "16000"
+    )
+    assert exported["status"] == {
+        "message": "native status",
+        "code": 2,
+    }
+    assert exported["events"] == [
+        {
+            "timeUnixNano": "1785920401000000000",
+            "name": "audio-ready",
+            "attributes": [{"key": "pipecat.event", "value": {"stringValue": "kept"}}],
+        }
+    ]
+    assert exported["links"] == [
+        {
+            "traceId": "1234567890abcdef1234567890abcdef",
+            "spanId": "1234567890abcdef",
+            "traceState": "vendor=kept",
+            "attributes": [{"key": "pipecat.link", "value": {"stringValue": "kept"}}],
+            # The low byte is TraceFlags.SAMPLED; the two high bits are the
+            # OTLP context-has-is-remote and context-is-remote masks.
+            "flags": 769,
+        }
+    ]

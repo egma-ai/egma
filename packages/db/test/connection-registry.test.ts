@@ -228,7 +228,7 @@ describe("what a livekit connection is made of", () => {
     expect(
       shapeOf("livekit", { url: A_URL, tokenEndpoint: AN_ENDPOINT })
         .credentials,
-    ).toMatchObject({ required: "if-sent", fields: ["headers"] });
+    ).toMatchObject({ required: true, fields: ["headers"] });
   });
 
   it("has no reuse rule: nothing in the config names one agent", () => {
@@ -410,12 +410,23 @@ describe("a livekit connection that names a token endpoint", () => {
     ).toEqual(AT);
   });
 
-  it("takes an endpoint over http or https and nothing else", () => {
-    expect(
-      validConfig("livekit", { url: A_URL, tokenEndpoint: "http://10.0.0.4/t" }),
-    ).toEqual({ url: A_URL, tokenEndpoint: "http://10.0.0.4/t" });
+  it("takes only a public https endpoint", () => {
+    expect(validConfig("livekit", AT)).toEqual(AT);
 
     for (const tokenEndpoint of [
+      "http://tokens.example/egma/livekit-token",
+      "https://127.0.0.1/egma/livekit-token",
+      "https://10.0.0.4/egma/livekit-token",
+      "https://169.254.169.254/latest/meta-data",
+      "https://0.0.0.0/egma/livekit-token",
+      "https://224.0.0.1/egma/livekit-token",
+      "https://2130706433/egma/livekit-token",
+      "https://0x7f000001/egma/livekit-token",
+      "https://[::1]/egma/livekit-token",
+      "https://localhost/egma/livekit-token",
+      "https://secret@tokens.example/egma/livekit-token",
+      "https://tokens.example\\@127.0.0.1/egma/livekit-token",
+      "https://tokens.example/egma/\u0000livekit-token",
       // The server URL's own schemes: egma POSTs to this one, so a websocket
       // address here is the two keys pasted the wrong way round.
       "wss://acme.livekit.cloud",
@@ -425,7 +436,7 @@ describe("a livekit connection that names a token endpoint", () => {
       "",
     ]) {
       expect(() => validConfig("livekit", { url: A_URL, tokenEndpoint })).toThrow(
-        "the config's tokenEndpoint must be an http or https URL, which " +
+        "the config's tokenEndpoint must be a public https URL, which " +
           "looks like https://example.com/egma/livekit-token",
       );
     }
@@ -466,8 +477,14 @@ describe("a livekit connection that names a token endpoint", () => {
     expect(hint).not.toContain("abcd");
   });
 
-  it("takes no credentials at all, because an open endpoint is a deployment", () => {
-    expect(validCredentials("livekit", AT, undefined)).toBeNull();
+  it("requires auth headers because every admitted endpoint is public", () => {
+    expect(() => validCredentials("livekit", AT, undefined)).toThrow(
+      "a livekit connection whose config names a tokenEndpoint asks that " +
+        "endpoint for every token, so it holds no key pair of its own: its " +
+        "credentials are the endpoint's auth headers, shaped { headers }. " +
+        "Send those, or drop the tokenEndpoint and Egma will mint its own " +
+        "tokens from an apiKey and apiSecret.",
+    );
   });
 
   it("refuses headers that are not a JSON object of name to value", () => {
@@ -538,7 +555,12 @@ describe("a livekit connection that is half of each shape", () => {
   it("refuses a connection carrying neither auth shape, naming both", () => {
     expect(() =>
       validCredentials("livekit", { url: A_URL }, undefined),
-    ).toThrow(/Send the pair, or name a tokenEndpoint in the config/);
+    ).toThrow(
+      "a livekit connection mints its own tokens, so it needs the project's " +
+        "apiKey and apiSecret. Send the pair, or name a tokenEndpoint in the " +
+        "config and Egma will ask that endpoint for a token instead — which " +
+        "is the shape where the project's secret never leaves the customer.",
+    );
   });
 
   /**

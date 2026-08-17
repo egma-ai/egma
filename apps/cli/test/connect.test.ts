@@ -1,5 +1,5 @@
 /**
- * Connecting a Retell voice agent, end to end, with nobody watching.
+ * Connecting a Retell agent, end to end, with nobody watching.
  *
  * A fake Retell speaking the shapes its published SDK speaks, the fixture
  * platform speaking egma's public API, and the headless UI in between. No real
@@ -22,8 +22,7 @@ import {
   KEY_ASK_LINE,
   CUSTODY_LINE,
   NO_AGENTS_LINE,
-  NO_NUMBERS_LINE,
-  type Reach,
+  VOICE_REQUIRES_PHONE_LINE,
 } from "../src/retell/connect.ts";
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
@@ -39,13 +38,13 @@ const OTHER_KEY = "key_9a8b7c6d5e4f3021b9d8";
 
 const PROMPT = "You answer the order line.\nNever quote a price.\n";
 
-const ONE_AGENT: FakeRetellScript = {
+const ONE_CHAT_AGENT: FakeRetellScript = {
   keys: [KEY],
   agents: [
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
-      voice_id: "11labs-Adrian",
+      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_0001", version: 3 },
       extra: { language: "en-GB", webhook_url: null },
     },
@@ -58,13 +57,28 @@ const ONE_AGENT: FakeRetellScript = {
       extra: { model: "gpt-4.1", begin_message: "Quillfeather Bindery, hello." },
     },
   ],
-  numbers: [
+};
+
+/** Two numbers on the account, one of them answered by the order line. */
+const NUMBERS = [
+  { phone_number: "+15551110000", nickname: "order line", inbound_agents: [{ agent_id: "agent_0001" }] },
+  { phone_number: "+15552220000", nickname: "somebody else", inbound_agents: [{ agent_id: "agent_9999" }] },
+] as const;
+
+const ONE_VOICE_AGENT: FakeRetellScript = {
+  keys: [KEY],
+  agents: [
     {
-      phone_number: "+15551110000",
-      nickname: "order line",
-      inbound_agents: [{ agent_id: "agent_0001" }],
+      agent_id: "agent_0001",
+      agent_name: "order-line",
+      channel: "voice",
+      voice_id: "11labs-Adrian",
+      response_engine: { type: "retell-llm", llm_id: "llm_0001", version: 3 },
+      extra: { language: "en-GB", webhook_url: null },
     },
   ],
+  ...(ONE_CHAT_AGENT.llms === undefined ? {} : { llms: ONE_CHAT_AGENT.llms }),
+  numbers: NUMBERS,
 };
 
 const THREE_AGENTS: FakeRetellScript = {
@@ -77,18 +91,6 @@ const THREE_AGENTS: FakeRetellScript = {
   llms: [
     { llm_id: "llm_0001", general_prompt: PROMPT },
     { llm_id: "llm_0002", general_prompt: "You answer out of hours." },
-  ],
-  numbers: [
-    {
-      phone_number: "+15551110000",
-      nickname: "order line",
-      inbound_agents: [{ agent_id: "agent_0001" }],
-    },
-    {
-      phone_number: "+15552220000",
-      nickname: "after hours",
-      inbound_agents: [{ agent_id: "agent_0002" }],
-    },
   ],
 };
 
@@ -115,10 +117,11 @@ type RunOptions = {
   /** Which agent they pick, when they are asked. */
   readonly agent?: string | null;
   /**
-   * Which provider-safe way they say Egma should reach it. The first offered
-   * option is used when a check does not make a choice itself.
+   * Which way they say egma should reach it. `text` unless a check is about
+   * the phone: every check written before there was a choice is about the
+   * connection egma made then, and text is that connection.
    */
-  readonly reach?: Reach | null;
+  readonly reach?: string | null;
   /** Which number they pick, when Retell routes the agent more than one. */
   readonly number?: string | null;
   /** Where the coding agent said the repository keeps its prompt. */
@@ -134,14 +137,14 @@ type RunOptions = {
 class ScriptedUI extends HeadlessUI {
   private readonly keys: (string | null)[];
   private readonly agent: string | null;
-  private readonly reach: Reach | null;
+  private readonly reach: string | null;
   private readonly number: string | null;
 
   constructor(options: RunOptions) {
     super();
     this.keys = [...options.keys];
     this.agent = options.agent ?? null;
-    this.reach = options.reach ?? null;
+    this.reach = options.reach === undefined ? "text" : options.reach;
     this.number = options.number ?? null;
   }
 
@@ -149,9 +152,7 @@ class ScriptedUI extends HeadlessUI {
     this.record.asked.push(ask);
     if (ask === "retell-key") return Promise.resolve(this.keys.shift() ?? null);
     if (ask === "retell-agent") return Promise.resolve(this.agent);
-    if (ask === "reach") {
-      return Promise.resolve(this.reach ?? this.record.reachOptions[0] ?? null);
-    }
+    if (ask === "reach") return Promise.resolve(this.reach);
     if (ask === "phone-number") return Promise.resolve(this.number);
     return Promise.resolve(null);
   }
@@ -179,7 +180,7 @@ async function run(options: RunOptions) {
 
 describe("the key, and the two failures worth a second try", () => {
   it("names a key Retell refused and asks exactly once more", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
 
     const { ui, report } = await run({ keys: [OTHER_KEY, OTHER_KEY] });
 
@@ -209,19 +210,19 @@ describe("the key, and the two failures worth a second try", () => {
   });
 
   it("takes the corrected key on the second ask, so a typo costs seconds", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
 
     const { report } = await run({ keys: [OTHER_KEY, KEY] });
 
     expect(report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "phone-1",
+      connectionName: "retell-1",
     });
   });
 
   it("says where the key goes before it is typed, every time it asks", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
 
     const { ui } = await run({ keys: [OTHER_KEY, KEY] });
 
@@ -239,7 +240,7 @@ describe("the key, and the two failures worth a second try", () => {
   });
 
   it("ends plainly when the developer has no key to give", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
 
     const { ui, report } = await run({ keys: [null] });
 
@@ -253,7 +254,7 @@ describe("the key, and the two failures worth a second try", () => {
 
 describe("one agent, and several", () => {
   it("asks nothing at all when the account holds one agent, and shows which", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
 
     const { ui, report } = await run({ keys: [KEY] });
 
@@ -267,14 +268,14 @@ describe("one agent, and several", () => {
     expect(report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "phone-1",
+      connectionName: "retell-1",
     });
   });
 
   it("offers a choice when there are several, and registers the one chosen", async () => {
     retell = await startFakeRetell(THREE_AGENTS);
 
-    const { ui, report } = await run({ keys: [KEY], agent: "agent_0002" });
+    const { ui, report } = await run({ keys: [KEY], agent: "agent_0003" });
 
     expect(ui.record.asked).toContain("retell-agent");
     expect(ui.record.agentChoices.map((agent) => agent.id)).toEqual([
@@ -284,12 +285,12 @@ describe("one agent, and several", () => {
     ]);
     expect(report).toEqual({
       kind: "connected",
-      agentName: "after-hours",
-      connectionName: "phone-1",
+      agentName: "chat-desk",
+      connectionName: "retell-1",
     });
 
     const [connection] = platform.registered.connections;
-    expect(connection?.config).toEqual({ phoneNumber: "+15552220000" });
+    expect(connection?.config).toEqual({ retellAgentId: "agent_0003" });
   });
 
   it("follows the listing's pages, so an account bigger than one page is whole", async () => {
@@ -319,25 +320,24 @@ describe("one agent, and several", () => {
     expect(platform.registered.agents).toHaveLength(0);
   });
 
-  it("uses direct text only for chat agents and a routed phone for voice agents", async () => {
+  it("makes a text connection a chat one for a Retell chat agent", async () => {
     retell = await startFakeRetell(THREE_AGENTS);
 
-    // A genuine chat agent uses Retell's direct text connection.
     const { connected } = await run({ keys: [KEY], agent: "agent_0003" });
+    expect(connected?.config.modality).toBe("chat");
     expect(platform.registered.connections[0]?.modality).toBe("chat");
-    expect(platform.registered.connections[0]?.type).toBe("retell");
     // A custom model is the customer's own service, so Retell holds no prompt.
     expect(connected?.config.prompt).toBeNull();
+  });
 
-    // A voice agent cannot use that direct chat adapter. Egma confirms one of
-    // its routed numbers and stores only the provider-blind phone destination.
+  it("refuses text for a Retell voice agent before it writes anything", async () => {
+    retell = await startFakeRetell(THREE_AGENTS);
+
     const voice = await run({ keys: [KEY], agent: "agent_0002" });
-    expect(voice.connected?.config.modality).toBe("voice");
-    expect(platform.registered.connections[1]?.modality).toBe("voice");
-    expect(platform.registered.connections[1]?.type).toBe("phone");
-    expect(platform.registered.connections[1]?.config).toEqual({
-      phoneNumber: "+15552220000",
-    });
+    expect(voice.connected).toBeNull();
+    expect(voice.report).toEqual({ kind: "failed", reason: VOICE_REQUIRES_PHONE_LINE });
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
   });
 
   it("reads a chat agent at the address Retell keeps chat agents at", async () => {
@@ -360,17 +360,16 @@ describe("what lands on the platform", () => {
    * A Retell agent is in two halves at two addresses, and egma reads both —
    * the identity and the voice from one, the words and the tools from the
    * other — because the half it skipped would be the half the tests needed.
-   * Then it lets them go. What the agent is running lives at the provider,
-   * reachable forever through the sealed credential; a copy on egma would start
-   * going stale the moment it was written and nothing ever read it back. So the
-   * request egma sends carries identity, the way of reaching the agent, and the
-   * credential, and nothing else at all.
+   * Then it lets them go. What the agent is running lives at the provider; a
+   * copy on egma would start going stale the moment it was written and nothing
+   * ever read it back. For a phone connection, egma keeps the identity and the
+   * number it will dial, and nothing from the provider's agent document.
    */
   it("reads both halves of the agent, and sends neither to egma", async () => {
-    const provider = await startFakeRetell(ONE_AGENT);
+    const provider = await startFakeRetell(ONE_VOICE_AGENT);
     retell = provider;
 
-    const { connected } = await run({ keys: [KEY] });
+    const { connected } = await run({ keys: [KEY], reach: "phone" });
 
     // Both halves were really read, each at its own address.
     const asked = provider.requests.map((one) => one.path);
@@ -385,10 +384,11 @@ describe("what lands on the platform", () => {
     expect(connected?.config.engine).toBe("retell-llm");
     expect(connected?.config.prompt).toBe(PROMPT);
     expect(connected?.config.tools).toHaveLength(1);
+    expect(connected?.reach).toBe("phone");
+    expect(platform.registered.connections[0]?.modality).toBe("voice");
 
-    // None of it went to egma. The platform keeps identity, the connection and
-    // the sealed key — and the agent it just registered holds no trace of what
-    // the provider is running.
+    // None of it went to egma. The agent it just registered holds no trace of
+    // what the provider is running.
     const [agent] = platform.registered.agents;
     expect(agent).not.toHaveProperty("pulled");
     expect(Object.keys(agent ?? {}).sort()).toEqual([
@@ -440,7 +440,7 @@ describe("what lands on the platform", () => {
   });
 
   it("registers an agent and a connection with names nobody had to type", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
 
     await run({ keys: [KEY] });
 
@@ -450,20 +450,20 @@ describe("what lands on the platform", () => {
     expect(agent?.name).toBe("order-line");
     expect(agent?.id).toMatch(/^agt_[0-9A-HJKMNP-TV-Z]{26}$/u);
     expect(connection?.id).toMatch(/^con_[0-9A-HJKMNP-TV-Z]{26}$/u);
-    expect(connection?.name).toBe("phone-1");
-    expect(connection?.type).toBe("phone");
-    expect(connection?.modality).toBe("voice");
-    expect(connection?.topology).toBe("egma-dials-in");
+    expect(connection?.name).toBe("retell-1");
+    expect(connection?.type).toBe("retell");
+    expect(connection?.modality).toBe("chat");
+    expect(connection?.topology).toBe("hosted-broker");
     expect(connection?.agentId).toBe(agent?.id);
   });
 
-  it("does not send the Retell key to the platform for a phone connection", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+  it("sends the key for sealing, and the platform answers only its last characters", async () => {
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
 
     await run({ keys: [KEY] });
 
-    expect(platform.registered.sealed).toEqual([]);
-    expect(platform.registered.connections[0]?.credentialsHint).toBeNull();
+    expect(platform.registered.sealed).toEqual([KEY]);
+    expect(platform.registered.connections[0]?.credentialsHint).toBe(KEY.slice(-4));
   });
 
   /**
@@ -478,9 +478,10 @@ describe("what lands on the platform", () => {
    * to find out what happened.
    */
   it("finds the registration already there when a run has been here before", async () => {
-    // Two keys the account accepts, so a developer can return with a fresh
-    // provider key without storing either one on the phone connection.
-    retell = await startFakeRetell({ ...ONE_AGENT, keys: [KEY, OTHER_KEY] });
+    // Two keys the account accepts, so the second connect can be a rotation as
+    // well as a reuse — which is what a developer coming back with a fresh
+    // provider key actually does.
+    retell = await startFakeRetell({ ...ONE_CHAT_AGENT, keys: [KEY, OTHER_KEY] });
 
     const first = await run({ keys: [KEY] });
     const second = await run({ keys: [OTHER_KEY] });
@@ -488,7 +489,7 @@ describe("what lands on the platform", () => {
     expect(second.report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "phone-1",
+      connectionName: "retell-1",
     });
     expect(second.connected?.registered.result).toBe("reused");
     expect(first.connected?.registered.result).toBe("created");
@@ -501,13 +502,13 @@ describe("what lands on the platform", () => {
       first.connected?.registered.connection.id,
     );
 
-    // Neither provider key crossed into Egma's stored phone connection.
-    expect(platform.registered.sealed).toEqual([]);
-    expect(platform.registered.connections[0]?.credentialsHint).toBeNull();
+    // The key it was just given is the one now sealed, replaced whole.
+    expect(platform.registered.sealed).toEqual([KEY, OTHER_KEY]);
+    expect(platform.registered.connections[0]?.credentialsHint).toBe(OTHER_KEY.slice(-4));
 
     // Said in plain words, on the screen, and never as a failure.
     expect(second.ui.record.statuses.join("\n")).toContain(
-      "This voice agent was already registered as order-line, and phone-1 was " +
+      "This voice agent was already registered as order-line, and retell-1 was " +
         "already the way Egma reaches it. Nothing new was registered.",
     );
     // And each half is reported on its own, because a retry cares about both.
@@ -530,7 +531,7 @@ describe("the drift line", () => {
   }
 
   it("says so once, and does not block, when the two have drifted apart", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
     const said = await withRepoPrompt("You answer the order line.\nAlways quote a price.\n");
 
     const { ui, report } = await run({ keys: [KEY], repoPrompts: said });
@@ -544,7 +545,7 @@ describe("the drift line", () => {
   });
 
   it("says nothing when they are the same but for a line ending and a last newline", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
     const said = await withRepoPrompt(`${PROMPT.replaceAll("\n", "\r\n")}\r\n\r\n`);
 
     const { ui } = await run({ keys: [KEY], repoPrompts: said });
@@ -553,7 +554,7 @@ describe("the drift line", () => {
   });
 
   it("says nothing when the coding agent found no prompt in the repository", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
 
     const { ui } = await run({ keys: [KEY], repoPrompts: null });
 
@@ -561,7 +562,7 @@ describe("the drift line", () => {
   });
 
   it("says nothing when what was found is a dashboard, not a file", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
 
     const { ui } = await run({
       keys: [KEY],
@@ -572,7 +573,7 @@ describe("the drift line", () => {
   });
 
   it("reads the file out of a sentence that names it, and reads no environment file", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
     await withRepoPrompt("Something else entirely.\n");
     // The fenced file is made to hold exactly what Retell runs, so a run that
     // read it would answer "the same" and say nothing. The line being said is
@@ -604,7 +605,7 @@ describe("the drift line", () => {
   }
 
   it("reads nothing a link points at outside the repository, whatever it is called", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
     // Two links inside the folder with innocent names: one to a file above it,
     // one to the fenced file beside it. A link is not a way around either rule.
     const above = await fileAboveTheRepo();
@@ -627,7 +628,7 @@ describe("the drift line", () => {
   });
 
   it("reads nothing outside the repository, named plainly or climbed out to", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
     const above = await fileAboveTheRepo();
 
     try {
@@ -711,7 +712,7 @@ describe("the platform's own rules, held by the fixture", () => {
   });
 
   it("numbers a second connection on the same agent, and refuses a name twice used", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
     await run({ keys: [KEY] });
 
     const agentId = platform.registered.agents[0]?.id as string;
@@ -730,7 +731,7 @@ describe("the platform's own rules, held by the fixture", () => {
 
     expect(second.status).toBe(201);
     expect(((await second.json()) as { connection: { name: string } }).connection.name).toBe(
-      "retell-1",
+      "retell-2",
     );
 
     const clash = await fetch(`${platform.url}/api/agents/${agentId}/connections`, {
@@ -748,7 +749,7 @@ describe("the platform's own rules, held by the fixture", () => {
   });
 
   it("never answers a sealed secret back, on any read", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(ONE_CHAT_AGENT);
     await run({ keys: [KEY] });
 
     const key = platform.device.keys[0] as string;

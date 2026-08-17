@@ -43,6 +43,8 @@ export type FakeStep =
     }
   | { kind: "read-file"; path: string; recordAs: string }
   | { kind: "write-file"; path: string; content: string; recordAs?: string }
+  | { kind: "cursor-ask-question"; recordAs: string }
+  | { kind: "cursor-create-plan"; recordAs: string }
   /** Noise on standard error, the way a real agent writes its own progress. */
   | { kind: "grumble"; text: string }
   | { kind: "wait"; ms: number }
@@ -96,6 +98,14 @@ type Report = {
   modeSetTo: string | null;
   observations: Record<string, unknown>;
   childPid: number | null;
+  /** Every OS process that contributed to this report, in start order. */
+  processIds: number[];
+  /** How many times the client initialized ACP. */
+  initializeCount: number;
+  /** Every ACP session the client opened. */
+  sessionIds: string[];
+  /** The session used for each prompt, in prompt order. */
+  promptSessionIds: string[];
   /** Every set of instructions the client sent, in order. */
   instructions: string[];
   /** The folder of each session the client opened, in order. */
@@ -107,10 +117,9 @@ type Report = {
 /**
  * The report this run adds to, which may already have somebody else's in it.
  *
- * One walk dispatches several tasks and each one starts a fresh agent, so a
- * report that began empty every time would leave a check able to see only the
- * last task. It is read back and carried on instead, which is what makes
- * "every set of instructions the client sent, in order" true across a walk.
+ * One wizard session receives several prompts. The report is read back and
+ * carried on so a check can prove every prompt used the same ACP process and
+ * session, in order.
  */
 function reportSoFar(file: string): Report {
   const fresh: Report = {
@@ -119,6 +128,10 @@ function reportSoFar(file: string): Report {
     modeSetTo: null,
     observations: {},
     childPid: null,
+    processIds: [],
+    initializeCount: 0,
+    sessionIds: [],
+    promptSessionIds: [],
     instructions: [],
     folders: [],
     loggedInWith: null,
@@ -141,6 +154,9 @@ async function run(): Promise<void> {
   const flush = (): void => {
     writeFileSync(reportPath(), `${JSON.stringify(report, null, 2)}\n`, "utf8");
   };
+
+  report.processIds.push(process.pid);
+  flush();
 
   if (script.spawnChild === true) {
     const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e9)"], {
@@ -276,12 +292,56 @@ async function run(): Promise<void> {
           break;
         }
 
+        case "cursor-ask-question": {
+          const answer = await client.request<Record<string, unknown>>(
+            "cursor/ask_question",
+            {
+              toolCallId: "cursor-question-1",
+              title: "Need input",
+              questions: [
+                {
+                  id: "q1",
+                  prompt: "Which source should I use?",
+                  options: [{ id: "repo", label: "Repository" }],
+                },
+              ],
+            },
+          );
+          report.observations[step.recordAs] = answer;
+          flush();
+          break;
+        }
+
+        case "cursor-create-plan": {
+          const answer = await client.request<Record<string, unknown>>(
+            "cursor/create_plan",
+            {
+              toolCallId: "cursor-plan-1",
+              name: "Discovery",
+              plan: "Read the repository.",
+              todos: [],
+            },
+          );
+          report.observations[step.recordAs] = answer;
+          flush();
+          break;
+        }
+
         case "grumble":
           process.stderr.write(`${step.text}\n`);
           break;
 
         case "wait":
-          await new Promise((resolve) => setTimeout(resolve, step.ms));
+          await new Promise<void>((resolve) => {
+            let timer: ReturnType<typeof setTimeout>;
+            const done = () => {
+              clearTimeout(timer);
+              signal.removeEventListener("abort", done);
+              resolve();
+            };
+            timer = setTimeout(done, step.ms);
+            signal.addEventListener("abort", done, { once: true });
+          });
           break;
 
         case "wait-for-file": {
@@ -329,6 +389,7 @@ async function run(): Promise<void> {
   await acp
     .agent({ name: "fake-agent" })
     .onRequest(acp.methods.agent.initialize, (ctx) => {
+      report.initializeCount += 1;
       report.protocolVersion = Math.min(ctx.params.protocolVersion, acp.PROTOCOL_VERSION);
       report.clientCapabilities = ctx.params.clientCapabilities ?? null;
       const login = script.authRequiredUntilLogin;
@@ -351,7 +412,8 @@ async function run(): Promise<void> {
       // once: after its own login has run, the same request works.
       if (!loggedIn) throw new acp.RequestError(-32000, "Authentication required");
       cwd = ctx.params.cwd;
-      sessionId = "fake-1";
+      sessionId = `fake-${report.sessionIds.length + 1}`;
+      report.sessionIds.push(sessionId);
       report.folders.push(cwd);
       flush();
       return { sessionId, modes };
@@ -362,6 +424,7 @@ async function run(): Promise<void> {
       return {};
     })
     .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
+      report.promptSessionIds.push(ctx.params.sessionId);
       let instructions = "";
       for (const block of ctx.params.prompt) {
         if (block.type === "text") {

@@ -37,6 +37,8 @@
  *   hears so, instead of watching egma quietly keep nothing.
  */
 
+import { isIP } from "node:net";
+
 import { given, isId, newId, NOT_AUTHENTICATED, PAGE_SIZE } from "./reading.ts";
 import type { FixtureAnswer, RouteGroup } from "./server.ts";
 
@@ -195,25 +197,37 @@ function namesIn(field: string): CredentialHint {
   };
 }
 
-/** The two schemes something egma POSTs to is written in. */
-const TOKEN_ENDPOINT_SCHEMES = ["http:", "https:"];
-
 /** Where egma asks the customer for a token, per simulation. */
 function tokenEndpointUrl(key: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
-  let scheme: string | undefined;
+  let parsed: URL | undefined;
   try {
-    scheme = new URL(candidate).protocol;
+    parsed = new URL(candidate);
   } catch {
-    scheme = undefined;
+    parsed = undefined;
   }
+  const rawHostname = parsed?.hostname ?? "";
+  const hostname = rawHostname
+    .replace(/^\[/, "")
+    .replace(/\]$/, "")
+    .replace(/\.$/, "")
+    .toLowerCase();
+  const hasAmbiguousSyntax =
+    candidate.includes("\\") || /[\u0000-\u001F\u007F]/u.test(candidate);
   if (
-    scheme === undefined ||
-    !TOKEN_ENDPOINT_SCHEMES.includes(scheme) ||
-    !candidate.toLowerCase().startsWith(`${scheme}//`)
+    parsed === undefined ||
+    hasAmbiguousSyntax ||
+    parsed.protocol !== "https:" ||
+    !candidate.toLowerCase().startsWith("https://") ||
+    hostname === "" ||
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    isIP(hostname) !== 0 ||
+    parsed.username !== "" ||
+    parsed.password !== ""
   ) {
     throw new Refusal(
-      `the config's ${key} must be an http or https URL, which looks like https://example.com/egma/livekit-token`,
+      `the config's ${key} must be a public https URL, which looks like https://example.com/egma/livekit-token`,
     );
   }
   return candidate;
@@ -360,8 +374,7 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         chosenBy: "tokenEndpoint",
         config: { url: livekitServerUrl, tokenEndpoint: tokenEndpointUrl },
         credentials: {
-          // An endpoint on a private network can be open to egma alone.
-          required: "if-sent",
+          required: true,
           fields: ["headers"],
           gate: authHeadersJson,
           // The header names and never their values.
@@ -552,6 +565,14 @@ function validCredentials(
   const shape = shapeChosen(variants, config);
   const what = nameOf(type, shape);
   const rule = shape.credentials;
+
+  if (
+    credentials === undefined &&
+    rule.required === true &&
+    shape.mixedUp !== undefined
+  ) {
+    throw new Refusal(shape.mixedUp);
+  }
 
   // A caller who sent the *other* shape's credentials hears about the mix
   // rather than about a key they never meant to send.

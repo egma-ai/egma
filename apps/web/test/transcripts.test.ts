@@ -704,7 +704,6 @@ describe("the two kinds of audio a transcript can offer", () => {
   it("says which speaker is on which channel, in the transcript's own words", () => {
     expect(copy.RECORDING.caption).toContain(copy.LIST.human);
     expect(copy.RECORDING.caption).toContain(copy.LIST.agent);
-    expect(copy.RECORDING.band(8000)).toContain("8000");
   });
 });
 

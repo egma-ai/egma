@@ -24,12 +24,12 @@ is already stored.
 
 Two things follow from that and shape everything below.
 
-**Ids are minted here, once, and never re-derived.** A span id is minted
-when the span is authored and travels with it; a resend replays the same
-bytes, so the store's id-keyed dedup lands nothing twice. The trace id is
-derived from the simulation id deterministically, so a conversation's
-spans and its verdicts can always find each other without either side
-having stored a mapping.
+**OpenTelemetry authors the record.** The process-wide SDK mints every span id,
+tracks parents, and serializes the export. Its one identity adapter gives a
+parentless simulation root the trace id already derived from the simulation id,
+so the conversation and its verdicts can find each other without a mapping. A
+retry replays the already-serialized bytes; conducting the same conversation
+again creates new span ids and therefore new evidence.
 
 **Timestamps say when the thing happened**, never when it was sent. A
 timing span is named for the measure it takes and its own duration *is*
@@ -51,25 +51,34 @@ simulation goes through it.
 
 from __future__ import annotations
 
-import hashlib
-import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from contextvars import Token
 
-SERVICE_NAME = "egma-simulator"
-"""What a well-formed OpenTelemetry resource calls itself. It decides
-nothing: the ingest recognises this vocabulary by its scope."""
+from opentelemetry import context as context_api
+from opentelemetry.context import Context
+from opentelemetry.trace import Span, set_span_in_context
+
+from . import telemetry
+from .telemetry import (
+    ActiveSimulation,
+    activate,
+    activate_root_trace_id,
+    deactivate,
+    deactivate_root_trace_id,
+    trace_id_for,
+    tracer,
+)
+from .telemetry import flush as flush_provider
+
+SERVICE_NAME = telemetry.SERVICE_NAME
+SIMULATION_ID_ATTRIBUTE = telemetry.SIMULATION_ID_ATTRIBUTE
 
 SCOPE_NAME = "egma-simulator"
 SCOPE_VERSION = "1"
-"""The instrumentation scope every span rides, and the contract version it
-speaks. The ingest is gated on the name, so another framework that happens
-to call something ``agent_turn`` is never read as this one."""
-
-SIMULATION_ID_ATTRIBUTE = "egma.simulation_id"
-"""How a resource names the simulation its spans are evidence of. Echoed
-verbatim from the claimed spec — opaque, never rewritten."""
+"""The instrumentation scope every Egma-authored span rides, and the contract
+version it speaks. The ingest is gated on the name, so another framework that
+happens to call something ``agent_turn`` is never read as this one."""
 
 ROOT_SPAN = "simulation"
 TOOL_CALL_SPAN = "tool_call"
@@ -109,105 +118,14 @@ did not run. Written the same way, a reader could not tell a refused call
 from a real backend quietly doing the work.
 """
 
-SPAN_KIND = "SPAN_KIND_INTERNAL"
-"""Every span here is work this process did itself. Nothing egma emits is a
-client or server span: the conversation is not an RPC."""
-
-_CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-_EGMA_SIMULATION_ID = re.compile(r"^sim_([0-9A-HJKMNP-TV-Z]{26})$")
-
 _NANOSECONDS_PER_MILLISECOND = 1_000_000
 
-Flush = Callable[[dict], None]
+Flush = Callable[[bytes], None]
 """What an emitter does with a finished document: hand it to delivery."""
 
 Clock = Callable[[], int]
 """Wall-clock nanoseconds since the epoch, which is what OTLP timestamps
 are. Injected so a test can hold time still."""
-
-
-def trace_id_for(simulation_id: str) -> str:
-    """The trace a simulation's spans belong to, as 32 lowercase hex.
-
-    egma's own ids carry 128 bits of their own — 26 Crockford base32
-    characters after ``sim_``, which is a ULID — and those bits *are* the
-    trace, so ``sim_01K3XQ7M4E8YB2FVN0H9TZQWER`` is trace
-    ``0198fb73d08e479627eea08a75fbf1d8``, always and on both sides.
-
-    The contract calls a simulation id opaque, though — never parsed,
-    never minted, never rewritten — so this cannot depend on the id being
-    egma's own shape. An id that is not gets a digest of itself instead:
-    still 128 bits, still the same answer every time, still different for
-    every id. What it is not is reversible, which nothing needs.
-    """
-    egma_shaped = _EGMA_SIMULATION_ID.match(simulation_id)
-    if egma_shaped is not None:
-        value = 0
-        for character in egma_shaped.group(1):
-            value = (value << 5) | _CROCKFORD_ALPHABET.index(character)
-        # 26 base32 characters hold 130 bits, so a value can be wider than a
-        # trace id is. egma's own ids never are — the top bits of a ULID's
-        # millisecond field are zero for the next eight thousand years — and
-        # one that somehow were would be silently truncated, which is worse
-        # than being digested like any other id this did not recognise.
-        if value < 1 << 128:
-            return format(value, "032x")
-    return hashlib.blake2b(simulation_id.encode(), digest_size=16).hexdigest()
-
-
-def span_id_for(trace_id: str, sequence: int) -> str:
-    """One span's own id: 16 hex characters, unique inside its trace.
-
-    Derived rather than random, so that the bytes a flush carries are a
-    function of what happened and nothing else — the same conversation
-    replayed mints the same ids, which is what a store deduping on them
-    needs, and what makes a document a test can pin.
-    """
-    digest = hashlib.blake2b(
-        f"{trace_id}:{sequence}".encode(), digest_size=8
-    )
-    return digest.hexdigest()
-
-
-@dataclass
-class _Span:
-    """One authored span, held until its flush."""
-
-    span_id: str
-    name: str
-    started_unix_nano: int
-    ended_unix_nano: int
-    attributes: dict[str, str | bool] = field(default_factory=dict)
-    """Text unless the vocabulary calls for a genuine boolean, which one
-    attribute does: a flag written as the string ``"true"`` is a flag every
-    reader has to know to parse, and one of them eventually will not."""
-
-    def as_otlp(self, *, trace_id: str, parent_span_id: str | None) -> dict:
-        document: dict = {
-            "traceId": trace_id,
-            "spanId": self.span_id,
-        }
-        if parent_span_id is not None:
-            document["parentSpanId"] = parent_span_id
-        document |= {
-            "name": self.name,
-            "kind": SPAN_KIND,
-            "startTimeUnixNano": str(self.started_unix_nano),
-            "endTimeUnixNano": str(self.ended_unix_nano),
-        }
-        if self.attributes:
-            document["attributes"] = [
-                {
-                    "key": key,
-                    "value": (
-                        {"boolValue": value}
-                        if isinstance(value, bool)
-                        else {"stringValue": value}
-                    ),
-                }
-                for key, value in self.attributes.items()
-            ]
-        return document
 
 
 class SpanEmitter:
@@ -224,20 +142,14 @@ class SpanEmitter:
         self.trace_id = trace_id_for(simulation_id)
         self._flush = flush
         self._clock = clock
-        self._sequence = 0
-        # Minted first and sent last. Every other span names it, so it has
-        # to exist before any of them; it leaves in the final flush, when
-        # the conversation is over and everything else is already on the
-        # wire.
-        self._root = _Span(
-            span_id=self._mint(), name=ROOT_SPAN, started_unix_nano=0, ended_unix_nano=0
-        )
-        self._pending: list[_Span] = []
+        self._tracer = tracer(SCOPE_NAME, SCOPE_VERSION)
+        self._active: ActiveSimulation | None = None
+        self._active_token: Token[ActiveSimulation | None] | None = None
+        self._span_token: Token[Context] | None = None
+        self._root: Span | None = None
+        self._root_context: Context | None = None
+        self._root_ended = False
         self._sealed = False
-
-    def _mint(self) -> str:
-        self._sequence += 1
-        return span_id_for(self.trace_id, self._sequence)
 
     def _author(
         self,
@@ -246,22 +158,49 @@ class SpanEmitter:
         started_unix_nano: int,
         ended_unix_nano: int,
         attributes: dict[str, str | bool] | None = None,
-    ) -> _Span:
-        span = _Span(
-            span_id=self._mint(),
-            name=name,
-            started_unix_nano=started_unix_nano,
-            ended_unix_nano=ended_unix_nano,
-            attributes=attributes or {},
+    ) -> Span:
+        if self._root_context is None:
+            raise RuntimeError("a span cannot be authored before the simulation opens")
+        span = self._tracer.start_span(
+            name,
+            context=self._root_context,
+            start_time=started_unix_nano,
+            attributes=attributes,
         )
-        self._pending.append(span)
+        span.end(end_time=ended_unix_nano)
         return span
 
     # -- What a conductor observes ---------------------------------------------
 
     def opened(self) -> None:
-        """The conversation began. Stamps the root's start and nothing else."""
-        self._root.started_unix_nano = self._clock()
+        """Start and attach the SDK root inherited by Pipecat pipeline tasks."""
+        if self._active is not None:
+            raise RuntimeError("a simulation span emitter can only be opened once")
+
+        active, active_token = activate(self.simulation_id, self._flush)
+        self._active = active
+        self._active_token = active_token
+        try:
+            # An explicit empty context makes this the parentless root. The
+            # provider's IdGenerator supplies its simulation-derived trace id.
+            root_id_token = activate_root_trace_id(active)
+            try:
+                root = self._tracer.start_span(
+                    ROOT_SPAN,
+                    context=Context(),
+                    start_time=self._clock(),
+                )
+            finally:
+                deactivate_root_trace_id(root_id_token)
+            root_context = set_span_in_context(root, Context())
+            self._root = root
+            self._root_context = root_context
+            self._span_token = context_api.attach(root_context)
+        except Exception:
+            deactivate(active, active_token, discard=True)
+            self._active = None
+            self._active_token = None
+            raise
 
     def turn(self, speaker: str, text: str) -> None:
         """One transcript turn, by whichever of the two speakers took it.
@@ -443,14 +382,10 @@ class SpanEmitter:
     # -- Handing them over ----------------------------------------------------
 
     def flush(self) -> None:
-        """Send everything authored since the last flush, and nothing else.
-
-        A span is authored once and drained once, so no two flushes ever
-        carry the same id — which is what lets a resend be at-least-once
-        while the store lands nothing twice.
-        """
-        self._hand_over(self._pending)
-        self._pending = []
+        """Ask the process-wide provider to export this task's ended spans."""
+        if self._active is None:
+            raise RuntimeError("a simulation cannot flush before it opens")
+        flush_provider()
 
     def sealed(self) -> None:
         """Close the conversation: everything left, with the root last.
@@ -460,50 +395,39 @@ class SpanEmitter:
         """
         if self._sealed:
             return
+        if self._root is None:
+            raise RuntimeError("a simulation cannot seal before it opens")
+        if not self._root_ended:
+            self._root.end(end_time=self._clock())
+            self._root_ended = True
+        # Cleanup happens only after the SDK has handed every ended span to
+        # the reporter WAL. If that handoff fails, terminal delivery is
+        # blocked and this route must still be released before another claim.
+        try:
+            flush_provider()
+        except Exception:
+            self.abort()
+            raise
         self._sealed = True
-        self._root.ended_unix_nano = self._clock()
-        self._hand_over([*self._pending, self._root])
-        self._pending = []
+        self._release(discard=False)
 
-    def _hand_over(self, spans: list[_Span]) -> None:
-        if not spans:
+    def abort(self) -> None:
+        """Release task-local tracing and discard anything not sealed."""
+        if self._sealed or self._active is None:
             return
-        self._flush(
-            {
-                "resourceSpans": [
-                    {
-                        "resource": {
-                            "attributes": [
-                                {
-                                    "key": "service.name",
-                                    "value": {"stringValue": SERVICE_NAME},
-                                },
-                                {
-                                    "key": SIMULATION_ID_ATTRIBUTE,
-                                    "value": {"stringValue": self.simulation_id},
-                                },
-                            ]
-                        },
-                        "scopeSpans": [
-                            {
-                                "scope": {
-                                    "name": SCOPE_NAME,
-                                    "version": SCOPE_VERSION,
-                                },
-                                "spans": [
-                                    span.as_otlp(
-                                        trace_id=self.trace_id,
-                                        parent_span_id=(
-                                            None
-                                            if span is self._root
-                                            else self._root.span_id
-                                        ),
-                                    )
-                                    for span in spans
-                                ],
-                            }
-                        ],
-                    }
-                ]
-            }
-        )
+        self._release(discard=True)
+
+    def _release(self, *, discard: bool) -> None:
+        active = self._active
+        active_token = self._active_token
+        span_token = self._span_token
+        if active is None or active_token is None:
+            return
+        try:
+            if span_token is not None:
+                context_api.detach(span_token)
+        finally:
+            deactivate(active, active_token, discard=discard)
+            self._active = None
+            self._active_token = None
+            self._span_token = None

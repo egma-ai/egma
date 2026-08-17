@@ -182,6 +182,7 @@ function exitCodeFor(outcome: ConnectOutcome): number {
       return CONNECT_EXIT.noAgents;
     case "unchosen":
     case "unchosen-reach":
+    case "incompatible-reach":
     case "unchosen-number":
       return CONNECT_EXIT.unchosen;
     case "no-numbers":
@@ -394,6 +395,11 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
         `Choose ${outcome.offered.map((reach) => `--reach ${reach}`).join(" or ")}, ` +
           `or set ${REACH_VARIABLE}. Nothing was written.`,
       );
+      break;
+    case "incompatible-reach":
+      options.out(`compatible_reach: ${outcome.compatible}`);
+      options.out("status: incompatible-reach");
+      options.fail(outcome.reason);
       break;
     case "unchosen-number":
       options.out(`retell_numbers: ${outcome.numbers.length}`);

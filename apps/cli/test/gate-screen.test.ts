@@ -50,10 +50,16 @@ const ONE_AGENT: FakeRetellScript = {
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
+      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },
   ],
   llms: [{ llm_id: "llm_0001", general_prompt: "You answer the order line.\n" }],
+};
+
+const VOICE_AGENT: FakeRetellScript = {
+  ...ONE_AGENT,
+  agents: ONE_AGENT.agents.map((agent) => ({ ...agent, channel: "voice" as const })),
 };
 
 /** Five, so the list is longer than the screen and browsing is a real thing. */
@@ -131,9 +137,8 @@ async function toTheGate(
     { kind: "stop", reason: "end_turn" },
   ],
   /**
-   * Whether to walk to a phone connection rather than a text one. The choosing
-   * itself is `connect-screen.test.ts`'s subject; here it is only the ground
-   * the gate stands on, so it is one extra keystroke and nothing more.
+   * Whether this walk uses a voice agent and confirms its phone connection.
+   * The choice itself is `connect-screen.test.ts`'s subject.
    */
   overThePhone = false,
 ): Promise<TerminalRun> {
@@ -178,11 +183,10 @@ async function toTheGate(
   await showing(run, "Paste your Retell API key");
   run.write(`${KEY}\r`);
 
-  // Text or phone. Not this check's subject, and not skippable
-  // either: egma never picks one of the two for a developer.
+  // The provider offers the reach that matches this agent. Egma still requires
+  // confirmation before it creates the connection.
   await showing(run, "How should Egma reach this agent?");
   if (overThePhone) {
-    run.write("\u001B[B");
     await showing(run, "\u203a Phone");
   }
   run.write("\r");
@@ -429,7 +433,7 @@ describe("the gate", () => {
   it("names the kind of connection, and the number every simulation will dial", async () => {
     await retell?.close();
     retell = await startFakeRetell({
-      ...ONE_AGENT,
+      ...VOICE_AGENT,
       numbers: [
         {
           phone_number: DIALLED,

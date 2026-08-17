@@ -31,10 +31,21 @@ import type { Detection } from "../wizard/detection.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
 import type { GenerationProgress } from "../wizard/test-generation.ts";
-import type { AskId, DrivenAgent, GateId, PlatformNotice, WizardUI } from "./wizard-ui.ts";
+import type { WizardPhase } from "../wizard/wizard-machine.ts";
+import type {
+  AskId,
+  CodingAgentChoice,
+  ConnectionAsk,
+  DrivenAgent,
+  GateId,
+  PlatformNotice,
+  WizardUI,
+} from "./wizard-ui.ts";
 
 export type HeadlessRecord = {
+  phase: WizardPhase;
   drivenAgent: DrivenAgent | null;
+  codingAgentChoices: CodingAgentChoice[];
   drivenAgentLog: string | null;
   /** Which egma this walk will use, as it was named before the gate. */
   platform: string | null;
@@ -51,6 +62,8 @@ export type HeadlessRecord = {
   reachOptions: Reach[];
   /** The numbers a choice was offered between, when one was. */
   numberChoices: RetellNumber[];
+  /** Provider fields shown, never the answers typed into them. */
+  connectionAsks: ConnectionAsk[];
   statuses: string[];
   summary: string;
   /** Every test the coding agent said it had written, in the order it said so. */
@@ -75,7 +88,9 @@ export type HeadlessOptions = {
 
 export class HeadlessUI implements WizardUI {
   readonly record: HeadlessRecord = {
+    phase: "coding-agent",
     drivenAgent: null,
+    codingAgentChoices: [],
     drivenAgentLog: null,
     platform: null,
     detection: null,
@@ -85,6 +100,7 @@ export class HeadlessUI implements WizardUI {
     reachOffered: false,
     reachOptions: [],
     numberChoices: [],
+    connectionAsks: [],
     statuses: [],
     summary: "",
     written: [],
@@ -111,9 +127,20 @@ export class HeadlessUI implements WizardUI {
     success: (message: string): void => this.write(message),
   };
 
+  setPhase(phase: WizardPhase): void {
+    this.record.phase = phase;
+  }
+
   setDrivenAgent(drivenAgent: DrivenAgent | null): void {
     this.record.drivenAgent = drivenAgent;
     if (drivenAgent !== null) this.write(`Coding agent: ${drivenAgent.name}`);
+  }
+
+  setCodingAgentChoices(agents: readonly CodingAgentChoice[]): void {
+    this.record.codingAgentChoices = [...agents];
+    for (const agent of agents) {
+      this.write(`coding_agent: ${agent.id} ${agent.name} ${agent.version}`);
+    }
   }
 
   setDrivenAgentLog(file: string): void {
@@ -194,6 +221,18 @@ export class HeadlessUI implements WizardUI {
     this.write(NUMBER_ASK_LINE);
     for (const number of numbers) {
       this.write(`retell_number: ${number.number} ${number.label}`.trimEnd());
+    }
+  }
+
+  setConnectionAsk(ask: ConnectionAsk | null): void {
+    if (ask === null) return;
+    this.record.connectionAsks.push(ask);
+    if (ask.problem != null) this.write(ask.problem);
+    this.write(`${ask.label}${ask.required ? "" : " (optional)"}`);
+    this.write(ask.help);
+    if (ask.custody !== undefined) this.write(ask.custody);
+    for (const choice of ask.choices ?? []) {
+      this.write(`connection_option: ${choice.value} ${choice.label}`);
     }
   }
 

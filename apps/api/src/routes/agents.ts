@@ -43,6 +43,8 @@ import {
 } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
+import type { RetellReach } from "../retell/api.ts";
+import { reconcileRetellWebhook } from "../retell/registration.ts";
 import { given, projectNamed, text } from "../http/reading.ts";
 import {
   discoverRetellVoiceAgents,
@@ -89,6 +91,14 @@ export type AgentRoutesOptions = {
   readonly rateLimit: RateLimit;
   /** Test seam for Retell account reads. Production uses the global fetch. */
   readonly retellFetch?: typeof fetch | undefined;
+  /**
+   * The origin this deployment is reached at. Switching production watching on
+   * registers a webhook at it, when it is an address a provider could reach —
+   * and quietly does not when it is not, which is every laptop.
+   */
+  readonly baseUrl: string;
+  /** Where Retell answers. A test stands a Retell-shaped server on loopback. */
+  readonly retellReach?: RetellReach;
 };
 
 type Body = Record<string, unknown>;
@@ -370,6 +380,7 @@ const CONNECTION_EDIT_KEYS = [
   "environment",
   "config",
   "credentials",
+  "watch_production",
   "expected_revision",
 ] as const;
 const CONNECTION_RESTORE_KEYS = [
@@ -491,6 +502,13 @@ function describedConnection(one: Connection): Record<string, unknown> {
     credential_present: one.credentialsHint !== null,
     credentials_hint: one.credentialsHint,
     capabilities: describedCapabilities(one),
+    // The switch, and whether egma got a webhook registered for it. Two fields
+    // rather than one because they are two facts: a deployment with no public
+    // address watches by polling, which is watching, and a reader who saw only
+    // the second would think nothing was happening.
+    watch_production: one.watchProduction,
+    webhook_registered: one.webhookRegisteredAt !== null,
+    webhook_registered_at: one.webhookRegisteredAt?.toISOString() ?? null,
     revision: one.revision,
     archived: one.archivedAt !== null,
     archived_at: one.archivedAt?.toISOString() ?? null,
@@ -1203,6 +1221,17 @@ export async function agentRoutes(
       const acting = await actingProject(auth, request, "writes into");
       if (isRefusal(acting)) return refused(reply, acting);
 
+      const watching = body.watch_production;
+      if (watching !== undefined && typeof watching !== "boolean") {
+        return refused(
+          reply,
+          invalid(
+            "watch_production is true or false: whether Egma stores this " +
+              "connection's production traffic as production traces",
+          ),
+        );
+      }
+
       const updated = await updateConnection(acting, agentId, connectionId, {
         ...(name === undefined ? {} : { name }),
         ...(body.environment === undefined ? {} : { environment }),
@@ -1216,10 +1245,46 @@ export async function agentRoutes(
                 Record<string, unknown>
               >,
             }),
+        ...(watching === undefined ? {} : { watchProduction: watching }),
         ...(revision === undefined ? {} : { expectedRevision: revision }),
       });
 
       if (updated === undefined) return refused(reply, NO_SUCH_CONNECTION);
+
+      // The switch moved, so the provider's own webhook is brought into line
+      // with it. **Never fatal.** Registration is an accelerator on top of a
+      // pull floor that is already running, so a deployment with no public
+      // address completes silently and a Retell that would not take the change
+      // costs seconds rather than conversations.
+      if (watching !== undefined && updated.type === "retell") {
+        const outcome = await reconcileRetellWebhook(
+          acting,
+          connectionId,
+          watching,
+          options.baseUrl,
+          options.retellReach ?? {},
+        ).catch((cause: unknown) => {
+          request.log.error(
+            { err: cause },
+            "could not reach Retell to bring the webhook into line; Egma polls this connection",
+          );
+          return undefined;
+        });
+
+        if (outcome?.kind === "not-taken") {
+          request.log.info(
+            { connectionId, reason: outcome.reason },
+            "Retell did not take the webhook change; Egma polls this connection",
+          );
+        }
+
+        // Read back, because a successful registration stamped the row.
+        const settled = await getConnection(acting, agentId, connectionId);
+        if (settled !== undefined) {
+          return reply.send({ connection: describedConnection(settled) });
+        }
+      }
+
       return reply.send({ connection: describedConnection(updated) });
     },
   );

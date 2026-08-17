@@ -53,7 +53,6 @@ export function pasteFallbackMessage(): string {
     ...toPaste(),
     "",
     "Then run egma again from a machine with a coding agent it can start. Egma",
-    "drives Claude Code and Codex today, and every agent the protocol registry",
-    "publishes as a package.",
+    "supports Claude Code, Codex, Cursor, and OpenCode today.",
   ].join("\n");
 }

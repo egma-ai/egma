@@ -213,11 +213,6 @@ export async function recordingRoutes(
       // a player that could not tell them apart would present a dead scrubber
       // as a broken recording.
       expires_at: link.expiresAt.toISOString(),
-      // What band the recording was measured at, carried beside it because two
-      // bands are two units: the narrow band a telephone carries strips what an
-      // audio grader reads, and a reader listening should know which one they
-      // are hearing. Null on a recording written before the measure existed.
-      measured_audio_band_hertz: simulation.measuredAudioBandHertz,
     });
   });
 

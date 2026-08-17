@@ -274,7 +274,7 @@ at all.
 
 ## Your first run, from a terminal
 
-With an instance up and an account on it, the walk is one command:
+With an instance up and an account on it, the wizard is one command:
 
 ```bash
 cd ~/your-voice-agent
@@ -298,9 +298,10 @@ node ~/egma/apps/cli/dist/bin.js --url http://localhost:3101
 
 `~/egma` is this checkout. The published package is `@egma/cli`; the command it installs is `egma`.
 
-It signs that machine in — a short code, approved in the browser you signed up
-in — registers your voice agent together with the way Egma reaches it, writes a
-first suite of tests with the coding agent you already have, puts them on your
+It lists the installed Claude Code, Codex, Cursor, and OpenCode agents and asks
+which one to use. It then signs that machine in — a short code, approved in the
+browser you signed up in — registers your voice agent together with the way
+Egma reaches it, writes a first suite of tests with that coding agent, puts them on your
 instance, and starts a run over the exact versions it pushed. Every step is also
 a verb (`egma login`, `egma connect`, `egma push`, `egma run`) that prints one
 fact per line and answers with a number, for a coding agent driving it with
@@ -316,14 +317,14 @@ whose calls have all finished is not yet a run whose judgment is in.
 Everything before that is real, and the run you started is yours — at
 the address the terminal printed, with no token on it.
 
-The same walk runs as a check. On a checkout that has had `pnpm install`, and on
+The same wizard flow runs as a check. On a checkout that has had `pnpm install`, and on
 a machine with a Chrome — or with `PLAYWRIGHT_BROWSERS_PATH` pointing at a
 Playwright Chromium, since the approval really happens in a browser — it is two
 commands:
 
 ```bash
 pnpm db:up
-pnpm --filter @egma/cli smoke:walk
+pnpm --filter @egma/cli smoke:wizard-flow
 ```
 
 They start a whole Egma of its own, sign in through a real browser, register,
@@ -570,21 +571,10 @@ no platform to be handed anything by, so there set `EGMA_SIMULATOR_TTS_PROVIDER`
 `EGMA_SIMULATOR_STT_PROVIDER`, their key and `EGMA_SIMULATOR_VAD_PROVIDER=silero`
 before you expect a conversation.
 
-**A phone line is 8 kHz and OpenAI returns 24 kHz whatever is asked of it**, so
-Egma converts what it receives down to the band the line really carries. That
-conversion is not decoration: audio relabelled instead of converted is a voice
-three times too deep and three times too slow, and every measurement taken off
-it is wrong by the same factor.
-
-What a simulation's record stamps as its band is read off the frames that
-arrived rather than copied from a constant in Egma — but be clear about what
-that does and does not prove. The bridge resamples what the carrier sends down
-to the band the pipeline was assembled at *before* Egma sees a frame, so on a
-phone call the measured band is 8 kHz whether the carrier negotiated narrowband
-or G.722. The measurement catches Egma's own path going wrong; it cannot report
-what the carrier chose. That is the safe direction — a wideband leg is
-understated rather than a narrowband one overstated — and it is the reason a
-band is never compared across connection types.
+Pipecat and the transport own any media conversion. Egma does not force or
+report a processing rate. The WAV header is the only sample-rate fact Egma
+writes. It tells a player how to play the recording; it does not describe the
+connection's codec or acoustic quality.
 
 Every variable this section mentions is in `.env.example` with its default and
 whether it is required. Anything set to something unusable stops the simulator
@@ -610,6 +600,31 @@ boring agent to try this path against before you point Egma at a real one. For
 teams that will not hand a testing tool their project's key pair, the
 token-endpoint mode keeps the secret on your side: your service mints each
 room's token.
+
+## Agent Skills
+
+The public repository is the source for three Agent Skills:
+
+- `egma` operates the CLI, keeps repository tests in step with Egma, starts a
+  run, and reads its verdicts.
+- `find-voice-agent` maps a repository's voice-agent framework, prompts, tools,
+  deployment path, and provider identifier location. Its provider references
+  currently include Retell and LiveKit, and it recognizes Pipecat and Vapi.
+- `write-egma-tests` writes and edits the Markdown tests in `egma/tests/`.
+
+Install any skill into a supported coding agent with:
+
+```bash
+npx skills add egma-ai/egma --skill egma
+npx skills add egma-ai/egma --skill find-voice-agent
+npx skills add egma-ai/egma --skill write-egma-tests
+```
+
+Leave out `--skill` to choose from all three.
+
+The CLI also carries the exact skill snapshot from its release tag. This lets
+the wizard use `find-voice-agent` and `write-egma-tests` without downloading
+them, and offer the `egma` skill for direct installation after a run.
 
 ## Working on it
 
@@ -841,8 +856,11 @@ A few things worth knowing about what happens next:
 - **Nothing is invented and nothing is dropped.** One span in is one row; what
   the columns have no place for — every attribute, event and resource field —
   is kept verbatim on the row it came on.
-- **A retry is free.** An exporter re-sending a batch it never heard back about
-  sends identical bytes, and identical bytes are stored once.
+- **A recent exact retry is free.** ClickHouse suppresses a byte-identical
+  insert block while that block remains in its recent deduplication window.
+  A later repeat can append, and regrouping, reordering, or changing any
+  evidence creates a different block that also appends, even when span ids
+  repeat.
 - **Sending traces is a write**, so a key acts at the role of whoever minted it:
   a `member` or an `admin` exports, and a key held by a `viewer` is refused.
   Demoting somebody stops their exporters on the next request, with no key
@@ -1128,8 +1146,11 @@ ClickHouse's schema lives beside it in `packages/db/clickhouse-migrations`,
 numbered the same way, applied on the same boot by the same mechanism, and
 hand-written rather than generated. Two things it asks for that Postgres does
 not: statements are separated by `--> statement-breakpoint`, because ClickHouse
-runs one per request, and every statement must say `IF NOT EXISTS`, because there
-is no transaction to roll a half-applied file back with.
+runs one per request, and every schema change must carry the safe guard for its
+operation — `IF NOT EXISTS` for creates and additions, and `IF EXISTS` for
+modifications, renames, and drops. ClickHouse has no transaction that can roll
+back a half-applied file, so the next boot must be able to run each statement
+again safely.
 
 ## License
 

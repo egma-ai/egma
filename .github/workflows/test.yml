@@ -11,6 +11,11 @@ name: Tests
 # real-browser proof, the simulator tests, the Python SDK tests and the fixture
 # tests. That is the handoff gate, and nothing in it is allowed to skip.
 #
+# The deploy pipeline is the third caller: on every push to main it runs this
+# workflow with `full: true` before anything builds, because a merge commit is
+# a tree no pull request ever tested and a direct push is a tree nothing
+# tested at all. Same complete proof, one more door.
+#
 # The split is deliberate rather than thrifty. An effort lands as a dozen pull
 # requests into one integration branch and then one pull request from that
 # branch into `main`. Running the browser proof and three Python suites on each
@@ -35,6 +40,12 @@ name: Tests
 
 on:
   pull_request:
+  workflow_call:
+    inputs:
+      full:
+        description: Run the complete proof, whatever the base branch says
+        type: boolean
+        default: false
 
 concurrency:
   # A newer push to the same pull request makes the run underway pointless.
@@ -54,8 +65,11 @@ jobs:
         # for, rather than to whichever jobs happened to be enabled that day.
         env:
           BASE: ${{ github.base_ref }}
+          FULL: ${{ inputs.full }}
         run: |
-          if [ "$BASE" = "main" ]; then
+          if [ "$FULL" = "true" ]; then
+            echo "Called by the deploy pipeline — the complete proof, on the commit main actually carries."
+          elif [ "$BASE" = "main" ]; then
             echo "Into main — the complete proof: lint, typecheck, the fast lane, the browser lane, the simulator, SDK and fixture tests."
           else
             echo "Into $BASE — the cheap lane: lint, typecheck and the fast lane."
@@ -141,7 +155,7 @@ jobs:
         # Only where a skip is not allowed. The recording suites start a MinIO
         # of their own from the image the compose file deploys, so pulling it
         # through compose keeps one version in one place.
-        if: github.base_ref == 'main'
+        if: ${{ github.base_ref == 'main' || inputs.full }}
         # **Compose interpolates every service before it pulls one**, and the
         # self-hosted phone platform declares ten variables with no default —
         # the LiveKit pair, the recording store's four credentials, the auth
@@ -167,7 +181,7 @@ jobs:
           # object store could be started would report the opposite of what
           # happened. Everywhere else the skip is the promise that contributing
           # costs no new infrastructure.
-          EGMA_REQUIRE_OBJECT_STORAGE: ${{ github.base_ref == 'main' && '1' || '' }}
+          EGMA_REQUIRE_OBJECT_STORAGE: ${{ (github.base_ref == 'main' || inputs.full) && '1' || '' }}
         run: |
           node -e 'const os = require("node:os"); console.log(`Fast Lane capacity: ${os.availableParallelism()} CPUs, 2 Vitest workers`);'
           pnpm test:fast
@@ -179,7 +193,7 @@ jobs:
     # matrix here would not make it faster, it would make it wrong — see
     # `apps/api/test/support/instance.ts` and `apps/web/tools/output-lock.ts`.
     name: Browser lane (one job, never sharded)
-    if: github.base_ref == 'main'
+    if: ${{ github.base_ref == 'main' || inputs.full }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -230,7 +244,7 @@ jobs:
 
   simulator:
     name: Simulator tests
-    if: github.base_ref == 'main'
+    if: ${{ github.base_ref == 'main' || inputs.full }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -264,7 +278,7 @@ jobs:
 
   sdk:
     name: Python SDK tests
-    if: github.base_ref == 'main'
+    if: ${{ github.base_ref == 'main' || inputs.full }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -295,7 +309,7 @@ jobs:
 
   fixture:
     name: Fixture agent tests
-    if: github.base_ref == 'main'
+    if: ${{ github.base_ref == 'main' || inputs.full }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

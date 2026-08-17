@@ -58,12 +58,20 @@ The script it is built with:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
-from dataclasses import dataclass, field
+import socket
+from dataclasses import dataclass, field, replace
+from typing import Any
 
-from egma_simulator.media.livekit_room import LiveKitRoomBackend, platform_refusal
+from egma_simulator.media import VoiceMedia
+from egma_simulator.media.livekit_room import (
+    LiveKitRoomBackend,
+    RoomSettings,
+    platform_refusal,
+)
 from egma_simulator.media.room import answering
-from egma_simulator.media.scripted import ScriptedSession
+from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.mock_tools import (
     HELLO_METHOD,
     LARGEST_PAYLOAD_BYTES,
@@ -104,20 +112,6 @@ class Dispatch:
     metadata: str
 
 
-class StubSession(ScriptedSession):
-    """The room's audio, with the latch a room driver waits on.
-
-    The frames, the greeting, the scripted replies and the leaving are
-    the scripted media session's, unchanged — a room and a phone line
-    carry a turn the same way, and writing it twice would only let the
-    two drift.
-    """
-
-    def __init__(self, **built: object) -> None:
-        super().__init__(**built)
-        self.carrying_audio = asyncio.Event()
-
-
 class StubRoom:
     """The room itself: who is in it, what can be heard in it, and what
     can be called in it.
@@ -131,45 +125,60 @@ class StubRoom:
     written against this room and is written against the real one.
     """
 
-    def __init__(self, backend: RoomStubBackend, *, band_hz: int) -> None:
+    def __init__(self, backend: RoomStubBackend) -> None:
         self._backend = backend
-        self._band_hz = band_hz
-        self._session: StubSession | None = None
+        self._transport: ScriptedTransport | None = None
+        self._activation: asyncio.Task[None] | None = None
         self._joined = False
         self._methods: dict[str, object] = {}
         self.arrivals = asyncio.Event()
+        self.carrying_audio = asyncio.Event()
+        self.ended = asyncio.Event()
         self.who_arrived: list[str] = []
 
     @property
-    def session(self) -> StubSession | None:
-        return self._session
+    def transport(self) -> ScriptedTransport | None:
+        return self._transport
 
     @property
     def joined(self) -> bool:
         return self._joined
 
-    async def join(self) -> StubSession:
+    def create_transport(self) -> VoiceMedia:
+        """Build the same Pipecat-native scripted transport CI uses elsewhere."""
         self._joined = True
-        self._session = StubSession(
-            band_hz=self._band_hz,
-            delay_seconds=self._backend.stub.answer_delay_seconds,
-            answered_by=self._backend.answer_to,
+        stub = self._backend.stub
+        self._transport = ScriptedTransport(
+            greeting=stub.greeting,
+            replies=stub.replies,
+            answer_delay_seconds=stub.answer_delay_seconds,
+            ends_after_replies=stub.hangs_up_after_replies,
         )
-        self._backend.stub.sessions.append(self._session)
+        stub.transports.append(self._transport)
         # Where egma minted its own token, the worker is on its way because
         # egma asked for it. Where it did not, nobody asked and nobody
         # could: the endpoint that minted the token is what dispatches, so
         # from the room's side the agent simply turns up — or does not.
         if self._backend.endpoint_dispatches:
-            self._backend.agent_is_coming = self._backend.stub.agent_joins
+            self._backend.agent_is_coming = stub.agent_joins
         if self._backend.agent_is_coming:
             self.agent_arrives()
-        return self._session
+        return self._transport.media
+
+    async def wait_connected(self) -> None:
+        """The local room is connected as soon as its processors exist."""
+        return None
 
     async def leave(self) -> None:
-        if self._session is not None:
-            self._session.hang_up()
-        self._session = None
+        if self._transport is not None:
+            self._transport.stop()
+        if self._activation is not None and not self._activation.done():
+            self._activation.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._activation
+        self._transport = None
+        self._joined = False
+        self.ended.set()
 
     # -- The room's other channel: what can be called in it -------------------
 
@@ -219,16 +228,20 @@ class StubRoom:
             return
         self.who_arrived.append(AGENT_IDENTITY)
         self.arrivals.set()
-        session = self._session
+        transport = self._transport
         stub = self._backend.stub
-        if session is None or not stub.agent_publishes_audio:
+        if transport is None or not stub.agent_publishes_audio:
             return
-        session.carrying_audio.set()
-        if stub.greeting is not None:
-            session.greet(
-                stub.greeting,
-                then_hang_up=stub.hangs_up_after_replies and not stub.replies,
-            )
+        self.carrying_audio.set()
+        self._activation = asyncio.create_task(
+            transport.activate(), name="room-stub-transport"
+        )
+
+
+def _test_endpoint_socket(addr_info: tuple[object, ...]) -> socket.socket:
+    """Let the local contract server stand in for a public endpoint in tests."""
+    family, kind, protocol, _canonical_name, _sockaddr = addr_info
+    return socket.socket(family=family, type=kind, proto=protocol)  # type: ignore[arg-type]
 
 
 class RoomStubBackend(LiveKitRoomBackend):
@@ -243,10 +256,33 @@ class RoomStubBackend(LiveKitRoomBackend):
     """
 
     def __init__(self, stub: RoomStub, **built: object) -> None:
+        settings = built.get("settings")
+        if isinstance(settings, RoomSettings) and settings.token_endpoint.startswith(
+            "https://127.0.0.1:"
+        ):
+            built["settings"] = replace(
+                settings,
+                token_endpoint=settings.token_endpoint.replace(
+                    "https://", "http://", 1
+                ),
+            )
         super().__init__(**built)
         self.stub = stub
         self.agent_is_coming = False
-        self._delivered = 0
+
+    def _endpoint_connector(self, aiohttp: Any, resolver: Any) -> tuple[Any, Any]:
+        """Reach this test's loopback HTTP server after production parsing.
+
+        This override is the explicit test-only exception to the production
+        connector's public-address and TLS policy. The request and response
+        still cross a real socket; the fake supplies only the network edge.
+        """
+        connector = aiohttp.TCPConnector(
+            resolver=resolver,
+            socket_factory=_test_endpoint_socket,
+            use_dns_cache=False,
+        )
+        return resolver, connector
 
     @property
     def endpoint_dispatches(self) -> bool:
@@ -270,7 +306,7 @@ class RoomStubBackend(LiveKitRoomBackend):
         # endpoint, and the server URL that answer named, are what egma
         # really went to the room with.
         self.stub.joined_with.append(way_in)
-        room = StubRoom(self, band_hz=self._band_hz)
+        room = StubRoom(self)
         self.stub.joined_rooms.append(room)
         return room
 
@@ -312,31 +348,6 @@ class RoomStubBackend(LiveKitRoomBackend):
         if isinstance(room, StubRoom):
             room.agent_arrives()
 
-    # -- The script ----------------------------------------------------------
-
-    def answer_to(self) -> None:
-        """Queue the answer to one stretch of persona speech.
-
-        A spent script answers with quiet rather than a holding line: a
-        room where nobody has anything left to say is a room where nobody
-        is talking, and the conductor reads exactly that.
-        """
-        room = self._room
-        session = room.session if isinstance(room, StubRoom) else None
-        if session is None:
-            return
-        position = self._delivered
-        self._delivered += 1
-        replies = self.stub.replies
-        if position >= len(replies):
-            return
-        session.say(
-            replies[position],
-            then_hang_up=(
-                self.stub.hangs_up_after_replies and position == len(replies) - 1
-            ),
-        )
-
 
 @dataclass
 class RoomStub:
@@ -370,10 +381,8 @@ class RoomStub:
     joined_with: list[object] = field(default_factory=list)
     """The token and server URL egma really went into each room with."""
 
-    sessions: list[StubSession] = field(default_factory=list)
-    """The audio of every room that was joined — what a test asks when it
-    wants the agent's side of the story, including every stretch of
-    persona speech the room really carried."""
+    transports: list[ScriptedTransport] = field(default_factory=list)
+    """The Pipecat transport built for every room that was joined."""
 
     backends: list[RoomStubBackend] = field(default_factory=list)
 

@@ -30,6 +30,10 @@ The connection type must have a compatible adapter installed on this deployment.
   The connection id to run the simulations against. This determines which agent and provider handle the calls.
 </ParamField>
 
+<ParamField body="idempotency_key" type="string" required>
+  A unique value chosen by the client for this start request. Reuse the same value when retrying the same request, so a lost response cannot start a second run.
+</ParamField>
+
 <ParamField body="agent" type="string">
   Optional agent id (`agt_…`). When supplied, Egma verifies the named connection belongs to this agent and refuses with a clear message if it does not. Useful when a client holds both ids and wants to catch mismatches explicitly.
 </ParamField>
@@ -175,6 +179,7 @@ curl -X POST https://your-egma-host/api/runs \
   -d '{
     "test_versions": ["tstv_01abc", "tstv_01def"],
     "connection": "con_01ghi",
+    "idempotency_key": "release-v2.4.0-voice-tests",
     "label": "release/v2.4.0"
   }'
 ```
@@ -323,10 +328,6 @@ This endpoint is only meaningful for voice simulations that completed a call. Ch
 
 <ResponseField name="expires_at" type="string">
   ISO 8601 timestamp of when the URL expires. If the URL has expired, request this endpoint again for a fresh one.
-</ResponseField>
-
-<ResponseField name="measured_audio_band_hertz" type="integer | null">
-  The audio bandwidth the recording was measured at (e.g. `8000` for narrow-band telephone audio, `16000` for wideband). `null` for recordings written before this measurement was introduced. Two simulations with different bands are different units: a narrow-band recording strips what an audio grader reads.
 </ResponseField>
 
 ### Example

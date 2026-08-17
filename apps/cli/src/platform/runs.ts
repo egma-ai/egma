@@ -41,7 +41,8 @@ export type SimulationStatus =
   | "running"
   | "completed"
   | "failed"
-  | "canceled";
+  | "canceled"
+  | "skipped";
 
 /**
  * What the graders made of a simulation.
@@ -61,6 +62,7 @@ const SIMULATION_STATUSES: readonly string[] = [
   "completed",
   "failed",
   "canceled",
+  "skipped",
 ];
 
 const VERDICTS: readonly string[] = ["passed", "failed", "skipped", "errored"];
@@ -113,7 +115,7 @@ export type RunEvent =
 export type RunEvents = {
   readonly events: readonly RunEvent[];
   readonly next: number;
-  /** True once the run itself has finished; there will be no more. */
+  /** True once execution has finished; grader verdicts can still arrive in the run snapshot. */
   readonly done: boolean;
 };
 
@@ -278,11 +280,13 @@ export async function getRun(
   signedIn: SignedIn,
   runId: string,
   fetchImpl?: Fetch,
+  signal?: AbortSignal,
 ): Promise<PlatformRun | null> {
   const { response, body } = await ask({
     signedIn,
     path: `/api/runs/${encodeURIComponent(runId)}`,
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
+    ...(signal === undefined ? {} : { signal }),
   });
 
   if (response.status === 404) return null;

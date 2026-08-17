@@ -12,8 +12,8 @@ one.
 Its first execution is on the record: 2026-08-08, against a LiveKit
 Cloud project and the dumb-agent fixture, three simulations conducted
 green — explicit dispatch by name twice (once against a cold worker) and
-automatic dispatch once, every room deleted at teardown, the measured
-band 16000 Hz in all three.
+automatic dispatch once, every room deleted at teardown, and every
+recording resolved with both speakers audible.
 
 It is opt-in because CI holds no LiveKit project and no agent worker, and
 it skips — visibly, never failing, never waiting on anybody::
@@ -67,11 +67,10 @@ so one variable moves both halves and the two cannot disagree.
 
 *Structure*, not content: a live agent says different words every time,
 and a model's latency is nobody's to pin. So this checks that a
-conversation happened, that it ended honestly, that the band was
-measured and came back wideband, that the room's own name is the
-provider reference, that the recording resolves with one speaker to a
-channel, and that no credential appears in a single byte the simulator
-wrote.
+conversation happened, that it ended honestly, that the room's own name
+is the provider reference, that the recording resolves with both
+speakers audible, and that no credential appears in a single byte the
+simulator wrote.
 
 It reads that record through both of the simulator's doors, because the
 record now travels by two: the lifecycle and its terminal facts come back
@@ -99,7 +98,6 @@ from conftest import (
     turns_for,
 )
 
-from egma_simulator.media.livekit_room import ROOM_BAND_HZ
 from egma_simulator.media.room import ROOM_PREFIX
 from egma_simulator.plugs.livekit import AGENT_JOIN_SECONDS
 from egma_simulator.recording import channels_of
@@ -344,19 +342,14 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     assert reference, "no room name came back"
     assert reference.startswith(f"{ROOM_PREFIX}-"), reference
 
-    # The band was measured on the wire, and it is the wideband a room
-    # carries where a phone call is narrowband. The recording resolves and
-    # both sides of the exchange are audible in it.
+    # The recording resolves and both speakers are audible in it. Its WAV
+    # header carries the playback rate; the report stores no second rate.
     audio = facts["audio"]
     assert audio is not None, "a simulation in a room with no audio on the record"
-    band = audio["measured_sample_rate_hz"]
-    assert band == ROOM_BAND_HZ, (
-        f"the room was carried at {band}Hz, not the {ROOM_BAND_HZ}Hz the "
-        "driver assembles the pipeline at"
-    )
+    assert set(audio) == {"recording"}
     recording = simulator.blob(audio["recording"])
-    persona_audio, agent_audio, recorded_band = channels_of(recording)
-    assert recorded_band == band
+    persona_audio, agent_audio, recording_rate_hz = channels_of(recording)
+    assert recording_rate_hz > 0
     assert any(persona_audio), "the persona's channel is silent"
     assert any(agent_audio), "the agent's channel is silent"
     # The fourth place a credential could be, and the one nothing else

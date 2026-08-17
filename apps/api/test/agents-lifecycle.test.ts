@@ -578,7 +578,7 @@ describe("a connection's stored credential", () => {
     expect(
       livekit?.variants.find((one) => one.id === "livekit.token_endpoint")
         ?.credential_rule,
-    ).toBe("optional");
+    ).toBe("required");
 
     // Nothing that could be a validator, an internal refusal or a secret. The
     // answer is JSON over the wire, so a function could not survive the trip —
@@ -686,7 +686,7 @@ describe("restoring a connection", () => {
     expect(restored.credentials_hint).toBe("ABCD");
   });
 
-  it("refuses a credential on a shape that takes none, and clears one that is optional", async () => {
+  it("refuses a credential on a forbidden shape and demands one on a required shape", async () => {
     api = await createApi("agents_browser_restore_rules");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -727,9 +727,7 @@ describe("restoring a connection", () => {
     );
     expect(plain.status).toBe(200);
 
-    // The optional shape: neither Replace nor Clear is assumed, because "left
-    // out" cannot be told from "meant to drop it" and the sealed envelope is
-    // sitting right there for the wrong reading to reuse.
+    // A public token endpoint always needs a fresh auth credential on Restore.
     const endpoint = await aConnection(ada, agent.id, {
       name: "endpoint",
       type: "livekit",
@@ -758,7 +756,7 @@ describe("restoring a connection", () => {
       { expected_revision: endpointRevision },
     );
     expect(undecided.status).toBe(422);
-    expect(undecided.body.error).toBe("credential_choice_required");
+    expect(undecided.body.error).toBe("credential_required");
 
     const cleared = await browser(
       "POST",
@@ -766,10 +764,27 @@ describe("restoring a connection", () => {
       ada,
       { expected_revision: endpointRevision, credential: { choice: "clear" } },
     );
-    expect(cleared.status).toBe(200);
-    const back = held<ConnectionBody>(cleared, "connection");
-    expect(back.credential_present).toBe(false);
-    expect(back.credentials_hint).toBeNull();
+    expect(cleared.status).toBe(422);
+    expect(cleared.body.error).toBe("credential_required");
+
+    const replaced = await browser(
+      "POST",
+      `/api/agents/${agent.id}/connections/${endpoint.id}/restore`,
+      ada,
+      {
+        expected_revision: endpointRevision,
+        credential: {
+          choice: "replace",
+          credentials: {
+            headers: '{"Authorization":"Bearer replacement-value"}',
+          },
+        },
+      },
+    );
+    expect(replaced.status).toBe(200);
+    const back = held<ConnectionBody>(replaced, "connection");
+    expect(back.credential_present).toBe(true);
+    expect(back.credentials_hint).toBe("Authorization");
   });
 
   it("refuses while the parent agent is archived", async () => {

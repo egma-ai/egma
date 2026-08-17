@@ -2787,4 +2787,3 @@ describe("grading plans over installed runs (0033)", () => {
     expect(rows[0]?.skipped_count).toBe(0);
   });
 });
-

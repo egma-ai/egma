@@ -26,39 +26,74 @@ import type { Detection } from "../../wizard/detection.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
-import type { AskId, DrivenAgent, GateId, PlatformNotice } from "../wizard-ui.ts";
+import type { WizardPhase } from "../../wizard/wizard-machine.ts";
+import type {
+  AskId,
+  CodingAgentChoice,
+  DrivenAgent,
+  GateId,
+  PlatformNotice,
+} from "../wizard-ui.ts";
+import type { ConnectionAsk } from "../wizard-ui.ts";
 
-/** The screens of the walk, in order. */
-export const WALK_SCREENS: Sequence = [
+/** The wizard screens, in order. */
+export const WIZARD_SCREENS: Sequence = [
+  { id: "coding-agent", show: (state) => state.phase === "coding-agent" },
   { id: "intro", isComplete: (state) => state.begun },
   // Login shows only while there is something to approve, and stops showing the
   // moment there is not — which is the router working the flow out from state
   // rather than the flow navigating anywhere.
-  { id: "login", show: (state) => state.login !== null },
-  // Only ever on while the flow is parked on that one question, and gone the
-  // moment it is answered — which is the router working the way it should.
-  { id: "prompts-pointer", show: (state) => state.asking === "prompts-pointer" },
-  { id: "retell-key", show: (state) => state.asking === "retell-key" },
+  { id: "login", show: (state) => state.phase === "login" && state.login !== null },
+  {
+    id: "retell-key",
+    show: (state) => state.phase === "provider-setup" && state.asking === "retell-key",
+  },
+  {
+    id: "connection-field",
+    show: (state) =>
+      state.phase === "provider-setup" && state.asking?.startsWith("connection:") === true,
+  },
   // Never reached with one agent on the account, because the flow only opens
   // this question when there is a choice to make.
-  { id: "retell-agent", show: (state) => state.asking === "retell-agent" },
+  {
+    id: "retell-agent",
+    show: (state) => state.phase === "provider-setup" && state.asking === "retell-agent",
+  },
   // The one question that decides what egma creates. Never skipped and never
   // answered for the developer.
-  { id: "reach", show: (state) => state.asking === "reach" },
+  {
+    id: "reach",
+    show: (state) => state.phase === "provider-setup" && state.asking === "reach",
+  },
   // Never reached when Retell routes one number to the agent, because the flow
   // only opens this question when there is a choice to make.
-  { id: "phone-number", show: (state) => state.asking === "phone-number" },
-  { id: "existing-tests", show: (state) => state.asking === "existing-tests" },
+  {
+    id: "phone-number",
+    show: (state) => state.phase === "provider-setup" && state.asking === "phone-number",
+  },
+  {
+    id: "existing-tests",
+    show: (state) => state.phase === "test-writing" && state.asking === "existing-tests",
+  },
   // The last question the wizard asks, over the run screen it interrupts: the
   // run keeps moving underneath while the developer decides.
-  { id: "skills-offer", show: (state) => state.asking === "skills-offer" },
+  {
+    id: "skills-offer",
+    show: (state) => state.phase === "run" && state.asking === "skills-offer",
+  },
   // The list, while it is waiting on the one keystroke it exists for.
-  { id: "gate", show: (state) => state.gate !== null },
+  { id: "gate", show: (state) => state.phase === "review" && state.gate !== null },
   // The files arriving, one at a time, while they arrive.
-  { id: "generating", show: (state) => state.generation !== null },
+  {
+    id: "generating",
+    show: (state) => state.phase === "test-writing" && state.generation !== null,
+  },
   // The run, from the moment it is created until the wizard closes. It never
   // completes on this screen: the wizard leaves and the suite carries on.
-  { id: "run", show: (state) => state.run !== null },
+  {
+    id: "run",
+    show: (state) => (state.phase === "run" || state.phase === "complete") && state.run !== null,
+  },
   { id: "task" },
 ];
 
@@ -102,7 +137,7 @@ export class WizardStore {
 
   readonly router: WizardRouter;
 
-  constructor(screens: Sequence = WALK_SCREENS) {
+  constructor(screens: Sequence = WIZARD_SCREENS) {
     this.router = new WizardRouter(screens);
     for (const [id, condition] of Object.entries(GATE_CONDITIONS)) {
       const gate: Gate = {
@@ -162,14 +197,26 @@ export class WizardStore {
   answer(ask: AskId, value: string | null): void {
     const open = this.answers.get(ask);
     if (open === undefined) return;
+    // One answer closes one question. A later retry with the same id must get
+    // a new promise, otherwise the old answer is reused and the developer has
+    // no way to correct an invalid credential.
+    this.answers.delete(ask);
     this.change({ asking: this.state.asking === ask ? null : this.state.asking });
     open.settle(value);
   }
 
   // ── The flow's writes ────────────────────────────────────────────────
 
+  setPhase(phase: WizardPhase): void {
+    this.change({ phase });
+  }
+
   setDrivenAgent(drivenAgent: DrivenAgent | null): void {
     this.change({ drivenAgent });
+  }
+
+  setCodingAgentChoices(codingAgentChoices: readonly CodingAgentChoice[]): void {
+    this.change({ codingAgentChoices });
   }
 
   setDrivenAgentLog(drivenAgentLog: string): void {
@@ -206,6 +253,10 @@ export class WizardStore {
 
   setNumberChoices(numberChoices: readonly RetellNumber[] | null): void {
     this.change({ numberChoices });
+  }
+
+  setConnectionAsk(connectionAsk: ConnectionAsk | null): void {
+    this.change({ connectionAsk });
   }
 
   setGeneration(generation: GenerationProgress | null): void {

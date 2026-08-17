@@ -4,9 +4,7 @@ The listening leg has one job: turn speech into the words of the
 transcript. This test proves exactly that and nothing else, so a failure
 here names the ears. The audio is a checked-in recording of one spoken
 sentence — no synthesis, no account for the other leg, no telephony — and
-it is carried to the leg the way a real line carries it: one slice at a
-time, down a duplex line, through the same conductor a live simulation
-uses.
+it enters the same Pipecat pipeline a live simulation uses.
 
 Silero listens for *whether* anybody is speaking, because the scripted
 detector reads the test codec and this recording is a real voice. That is
@@ -24,14 +22,25 @@ credentials apart from its working ones.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import wave
 from pathlib import Path
 
 import pytest
 from conftest import credential, words_of
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    Frame,
+    InputAudioRawFrame,
+    StartFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import VoiceConductor
+from egma_simulator.media import VoiceMedia
 from egma_simulator.model import ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.speech import (
@@ -65,53 +74,79 @@ detector to hear the speaker stop and the turn model to call the turn
 over, spent in audio rather than on a clock."""
 
 
-class OneSentenceLine:
-    """A duplex line whose whole far end is the recorded sentence.
+FRAME_SECONDS = 0.02
 
-    It exists so this test can stay about the ears: it never listens to
-    what the persona says, and it carries the same real speech every time.
-    It is otherwise an ordinary line — the same slices in both directions,
-    quiet included — so what the conductor does with its audio is what the
-    conductor does with any line's.
-    """
+
+class _OneSentenceInput(FrameProcessor):
+    """Put one real recording into a running Pipecat pipeline."""
 
     def __init__(self, pcm: bytes, band: int) -> None:
+        super().__init__()
         self._band = band
         self._saying = pcm + bytes(
             round(QUIET_AFTER_SECONDS * band) * SAMPLE_WIDTH_BYTES
         )
-        self._left = False
+        self._active = asyncio.Event()
+        self.ended = asyncio.Event()
+        self._pump: asyncio.Task | None = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+        if isinstance(frame, StartFrame):
+            self._pump = self.create_task(self._run(), name="one-sentence-input")
+        elif isinstance(frame, (EndFrame, CancelFrame)):
+            self.ended.set()
+            if self._pump is not None and not self._pump.done():
+                self._pump.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self._pump
+
+    async def _run(self) -> None:
+        await self._active.wait()
+        width = round(FRAME_SECONDS * self._band) * SAMPLE_WIDTH_BYTES
+        chunks = [
+            self._saying[offset : offset + width]
+            for offset in range(0, len(self._saying), width)
+        ]
+        for position, audio in enumerate(chunks):
+            if position == len(chunks) - 1:
+                self.ended.set()
+            await self.push_frame(
+                InputAudioRawFrame(
+                    audio=audio,
+                    sample_rate=self._band,
+                    num_channels=1,
+                )
+            )
+            await asyncio.sleep(FRAME_SECONDS)
+
+    def open(self) -> None:
+        self._active.set()
+
+
+class OneSentenceConnection:
+    """A voice connection whose far end is one checked-in sentence."""
+
+    def __init__(self, pcm: bytes, band: int) -> None:
+        self._input = _OneSentenceInput(pcm, band)
 
     @property
     def provider_reference(self) -> str | None:
         return None
 
     @property
-    def sample_rate_hz(self) -> int:
-        return self._band
-
-    @property
-    def measured_band_hz(self) -> int | None:
-        return self._band
-
-    @property
     def far_end_left(self) -> bool:
-        return self._left
+        return self._input.ended.is_set()
+
+    async def prepare(self) -> VoiceMedia:
+        return VoiceMedia(input=(self._input,), output=(), ended=self._input.ended)
 
     async def open(self) -> None:
-        return None
-
-    async def exchange(self, outgoing: bytes) -> bytes:
-        wanted = len(outgoing)
-        spoken, self._saying = self._saying[:wanted], self._saying[wanted:]
-        if not self._saying:
-            # Everything the recording had is on the line; the far end has
-            # nothing left to say and goes, which is what ends the exchange.
-            self._left = True
-        return spoken.ljust(wanted, b"\x00")
+        self._input.open()
 
     async def close(self) -> None:
-        return None
+        self._input.ended.set()
 
 
 def a_spoken_sentence() -> tuple[bytes, int]:
@@ -124,7 +159,7 @@ def a_spoken_sentence() -> tuple[bytes, int]:
 async def test_a_real_transcriber_reads_a_real_sentence(tmp_path: Path):
     pcm, band = a_spoken_sentence()
     conductor = VoiceConductor(
-        line=OneSentenceLine(pcm, band),
+        connection=OneSentenceConnection(pcm, band),
         voice=PersonaVoice(voice_id="unused", provider=None, speed=None),
         blobs=FilesystemBlobStore(tmp_path),
         recording_key="sim-live-deepgram/dual-channel.wav",

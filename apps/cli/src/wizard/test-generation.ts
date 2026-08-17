@@ -2,13 +2,13 @@
  * The two tasks that turn what egma knows into test files, and the progress a
  * developer watches while they run.
  *
- * Both are dispatched to the developer's own coding agent under one set of
- * notes: the file format, what an expected behavior is worth, and the marker
- * lines egma reads. What differs is the material. **Converting** works from
- * something the developer already wrote — a spreadsheet, a document, a list of
- * notes — and invents nothing. **Generating** works from what the earlier steps
- * learned: the facts the coding agent reported about the repository, and the
- * configuration the provider is actually running.
+ * Both are dispatched to the developer's own coding agent under the public
+ * `write-egma-tests` skill. The task adds the CLI marker protocol and the
+ * facts for this one run. **Converting** works from something the developer
+ * already wrote — a spreadsheet, a document, a list of notes — and invents
+ * nothing. **Generating** works from what the earlier steps learned: the facts
+ * the coding agent reported about the repository, and the configuration the
+ * provider is actually running.
  *
  * Everything either task needs is written into the task itself. Neither is
  * given a path to go and fetch, because a task that sends an agent looking is a
@@ -18,7 +18,7 @@
  * agent is told exactly what to write, where to write it, and how to say so.
  */
 
-import { instructionsWith } from "../skills/index.ts";
+import { instructionsWith, publicSkill } from "../skills/index.ts";
 import { FACTS, LABEL_WIDTH } from "./facts.ts";
 
 /** The number of tests a first suite is generated with. */
@@ -32,8 +32,8 @@ export type GenerationContext = {
   readonly facts: ReadonlyMap<string, string>;
   /** The words the provider is actually running, or `null` when it holds none. */
   readonly prompt: string | null;
-  /** How many tools the provider holds for this agent. */
-  readonly toolCount: number;
+  /** How many tools the provider holds, or null when repository evidence owns them. */
+  readonly toolCount: number | null;
   /** What the agent is called on egma. */
   readonly agentName: string;
   /** Test names the folder already holds, which must not be taken twice. */
@@ -107,8 +107,9 @@ function dataBlock(what: string, content: string): readonly string[] {
 function promptBlock(prompt: string | null): readonly string[] {
   if (prompt === null || prompt.trim() === "") {
     return [
-      "The provider holds no prompt for this agent — the customer runs the model",
-      "themselves. Ground the tests in what the repository says instead.",
+      "Egma did not pull a provider-managed prompt for this agent. Ground the",
+      "tests in the repository facts above and the repository context you already",
+      "built earlier in this same coding-agent session.",
     ];
   }
   return dataBlock("what the provider is running this agent on", prompt);
@@ -166,20 +167,19 @@ function boundaryBlock(cwd: string): readonly string[] {
 }
 
 /**
- * The marker lines, said again in the task.
+ * The CLI marker protocol, kept in the run-specific task.
  *
- * They are taught in the notes above, and a model that has just been told to
- * write files reads "announce each one" as decoration and writes the files.
- * The smoke check against a real coding agent is what said so. It costs four
- * lines to say it where the work is described, in the shape it has to be
- * written in, and a step whose whole screen is drawn from these lines can
- * afford the four lines.
+ * A public skill should make sense when it is installed on its own. These
+ * lines exist only because the wizard draws its progress screen from them, so
+ * they stay at this delivery boundary. A model that has just been told to
+ * write files can still read "announce each one" as decoration, which is why
+ * the exact shape is repeated where the work is described.
  */
 function reportingBlock(): readonly string[] {
   return [
     "## Say what you are doing, as you do it",
     "",
-      "This is not optional and it is not decoration. Egma turns these lines into",
+    "This is not optional and it is not decoration. Egma turns these lines into",
     "the list the developer watches fill in while you work, and they are the",
     "only way it can say which file you are on right now. Write each one on a",
     "line of its own, at the very start of the line, with no bullet and no code",
@@ -187,7 +187,9 @@ function reportingBlock(): readonly string[] {
     "",
     "- one `egma:plan <name>, <name>, …` line, first, before any file exists;",
     "- an `egma:writing <name>` line immediately before you write each file;",
-    "- an `egma:wrote <name>` line immediately after each file is written.",
+    "- an `egma:wrote <name>` line immediately after each file is written;",
+    "- an `egma:abort <reason>` line only when something prevents the work; stop",
+    "  after it.",
   ];
 }
 
@@ -204,8 +206,15 @@ export function generateTask(context: GenerationContext, howMany: number): strin
     "",
     ...contextBlock(context.facts),
     "",
-    `The agent is called ${context.agentName} on Egma, and the provider holds`,
-    `${context.toolCount} ${context.toolCount === 1 ? "tool" : "tools"} for it.`,
+    `The agent is called ${context.agentName} on Egma.`,
+    ...(context.toolCount === null
+      ? [
+          "Egma did not pull a provider-managed tool list. Use the repository",
+          "facts above and the tool context you already found in this session.",
+        ]
+      : [
+          `The provider holds ${context.toolCount} ${context.toolCount === 1 ? "tool" : "tools"} for it.`,
+        ]),
     "",
     "## The words the agent is running on",
     "",
@@ -225,7 +234,7 @@ export function generateTask(context: GenerationContext, howMany: number): strin
 
 /** The whole dispatch for generating: the notes, then the task. */
 export function generateInstructions(context: GenerationContext, howMany: number): string {
-  return instructionsWith(["writing-tests"], generateTask(context, howMany));
+  return instructionsWith([publicSkill("write-egma-tests")], generateTask(context, howMany));
 }
 
 /** What egma asks the coding agent to convert, and the material itself. */
@@ -276,7 +285,7 @@ export function convertTask(options: ConvertContext): string {
 
 /** The whole dispatch for converting: the notes, then the task. */
 export function convertInstructions(options: ConvertContext): string {
-  return instructionsWith(["writing-tests"], convertTask(options));
+  return instructionsWith([publicSkill("write-egma-tests")], convertTask(options));
 }
 
 /** Where one test has got to, as the pane draws it. */

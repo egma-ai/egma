@@ -29,7 +29,7 @@ import {
   generateTask as buildGenerateTask,
 } from "../src/wizard/test-generation.ts";
 import { alreadyAsked } from "../src/wizard/login-step.ts";
-import { walk } from "../src/wizard/walk.ts";
+import { runWizard } from "../src/wizard/wizard-flow.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -134,7 +134,7 @@ function names(howMany: number, from = 1): string[] {
 
 type WalkOutcome = {
   readonly ui: HeadlessUI;
-  readonly report: Awaited<ReturnType<typeof walk>>;
+  readonly report: Awaited<ReturnType<typeof runWizard>>;
   /** Every line the walk wrote, which is what a machine reads it by. */
   readonly lines: readonly string[];
 };
@@ -171,7 +171,7 @@ async function runWalk(options: {
   const grading = gradeEveryRun(platform);
   let report;
   try {
-    report = await walk({
+    report = await runWizard({
       ui,
       launch: workspace.launch(options.script),
       cwd: workspace.dir,

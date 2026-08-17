@@ -12,7 +12,7 @@ import type { Fetch as RetellFetch } from "@egma/retell";
 import { loadConfig, type Config } from "../../src/config.ts";
 import type { Email, EmailSender } from "../../src/auth/email.ts";
 import type { RateLimit } from "../../src/http/rate-limit.ts";
-import { buildApi } from "../../src/server.ts";
+import { buildApi, type ServerOptions } from "../../src/server.ts";
 import type { Identity } from "../../src/auth/better-auth.ts";
 import {
   createMigratedDatabase,
@@ -132,6 +132,10 @@ export type TestApiOptions = {
   readonly rateLimit?: RateLimit;
   /** A sweep cadence short enough to observe, for the tests about the sweep. */
   readonly orphanSweepIntervalMilliseconds?: number;
+  /** Where Retell answers. A test stands a Retell-shaped server on loopback. */
+  readonly retellReach?: ServerOptions["retellReach"];
+  /** The origin the API believes it is reached at, so registration can be seen. */
+  readonly baseUrl?: string;
   /**
    * Whether this API needs a trace store of its own. Off by default: creating
    * and migrating a ClickHouse database costs a second, and only the files
@@ -199,6 +203,7 @@ export async function createApi(
     ...(options.defaultJudge === null
       ? {}
       : { defaultJudge: options.defaultJudge ?? THE_TEST_DEPLOYMENTS_JUDGE }),
+    ...(options.baseUrl === undefined ? {} : { baseUrl: options.baseUrl }),
   });
 
   // Through the deployment's own seeding door rather than written straight
@@ -230,6 +235,13 @@ export async function createApi(
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),
+    ...(options.retellReach === undefined
+      ? {}
+      : { retellReach: options.retellReach }),
+    // The production sweep's loop is never wanted in a route test: a suite that
+    // wants one drives `runProductionSweep` itself, where it can say when a
+    // tick happens instead of waiting for one.
+    productionSweepIntervalMilliseconds: 60 * 60_000,
   });
   await app.ready();
 

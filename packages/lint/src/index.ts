@@ -172,7 +172,7 @@ const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
  * every claim arrives with the `AuthContext` narrowed to that row's own
  * organization and project — which is what the work itself goes through.
  *
- * A seventh name here is a decision somebody has to make on purpose.
+ * A tenth name here is a decision somebody has to make on purpose.
  */
 const WORK_DISPATCHING = [
   "claimGradingJobs",
@@ -181,6 +181,22 @@ const WORK_DISPATCHING = [
   "resolveSimulationStanding",
   "sweepOrphanedSimulations",
   "watchGradingWork",
+  // The three below arrived on 2026-08-16 with production watching, and they
+  // stand exactly where `claimGradingJobs` stands. A poller running beside the
+  // orphan sweep has no user and no credential; a delivery arriving at the
+  // receiving endpoint has proved nothing at all, because finding out whose it
+  // is *is* the door's job. So each is handed egma's own bookkeeping instead of
+  // asked for a credential, and each hands back the `AuthContext` narrowed to
+  // the connection's own organization and project — which is what every write
+  // that follows goes through.
+  //
+  // `resolveRetellWatch` takes a connection id or nothing; `countRetellWebhookRefusal`
+  // takes a reason a delivery was turned away, which by construction belongs to
+  // no customer; `sweepStaleProductionClaims` takes a lease. None of them can be
+  // asked whose traffic to bring back, which is the property this rule enforces.
+  "countRetellWebhookRefusal",
+  "resolveRetellWatch",
+  "sweepStaleProductionClaims",
 ];
 
 /**

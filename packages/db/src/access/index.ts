@@ -350,6 +350,32 @@ export type {
   Topology,
 } from "../schema/agents.ts";
 
+/**
+ * Watching a customer's production traffic on somebody else's platform.
+ *
+ * The first three take no `AuthContext` and cannot be given one — see the file
+ * they live in. Every one of them hands back the narrowed context the work is
+ * then done under, and the four below take one.
+ */
+export {
+  advanceProductionCursor,
+  claimProductionTrace,
+  countRetellWebhookRefusal,
+  finishProductionTrace,
+  recordRetellWebhookDelivery,
+  recordRetellWebhookRegistration,
+  resolveRetellWatch,
+  sweepStaleProductionClaims,
+  type ProductionTraceClaim,
+  type ProductionTraceOffer,
+  type RetellWatchQuery,
+  type RetellWatchTarget,
+} from "./production-watch.ts";
+export type {
+  ProductionTransport,
+  RetellWebhookRefusal,
+} from "../schema/production.ts";
+
 
 export {
   archivePersona,

@@ -27,19 +27,29 @@ Each file in `egma/tests/` has two parts: a YAML front matter block and a set of
 
 ```yaml
 ---
+format: 3
 name: missed-appointment-reschedule
-personas: [impatient-caller]
+description: The caller missed an appointment and needs another time this week.
 version: tstv_01K…
+identity_revision: rev_01K…
+required_capabilities: [dtmf]
+personas:
+  - id: prs_01K…
+    name: Impatient caller
 ---
 ```
 
 | Field | Required | Description |
 |---|---|---|
+| `format` | No | The file format Egma writes. A new hand-authored file can omit it |
 | `name` | Yes | A short identifier for the test. Used as the filename and displayed in run output |
-| `personas` | No | A list of persona IDs to use for the simulation. Omit it and the default persona applies |
-| `version` | No | Written automatically by `egma pull` and `egma push`. Leave it out when creating a new test |
+| `description` | No | A short explanation shown beside the name |
+| `version` | No | The test-content version. `egma pull` and `egma push` write it |
+| `identity_revision` | No | The synced revision of the name and description. `egma pull` and `egma push` write it |
+| `required_capabilities` | No | Connection features that this test needs, such as `dtmf` |
+| `personas` | No | Persona identities used for the simulation. Omit the field to use the default persona |
 
-Name a persona only when the situation calls for a particular kind of caller. Most tests work fine with the default.
+Name a persona only when the situation calls for a particular kind of caller. Use an identity already written by `egma pull`; do not invent an ID. Most tests work fine with the default.
 
 ### Sections
 
@@ -75,10 +85,12 @@ Below the expected behaviors, you can add the same `### <tool-name>` sections us
 
 Use this when a test needs a specific backend state — an empty calendar, a failed payment, a service that is down — that the project-wide mock should not enforce globally.
 
-```markdown
+````markdown
 ## Expected behaviors
 1. The agent tells the caller that no slots are available this week.
 2. The agent offers to put the caller on a waitlist.
+
+## Mock tools
 
 ### check_availability
 ```json
@@ -87,7 +99,7 @@ Use this when a test needs a specific backend state — an empty calendar, a fai
   "delay_ms": 150
 }
 ```
-```
+````
 
 ## The mock-tools.md file
 
@@ -155,11 +167,17 @@ Each tool gets its own `###` section. The body is a JSON code block with the fol
 
 Here is a full test file showing every feature: front matter, scenario, expected behaviors, and a test-level tool override.
 
-```markdown
+````markdown
 ---
+format: 3
 name: missed-appointment-reschedule
-personas: [impatient-caller]
+description: The caller missed an appointment and needs another time this week.
 version: tstv_01JXMK8P2QN4R6S9T1UV3WX5Y
+identity_revision: rev_01JXMK8P2QN4R6S9T1UV3WX5Y
+required_capabilities: [dtmf]
+personas:
+  - id: prs_01JXMK8P2QN4R6S9T1UV3WX5Y
+    name: Impatient caller
 ---
 
 ## Scenario
@@ -175,6 +193,8 @@ had a booking confirmed by SMS, but the confirmation never arrived.
 3. The agent confirms the new booking before ending the call.
 4. The agent does not promise an SMS confirmation given the service outage.
 
+## Mock tools
+
 ### check_availability
 ```json
 {
@@ -189,7 +209,7 @@ had a booking confirmed by SMS, but the confirmation never arrived.
   "error": "SMS service unavailable"
 }
 ```
-```
+````
 
 ## Keeping local files in sync with Egma
 
@@ -197,7 +217,7 @@ The `egma/` folder and Egma each hold a copy of your tests. Sync is explicit —
 
 <Steps>
   <Step title="Pull Egma's current versions">
-    Run `egma pull` to write Egma's current version of every test into your local files. This updates the `version:` field in each file's front matter.
+    Run `egma pull` to write Egma's current version of every test into your local files. This updates the sync fields and known persona identities in each file's front matter.
 
     ```bash
     egma pull

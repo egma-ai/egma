@@ -79,7 +79,7 @@ export function ReachScreen({ options, onAnswer }: ReachScreenProps) {
         })}
       </Box>
       <Box height={1} />
-      <Text dimColor>Egma creates the one you choose, and only that one.</Text>
+      <Text dimColor>Egma creates this connection only after you confirm it.</Text>
       <Box height={1} />
       <Text dimColor>{hintBar(bindings)}</Text>
     </Box>

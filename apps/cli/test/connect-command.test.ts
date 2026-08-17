@@ -35,6 +35,7 @@ const ONE_AGENT: FakeRetellScript = {
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
+      channel: "chat",
       voice_id: "11labs-Adrian",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },
@@ -47,6 +48,11 @@ const ONE_AGENT: FakeRetellScript = {
       inbound_agents: [{ agent_id: "agent_0001" }],
     },
   ],
+};
+
+const VOICE_AGENT: FakeRetellScript = {
+  ...ONE_AGENT,
+  agents: ONE_AGENT.agents.map((agent) => ({ ...agent, channel: "voice" as const })),
 };
 
 const TWO_AGENTS: FakeRetellScript = {
@@ -132,10 +138,10 @@ function facts(stdout: string): Record<string, string> {
 }
 
 describe("egma connect", () => {
-  it("takes the key on standard input and registers a routed voice agent", async () => {
+  it("takes the key on standard input and registers the agent, asking nothing", async () => {
     retell = await startFakeRetell(ONE_AGENT);
 
-    const result = await egma(["connect", "--reach", "phone"], { stdin: `${KEY}\n` });
+    const result = await egma(["connect"], { stdin: `${KEY}\n` });
 
     expect(result.code).toBe(CONNECT_EXIT.connected);
     const said = facts(result.stdout);
@@ -149,11 +155,11 @@ describe("egma connect", () => {
     expect(said.agent_name).toBe("order-line");
     expect(said.agent_id).toMatch(/^agt_/u);
     expect(said.connection_id).toMatch(/^con_/u);
-    expect(said.connection_name).toBe("phone-1");
-    expect(said.connection_type).toBe("phone");
-    expect(said.connection_modality).toBe("voice");
-    expect(said.reach).toBe("phone");
-    expect(said.phone_number).toBe(DIALLED);
+    expect(said.connection_name).toBe("retell-1");
+    expect(said.connection_type).toBe("retell");
+    expect(said.connection_modality).toBe("chat");
+    expect(said.reach).toBe("text");
+    expect(said.phone_number).toBe("none");
     expect(said.agent_registration).toBe("created");
     expect(said.connection_registration).toBe("created");
     expect(said.grounded_in).toBe("retell");
@@ -166,7 +172,7 @@ describe("egma connect", () => {
     );
 
     expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.registered.sealed).toEqual([]);
+    expect(platform.registered.sealed).toEqual([KEY]);
     // The same four things the wizard's own walk writes, so a repository
     // connected by the verb and one connected by the wizard hold one file.
     expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
@@ -180,9 +186,7 @@ describe("egma connect", () => {
   it("takes the key from the environment, under either name", async () => {
     retell = await startFakeRetell(ONE_AGENT);
 
-    const ours = await egma(["connect"], {
-      env: { EGMA_RETELL_API_KEY: KEY, EGMA_REACH: "phone" },
-    });
+    const ours = await egma(["connect"], { env: { EGMA_RETELL_API_KEY: KEY } });
     expect(ours.code).toBe(CONNECT_EXIT.connected);
     expect(facts(ours.stdout).agent_name).toBe("order-line");
 
@@ -190,9 +194,7 @@ describe("egma connect", () => {
     // holds one needs nothing new set. The same Retell agent registered again
     // is the registration already there, said in a fact line a coding agent
     // reads rather than left to be worked out by counting agents.
-    const theirs = await egma(["connect"], {
-      env: { RETELL_API_KEY: KEY, EGMA_REACH: "phone" },
-    });
+    const theirs = await egma(["connect"], { env: { RETELL_API_KEY: KEY } });
     expect(theirs.code).toBe(CONNECT_EXIT.connected);
     expect(facts(theirs.stdout).agent_name).toBe("order-line");
     expect(facts(theirs.stdout).registration).toBe("reused");
@@ -200,7 +202,7 @@ describe("egma connect", () => {
     expect(facts(theirs.stdout).agent_registration).toBe("reused");
     expect(facts(theirs.stdout).connection_registration).toBe("reused");
     expect(theirs.stdout).toContain(
-      "note: This voice agent was already registered as order-line, and phone-1 was " +
+      "note: This voice agent was already registered as order-line, and retell-1 was " +
         "already the way Egma reaches it. Nothing new was registered.",
     );
     expect(platform.registered.agents).toHaveLength(1);
@@ -258,7 +260,7 @@ describe("egma connect", () => {
   it("commits the platform before it asks the platform to create anything", async () => {
     retell = await startFakeRetell(ONE_AGENT);
 
-    const connected = await egma(["connect", "--reach", "phone"], { stdin: KEY });
+    const connected = await egma(["connect"], { stdin: KEY });
     expect(connected.code).toBe(CONNECT_EXIT.connected);
 
     const written = await readConfig(folderPathsIn(workspace.dir).config);
@@ -296,16 +298,13 @@ describe("egma connect", () => {
   it("connects the agent that was named, by flag or by variable", async () => {
     retell = await startFakeRetell(TWO_AGENTS);
 
-    const byFlag = await egma(
-      ["connect", "--retell-agent", "agent_0002", "--reach", "text"],
-      { stdin: KEY },
-    );
+    const byFlag = await egma(["connect", "--retell-agent", "agent_0002"], { stdin: KEY });
     expect(byFlag.code).toBe(CONNECT_EXIT.connected);
     expect(facts(byFlag.stdout).agent_name).toBe("after-hours");
 
     const byVariable = await egma(["connect"], {
       stdin: KEY,
-      env: { EGMA_RETELL_AGENT_ID: "agent_0001", EGMA_REACH: "text" },
+      env: { EGMA_RETELL_AGENT_ID: "agent_0001" },
     });
     expect(byVariable.code).toBe(CONNECT_EXIT.connected);
     expect(facts(byVariable.stdout).agent_name).toBe("order-line");
@@ -350,25 +349,19 @@ describe("egma connect", () => {
     retell = await startFakeRetell(ONE_AGENT);
     await writeFile(path.join(workspace.dir, "prompt.md"), "Always quote a price.\n", "utf8");
 
-    const drifted = await egma(
-      ["connect", "--reach", "phone", "--repo-prompt", "prompt.md"],
-      { stdin: KEY },
-    );
+    const drifted = await egma(["connect", "--repo-prompt", "prompt.md"], { stdin: KEY });
     expect(drifted.code).toBe(CONNECT_EXIT.connected);
     expect(facts(drifted.stdout).drift).toBe("yes");
     expect(drifted.stdout.split("\n").filter((line) => line.includes(DRIFT_LINE))).toHaveLength(1);
 
     // The same file holding the same words says nothing at all.
     await writeFile(path.join(workspace.dir, "same.md"), PROMPT, "utf8");
-    const same = await egma(
-      ["connect", "--reach", "phone", "--repo-prompt", "same.md"],
-      { stdin: KEY },
-    );
+    const same = await egma(["connect", "--repo-prompt", "same.md"], { stdin: KEY });
     expect(facts(same.stdout).drift).toBe("no");
     expect(same.stdout).not.toContain(DRIFT_LINE);
 
     // And with nothing to compare against, nothing is claimed either way.
-    const unknown = await egma(["connect", "--reach", "phone"], { stdin: KEY });
+    const unknown = await egma(["connect"], { stdin: KEY });
     expect(facts(unknown.stdout).drift).toBe("not-compared");
     expect(unknown.stdout).not.toContain(DRIFT_LINE);
   });
@@ -392,8 +385,27 @@ describe("egma connect", () => {
  * dial somebody's telephone.
  */
 describe("which connection egma creates", () => {
+  it("refuses an explicit reach that the Retell agent does not support before writing", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+
+    const result = await egma(["connect", "--reach", "text"], { stdin: KEY });
+
+    expect(result.code).toBe(CONNECT_EXIT.unchosen);
+    expect(facts(result.stdout).status).toBe("incompatible-reach");
+    expect(result.stdout).toContain("reach_option: phone");
+    expect(result.stdout).not.toContain("reach_option: text");
+    expect(result.stderr).toContain(
+      "Voice agents can be reached only by phone, not text. Choose phone and try again.",
+    );
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+    await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("creates only the phone connection, holding the number and nothing else", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(VOICE_AGENT);
 
     const result = await egma(["connect", "--reach", "phone"], { stdin: KEY });
 
@@ -418,16 +430,15 @@ describe("which connection egma creates", () => {
   });
 
   it("creates nothing at all when neither way was chosen", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(VOICE_AGENT);
 
     const result = await egma(["connect"], { stdin: KEY, env: { EGMA_REACH: "" } });
 
     expect(result.code).toBe(CONNECT_EXIT.unchosen);
     expect(facts(result.stdout).status).toBe("unchosen-reach");
-    // This is a voice agent, so phone is the only safe route offered.
+    // Only the compatible way was put on the screen, and it was not taken.
     expect(result.stdout).not.toContain("reach_option: text");
     expect(result.stdout).toContain("reach_option: phone");
-    expect(result.stderr).toContain("Choose --reach phone");
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
     await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
@@ -447,9 +458,9 @@ describe("which connection egma creates", () => {
 
   it("says which numbers reach the agent when it will not guess between them", async () => {
     retell = await startFakeRetell({
-      ...ONE_AGENT,
+      ...VOICE_AGENT,
       numbers: [
-        ...(ONE_AGENT.numbers ?? []),
+        ...(VOICE_AGENT.numbers ?? []),
         {
           phone_number: "+14155550999",
           nickname: "overflow",
@@ -472,7 +483,7 @@ describe("which connection egma creates", () => {
   });
 
   it("says plainly when Retell routes no number to the agent", async () => {
-    retell = await startFakeRetell({ ...ONE_AGENT, numbers: [] });
+    retell = await startFakeRetell({ ...VOICE_AGENT, numbers: [] });
 
     const result = await egma(["connect", "--reach", "phone"], { stdin: KEY });
 
@@ -483,7 +494,7 @@ describe("which connection egma creates", () => {
   });
 
   it("is deterministic under retry, and says which half it wrote each time", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(VOICE_AGENT);
 
     const first = await egma(["connect", "--reach", "phone"], { stdin: KEY });
     const again = await egma(["connect", "--reach", "phone"], { stdin: KEY });
@@ -501,6 +512,45 @@ describe("which connection egma creates", () => {
 });
 
 describe("the whole walk, headless", () => {
+  it("prints the compatible Retell reach and stops before writing on a mismatch", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:found framework retell-sdk\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const result = await egma(
+      [
+        "--headless",
+        "--reach",
+        "text",
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        new URL("./support/fake-agent.ts", import.meta.url).pathname,
+        script,
+      ],
+      { env: { EGMA_RETELL_API_KEY: KEY } },
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain("reach_option: phone");
+    expect(result.stdout).not.toContain("reach_option: text");
+    expect(result.stdout).toContain(
+      "Egma could not finish: Retell says this is a voice agent. " +
+        "Voice agents can be reached only by phone, not text. Choose phone and try again. " +
+        "Nothing was written.",
+    );
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+    await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("finds the agent, connects it, and leaves one line behind", async () => {
     retell = await startFakeRetell(ONE_AGENT);
     await writeFile(path.join(workspace.dir, "prompt.md"), "Always quote a price.\n", "utf8");
@@ -545,7 +595,7 @@ describe("the whole walk, headless", () => {
         new URL("./support/fake-agent.ts", import.meta.url).pathname,
         script,
       ],
-      { env: { EGMA_RETELL_API_KEY: KEY, EGMA_REACH: "phone" } },
+      { env: { EGMA_RETELL_API_KEY: KEY } },
     );
     grading.stop();
 
@@ -553,7 +603,7 @@ describe("the whole walk, headless", () => {
     // The drift the coding agent's answer made checkable, said once.
     expect(result.stdout).toContain(DRIFT_LINE);
     expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.registered.connections[0]?.name).toBe("phone-1");
+    expect(platform.registered.connections[0]?.name).toBe("retell-1");
 
     // And the walk did not stop at connecting: the test the coding agent wrote
     // is a file in the repository and a version on egma.

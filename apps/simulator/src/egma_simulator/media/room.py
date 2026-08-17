@@ -1,22 +1,4 @@
-"""A LiveKit room, joined outbound: what every room driver shares.
-
-Two drivers in this package reach an agent through a LiveKit room, and
-they reach it the same way — a room created by egma, a token minted for
-the persona alone, a websocket the simulator opens and ICE it negotiates,
-audio in and out through Pipecat's stock transport, and the room deleted
-when it is over. What differs between them is only *how the agent gets
-into the room*: over a SIP trunk for a phone call, by dispatching a worker
-for a room connection. That difference is each driver's own; everything
-above is here, written once.
-
-Nothing in this file reads the environment and nothing decides policy. It
-is handed a URL, a key pair and a band, and it opens and closes one room.
-
-(``from livekit import api`` inside it reaches the installed LiveKit
-package, not the module beside it: Python resolves imports absolutely.
-Every such import sits inside a function, so a simulator that joins no
-room never loads the library at all — see the quarantine suite.)
-"""
+"""A LiveKit room exposed directly to the simulator's Pipecat pipeline."""
 
 from __future__ import annotations
 
@@ -25,85 +7,40 @@ import contextlib
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from ..contract import ERROR
 from ..mock_tools import MockToolRefusal
-from . import MediaBackendError
+from . import MediaBackendError, RemoteParticipantLeftFrame, VoiceMedia
 
 logger = logging.getLogger(__name__)
 
 RpcMethod = Callable[[str], Awaitable[str]]
-"""One method somebody in the room may call: a payload in, a payload out.
-
-Deliberately the whole surface. What answers these knows nothing about
-rooms, participants or LiveKit — it takes the bytes of a request and hands
-back the bytes of a reply — so the same handler is registered against a
-real room and against the room-shaped fake with nothing in it changing.
-"""
 
 ROOM_PREFIX = "egma-sim"
-"""What a simulation's room is called. One room per simulation, never
-reused — a room that outlived its exchange would put two simulations on
-one line."""
-
 PERSONA_IDENTITY = "egma-persona"
-"""Who the simulator is in the room. The *agent* under test is whoever
-else turns up; this name is only ever the persona's."""
-
 CONNECT_SECONDS = 30.0
-"""How long joining the room may take before it counts as a server that
-cannot be reached."""
-
-TEARDOWN_SECONDS = 10.0
-"""How long a torn-down exchange may take to finish before it is cancelled."""
-
+AUDIO_STREAM_CLOSE_SECONDS = 2.0
+PIPECAT_VERSION = "1.7.0"
+LIVEKIT_VERSION = "1.1.14"
 QUOTED_REFUSAL_CHARS = 200
-"""How much of somebody else's refusal is quoted into a reason: enough to
-carry their own words about what was wrong, short of pasting a page."""
 
 
 def fresh_room_name() -> str:
-    """A room name nothing else will ever have."""
     return f"{ROOM_PREFIX}-{uuid.uuid4().hex}"
 
 
 def room_name_for(simulation_id: str) -> str:
-    """The room one simulation is conducted in, named after it.
-
-    For the connections where egma does not open the room itself but asks
-    somebody else for a token into it. The name has to be one the other
-    side can check rather than one only egma knows, and a simulation's own
-    id is exactly that: unique because a simulation is, and derived from
-    what egma is about to ask for, so an endpoint can hold egma to it.
-    """
     return f"{ROOM_PREFIX}-{simulation_id}"
 
 
 def persona_name_for(simulation_id: str) -> str:
-    """Who the simulator is in that room — the persona, never the agent.
-
-    Carries the simulation's id for the same reason the room name does: it
-    is asked for by name, so it has to be a name that names one simulation
-    and a token can be minted for exactly it.
-    """
     return f"{PERSONA_IDENTITY}-{simulation_id}"
 
 
 def answering(handler: RpcMethod) -> Callable[[Any], Awaitable[str]]:
-    """One handler, wrapped so its refusals leave as the room's own error.
-
-    What answers a method raises :class:`MockToolRefusal` when it will not
-    answer — a payload it cannot read, a tool it has no answer for — and
-    the room turns that into the transport's typed error, code and
-    sentence intact, so the caller is refused rather than left waiting.
-    Anything else the handler raises is the caller's to hear as an
-    application error, which is what the transport does with it by default.
-
-    The wrapping is here, once, rather than at each place a handler is
-    registered: a room-shaped fake that converted refusals its own way
-    would be proving its own conversion rather than this one.
-    """
+    """Turn an Egma mock-tool refusal into LiveKit's typed RPC refusal."""
 
     async def answer(invocation: Any) -> str:
         from livekit import rtc
@@ -117,7 +54,7 @@ def answering(handler: RpcMethod) -> Callable[[Any], Awaitable[str]]:
 
 
 async def first_of(*events: asyncio.Event, within: float) -> bool:
-    """Wait until one of these happens, or say that none did."""
+    """Wait until one event occurs, or return false at the deadline."""
     waiting = [asyncio.ensure_future(event.wait()) for event in events]
     try:
         done, _pending = await asyncio.wait(
@@ -132,105 +69,243 @@ async def first_of(*events: asyncio.Event, within: float) -> bool:
     return bool(done)
 
 
-class RoomSession:
-    """The audio of one exchange, once the room is joined.
+class _JoinAfterPipecatConversion(asyncio.Queue[Any]):
+    """Make Pipecat's stock client iterator joinable without replacing it."""
 
-    Frames of the far end's audio arrive from the transport's input and
-    wait in a queue; the persona's audio goes out through the transport's
-    output, which paces it onto the wire the way a voice really travels.
+    def __init__(self) -> None:
+        super().__init__()
+        self._borrowed = False
+
+    async def get(self) -> Any:
+        # Pipecat asks for the next item only after it converted and put the
+        # prior one into BaseInput. That point is the missing queue ack in
+        # 1.7.0, so a join covers the unchanged conversion/push path.
+        if self._borrowed:
+            self.task_done()
+            self._borrowed = False
+        item = await super().get()
+        self._borrowed = True
+        return item
+
+
+class _Pipecat17InputDrain:
+    """Order participant departure after Pipecat 1.7.0's inbound queues.
+
+    Pipecat has no public input-drain operation. LiveKit 1.1.14's iterator also
+    stops as soon as its native task ends, before it reads buffered frames that
+    precede the queue's explicit end marker. This exact-version shim replaces
+    its stream reader and close coordinator, makes its existing client iterator
+    joinable, then joins BaseInput before one ordinary control frame enters the
+    pipeline. Pipecat's conversion and push path remain unchanged.
     """
 
-    def __init__(self, transport: object, *, band_hz: int) -> None:
-        self._transport = transport
-        self._band_hz = band_hz
-        self._heard: asyncio.Queue[bytes] = asyncio.Queue()
-        self._left = asyncio.Event()
-        self._carrying = asyncio.Event()
-        self._observed_band_hz: int | None = None
-
-    @property
-    def sample_rate_hz(self) -> int:
-        return self._band_hz
-
-    @property
-    def observed_band_hz(self) -> int | None:
-        """The band the far end's audio really arrived at, or ``None``.
-
-        Read off the frames the transport handed over rather than taken
-        from :attr:`sample_rate_hz`, which is only what this session was
-        *asked* for. They agree while the transport resamples to the band
-        the pipeline was assembled at, and the whole value of this
-        property is the day one of them stops being true: a record that
-        copied the request would say 8 kHz about audio that was not.
-        """
-        return self._observed_band_hz
-
-    @property
-    def far_end_left(self) -> bool:
-        return self._left.is_set()
-
-    @property
-    def carrying_audio(self) -> asyncio.Event:
-        """Set once the far end's audio has flowed at all.
-
-        A latch rather than a level: a driver waits on it to learn that
-        the other side is really on the line, and what happens to the
-        audio afterwards is the turn reader's business.
-        """
-        return self._carrying
-
-    def note_arrival(self, pcm: bytes, band_hz: int | None = None) -> None:
-        self._heard.put_nowait(pcm)
-        self._carrying.set()
-        if band_hz:
-            self._observed_band_hz = band_hz
-
-    def note_departure(self) -> None:
-        """The far end is off the line — its participant left the room.
-
-        There is no other signal and no better one: the agent leaving the
-        room *is* the agent ending the exchange.
-        """
-        self._left.set()
-
-    async def send(self, pcm: bytes) -> None:
-        """One slice of the persona's voice, put on the wire and left there.
-
-        The transport writes audio out at the rate a voice really travels,
-        so handing it a slice and returning is all there is to do: the
-        pacing is the wire's and the waiting is done on the far end's
-        audio arriving, one slice for one slice.
-
-        Nothing that arrived meanwhile is touched, and that is the change
-        this line exists for. It used to wait out the audio's own length
-        and throw away everything the room carried while the persona was
-        speaking — which threw away every word an agent said over the top
-        of it, and left a record that showed an exchange without
-        interruptions whatever really happened.
-        """
-        from pipecat.frames.frames import OutputAudioRawFrame
-
-        await self._transport.send_audio(
-            OutputAudioRawFrame(
-                audio=pcm, sample_rate=self._band_hz, num_channels=1
-            )
-        )
-
-    async def receive(self, seconds: float) -> bytes | None:
+    def __init__(self, input_transport: object, failed: asyncio.Event) -> None:
         try:
-            return await asyncio.wait_for(self._heard.get(), timeout=seconds)
-        except TimeoutError:
+            from livekit import rtc
+            from livekit.rtc._utils import RingQueue
+
+            installed_pipecat = version("pipecat-ai")
+            installed_livekit = version("livekit")
+        except (ImportError, PackageNotFoundError) as changed:
+            raise MediaBackendError(
+                "the installed voice transport no longer matches its pinned "
+                "media drain",
+                ending=ERROR,
+            ) from changed
+        if (
+            installed_pipecat != PIPECAT_VERSION
+            or installed_livekit != LIVEKIT_VERSION
+            or not callable(RingQueue.get)
+            or not callable(rtc.AudioStream.aclose)
+        ):
+            raise MediaBackendError(
+                "the installed voice transport no longer matches its pinned "
+                "media drain",
+                ending=ERROR,
+            )
+        try:
+            client = input_transport._client
+            audio_queue = client._audio_queue
+            streams = client._audio_streams
+            reader = client._process_audio_stream
+            client_iterator = client.get_next_audio_frame
+            stream_closer = client._close_audio_stream
+        except AttributeError as changed:
+            raise MediaBackendError(
+                "pipecat 1.7 no longer exposes the livekit input drain needed "
+                "to order participant departure after audio",
+                ending=ERROR,
+            ) from changed
+        if (
+            type(audio_queue) is not asyncio.Queue
+            or not audio_queue.empty()
+            or not isinstance(streams, dict)
+            or not callable(reader)
+            or not callable(client_iterator)
+            or not callable(stream_closer)
+        ):
+            raise MediaBackendError(
+                "pipecat 1.7 no longer exposes the livekit input drain needed "
+                "to order participant departure after audio",
+                ending=ERROR,
+            )
+        self._input = input_transport
+        self._failed = failed
+        self._stock_close = stream_closer
+        self._canceling = False
+        self._audio_queue = _JoinAfterPipecatConversion()
+        client._audio_queue = self._audio_queue
+        self._ring_queue_type = RingQueue
+        self._audio_event_type = rtc.AudioFrameEvent
+        self._streams: dict[str, tuple[object, asyncio.Task[Any]]] = streams
+        self._finishes: dict[
+            str,
+            tuple[
+                tuple[object, asyncio.Task[Any]],
+                asyncio.Task[None],
+            ],
+        ] = {}
+        self._departures: dict[str, asyncio.Task[None]] = {}
+        client._process_audio_stream = self._read_audio_stream
+        client._close_audio_stream = self.finish_stream
+
+    async def _read_audio_stream(self, stream: object, participant_id: str) -> None:
+        """Read LiveKit 1.1.14 through its explicit end marker."""
+        try:
+            queue = stream._queue
+            if not isinstance(queue, self._ring_queue_type):
+                raise RuntimeError
+            while True:
+                event = await queue.get()
+                if event is None:
+                    return
+                if not isinstance(event, self._audio_event_type):
+                    raise RuntimeError
+                await self._audio_queue.put((event, participant_id))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._failed.set()
+            raise RuntimeError("the livekit input stream could not be read") from None
+
+    def _finish_for(self, participant_id: str) -> asyncio.Task[None] | None:
+        entry = self._streams.get(participant_id)
+        owned = self._finishes.get(participant_id)
+        if owned is not None:
+            owned_entry, finish = owned
+            if entry is None or entry is owned_entry:
+                return finish
+        if entry is None:
             return None
+        finish = asyncio.create_task(
+            self._finish_stream(participant_id, entry),
+            name="livekit-audio-stream-finish",
+        )
+        self._finishes[participant_id] = (entry, finish)
+        return finish
+
+    async def finish_stream(self, participant_id: str) -> None:
+        """Drain one unsubscribed stream without declaring a departure."""
+        if self._canceling:
+            await self._stock_close(participant_id)
+            return
+        finish = self._finish_for(participant_id)
+        if finish is not None:
+            await asyncio.shield(finish)
+
+    async def _finish_stream(
+        self,
+        participant_id: str,
+        entry: tuple[object, asyncio.Task[Any]],
+    ) -> None:
+        stream, reader = entry
+        try:
+            async with asyncio.timeout(AUDIO_STREAM_CLOSE_SECONDS):
+                if self._streams.get(participant_id) is entry:
+                    self._streams.pop(participant_id)
+                await stream.aclose()
+                await reader
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+            self._failed.set()
+            raise RuntimeError("the livekit input stream could not be closed") from None
+        except Exception:
+            self._failed.set()
+            raise RuntimeError("the livekit input stream could not be closed") from None
+        finally:
+            if not reader.done():
+                reader.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await reader
+
+    async def participant_left(
+        self, participant_id: str, completed: asyncio.Event
+    ) -> None:
+        departure = self._departures.get(participant_id)
+        if departure is None:
+            departure = asyncio.create_task(
+                self._finish_departure(participant_id, completed),
+                name="livekit-participant-departure",
+            )
+            self._departures[participant_id] = departure
+        await asyncio.shield(departure)
+
+    def _require_working_media(self) -> None:
+        if self._failed.is_set():
+            raise RuntimeError("the livekit input failed before participant departure")
+
+    async def _finish_departure(
+        self, participant_id: str, completed: asyncio.Event
+    ) -> None:
+        finish = self._finish_for(participant_id)
+        try:
+            async with asyncio.timeout(AUDIO_STREAM_CLOSE_SECONDS):
+                if finish is not None:
+                    await asyncio.shield(finish)
+                self._require_working_media()
+                await self._audio_queue.join()
+                self._require_working_media()
+                try:
+                    input_queue = self._input._audio_in_queue
+                except AttributeError as changed:
+                    raise RuntimeError(
+                        "pipecat no longer exposes its audio input queue"
+                    ) from changed
+                if not isinstance(input_queue, asyncio.Queue):
+                    raise RuntimeError(
+                        "pipecat no longer exposes its audio input queue"
+                    )
+                await input_queue.join()
+                self._require_working_media()
+                acknowledged = asyncio.Event()
+                marker = RemoteParticipantLeftFrame(completed=acknowledged)
+                await self._input.push_frame(marker)
+                await acknowledged.wait()
+                completed.set()
+        except TimeoutError:
+            if finish is not None and not finish.done():
+                finish.cancel()
+                await asyncio.gather(finish, return_exceptions=True)
+            raise
+
+    async def cancel(self) -> None:
+        """Cancel and reap owned media work before local transport cleanup."""
+        self._canceling = True
+        owned = [*self._departures.values()]
+        owned.extend(finish for _entry, finish in self._finishes.values())
+        pending = list({task for task in owned if not task.done()})
+        for task in pending:
+            task.cancel()
+        if pending:
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(AUDIO_STREAM_CLOSE_SECONDS):
+                    await asyncio.gather(*pending, return_exceptions=True)
 
 
 class JoinedRoom:
-    """One room, from the way in to the way out.
-
-    Built with everything it needs and nothing it could look up: the
-    server, a token already minted, the room's name, and the band the
-    pipeline above was assembled at. ``join`` opens it or refuses in the
-    server's own words; ``leave`` ends the transport from any state.
-    """
+    """One LiveKit transport, owned by the conductor's only pipeline."""
 
     def __init__(
         self,
@@ -238,184 +313,148 @@ class JoinedRoom:
         url: str,
         token: str,
         room_name: str,
-        band_hz: int,
         quotable: Callable[[str], str] = lambda told: told,
     ) -> None:
         self._url = url
         self._token = token
         self._room_name = room_name
-        self._band_hz = band_hz
         self._quotable = quotable
-        self._session: RoomSession | None = None
         self._transport: object | None = None
-        self._worker: object | None = None
-        self._running: asyncio.Task | None = None
-        self.arrivals: asyncio.Event = asyncio.Event()
-        """Set once somebody other than the persona is in the room."""
-
-    @property
-    def session(self) -> RoomSession | None:
-        """The exchange's audio, once the room is joined."""
-        return self._session
+        self._input_drain: _Pipecat17InputDrain | None = None
+        self._connected = asyncio.Event()
+        self.arrivals = asyncio.Event()
+        self.carrying_audio = asyncio.Event()
+        self.ended = asyncio.Event()
+        self.failed = asyncio.Event()
+        self._leaving = False
 
     @property
     def joined(self) -> bool:
-        """Whether a room was ever really opened. Nothing to delete if not."""
         return self._transport is not None
 
-    async def join(self) -> RoomSession:
-        """Join the room, outbound, and answer with the exchange's audio."""
+    def create_transport(self) -> VoiceMedia:
+        """Create stock LiveKit input and output processors without rates."""
         from pipecat.frames.frames import Frame, InputAudioRawFrame
-        from pipecat.pipeline.pipeline import Pipeline
-        from pipecat.pipeline.worker import PipelineParams, PipelineWorker
         from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
         from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
-        from pipecat.workers.runner import WorkerRunner
 
         transport = LiveKitTransport(
             url=self._url,
             token=self._token,
             room_name=self._room_name,
-            params=LiveKitParams(
-                audio_in_enabled=True,
-                audio_out_enabled=True,
-                audio_in_sample_rate=self._band_hz,
-                audio_out_sample_rate=self._band_hz,
-            ),
+            params=LiveKitParams(audio_in_enabled=True, audio_out_enabled=True),
         )
         self._transport = transport
-        session = RoomSession(transport, band_hz=self._band_hz)
-        joined = asyncio.Event()
-        refused = asyncio.Event()
-        told: list[str] = []
+        input_transport = transport.input()
+        try:
+            input_drain = _Pipecat17InputDrain(input_transport, self.failed)
+        except Exception:
+            self.failed.set()
+            raise
+        self._input_drain = input_drain
 
         @transport.event_handler("on_connected")
-        async def _in_the_room(_transport: object) -> None:
-            joined.set()
+        async def _connected(_transport: object) -> None:
+            self._connected.set()
+
+        @transport.event_handler("on_before_disconnect")
+        async def _before_disconnect(_transport: object) -> None:
+            # Pipecat fires this awaited event before its own stop/cancel path
+            # closes streams. Take down an in-flight remote departure first.
+            self._leaving = True
+            await input_drain.cancel()
+
+        @transport.event_handler("on_disconnected")
+        async def _disconnected(_transport: object) -> None:
+            if not self._leaving:
+                self.failed.set()
+                await input_drain.cancel()
 
         @transport.event_handler("on_participant_connected")
-        async def _somebody_arrived(_transport: object, _participant: str) -> None:
+        async def _arrived(_transport: object, _participant: str) -> None:
             self.arrivals.set()
 
         @transport.event_handler("on_participant_disconnected")
-        async def _far_end_left(_transport: object, _participant: str) -> None:
-            session.note_departure()
+        async def _left(_transport: object, participant: str) -> None:
+            if self._leaving:
+                return
+            try:
+                await input_drain.participant_left(participant, self.ended)
+            except Exception:
+                logger.warning(
+                    "the livekit input drain failed before participant departure"
+                )
+                self.failed.set()
 
-        class _Ear(FrameProcessor):
-            """Where the far end's audio leaves the transport and becomes
-            this exchange's audio."""
+        room = self
 
+        class _Arrival(FrameProcessor):
             async def process_frame(
                 self, frame: Frame, direction: FrameDirection
             ) -> None:
                 await super().process_frame(frame, direction)
                 if isinstance(frame, InputAudioRawFrame):
-                    # The frame's own band, not the one asked for: this is
-                    # the one place in the whole path where what the audio
-                    # really is can be read rather than assumed.
-                    session.note_arrival(frame.audio, frame.sample_rate)
+                    room.carrying_audio.set()
                 await self.push_frame(frame, direction)
 
-        worker = PipelineWorker(
-            Pipeline([transport.input(), _Ear(), transport.output()]),
-            params=PipelineParams(
-                audio_in_sample_rate=self._band_hz,
-                audio_out_sample_rate=self._band_hz,
-            ),
-            # The walk owns the clock and the limits; a transport that
-            # cancelled itself for being quiet would be a second, hidden
-            # limit with no record of having tripped.
-            idle_timeout_secs=None,
-            enable_turn_tracking=False,
-            enable_rtvi=False,
+        return VoiceMedia(
+            input=(input_transport, _Arrival()),
+            output=(transport.output(),),
+            ended=self.ended,
+            failed=self.failed,
+            transport_name=f"livekit server at {self._quotable(self._url)}",
         )
 
-        @worker.event_handler("on_pipeline_error")
-        async def _went_wrong(_worker: object, error: object) -> None:
-            # A transport that cannot reach the server says so *here* and
-            # nowhere else: the failure travels back up the pipeline as an
-            # error frame the library itself calls non-fatal, and the
-            # start frame reaches the end of the pipeline regardless. Read
-            # any other way, a room that was never joined would look like
-            # a room that was, and the exchange would be conducted into it.
-            told.append(str(getattr(error, "error", error)))
-            refused.set()
-
-        self._worker = worker
-        runner = WorkerRunner(handle_sigint=False)
-        await runner.add_workers(worker)
-        self._running = asyncio.create_task(
-            runner.run(), name=f"room-transport:{self._room_name}"
-        )
-
-        if not await first_of(joined, refused, within=CONNECT_SECONDS):
+    async def wait_connected(self) -> None:
+        """Wait for the running Pipecat transport to enter the room."""
+        if not await first_of(
+            self._connected, self.ended, self.failed, within=CONNECT_SECONDS
+        ):
             raise MediaBackendError(
                 f"the livekit server at {self._url} did not let the simulator "
                 f"into a room within {CONNECT_SECONDS:.0f}s",
                 ending=ERROR,
             )
-        if refused.is_set():
+        if self.failed.is_set() or not self._connected.is_set():
             raise MediaBackendError(
-                f"the livekit server at {self._url} would not let the "
-                f"simulator into a room: {self._quotable('; '.join(told))}",
+                f"the livekit server at {self._url} closed the room while the "
+                "simulator was joining",
                 ending=ERROR,
             )
-
-        self._session = session
-        return session
 
     def register_rpc(self, method: str, handler: RpcMethod) -> None:
-        """Let anybody in the room call ``method`` on egma's participant.
-
-        Room membership is the whole of the authorisation, and that is the
-        design rather than a shortcut: a token into one room is minted for
-        one simulation and nothing else, so the only callers are the agent
-        egma is testing and egma itself. In a room with no egma
-        participant there is nothing registered and nothing to call, which
-        is what makes production safe by absence rather than by
-        configuration.
-        """
         if self._transport is None:
             raise MediaBackendError(
-                f"{method} was offered before the room was joined; there is "
-                "no participant to register it on",
+                f"{method} was offered before the room transport existed",
                 ending=ERROR,
             )
-        # The transport offers no public way to the room it joined, so this
-        # reaches through it to the participant underneath. A debt owed to
-        # the pinned version, and a small one: it is the one line of this
-        # file that knows the transport has an inside, and the seam it
-        # serves is named in the four verbs above it.
+        # Pipecat 1.7.0 offers no public path from LiveKitTransport to its
+        # local participant. This one access is pinned in uv.lock and covered
+        # by the room mock-tool tests.
         self._transport._client.room.local_participant.register_rpc_method(
             method, answering(handler)
         )
 
     async def leave(self) -> None:
-        """End the transport and let go of it, from any state."""
-        if self._running is None:
-            return
-        from pipecat.frames.frames import EndFrame
-
-        try:
-            await self._worker.queue_frame(EndFrame())
-            await asyncio.wait_for(
-                asyncio.shield(self._running), timeout=TEARDOWN_SECONDS
-            )
-        except Exception as unfinished:
-            logger.warning(
-                "the exchange's transport did not end cleanly: %r", unfinished
-            )
-        finally:
-            if not self._running.done():
-                self._running.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await self._running
-            self._running = None
-            self._session = None
+        """Release transport event handlers after the pipeline has ended."""
+        transport, self._transport = self._transport, None
+        input_drain, self._input_drain = self._input_drain, None
+        self._leaving = True
+        self.ended.set()
+        if input_drain is not None:
+            await input_drain.cancel()
+        if transport is not None:
+            try:
+                await transport.cleanup()
+            except Exception as unfinished:
+                logger.warning(
+                    "the exchange's transport did not clean up: %s",
+                    self._quotable(repr(unfinished)),
+                )
 
 
 def room_token(api_key: str, api_secret: str, room_name: str) -> str:
-    """The persona's own way into its room, and nothing else's."""
+    """Mint the persona's way into one room."""
     from livekit import api
 
     return (
@@ -442,21 +481,9 @@ async def delete_room(
     room_name: str,
     quotable: Callable[[str], str] = lambda told: told,
 ) -> None:
-    """Delete the room, and never raise about it.
-
-    Deleting is what ends everything the room held — a SIP leg, a
-    dispatched worker, the persona's own connection — so it is done on
-    every path out. A room that was never created, or a server that
-    cannot be reached to be told, has nothing left to be told; that is
-    logged rather than raised, because a refusal here would eat the
-    conductor's own answer.
-    """
+    """Delete a room, logging teardown failure instead of replacing the run."""
     from livekit import api
 
-    # Built inside the guard, not before it: a client that cannot even be
-    # constructed — a URL nothing can parse — must not turn teardown into
-    # a raise, because whatever raises here replaces the conductor's own
-    # answer with a complaint about tidying up.
     lkapi = None
     try:
         lkapi = api.LiveKitAPI(url, api_key, api_secret)

@@ -45,21 +45,19 @@ customer's side:
 
 - ``url`` (string, required) — as above, and what the join falls back on
   where the endpoint's answer names no server of its own.
-- ``tokenEndpoint`` (string, required) — an ``http`` or ``https`` address
-  egma POSTs to, once per simulation.
+- ``tokenEndpoint`` (string, required) — the public ``https`` address egma
+  POSTs to, once per simulation. The simulator repeats the HTTPS check before an
+  auth header or room token can cross the network.
 
-Its credentials are that endpoint's auth ``headers``, and they may be
-absent where the endpoint is open to egma alone. There is no agent name
-and no metadata, because both are powers a key pair buys: this shape holds
-none, so **dispatching is the endpoint's job** — and a room nobody joined
-says exactly that.
+Its credentials are that endpoint's auth ``headers``. They are required. There
+is no agent name and no metadata, because both are powers a key pair buys: this
+shape holds none, so **dispatching is the endpoint's job** — and a room nobody
+joined says exactly that.
 
-## The band an exchange in a room is carried at
+## Media
 
-Always :data:`ROOM_BAND_HZ` — wideband, where a phone call is narrowband
-— and there is no way to ask for another. WebRTC negotiates its own codec
-and the transport resamples what arrives, so what a record stamps is
-measured off the audio the recorder really saw.
+The stock Pipecat LiveKit transport owns the room's input, output,
+conversion, and pacing. Egma does not select or expose a processing rate.
 
 ## Answering for the agent's tools
 
@@ -73,23 +71,18 @@ it to the driver that joins the room, and the driver offers it there.
 
 ## Where a turn begins and ends
 
-Nowhere in here. A live room carries no end-of-turn signal any more than a
-phone line does, so this plug declares none: it is a **duplex line**,
-driven one slice of audio at a time with both directions open at once, and
-where the turns fall is the conductor's reading of that audio. What every
-plug over a live line shares — turning the transport's own frames into
-slices of the same width — is :mod:`egma_simulator.plugs.media_line`.
+Nowhere in here. A live room carries no end-of-turn signal. The one
+running Pipecat pipeline reads those turns from the transport's frames.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from ..media import MediaBackendError
-from ..media.livekit_room import ROOM_BAND_HZ, LiveKitRoomBackend, RoomSettings
+from ..media import MediaBackendError, VoiceMedia
+from ..media.livekit_room import LiveKitRoomBackend, RoomSettings
 from ..mock_tools import MockToolSeam
 from . import PlugError
-from .media_line import MediaLine
 
 AGENT_JOIN_SECONDS = 30.0
 """How long the room may stand empty before nobody coming is the answer.
@@ -135,15 +128,13 @@ class LiveKitRoom:
         # one, and it is the one below. The keyword is for tests, which put
         # a room-shaped fake behind the same seam rather than stand up a
         # LiveKit.
-        self._band_hz = ROOM_BAND_HZ
         self._backend = _built(
             driver or LiveKitRoomBackend,
             settings=_read(config, credentials),
-            band_hz=self._band_hz,
             simulation_id=simulation_id,
             mock_tools=mock_tools,
         )
-        self._line: MediaLine | None = None
+        self._media: VoiceMedia | None = None
         self._reference: str | None = None
 
     @property
@@ -152,20 +143,11 @@ class LiveKitRoom:
         return self._reference
 
     @property
-    def sample_rate_hz(self) -> int:
-        return self._band_hz
-
-    @property
-    def measured_band_hz(self) -> int | None:
-        """The band this exchange really carried, read off its audio."""
-        return None if self._line is None else self._line.measured_band_hz
-
-    @property
     def far_end_left(self) -> bool:
         """Whether the agent has left the room. There is no other signal
         and no better one: its participant leaving *is* the agent ending
         the exchange."""
-        return self._line is not None and self._line.far_end_left
+        return self._media is not None and self._media.ended.is_set()
 
     @property
     def backend(self) -> object:
@@ -177,38 +159,30 @@ class LiveKitRoom:
         """
         return self._backend
 
+    async def prepare(self) -> VoiceMedia:
+        """Build the transport before the conductor starts its pipeline."""
+        try:
+            self._media = await self._backend.create_transport()
+            return self._media
+        except MediaBackendError as refused:
+            raise PlugError(str(refused), ending=refused.ending) from refused
+
     async def open(self) -> None:
         """Make the room and wait for the agent to turn up in it.
 
         Nothing is heard here. The line is open the moment the agent's
-        audio flows, and every sample either side says after that crosses
-        it through :meth:`exchange` — including the agent's opening,
-        which in a real room is simply the first thing it happens to say.
+        audio flows. The running Pipecat transport then carries both
+        sides, including the agent's opening.
         """
         try:
-            session = await self._backend.create_session()
             await self._backend.dial()
             self._reference = await self._backend.wait_answered(AGENT_JOIN_SECONDS)
-            self._line = MediaLine(session, band_hz=self._band_hz)
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused
 
-    async def exchange(self, outgoing: bytes) -> bytes:
-        """One slice of the exchange, both directions at once."""
-        line = self._line
-        if line is None:
-            raise PlugError("the room was driven before the agent was in it")
-        try:
-            return await line.carry(outgoing)
-        except MediaBackendError as failed:
-            # A room that goes wrong mid-exchange is the driver's to name
-            # and the plug's to carry: a fault, never an agent that never
-            # joined, because one did join.
-            raise PlugError(str(failed), ending=failed.ending) from failed
-
     async def close(self) -> None:
         """Leave, and delete the room. Safe from every state."""
-        self._line = None
+        self._media = None
         await self._backend.teardown()
 
 

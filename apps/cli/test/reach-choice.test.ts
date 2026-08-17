@@ -53,11 +53,9 @@ const ACCOUNT: FakeRetellScript = {
   ],
 };
 
-/** A genuine Retell chat agent, which the shipped direct adapter supports. */
 const CHAT_ACCOUNT: FakeRetellScript = {
   ...ACCOUNT,
-  agents: ACCOUNT.agents.map((agent) => ({ ...agent, channel: "chat" })),
-  numbers: [],
+  agents: ACCOUNT.agents.map((agent) => ({ ...agent, channel: "chat" as const })),
 };
 
 /** The same account, with two numbers routed to the agent under test. */
@@ -105,8 +103,8 @@ async function wroteAnEgmaFolder(): Promise<boolean> {
 class ScriptedUI extends HeadlessUI {
   private readonly said: Answers;
 
-  constructor(answers: Answers) {
-    super();
+  constructor(answers: Answers, write: (line: string) => void) {
+    super({ write });
     this.said = answers;
   }
 
@@ -121,7 +119,8 @@ class ScriptedUI extends HeadlessUI {
 }
 
 async function run(answers: Answers, fetchImpl?: typeof fetch) {
-  const ui = new ScriptedUI(answers);
+  const lines: string[] = [];
+  const ui = new ScriptedUI(answers, (line) => lines.push(line));
   const { report, connected } = await connectStep({
     ui,
     platform: {
@@ -135,10 +134,55 @@ async function run(answers: Answers, fetchImpl?: typeof fetch) {
     retell: { url: retell?.url ?? "http://127.0.0.1:1" },
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
   });
-  return { ui, report, connected };
+  return { ui, report, connected, lines };
+}
+
+/**
+ * The other terminal, getting there first.
+ *
+ * The first attempt to attach a connection is really made — so the platform
+ * really holds it, exactly as it would if a second `connect` had won — and then
+ * this run is told the name is taken, which is what the loser of that race is
+ * told. Nothing is faked but the timing.
+ */
+function losingTheRace(): typeof fetch {
+  let raced = false;
+  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const where = typeof input === "string" ? input : String(input);
+    if (raced || init?.method !== "POST" || !where.endsWith("/connections")) {
+      return fetch(input, init);
+    }
+    raced = true;
+    // The winner's write, made through the same door and committed.
+    await fetch(input, init);
+    return new Response(
+      JSON.stringify({
+        error: "name_taken",
+        message: 'a connection named "phone-1" already exists on this agent',
+      }),
+      { status: 409, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
 }
 
 describe("choosing the phone", () => {
+  it("refuses phone for a Retell chat agent before it writes anything", async () => {
+    retell = await startFakeRetell(CHAT_ACCOUNT);
+
+    const { report, connected } = await run({ reach: "phone" });
+
+    expect(connected).toBeNull();
+    expect(report).toEqual({
+      kind: "failed",
+      reason:
+        "Retell says this is a chat agent. Chat agents can be reached only by text, not phone. " +
+        "Choose text and try again. Nothing was written.",
+    });
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+    expect(await wroteAnEgmaFolder()).toBe(false);
+  });
+
   it("creates one phone connection holding the number and nothing else", async () => {
     retell = await startFakeRetell(ACCOUNT);
 
@@ -241,19 +285,36 @@ describe("choosing the phone", () => {
 });
 
 describe("choosing text", () => {
-  it("creates one direct connection for a genuine Retell chat agent", async () => {
+  it("refuses text for a Retell voice agent before it writes anything", async () => {
+    retell = await startFakeRetell(ACCOUNT);
+
+    const { report, connected } = await run({ reach: "text" });
+
+    expect(connected).toBeNull();
+    expect(report).toEqual({
+      kind: "failed",
+      reason:
+        "Retell says this is a voice agent. Voice agents can be reached only by phone, not text. " +
+        "Choose phone and try again. Nothing was written.",
+    });
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+    expect(await wroteAnEgmaFolder()).toBe(false);
+  });
+
+  it("creates one Retell chat connection for the selected chat agent", async () => {
     retell = await startFakeRetell(CHAT_ACCOUNT);
 
-    const { connected, ui } = await run({ reach: "text" });
+    const { connected } = await run({ reach: "text" });
 
     expect(connected?.reach).toBe("text");
     expect(connected?.number).toBeNull();
-    expect(ui.record.reachOptions).toEqual(["text"]);
 
     expect(platform.registered.connections).toHaveLength(1);
     const [connection] = platform.registered.connections;
     expect(connection?.type).toBe("retell");
     expect(connection?.modality).toBe("chat");
+    // The selected chat agent's own identity is the connection target.
     expect(connection?.config).toEqual({ retellAgentId: "agent_0001" });
     expect(connection?.credentialsHint).toBe(KEY.slice(-4));
     expect(platform.registered.sealed).toEqual([KEY]);
@@ -271,6 +332,24 @@ describe("choosing text", () => {
 });
 
 describe("choosing neither", () => {
+  it("offers only phone for a Retell voice agent", async () => {
+    retell = await startFakeRetell(ACCOUNT);
+
+    const { lines } = await run({ reach: null });
+
+    expect(lines).toContainEqual(expect.stringContaining("reach_option: phone"));
+    expect(lines).not.toContainEqual(expect.stringContaining("reach_option: text"));
+  });
+
+  it("offers only text for a Retell chat agent", async () => {
+    retell = await startFakeRetell(CHAT_ACCOUNT);
+
+    const { lines } = await run({ reach: null });
+
+    expect(lines).toContainEqual(expect.stringContaining("reach_option: text"));
+    expect(lines).not.toContainEqual(expect.stringContaining("reach_option: phone"));
+  });
+
   it("creates nothing, and leaves the repository exactly as it was", async () => {
     retell = await startFakeRetell(ACCOUNT);
 
@@ -329,18 +408,80 @@ describe("running it twice", () => {
     expect(platform.registered.connections).toHaveLength(1);
   });
 
-  it("never writes a text connection for a Retell voice agent", async () => {
-    retell = await startFakeRetell(ACCOUNT);
-
-    const { report, ui } = await run({ reach: "text" });
-
-    expect(ui.record.reachOptions).toEqual(["phone"]);
-    expect(report).toEqual({
-      kind: "failed",
-      reason:
-        "Retell voice agents can only be connected by phone until Agent Playground Completion is supported.",
+  it("still takes the next name for a different voice agent called the same thing", async () => {
+    // Two agents on the account with one name between them, which a real
+    // account does produce. The second is a different agent and gets its own
+    // egma agent — the name loop this replaced was there for exactly this, and
+    // reading the refusal rather than working around it must not lose it.
+    retell = await startFakeRetell({
+      ...ACCOUNT,
+      agents: [
+        ...ACCOUNT.agents,
+        {
+          agent_id: "agent_0002",
+          agent_name: "front-desk",
+          response_engine: { type: "retell-llm", llm_id: "llm_0001" },
+        },
+      ],
+      numbers: [
+        ...(ACCOUNT.numbers ?? []),
+        {
+          phone_number: "+14155550444",
+          nickname: "second front desk",
+          inbound_agents: [{ agent_id: "agent_0002" }],
+        },
+      ],
     });
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.registered.connections).toHaveLength(0);
+
+    // The first walk leaves an agent reached only by phone, so nothing on it
+    // names a vendor at all. What tells the second walk that this is somebody
+    // else's agent is the number: Retell routes it to agent_0001 and not to
+    // agent_0002, and that is as good an answer as a vendor id would be.
+    const first = await run({ reach: "phone", agent: "agent_0001" });
+    const second = await run({ reach: "phone", agent: "agent_0002" });
+
+    expect(first.connected?.registered.agent.name).toBe("front-desk");
+    expect(second.connected?.registered.agent.name).toBe("front-desk-2");
+    expect(second.connected?.registration).toEqual({
+      agent: "created",
+      connection: "created",
+    });
+    expect(platform.registered.agents).toHaveLength(2);
+    expect(platform.registered.connections).toHaveLength(2);
+  });
+
+  /**
+   * Two terminals attaching the same reach at the same instant.
+   *
+   * Both get past the check that says the reach is not there yet, because
+   * neither has written anything when either looks. One then loses the
+   * connection-name index — and the right answer for the loser is the
+   * connection the winner just wrote, because that is what it was going to
+   * create. Telling them their egma is out of date would send a developer to
+   * check a version when the only thing that happened is that their other
+   * terminal got there first.
+   */
+  it("reads the winner's connection as a reuse when it loses the race to attach", async () => {
+    retell = await startFakeRetell(TWO_NUMBERS);
+
+    const first = await run({ reach: "phone", number: DIALLED });
+    const phone = await run({ reach: "phone", number: "+14155550333" }, losingTheRace());
+
+    expect(phone.report.kind).toBe("connected");
+    expect(phone.connected?.registration).toEqual({
+      agent: "reused",
+      connection: "reused",
+    });
+    expect(phone.connected?.registered.agent.id).toBe(first.connected?.registered.agent.id);
+    expect(phone.connected?.registered.connection.name).toBe("phone-2");
+    expect(phone.connected?.number).toBe("+14155550333");
+
+    // One agent, one connection each way, and no second phone connection left
+    // behind by the write that lost.
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections.map((one) => one.name)).toEqual([
+      "phone-1",
+      "phone-2",
+    ]);
   });
 });

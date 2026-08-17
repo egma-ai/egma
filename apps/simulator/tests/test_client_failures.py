@@ -189,9 +189,35 @@ async def test_a_refused_span_batch_is_rejected_and_a_stalled_one_is_transient()
         await runner.cleanup()
 
 
-async def test_a_partial_success_is_not_retried_and_is_not_a_failure(caplog):
-    """The specification says rejected data must not be resent — so it is
-    not, and the count is said out loud instead of vanishing."""
+async def test_a_queued_span_batch_is_not_yet_accepted():
+    """A 202 only says the ingest queued the bytes; terminal delivery must
+    wait for a response that confirms the span write is complete."""
+
+    async def traces(_request: web.Request) -> web.Response:
+        return web.Response(status=202)
+
+    app = web.Application()
+    app.router.add_post("/v1/traces", traces)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    base = f"http://127.0.0.1:{runner.addresses[0][1]}"
+    try:
+        async with ControlPlaneClient(base, claim_wait_seconds=1) as client:
+            with pytest.raises(TransientDeliveryFailure, match="202"):
+                await client.spans("sim-1", b'{"resourceSpans":[]}')
+    finally:
+        await runner.cleanup()
+
+
+async def test_a_partial_success_is_a_final_rejection():
+    """A 200 is accepted only when it rejected no spans.
+
+    The same export must stay in the write-ahead log, but retrying it cannot
+    repair a partial success. The ordered reporter therefore needs a declared
+    final rejection so it can stop the terminal lifecycle report.
+    """
 
     async def traces(_request: web.Request) -> web.Response:
         return web.json_response(
@@ -212,10 +238,51 @@ async def test_a_partial_success_is_not_retried_and_is_not_a_failure(caplog):
     base = f"http://127.0.0.1:{runner.addresses[0][1]}"
     try:
         async with ControlPlaneClient(base, claim_wait_seconds=1) as client:
-            with caplog.at_level("ERROR"):
+            with pytest.raises(DocumentRejected) as refused:
                 await client.spans("sim-1", b'{"resourceSpans":[]}')
     finally:
         await runner.cleanup()
 
-    assert "refused 2 of sim-1's spans" in caplog.text
-    assert "weighed more than one insert holds" in caplog.text
+    assert "refused 2 of sim-1's spans" in str(refused.value)
+    assert "weighed more than one insert holds" in str(refused.value)
+
+
+async def test_an_unreadable_success_cannot_claim_that_zero_spans_were_rejected():
+    async def traces(_request: web.Request) -> web.Response:
+        return web.Response(status=200, text="not an OTLP response")
+
+    app = web.Application()
+    app.router.add_post("/v1/traces", traces)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    base = f"http://127.0.0.1:{runner.addresses[0][1]}"
+    try:
+        async with ControlPlaneClient(base, claim_wait_seconds=1) as client:
+            with pytest.raises(TransientDeliveryFailure, match="unreadable"):
+                await client.spans("sim-1", b'{"resourceSpans":[]}')
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.parametrize("rejected", [False, 0.0, 0.5, "0.5", "", [], {}])
+async def test_a_malformed_rejected_span_count_is_not_zero(rejected: object):
+    async def traces(_request: web.Request) -> web.Response:
+        return web.json_response(
+            {"partialSuccess": {"rejectedSpans": rejected}}
+        )
+
+    app = web.Application()
+    app.router.add_post("/v1/traces", traces)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    base = f"http://127.0.0.1:{runner.addresses[0][1]}"
+    try:
+        async with ControlPlaneClient(base, claim_wait_seconds=1) as client:
+            with pytest.raises(TransientDeliveryFailure, match="rejected-span count"):
+                await client.spans("sim-1", b'{"resourceSpans":[]}')
+    finally:
+        await runner.cleanup()
