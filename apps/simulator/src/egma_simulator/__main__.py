@@ -2,9 +2,14 @@
 
 Reads its whole configuration from ``EGMA_SIMULATOR_*`` environment
 variables, installs the credential-redacting log filter, and claims work
-until told to stop. SIGTERM and SIGINT stop it the honest way: in-flight
-exchanges are torn down and nothing terminal is invented for them — the
-control plane's orphan sweep records what a disappearing simulator means.
+until told to stop. The first SIGTERM or SIGINT is the drain: claiming
+ends, the exchanges in flight finish and report, and the process exits
+when the last one has — so replacing this container drops nobody's call.
+A second signal is the hard stop of old: in-flight exchanges are torn
+down and nothing terminal is invented for them — the control plane's
+orphan sweep records what a disappearing simulator means. The compose
+file's ``stop_grace_period`` is the drain's ceiling; past it, Docker
+kills the container and the sweep speaks for whatever remained.
 """
 
 from __future__ import annotations
@@ -99,8 +104,17 @@ async def _run(config: SimulatorConfig) -> None:
     task = asyncio.ensure_future(service.run())
 
     loop = asyncio.get_running_loop()
+
+    def on_stop_signal() -> None:
+        # The first signal drains; the second is the hard stop an operator
+        # still deserves when a drain is not what they meant.
+        if service.stop_requested:
+            task.cancel()
+        else:
+            service.request_stop()
+
     for signum in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(signum, task.cancel)
+        loop.add_signal_handler(signum, on_stop_signal)
 
     try:
         await task
