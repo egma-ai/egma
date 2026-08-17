@@ -838,8 +838,35 @@ describe("what a project recorded in production", () => {
       await page.evaluate(() => {
         Reflect.set(globalThis, "__egma_same_document_navigation", true);
       });
-      await page.getByRole("link", { name: "Tests", exact: true }).first().click();
-      await page.waitForURL(new RegExp(`/projects/${project}/tests$`));
+      // Clicked until the address answers. The shell has just re-rendered
+      // around the Settings page, and a click can land on a link node the
+      // re-render is replacing — dispatched at something already detached,
+      // handled by nobody, navigating nowhere; that is how this step once
+      // timed out with the click reported delivered. Each poll turn clicks
+      // again unless the address already moved, so the settled node gets
+      // the next attempt. The marker above still proves what this test
+      // exists to prove: retried clicks never reload the document, and a
+      // product that did reload would wipe the marker and fail below
+      // exactly as before.
+      const atTests = new RegExp(`/projects/${project}/tests$`);
+      await expect
+        .poll(
+          async () => {
+            if (!atTests.test(page.url())) {
+              await page
+                .getByRole("link", { name: "Tests", exact: true })
+                .first()
+                .click({ timeout: 2_000 })
+                .catch(() => undefined);
+              await page
+                .waitForURL(atTests, { timeout: 2_000 })
+                .catch(() => undefined);
+            }
+            return page.url();
+          },
+          { timeout: 30_000 },
+        )
+        .toMatch(atTests);
 
       expect(
         await page.evaluate(() =>
@@ -1650,7 +1677,12 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
           )
           .toBe(75);
       } finally {
-        await page.unroute(`${running.store.publicUrl}/**`);
+        // Removed with `behavior: "wait"`, not the default: the player keeps
+        // fetching the store while it plays, so a handler can be mid-continue
+        // at exactly this moment, and a default removal races it over one
+        // request. This is the page's only route here, so removing all of
+        // them is the same removal with the safe semantics.
+        await page.unrouteAll({ behavior: "wait" });
       }
 
       // The other conversation of the same run never connected, so it wrote no
@@ -3690,8 +3722,18 @@ describe("the complete product, walked in order in a second project", () => {
           const theAgentsRead = (asked: URL) =>
             asked.pathname === "/api/agents";
           await walk.route(theAgentsRead, async (route) => {
+            // The real answer is fetched at once; only its delivery is held.
+            // The shorter spelling — await the gate, then `route.continue()`
+            // — parks the request itself across the release and removal
+            // below, and a continue that loses that race kills the fetch. A
+            // killed fetch carries no error for the page to react to, so it
+            // renders as "Loading agents…" until the poll gives up — which
+            // is exactly how this step once failed on a tree that passed
+            // this same suite twice. Fetch-then-fulfil parks nothing: one
+            // pending request until `release()`, then one delivery.
+            const answer = await route.fetch();
             await held;
-            return route.continue();
+            return route.fulfill({ response: answer });
           });
           try {
             await walk.goto(at("agents"));
@@ -3700,9 +3742,8 @@ describe("the complete product, walked in order in a second project", () => {
               .toContain("Loading");
           } finally {
             release();
-            // Wait for the held handler to finish before removing it. The
-            // default removal can continue the request itself, after which the
-            // released handler tries to continue the same route a second time.
+            // Wait for the handler to finish its delivery before removing it
+            // — a removal mid-delivery would strand the request it holds.
             await walk.unrouteAll({ behavior: "wait" });
           }
           await saysWithin(walk, "The Support line");
