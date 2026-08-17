@@ -200,7 +200,6 @@ beforeAll(async () => {
   const own = await useLibraryEntry(actingAsAcme(), {
     libraryId: PREDEFINED_GRADERS.expectedBehaviors,
     name: "Strictly judged behaviors",
-    config: { assertions: [] },
   });
   ownJudge = own.id;
   await editGrader(actingAsAcme(), own.id, {
