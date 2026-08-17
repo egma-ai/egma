@@ -707,6 +707,7 @@ const THE_MEASURES = [
   // a normalizer embeds what `reportedMeasurementsOf` reads back — and the
   // constants ride along so neither side ever spells the version or the
   // payload path for itself.
+  "REPORTED_MEASUREMENTS_PAYLOAD_KEY",
   "REPORTED_MEASUREMENTS_PAYLOAD_PATH",
   "REPORTED_MEASUREMENTS_VERSION",
   "reportedMeasurementsOf",
