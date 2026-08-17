@@ -45,10 +45,21 @@ describe("the shared controls on access pages", () => {
     expect(password.getAttribute("type")).toBe("password");
     expect(password.getAttribute("autocomplete")).toBe("current-password");
 
+    const showPassword = screen.getByRole("button", { name: "Show password" });
+    expect(showPassword.getAttribute("type")).toBe("button");
+    expect(showPassword.getAttribute("aria-controls")).toBe("password");
+
     fireEvent.change(email, { target: { value: "ada@example.com" } });
     fireEvent.change(password, { target: { value: "correct horse" } });
     expect((email as HTMLInputElement).value).toBe("ada@example.com");
     expect((password as HTMLInputElement).value).toBe("correct horse");
+
+    fireEvent.click(showPassword);
+    expect(password.getAttribute("type")).toBe("text");
+    expect((password as HTMLInputElement).value).toBe("correct horse");
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(password.getAttribute("type")).toBe("password");
     expect(screen.getByRole("button", { name: "Sign in" }).getAttribute("type")).toBe("submit");
     expect(screen.getByRole("link", { name: "Sign up" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Sign in" })).toBeTruthy();

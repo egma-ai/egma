@@ -19,6 +19,7 @@ import { AuthShell, Notice, styles } from "../ui.tsx";
 export default function SignInPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   /** Somebody sent here by a terminal's approval page goes back to it. */
@@ -75,15 +76,23 @@ export default function SignInPage() {
         </Field>
 
         <Field label="Password" htmlFor="password">
-          <TextInput
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={setPassword}
-          />
+          <div className={styles.passwordControl}>
+            <TextInput
+              id="password"
+              name="password"
+              type={passwordVisible ? "text" : "password"}
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={setPassword}
+            />
+            <Button
+              ariaControls="password"
+              onClick={() => setPasswordVisible((visible) => !visible)}
+            >
+              {passwordVisible ? "Hide password" : "Show password"}
+            </Button>
+          </div>
         </Field>
 
         <Button weight="strong" type="submit" disabled={submitting}>
