@@ -303,11 +303,32 @@ export function RecordingPlayer({
         // A link that loads is a link that works, so the next expiry — hours
         // later, on a page nobody reloaded — gets its own retry rather than
         // being treated as the second failure of a problem long since over.
+        //
+        // **The place is put back on every arrival of metadata, and taking it
+        // is not what forgets it.** Replacing a link can run the element's
+        // loading sequence more than once — React writes the new `src`, which
+        // starts one, and the effect above says `load()` out loud, which starts
+        // another — and every one of them sends the position back to the
+        // beginning. A version that cleared the remembered place as soon as it
+        // had used it therefore restored into the first arrival and was wiped
+        // by the second: a listener at zero, on a player that looks perfectly
+        // healthy, and no way to tell from the screen that anything happened.
+        // Whether both arrivals happen is a question about how fast the store
+        // answered, so it failed on some machines and not others.
+        //
+        // Nothing else can drag somebody forward by mistake, because nothing
+        // else fires this: dragging the scrubber is a seek, and a seek loads no
+        // metadata. What replaces the remembered place is the next expiry
+        // remembering wherever the listener has got to by then.
         onLoadedMetadata={() => {
           isASecondTry.current = false;
-          if (resumeAt.current > 0 && player.current !== null) {
-            player.current.currentTime = resumeAt.current;
-            resumeAt.current = 0;
+          const wanted = resumeAt.current;
+          if (
+            wanted > 0 &&
+            player.current !== null &&
+            player.current.currentTime !== wanted
+          ) {
+            player.current.currentTime = wanted;
           }
         }}
       >
