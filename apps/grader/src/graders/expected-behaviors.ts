@@ -126,14 +126,20 @@ export async function executeExpectedBehaviors(
   }
 
   // Only now, with behaviors to judge, a conversation that happened and words
-  // to ask with, is the project's key worth unsealing.
-  const configured = await execution.judging.judge();
-  if (configured instanceof NoJudge) {
-    const why = configured.message;
+  // to ask with, is a key worth unsealing. Which one is asked for — this
+  // grader's own selection, or the project's setting — is the resolution's
+  // decision, and nothing in this executor knows the difference.
+  const judge = await execution.judging.judges.judgeFor(
+    execution.judging.grader,
+    execution.judging.makers,
+  );
+  if (judge instanceof NoJudge) {
+    // An infrastructure error and never a failed verdict: a check egma could
+    // not make did not fail, and one `errored` row per behavior says so with
+    // the sentence a person can act on.
+    const why = judge.message;
     return behaviors.map((_, at) => couldNotJudge(at, why));
   }
-
-  const judge = configured.judging(execution.judging.model, execution.judging.makers);
 
   // Assembled once and shared by every call, which is what makes N judgments of
   // one conversation one read rather than N.

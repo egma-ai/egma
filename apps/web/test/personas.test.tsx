@@ -127,6 +127,9 @@ const RITA: Persona = {
   description: "Somebody in a hurry.",
   version: 1,
   version_id: "prsv_1",
+  // On the compatibility path, which is what every persona authored before the
+  // model catalog existed reads as — and a state rather than a fault.
+  models: null,
   traits: {
     personality: "Seventy, hard of hearing, and gets louder when she mishears.",
     language: "en-US",

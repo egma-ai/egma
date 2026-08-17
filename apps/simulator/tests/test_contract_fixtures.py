@@ -17,6 +17,7 @@ import pytest
 from jsonschema.exceptions import ValidationError
 
 from egma_simulator.contract import (
+    SUPPORTED_SPEC_VERSIONS,
     ContractViolation,
     contract_dir,
     report_validator,
@@ -25,8 +26,23 @@ from egma_simulator.contract import (
     validate_spec,
 )
 
-VALIDATORS = {"spec": spec_validator, "report": report_validator}
-VALIDATE = {"spec": validate_spec, "report": validate_report}
+# `spec` is the version-1 spec direction and `spec-v2` the version-2 one. They
+# are two folders because they are two closed documents: a version-2 document
+# is not a version-1 document with an extra field, it is a different contract,
+# and a folder mixing them would be checked against whichever schema the loop
+# happened to be holding.
+DIRECTIONS = ["spec", "spec-v2", "report"]
+
+VALIDATORS = {
+    "spec": lambda: spec_validator(1),
+    "spec-v2": lambda: spec_validator(2),
+    "report": report_validator,
+}
+VALIDATE = {
+    "spec": validate_spec,
+    "spec-v2": validate_spec,
+    "report": validate_report,
+}
 
 
 def fixtures_under(direction: str, expectation: str) -> list[tuple[str, dict]]:
@@ -65,6 +81,30 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
         "base_url",
     ),
     "spec/wrong-contract-version.json": ("/contract_version", "const", None),
+    # The mixed-rollout guard, as a document. A version-1 document carrying
+    # version 2's `models` block is exactly what a control plane that got the
+    # negotiation wrong would emit, and the failure it would cause is the quiet
+    # one: a worker that ignored the unknown block would conduct the simulation
+    # with its deployment's own model settings while the control plane believed
+    # it had sent the persona's. The version-1 schema closes its top level, so
+    # the block is refused loudly here rather than dropped silently there.
+    "spec/models-on-the-old-contract.json": ("", "additionalProperties", "models"),
+    "spec-v2/models-missing.json": ("", "required", "models"),
+    "spec-v2/customer-owned-without-a-key.json": ("/models/stt", "required", "key"),
+    "spec-v2/models-carrying-a-credential-id.json": (
+        "/models",
+        "additionalProperties",
+        "credential_id",
+    ),
+    "spec-v2/speaking-faster-than-a-voice-goes.json": (
+        "/models/tts/speed",
+        "maximum",
+        None,
+    ),
+    # A chat simulation has no mouth and no ears, so a speech key on its wire
+    # is a secret travelling for nothing.
+    "spec-v2/chat-carrying-a-speech-key.json": ("/models/stt", "not", None),
+    "spec-v2/unknown-field.json": ("", "additionalProperties", "agent_id"),
     "report/completed-claiming-never-ran.json": (
         "/events/0/facts/ending",
         "enum",
@@ -99,19 +139,51 @@ def place_of(error: ValidationError) -> str:
     return "".join(f"/{part}" for part in error.absolute_path)
 
 
-def test_both_schemas_compile_and_pin_the_same_contract_version():
+def test_every_schema_pins_the_version_it_claims_to_be():
+    pinned = {
+        "spec": 1,
+        "spec-v2": 2,
+        "report": 1,
+    }
     for direction, validator in VALIDATORS.items():
         compiled = validator()
-        assert compiled.schema["properties"]["contract_version"]["const"] == 1, (
-            direction
-        )
-    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v1"
+        assert (
+            compiled.schema["properties"]["contract_version"]["const"]
+            == pinned[direction]
+        ), direction
+
+    assert spec_validator(1).schema["$id"] == "urn:egma:simulation-contract:spec:v1"
+    assert spec_validator(2).schema["$id"] == "urn:egma:simulation-contract:spec:v2"
     assert (
         report_validator().schema["$id"] == "urn:egma:simulation-contract:report:v1"
     )
 
 
-@pytest.mark.parametrize("direction", ["spec", "report"])
+def test_a_version_this_simulator_does_not_implement_is_refused_by_its_version():
+    """The other half of the mixed-rollout rule, from this side of the wire.
+
+    A worker handed a document numbered higher than it implements must say
+    so rather than read it against the newest contract it happens to hold.
+    Reading it that way is how a block this process does not understand gets
+    dropped in silence, and a simulation conducted with silently dropped
+    model selections is worse than one that was refused.
+    """
+    ahead = read_json(
+        contract_dir() / "fixtures" / "spec-v2" / "valid" / "voice-customer-owned.json"
+    )
+    ahead["contract_version"] = max(SUPPORTED_SPEC_VERSIONS) + 1
+
+    with pytest.raises(ContractViolation) as refusal:
+        validate_spec(ahead)
+
+    assert refusal.value.complaints == [
+        "/contract_version: must be one of "
+        + ", ".join(str(known) for known in SUPPORTED_SPEC_VERSIONS)
+        + f", and this document says {ahead['contract_version']!r}"
+    ]
+
+
+@pytest.mark.parametrize("direction", DIRECTIONS)
 def test_every_valid_golden_fixture_validates(direction: str):
     fixtures = fixtures_under(direction, "valid")
     assert fixtures, f"no valid {direction} fixtures found"
@@ -119,7 +191,7 @@ def test_every_valid_golden_fixture_validates(direction: str):
         VALIDATE[direction](document)  # raises ContractViolation on drift
 
 
-@pytest.mark.parametrize("direction", ["spec", "report"])
+@pytest.mark.parametrize("direction", DIRECTIONS)
 def test_every_invalid_fixture_is_rejected_at_the_place_it_is_wrong(direction: str):
     fixtures = fixtures_under(direction, "invalid")
 
@@ -203,10 +275,18 @@ def test_the_report_schema_rejects_the_specs_credentials_wherever_they_ride():
 
 def test_the_golden_fixtures_cover_what_the_simulator_must_speak():
     """Both modalities inbound; the lifecycle and nothing else outbound."""
-    modalities = {
-        document["modality"] for _, document in fixtures_under("spec", "valid")
-    }
-    assert modalities == {"chat", "voice"}
+    for direction in ("spec", "spec-v2"):
+        modalities = {
+            document["modality"] for _, document in fixtures_under(direction, "valid")
+        }
+        assert modalities == {"chat", "voice"}, direction
+
+    # Both access modes are golden documents, so the shape managed access will
+    # arrive in is pinned before anything emits one.
+    assert {
+        document["models"]["access"]
+        for _, document in fixtures_under("spec-v2", "valid")
+    } == {"managed", "customer-owned"}
 
     events = [
         event

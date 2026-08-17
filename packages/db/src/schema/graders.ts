@@ -577,6 +577,23 @@ export const graderVersion = pgTable(
      * a stronger one named here on the subtle rubric that needs it.
      */
     judgeModel: jsonb("judge_model"),
+    /**
+     * This grader version's **own** LLM selection: a provider from the model
+     * catalog and a model ID. Not an override of anything — the key behind it
+     * is the organization's model-provider credential for that provider, or
+     * Egma's own under managed access, resolved when the grading claim is
+     * prepared.
+     *
+     * **Beside `judge_model` rather than in place of it, and the difference is
+     * the whole reason for a second column.** `judge_model` overrides a
+     * *project's* judge configuration and takes that project's key with it;
+     * this names a complete selection and takes the organization's. A version
+     * with this set is new work and never consults the project's judge; a
+     * version with only `judge_model` is work authored before the model catalog
+     * existed and keeps resolving exactly as it did. Null here is therefore an
+     * ordinary state and means "compatibility path", never a fault.
+     */
+    graderModel: jsonb("grader_model"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),

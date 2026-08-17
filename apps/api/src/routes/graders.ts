@@ -10,6 +10,7 @@ import {
   useLibraryEntry,
   type FilledInForm,
   type Grader,
+  type GraderModel,
 } from "@egma/db";
 import { isId } from "@egma/ids";
 import type { FastifyInstance } from "fastify";
@@ -110,6 +111,7 @@ type Query = {
 const USE_KEYS = [
   "library_id",
   "params",
+  "model",
   "name",
   "description",
   "required",
@@ -184,8 +186,68 @@ function described(one: Grader): Record<string, unknown> {
     version: one.version,
     version_id: one.versionId,
     config: one.config,
+    /**
+     * This grader's own LLM selection, or `null` for one still on the
+     * compatibility path — where the project's judge configuration decides,
+     * exactly as it did before the model catalog existed.
+     *
+     * There is no credential field beside it and there never will be: the key
+     * behind the selection is the organization's, resolved when the grading
+     * claim is prepared, and a grader that named one would put a secret inside
+     * authored content a run then pins forever.
+     */
+    model: one.graderModel,
     created_at: one.createdAt.toISOString(),
     updated_at: one.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * The LLM selection a body carries, as the factory takes it.
+ *
+ * The envelope only: that `model` is an object naming a provider and a model
+ * id, and that it holds nothing a secret could travel in. Which providers do
+ * LLM work and what an id may be are the factory's rules, and a second opinion
+ * here could come to disagree with the one that decides.
+ *
+ * `null` is a real answer and means *go back to the compatibility path* — the
+ * project's judge configuration decides again. It is told apart from absent,
+ * which means keep what is stored.
+ */
+type WrittenGraderModel =
+  | { readonly value: GraderModel | null | undefined }
+  | { readonly refusal: string };
+
+function modelIn(body: Body): WrittenGraderModel {
+  if (!("model" in body)) return { value: undefined };
+  const written = body.model;
+  if (written === null) return { value: null };
+  if (
+    typeof written !== "object" ||
+    Array.isArray(written)
+  ) {
+    return {
+      refusal:
+        "a grader's model names the provider and the model id it judges with, " +
+        "as an object — or null to go back to the project's judge setting.",
+    };
+  }
+  const held = written as Body;
+  for (const forbidden of ["key", "credential", "credential_id"]) {
+    if (forbidden in held) {
+      return {
+        refusal:
+          `a grader's model holds no "${forbidden}". Who pays for a judgment ` +
+          "is the organization's model access, under Model providers — a " +
+          "grader names a provider and never a secret.",
+      };
+    }
+  }
+  return {
+    value: {
+      provider: held.provider as GraderModel["provider"],
+      model: text(held.model),
+    } as GraderModel,
   };
 }
 
@@ -451,6 +513,9 @@ export async function graderRoutes(
     const params = paramsIn(body);
     if ("refusal" in params) return unprocessable(reply, params.refusal);
 
+    const model = modelIn(body);
+    if ("refusal" in model) return unprocessable(reply, model.refusal);
+
     const required = requiredIn(body);
     if ("refusal" in required) return unprocessable(reply, required.refusal);
 
@@ -498,6 +563,13 @@ export async function graderRoutes(
       ...(sampleRate.value === undefined
         ? {}
         : { productionSampleRate: sampleRate.value }),
+      // Absent leaves the copy on the compatibility path, where the project's
+      // judge configuration decides. Egma does not fill in a model on a
+      // caller's behalf: a grader silently pointed at a provider nobody chose
+      // would spend from an account nobody agreed to.
+      ...(model.value === undefined || model.value === null
+        ? {}
+        : { graderModel: model.value }),
     });
 
     return reply.code(201).send(described(created));
@@ -550,6 +622,9 @@ export async function graderRoutes(
     const params = paramsIn(body);
     if ("refusal" in params) return unprocessable(reply, params.refusal);
 
+    const model = modelIn(body);
+    if ("refusal" in model) return unprocessable(reply, model.refusal);
+
     const required = requiredIn(body);
     if ("refusal" in required) return unprocessable(reply, required.refusal);
 
@@ -590,6 +665,9 @@ export async function graderRoutes(
       ...(sampleRate.value === undefined
         ? {}
         : { productionSampleRate: sampleRate.value }),
+      // `null` is the one way back to the compatibility path and is a
+      // different act from leaving the key out, which keeps what is stored.
+      ...(model.value === undefined ? {} : { graderModel: model.value }),
     });
 
     if (edited === undefined) return notFound(reply, noSuchGrader(graderId));

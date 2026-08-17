@@ -2457,6 +2457,65 @@ describe("the complete product, walked in order in a second project", () => {
     SETTLE,
   );
 
+  /**
+   * The organization's own provider key, stored before anything is authored.
+   *
+   * **This is the order the product actually has.** An organization on
+   * customer-owned model access supplies the keys its personas and graders
+   * spend, and a persona authored afterwards selects a provider rather than a
+   * secret. Doing it here rather than later is what makes the run below a real
+   * one: the claim resolves this credential, and nothing further down would
+   * conduct anything without it.
+   */
+  it(
+    "stores the organization's own provider key before authoring anything",
+    async () => {
+      await walk.goto(at("settings", "model-providers"));
+      await saysWithin(walk, "Model providers");
+      // Which mode this organization is on, said as a word rather than left to
+      // be inferred from which rows are filled in.
+      await saysWithin(walk, "Customer-owned");
+      // One row for each provider Egma ships, named the way the catalog names
+      // it rather than by the word it is stored under.
+      const table = walk.locator('table[aria-label="Model providers"]');
+      await table.waitFor();
+      await expect.poll(() => table.locator("tbody tr").count()).toBe(3);
+      expect(await table.innerText()).toContain("OpenAI");
+
+      // The form is opened by the row it belongs to, so exactly one labelled
+      // secret field is on screen at a time rather than one per provider.
+      expect(await walk.locator('input[type="password"]').count()).toBe(0);
+      await walk.getByRole("button", { name: "Add key" }).first().click();
+
+      const key = walk.locator("#model-provider-openai");
+      await key.waitFor();
+      // A password field, so a shoulder cannot read what is being typed.
+      expect(await key.getAttribute("type")).toBe("password");
+      expect(await walk.locator('input[type="password"]').count()).toBe(1);
+      await key.fill("sk-browser-sentinel-openai-A1B2");
+      await walk
+        .getByRole("button", { name: "Add key" })
+        .last()
+        .click();
+
+      // Four characters and nothing else, and the field it was typed into is
+      // empty again — the form is never the one place in the product showing a
+      // secret. Asserted on the hint rather than on the badge beside it,
+      // because the badge is uppercased by the design system and reads back as
+      // "CONFIGURED", which "NOT CONFIGURED" also contains.
+      await expect.poll(() => walk.innerText("main")).toContain("…A1B2");
+      // The fourth save state, said out loud: a write that landed and left
+      // nothing on screen is indistinguishable from one that never went.
+      await saysWithin(walk, "key is saved");
+      // And the field is gone with the form it belonged to.
+      await expect.poll(() => walk.locator('input[type="password"]').count()).toBe(0);
+      const shown = await walk.innerText("main");
+      expect(shown).not.toContain("sk-browser-sentinel-openai-A1B2");
+      expect(shown).toContain("…A1B2");
+    },
+    SETTLE,
+  );
+
   it(
     "authors a persona for this project",
     async () => {
@@ -3614,6 +3673,198 @@ describe("the complete product, walked in order in a second project", () => {
   /* ------------------------------------------------------------------ *
    * A narrow screen, and no pointer at all.
    * ------------------------------------------------------------------ */
+
+  /**
+   * The three screens that decide which models run and who pays for them.
+   *
+   * **What a browser proves here and nothing else can** is that no stored key
+   * comes back out of any of them, that a persona's Models form has nowhere to
+   * put one, and that a simulation stopped by a missing key sends somebody to
+   * the exact screen that fixes it. Every one of those is a claim about what a
+   * person can see and reach, which is the only place it can be checked.
+   *
+   * At both widths, because a settings form and a persona form are where a
+   * phone is most likely to be used and most likely to be forgotten.
+   */
+  describe("model providers, and the two forms that select from them", () => {
+    /** A sentinel, so a leak anywhere is a string this test can look for. */
+    const THE_KEY = "sk-browser-sentinel-openai-A1B2";
+
+    afterAll(async () => {
+      await walk.setViewportSize({ width: 1280, height: 900 });
+    });
+
+    it(
+      "replaces a provider key and never shows either one, on a phone and on a desktop",
+      async () => {
+        for (const [width, replacement] of [
+          [390, `${THE_KEY}-phone-9ZY8`],
+          [1280, `${THE_KEY}-desk-7XW6`],
+        ] as const) {
+          await walk.setViewportSize({ width, height: 900 });
+          await walk.goto(at("settings", "model-providers"));
+          await saysWithin(walk, "Model providers");
+
+          // The mode this organization is on, said as a word rather than left
+          // to be inferred from which rows are filled in.
+          await saysWithin(walk, "Customer-owned");
+          // And why the other mode is not on offer, said before anybody tries.
+          await saysWithin(walk, "Egma model gateway");
+          // A provider with no key is a state and not a fault: the row says so
+          // and the page still lets somebody leave. The badge is uppercased by
+          // the design system, so the whole phrase is what tells it from the
+          // configured one.
+          await expect
+            .poll(() => walk.innerText("main"))
+            .toContain("NOT CONFIGURED");
+
+          await walk
+            .getByRole("button", { name: "Replace key" })
+            .first()
+            .click();
+          const key = walk.locator("#model-provider-openai");
+          await key.waitFor();
+          // A password field, so a shoulder cannot read what is being typed.
+          expect(await key.getAttribute("type")).toBe("password");
+          const save = walk.getByRole("button", { name: "Replace key" }).last();
+
+          if (width === 390) {
+            // A pointer target on a coarse pointer is at least 44px. Checked
+            // on the button somebody actually presses to store a key.
+            const box = await save.boundingBox();
+            expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+          }
+
+          await key.fill(replacement);
+          await save.click();
+
+          // The stored key is four characters and nothing else, the field it
+          // was typed into is empty again, and neither the key that was there
+          // nor the one just typed is anywhere on the page.
+          await expect
+            .poll(() => walk.innerText("main"))
+            .toContain(`…${replacement.slice(-4)}`);
+          await expect
+            .poll(() => walk.locator('input[type="password"]').count())
+            .toBe(0);
+          const shown = await walk.innerText("main");
+          expect(shown).not.toContain(replacement);
+          expect(shown).not.toContain(THE_KEY);
+        }
+      },
+      SETTLE,
+    );
+
+    it(
+      "confirms removing a key, names the provider, and says what stops",
+      async () => {
+        await walk.setViewportSize({ width: 1280, height: 900 });
+        await walk.goto(at("settings", "model-providers"));
+        await saysWithin(walk, "Model providers");
+
+        // **Nothing is removed by one click.** The stored key cannot be read
+        // back, so a stray press is unrecoverable in the product, and it stops
+        // every later simulation and grading job that selects the provider.
+        await walk.getByRole("button", { name: "Remove key" }).first().click();
+
+        const dialog = walk.getByRole("dialog");
+        await dialog.waitFor();
+        const asked = await dialog.innerText();
+        // It names the provider it is about, and says what stops rather than
+        // asking "are you sure".
+        expect(asked).toContain("OpenAI");
+        expect(asked).toContain("stops with an error naming it");
+        expect(asked).toContain("cannot be undone");
+
+        // Escape leaves it exactly where it was.
+        await walk.keyboard.press("Escape");
+        await expect.poll(() => walk.getByRole("dialog").count()).toBe(0);
+        await expect
+          .poll(() => walk.innerText("main"))
+          .toContain("CONFIGURED");
+      },
+      SETTLE,
+    );
+
+    it(
+      "offers a persona three model choices and nowhere to put a key",
+      async () => {
+        await walk.setViewportSize({ width: 1280, height: 900 });
+        await walk.goto(at("personas", "new"));
+        await saysWithin(walk, "New persona");
+        await saysWithin(walk, "Models");
+
+        // Three independent choices, each filled in from a default a release
+        // proved — so a first persona runs before anybody opens a provider's
+        // documentation.
+        for (const [field, expected] of [
+          ["#persona-llm-provider", "openai"],
+          ["#persona-stt-provider", "deepgram"],
+          ["#persona-tts-provider", "cartesia"],
+        ] as const) {
+          await expect.poll(() => walk.locator(field).inputValue()).toBe(expected);
+        }
+        for (const field of [
+          "#persona-llm-model",
+          "#persona-stt-model",
+          "#persona-tts-model",
+          "#persona-tts-voice",
+        ]) {
+          expect(
+            (await walk.locator(field).inputValue()).trim().length,
+            field,
+          ).toBeGreaterThan(0);
+        }
+        // A model id is free text: a model released this morning has to be
+        // nameable without shipping a new browser.
+        await walk.locator("#persona-llm-model").fill("a-model-from-this-morning");
+        expect(await walk.locator("#persona-llm-model").inputValue()).toBe(
+          "a-model-from-this-morning",
+        );
+
+        // And nowhere to put a secret, and nothing about voice activity: the
+        // first would put a key inside authored content a run pins, and the
+        // second would make internal simulator behavior a question every
+        // persona author has to answer.
+        const shown = (await walk.innerText("main")).toLowerCase();
+        expect(shown).not.toContain("silero");
+        expect(shown).not.toContain("api key");
+        expect(await walk.locator('input[type="password"]').count()).toBe(0);
+      },
+      SETTLE,
+    );
+
+    it(
+      "reaches the persona's models with the keyboard alone",
+      async () => {
+        await walk.setViewportSize({ width: 1280, height: 900 });
+        await walk.goto(at("personas", "new"));
+        await saysWithin(walk, "Models");
+
+        const model = walk.locator("#persona-stt-model");
+        await model.focus();
+        // Selected and replaced from the keyboard, because the field arrives
+        // filled in with a default a release proved — typing into it without
+        // clearing would append rather than replace.
+        await walk.keyboard.press("ControlOrMeta+a");
+        await walk.keyboard.type("nova-2-phonecall");
+
+        expect(await model.inputValue()).toBe("nova-2-phonecall");
+        // Focus is where a person put it, and visibly so.
+        expect(
+          await walk.evaluate(() => {
+            const active = (
+              Reflect.get(globalThis, "document") as {
+                readonly activeElement: { id: string } | null;
+              }
+            ).activeElement;
+            return active?.id ?? "";
+          }),
+        ).toBe("persona-stt-model");
+      },
+      SETTLE,
+    );
+  });
 
   describe("a narrow screen", () => {
     afterAll(async () => {

@@ -97,6 +97,27 @@ export const personaVersion = pgTable(
      * personality, language, and the concrete voice.
      */
     traits: jsonb("traits").notNull(),
+    /**
+     * This persona's three model selections — LLM, STT and TTS, each a provider
+     * and a model ID, the TTS one also a voice ID and a speech speed.
+     *
+     * **Null is an ordinary state, not a fault.** Every version authored before
+     * persona models existed has none, and that is what puts it on the
+     * compatibility path: work-order preparation falls back to the deployment's
+     * own model settings for it, exactly as it always did. Nothing rewrites an
+     * old version to fill this in — immutable means immutable — so the column
+     * fills up as personas are edited and by the migration that gives each
+     * current version an explicit successor.
+     *
+     * **It holds no credential and has nowhere to put one.** Who pays is the
+     * organization's model access, resolved when a claim is prepared, so
+     * rotating a key mints no version and no version can leak a secret.
+     *
+     * Deliberately jsonb, for the reason `traits` beside it is: three
+     * selections with four fields between them is a shape that will grow, and a
+     * field promoted to a column later is a cheap migration.
+     */
+    models: jsonb("models"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),

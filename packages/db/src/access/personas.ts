@@ -35,6 +35,12 @@ import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { liveTestsNamingPersona } from "./tests.ts";
 import { within } from "./within.ts";
+import {
+  personaModelsFromRow,
+  samePersonaModels,
+  validPersonaModels,
+  type PersonaModels,
+} from "../models/selections.ts";
 
 /**
  * Reading and writing personas — what they are is the schema file's
@@ -142,6 +148,13 @@ export type NewPersona = {
   readonly name: string;
   readonly description?: string | undefined;
   readonly traits: PersonaTraits;
+  /**
+   * What this persona thinks, listens and speaks with. Absent leaves the
+   * persona on the compatibility path, where work-order preparation falls back
+   * to the deployment's own model settings — which is how every persona
+   * authored before the model catalog existed still runs.
+   */
+  readonly models?: PersonaModels | undefined;
 };
 
 export type Persona = {
@@ -153,6 +166,14 @@ export type Persona = {
   /** The current version's own `prsv_` id — what a run pins. */
   readonly versionId: string;
   readonly traits: PersonaTraits;
+  /**
+   * The current version's model selections, or `null` for a persona still on
+   * the compatibility path. `null` is an ordinary state and never a fault: it
+   * means this version was authored before the model catalog existed, and
+   * work-order preparation resolves it through the deployment's own settings
+   * exactly as it always did.
+   */
+  readonly models: PersonaModels | null;
   /**
    * The opaque token an identity write or a lifecycle change has to name.
    * It changes on every one of them and means nothing on its own.
@@ -186,6 +207,13 @@ export type PersonaChanges = {
   readonly name?: string;
   readonly description?: string | null;
   readonly traits?: PersonaTraits;
+  /**
+   * The three model selections, whole. Absent means keep what is stored, which
+   * is the ordinary edit; a selection that differs from the stored one mints
+   * the next version exactly as a trait change does, because which model a
+   * persona speaks with is behavior a run has to stay pinned to.
+   */
+  readonly models?: PersonaModels;
   readonly expectedRevision?: string | undefined;
   readonly expectedVersionId?: string | undefined;
 };
@@ -196,6 +224,8 @@ export type PersonaVersion = {
   readonly personaId: string;
   readonly version: number;
   readonly traits: PersonaTraits;
+  /** This version's model selections, or `null` on the compatibility path. */
+  readonly models: PersonaModels | null;
   readonly createdAt: Date;
 };
 
@@ -430,6 +460,8 @@ export async function createPersona(
   const id = newId("prs");
   const versionId = newId("prsv");
   const traits = normalizedTraits(input.traits);
+  const models =
+    input.models === undefined ? null : validPersonaModels(input.models);
 
   const inserted = await db().transaction(async (tx) => {
     // The identity row goes first, naming a version that does not exist yet;
@@ -452,6 +484,7 @@ export async function createPersona(
       personaId: id,
       version: 1,
       traits,
+      models,
       createdBy: auth.userId,
     });
 
@@ -465,6 +498,7 @@ export async function createPersona(
     version: 1,
     versionId,
     traits,
+    models,
     // A project's pointer is moved deliberately, and never by a create. A
     // brand-new persona is nobody's default until somebody says so.
     isDefault: false,
@@ -486,6 +520,7 @@ function selectWithCurrentVersion(on: Queryable = db()) {
       version: personaVersion.version,
       versionId: personaVersion.id,
       traits: personaVersion.traits,
+      models: personaVersion.models,
       defaultPersonaId: project.defaultPersonaId,
     })
     .from(persona)
@@ -501,12 +536,14 @@ function personaFrom(row: {
   readonly id: string;
   readonly versionId: string;
   readonly traits: unknown;
+  readonly models: unknown;
   readonly defaultPersonaId: string | null;
 }): Persona {
   const { defaultPersonaId, ...rest } = row;
   return {
-    ...(rest as unknown as Omit<Persona, "traits" | "isDefault">),
+    ...(rest as unknown as Omit<Persona, "traits" | "models" | "isDefault">),
     traits: traitsFromRow(row.traits, row.versionId),
+    models: personaModelsFromRow(row.models, row.versionId),
     isDefault: defaultPersonaId === row.id,
   };
 }
@@ -564,6 +601,11 @@ export async function editPersona(
 
   if (changes.name !== undefined) validateName(changes.name);
   if (changes.traits !== undefined) validateTraits(changes.traits);
+  // Checked before the transaction opens, like every other input: a selection
+  // naming a provider Egma ships nothing for is the caller's mistake, and it
+  // should cost no lock to say so.
+  const askedModels =
+    changes.models === undefined ? undefined : validPersonaModels(changes.models);
 
   return writing(() =>
     db().transaction(async (tx) => {
@@ -596,6 +638,7 @@ export async function editPersona(
           id: personaVersion.id,
           version: personaVersion.version,
           traits: personaVersion.traits,
+          models: personaVersion.models,
         })
         .from(personaVersion)
         .where(eq(personaVersion.id, currentVersionId))
@@ -614,7 +657,10 @@ export async function editPersona(
        * telling them so is what stops the next save silently landing on top of
        * somebody else's. So it is checked whenever traits were sent.
        */
-      if (changes.traits !== undefined && changes.expectedVersionId !== undefined) {
+      if (
+        (changes.traits !== undefined || askedModels !== undefined) &&
+        changes.expectedVersionId !== undefined
+      ) {
         if (changes.expectedVersionId !== currentVersion.id) {
           throw new VersionConflictError(
             "persona",
@@ -625,33 +671,57 @@ export async function editPersona(
       }
 
       const storedTraits = traitsFromRow(currentVersion.traits, currentVersion.id);
+      const storedModels = personaModelsFromRow(
+        currentVersion.models,
+        currentVersion.id,
+      );
       const nextTraits =
         changes.traits !== undefined && !sameTraits(storedTraits, changes.traits)
           ? normalizedTraits(changes.traits)
           : undefined;
+      /**
+       * A model selection that says something different from the stored one.
+       *
+       * **A version-minting change, exactly as a trait is**, because which
+       * model a persona thinks and speaks with is what that persona *is* on the
+       * simulation it conducted — and a run that pinned last week's version has
+       * to keep meaning what it meant. A save that names the selections already
+       * stored mints nothing, on the traits' own rule: a field somebody
+       * re-submitted unchanged is not a change.
+       */
+      const nextModels =
+        askedModels !== undefined && !samePersonaModels(storedModels, askedModels)
+          ? askedModels
+          : undefined;
+      const contentChanged = nextTraits !== undefined || nextModels !== undefined;
       const identityChanged =
         changes.name !== undefined || changes.description !== undefined;
 
-      if (nextTraits === undefined && !identityChanged) {
+      if (!contentChanged && !identityChanged) {
         return {
           ...current,
           version: currentVersion.version,
           versionId: currentVersion.id,
           traits: storedTraits,
+          models: storedModels,
           isDefault,
         };
       }
 
       let versionId = currentVersion.id;
       let version = currentVersion.version;
-      if (nextTraits !== undefined) {
+      if (contentChanged) {
         versionId = newId("prsv");
         version = currentVersion.version + 1;
         await tx.insert(personaVersion).values({
           id: versionId,
           personaId: current.id,
           version,
-          traits: nextTraits,
+          // Whichever half of the content moved, the new version carries both:
+          // a version is the whole persona as some simulation met it, never a
+          // patch on the one before it.
+          traits: nextTraits ?? storedTraits,
+          models: nextModels ?? storedModels,
           createdBy: auth.userId,
         });
       }
@@ -663,7 +733,7 @@ export async function editPersona(
           ...(changes.description === undefined
             ? {}
             : { description: changes.description }),
-          ...(nextTraits === undefined ? {} : { currentVersionId: versionId }),
+          ...(contentChanged ? { currentVersionId: versionId } : {}),
           // The identity moved, so the token that names it moves too — whichever
           // half of the edit moved it. A caller holding the old one is holding a
           // read taken before this write, and that is exactly what it is for.
@@ -681,6 +751,7 @@ export async function editPersona(
         version,
         versionId,
         traits: nextTraits ?? storedTraits,
+        models: nextModels ?? storedModels,
         isDefault,
       };
     }),
@@ -706,6 +777,7 @@ export async function getPersonaVersion(
       personaId: personaVersion.personaId,
       version: personaVersion.version,
       traits: personaVersion.traits,
+      models: personaVersion.models,
       createdAt: personaVersion.createdAt,
     })
     .from(personaVersion)
@@ -723,7 +795,11 @@ export async function getPersonaVersion(
     .limit(1);
 
   if (row === undefined) return undefined;
-  return { ...row, traits: traitsFromRow(row.traits, row.id) };
+  return {
+    ...row,
+    traits: traitsFromRow(row.traits, row.id),
+    models: personaModelsFromRow(row.models, row.id),
+  };
 }
 
 /**
@@ -956,6 +1032,11 @@ export async function clonePersona(
     name: source.name,
     description: source.description ?? undefined,
     traits: source.traits,
+    // A clone is the same persona under a new identity, models included. A
+    // clone of one still on the compatibility path is on it too — copying the
+    // release's recommended selections onto it would be Egma answering a
+    // question the original never answered.
+    ...(source.models === null ? {} : { models: source.models }),
   });
 }
 
@@ -1276,6 +1357,7 @@ export async function listPersonaVersions(
       personaId: personaVersion.personaId,
       version: personaVersion.version,
       traits: personaVersion.traits,
+      models: personaVersion.models,
       createdAt: personaVersion.createdAt,
     })
     .from(personaVersion)
@@ -1294,6 +1376,7 @@ export async function listPersonaVersions(
     items: items.map((row) => ({
       ...row,
       traits: traitsFromRow(row.traits, row.id),
+      models: personaModelsFromRow(row.models, row.id),
     })),
     nextCursor,
   };

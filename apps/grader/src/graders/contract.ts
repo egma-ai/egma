@@ -6,7 +6,11 @@ import type {
 } from "@egma/db";
 
 import type { Conversation } from "../conversation.ts";
-import type { JudgeMakers, JudgeResolution } from "../judge/index.ts";
+import type {
+  ConversationJudges,
+  GraderJudging,
+  JudgeMakers,
+} from "../judge/index.ts";
 
 /**
  * What every grader is handed and what every one of them answers with.
@@ -78,27 +82,29 @@ export type Judgment = {
  */
 export type Judging = {
   /**
-   * The project's judge, resolved at most once per conversation and shared by
-   * everything on it that judges — so five judged checks cost one read of the
-   * configuration rather than five, and all of them speak with one account.
+   * The judges this conversation may be judged by, each source resolved at
+   * most once and shared by everything on it that asks — so five judged
+   * checks on one source cost one read rather than five.
    */
-  readonly judge: JudgeResolution;
+  readonly judges: ConversationJudges;
   /** How each provider is spoken to. A test hands over a scripted one. */
   readonly makers: JudgeMakers;
   /**
-   * This grader version's own judge, or `null` for the project's default.
+   * The two model fields this grader version froze.
    *
-   * The override is judged content: it lives on the immutable version beside the
-   * config, so a verdict written under it stays readable as "decided by this
-   * model" long after the project's default moved on. It names a provider and a
-   * model and never a key, so a grader cannot move a project's judging onto an
-   * account nobody configured.
+   * **Which of them answers is the resolution's decision, not an executor's.**
+   * A version carrying a `graderModel` selected its provider and model
+   * outright and spends the organization's credential for that provider; one
+   * carrying only a `judgeModel` overrides the project's judge without
+   * touching its key; one carrying neither is judged by the project's setting
+   * exactly as it always was. Both are judged content, frozen on the immutable
+   * version beside the config, so a verdict written under either stays
+   * readable as "decided by this model" long after anything else moved on.
+   * Neither names a key, so no grader can move judging onto an account nobody
+   * configured.
    */
-  readonly model: JudgeModelOverride;
+  readonly grader: GraderJudging;
 };
-
-/** What a version may insist on: a provider and a model, or the project's. */
-type JudgeModelOverride = Grader["judgeModel"];
 
 /**
  * What egma knows about *this* conversation besides its spans — what an entry

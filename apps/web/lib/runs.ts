@@ -394,6 +394,17 @@ export type RunSimulation = {
   readonly score: number | null;
   readonly counts: VerdictCounts | null;
   readonly reason: string | null;
+  /**
+   * One sentence saying what actually went wrong, where the reason word cannot
+   * say it alone — and the screen that fixes it, as one word from a closed
+   * list. Both null on every conversation that ran.
+   *
+   * A word rather than a link, because the address of a page is the browser's
+   * business: a stored link would be a route the platform could not be
+   * refactored around, and an unknown word would be a button to nowhere.
+   */
+  readonly detail: string | null;
+  readonly repair: string | null;
   readonly skip_reason: string | null;
   readonly skipped_capabilities: readonly string[] | null;
   readonly modality: string | null;

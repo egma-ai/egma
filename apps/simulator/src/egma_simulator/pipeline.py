@@ -32,7 +32,7 @@ from .mock_tools import ExchangedToolCall, MockToolSeam
 from .plugs import DuplexLine, PlatformPlug, PlugError, plug_for
 from .recording import RECORDING_NAME
 from .spec import SimulationSpec
-from .speech import SCRIPTED_PAIR, SpeechProviders, voice_from_traits
+from .speech import SCRIPTED_PAIR, SpeechProviders, voice_for_simulation
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ def assemble(
     return Assembled(
         conductor=VoiceConductor(
             line=plug,
-            voice=voice_from_traits(spec.persona_traits),
+            voice=voice_for_simulation(spec.persona_traits, spec.models),
             speech=speech,
             blobs=blobs,
             recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",

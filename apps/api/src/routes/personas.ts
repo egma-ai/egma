@@ -17,10 +17,14 @@ import {
   testsUsingPersona,
   UnprocessableInputError,
   VersionConflictError,
+  PROVIDER_CATALOG,
+  RECOMMENDED_PERSONA_MODELS,
+  SPEED_RANGE,
   VOICE_PROVIDERS,
   WriteAbortedError,
   type AuthContext,
   type Persona,
+  type PersonaModels,
   type PersonaTraits,
   type PersonaVersion,
 } from "@egma/db";
@@ -191,6 +195,11 @@ function describedPersona(one: Persona): Record<string, unknown> {
     version: one.version,
     version_id: one.versionId,
     traits: one.traits,
+    // What this persona thinks, listens and speaks with, or `null` for one
+    // still on the compatibility path — where the deployment's own settings
+    // decide, exactly as they did before the model catalog existed. Null is an
+    // ordinary state and a form says so; it is never a fault.
+    models: one.models,
     // The two expectations a write can name, always answered, so that reading
     // a persona is always enough to edit one.
     revision: one.revision,
@@ -208,6 +217,7 @@ function describedVersion(one: PersonaVersion): Record<string, unknown> {
     persona_id: one.personaId,
     version: one.version,
     traits: one.traits,
+    models: one.models,
     created_at: one.createdAt.toISOString(),
   };
 }
@@ -268,6 +278,84 @@ function traitsIn(value: unknown): WrittenTraits {
       ...described("backgroundNoise"),
       ...described("underFriction"),
     } as PersonaTraits,
+  };
+}
+
+/**
+ * The model selections a body carries, as the factory takes them.
+ *
+ * Almost nothing is judged here, on the traits reader's exact terms one
+ * function up: which providers do which job, what a speed may be, and which
+ * ids are non-empty are the factory's rules, and a second opinion at this door
+ * could come to disagree with the one that decides. What this owns is the
+ * envelope — that `models` is an object holding three jobs, and that a body
+ * which is not that shape is refused rather than quietly read as a persona
+ * with no selections at all.
+ *
+ * **There is no credential field and no place for one.** Who pays is the
+ * organization's model access; a persona that named a key would put a secret
+ * inside authored content that a run then pins forever.
+ */
+type WrittenModels =
+  | { readonly models: PersonaModels }
+  | { readonly refusal: string };
+
+function modelsIn(value: unknown): WrittenModels {
+  const anObject = (held: unknown): Body | undefined =>
+    typeof held === "object" && held !== null && !Array.isArray(held)
+      ? (held as Body)
+      : undefined;
+
+  const block = anObject(value);
+  if (block === undefined) {
+    return {
+      refusal:
+        "models say what the persona thinks, listens and speaks with. Send " +
+        "them as an object holding llm, stt and tts.",
+    };
+  }
+  for (const forbidden of ["key", "credential", "credential_id"]) {
+    if (forbidden in block) {
+      return {
+        refusal:
+          `a persona's models hold no "${forbidden}". Who pays for a model is ` +
+          "the organization's model access, under Model providers — a persona " +
+          "names a provider and never a secret.",
+      };
+    }
+  }
+
+  const llm = anObject(block.llm);
+  const stt = anObject(block.stt);
+  const tts = anObject(block.tts);
+  if (llm === undefined || stt === undefined || tts === undefined) {
+    return {
+      refusal:
+        "a persona's models name all three jobs: llm, stt and tts, each an " +
+        "object with a provider and a model id.",
+    };
+  }
+
+  // Handed on as they arrived: the factory names a provider Egma ships nothing
+  // for, an empty model id and a speed outside the intelligible range in its
+  // own words, and those are the words worth relaying.
+  return {
+    models: {
+      llm: {
+        provider: llm.provider as PersonaModels["llm"]["provider"],
+        model: text(llm.model),
+      },
+      stt: {
+        provider: stt.provider as PersonaModels["stt"]["provider"],
+        model: text(stt.model),
+      },
+      tts: {
+        provider: tts.provider as PersonaModels["tts"]["provider"],
+        model: text(tts.model),
+        voiceId: text(tts.voiceId ?? tts.voice_id),
+        speed: (tts.speed ?? tts.speed) as number,
+      },
+    } as PersonaModels,
   };
 }
 
@@ -361,7 +449,38 @@ export async function personaRoutes(
     const acting = await projectFor(auth, given(query.project));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    return reply.send({ voice_providers: VOICE_PROVIDERS });
+    return reply.send({
+      voice_providers: VOICE_PROVIDERS,
+      /**
+       * The catalog a Models form draws itself from, and the selection it
+       * starts a new persona at.
+       *
+       * Here beside the voice providers rather than fetched separately,
+       * because this is the one endpoint whose job is "what does the persona
+       * editor ask for" — and a form that had to assemble itself from two
+       * calls is a form that can render half-configured.
+       *
+       * There is no credential field and there never will be: who pays is the
+       * organization's model access, and a persona that named a key would put
+       * a secret inside authored content a run then pins forever.
+       */
+      model_catalog: PROVIDER_CATALOG.map((entry) => ({
+        provider: entry.provider,
+        job: entry.job,
+        label: entry.label,
+        recommended_model: entry.recommendedModel,
+        ...(entry.recommendedVoiceId === undefined
+          ? {}
+          : { recommended_voice_id: entry.recommendedVoiceId }),
+        model_is_free_text: true,
+      })),
+      recommended_models: {
+        llm: RECOMMENDED_PERSONA_MODELS.llm,
+        stt: RECOMMENDED_PERSONA_MODELS.stt,
+        tts: RECOMMENDED_PERSONA_MODELS.tts,
+      },
+      speed_range: SPEED_RANGE,
+    });
   });
 
   /** One persona, active or archived — a detail page has to render both. */
@@ -468,6 +587,10 @@ export async function personaRoutes(
     if (refused !== undefined) return refused;
 
     const written = traitsIn(body.traits ?? {});
+    const models = "models" in body ? modelsIn(body.models) : undefined;
+    if (models !== undefined && "refusal" in models) {
+      return sendRefusal(reply, "unprocessable", models.refusal);
+    }
     if ("refusal" in written) {
       return sendRefusal(reply, "unprocessable", written.refusal);
     }
@@ -481,6 +604,7 @@ export async function personaRoutes(
         ? {}
         : { description: text(body.description) }),
       traits: written.traits,
+      ...(models === undefined ? {} : { models: models.models }),
     });
 
     return reply.code(201).send(describedPersona(created));
@@ -523,14 +647,25 @@ export async function personaRoutes(
       return sendRefusal(reply, "unprocessable", written.refusal);
     }
 
+    const models = "models" in body ? modelsIn(body.models) : undefined;
+    if (models !== undefined && "refusal" in models) {
+      return sendRefusal(reply, "unprocessable", models.refusal);
+    }
+
     const expectedVersionId = given(text(body.expected_version_id));
-    if (written !== undefined && expectedVersionId === undefined) {
+    // Both halves of a version's content are guarded the same way, because
+    // both mint one: a models edit is as much "who this persona is on the
+    // simulation it conducts" as a trait edit is.
+    if (
+      (written !== undefined || models !== undefined) &&
+      expectedVersionId === undefined
+    ) {
       return sendRefusal(
         reply,
         "unprocessable",
-        "a traits edit says which version it was written against, and this " +
-          "one named no expected_version_id. Read the persona again and send " +
-          "the version_id it names now.",
+        "an edit to a persona's traits or models says which version it was " +
+          "written against, and this one named no expected_version_id. Read " +
+          "the persona again and send the version_id it names now.",
       );
     }
 
@@ -545,6 +680,7 @@ export async function personaRoutes(
         ? { description: given(text(body.description)) ?? null }
         : {}),
       ...(written === undefined ? {} : { traits: written.traits }),
+      ...(models === undefined ? {} : { models: models.models }),
     });
 
     if (edited === undefined) return noSuchPersona(reply, personaId);

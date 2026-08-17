@@ -76,7 +76,7 @@ from .config import (
     TTS_PROVIDERS,
     VAD_PROVIDERS,
 )
-from .spec import PlatformSpeech
+from .spec import PlatformSpeech, SelectedModels
 
 if TYPE_CHECKING:
     from .config import SimulatorConfig
@@ -153,6 +153,29 @@ class PersonaVoice:
     voice_id: str
     provider: str | None
     speed: float | None
+
+
+def voice_for_simulation(
+    traits: dict[str, Any], models: SelectedModels | None
+) -> PersonaVoice:
+    """Which voice this simulation speaks with.
+
+    **One source, decided by whether the persona selected its own models.**
+    A version that carries selections says its voice there — provider,
+    voice id and speed together — and the old fields in its traits are not
+    read at all. A version on the compatibility path says it in its traits,
+    exactly as it always did.
+
+    Reading both would be two answers to one question, and the one that
+    won would depend on which of them somebody edited last.
+    """
+    if models is None:
+        return voice_from_traits(traits)
+    return PersonaVoice(
+        voice_id=models.tts.voice_id,
+        provider=models.tts.provider,
+        speed=models.tts.speed,
+    )
 
 
 def voice_from_traits(traits: dict[str, Any]) -> PersonaVoice:
@@ -500,14 +523,40 @@ class SpeechProviders:
 
     @classmethod
     def for_simulation(
-        cls, config: SimulatorConfig, platform: PlatformSpeech | None = None
+        cls,
+        config: SimulatorConfig,
+        platform: PlatformSpeech | None = None,
+        models: SelectedModels | None = None,
     ) -> SpeechProviders:
         """The pair one simulation is assembled with.
 
-        This container's own configuration, with the platform's settings
-        laid over it leg by leg — which is what makes a second simulator on
-        another machine need no speech variables at all, and what makes a
-        replaced key apply to the next simulation with no restart.
+        Three sources, and the order between them is the whole of this
+        method. **The persona's own selections win outright**, because they
+        are what the run pinned: a deployment setting quietly overriding one
+        would make a simulation's voice depend on which machine conducted
+        it, and two runs of one pinned version would stop being comparable.
+        Below them, this container's configuration with the platform's
+        settings laid over it leg by leg — which is what makes a second
+        simulator on another machine need no speech variables at all, and
+        what makes a replaced key apply to the next simulation with no
+        restart.
+
+        **A selected leg takes its key from its own selection and nowhere
+        else.** Falling back to the container's key for a provider the
+        persona named would spend from an account nobody in that
+        organization chose, which is the failure the whole credential
+        arrangement exists to make unreachable. Under managed access there
+        is no key in the selection at all, and there is nothing to fall back
+        to either: the credential never leaves the Egma model gateway.
+
+        **The voice-activity leg is never selected.** What tells the persona
+        the agent started and stopped speaking is internal simulator
+        behavior rather than a model anybody chooses, so it comes from the
+        platform and this container exactly as it always has, whatever the
+        persona selected.
+
+        Where the persona selected nothing, this is the method it was before
+        selections existed, line for line.
 
         **A leg's key follows its leg's provider.** Naming a provider and
         no key is a deployment saying "use this company, with the key you
@@ -516,12 +565,26 @@ class SpeechProviders:
         whichever leg the container already chose.
         """
         said = platform or PlatformSpeech()
+        vad = said.vad_provider or config.vad_provider
+
+        if models is not None:
+            return cls(
+                stt=models.stt.provider,
+                tts=models.tts.provider,
+                vad=vad,
+                stt_key=models.stt.key,
+                tts_key=models.tts.key,
+                stt_model=models.stt.model,
+                tts_model=models.tts.model,
+                tts_voice=models.tts.voice_id,
+            )
+
         stt = said.stt_provider or config.stt_provider
         tts = said.tts_provider or config.tts_provider
         return cls(
             stt=stt,
             tts=tts,
-            vad=said.vad_provider or config.vad_provider,
+            vad=vad,
             stt_key=said.stt_key or config.key_for(stt),
             tts_key=said.tts_key or config.key_for(tts),
             stt_model=said.stt_model or config.stt_model,

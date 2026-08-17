@@ -118,6 +118,17 @@ export const COMPLETED_ENDING_REASONS = [
 ] as const;
 
 /**
+ * Where a person goes to repair what stopped a simulation.
+ *
+ * One entry today: the organization's Model providers screen, which is where
+ * every model credential in the product lives. The list grows when a failure
+ * arrives that a different screen fixes, and it stays closed so that a stored
+ * word is always a page a browser can actually open.
+ */
+export const ENDING_REPAIRS = ["model_providers"] as const;
+export type EndingRepair = (typeof ENDING_REPAIRS)[number];
+
+/**
  * Why a simulation never produced a conversation to grade. These must never
  * collapse into "the agent behaved badly": an agent that never joined, a line
  * that was never answered, a platform out of capacity, egma's own error, and
@@ -410,6 +421,32 @@ export const simulation = pgTable(
      */
     endingReason: text("ending_reason"),
     /**
+     * One sentence saying what actually went wrong, for a failure whose reason
+     * word is not enough on its own.
+     *
+     * **The platform's own account, and only where the platform has one.**
+     * `dispatch_failed` says a claimed simulation was never handed over and
+     * says nothing about why; "this organization holds no Deepgram credential,
+     * and this persona listens with Deepgram" is what somebody can actually act
+     * on. Null everywhere else, which is every simulation that ran.
+     *
+     * **Written by Egma and never by a caller**, so it carries no customer
+     * content and no secret: the claim path composes it from the provider and
+     * the model job it could not resolve, both of which are already on screen
+     * wherever the persona is.
+     */
+    endingDetail: text("ending_detail"),
+    /**
+     * Where the person reading that sentence goes to fix it, as one word from
+     * a closed list — or null where there is nowhere to send them.
+     *
+     * A word rather than a URL, because the address of a page is the browser's
+     * business and a stored link would be a route this table could not be
+     * refactored around. A closed list rather than free text, because a page
+     * turns it into a link and an unknown word would be a button to nowhere.
+     */
+    endingRepair: text("ending_repair"),
+    /**
      * Claim bookkeeping. The claimant is the simulator instance's own name
      * for itself — an operational label, never an identity in egma's tables
      * — and the heartbeat is what the orphan sweep reads.
@@ -502,6 +539,18 @@ export const simulation = pgTable(
       sql`${table.endingReason} is null or ${table.endingReason} in ${quoted(
         SIMULATION_ENDING_REASONS,
       )}`,
+    ),
+    check(
+      "simulation_ending_repair_allowed",
+      sql`${table.endingRepair} is null or ${table.endingRepair} in ${quoted(
+        ENDING_REPAIRS,
+      )}`,
+    ),
+    // A place to go with no sentence saying why would be a link somebody
+    // follows without knowing what they are fixing.
+    check(
+      "simulation_ending_repair_has_a_reason_to_exist",
+      sql`${table.endingRepair} is null or ${table.endingDetail} is not null`,
     ),
     // The reason's class follows the status: a conversation ended one of the
     // completed ways, a simulation that never ran failed one of the failed

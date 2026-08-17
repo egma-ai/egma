@@ -25,7 +25,7 @@ import {
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
-import { persona } from "../schema/personas.ts";
+import { persona, personaVersion } from "../schema/personas.ts";
 import { openCredentials } from "../sealing.ts";
 import { test, testVersion, testPersona } from "../schema/tests.ts";
 import { idempotentOperation } from "../schema/plans.ts";
@@ -38,6 +38,7 @@ import {
   type RunEventKind,
   type RunStatus,
   type RunTrigger,
+  type EndingRepair,
   type SimulationEndingReason,
   type SimulationSkipReason,
   type SimulationStatus,
@@ -247,6 +248,13 @@ export type Simulation = {
   readonly modality: Modality;
   readonly status: SimulationStatus;
   readonly endingReason: SimulationEndingReason | null;
+  /**
+   * One sentence saying what actually went wrong, where the reason word is not
+   * enough on its own. Null on every simulation that ran.
+   */
+  readonly endingDetail: string | null;
+  /** Which screen fixes it, from `ENDING_REPAIRS`, or null where none does. */
+  readonly endingRepair: EndingRepair | null;
   readonly claimedBy: string | null;
   readonly claimedAt: Date | null;
   readonly heartbeatAt: Date | null;
@@ -417,6 +425,8 @@ const SIMULATION_COLUMNS = {
   modality: simulation.modality,
   status: simulation.status,
   endingReason: simulation.endingReason,
+  endingDetail: simulation.endingDetail,
+  endingRepair: simulation.endingRepair,
   claimedBy: simulation.claimedBy,
   claimedAt: simulation.claimedAt,
   heartbeatAt: simulation.heartbeatAt,
@@ -722,6 +732,7 @@ type SimulationRow = Omit<
   Simulation,
   | "status"
   | "endingReason"
+  | "endingRepair"
   | "modality"
   | "mockToolCoverage"
   | "skipReason"
@@ -729,6 +740,7 @@ type SimulationRow = Omit<
 > & {
   readonly status: string;
   readonly endingReason: string | null;
+  readonly endingRepair: string | null;
   readonly modality: string;
   readonly mockToolCoverage: unknown;
   readonly skipReason: string | null;
@@ -740,6 +752,9 @@ function simulationFromRow(row: SimulationRow): Simulation {
     ...row,
     status: row.status as SimulationStatus,
     endingReason: row.endingReason as SimulationEndingReason | null,
+    // Pinned by a check constraint, so what comes back is one of the words
+    // this module writes.
+    endingRepair: row.endingRepair as EndingRepair | null,
     modality: row.modality as Modality,
     mockToolCoverage: mockToolCoverageFromRow(row.mockToolCoverage, row.id),
     skipReason: row.skipReason as SimulationSkipReason | null,
@@ -2173,6 +2188,28 @@ export type SimulationClaimRequest = {
   readonly claimant: string;
   /** How many conversations it has room to conduct at once. */
   readonly capacity: number;
+  /**
+   * Which versions of the simulation contract this simulator implements.
+   *
+   * **What a worker can read decides what it may take**, which is how a mixed
+   * rollout stays safe with no drain step and no work stranded. A simulation
+   * whose pinned persona version carries explicit model selections can only be
+   * conducted from a version-2 document; a worker that speaks only version 1
+   * therefore never claims that row at all, and one that speaks version 2
+   * standing beside it takes it on the next poll.
+   *
+   * The alternative shapes are both worse. Handing an old worker the row and a
+   * version-1 document would drop the selections in silence and conduct the
+   * conversation with the deployment's own models — the failure the closed
+   * contract exists to make unreachable. Handing it the row and then failing
+   * the dispatch would spend a customer's simulation on a rollout detail.
+   *
+   * Absent means version 1 alone, which is what every simulator built before
+   * the second version means when it says nothing. It names no customer, so
+   * this is a declaration of capability rather than a filter on whose work to
+   * bring back.
+   */
+  readonly contractVersions?: readonly number[] | undefined;
 };
 
 /**
@@ -2217,15 +2254,32 @@ export async function claimSimulations(
   }
 
   const now = new Date();
+  // A worker that says nothing speaks version 1, which is what every simulator
+  // built before the second version means by saying nothing.
+  const speaksVersionTwo = (request.contractVersions ?? [1]).includes(2);
 
   const claimed = await db().transaction(async (tx) => {
     const candidates = await tx
       .select({ id: simulation.id })
       .from(simulation)
-      .where(eq(simulation.status, "queued"))
+      // The persona version the row pinned, joined so the queue itself can
+      // answer whether this worker could conduct the conversation. A row whose
+      // persona selects its own models needs a version-2 document, so a
+      // version-1 worker is never offered it — `skipLocked` above already means
+      // "take what you can", and this is the same idea one step earlier.
+      .innerJoin(
+        personaVersion,
+        eq(simulation.personaVersionId, personaVersion.id),
+      )
+      .where(
+        and(
+          eq(simulation.status, "queued"),
+          speaksVersionTwo ? undefined : isNull(personaVersion.models),
+        ),
+      )
       .orderBy(asc(simulation.id))
       .limit(capacity)
-      .for("update", { skipLocked: true });
+      .for("update", { of: simulation, skipLocked: true });
 
     if (candidates.length === 0) return [];
 
@@ -2740,6 +2794,20 @@ export async function failSimulationDispatch(
   auth: AuthContext,
   id: string,
   claimant: string,
+  /**
+   * What went wrong and where it is fixed, where the platform knows.
+   *
+   * **Egma's own sentence, never a caller's**, so it carries no customer
+   * content and no secret. `dispatch_failed` says a claimed simulation was
+   * never handed over and says nothing about why; a person looking at a red
+   * row needs the why, and — where one exists — the screen that fixes it.
+   * Omitted leaves both null, which is every dispatch failure the platform can
+   * only describe as itself being broken.
+   */
+  detail?: {
+    readonly detail: string;
+    readonly repair?: EndingRepair | undefined;
+  },
 ): Promise<Simulation | undefined> {
   authorize(auth, "start_and_cancel_runs", here(auth));
 
@@ -2751,7 +2819,16 @@ export async function failSimulationDispatch(
 
   return landSimulation(auth, id, claimant, {
     from: ["claimed"],
-    write: { status: "failed", endingReason: "dispatch_failed" },
+    write: {
+      status: "failed",
+      endingReason: "dispatch_failed",
+      ...(detail === undefined
+        ? {}
+        : {
+            endingDetail: detail.detail,
+            endingRepair: detail.repair ?? null,
+          }),
+    },
   });
 }
 

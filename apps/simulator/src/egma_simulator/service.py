@@ -266,7 +266,9 @@ class RunningSimulation:
                 # simulation with nothing restarted, and what lets a second
                 # simulator on another machine hold no settings at all.
                 speech=SpeechProviders.for_simulation(
-                    self._config, self._spec.platform.speech
+                    self._config,
+                    self._spec.platform.speech,
+                    self._spec.models,
                 ),
                 media=MediaSettings.for_simulation(
                     self._config.media, self._spec.platform.carrier
@@ -694,13 +696,16 @@ class SimulatorService:
                 )
                 continue
 
-            # The connection's credentials and the platform's own keys, both
-            # registered before anything is conducted with either. A key that
-            # arrived on a work order is exactly as much a secret as one that
-            # arrived in this container's environment, and the filter that
-            # keeps it out of the log has to know about it either way.
+            # The connection's credentials, the platform's own keys and the
+            # persona's selected ones, all registered before anything is
+            # conducted with any of them. A key that arrived on a work order is
+            # exactly as much a secret as one that arrived in this container's
+            # environment, and the filter that keeps it out of the log has to
+            # know about it either way.
             self._secrets.register(spec.credentials)
             self._secrets.register(list(spec.platform.secrets))
+            if spec.models is not None:
+                self._secrets.register(list(spec.models.secrets))
             executor.submit(spec)
 
     async def _conduct_one(

@@ -12,7 +12,14 @@
  * under.
  */
 
-export { reportComplaints, specComplaints } from "./documents.ts";
+export {
+  isSpecContractVersion,
+  reportComplaints,
+  specComplaints,
+  specComplaintsAsVersion,
+  SPEC_CONTRACT_VERSIONS,
+  type SpecContractVersion,
+} from "./documents.ts";
 
 export {
   simulationIdOfTrace,

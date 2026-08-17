@@ -292,8 +292,15 @@ export function TextInput({
   /**
    * A field whose value is a number rather than words. It changes the keypad a
    * phone offers and what the browser will accept, and it is deliberately not
-   * what makes the value a number — the caller converts before sending, because
+   * what makes the value a number — the reader converts before sending, because
    * an input's value is a string whatever type it wears.
+   *
+   * It states the keypad twice, and both are load-bearing. `type="number"` is
+   * what the browser validates against; `inputMode` is what actually decides
+   * the on-screen keyboard on a phone, and a numeric field without it can still
+   * be met with a full alphabetic one. `decimal` rather than `numeric` because
+   * a speech rate is 1.25 as often as it is 1, and the whole-number keypad has
+   * no separator on it at all.
    */
   readonly numeric?: boolean;
   /** Keep native browser validation available to forms that require a value. */
@@ -327,6 +334,7 @@ export function TextInput({
       id={id}
       name={name}
       type={type ?? (secret ? "password" : numeric ? "number" : "text")}
+      inputMode={numeric ? "decimal" : undefined}
       value={value}
       placeholder={placeholder}
       aria-label={label}

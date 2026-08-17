@@ -185,6 +185,9 @@ const SEEDED: RunningGrader = {
   scope: "simulations",
   production_sample_rate: 0,
   config: { assertions: [] },
+  // On the compatibility path, which is what every copy authored before the
+  // model catalog existed reads as — a state rather than a fault.
+  model: null,
   created_at: "2026-08-15T10:00:00.000Z",
   updated_at: "2026-08-15T10:00:00.000Z",
 };

@@ -1,0 +1,624 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:egma:simulation-contract:spec:v2",
+  "title": "Simulation spec (v2)",
+  "description": "The spec direction of the simulation contract, version 2: what the control plane hands the simulator when a queued simulation is claimed. Version 2 adds `models` \u2014 the pinned persona model selections and, for customer-owned model access, the organization's key for each provider they name. Everything else is version 1 unchanged, so a document of this version is a version-1 document with one more block. The two versions are separate closed documents rather than one document with optional fields, and that is the whole point of versioning them: a worker that implements version 1 refuses this document by its version rather than accepting it and silently dropping the block it does not understand. Dropping it would conduct a simulation with the deployment's own model settings while the control plane believed it had sent the persona's \u2014 the same conversation with a different voice, a different brain and a different bill, and nothing anywhere saying so. The spec is fully flattened \u2014 the simulator receives no identifiers to resolve, no database to ask, and everything it needs to conduct one simulation from birth to a terminal report. This is the only direction credential material ever travels; the report schema (urn:egma:simulation-contract:report:v1) structurally forbids it coming back.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "simulation_id",
+    "modality",
+    "connection",
+    "persona",
+    "scenario",
+    "limits",
+    "models"
+  ],
+  "properties": {
+    "contract_version": {
+      "description": "Which version of the simulation contract this document speaks. A simulator refuses a spec whose version it does not implement; it never guesses at fields it does not know, and it never accepts a version it does not implement in the hope that the extra fields did not matter.",
+      "type": "integer",
+      "const": 2
+    },
+    "simulation_id": {
+      "description": "The simulation this spec conducts, echoed verbatim on every report about it. Opaque to the simulator: never parsed, never minted, never rewritten.",
+      "type": "string",
+      "minLength": 1
+    },
+    "modality": {
+      "description": "Which layer is under test. Chat exercises the agent's harness \u2014 prompt, reasoning, tools; voice exercises the harness plus the speech stack. The modality selects the pipeline legs; the persona brain is the same for both.",
+      "type": "string",
+      "enum": [
+        "chat",
+        "voice"
+      ]
+    },
+    "connection": {
+      "description": "How the simulator reaches the agent under test, resolved by the control plane from the connection the run named. The simulator selects its platform plug by `type` and hands the plug the config and credentials whole.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "config",
+        "credentials"
+      ],
+      "properties": {
+        "type": {
+          "description": "The connection type, from the platform's open, growing list \u2014 `retell`, `phone`, and whatever lands next. Deliberately not an enum here: the list grows one plug at a time, and a simulator holding no plug for a type refuses the claim at runtime rather than this schema refusing the document.",
+          "type": "string",
+          "minLength": 1
+        },
+        "config": {
+          "description": "The non-secret reach configuration, exactly as stored on the connection \u2014 what to reach, never how to prove. Its keys belong to the plug for `type`; this schema does not know them.",
+          "type": "object"
+        },
+        "credentials": {
+          "description": "The resolved secret material for this connection, unsealed by the control plane for exactly this hand-off, or null for types where the customer supplies no secret. The simulator holds it in memory for the simulation, hands it only to the plug, and never logs, persists, or reports it. No report document has anywhere to put it.",
+          "oneOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "persona": {
+      "description": "Who does the talking on the human side of the transcript.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "traits"
+      ],
+      "properties": {
+        "traits": {
+          "description": "The persona's authored traits, exactly as saved on the version the run pinned \u2014 today personality, language, and the concrete voice. Passed through opaquely: what a persona is made of is authoring's business, and the simulator composes these with the scenario instructions into the persona brain's system prompt.",
+          "type": "object"
+        }
+      }
+    },
+    "scenario": {
+      "description": "What the persona wants on this occasion \u2014 the situation, from the test's own content. The persona says who; the scenario says why they are here today.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instructions"
+      ],
+      "properties": {
+        "instructions": {
+          "description": "The scenario as instructions to the persona brain: the goal, the circumstances, and anything the persona knows going in.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "limits": {
+      "description": "The walls around one simulation. A limit tripping ends the simulation deliberately, reported with ending `limit_reached` \u2014 which is never the agent failing, and never graded as if it were.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_duration_seconds",
+        "max_turns"
+      ],
+      "properties": {
+        "max_duration_seconds": {
+          "description": "The most wall-clock seconds the simulation may run, measured from when the simulator begins conducting it.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_turns": {
+          "description": "The most transcript turns the simulation may reach, counting both speakers.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "mock_tools": {
+      "description": "The answers this simulation serves for the agent's tools, already resolved: one entry per tool name, the project's default or the test's override, whichever applies \u2014 worked out once by the control plane so that every simulation in one run sees one world and nothing downstream can reach a second answer. Absent, which is the ordinary case, means egma answers for nothing: every tool the agent has runs its own implementation, untouched and unobserved. Order is the order the answers were authored, and it is stable so that two runs of one project read alike.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/mock_tool"
+      }
+    },
+    "platform": {
+      "description": "What this deployment has been configured with, unsealed for exactly this hand-off: who the persona thinks with, what it speaks and hears with, and how a call reaches the telephone network. These belong to the whole deployment rather than to any customer on it, and they used to live in each simulator's own environment \u2014 which meant a second simulator on another machine needed a file copied to it, and a container started without one dialled nothing while reporting itself healthy. They ride this document instead, through the same door and with the same authority as the connection's credentials beside them, and are read afresh for each simulation so a changed key applies to the next one with no restart. Every block is optional and so is every field inside it: a setting the platform does not hold leaves the simulator's own value standing, and a setting it does hold replaces it. A platform that has configured nothing sends nothing, and a simulator conducts exactly as it did before this block existed.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "$ref": "#/$defs/platform_model"
+        },
+        "speech": {
+          "$ref": "#/$defs/platform_speech"
+        },
+        "carrier": {
+          "$ref": "#/$defs/platform_carrier"
+        }
+      }
+    },
+    "models": {
+      "$ref": "#/$defs/models"
+    }
+  },
+  "$defs": {
+    "platform_model": {
+      "description": "What the persona thinks with. Every field is optional, because a platform mid-setup holds some of them and not others, and one that holds none of them is every platform before anybody set it up.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "description": "Which client speaks to the model \u2014 the simulator's own open vocabulary, not an enum here: a simulator holding no client for a provider refuses at runtime with the ones it has, rather than this schema refusing the document.",
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "description": "Which model to ask for, verbatim as the provider names it. Configuration rather than a constant of the product: providers retire and add models on their own schedule.",
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "description": "The provider key, in the clear for exactly this hand-off. Held in memory for the simulation, registered for redaction, and never logged, persisted or reported. No report document has anywhere to put it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoning_effort": {
+          "description": "How hard the model should think before the persona speaks, in the provider's own vocabulary \u2014 an open string, not an enum here, because the accepted values differ between providers speaking one chat-completions shape and have grown more than once. Absent means send nothing at all, which is what keeps a model that has never heard of the field working exactly as it did. A persona is in a hurry rather than solving a puzzle: the reasoning under test is the agent's, and every moment the persona spends thinking is silence on a live line that nobody real would leave. It belongs to the deployment's own settings and never to a persona's selections, so a persona that selects its own models uses its provider's default reasoning behavior.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "platform_speech": {
+      "description": "What the persona speaks and hears with on a voice simulation, and what tells it the agent has started and stopped speaking. A key per leg rather than one per provider: the two legs are two accounts as often as they are one, and a shape that could not say so would make the second one unreachable.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stt_provider": {
+          "description": "The persona's ears. An open vocabulary, refused at runtime by the simulator holding no such leg.",
+          "type": "string",
+          "minLength": 1
+        },
+        "stt_key": {
+          "description": "The listening leg's provider key, on the same terms as the model key above.",
+          "type": "string",
+          "minLength": 1
+        },
+        "stt_model": {
+          "description": "Which model the listening leg asks for, where its provider has more than one. Here beside tts_model rather than left in each simulator's environment, which is where it used to live alone: that asymmetry was the one speech setting a deployment could not change centrally, so moving the persona's mouth was a settings page and moving its ears was editing a container and restarting it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "tts_provider": {
+          "description": "The persona's mouth. Chosen apart from the ears on purpose \u2014 a real mouth with scripted ears is a configuration somebody will want.",
+          "type": "string",
+          "minLength": 1
+        },
+        "tts_key": {
+          "description": "The speaking leg's provider key, on the same terms as the model key above.",
+          "type": "string",
+          "minLength": 1
+        },
+        "tts_model": {
+          "description": "Which model the speaking leg asks for, where its provider has more than one.",
+          "type": "string",
+          "minLength": 1
+        },
+        "tts_voice": {
+          "description": "Which voice the speaking leg asks for when the persona's own traits name none.",
+          "type": "string",
+          "minLength": 1
+        },
+        "vad_provider": {
+          "description": "What tells the persona the agent has started or stopped speaking. Needs no key either way.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "platform_carrier": {
+      "description": "How a call reaches the telephone network: which bridge places it, and the trunk the carrier authenticates. Absent on every deployment that has never been given a carrier \u2014 which still runs chat and voice simulations perfectly well \u2014 and that absence is an ordinary state rather than a fault. The media server's own key and secret are deliberately not here: they are read by a third-party container when it is created and cannot come from the platform's store, so they stay in each simulator's environment.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "media_backend": {
+          "description": "Which driver places the call. An open vocabulary, refused at runtime by a simulator holding no such backend.",
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_address": {
+          "description": "The carrier hostname a call is routed through. Non-secret: it is a fact the readiness answer already reports.",
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_number": {
+          "description": "The number a call appears to come from, E.164. Non-secret, for the same reason.",
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_username": {
+          "description": "The username the carrier authenticates the trunk by.",
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_password": {
+          "description": "The password beside it, in the clear for exactly this hand-off and on the same terms as every other secret in this document.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "mock_tool": {
+      "description": "One tool name, and what egma answers when the agent calls it. Matching is by the name and strictly by it: a mock tool never reads a call's arguments, so there is no matcher here and nowhere for one to go.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_name",
+        "answer",
+        "delay_milliseconds"
+      ],
+      "properties": {
+        "tool_name": {
+          "description": "The agent's own name for the tool, verbatim. Never parsed, never folded, never matched loosely.",
+          "type": "string",
+          "minLength": 1
+        },
+        "answer": {
+          "$ref": "#/$defs/mock_tool_answer"
+        },
+        "delay_milliseconds": {
+          "description": "How long egma holds the answer back before serving it, so a mocked backend takes as long as the real one would. The ceiling is arithmetic rather than taste: the exchange carrying an answer has a 45-second budget, of which 10 seconds is allowed for the round trip and 5 for egma's own serving margin \u2014 so 30 000 is what is left, and a delay this document admits can never collide with the transport that has to carry it.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30000
+        }
+      }
+    },
+    "mock_tool_answer": {
+      "description": "What the tool returns, or the failure it raises \u2014 travelling in the shape it is served in, so nothing between the authoring and the wire re-tags it. Two shapes rather than one with a nullable failure, because `null` is a perfectly good answer for a tool to give and a shape that could not tell it from 'no answer' would make an authored `null` unserveable. Exactly one of the two keys is ever written.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "answer"
+          ],
+          "properties": {
+            "answer": {
+              "description": "The value the tool returns, of whatever shape its own contract has \u2014 including `null` and bare scalars. Bounded by what the exchange carrying it holds: 15 KiB once serialized, refused at authoring time with the honest reason."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error"
+          ],
+          "properties": {
+            "error": {
+              "description": "The failure the tool raises, as text \u2014 how a test orders up the branch a real backend cannot be asked for.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "models": {
+      "description": "What this simulation's persona thinks, listens and speaks with, and who pays for it. The three selections are the pinned persona version's own, resolved by the control plane and flattened like everything else here: the simulator receives a provider, a model id, and \u2014 for the speaking leg \u2014 a voice and a speed, with nothing left to look up and nothing left to choose between. Which of the two access modes the organization is on rides the block because it is what says where the keys came from and, under managed access, where the traffic goes. Credentials are resolved when the claim is prepared rather than when the run was created, so a key replaced mid-run reaches the next simulation to be claimed and leaves the ones already running alone. The block is required. A version-2 document without it would be a version-1 document wearing the wrong number. Two shapes rather than one with an optional key, and the split is the guarantee: a customer-owned document must carry a key for every selection, because the simulator is calling that provider itself and has nothing else to authenticate with \u2014 and a managed document must carry none, because Egma's provider credentials never leave the Egma model gateway. A shape with one optional key field could express both mistakes and would refuse neither.",
+      "oneOf": [
+        {
+          "description": "Customer-owned access: the organization's own key travels with each selection.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "access",
+            "llm",
+            "stt",
+            "tts"
+          ],
+          "properties": {
+            "access": {
+              "description": "The organization supplies the provider credentials and the simulator calls those providers directly. One organization-wide value; there is no per-provider mixing and no third state.",
+              "type": "string",
+              "const": "customer-owned"
+            },
+            "llm": {
+              "$ref": "#/$defs/customer_owned_llm"
+            },
+            "stt": {
+              "$ref": "#/$defs/model_selection"
+            },
+            "tts": {
+              "$ref": "#/$defs/speech_selection"
+            }
+          }
+        },
+        {
+          "description": "Managed access: the traffic goes through the Egma model gateway and no provider key travels at all.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "access",
+            "llm",
+            "stt",
+            "tts"
+          ],
+          "properties": {
+            "access": {
+              "description": "Egma supplies the provider credentials through the Egma model gateway, and this document carries none of them.",
+              "type": "string",
+              "const": "managed"
+            },
+            "llm": {
+              "$ref": "#/$defs/managed_selection"
+            },
+            "stt": {
+              "$ref": "#/$defs/managed_selection"
+            },
+            "tts": {
+              "$ref": "#/$defs/managed_speech_selection"
+            }
+          }
+        }
+      ]
+    },
+    "model_selection": {
+      "description": "One model job's pinned selection under customer-owned access: which provider, which model, and \u2014 where this simulation actually uses the leg \u2014 the organization's own key to speak to it with. Provider and model come off the persona version a run pinned, so two runs of one version ask the same provider for the same model however the organization's credentials have moved since.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model"
+      ],
+      "properties": {
+        "provider": {
+          "description": "Which provider does this job \u2014 the model catalog's own word, matching the simulator's factory for that leg. Deliberately not an enum here: the catalog grows one proved entry at a time, and a simulator holding no factory for a provider refuses at runtime with the ones it has rather than this schema refusing the document.",
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "description": "Which model to ask for, verbatim as the provider names it. Never allowlisted by Egma: a release proves one recommended default per provider and a user may enter any id that provider's shipped adapter accepts, so a model Egma has never heard of is the provider's business to accept or refuse.",
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "description": "The provider key, in the clear for exactly this hand-off. Held in memory for the simulation, registered for redaction, and never logged, persisted or reported \u2014 no report document has anywhere to put it. Present under customer-owned access and absent under managed access, where the key never leaves the Egma model gateway.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "speech_selection": {
+      "description": "The speaking job's selection under customer-owned access, which needs two facts the others do not: which of the provider's voices, and how fast the persona talks. Both are the persona version's own, so the same persona sounds identical on every simulation of that version. Its key travels only on a voice simulation, which is the only kind that has a mouth.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "voice_id",
+        "speed"
+      ],
+      "properties": {
+        "provider": {
+          "description": "Which provider does this job \u2014 the model catalog's own word, matching the simulator's factory for that leg. Deliberately not an enum here: the catalog grows one proved entry at a time, and a simulator holding no factory for a provider refuses at runtime with the ones it has rather than this schema refusing the document.",
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "description": "Which model to ask for, verbatim as the provider names it. Never allowlisted by Egma: a release proves one recommended default per provider and a user may enter any id that provider's shipped adapter accepts, so a model Egma has never heard of is the provider's business to accept or refuse.",
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "description": "The provider key, in the clear for exactly this hand-off. Held in memory for the simulation, registered for redaction, and never logged, persisted or reported \u2014 no report document has anywhere to put it. Present under customer-owned access and absent under managed access, where the key never leaves the Egma model gateway.",
+          "type": "string",
+          "minLength": 1
+        },
+        "voice_id": {
+          "description": "The provider's own id for the voice this persona speaks in. Free text on the model id's exact terms \u2014 the provider is the authority on which of its voices exist.",
+          "type": "string",
+          "minLength": 1
+        },
+        "speed": {
+          "description": "Speech rate, as a multiple of the provider's natural pace. A number rather than a description, because two runs interpreting \"quite fast\" differently is exactly the drift a pinned version exists to rule out.",
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2
+        }
+      }
+    },
+    "managed_selection": {
+      "description": "One model job's pinned selection under managed access: the same provider and model, and **no key**. The closed shape is the guarantee rather than a habit \u2014 Egma's provider credentials stay inside the Egma model gateway, and a managed work order carrying one would be refused here rather than arriving at a simulator that had no business holding it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model"
+      ],
+      "properties": {
+        "provider": {
+          "description": "Which provider does this job \u2014 the model catalog's own word, matching the simulator's factory for that leg. Deliberately not an enum here: the catalog grows one proved entry at a time, and a simulator holding no factory for a provider refuses at runtime with the ones it has rather than this schema refusing the document.",
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "description": "Which model to ask for, verbatim as the provider names it. Never allowlisted by Egma: a release proves one recommended default per provider and a user may enter any id that provider's shipped adapter accepts, so a model Egma has never heard of is the provider's business to accept or refuse.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "managed_speech_selection": {
+      "description": "The speaking job's selection under managed access: the voice and the speed, and no key.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "voice_id",
+        "speed"
+      ],
+      "properties": {
+        "provider": {
+          "description": "Which provider does this job \u2014 the model catalog's own word, matching the simulator's factory for that leg. Deliberately not an enum here: the catalog grows one proved entry at a time, and a simulator holding no factory for a provider refuses at runtime with the ones it has rather than this schema refusing the document.",
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "description": "Which model to ask for, verbatim as the provider names it. Never allowlisted by Egma: a release proves one recommended default per provider and a user may enter any id that provider's shipped adapter accepts, so a model Egma has never heard of is the provider's business to accept or refuse.",
+          "type": "string",
+          "minLength": 1
+        },
+        "voice_id": {
+          "description": "The provider's own id for the voice this persona speaks in. Free text on the model id's exact terms \u2014 the provider is the authority on which of its voices exist.",
+          "type": "string",
+          "minLength": 1
+        },
+        "speed": {
+          "description": "Speech rate, as a multiple of the provider's natural pace. A number rather than a description, because two runs interpreting \"quite fast\" differently is exactly the drift a pinned version exists to rule out.",
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2
+        }
+      }
+    },
+    "customer_owned_llm": {
+      "description": "The thinking leg under customer-owned access. Its key travels on every simulation, because every simulation thinks \u2014 chat and voice alike.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/model_selection"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "description": "**A worker receives only the credentials its selected models actually require.** Every customer-owned document carries the key for the thinking leg, because every simulation thinks. The listening and speaking legs exist only on a voice simulation, so their keys travel only there \u2014 a chat simulation is conducted without them, and an organization that has not stored a speech credential can still run its chat tests. Requiring all three everywhere would put two secrets on a wire that has no use for them, and would stop work that had everything it needed.",
+      "if": {
+        "type": "object",
+        "properties": {
+          "modality": {
+            "const": "voice"
+          },
+          "models": {
+            "type": "object",
+            "properties": {
+              "access": {
+                "const": "customer-owned"
+              }
+            },
+            "required": [
+              "access"
+            ]
+          }
+        },
+        "required": [
+          "modality",
+          "models"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "object",
+            "properties": {
+              "stt": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "key"
+                ]
+              },
+              "tts": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "key"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "The other half of the same rule: a chat simulation has no mouth and no ears, so a listening or speaking key on its wire is a secret travelling for nothing. Refused rather than carried and ignored, because a credential that reaches a process with no use for it is a credential that did not have to be there.",
+      "if": {
+        "type": "object",
+        "properties": {
+          "modality": {
+            "const": "chat"
+          }
+        },
+        "required": [
+          "modality"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "object",
+            "properties": {
+              "stt": {
+                "type": "object",
+                "not": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key"
+                  ]
+                }
+              },
+              "tts": {
+                "type": "object",
+                "not": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

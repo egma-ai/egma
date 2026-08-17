@@ -112,6 +112,10 @@ describe("the provider's footprint on the schema", () => {
     "membership",
     "mock_tool",
     "mock_tool_agent",
+    // Who supplies the organization's model credentials, and the credentials
+    // themselves. Both are Egma's own, and the auth provider reaches neither.
+    "model_access",
+    "model_provider_credential",
     "organization",
     "organization_settings",
     "persona",

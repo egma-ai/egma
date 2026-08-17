@@ -312,6 +312,24 @@ const CONTEXT_REQUIRING = [
   // The second secret egma holds, on the first one's terms: the read answers a
   // reference and a hint, and this is the one door to the plaintext behind it.
   "resolveJudgeKey",
+  // The organization's own model-provider keys, on exactly those terms one
+  // table over: the reads answer a provider and a hint and never a key, one
+  // verb both adds and rotates because there is one credential per provider,
+  // and removing one strands nothing because nothing points at it by id.
+  "listModelProviderCredentials",
+  "storeModelProviderCredential",
+  "removeModelProviderCredential",
+  // Which of the two access modes the organization is on, read at every role
+  // because it is not a secret, and written by an admin alone because it
+  // decides whose provider account every simulation spends from.
+  "readModelAccess",
+  "setModelAccess",
+  // The one door to a model-provider key's plaintext. It takes the context
+  // like everything else and then refuses every one that did not come from a
+  // simulation or a grading claim — conducting and judging being the only two
+  // things egma does with one — and answers only the providers it was asked
+  // for, so a work order never carries a secret its selections do not name.
+  "resolveModelProviderKeys",
   // The same translation for a mock tool's scope: names off a reviewed file
   // turned into the agents it applies to. It reads agents and nothing else, and
   // only ones the context already reaches.
@@ -432,6 +450,42 @@ const THE_GRADER_LIBRARY = [
   "RESERVED_LIBRARY_TYPES",
 ];
 
+/**
+ * The provider catalog and what is selected from it: release data and pure
+ * shapes, reaching no store and taking no context, on the grader library's
+ * exact terms one group up.
+ *
+ * They are here rather than restated in the browser because a page that kept
+ * its own provider list would be a list that can disagree with this one — and
+ * the disagreement is a provider somebody can select and nothing can execute.
+ * The recommended values are exported for the same reason `PREDEFINED_GRADERS`
+ * is: three places start a selection from them, and a repeated literal is a
+ * default somebody can mistype into a model nobody proved.
+ */
+const THE_MODEL_CATALOG = [
+  // Where a person goes to repair what stopped a simulation, as one word from
+  // a closed list. A word rather than a URL, because the address of a page is
+  // the browser's business — and closed, because a page turns it into a link
+  // and an unknown word would be a button to nowhere.
+  "ENDING_REPAIRS",
+  // What a grader binary understands beyond what every one of them always has.
+  // A rollout fact rather than a setting: a binary that cannot read a grader's
+  // own model selection is offered no work that carries one, so it never
+  // judges on an account nobody chose.
+  "GRADING_CAPABILITIES",
+  "MODEL_ACCESS_MODES",
+  "MODEL_JOBS",
+  "MODEL_PROVIDERS",
+  "PROVIDER_CATALOG",
+  "RESERVED_PROVIDER_JOBS",
+  "PROVIDERS_BY_JOB",
+  "RECOMMENDED_ENTRY",
+  "RECOMMENDED_GRADER_MODEL",
+  "RECOMMENDED_PERSONA_MODELS",
+  "SPEED_RANGE",
+  "DEFAULT_MODEL_ACCESS",
+];
+
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
   // The agent factory's own refusal, carrying which of its three rules turned
@@ -464,10 +518,24 @@ const VALUES = [
   // provider. Its own class because the fix is specific and nameable.
   "JudgeProviderMismatchError",
   "LastAdminError",
+  // Managed model access selected while nothing is connected to Egma's own
+  // provider accounts. A refusal rather than a quiet no-op, because a stored
+  // `managed` with no inference key behind it fails one claim at a time for a
+  // setting that read as saved.
+  "ManagedAccessNotConnectedError",
+  // The same state found on the claim path instead — a tripwire, because no
+  // door in this release can write it. Typed so it lands as an infrastructure
+  // error naming the mode rather than as a bare dispatch failure.
+  "ManagedAccessUnavailableError",
   // A second answer for a tool this project already answers for. Its own class
   // because nothing about the body is wrong and something is already there,
   // which is a different answer in kind.
   "MockToolTakenError",
+  // A claim that could not open a credential its pinned selections name. It is
+  // an infrastructure error and never a failed verdict, and it carries the
+  // model job and the provider as values so a page can link to Model providers
+  // rather than parse a sentence.
+  "ModelProviderCredentialMissingError",
   "NotPermittedError",
   // The persona factory's other refusal: archiving the persona a project
   // points at, without saying who takes the pointer. A project always has a
@@ -722,6 +790,7 @@ describe("the data-access module's surface", () => {
         ...THE_MOCKED_WORLD,
         ...THE_PLATFORMS_SETTINGS,
         ...THE_GRADER_LIBRARY,
+        ...THE_MODEL_CATALOG,
       ].sort(),
     );
   });

@@ -6,7 +6,10 @@ import {
   startSimulation,
   type AuthContext,
 } from "@egma/db";
-import { traceIdOfSimulation } from "@egma/simulation-contract";
+import {
+  SPEC_CONTRACT_VERSIONS,
+  traceIdOfSimulation,
+} from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
 
@@ -280,7 +283,15 @@ export async function landOneConversationOf(
   runId: string,
   options: { readonly reference?: string } = {},
 ): Promise<string> {
-  const [first] = await claimSimulations({ claimant: CLAIMANT, capacity: 1 });
+  const [first] = await claimSimulations({
+    claimant: CLAIMANT,
+    capacity: 1,
+    // What the shipped simulator declares. This helper stands in for one, and
+    // a stand-in that declared less would silently refuse to claim every
+    // conversation whose persona selects its own models — which reads as an
+    // empty queue rather than as a version this stand-in cannot read.
+    contractVersions: [...SPEC_CONTRACT_VERSIONS],
+  });
   expect(first, "this run wrote a conversation to claim").toBeDefined();
   expect(
     first?.runId,

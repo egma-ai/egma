@@ -19,6 +19,7 @@ import {
   type GradingJobStatus,
   type GradingSource,
 } from "../schema/grading.ts";
+import { grader, graderVersion } from "../schema/graders.ts";
 import { run, simulation } from "../schema/runs.ts";
 import { validClaimant } from "./claimants.ts";
 import type { AuthContext } from "./context.ts";
@@ -594,11 +595,42 @@ function productionTracesIn(
  * Taking work. The one call that works the whole deployment.
  * ------------------------------------------------------------------- */
 
+/**
+ * What a grader binary can do beyond what every one of them has always done.
+ *
+ * **One entry, and it is a rollout fact rather than a setting.** A grader
+ * version that selects its own model is judged with the organization's
+ * credential for that provider; a binary built before grader models existed
+ * reads no such field and judges through the project's judge configuration
+ * instead — a different model, on a different account, that nobody chose. That
+ * is silent and it produces verdicts, which makes it worse than a failure.
+ *
+ * So a binary declares what it understands and the queue offers it only work it
+ * can judge honestly. Declaring nothing is what every grader built before this
+ * declares by saying nothing, and it is read as the old binary it is.
+ *
+ * The simulation queue makes the same bargain one file over, in the shape its
+ * own problem has: there the document is versioned, so a worker declares
+ * versions; here there is no versioned grading document to number, so a worker
+ * declares the field it can read.
+ */
+export const GRADING_CAPABILITIES = ["grader_models"] as const;
+export type GradingCapability = (typeof GRADING_CAPABILITIES)[number];
+
 export type GradingClaimRequest = {
   /** This copy of the grader service's own name for itself. */
   readonly claimant: string;
   /** How many conversations it will judge at once. */
   readonly capacity: number;
+  /**
+   * What this binary understands, from `GRADING_CAPABILITIES`.
+   *
+   * Absent means none of it, which is what every grader built before these
+   * existed means by saying nothing — and the queue then offers it only work
+   * that needs none of them, rather than work it would judge on the wrong
+   * account.
+   */
+  readonly capabilities?: readonly GradingCapability[] | undefined;
   /** How long its claim survives its silence; the default is generous. */
   readonly leaseSeconds?: number | undefined;
   /**
@@ -689,17 +721,52 @@ export async function claimGradingJobs(
     lt(gradingJob.lastSeenAt, quietSince),
   );
 
+  /**
+   * Work this binary could not judge honestly, left for one that can.
+   *
+   * A conversation is judged by every applicable grader in its project, so the
+   * question is whether *any* of them selects its own model — or, for a job
+   * narrowed to one grader by a regrade, whether that one does. A binary that
+   * cannot read the field would judge those through the project's judge
+   * configuration: a different model, on a different account, with verdicts to
+   * show for it and nothing anywhere saying so.
+   *
+   * So such a job is simply not offered, exactly as a simulation needing a
+   * version-2 document is not offered to a version-1 worker. Nothing is
+   * stranded: an upgraded binary beside it takes the job on its next poll, and
+   * a fleet with no upgraded binary yet leaves it pending rather than judging it
+   * wrongly. `SKIP LOCKED` above already means "take what you can"; this is the
+   * same idea one step earlier.
+   */
+  const judgeable = (request.capabilities ?? []).includes("grader_models")
+    ? undefined
+    : sql`not exists (
+        select 1
+        from ${grader}
+        join ${graderVersion} on ${graderVersion.id} = ${grader.currentVersionId}
+        where ${grader.projectId} = ${gradingJob.projectId}
+          and ${grader.deletedAt} is null
+          and ${graderVersion.graderModel} is not null
+          and (
+            ${gradingJob.regradeGraderId} is null
+            or ${gradingJob.regradeGraderId} = ${grader.id}
+          )
+      )`;
+
   const claimed = await db().transaction(async (tx) => {
     const candidates = await tx
       .select({ id: gradingJob.id, attempts: gradingJob.attempts })
       .from(gradingJob)
       .where(
-        or(
-          and(eq(gradingJob.status, "pending"), finished),
-          and(
-            eq(gradingJob.status, "claimed"),
-            lt(gradingJob.heartbeatAt, silentSince),
+        and(
+          or(
+            and(eq(gradingJob.status, "pending"), finished),
+            and(
+              eq(gradingJob.status, "claimed"),
+              lt(gradingJob.heartbeatAt, silentSince),
+            ),
           ),
+          judgeable,
         ),
       )
       .orderBy(asc(gradingJob.id))

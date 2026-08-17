@@ -122,6 +122,23 @@ const config: NextConfig = {
           source: "/api/judge-credentials/:path*",
           destination: `${api}/api/judge-credentials/:path*`,
         },
+        // Model providers: who supplies the keys this organization's model
+        // traffic spends, the keys themselves, and the catalog a persona and a
+        // grader select from. Three rules and a wildcard, because the bare
+        // paths and the per-provider one are four different doors — and
+        // because `:path*` is documented as matching zero segments and on the
+        // hosted deployment it did not, which is why every bare path in this
+        // file is named outright rather than left to the wildcard.
+        { source: "/api/model-access", destination: `${api}/api/model-access` },
+        { source: "/api/model-catalog", destination: `${api}/api/model-catalog` },
+        {
+          source: "/api/model-provider-credentials",
+          destination: `${api}/api/model-provider-credentials`,
+        },
+        {
+          source: "/api/model-provider-credentials/:path*",
+          destination: `${api}/api/model-provider-credentials/:path*`,
+        },
         // The shelf of grader definitions the Library screen draws itself
         // from. One rule and no `:path*` beside it, because the library is
         // read and never authored: a second address under it would be a
