@@ -532,8 +532,6 @@ describe("what one measure looks like on the wire", () => {
       toolResult: "",
       providerCallId: "room-wire",
       connectionType: "livekit",
-      audioSampleRateHz: 0,
-      audioEncoding: "",
       runId: "",
       agentId: "",
       agentVersionId: "",
