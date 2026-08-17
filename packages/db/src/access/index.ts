@@ -802,3 +802,51 @@ export {
 } from "./grading.ts";
 export type { GradingJobStatus, GradingSource } from "../schema/grading.ts";
 export type { Listening } from "../client.ts";
+
+/**
+ * The upgrade onto model selections, and what it left behind.
+ *
+ * `upgradeModelSetup` is the fifth deployment-configuring export, on
+ * `seedRunningGraders`' exact terms: it names no customer, takes no
+ * `AuthContext`, and runs in the same breath as the migrations because it
+ * finishes a change the release shipped. What it will not do is as important as
+ * what it does — it never invents a provider, never compares two secrets, and
+ * never copies deployment-wide configuration into more than one organization.
+ * Where the answer is ambiguous it writes an action instead, and those *are*
+ * customer-facing: `listModelUpgradeActions` and `listCredentialCandidates`
+ * take the context like every other read, and `activateCredentialCandidate` is
+ * the admin-only door that settles a provider with two stored keys.
+ *
+ * `readModelUpgradeCompletion` is the marker the later removal of the legacy
+ * paths is gated on. It writes nothing and takes nothing, because whether this
+ * *installation* has finished is a fact about the deployment rather than about
+ * anybody on it.
+ */
+export {
+  upgradeModelSetup,
+  type ModelUpgradeReport,
+} from "./model-upgrade.ts";
+export {
+  readModelUpgradeCompletion,
+  recordModelUpgradeCompletion,
+  UPGRADE_CONDITIONS,
+  type ModelUpgradeCompletion,
+  type UpgradeCondition,
+} from "./model-upgrade-completion.ts";
+export {
+  activateCredentialCandidate,
+  anythingOnTheLegacyPath,
+  listCredentialCandidates,
+  listModelUpgradeActions,
+  modelUpgradeOutstanding,
+  type CredentialCandidate,
+  type ModelUpgradeAction,
+} from "./model-upgrade-actions.ts";
+export type {
+  CredentialCandidateSource,
+  ModelUpgradeActionKind,
+} from "../schema/upgrade.ts";
+export {
+  CREDENTIAL_CANDIDATE_SOURCES,
+  MODEL_UPGRADE_ACTIONS,
+} from "../schema/upgrade.ts";

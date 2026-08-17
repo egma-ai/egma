@@ -260,6 +260,13 @@
       "when": 1786971693012,
       "tag": "0036_managed_model_access",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786995097828,
+      "tag": "0037_model_upgrade",
+      "breakpoints": true
     }
   ]
 }
