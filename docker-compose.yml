@@ -339,6 +339,32 @@ services:
       # these two directly and gives that credential the same shape.
       EGMA_BLOB_ACCESS_KEY_ID: ${EGMA_BLOB_ACCESS_KEY_ID:-${EGMA_S3_READ_ACCESS_KEY_ID:?no default — the read-only credential playback links are signed with. openssl rand -hex 8 makes one, set it in .env}}
       EGMA_BLOB_SECRET_ACCESS_KEY: ${EGMA_BLOB_SECRET_ACCESS_KEY:-${EGMA_S3_READ_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, set it in .env beside EGMA_S3_READ_ACCESS_KEY_ID}}
+      # ── Managed model access ───────────────────────────────────────────
+      # Whether this is hosted Egma, where the Egma model gateway and the
+      # provider accounts behind it belong. It decides three things and
+      # nothing else: a new organization starts on Managed by Egma rather
+      # than Customer-owned, managed work is authorized by a credential this
+      # deployment signs rather than by a pasted inference key, and inference
+      # keys can be created here at all. A self-hosted deployment leaves it
+      # off, which is the default and the ordinary case.
+      EGMA_HOSTED: ${EGMA_HOSTED:-false}
+      # Where the Egma model gateway answers. Unset on a deployment that has
+      # not connected managed model access, which is every deployment until
+      # somebody does; a claim that needs it and does not have it lands as a
+      # visible infrastructure error rather than as a leg quietly calling a
+      # provider directly.
+      EGMA_MODEL_GATEWAY_URL: ${EGMA_MODEL_GATEWAY_URL:-}
+      # The key hosted Egma signs its own gateway credentials with. Hosted
+      # Egma's alone: a self-hosted deployment presents the inference key its
+      # administrator connected and holds nothing here. It is the same value
+      # and the same name the gateway itself reads, because it is one secret
+      # shared by the two ends of one wire.
+      EGMA_GATEWAY_INTERNAL_KEY: ${EGMA_GATEWAY_INTERNAL_KEY:-}
+      # Where Egma Cloud answers when an administrator connects an inference
+      # key. One content-free request, made on their behalf when they paste
+      # one and never again. Hosted Egma is at one address, so this has a
+      # default; a deployment pointed at a staging Egma Cloud sets it.
+      EGMA_CLOUD_URL: ${EGMA_CLOUD_URL:-}
       EGMA_SINGLE_ORGANIZATION: ${EGMA_SINGLE_ORGANIZATION:-true}
       EGMA_TRUST_PROXY: ${EGMA_TRUST_PROXY:-false}
       # The budget belongs to the organization rather than to a key, so
@@ -651,6 +677,27 @@ services:
       # There is still deliberately no model key here. A judge belongs to the
       # project that configured it, never to a container.
       EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?no default — openssl rand -hex 32 makes one, set it in .env and back it up beside the database}
+      # ── Managed model access ───────────────────────────────────────────
+      # Whether this is hosted Egma, where the Egma model gateway and the
+      # provider accounts behind it belong. It decides three things and
+      # nothing else: a new organization starts on Managed by Egma rather
+      # than Customer-owned, managed work is authorized by a credential this
+      # deployment signs rather than by a pasted inference key, and inference
+      # keys can be created here at all. A self-hosted deployment leaves it
+      # off, which is the default and the ordinary case.
+      EGMA_HOSTED: ${EGMA_HOSTED:-false}
+      # Where the Egma model gateway answers. Unset on a deployment that has
+      # not connected managed model access, which is every deployment until
+      # somebody does; a claim that needs it and does not have it lands as a
+      # visible infrastructure error rather than as a leg quietly calling a
+      # provider directly.
+      EGMA_MODEL_GATEWAY_URL: ${EGMA_MODEL_GATEWAY_URL:-}
+      # The key hosted Egma signs its own gateway credentials with. Hosted
+      # Egma's alone: a self-hosted deployment presents the inference key its
+      # administrator connected and holds nothing here. It is the same value
+      # and the same name the gateway itself reads, because it is one secret
+      # shared by the two ends of one wire.
+      EGMA_GATEWAY_INTERNAL_KEY: ${EGMA_GATEWAY_INTERNAL_KEY:-}
       # This copy's own name for itself, in claims and in its log. Unset is
       # fine and usual — it names itself after its host and process, which is
       # what tells two copies apart.

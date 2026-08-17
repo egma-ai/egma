@@ -241,6 +241,58 @@ class SpeechSelection(ModelSelection):
 
 
 @dataclass(frozen=True)
+class GatewayAccess:
+    """Where managed model traffic goes, and what authorizes it there.
+
+    **Present only under managed access, and it is the whole of what
+    managed access adds to a work order.** No provider key travels at
+    all — Egma's own credentials stay inside the Egma model gateway and
+    this process is never handed one — so what arrives instead is one
+    address and one credential for the gateway's own door.
+
+    Each leg composes its own provider path onto the address; see
+    :data:`GATEWAY_ROUTE`. The credential goes in the slot the shipped
+    provider adapter already puts a key in, which is why a managed leg
+    is the same Pipecat service told a different base address and handed
+    a different secret, and not a second adapter.
+    """
+
+    address: str
+    credential: str = field(default="", repr=False)
+    """Kept out of the dataclass repr, like every other credential in
+    this process: a log line carrying one is a log line that should not
+    have."""
+
+    def base_for(self, provider: str, job: str) -> str | None:
+        """Where one leg reaches its provider through the gateway, or
+        ``None`` where this release carries no route for that pair.
+
+        ``None`` is a refusal to guess. Answering the gateway's bare
+        address would send the leg to a path the gateway turns away, and
+        whoever read the failure would see the provider being wrong.
+        """
+        suffix = GATEWAY_ROUTE.get(provider, {}).get(job)
+        return None if suffix is None else f"{self.address.rstrip('/')}{suffix}"
+
+
+GATEWAY_ROUTE: dict[str, dict[str, str]] = {
+    "openai": {"llm": "/openai/v1"},
+    "deepgram": {"stt": "/deepgram"},
+    "cartesia": {"tts": "/cartesia/tts/websocket"},
+}
+"""Where each provider-job pair is reached through the Egma model gateway.
+
+**The Python half of one list that three things have to agree about**:
+this, the control plane's own copy beside the provider catalog, and the
+gateway's route table, which is the authority. The suffix stops where
+the shipped adapter starts appending — Pipecat's Deepgram service adds
+``/v1/listen`` to whatever base it is given, the OpenAI chat client adds
+``/chat/completions``, and Cartesia's service is handed a whole socket
+address — so each entry ends exactly where its adapter takes over.
+"""
+
+
+@dataclass(frozen=True)
 class SelectedModels:
     """What this simulation's persona thinks, listens and speaks with.
 
@@ -260,19 +312,24 @@ class SelectedModels:
     llm: ModelSelection
     stt: ModelSelection
     tts: SpeechSelection
+    gateway: GatewayAccess | None = None
+    """Present under managed access and absent under customer-owned, and
+    the two are exclusive by the contract's own shape rather than by
+    anything read here."""
 
     @property
     def secrets(self) -> tuple[str, ...]:
-        """Every key this block holds, for redaction.
+        """Every credential this block holds, for redaction.
 
         One place to ask, exactly as the platform settings' own has, so a
-        fourth key arriving cannot fall out of the scrubbing.
+        fourth secret arriving cannot fall out of the scrubbing — which
+        is why the gateway credential is here beside the provider keys.
+        Only one of the two kinds is ever present.
         """
-        return tuple(
-            secret
-            for secret in (self.llm.key, self.stt.key, self.tts.key)
-            if secret is not None
-        )
+        held = (self.llm.key, self.stt.key, self.tts.key)
+        if self.gateway is not None:
+            held = (*held, self.gateway.credential)
+        return tuple(secret for secret in held if secret)
 
     @classmethod
     def from_document(cls, written: Any) -> SelectedModels | None:
@@ -285,8 +342,16 @@ class SelectedModels:
         if not written:
             return None
         tts = written["tts"]
+        gateway = written.get("gateway")
         return cls(
             access=written["access"],
+            gateway=(
+                None
+                if gateway is None
+                else GatewayAccess(
+                    address=gateway["address"], credential=gateway["credential"]
+                )
+            ),
             llm=_selection(written["llm"]),
             stt=_selection(written["stt"]),
             tts=SpeechSelection(

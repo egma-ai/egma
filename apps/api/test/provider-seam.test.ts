@@ -106,9 +106,15 @@ describe("the provider's footprint on the schema", () => {
     "grading_job",
     "grading_plan",
     "idempotent_operation",
+    // The two halves of one inference key: hosted Egma's hash of it, and a
+    // self-hosted deployment's sealed copy. Both are Egma's own, and the auth
+    // provider reaches neither.
+    "inference_key",
     "invitation",
     "judge_configuration",
     "judge_credential",
+    // A self-hosted deployment's sealed copy of the inference key it connected.
+    "managed_access_key",
     "membership",
     "mock_tool",
     "mock_tool_agent",

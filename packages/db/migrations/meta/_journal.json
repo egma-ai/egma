@@ -253,6 +253,13 @@
       "when": 1786961303765,
       "tag": "0035_customer_owned_model_access",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786971693012,
+      "tag": "0036_managed_model_access",
+      "breakpoints": true
     }
   ]
 }

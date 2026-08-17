@@ -31,6 +31,23 @@ export type ModelProviderCredential = {
   readonly updated_at: string;
 };
 
+/**
+ * The organization's connection to the Egma model gateway, as a self-hosted
+ * deployment holds it.
+ *
+ * **Connected, a hint, and which Egma Cloud organization it is bound to. Never
+ * the key.** There is no field here a secret could travel in, because there is
+ * none in the answer either: a connected key is sealed and there is no route
+ * that reads one back.
+ */
+export type ManagedConnection = {
+  readonly connected: boolean;
+  /** The last characters of the connected key, or null where none is. */
+  readonly hint: string | null;
+  readonly cloud_organization_id: string | null;
+  readonly connected_at: string | null;
+};
+
 export type ModelAccess = {
   readonly mode: ModelAccessMode;
   /** When the choice was last made, or null where nobody has made one. */
@@ -39,11 +56,21 @@ export type ModelAccess = {
   /**
    * Whether managed access can be chosen on this deployment at all.
    *
-   * **A fact about the deployment, never about the organization's current
-   * choice.** A form that offered a mode the server refuses would let somebody
-   * decide before telling them the decision cannot land.
+   * **A fact about the deployment and this organization's connection, never
+   * about the organization's current choice.** A form that offered a mode the
+   * server refuses would let somebody decide before telling them the decision
+   * cannot land.
    */
   readonly managed_available: boolean;
+  /**
+   * Whether this is hosted Egma, which operates the gateway.
+   *
+   * It decides which of two managed shapes the screen draws: a state to read,
+   * or a key to connect. A page that guessed from `managed_available` would
+   * draw a Connect form on a deployment with nothing to connect.
+   */
+  readonly hosted: boolean;
+  readonly managed: ManagedConnection;
   readonly credentials: readonly ModelProviderCredential[];
 };
 
@@ -67,9 +94,25 @@ export type ModelCatalog = {
 export const MODEL_ACCESS_PATH = "/api/model-access";
 export const MODEL_CATALOG_PATH = "/api/model-catalog";
 export const MODEL_PROVIDER_CREDENTIALS_PATH = "/api/model-provider-credentials";
+export const MANAGED_ACCESS_PATH = "/api/managed-access";
 
 export function modelProviderCredentialPath(provider: string): string {
   return `${MODEL_PROVIDER_CREDENTIALS_PATH}/${encodeURIComponent(provider)}`;
+}
+
+/**
+ * The connection an answer actually carried, and not connected at all when it
+ * carried something this page cannot read.
+ *
+ * The same guard `credentialsIn` makes one field over, for the same reason: a
+ * read whose shape is not the expected one is a deployment mid-upgrade, and
+ * trusting it costs the whole settings page rather than one row.
+ */
+export function managedIn(access: ModelAccess | undefined): ManagedConnection {
+  const said = access?.managed;
+  return typeof said === "object" && said !== null
+    ? said
+    : { connected: false, hint: null, cloud_organization_id: null, connected_at: null };
 }
 
 /** What a person calls each mode, said the way the settings screen says it. */

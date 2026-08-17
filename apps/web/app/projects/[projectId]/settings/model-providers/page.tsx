@@ -8,21 +8,26 @@ import { roleOf } from "../../../../../lib/me.ts";
 import {
   credentialsIn,
   jobsOfProvider,
+  managedIn,
   labelOfProvider,
   modelProviderCredentialPath,
   providersIn,
   JOB_LABEL,
+  MANAGED_ACCESS_PATH,
   MODE_LABEL,
   MODEL_ACCESS_PATH,
   MODEL_CATALOG_PATH,
   MODEL_PROVIDER_CREDENTIALS_PATH,
   type ModelAccess,
+  type ModelAccessMode,
   type ModelCatalog,
   type ModelProviderCredential,
 } from "../../../../../lib/model-access.ts";
 import {
+  Actions,
   Badge,
   Button,
+  Choice,
   Field,
   Form,
   FormActions,
@@ -123,6 +128,10 @@ function ModelProviders({ projectId }: { readonly projectId: string }) {
   const [confirmingRemove, setConfirmingRemove] = useState<ProviderRow | null>(
     null,
   );
+  /** Whether the Connect Egma form is open, and what has been typed into it. */
+  const [connecting, setConnecting] = useState(false);
+  const [inferenceKey, setInferenceKey] = useState("");
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
 
   useEffect(() => {
     if (access?.status === "signed-out" || catalog?.status === "signed-out") {
@@ -300,24 +309,123 @@ function ModelProviders({ projectId }: { readonly projectId: string }) {
     },
   ];
 
+  const hosted = access.value.hosted === true;
+  const managed = managedIn(access.value);
+  const managedAvailable = access.value.managed_available === true;
+
+  async function chooseMode(next: ModelAccessMode): Promise<void> {
+    if (!mayAdminister || busy || next === mode) return;
+    setRefused(null);
+    setSaved(null);
+    setBusy(true);
+
+    const written = await writeJson(MODEL_ACCESS_PATH, {
+      method: "PUT",
+      project: projectId,
+      body: { mode: next },
+    });
+
+    setBusy(false);
+    if (written.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (written.status !== "ready") {
+      setRefused(written.refusal);
+      return;
+    }
+    reloadAccess();
+  }
+
+  async function connect(): Promise<void> {
+    if (!mayAdminister || inferenceKey.trim() === "" || busy) return;
+    setRefused(null);
+    setSaved(null);
+    setBusy(true);
+
+    const written = await writeJson(MANAGED_ACCESS_PATH, {
+      method: "PUT",
+      project: projectId,
+      body: { key: inferenceKey.trim() },
+    });
+
+    setBusy(false);
+    if (written.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (written.status !== "ready") {
+      setRefused(written.refusal);
+      return;
+    }
+    // Cleared the moment it lands: what was typed is a secret, and a form that
+    // kept it on screen would be the one place in the product that shows one.
+    setInferenceKey("");
+    setConnecting(false);
+    setSaved("Egma");
+    reloadAccess();
+  }
+
+  async function disconnect(): Promise<void> {
+    if (!mayAdminister || busy) return;
+    setRefused(null);
+    setSaved(null);
+    setBusy(true);
+
+    const written = await deleteJson(MANAGED_ACCESS_PATH, { project: projectId });
+
+    setBusy(false);
+    if (written.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (written.status !== "ready") {
+      setRefused(written.refusal);
+      return;
+    }
+    setConnecting(false);
+    reloadAccess();
+  }
+
   return (
     <Frame projectId={projectId}>
       <Section
         title="Model access"
         lead="Who supplies the provider keys every persona and grader in this organization spends."
       >
+        {mayAdminister ? (
+          <Choice<ModelAccessMode>
+            label="Model access"
+            value={mode}
+            options={access.value.modes.map((one) => ({
+              value: one,
+              label: MODE_LABEL[one],
+            }))}
+            onChange={(next) => void chooseMode(next)}
+          />
+        ) : (
+          <Help>
+            <Badge tone="neutral">{MODE_LABEL[mode]}</Badge>
+          </Help>
+        )}
+
         <Help>
-          <Badge tone="neutral">{MODE_LABEL[mode]}</Badge>{" "}
           {mode === "customer-owned"
             ? "This organization uses its own provider accounts. The simulator and the grader call those providers directly, and Egma is not on the path."
-            : "This organization uses Egma's provider accounts through the Egma model gateway."}
+            : "This organization uses Egma's provider accounts through the Egma model gateway. Egma's provider keys stay inside that gateway and never reach a simulator or a grader."}
         </Help>
 
-        {access.value.managed_available ? null : (
+        {/*
+         * The one thing that stops the choice landing, said before somebody
+         * makes it rather than as a refusal afterwards. Never shown on hosted
+         * Egma, where there is nothing to connect and managed access is
+         * always available.
+         */}
+        {managedAvailable || mode === "managed" ? null : (
           <Help>
-            Managed by Egma is not available on this deployment: it sends model
-            traffic through the Egma model gateway, and no connection to it has
-            been made here. Customer-owned is the only mode that can be chosen.
+            Managed by Egma sends model traffic through the Egma model gateway,
+            and this deployment has connected no inference key for it. Connect
+            one below to make it available.
           </Help>
         )}
 
@@ -327,7 +435,133 @@ function ModelProviders({ projectId }: { readonly projectId: string }) {
             organization admin.
           </Help>
         )}
+
+        {/* A refusal from the mode switch, which has no form of its own. */}
+        {refused === null || open !== undefined || connecting ? null : (
+          <Failure
+            title="Egma did not change model access."
+            message={refused.message}
+            onRetry={reloadAccess}
+          />
+        )}
       </Section>
+
+      {/*
+       * Managed by Egma, in the shape this deployment actually has.
+       *
+       * Hosted Egma operates the gateway and signs its own credentials, so
+       * there is nothing to paste and nothing to disconnect — the whole state
+       * is Available. A self-hosted deployment holds one inference key, and the
+       * states are Connect Egma, Connected, Replace and Disconnect.
+       */}
+      {hosted ? (
+        <Section
+          title="Managed by Egma"
+          lead="Egma supplies the provider accounts for this organization's model traffic."
+        >
+          <Help>
+            <Badge tone="good">Available</Badge> Nothing to connect and nothing
+            to paste. This deployment operates the Egma model gateway, so a
+            persona and a grader can run before this organization has an account
+            with any model provider.
+          </Help>
+        </Section>
+      ) : (
+        <Section
+          title="Managed by Egma"
+          lead="One inference key, created in Egma Cloud, that lets this deployment use Egma's provider accounts."
+        >
+          <Help>
+            {managed.connected ? (
+              <>
+                <Badge tone="good">Connected</Badge>{" "}
+                <span>…{managed.hint}</span> Simulations and grading on Managed
+                by Egma present this key at the Egma model gateway. It is sealed
+                here and cannot be read back.
+              </>
+            ) : (
+              <>
+                <Badge tone="warn">Not connected</Badge> Create an inference key
+                in Egma Cloud and paste it here. Egma checks it before anything
+                is stored, and stores it sealed.
+              </>
+            )}
+          </Help>
+
+          {!mayAdminister ? null : (
+            <Actions>
+              <Button
+                disabled={busy}
+                ariaExpanded={connecting}
+                onClick={() => {
+                  setInferenceKey("");
+                  setRefused(null);
+                  setSaved(null);
+                  setConnecting(!connecting);
+                }}
+              >
+                {managed.connected ? "Replace key" : "Connect Egma"}
+              </Button>
+              {!managed.connected ? null : (
+                <Button
+                  disabled={busy}
+                  onClick={() => setConfirmingDisconnect(true)}
+                >
+                  Disconnect
+                </Button>
+              )}
+            </Actions>
+          )}
+
+          {!connecting ? null : (
+            <Form onSubmit={() => void connect()}>
+              <Field
+                label={
+                  managed.connected
+                    ? "Replacement inference key"
+                    : "Inference key from Egma Cloud"
+                }
+                htmlFor="managed-access-key"
+                hint="Egma Cloud shows an inference key once, when it is created. Egma checks this one with Egma Cloud before storing it, and reports Connected only after Egma Cloud confirms which organization owns it."
+              >
+                <TextInput
+                  id="managed-access-key"
+                  value={inferenceKey}
+                  type="password"
+                  disabled={!mayAdminister}
+                  onChange={setInferenceKey}
+                />
+              </Field>
+
+              {refused === null ? null : (
+                <Failure
+                  title="Egma did not connect that key."
+                  message={refused.message}
+                  onRetry={() => void connect()}
+                />
+              )}
+
+              <FormActions>
+                <Button
+                  weight="strong"
+                  type="submit"
+                  busy={busy}
+                  disabled={!mayAdminister || inferenceKey.trim() === ""}
+                >
+                  {managed.connected ? "Replace key" : "Connect Egma"}
+                </Button>
+                <Button disabled={busy} onClick={() => setConnecting(false)}>
+                  Cancel
+                </Button>
+              </FormActions>
+            </Form>
+          )}
+
+          {saved !== "Egma" || refused !== null ? null : (
+            <Help>Egma is connected.</Help>
+          )}
+        </Section>
+      )}
 
       {mode !== "customer-owned" ? null : (
         <Section
@@ -432,6 +666,48 @@ function ModelProviders({ projectId }: { readonly projectId: string }) {
             </>
           )}
         </Section>
+      )}
+
+      {!confirmingDisconnect ? null : (
+        <Dialog
+          /*
+           * The key is named, on the same rule the sibling remove-credential
+           * dialog follows: a destructive dialog says which thing it is about.
+           * The safe hint is all there is to name one by — it is the only part
+           * of a connected key anybody can see — and it is exactly enough to
+           * tell an administrator holding two whether this is the one they
+           * meant.
+           */
+          title={`Disconnect Egma (…${managed.hint ?? ""})?`}
+          onClose={() => setConfirmingDisconnect(false)}
+        >
+          {(dismiss) => (
+            <>
+              <p>
+                Egma will hold no inference key for this organization. The key
+                ending …{managed.hint} is removed from this deployment, and
+                while this organization stays on Managed by Egma every
+                simulation and every grading job stops with an error naming the
+                missing key.
+              </p>
+              <p>
+                The stored key cannot be read back, so reconnecting means having
+                the key itself — or creating a new one in Egma Cloud.
+              </p>
+              <Button onClick={dismiss}>Cancel</Button>{" "}
+              <Button
+                tone="destructive"
+                busy={busy}
+                onClick={() => {
+                  setConfirmingDisconnect(false);
+                  void disconnect();
+                }}
+              >
+                Disconnect
+              </Button>
+            </>
+          )}
+        </Dialog>
       )}
 
       {confirmingRemove === null ? null : (

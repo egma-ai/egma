@@ -1,7 +1,10 @@
 import {
+  gatewayAddressFor,
   getJudgeConfiguration,
   JUDGE_PROVIDERS,
+  readModelAccess,
   resolveJudgeKey,
+  resolveManagedAccess,
   resolveModelProviderKeys,
   type AuthContext,
   type GraderModel,
@@ -159,14 +162,24 @@ export type JudgeResolution = () => Promise<ProjectJudge | NoJudge>;
  */
 export function judgesOnce(auth: AuthContext): ConversationJudges {
   let theProjects: Promise<ProjectJudge | NoJudge> | undefined;
-  const byProvider = new Map<string, Promise<string | NoJudge>>();
+  const byProvider = new Map<string, Promise<Reached | NoJudge>>();
 
-  const keyForProvider = (
+  /**
+   * How this organization reaches one provider, resolved at most once however
+   * many graders ask.
+   *
+   * **The access mode is read once and the answer applies to every judged
+   * check on this conversation**, which is the same rule the claim path keeps
+   * one grain up: who supplies the credential is the organization's current
+   * state, read when the work is prepared, and two graders judging one
+   * conversation must not be able to land on two different answers.
+   */
+  const accessOnce = (
     provider: GraderModel["provider"],
-  ): Promise<string | NoJudge> => {
+  ): Promise<Reached | NoJudge> => {
     const held = byProvider.get(provider);
     if (held !== undefined) return held;
-    const resolving = organizationKeyFor(auth, provider);
+    const resolving = reachFor(auth, provider);
     byProvider.set(provider, resolving);
     return resolving;
   };
@@ -186,8 +199,8 @@ export function judgesOnce(auth: AuthContext): ConversationJudges {
       const asked = makerFor(selected.provider, makers);
       if (asked instanceof NoJudge) return asked;
 
-      const key = await keyForProvider(selected.provider);
-      if (key instanceof NoJudge) return key;
+      const reached = await accessOnce(selected.provider);
+      if (reached instanceof NoJudge) return reached;
 
       return {
         ask: asked.maker({
@@ -197,28 +210,70 @@ export function judgesOnce(auth: AuthContext): ConversationJudges {
           // two vocabularies that only happen to overlap.
           provider: asked.provider,
           model: selected.model,
-          key,
+          key: reached.key,
+          ...(reached.endpoint === undefined ? {} : { endpoint: reached.endpoint }),
         }),
       };
     },
   };
 }
 
+/** Where one provider is reached for this organization, and with what. */
+type Reached = {
+  readonly key: string;
+  /** The Egma model gateway's route, or `undefined` for the provider itself. */
+  readonly endpoint?: string | undefined;
+};
+
 /**
- * The organization's own key for one provider, or the sentence a person can
- * act on.
+ * How this organization reaches one provider, or the sentence a person can act
+ * on.
  *
- * **A missing credential is an infrastructure error and never a failed
+ * **Two answers, decided by the organization's own model access, and the judge
+ * maker below cannot tell which it got.** Under managed access the endpoint is
+ * the Egma model gateway's route for this provider and the key is what
+ * authorizes the gateway; under customer-owned access the endpoint is absent
+ * and the key is the organization's own. Same request, same body, same
+ * protocol — which is the whole reason the grader needs no second provider
+ * adapter for managed access.
+ *
+ * **Every way this fails is an infrastructure error and never a failed
  * verdict.** A check that could not be made did not fail: nothing about the
  * agent was learned, and recording it as a failure would put a red row on a
- * report for a key somebody has not pasted yet. The sentence names the provider
- * and where to add it, because that is what the person reading the rationale
- * has to do next.
+ * report for a key somebody has not pasted yet. Each sentence names what is
+ * missing and where to fix it, because that is what the person reading the
+ * rationale has to do next.
  */
-async function organizationKeyFor(
+async function reachFor(
   auth: AuthContext,
   provider: GraderModel["provider"],
-): Promise<string | NoJudge> {
+): Promise<Reached | NoJudge> {
+  const access = await readModelAccess(auth);
+
+  if (access.mode === "managed") {
+    let managed: Awaited<ReturnType<typeof resolveManagedAccess>>;
+    try {
+      managed = await resolveManagedAccess(auth);
+    } catch (error) {
+      return new NoJudge(
+        `this grader judges with ${provider} through the Egma model gateway, and this organization's managed access could not be prepared: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    const endpoint = gatewayAddressFor(managed.gatewayAddress, provider, "llm");
+    if (endpoint === undefined) {
+      // Refused rather than answered with the gateway's bare address, which
+      // would send this request to a path the gateway turns away — read by
+      // whoever sees the rationale as the provider being wrong.
+      return new NoJudge(
+        `this grader judges with ${provider}, and the Egma model gateway carries no language-model route for it in this release.`,
+      );
+    }
+    return { key: managed.credential, endpoint };
+  }
+
   let resolved: Awaited<ReturnType<typeof resolveModelProviderKeys>>;
   try {
     resolved = await resolveModelProviderKeys(auth, [provider]);
@@ -239,7 +294,9 @@ async function organizationKeyFor(
       `this grader judges with ${provider}, and this organization holds no ${provider} model-provider credential; add one under Model providers in Organization settings.`,
     );
   }
-  return key;
+  // No endpoint: Egma is not on the model traffic path under customer-owned
+  // access, and the judge maker reaches the provider's own address.
+  return { key };
 }
 
 /**

@@ -130,6 +130,12 @@ const config: NextConfig = {
         // hosted deployment it did not, which is why every bare path in this
         // file is named outright rather than left to the wildcard.
         { source: "/api/model-access", destination: `${api}/api/model-access` },
+        // The self-hosted deployment's one inference key: connected, replaced
+        // and disconnected here, and never read back out.
+        {
+          source: "/api/managed-access",
+          destination: `${api}/api/managed-access`,
+        },
         { source: "/api/model-catalog", destination: `${api}/api/model-catalog` },
         {
           source: "/api/model-provider-credentials",

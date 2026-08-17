@@ -171,3 +171,51 @@ function firstEntryFor(job: ModelJob): ProviderCatalogEntry {
   }
   return first;
 }
+
+/**
+ * Where each provider-job pair is reached **through the Egma model gateway**,
+ * as a suffix on the gateway's own address.
+ *
+ * **Release catalog data, exactly like the provider catalog above, and it lives
+ * here for the same reason.** Three things have to agree about it: the
+ * simulator's speech legs, the grader's judge makers, and the gateway's own
+ * route table. The first two read this; the third is the authority, and a
+ * deterministic test holds the two lists against each other so a route renamed
+ * in the gateway cannot leave a leg quietly pointed at a path nothing answers.
+ *
+ * **A suffix rather than a whole address, because the address is the
+ * deployment's.** A work order carries one gateway address; each leg composes
+ * its own path onto it. What each suffix is depends on what the shipped
+ * provider adapter does with a base: Pipecat's Deepgram service appends
+ * `/v1/listen`, so the suffix stops at the provider's name; the OpenAI chat
+ * client appends `/chat/completions`, so the suffix carries `/v1`; Cartesia's
+ * service takes a whole socket address, so the suffix is the whole path.
+ */
+export const GATEWAY_ROUTE: Readonly<
+  Record<ModelProvider, Partial<Record<ModelJob, string>>>
+> = {
+  openai: { llm: "/openai/v1" },
+  deepgram: { stt: "/deepgram" },
+  cartesia: { tts: "/cartesia/tts/websocket" },
+};
+
+/**
+ * The address one leg is told, or `undefined` where this release carries no
+ * gateway route for that provider and job.
+ *
+ * Absent is a refusal to guess. A provider-job pair with no route is a pair
+ * managed access cannot execute, and answering the gateway's bare address would
+ * send the leg to a path the gateway refuses — a `404` from Egma, read by
+ * whoever sees it as the provider being wrong.
+ */
+export function gatewayAddressFor(
+  gatewayAddress: string,
+  provider: string,
+  job: ModelJob,
+): string | undefined {
+  if (!isModelProvider(provider)) return undefined;
+  const suffix = GATEWAY_ROUTE[provider][job];
+  return suffix === undefined
+    ? undefined
+    : `${gatewayAddress.replace(/\/+$/, "")}${suffix}`;
+}

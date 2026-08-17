@@ -1,11 +1,17 @@
 import {
+  connectManagedAccess,
+  disconnectManagedAccess,
   IdentityConflictError,
   listModelProviderCredentials,
+  managedAccessAvailable,
+  managedDeployment,
+  ManagedAccessBoundElsewhereError,
   ManagedAccessNotConnectedError,
   MODEL_ACCESS_MODES,
   MODEL_JOBS,
   PROVIDER_CATALOG,
   RECOMMENDED_ENTRY,
+  readManagedAccessConnection,
   readModelAccess,
   removeModelProviderCredential,
   RESERVED_PROVIDER_JOBS,
@@ -55,21 +61,68 @@ import {
  * provider it could not open.
  */
 
+/**
+ * What one content-free validation request answered.
+ *
+ * Three outcomes rather than two, for the reason the gateway keeps three: a key
+ * Egma Cloud could not be asked about is not a bad key, and telling an
+ * administrator to check the value they just pasted when Egma Cloud was down
+ * would send them looking in the wrong place.
+ */
+export type ManagedValidation =
+  | { readonly outcome: "valid"; readonly organizationId: string }
+  | { readonly outcome: "refused" }
+  | { readonly outcome: "unreachable" };
+
+const VALIDATION_REFUSAL: Readonly<Record<"refused" | "unreachable", string>> = {
+  refused:
+    "Egma Cloud does not recognise this inference key. Create one under Inference keys in Egma Cloud and paste the value it shows you; a key that was revoked cannot be connected again.",
+  unreachable:
+    "Egma Cloud could not be reached, so this key was neither accepted nor refused. Nothing has changed here; try again when it answers.",
+};
+
 export type ModelAccessRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
+  /**
+   * The one content-free ask, as a seam.
+   *
+   * A seam rather than a call written inline, because this is the one place the
+   * product reaches out of the deployment on a person's behalf — and the
+   * deterministic suite has to be able to stand a real Egma Cloud in front of it
+   * without a network. What crosses is a key and what comes back is an
+   * organization identifier: no simulation, no persona, no model, no payload.
+   */
+  readonly validate: (key: string) => Promise<ManagedValidation>;
 };
+
+/**
+ * Hosted Egma has nothing to connect, and says where the answer really lives.
+ *
+ * A `404` rather than a refusal, for the reason the inference-key routes answer
+ * one on a self-hosted deployment: there is nothing at this address here, and a
+ * "you may not" would suggest somebody with more authority could.
+ */
+function managedIsInternal(reply: FastifyReply): FastifyReply {
+  return reply.code(404).send({
+    error: "not_found",
+    message:
+      "this deployment supplies managed model access internally, so there is no inference key to connect. Managed by Egma is available under Model access.",
+  });
+}
 
 export const MODEL_ACCESS_PATH = "/api/model-access";
 export const MODEL_CATALOG_PATH = "/api/model-catalog";
 export const MODEL_PROVIDER_CREDENTIALS_PATH = "/api/model-provider-credentials";
 export const MODEL_PROVIDER_CREDENTIAL_PATH =
   "/api/model-provider-credentials/:provider";
+export const MANAGED_ACCESS_PATH = "/api/managed-access";
 
 type Body = Record<string, unknown>;
 
 const ACCESS_KEYS = ["mode"] as const;
 const CREDENTIAL_KEYS = ["provider", "key", "expected_revision"] as const;
+const MANAGED_KEYS = ["key"] as const;
 
 function unknownKeyIn(
   body: Body,
@@ -173,9 +226,11 @@ export async function modelAccessRoutes(
    */
   app.get(MODEL_ACCESS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
-    const [access, credentials] = await Promise.all([
+    const [access, credentials, connection, available] = await Promise.all([
       readModelAccess(auth),
       listModelProviderCredentials(auth),
+      readManagedAccessConnection(auth),
+      managedAccessAvailable(auth),
     ]);
 
     return reply.send({
@@ -183,14 +238,29 @@ export async function modelAccessRoutes(
       updated_at: access.updatedAt?.toISOString() ?? null,
       modes: MODEL_ACCESS_MODES,
       /**
-       * Whether managed access can be chosen at all on this deployment.
+       * Whether managed access can be chosen at all right now.
        *
-       * `false` while nothing is connected to Egma's own provider accounts,
-       * which is every deployment today. A form that offered the choice anyway
-       * would be offering a setting the server refuses, and the refusal would
-       * arrive after somebody had already decided.
+       * Always true on hosted Egma, which operates the gateway and signs its
+       * own credentials, so there is nothing to connect. On a self-hosted
+       * deployment it is true once an inference key is connected. A form that
+       * offered the choice otherwise would be offering a setting the server
+       * refuses, and the refusal would arrive after somebody had decided.
        */
-      managed_available: false,
+      managed_available: available,
+      /**
+       * Which of the two managed stories this deployment tells.
+       *
+       * A fact about the deployment rather than about the organization, and the
+       * screen needs it to know which shape to draw: hosted managed access is a
+       * state to read, and self-hosted managed access is a key to connect.
+       */
+      hosted: managedDeployment().hosted,
+      managed: {
+        connected: connection.connected,
+        hint: connection.hint,
+        cloud_organization_id: connection.cloudOrganizationId,
+        connected_at: connection.updatedAt?.toISOString() ?? null,
+      },
       credentials: credentials.map(described),
     });
   });
@@ -229,6 +299,94 @@ export async function modelAccessRoutes(
       }
       throw refusal;
     }
+  });
+
+  /**
+   * Connect the inference key this deployment presents at the Egma model
+   * gateway, or replace the one it presents now.
+   *
+   * **One content-free validation request stands between the paste and
+   * Connected**, and it is the whole reason this route is not just a write.
+   * Egma Cloud is asked whether the key is good and which organization owns it;
+   * only then is anything stored, and what is stored includes that answer — so
+   * a key belonging to another Egma Cloud organization is refused next time
+   * rather than silently moving this deployment's spend onto somebody else's
+   * account.
+   *
+   * **The key is not exchanged for anything.** What comes back is an identifier,
+   * not a grant and not a provider credential; the key itself is what every
+   * later connection presents. There is no per-simulation round trip here or
+   * anywhere else.
+   *
+   * Hosted Egma answers `404`: it signs its own credentials and has nothing to
+   * connect, so a route that accepted a pasted key there would be a second
+   * authentication story nobody asked for.
+   */
+  app.put(MANAGED_ACCESS_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const body = (request.body ?? {}) as Body;
+
+    if (managedDeployment().hosted) return managedIsInternal(reply);
+    if (auth.role !== "admin") {
+      return refuseRole(reply, auth, "connect managed model access");
+    }
+
+    const unknown = unknownKeyIn(body, MANAGED_KEYS, "a managed access connection");
+    if (unknown !== undefined) return invalid(reply, unknown);
+
+    const key = given(text(body.key));
+    if (key === undefined) {
+      return invalid(
+        reply,
+        "connecting managed access needs the inference key Egma Cloud showed you when you created it",
+      );
+    }
+
+    const validated = await options.validate(key);
+    if (validated.outcome !== "valid") {
+      return unprocessable(reply, VALIDATION_REFUSAL[validated.outcome]);
+    }
+
+    try {
+      const connected = await connectManagedAccess(auth, {
+        key,
+        cloudOrganizationId: validated.organizationId,
+      });
+      return reply.send({
+        connected: connected.connected,
+        hint: connected.hint,
+        cloud_organization_id: connected.cloudOrganizationId,
+        connected_at: connected.updatedAt?.toISOString() ?? null,
+      });
+    } catch (refusal) {
+      if (refusal instanceof ManagedAccessBoundElsewhereError) {
+        return sendRefusal(reply, "conflict", refusal.message);
+      }
+      if (refusal instanceof UnprocessableInputError) {
+        return unprocessable(reply, refusal.message);
+      }
+      throw refusal;
+    }
+  });
+
+  /**
+   * Disconnect it.
+   *
+   * The access mode is deliberately left alone. An organization that is on
+   * managed access and disconnects lands its next claim as a visible
+   * infrastructure error naming what to reconnect, which is a better answer
+   * than this route quietly choosing somebody's access mode for them.
+   */
+  app.delete(MANAGED_ACCESS_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+
+    if (managedDeployment().hosted) return managedIsInternal(reply);
+    if (auth.role !== "admin") {
+      return refuseRole(reply, auth, "disconnect managed model access");
+    }
+
+    const removed = await disconnectManagedAccess(auth);
+    return reply.send({ disconnected: removed });
   });
 
   /**

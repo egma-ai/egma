@@ -34,6 +34,10 @@
   },
   "models": {
     "access": "managed",
+    "gateway": {
+      "address": "https://gateway.egma.ai",
+      "credential": "egma_ik_sentinel-managed-work-order-key-Rt7Yu2"
+    },
     "llm": {
       "provider": "openai",
       "model": "gpt-4o-mini"

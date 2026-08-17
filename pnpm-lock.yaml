@@ -51,6 +51,12 @@ importers:
       '@types/nodemailer':
         specifier: ^8.0.1
         version: 8.0.1
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      ws:
+        specifier: ^8.21.2
+        version: 8.21.2
 
   apps/cli:
     dependencies:

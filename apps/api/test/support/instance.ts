@@ -8,6 +8,7 @@ import {
   disconnect,
   disconnectClickHouse,
   seedGraderLibrary,
+  type ManagedDeployment,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -94,6 +95,18 @@ export type InstanceOptions = {
    */
   readonly web?: boolean;
   /**
+   * How this instance validates a pasted inference key, and what kind of
+   * deployment it is.
+   *
+   * Absent is the ordinary self-hosted instance: nothing connected, and a
+   * paste that reaches the real Egma Cloud, which no test may do. A browser
+   * walk that drives the Connect Egma states hands one in, so the arc it
+   * clicks through is the real one — real routes, real Postgres, real sealing
+   * — with only the outbound ask standing in.
+   */
+  readonly validateInferenceKey?: ServerOptions["validateInferenceKey"];
+  readonly managedDeployment?: ManagedDeployment;
+  /**
    * The object store recordings are resolved against, where the caller has one
    * running. Absent by default, because most of what a browser does here has
    * nothing to do with audio — and because the one flow that does must skip
@@ -177,6 +190,11 @@ export async function startInstance(
     databaseUrl: database.url,
     maxConnections: 4,
     encryptionKey: TEST_ENCRYPTION_KEY,
+    managedDeployment: options.managedDeployment ?? {
+      hosted: false,
+      gatewayAddress: undefined,
+      internalGatewayKey: undefined,
+    },
   });
   connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
 
@@ -217,6 +235,9 @@ export async function startInstance(
     ...(options.deviceAuthorizationInterval === undefined
       ? {}
       : { deviceAuthorizationInterval: options.deviceAuthorizationInterval }),
+    ...(options.validateInferenceKey === undefined
+      ? {}
+      : { validateInferenceKey: options.validateInferenceKey }),
   });
   if (options.observeRequest !== undefined) {
     // `prependListener` puts this before Fastify's own request listener. A

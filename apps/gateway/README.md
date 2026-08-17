@@ -41,9 +41,39 @@ different base address and nothing else:
 
 The gateway takes one credential per connection and asks one question of it:
 does this authorize a connection, and which organization is it. That question is
-answered by a **verifier**, which is a replaceable interface
-(`src/verify.ts`) — the shipped implementation compares one
-organization-scoped secret held in deployment configuration.
+answered by a **verifier**, which is a replaceable interface (`src/verify.ts`).
+Two shipped answers sit behind it, tried in that order:
+
+- an **internal gateway credential** — `egma_ig_<payload>.<signature>`, where
+  the payload names the organization and when the credential stops being good,
+  and the signature is made with a key only Egma's control plane and this
+  gateway hold. It is checked here, with no network and no store. The
+  organization travels *inside* the signature, which is what keeps it out of a
+  caller's hands: edit it and the signature stops matching, hold no signing key
+  and you cannot name an organization at all;
+- an **inference key** — `egma_ik_…`, an organization's own credential for
+  managed model access. The gateway keeps no key store and holds no copy of
+  anybody's key: it asks Egma Cloud, where the key was minted and hashed,
+  whether it is still good and whose it is. One small request when a connection
+  opens, never per audio frame.
+
+**A credential that could not be an inference key is refused without Egma Cloud
+being asked.** A forged internal credential, an ordinary Egma product key
+(`egma_sk_…`), a provider key pasted into the wrong field — none is a value Egma
+Cloud could recognise. Asking would spend a round trip to be told so, would make
+every one of them read as "nobody could say" on a day Egma Cloud is down, and
+would turn the validation door into a free oracle for arbitrary strings.
+
+Two things follow from asking rather than caching, and both are promises this
+product makes. **Revocation is effective for the very next connection**, because
+there is nothing to wait out. And **no Cloudflare storage product is part of
+authentication at all**, so swapping one changes nothing here.
+
+The cost is honest: a connection cannot open while Egma Cloud is unreachable.
+That is answered `503 gateway_authentication_unavailable` rather than `401`,
+because a credential Egma could not look up is not a bad credential — and
+telling a customer to rotate a key that was fine would hide an Egma outage
+inside a sentence about their configuration.
 
 The credential may arrive in either of two places:
 
@@ -167,12 +197,20 @@ except where a default is written below.
 
 | Name | Secret | What it is |
 | --- | --- | --- |
-| `EGMA_GATEWAY_ORGANIZATION_SECRET` | **yes** | The organization-scoped credential the shipped verifier accepts |
-| `EGMA_GATEWAY_ORGANIZATION_ID` | no | The organization that credential stands for |
-| `EGMA_GATEWAY_INFERENCE_KEY_ID` | no | The identifier recorded against connections it opens |
 | `EGMA_GATEWAY_DEEPGRAM_KEY` | **yes** | Egma's Deepgram credential |
 | `EGMA_GATEWAY_OPENAI_KEY` | **yes** | Egma's OpenAI credential |
 | `EGMA_GATEWAY_CARTESIA_KEY` | **yes** | Egma's Cartesia credential |
+
+### Authentication
+
+Optional, each on its own, because a deployment may honestly hold only one of
+the two answers. Absent means that answer is not accepted from anybody.
+
+| Name | Secret | What it is |
+| --- | --- | --- |
+| `EGMA_GATEWAY_INTERNAL_KEY` | **yes** | The key hosted Egma signs its own gateway credentials with |
+| `EGMA_GATEWAY_VALIDATION_URL` | no | Where Egma Cloud answers whether an inference key is good and whose it is |
+| `EGMA_GATEWAY_VALIDATION_TIMEOUT_MS` | no | How long that one ask may take before the answer is "nobody knows". Default `5000` |
 
 ### Optional
 
@@ -195,6 +233,13 @@ The three `_HOME` names are **deployment configuration and never a caller's**.
 They exist so the deterministic suite can point a route at a strict local server
 standing in for a provider. A deployment reaching the real providers sets none
 of them.
+
+**The two authentication names are optional on their own, and neither is a
+default worth having.** A gateway with a signing key and no validation address
+serves hosted Egma alone; one with a validation address and no signing key
+serves self-hosted installations alone. A gateway with neither authenticates
+nobody — every connection is refused, and nothing is silently open. Egma's own
+deployment sets both.
 
 A missing required name stops the gateway at startup, in a sentence naming it.
 
@@ -236,9 +281,8 @@ production deployment.
 
 ```sh
 pnpm --filter @egma/gateway build
-EGMA_GATEWAY_ORGANIZATION_SECRET=… \
-EGMA_GATEWAY_ORGANIZATION_ID=org_… \
-EGMA_GATEWAY_INFERENCE_KEY_ID=… \
+EGMA_GATEWAY_INTERNAL_KEY=… \
+EGMA_GATEWAY_VALIDATION_URL=https://app.example/v1/inference-keys/validation \
 EGMA_GATEWAY_DEEPGRAM_KEY=… EGMA_GATEWAY_OPENAI_KEY=… EGMA_GATEWAY_CARTESIA_KEY=… \
 EGMA_GATEWAY_PORT=8787 \
 pnpm --filter @egma/gateway start

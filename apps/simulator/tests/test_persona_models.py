@@ -21,6 +21,7 @@ from egma_simulator.config import SimulatorConfig
 from egma_simulator.contract import SUPPORTED_SPEC_VERSIONS, ContractViolation
 from egma_simulator.model import ModelFailure, OpenAICompatibleModel, build_model_client
 from egma_simulator.spec import (
+    GatewayAccess,
     Limits,
     ModelSelection,
     PlatformModel,
@@ -30,9 +31,12 @@ from egma_simulator.spec import (
     SimulationSpec,
     SpeechSelection,
 )
-from egma_simulator.speech import SpeechProviders, voice_for_simulation
+from egma_simulator.speech import SpeechFault, SpeechProviders, voice_for_simulation
 
 A_URL = "http://control-plane.test"
+
+THE_GATEWAY = "https://gateway.egma.test"
+GATEWAY_CREDENTIAL = "SENTINEL-managed-gateway-credential-94gh"
 
 SELECTED = SelectedModels(
     access="customer-owned",
@@ -54,6 +58,24 @@ SELECTED = SelectedModels(
         speed=1.25,
     ),
 )
+
+
+MANAGED = SelectedModels(
+    access="managed",
+    gateway=GatewayAccess(address=THE_GATEWAY, credential=GATEWAY_CREDENTIAL),
+    llm=ModelSelection(provider="openai", model="the-model-the-persona-selected"),
+    stt=ModelSelection(
+        provider="deepgram", model="the-model-the-persona-listens-with"
+    ),
+    tts=SpeechSelection(
+        provider="cartesia",
+        model="the-model-the-persona-speaks-with",
+        voice_id="the-voice-the-persona-selected",
+        speed=1.2,
+    ),
+)
+"""The same persona, on managed access: the same three selections, no
+provider key anywhere, and one credential for the gateway's own door."""
 
 THE_PLATFORMS_OWN = PlatformSettings(
     model=PlatformModel(
@@ -281,15 +303,11 @@ def test_every_selected_key_is_offered_for_redaction_in_one_place():
     }
 
 
-def test_a_managed_work_order_offers_no_key_because_it_carries_none():
-    managed = SelectedModels(
-        access="managed",
-        llm=ModelSelection(provider="openai", model="m"),
-        stt=ModelSelection(provider="deepgram", model="n"),
-        tts=SpeechSelection(provider="cartesia", model="s", voice_id="v", speed=1.0),
-    )
-
-    assert managed.secrets == ()
+def test_a_managed_work_order_offers_no_provider_key_because_it_carries_none():
+    """The one credential a managed order holds authorizes the Egma model
+    gateway, and it is scrubbed exactly as a provider key is."""
+    assert MANAGED.secrets == ("SENTINEL-managed-gateway-credential-94gh",)
+    assert "SENTINEL-selected-thinking-key-91ab" not in MANAGED.secrets
 
 
 def test_no_selected_key_appears_in_a_repr_of_what_holds_it():
@@ -398,3 +416,165 @@ def test_this_simulator_declares_the_versions_it_implements():
     drain step: a row needing a document this process cannot read is never
     offered to it at all."""
     assert SUPPORTED_SPEC_VERSIONS == (1, 2)
+
+
+# -- Managed access: the same legs, a different address and one credential ---
+
+
+def test_managed_legs_are_told_the_gateways_address_and_its_credential(a_container):
+    """The same shipped services, told a different base and handed a
+    different secret. Nothing about the model, the voice or the protocol
+    moves — which is what keeps a second provider-adapter layer from
+    growing beside Pipecat."""
+    providers = SpeechProviders.for_simulation(
+        a_container, THE_PLATFORMS_OWN.speech, MANAGED
+    )
+
+    assert providers.stt == "deepgram"
+    assert providers.stt_base_url == f"{THE_GATEWAY}/deepgram"
+    assert providers.stt_key == GATEWAY_CREDENTIAL
+    assert providers.tts == "cartesia"
+    assert providers.tts_base_url == f"{THE_GATEWAY}/cartesia/tts/websocket"
+    assert providers.tts_key == GATEWAY_CREDENTIAL
+    # The pinned selections are untouched by who supplies the credentials.
+    assert providers.stt_model == "the-model-the-persona-listens-with"
+    assert providers.tts_model == "the-model-the-persona-speaks-with"
+    assert providers.tts_voice == "the-voice-the-persona-selected"
+
+
+def test_a_managed_brain_thinks_through_the_gateway_with_its_credential(a_container):
+    client = build_model_client(a_container, a_spec_with(models=MANAGED))
+
+    assert isinstance(client, OpenAICompatibleModel)
+    assert client._base_url == f"{THE_GATEWAY}/openai/v1"
+    assert client._api_key == GATEWAY_CREDENTIAL
+    assert client._model_name == "the-model-the-persona-selected"
+
+
+def test_a_customer_owned_order_names_no_gateway_at_all(a_container):
+    """Egma is not on the model traffic path under customer-owned access, so
+    the legs reach their own providers exactly as they always did."""
+    providers = SpeechProviders.for_simulation(
+        a_container, THE_PLATFORMS_OWN.speech, SELECTED
+    )
+
+    assert providers.stt_base_url is None
+    assert providers.tts_base_url is None
+
+
+def test_a_managed_leg_with_no_gateway_route_is_refused_rather_than_guessed():
+    """Answering the gateway's bare address would send the leg to a path the
+    gateway turns away, and whoever read the failure would see the provider
+    being wrong."""
+    gateway = GatewayAccess(address=THE_GATEWAY, credential=GATEWAY_CREDENTIAL)
+
+    assert gateway.base_for("deepgram", "tts") is None
+    assert gateway.base_for("a-provider-with-no-route", "llm") is None
+
+
+def test_a_managed_gateway_credential_never_appears_in_a_repr():
+    assert GATEWAY_CREDENTIAL not in repr(MANAGED)
+    assert GATEWAY_CREDENTIAL not in repr(MANAGED.gateway)
+
+
+def test_a_claimed_managed_document_becomes_the_gateway_it_carries():
+    document = {
+        "contract_version": 2,
+        "simulation_id": "sim-1",
+        "modality": "voice",
+        "connection": {"type": "scripted", "config": {}, "credentials": None},
+        "persona": {"traits": {}},
+        "scenario": {"instructions": "Say the thing."},
+        "limits": {"max_duration_seconds": 300, "max_turns": 40},
+        "models": {
+            "access": "managed",
+            "gateway": {
+                "address": THE_GATEWAY,
+                "credential": GATEWAY_CREDENTIAL,
+            },
+            "llm": {"provider": "openai", "model": "m"},
+            "stt": {"provider": "deepgram", "model": "n"},
+            "tts": {
+                "provider": "cartesia",
+                "model": "s",
+                "voice_id": "v",
+                "speed": 1.0,
+            },
+        },
+    }
+
+    spec = SimulationSpec.from_document(document)
+
+    assert spec.models is not None
+    assert spec.models.access == "managed"
+    assert spec.models.gateway is not None
+    assert spec.models.gateway.address == THE_GATEWAY
+    assert spec.models.gateway.credential == GATEWAY_CREDENTIAL
+    # No provider key anywhere, because none travelled.
+    assert spec.models.llm.key is None
+    assert spec.models.stt.key is None
+    assert spec.models.tts.key is None
+
+
+def test_a_managed_leg_with_no_gateway_route_is_refused_rather_than_opened(
+    a_container,
+):
+    """The leak this exists to close.
+
+    The key a managed leg holds authorizes the Egma model gateway. Every
+    builder reads a missing base address as "the provider's own", so a leg
+    for a pair the gateway has no route for would open a connection straight
+    to that provider and present an Egma credential as their API key — a
+    third party holding an Egma secret, and a failure that reads as a bad
+    key rather than as a missing route.
+    """
+    no_route = SelectedModels(
+        access="managed",
+        gateway=GatewayAccess(address=THE_GATEWAY, credential=GATEWAY_CREDENTIAL),
+        llm=ModelSelection(provider="openai", model="m"),
+        stt=ModelSelection(provider="deepgram", model="n"),
+        # A leg this simulator really has and the gateway has no route for,
+        # which is exactly the shape a growing provider catalog produces:
+        # ElevenLabs speaks here and is not a shipped gateway route.
+        tts=SpeechSelection(
+            provider="elevenlabs", model="s", voice_id="v", speed=1.0
+        ),
+    )
+    providers = SpeechProviders.for_simulation(a_container, None, no_route)
+
+    with pytest.raises(SpeechFault) as refusal:
+        providers.checked()
+
+    assert "elevenlabs" in str(refusal.value)
+    assert "tts" in str(refusal.value)
+    # And the sentence says what was avoided, so nobody reads it as the
+    # provider rejecting a key.
+    assert "route" in str(refusal.value)
+
+
+def test_a_chat_simulation_is_not_refused_over_a_leg_it_never_builds(a_container):
+    """The refusal above is at build time and not at resolution, for the
+    reason every other speech check is: a chat simulation has no mouth and no
+    ears, and must not fail over a route it was never going to use."""
+    no_route = SelectedModels(
+        access="managed",
+        gateway=GatewayAccess(address=THE_GATEWAY, credential=GATEWAY_CREDENTIAL),
+        llm=ModelSelection(provider="openai", model="m"),
+        stt=ModelSelection(provider="deepgram", model="n"),
+        tts=SpeechSelection(
+            provider="deepgram", model="s", voice_id="v", speed=1.0
+        ),
+    )
+
+    # Resolving is what a chat simulation does; building is what it does not.
+    providers = SpeechProviders.for_simulation(a_container, None, no_route)
+
+    assert providers.managed is True
+    assert providers.tts_base_url is None
+
+
+def test_a_managed_pair_the_gateway_carries_passes_the_same_check(a_container):
+    providers = SpeechProviders.for_simulation(a_container, None, MANAGED).checked()
+
+    assert providers.stt_base_url == f"{THE_GATEWAY}/deepgram"
+    assert providers.tts_base_url == f"{THE_GATEWAY}/cartesia/tts/websocket"

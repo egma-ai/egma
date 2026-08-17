@@ -2,7 +2,14 @@ import { pgTable, text, unique } from "drizzle-orm/pg-core";
 
 import { organization } from "./tenancy.ts";
 import { user } from "./identity.ts";
-import { createdAt, idText, oneOf, prefixCheck, updatedAt } from "./columns.ts";
+import {
+  createdAt,
+  idText,
+  moment,
+  oneOf,
+  prefixCheck,
+  updatedAt,
+} from "./columns.ts";
 import { MODEL_PROVIDERS } from "../models/catalog.ts";
 
 /**
@@ -129,5 +136,116 @@ export const modelProviderCredential = pgTable(
       table.organizationId,
       table.provider,
     ),
+  ],
+);
+
+/**
+ * One inference key an organization holds for the Egma model gateway, as
+ * hosted Egma stores it: **a hash and its lifecycle, never a readable copy.**
+ *
+ * The sibling of `api_key` and deliberately not the same table. A product key
+ * resolves to a person, a role and a project, and opens every ordinary Egma
+ * door; this one resolves to an organization and opens exactly one thing —
+ * managed model traffic through the Egma model gateway. Keeping them apart is
+ * what makes "an inference key cannot use a normal Egma product interface" a
+ * property of where the secret is looked up rather than a rule a door has to
+ * remember: the product's resolver reads `api_key` and this row is not in it.
+ *
+ * **Several active keys per organization, on purpose.** Separate installations
+ * hold separate keys, and rotation is create-then-revoke rather than
+ * replace-in-place — so an administrator can bring a replacement up before the
+ * old key stops working and nothing stops mid-run.
+ */
+export const inferenceKey = pgTable(
+  "inference_key",
+  {
+    id: idText("id").primaryKey(),
+    organizationId: idText("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    /**
+     * What an administrator calls this key, so a list of several says which
+     * installation each belongs to. Required: an unnamed key in a list of four
+     * is a key nobody dares revoke.
+     */
+    name: text("name").notNull(),
+    /**
+     * A single SHA-256 over the secret, and the whole of what is kept.
+     *
+     * Unique across the deployment, which is what lets a validation request
+     * find a key by its hash alone without naming an organization first — the
+     * organization is the row's answer, never the caller's question.
+     */
+    hash: text("hash").notNull(),
+    /** The static prefix every inference key starts with. */
+    prefix: text("prefix").notNull(),
+    /** The last characters of the secret. Enough to tell two keys apart. */
+    displaySuffix: text("display_suffix").notNull(),
+    createdBy: idText("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    /** When a connection last authenticated with it, so a dead key is visible. */
+    lastUsedAt: moment("last_used_at"),
+    /** When it stopped working. Read on every connection, so there is no cache to wait out. */
+    revokedAt: moment("revoked_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    prefixCheck("inference_key_id_prefix", table.id, "ifk"),
+    unique("inference_key_hash_unique").on(table.hash),
+  ],
+);
+
+/**
+ * The one inference key a self-hosted organization has connected, sealed.
+ *
+ * **The other end of the row above, in the other deployment.** Hosted Egma
+ * keeps the hash so it can answer "is this key good and whose is it"; the
+ * self-hosted deployment keeps the secret itself, because it has to present it
+ * every time a simulation opens a connection to the gateway. Neither holds what
+ * the other does, which is the whole arrangement: a stolen hosted database
+ * yields no usable key, and a stolen self-hosted one yields exactly the one
+ * organization's own key and nothing else's.
+ *
+ * **One per organization, held by the primary key.** A self-hosted deployment
+ * connects one key at a time; rotating is replacing this row, and the safe
+ * overlap lives in Egma Cloud where several keys may be active at once.
+ *
+ * **`cloud_organization_id` is the binding, and it is why this column exists.**
+ * Validation answers which Egma Cloud organization owns the key, and that
+ * answer is written down — so a key belonging to somebody else's Egma Cloud
+ * organization is refused while a binding stands, rather than quietly moving
+ * this deployment's managed traffic onto another customer's account.
+ */
+export const managedAccessKey = pgTable(
+  "managed_access_key",
+  {
+    organizationId: idText("organization_id")
+      .primaryKey()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    /** The Egma Cloud organization this local organization is bound to. */
+    cloudOrganizationId: idText("cloud_organization_id").notNull(),
+    /** The key, sealed with the deployment's own master key. Never read back out. */
+    credentials: text("credentials").notNull(),
+    /** The last characters of the key. Never enough of it to use. */
+    credentialsHint: text("credentials_hint").notNull(),
+    connectedBy: idText("connected_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    prefixCheck(
+      "managed_access_key_organization_id_prefix",
+      table.organizationId,
+      "org",
+    ),
+    // `cloud_organization_id` carries no format check, and that is the
+    // convention rather than an omission: a prefix check pins the identifiers
+    // *this* deployment mints, and this one is another deployment's answer,
+    // written down exactly as validation returned it. A check here would be
+    // Egma Cloud's identifier format frozen into a self-hoster's database.
   ],
 );

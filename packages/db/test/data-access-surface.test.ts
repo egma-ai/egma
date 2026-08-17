@@ -43,6 +43,35 @@ const MIGRATIONS = [
 const IDENTITY = ["IDENTITY_MODELS", "identityId", "identityStore"];
 
 /**
+ * What kind of deployment this is, and how it signs its own connections to the
+ * Egma model gateway.
+ *
+ * Deployment configuration handed in at boot, beside the connection above and
+ * for the connection's reason: it reaches no store and takes no context.
+ * `managedDeployment` answers what `connect` was told; the other three are the
+ * *format* of the internal gateway credential — the one place this side of the
+ * wire writes it down, so that a gateway verifier at the other end reads the
+ * same thing Egma mints. A second spelling anywhere would be a credential one
+ * half of Egma could make and the other half could not check.
+ */
+const MANAGED_DEPLOYMENT = [
+  // Settable as well as readable, unlike the master key beside it, and for one
+  // reason: a deployment is hosted or self-hosted for its whole life, so the
+  // only way to exercise both answers is to tell one process it is the other.
+  // It reaches no store and holds no customer's anything, so what it widens is
+  // a boot-time setting rather than a door into data.
+  "holdManagedDeployment",
+  "INTERNAL_GATEWAY_CREDENTIAL_PREFIX",
+  "INTERNAL_GATEWAY_CREDENTIAL_SECONDS",
+  "managedDeployment",
+  "managedDeploymentFrom",
+  // The TLS floor, shared with the one other place an address managed traffic
+  // reaches is read: an https address, or a loopback one for the suite.
+  "securely",
+  "signInternalGatewayCredential",
+];
+
+/**
  * What produces an `AuthContext`: which organization a person is in, which
  * projects are in it, and what a credential resolves to. An eighth name here is
  * a decision somebody makes on purpose, and the build rule makes them make it.
@@ -59,6 +88,11 @@ const CONTEXT_ESTABLISHING = [
   "resolveDeviceAuthorization",
   "readInvitation",
   "acceptInvitation",
+  // One inference key's hash turned into the organization it authorizes.
+  // `resolveApiKey`'s shape with less authority: no context comes back, because
+  // the one thing an inference key opens is a connection to the Egma model
+  // gateway.
+  "resolveInferenceKey",
 ];
 
 /**
@@ -330,6 +364,28 @@ const CONTEXT_REQUIRING = [
   // things egma does with one — and answers only the providers it was asked
   // for, so a work order never carries a secret its selections do not name.
   "resolveModelProviderKeys",
+  // The inference keys hosted Egma mints for the Egma model gateway. Created
+  // by an admin, shown once by the route that minted the secret, and answered
+  // here as a name, a safe hint and four times — there is no shape in this
+  // module a key could travel back in.
+  "createInferenceKey",
+  "listInferenceKeys",
+  "revokeInferenceKey",
+  // The self-hosted half: the one key an administrator connected, sealed, read
+  // back as Connected and a hint, and replaced or removed deliberately.
+  "connectManagedAccess",
+  "disconnectManagedAccess",
+  "readManagedAccessConnection",
+  // Whether managed access can be chosen here at all — always on hosted Egma,
+  // and on a self-hosted deployment once a key is connected. A form reads it so
+  // that it never offers a choice the setting would refuse.
+  "managedAccessAvailable",
+  // The one door to a usable gateway credential, on `resolveModelProviderKeys`'
+  // exact terms: it takes the context and then refuses every one that did not
+  // come from a simulation or a grading claim. What it answers is where the
+  // traffic goes and what authorizes it — never an upstream provider secret,
+  // which this process cannot reach at all.
+  "resolveManagedAccess",
   // The same translation for a mock tool's scope: names off a reviewed file
   // turned into the agents it applies to. It reads agents and nothing else, and
   // only ones the context already reaches.
@@ -523,10 +579,15 @@ const VALUES = [
   // `managed` with no inference key behind it fails one claim at a time for a
   // setting that read as saved.
   "ManagedAccessNotConnectedError",
-  // The same state found on the claim path instead — a tripwire, because no
-  // door in this release can write it. Typed so it lands as an infrastructure
-  // error naming the mode rather than as a bare dispatch failure.
+  // The same state found on the claim path instead: a deployment that has not
+  // been told where its gateway is. Egma misconfigured rather than a customer
+  // unconnected, which is why it is not the error above.
   "ManagedAccessUnavailableError",
+  // An inference key pasted whose Egma Cloud organization is not the one this
+  // deployment is bound to. Refused while the binding stands, because managed
+  // spend moving onto another customer's account is not a thing one paste
+  // should be able to do.
+  "ManagedAccessBoundElsewhereError",
   // A second answer for a tool this project already answers for. Its own class
   // because nothing about the body is wrong and something is already there,
   // which is a different answer in kind.
@@ -765,6 +826,8 @@ const THE_FOLD = [
  * for a conversation's tool calls, and two implementations of "every span, once"
  * is one of them quietly missing a list.
  */
+const THE_GATEWAY_ROUTES = ["GATEWAY_ROUTE", "gatewayAddressFor"];
+
 const THE_MEASURES = [
   "everySpanIn",
   "measuresFromSpans",
@@ -778,6 +841,7 @@ describe("the data-access module's surface", () => {
         ...CONNECTION,
         ...MIGRATIONS,
         ...IDENTITY,
+        ...MANAGED_DEPLOYMENT,
         ...CONTEXT_ESTABLISHING,
         ...INSTANCE_SCOPED,
         ...WORK_DISPATCHING,
@@ -786,6 +850,7 @@ describe("the data-access module's surface", () => {
         ...VALUES,
         ...READ_LIMITS,
         ...THE_FOLD,
+        ...THE_GATEWAY_ROUTES,
         ...THE_MEASURES,
         ...THE_MOCKED_WORLD,
         ...THE_PLATFORMS_SETTINGS,

@@ -59,6 +59,16 @@ import {
  * product in.
  */
 
+/**
+ * The inference key this walk pastes, and the Egma Cloud organization it
+ * belongs to.
+ *
+ * A sentinel, so a leak anywhere on any of these pages is a string this file
+ * can look for — and it is looked for, on every screen the arc passes.
+ */
+const MANAGED_ACCESS_KEY = "egma_ik_browser-sentinel-managed-access-Q7R8";
+const EGMA_CLOUD_ORGANIZATION = "org_01K3XQ7M4E8YB2FVN0H9TZQWER";
+
 let instance: Instance;
 let browser: Browser;
 let page: Page;
@@ -84,6 +94,20 @@ beforeAll(async () => {
   instance = await startInstance("browser", {
     traces: true,
     ...(storage.available ? { blob: storage.store } : {}),
+    /**
+     * The one outbound ask managed access makes, standing in.
+     *
+     * Everything else in the Connect Egma arc below is real — the routes, the
+     * Postgres, the sealing, the binding — and this is the only part that
+     * cannot be: it leaves the deployment, and no test may reach Egma Cloud.
+     * What it stands in for is exactly the contract: a key Egma Cloud
+     * recognises answers which organization owns it, and one it does not is
+     * refused.
+     */
+    validateInferenceKey: async (key: string) =>
+      key === MANAGED_ACCESS_KEY
+        ? { outcome: "valid", organizationId: EGMA_CLOUD_ORGANIZATION }
+        : { outcome: "refused" },
   });
   origin = instance.origin;
 
@@ -3782,6 +3806,149 @@ describe("the complete product, walked in order in a second project", () => {
         await expect
           .poll(() => walk.innerText("main"))
           .toContain("CONFIGURED");
+      },
+      SETTLE,
+    );
+
+    /**
+     * The Managed by Egma arc, clicked through on the deployment that has one:
+     * a self-hosted installation with an inference key to connect.
+     *
+     * **Every state the specification names, in the order somebody meets
+     * them** — Connect Egma, Connected, Replace, Disconnect — plus the mode
+     * switch above them and the refusal a key Egma Cloud does not recognise
+     * earns. What is checked on every screen is the same two things: that the
+     * state is said in words rather than implied by which controls are lit,
+     * and that the key is nowhere on the page.
+     *
+     * Hosted Egma's own state is a different deployment and cannot be a second
+     * instance in this lane; its `Available` shape is read in
+     * `apps/web/test/model-providers.test.tsx`.
+     */
+    it(
+      "connects, replaces and disconnects Egma, and never shows the key",
+      async () => {
+        await walk.setViewportSize({ width: 1280, height: 900 });
+        await walk.goto(at("settings", "model-providers"));
+        await saysWithin(walk, "Managed by Egma");
+
+        // Nothing connected: the state is a word, and the sentence says what
+        // has to happen before Managed by Egma can be chosen at all.
+        //
+        // Read as the design system renders it — badges are uppercased, so the
+        // legible text is "NOT CONNECTED" — and paired with prose, because
+        // "CONNECTED" is a substring of it and a badge assertion alone could
+        // not tell the two states apart.
+        await saysWithin(walk, "NOT CONNECTED");
+        await saysWithin(walk, "Create an inference key in Egma Cloud");
+        await saysWithin(walk, "connected no inference key for it");
+
+        // The mode switch is a radio group, so a keyboard reaches it and a
+        // screen reader announces which of the two is current.
+        const managed = walk.getByRole("radio", { name: "Managed by Egma" });
+        await managed.waitFor();
+        expect(await managed.getAttribute("aria-checked")).toBe("false");
+
+        // A key Egma Cloud does not recognise is refused, and connects
+        // nothing — said in words that send somebody to Egma Cloud rather
+        // than blaming the field they typed into.
+        await walk.getByRole("button", { name: "Connect Egma" }).click();
+        const field = walk.locator("#managed-access-key");
+        await field.waitFor();
+        expect(await field.getAttribute("type")).toBe("password");
+        await field.fill("egma_ik_browser-sentinel-never-issued-S9T0");
+        await walk.getByRole("button", { name: "Connect Egma" }).last().click();
+        await saysWithin(walk, "does not recognise this inference key");
+        await saysWithin(walk, "NOT CONNECTED");
+
+        // And the real one connects.
+        await field.fill(MANAGED_ACCESS_KEY);
+        await walk.getByRole("button", { name: "Connect Egma" }).last().click();
+
+        // Asserted on the prose and the hint rather than on the badge, for the
+        // reason above: "CONNECTED" is a substring of "NOT CONNECTED", so the
+        // badge alone cannot say which of the two states this is.
+        await saysWithin(walk, "present this key at the Egma model gateway");
+        // Four characters, which is the whole of what a connected key ever
+        // shows — and the field it was typed into is gone with its form.
+        await saysWithin(walk, `…${MANAGED_ACCESS_KEY.slice(-4)}`);
+        expect(await walk.innerText("main")).not.toContain("NOT CONNECTED");
+        await expect
+          .poll(() => walk.locator('input[type="password"]').count())
+          .toBe(0);
+        expect(await walk.innerText("main")).not.toContain(MANAGED_ACCESS_KEY);
+
+        // Now the mode can be chosen, which is the point of connecting.
+        await walk.getByRole("radio", { name: "Managed by Egma" }).click();
+        await expect
+          .poll(() =>
+            walk
+              .getByRole("radio", { name: "Managed by Egma" })
+              .getAttribute("aria-checked"),
+          )
+          .toBe("true");
+        await saysWithin(walk, "Egma's provider accounts through the Egma model gateway");
+
+        // Replace is the same one field, opened by the row that owns it.
+        await walk.getByRole("button", { name: "Replace key" }).first().click();
+        await walk.locator("#managed-access-key").waitFor();
+        expect(await walk.locator('input[type="password"]').count()).toBe(1);
+        await walk.getByRole("button", { name: "Cancel" }).last().click();
+        await expect
+          .poll(() => walk.locator('input[type="password"]').count())
+          .toBe(0);
+
+        // **Nothing is disconnected by one click**, and the dialog names the
+        // key it is about — the safe hint being the only part of a connected
+        // key anybody can see, and exactly enough to tell two apart.
+        await walk.getByRole("button", { name: "Disconnect" }).click();
+        const dialog = walk.getByRole("dialog");
+        await dialog.waitFor();
+        const asked = await dialog.innerText();
+        expect(asked).toContain(MANAGED_ACCESS_KEY.slice(-4));
+        expect(asked).toContain("stops with an error");
+        expect(asked).not.toContain(MANAGED_ACCESS_KEY);
+
+        // Escape leaves it exactly where it was.
+        await walk.keyboard.press("Escape");
+        await expect.poll(() => walk.getByRole("dialog").count()).toBe(0);
+        await saysWithin(walk, "present this key at the Egma model gateway");
+
+        // And confirming really disconnects.
+        await walk.getByRole("button", { name: "Disconnect" }).click();
+        await walk.getByRole("dialog").waitFor();
+        await walk
+          .getByRole("dialog")
+          .getByRole("button", { name: "Disconnect" })
+          .click();
+        await saysWithin(walk, "NOT CONNECTED");
+        expect(await walk.innerText("main")).not.toContain(MANAGED_ACCESS_KEY);
+      },
+      SETTLE,
+    );
+
+    it(
+      "connects Egma on a phone, where the whole arc has to fit in one column",
+      async () => {
+        await walk.setViewportSize({ width: 390, height: 844 });
+        await walk.goto(at("settings", "model-providers"));
+        await saysWithin(walk, "Managed by Egma");
+
+        await walk.getByRole("button", { name: "Connect Egma" }).click();
+        const field = walk.locator("#managed-access-key");
+        await field.waitFor();
+
+        // A pointer target somebody can actually hit with a thumb.
+        const connect = walk.getByRole("button", { name: "Connect Egma" }).last();
+        const box = await connect.boundingBox();
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+        await field.fill(MANAGED_ACCESS_KEY);
+        await connect.click();
+        await saysWithin(walk, "present this key at the Egma model gateway");
+        expect(await walk.innerText("main")).not.toContain(MANAGED_ACCESS_KEY);
+
+        await walk.setViewportSize({ width: 1280, height: 900 });
       },
       SETTLE,
     );

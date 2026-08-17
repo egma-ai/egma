@@ -25,6 +25,16 @@ import { asJudgeReads } from "./input.ts";
 const OPENAI_CHAT_COMPLETIONS = "https://api.openai.com/v1/chat/completions";
 
 /**
+ * The one path this provider answers, appended to whichever base is in play.
+ *
+ * Split from the address above rather than written twice, because under managed
+ * access the base moves and the path does not: the Egma model gateway carries
+ * this provider's own protocol at this provider's own path, which is what makes
+ * managed access a base URL rather than a rewrite.
+ */
+const CHAT_COMPLETIONS_PATH = "/chat/completions";
+
+/**
  * How many times a call is made before the assertion is `errored`.
  *
  * Three, for the reason the grading job's own attempt count is three: the
@@ -61,17 +71,25 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
     });
 
     const said = await withRetries(async () => {
-      const response = await fetch(OPENAI_CHAT_COMPLETIONS, {
-        method: "POST",
-        headers: {
-          // The one place the key is ever written down, and it is written into
-          // a header on the way out. Nothing logs this object.
-          authorization: `Bearer ${judge.key}`,
-          "content-type": "application/json",
+      const response = await fetch(
+        judge.endpoint === undefined
+          ? OPENAI_CHAT_COMPLETIONS
+          : `${judge.endpoint.replace(/\/+$/, "")}${CHAT_COMPLETIONS_PATH}`,
+        {
+          method: "POST",
+          headers: {
+            // The one place the key is ever written down, and it is written into
+            // a header on the way out. Nothing logs this object. Under managed
+            // access this is the gateway's credential rather than a provider's,
+            // sent in the slot the provider's own adapter would use — which is
+            // exactly how the gateway is reachable with no second adapter.
+            authorization: `Bearer ${judge.key}`,
+            "content-type": "application/json",
+          },
+          body,
+          signal: AbortSignal.timeout(DEADLINE_MILLISECONDS),
         },
-        body,
-        signal: AbortSignal.timeout(DEADLINE_MILLISECONDS),
-      });
+      );
 
       if (!response.ok) {
         // The provider's own words, trimmed to a line — never the request, so
@@ -178,7 +196,8 @@ function answerOf(said: unknown): JudgeAnswer {
   return {
     decision: decision as Decision,
     rationale:
-      typeof fields["rationale"] === "string" && fields["rationale"].trim() !== ""
+      typeof fields["rationale"] === "string" &&
+      fields["rationale"].trim() !== ""
         ? fields["rationale"].trim()
         : "the judge gave no reason.",
     citedTurns: citedTurnsOf(fields["cited_turns"]),
@@ -213,6 +232,7 @@ function contentOf(said: unknown): string {
 function citedTurnsOf(value: unknown): readonly number[] {
   if (!Array.isArray(value)) return [];
   return value.filter(
-    (at): at is number => Number.isInteger(at) && typeof at === "number" && at > 0,
+    (at): at is number =>
+      Number.isInteger(at) && typeof at === "number" && at > 0,
   );
 }

@@ -35,8 +35,14 @@ export { HEALTH_PATH, matchRoute, type Route, ROUTES, type Transport } from "./r
 export { type Duplex, type SocketHost, UpstreamHandshakeRefused } from "./socket.ts";
 export {
   type Authenticated,
+  cloudInferenceKeyVerifier,
+  deployedVerifier,
+  eitherVerifier,
+  INFERENCE_KEY_PREFIX,
+  internalCredentialVerifier,
+  INTERNAL_CREDENTIAL_ID,
+  INTERNAL_CREDENTIAL_PREFIX,
   isAuthenticated,
-  staticSecretVerifier,
   type Verified,
   type Verifier,
 } from "./verify.ts";

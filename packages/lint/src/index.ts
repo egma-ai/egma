@@ -79,6 +79,17 @@ const CONTEXT_ESTABLISHING = [
   "resolveDeviceAuthorization",
   "readInvitation",
   "acceptInvitation",
+  /**
+   * `resolveInferenceKey` was added on 2026-08-17 with managed model access, on
+   * `resolveApiKey`'s exact terms and after the rule stopped the build. It takes
+   * the hash of a high-entropy secret Egma issued to one organization and
+   * answers which organization that is. There is no argument other than the
+   * secret, so it cannot be asked about somebody else's — and it deliberately
+   * answers *less* than `resolveApiKey` does: an organization and a key id,
+   * never a whole context, because the one thing an inference key authorizes is
+   * a connection to the Egma model gateway.
+   */
+  "resolveInferenceKey",
 ];
 
 /**

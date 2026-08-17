@@ -6,10 +6,12 @@ import {
   getPersonaVersion,
   getRun,
   getSimulationTestVersion,
+  ManagedAccessNotConnectedError,
   ManagedAccessUnavailableError,
   ModelProviderCredentialMissingError,
   readModelAccess,
   resolveMockTools,
+  resolveManagedAccess,
   resolveModelProviderKeys,
   resolvePlatformSettings,
   resolveSimulationConnection,
@@ -237,13 +239,40 @@ async function modelsBlock(
   const access = await readModelAccess(claim.auth);
 
   if (access.mode === "managed") {
-    // Nothing on this deployment can select managed access yet — the setting
-    // refuses it by name while no connection to a gateway exists — so a row
-    // saying so is a state this control plane cannot honor. Typed rather than
-    // thrown plainly, so it lands on the row as an infrastructure error naming
-    // the mode with somewhere to go, rather than as a bare dispatch failure
-    // with nothing on it a person could act on.
-    throw new ManagedAccessUnavailableError();
+    /**
+     * **The whole managed answer is two values, and neither is a provider
+     * secret.** Where the traffic goes, and what authorizes it at the door —
+     * hosted Egma's own signed credential, or the inference key this
+     * deployment connected. Egma's provider credentials never leave the
+     * gateway, so there is no path from here to one and the closed contract
+     * shape refuses a document that carried one anyway.
+     *
+     * Resolved now rather than when the run was created, exactly as the
+     * customer-owned keys below are: a reconnected key reaches the next
+     * simulation to be claimed and leaves the ones already conducting alone.
+     *
+     * A deployment with no gateway address, or an organization on managed
+     * access with nothing connected, throws typed and lands on the row as an
+     * infrastructure error with somewhere to go. Neither falls back to calling
+     * a provider directly: a simulation quietly conducted on an account nobody
+     * chose is worse than one that stopped and said why.
+     */
+    const managed = await resolveManagedAccess(claim.auth);
+    return {
+      access: access.mode,
+      gateway: {
+        address: managed.gatewayAddress,
+        credential: managed.credential,
+      },
+      llm: { provider: models.llm.provider, model: models.llm.model },
+      stt: { provider: models.stt.provider, model: models.stt.model },
+      tts: {
+        provider: models.tts.provider,
+        model: models.tts.model,
+        voice_id: models.tts.voiceId,
+        speed: models.tts.speed,
+      },
+    };
   }
 
   /**
@@ -656,13 +685,15 @@ export async function claimRoutes(
         const spec = await assembledSpec(claim, runs).catch(
           (fault: unknown): Unbuildable => ({
             unbuildable: fault instanceof Error ? fault.message : String(fault),
-            // A credential the organization has not stored is a configuration
-            // problem with a screen behind it, so the row that lands says which
-            // screen. Every other fault is Egma being broken, and sending
-            // somebody to Model providers for one of those would be a link that
-            // fixes nothing.
+            // A credential the organization has not stored, and an inference
+            // key nobody has connected, are configuration problems with a
+            // screen behind them — so the row that lands says which screen.
+            // `ManagedAccessUnavailableError` is deliberately not here: a
+            // deployment that was never told where its gateway is, is Egma
+            // misconfigured, and sending an administrator to Model providers
+            // for that would be a link that fixes nothing.
             ...(fault instanceof ModelProviderCredentialMissingError ||
-            fault instanceof ManagedAccessUnavailableError
+            fault instanceof ManagedAccessNotConnectedError
               ? { repair: "model_providers" as const }
               : {}),
           }),

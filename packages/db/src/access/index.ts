@@ -120,6 +120,7 @@ export {
   JudgeNotConfiguredError,
   JudgeProviderMismatchError,
   LastAdminError,
+  ManagedAccessBoundElsewhereError,
   ManagedAccessNotConnectedError,
   ManagedAccessUnavailableError,
   MockToolTakenError,
@@ -616,6 +617,37 @@ export {
   type ModelProviderCredential,
   type ModelProviderCredentialInput,
 } from "./model-provider-credentials.ts";
+/**
+ * Managed model access: the inference keys hosted Egma mints, the one a
+ * self-hosted deployment connects, and the credential Egma's own two services
+ * present at the gateway.
+ *
+ * The same rule the provider credentials keep, one table over: **nothing
+ * exported here can answer with a key.** `listInferenceKeys` answers a name, a
+ * safe hint and four times; `readManagedAccessConnection` answers Connected and
+ * a hint; and the one door to a usable credential —
+ * `resolveManagedAccess` — refuses every context that did not come from a
+ * simulation or a grading claim.
+ */
+export {
+  createInferenceKey,
+  listInferenceKeys,
+  resolveInferenceKey,
+  revokeInferenceKey,
+  type InferenceKey,
+  type NewInferenceKey,
+  type ResolvedInferenceKey,
+} from "./inference-keys.ts";
+export {
+  connectManagedAccess,
+  disconnectManagedAccess,
+  managedAccessAvailable,
+  readManagedAccessConnection,
+  resolveManagedAccess,
+  type ConnectManagedAccess,
+  type ManagedAccessConnection,
+  type ResolvedManagedAccess,
+} from "./managed-access.ts";
 export {
   MODEL_ACCESS_MODES,
   type ModelAccessMode,
