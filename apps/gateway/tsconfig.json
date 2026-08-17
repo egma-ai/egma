@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    /**
+     * The relay is written against the web platform, not against Node.
+     *
+     * `DOM` is here for `Request`, `Response`, `ReadableStream`, `AbortSignal`
+     * and `WebSocket` — the vocabulary Cloudflare Workers and Node 24 both
+     * speak — and it is what keeps a Node-only API from reaching `src/`
+     * without somebody noticing. The one file that is allowed a Node import is
+     * the development host, and it says so.
+     */
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/**/*.ts"]
+}

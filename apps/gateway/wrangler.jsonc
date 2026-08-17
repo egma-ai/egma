@@ -1,0 +1,33 @@
+{
+  // The Egma model gateway, as the Cloudflare Worker that Egma deploys.
+  //
+  // This file is the application's own shape: its entry point, the runtime
+  // date it is written against, and the two settings that keep customer
+  // payloads out of anybody's logs. Everything that is one deployment's —
+  // which account, which name, which addresses, and every secret value — is
+  // supplied at deploy time and is deliberately absent here.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "egma-model-gateway",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-04-01",
+
+  // **Payload logging is off, and this is where that is true.** Workers Logs
+  // records invocations together with what was logged during them; the gateway
+  // carries audio, transcripts and prompts, so the platform's own recording of
+  // its traffic is switched off rather than trusted to hold nothing. `logpush`
+  // is the same decision for the forwarding side: no destination receives these
+  // requests. The gateway's own records — content-free by construction, see
+  // `src/record.ts` — are what operations reads instead, and they are read from
+  // a live tail rather than from a store.
+  "observability": { "enabled": false },
+  "logpush": false,
+
+  // The one binding, and it stores nothing: the runtime's own name for the
+  // build that is answering, read back on the health check so that a gradual
+  // rollout is observable from outside and a rollback is checkable rather than
+  // claimed. There is no KV, no D1, no R2, no Durable Object, no queue and no
+  // cache — each of those would be a place a payload could come to rest.
+  "version_metadata": { "binding": "EGMA_GATEWAY_VERSION" },
+
+  "vars": {}
+}

@@ -5,6 +5,7 @@
   "description": "pnpm's door into the Python app: the real toolchain is uv. See README.md.",
   "scripts": {
     "lint": "uv run --frozen ruff check src tests",
-    "test": "uv run --frozen ruff check src tests && uv run --frozen pytest"
+    "test": "uv run --frozen ruff check src tests && uv run --frozen pytest",
+    "gateway-latency": "uv run --frozen python tools/gateway_latency.py"
   }
 }
