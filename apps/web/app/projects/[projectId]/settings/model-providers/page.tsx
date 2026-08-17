@@ -6,22 +6,31 @@ import { useEffect, useState } from "react";
 import { deleteJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
+  actionsIn,
+  candidatesIn,
+  credentialCandidatePath,
   credentialsIn,
   jobsOfProvider,
   managedIn,
   labelOfProvider,
   modelProviderCredentialPath,
   providersIn,
+  ACTION_LABEL,
+  CANDIDATE_SOURCE_LABEL,
   JOB_LABEL,
   MANAGED_ACCESS_PATH,
   MODE_LABEL,
   MODEL_ACCESS_PATH,
   MODEL_CATALOG_PATH,
   MODEL_PROVIDER_CREDENTIALS_PATH,
+  MODEL_UPGRADE_PATH,
+  type CredentialCandidate,
   type ModelAccess,
   type ModelAccessMode,
   type ModelCatalog,
   type ModelProviderCredential,
+  type ModelUpgrade,
+  type ModelUpgradeAction,
 } from "../../../../../lib/model-access.ts";
 import {
   Actions,
@@ -118,6 +127,17 @@ function ModelProviders({ projectId }: { readonly projectId: string }) {
   );
   const { answer: catalog, reload: reloadCatalog } =
     useProjectRead<ModelCatalog>(MODEL_CATALOG_PATH, projectId);
+  /**
+   * What the upgrade onto model selections would not decide for this
+   * organization.
+   *
+   * A separate read rather than a field on the access one, because it is a
+   * different question with a different answer for a member — and because a
+   * deployment that has finished has nothing here at all, which is the ordinary
+   * state and must cost the settings page nothing.
+   */
+  const { answer: upgrade, reload: reloadUpgrade } =
+    useProjectRead<ModelUpgrade>(MODEL_UPGRADE_PATH, projectId);
 
   /** The provider whose replacement form is open, by name. */
   const [editing, setEditing] = useState<string | null>(null);
@@ -387,8 +407,138 @@ function ModelProviders({ projectId }: { readonly projectId: string }) {
     reloadAccess();
   }
 
+  const outstanding: readonly ModelUpgradeAction[] =
+    upgrade?.status === "ready" ? actionsIn(upgrade.value) : [];
+  const stored: readonly CredentialCandidate[] =
+    upgrade?.status === "ready" ? candidatesIn(upgrade.value) : [];
+  /**
+   * The stored keys worth showing: the ones for a provider somebody still has
+   * to choose between.
+   *
+   * A provider that already has a key needs no choosing, and a provider with
+   * one candidate chose itself — so listing every stored key would be a table
+   * of decisions nobody has to make, on a page whose whole point is the ones
+   * they do.
+   */
+  const toChoose = stored.filter((one) =>
+    outstanding.some(
+      (action) =>
+        action.kind === "select_model_provider_credential" &&
+        action.subject === one.provider,
+    ),
+  );
+
+  async function chooseCandidate(candidate: CredentialCandidate): Promise<void> {
+    if (!mayAdminister || busy) return;
+    setRefused(null);
+    setSaved(null);
+    setBusy(true);
+
+    const written = await writeJson(credentialCandidatePath(candidate.id), {
+      method: "PUT",
+      project: projectId,
+    });
+
+    setBusy(false);
+    if (written.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (written.status !== "ready") {
+      setRefused(written.refusal);
+      return;
+    }
+    setSaved(labelOfProvider(shipped, candidate.provider));
+    reloadAccess();
+    reloadUpgrade();
+  }
+
   return (
     <Frame projectId={projectId}>
+      {outstanding.length === 0 ? null : (
+        <Section
+          title="Still to choose"
+          lead="Egma moved this organization onto model selections and would not guess these. Until each one is chosen, the persona, grader or key it names keeps working the way it did before."
+        >
+          <DataTable<ModelUpgradeAction>
+            label="Choices the upgrade left"
+            rows={outstanding}
+            keyOf={(action) => action.id}
+            columns={[
+              {
+                key: "what",
+                header: "What to do",
+                cell: (action) => (
+                  <Badge tone="warn">{ACTION_LABEL[action.kind]}</Badge>
+                ),
+              },
+              {
+                key: "why",
+                header: "Why",
+                cell: (action) => <span>{action.detail}</span>,
+              },
+            ]}
+          />
+
+          {toChoose.length === 0 ? null : (
+            <DataTable<CredentialCandidate>
+              label="Stored keys to choose between"
+              rows={toChoose}
+              keyOf={(candidate) => candidate.id}
+              columns={[
+                {
+                  key: "provider",
+                  header: "Provider",
+                  cell: (candidate) => (
+                    <span>{labelOfProvider(shipped, candidate.provider)}</span>
+                  ),
+                },
+                {
+                  key: "found",
+                  header: "Found in",
+                  cell: (candidate) => (
+                    <span>
+                      {CANDIDATE_SOURCE_LABEL[candidate.source]} ·{" "}
+                      {candidate.source_name}
+                    </span>
+                  ),
+                },
+                {
+                  key: "hint",
+                  header: "Key",
+                  cell: (candidate) => <span>…{candidate.hint}</span>,
+                },
+                {
+                  key: "choose",
+                  header: "",
+                  cell: (candidate) =>
+                    candidate.active ? (
+                      <Badge tone="good">In use</Badge>
+                    ) : (
+                      <Button
+                        disabled={
+                          !mayAdminister || busy || !candidate.selectable
+                        }
+                        onClick={() => void chooseCandidate(candidate)}
+                      >
+                        Use this key
+                      </Button>
+                    ),
+                },
+              ]}
+            />
+          )}
+
+          {toChoose.every((one) => one.selectable) ? null : (
+            <Help>
+              A stored key for a provider this release does not carry is kept and
+              shown, and cannot be used. Store a key for a provider in the table
+              below instead.
+            </Help>
+          )}
+        </Section>
+      )}
+
       <Section
         title="Model access"
         lead="Who supplies the provider keys every persona and grader in this organization spends."

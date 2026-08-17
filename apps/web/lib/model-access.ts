@@ -203,3 +203,88 @@ export function entriesForJob(
   if (!Array.isArray(catalog?.providers)) return [];
   return catalog.providers.filter((entry) => entry.job === job);
 }
+
+/**
+ * What the upgrade onto model selections left for this organization to decide,
+ * as `GET /api/model-upgrade` answers it.
+ *
+ * **Nothing here holds a key either.** A stored key the upgrade found is a
+ * provider, where it was found, and four characters — the same shape a
+ * credential has, for the same reason.
+ */
+export type ModelUpgradeAction = {
+  readonly id: string;
+  readonly kind:
+    | "select_model_provider_credential"
+    | "select_persona_models"
+    | "select_grader_model"
+    | "set_up_model_access";
+  /** The persona, grader, provider or organization it is about. */
+  readonly subject: string;
+  /** Egma's own sentence, written to be acted on. */
+  readonly detail: string;
+  readonly created_at: string;
+};
+
+/** One key the upgrade found, offered as the one this organization spends. */
+export type CredentialCandidate = {
+  readonly id: string;
+  readonly provider: string;
+  readonly source: "platform_setting" | "judge_credential" | "judge_configuration";
+  /** Which row exactly — a setting's name, a credential's label, a project. */
+  readonly source_name: string;
+  /** The last characters of the key. Never enough of it to use. */
+  readonly hint: string;
+  readonly active: boolean;
+  /** Whether this release's catalog carries its provider at all. */
+  readonly selectable: boolean;
+};
+
+export type ModelUpgrade = {
+  readonly actions: readonly ModelUpgradeAction[];
+  /** Empty for anybody but an admin, who is the only role that may choose. */
+  readonly candidates: readonly CredentialCandidate[];
+  /** Whether this installation has finished moving onto model selections. */
+  readonly completed: boolean;
+  readonly completed_at: string | null;
+  readonly outstanding: readonly string[];
+};
+
+export const MODEL_UPGRADE_PATH = "/api/model-upgrade";
+
+export function credentialCandidatePath(id: string): string {
+  return `/api/model-credential-candidates/${encodeURIComponent(id)}`;
+}
+
+/** What a person calls each outstanding decision, said once. */
+export const ACTION_LABEL: Readonly<Record<ModelUpgradeAction["kind"], string>> = {
+  select_model_provider_credential: "Choose a provider key",
+  select_persona_models: "Select a persona's models",
+  select_grader_model: "Select a grader's model",
+  set_up_model_access: "Set up model access",
+};
+
+/** Where each stored key was found, in words rather than a column name. */
+export const CANDIDATE_SOURCE_LABEL: Readonly<
+  Record<CredentialCandidate["source"], string>
+> = {
+  platform_setting: "Deployment setting",
+  judge_credential: "Judge credential",
+  judge_configuration: "Project judge",
+};
+
+/**
+ * The actions an answer actually carried, and none at all when it carried
+ * something this page cannot read — `credentialsIn`'s guard, for its reason.
+ */
+export function actionsIn(
+  upgrade: ModelUpgrade | undefined,
+): readonly ModelUpgradeAction[] {
+  return Array.isArray(upgrade?.actions) ? upgrade.actions : [];
+}
+
+export function candidatesIn(
+  upgrade: ModelUpgrade | undefined,
+): readonly CredentialCandidate[] {
+  return Array.isArray(upgrade?.candidates) ? upgrade.candidates : [];
+}

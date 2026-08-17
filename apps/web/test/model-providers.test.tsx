@@ -111,12 +111,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function open(access: Record<string, unknown>): Promise<void> {
+/** An installation with nothing left over from the upgrade, which is most of them. */
+const NOTHING_OUTSTANDING = {
+  actions: [],
+  candidates: [],
+  completed: true,
+  completed_at: "2026-08-17T00:00:00.000Z",
+  outstanding: [],
+};
+
+async function open(
+  access: Record<string, unknown>,
+  upgrade: Record<string, unknown> = NOTHING_OUTSTANDING,
+): Promise<void> {
   apiAnswers({
     "/api/me": ME,
     "/api/projects": { projects: ME.projects },
     "/api/model-access": access,
     "/api/model-catalog": CATALOG,
+    "/api/model-upgrade": upgrade,
   });
   render(<ModelProvidersPage />);
   await waitFor(() => expect(screen.getByText("Model access")).toBeDefined());
@@ -213,5 +226,107 @@ describe("a self-hosted deployment with a key connected", () => {
     expect(within(dialog).getAllByText(/A1B2/).length).toBeGreaterThan(0);
     // And it says what stops, rather than only what is removed.
     expect(within(dialog).getByText(/stops with an error/)).toBeDefined();
+  });
+});
+
+/**
+ * What the upgrade left for somebody to choose, on the screen it is chosen on.
+ *
+ * **A compatibility path nobody can see is a trap.** A persona still resolving
+ * through the deployment's old settings keeps running, so nothing about it
+ * looks wrong until the release that removes those settings arrives. This
+ * section is what makes the choice visible while there is still time.
+ */
+describe("an installation with choices left over from the upgrade", () => {
+  const OUTSTANDING = {
+    actions: [
+      {
+        id: "mua_1",
+        kind: "select_model_provider_credential",
+        subject: "openai",
+        detail:
+          "Egma found 2 stored openai keys on this installation and cannot tell whether they are the same account, so none was activated.",
+        created_at: "2026-08-17T00:00:00.000Z",
+      },
+      {
+        id: "mua_2",
+        kind: "select_persona_models",
+        subject: "prs_1",
+        detail:
+          "this persona's own voice is elevenlabs and this deployment speaks with cartesia. Egma will not choose between them.",
+        created_at: "2026-08-17T00:00:00.000Z",
+      },
+    ],
+    candidates: [
+      {
+        id: "mcc_1",
+        provider: "openai",
+        source: "platform_setting",
+        source_name: "persona_model_key",
+        hint: "A1B2",
+        active: false,
+        selectable: true,
+      },
+      {
+        id: "mcc_2",
+        provider: "openai",
+        source: "judge_credential",
+        source_name: "Acme's judge key",
+        hint: "G7H8",
+        active: false,
+        selectable: true,
+      },
+      {
+        id: "mcc_3",
+        provider: "deepgram",
+        source: "platform_setting",
+        source_name: "speech_to_text_key",
+        hint: "C3D4",
+        active: true,
+        selectable: true,
+      },
+    ],
+    completed: false,
+    completed_at: null,
+    outstanding: ["personas"],
+  };
+
+  it("says what to do and why, in Egma's own words and never a key", async () => {
+    await open(accessAnswer({}), OUTSTANDING);
+
+    expect(screen.getByText("Still to choose")).toBeDefined();
+    expect(screen.getByText("Choose a provider key")).toBeDefined();
+    expect(screen.getByText("Select a persona's models")).toBeDefined();
+    expect(
+      screen.getByText(/Egma will not choose between them/u),
+    ).toBeDefined();
+  });
+
+  /**
+   * Only the keys somebody actually has to choose between. The Deepgram key
+   * chose itself — one candidate — so offering it here would be a decision
+   * nobody has to make on a page whose whole point is the ones they do.
+   */
+  it("offers the two keys for the provider that has two, and no others", async () => {
+    await open(accessAnswer({}), OUTSTANDING);
+
+    const table = screen.getByRole("table", {
+      name: "Stored keys to choose between",
+    });
+    expect(within(table).getAllByRole("button", { name: "Use this key" })).toHaveLength(2);
+    expect(within(table).getByText("Deployment setting · persona_model_key")).toBeDefined();
+    expect(within(table).getByText("Judge credential · Acme's judge key")).toBeDefined();
+    expect(within(table).queryByText(/speech_to_text_key/u)).toBeNull();
+    // Four characters, and no route anywhere that could answer with more.
+    expect(within(table).getByText("…A1B2")).toBeDefined();
+  });
+
+  it("is absent entirely on an installation that has finished", async () => {
+    await open(accessAnswer({}));
+
+    expect(screen.queryByText("Still to choose")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Use this key" }),
+    ).toBeNull();
   });
 });
