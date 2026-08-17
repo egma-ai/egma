@@ -70,6 +70,7 @@ function grader(overrides: Partial<Grader> = {}): Grader {
     versionId: "grv_01JQZ0000000000000000000AA",
     config: { assertions: [{ metric: "turn_response_latency", bound: 2_000 }] },
     judgeModel: null,
+    graderModel: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

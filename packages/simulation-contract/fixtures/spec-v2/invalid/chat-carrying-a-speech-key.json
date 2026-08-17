@@ -38,7 +38,8 @@
     },
     "stt": {
       "provider": "deepgram",
-      "model": "nova-3-general"
+      "model": "nova-3-general",
+      "key": "dg-a-secret-a-chat-simulation-has-no-use-for"
     },
     "tts": {
       "provider": "cartesia",

@@ -197,6 +197,12 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     at: "/models/tts/speed",
     keyword: "maximum",
   },
+  // A chat simulation has no mouth and no ears, so a speech key on its wire is
+  // a secret travelling for nothing. Refused rather than carried and ignored.
+  "spec-v2/chat-carrying-a-speech-key.json": {
+    at: "/models/stt",
+    keyword: "not",
+  },
   "spec-v2/unknown-field.json": {
     at: "",
     keyword: "additionalProperties",
@@ -291,12 +297,17 @@ describe("the two schemas, as one contract", () => {
       for (const added of [
         "models",
         "model_selection",
+        "customer_owned_llm",
         "managed_selection",
         "speech_selection",
         "managed_speech_selection",
       ]) {
         delete defs[added];
       }
+      // The one rule that reads two fields at once — which speech keys travel
+      // depends on the modality — and therefore the one that cannot live
+      // inside the models block. It arrived with version 2 like the block.
+      delete clone.allOf;
       return clone;
     };
 

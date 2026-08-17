@@ -269,8 +269,8 @@ describe("a grader's own model", () => {
     const { key } = await aCustomer("grader_model_independent");
 
     const library = await ask(api.app, "GET", "/api/grader-library", key);
-    const entry = (library.body.items as { id: string; key: string }[]).find(
-      (one) => one.key === PREDEFINED_GRADERS.expectedBehaviors.key,
+    const entry = (library.body.items as { id: string }[]).find(
+      (one) => one.id === PREDEFINED_GRADERS.expectedBehaviors,
     );
     expect(entry, "the predefined entry is missing").toBeDefined();
 

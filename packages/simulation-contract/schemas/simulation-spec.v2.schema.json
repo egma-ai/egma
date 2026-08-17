@@ -327,7 +327,7 @@
               "const": "customer-owned"
             },
             "llm": {
-              "$ref": "#/$defs/model_selection"
+              "$ref": "#/$defs/customer_owned_llm"
             },
             "stt": {
               "$ref": "#/$defs/model_selection"
@@ -367,13 +367,12 @@
       ]
     },
     "model_selection": {
-      "description": "One model job's pinned selection under customer-owned access: which provider, which model, and the organization's own key to speak to it with. Provider and model come off the persona version a run pinned, so two runs of one version ask the same provider for the same model however the organization's credentials have moved since.",
+      "description": "One model job's pinned selection under customer-owned access: which provider, which model, and \u2014 where this simulation actually uses the leg \u2014 the organization's own key to speak to it with. Provider and model come off the persona version a run pinned, so two runs of one version ask the same provider for the same model however the organization's credentials have moved since.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "provider",
-        "model",
-        "key"
+        "model"
       ],
       "properties": {
         "provider": {
@@ -394,13 +393,12 @@
       }
     },
     "speech_selection": {
-      "description": "The speaking job's selection under customer-owned access, which needs two facts the others do not: which of the provider's voices, and how fast the persona talks. Both are the persona version's own, so the same persona sounds identical on every simulation of that version.",
+      "description": "The speaking job's selection under customer-owned access, which needs two facts the others do not: which of the provider's voices, and how fast the persona talks. Both are the persona version's own, so the same persona sounds identical on every simulation of that version. Its key travels only on a voice simulation, which is the only kind that has a mouth.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "provider",
         "model",
-        "key",
         "voice_id",
         "speed"
       ],
@@ -487,6 +485,140 @@
           "maximum": 2
         }
       }
+    },
+    "customer_owned_llm": {
+      "description": "The thinking leg under customer-owned access. Its key travels on every simulation, because every simulation thinks \u2014 chat and voice alike.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/model_selection"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "description": "**A worker receives only the credentials its selected models actually require.** Every customer-owned document carries the key for the thinking leg, because every simulation thinks. The listening and speaking legs exist only on a voice simulation, so their keys travel only there \u2014 a chat simulation is conducted without them, and an organization that has not stored a speech credential can still run its chat tests. Requiring all three everywhere would put two secrets on a wire that has no use for them, and would stop work that had everything it needed.",
+      "if": {
+        "type": "object",
+        "properties": {
+          "modality": {
+            "const": "voice"
+          },
+          "models": {
+            "type": "object",
+            "properties": {
+              "access": {
+                "const": "customer-owned"
+              }
+            },
+            "required": [
+              "access"
+            ]
+          }
+        },
+        "required": [
+          "modality",
+          "models"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "object",
+            "properties": {
+              "stt": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "key"
+                ]
+              },
+              "tts": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "key"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "The other half of the same rule: a chat simulation has no mouth and no ears, so a listening or speaking key on its wire is a secret travelling for nothing. Refused rather than carried and ignored, because a credential that reaches a process with no use for it is a credential that did not have to be there.",
+      "if": {
+        "type": "object",
+        "properties": {
+          "modality": {
+            "const": "chat"
+          }
+        },
+        "required": [
+          "modality"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "object",
+            "properties": {
+              "stt": {
+                "type": "object",
+                "not": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key"
+                  ]
+                }
+              },
+              "tts": {
+                "type": "object",
+                "not": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

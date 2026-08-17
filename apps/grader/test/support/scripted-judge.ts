@@ -1,12 +1,12 @@
-import type { JudgeModel } from "@egma/db";
+import type { GraderModel, JudgeModel } from "@egma/db";
 
 import type { Judging } from "../../src/graders/index.ts";
 import type {
+  ConversationJudges,
   Judge,
   JudgeAnswer,
   JudgeMakers,
   JudgeQuestion,
-  JudgeResolution,
   ResolvedJudge,
 } from "../../src/judge/index.ts";
 
@@ -86,27 +86,46 @@ export function scriptedJudge(options: ScriptedJudgeOptions): ScriptedJudge {
  * question and the answer became this row" is testable without a database.
  */
 export function scriptedJudging(
-  options: ScriptedJudgeOptions & { readonly model?: JudgeModel | undefined },
+  options: ScriptedJudgeOptions & {
+    /** A judge-model override, which names no key: the compatibility path. */
+    readonly model?: JudgeModel | undefined;
+    /** This copy's own selection, which resolves the organization's key. */
+    readonly graderModel?: GraderModel | undefined;
+  },
 ): { readonly judging: Judging; readonly judge: ScriptedJudge } {
   const judge = scriptedJudge(options);
 
-  const resolution: JudgeResolution = async () => ({
-    judging(override, makers) {
+  /**
+   * The resolution, standing in for both sources at once.
+   *
+   * Which of them a real grader is on is decided by its own version — a
+   * selected model spends the organization's credential, and one without spends
+   * the project's — and that decision has its own tests through the real
+   * service. What is stood in for here is only the key, so that "this rubric
+   * asked one question and the answer became this row" is testable without a
+   * database.
+   */
+  const judges: ConversationJudges = {
+    async judgeFor(grader, makers) {
+      const chosen = grader.graderModel ?? grader.judgeModel;
       const resolved: ResolvedJudge = {
-        provider: override?.provider ?? "openai",
-        model: override?.model ?? "gpt-4.1-mini",
+        provider: (chosen?.provider ?? "openai") as ResolvedJudge["provider"],
+        model: chosen?.model ?? "gpt-4.1-mini",
         key: "sk-egma-unit-judge-NEVERLEAKME",
       };
       return { ask: makers[resolved.provider](resolved) };
     },
-  });
+  };
 
   return {
     judge,
     judging: {
-      judge: resolution,
+      judges,
       makers: judge.makers,
-      model: options.model ?? null,
+      grader: {
+        graderModel: options.graderModel ?? null,
+        judgeModel: options.model ?? null,
+      },
     },
   };
 }
@@ -123,7 +142,11 @@ export function noJudgeWanted(): Judging {
   const refuse = (): never => {
     throw new Error("a deterministic grader reached for a judge");
   };
-  return { judge: refuse, makers: { openai: refuse }, model: null };
+  return {
+    judges: { judgeFor: refuse },
+    makers: { openai: refuse },
+    grader: { graderModel: null, judgeModel: null },
+  };
 }
 
 /** An answer in one line, for the ordinary case. */

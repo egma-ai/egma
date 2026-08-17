@@ -101,6 +101,9 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
         "maximum",
         None,
     ),
+    # A chat simulation has no mouth and no ears, so a speech key on its wire
+    # is a secret travelling for nothing.
+    "spec-v2/chat-carrying-a-speech-key.json": ("/models/stt", "not", None),
     "spec-v2/unknown-field.json": ("", "additionalProperties", "agent_id"),
     "report/completed-claiming-never-ran.json": (
         "/events/0/facts/ending",

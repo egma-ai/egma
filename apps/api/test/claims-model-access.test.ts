@@ -56,6 +56,9 @@ const RETELL = {
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
+/** The same agent reached over a voice line, for the cases about speech legs. */
+const RETELL_VOICE = { ...RETELL, modality: "voice" } as const;
+
 /** Sentinels, so a leak anywhere is a string a scan can find. */
 const OPENAI_KEY = "sk-sentinel-thinking-with-A1B2";
 const DEEPGRAM_KEY = "dg-sentinel-listening-with-C3D4";
@@ -93,7 +96,10 @@ type World = {
 /** A customer with an agent, a persona and a test — everything a run needs. */
 async function aCustomer(
   label: string,
-  persona: { readonly models?: PersonaModels | undefined } = {},
+  persona: {
+    readonly models?: PersonaModels | undefined;
+    readonly modality?: "chat" | "voice" | undefined;
+  } = {},
 ): Promise<World> {
   api = await createApi(label);
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -101,7 +107,7 @@ async function aCustomer(
 
   const registered = await ask(api.app, "POST", "/api/agents", key, {
     name: "Front desk",
-    connection: RETELL,
+    connection: persona.modality === "voice" ? RETELL_VOICE : RETELL,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   const connectionId = (registered.body.connection as { id: string }).id;
@@ -177,6 +183,9 @@ describe("a work order for a persona that selects its own models", () => {
     expect(specComplaints(spec)).toEqual([]);
     expect(spec?.contract_version).toBe(2);
 
+    // A chat simulation over this connection: it thinks, and it neither speaks
+    // nor listens. The selections travel whole because they are what the
+    // persona *is*; the keys follow the legs this simulation actually has.
     expect(spec?.models).toEqual({
       access: "customer-owned",
       llm: {
@@ -187,16 +196,60 @@ describe("a work order for a persona that selects its own models", () => {
       stt: {
         provider: RECOMMENDED_PERSONA_MODELS.stt.provider,
         model: RECOMMENDED_PERSONA_MODELS.stt.model,
-        key: DEEPGRAM_KEY,
       },
       tts: {
         provider: RECOMMENDED_PERSONA_MODELS.tts.provider,
         model: RECOMMENDED_PERSONA_MODELS.tts.model,
-        key: CARTESIA_KEY,
         voice_id: RECOMMENDED_PERSONA_MODELS.tts.voiceId,
         speed: RECOMMENDED_PERSONA_MODELS.tts.speed,
       },
     });
+  });
+
+  it("carries no speech key on a chat simulation, which has no use for one", async () => {
+    const world = await aCustomer("claims_models_chat_carries_no_speech_key", {
+      models: RECOMMENDED_PERSONA_MODELS,
+    });
+    await storeTheThreeKeys(world.ada);
+    await aQueuedRun(world);
+
+    const claimed = await claim(world.serviceToken, {
+      claimant: "sim-1",
+      capacity: 1,
+      wait_seconds: 0,
+      contract_versions: [1, 2],
+    });
+
+    const written = JSON.stringify(claimed.specs);
+    expect(written).toContain(OPENAI_KEY);
+    // The organization holds both, and neither travels: a credential that
+    // reaches a process with no use for it is a credential that did not have
+    // to be there.
+    expect(written).not.toContain(DEEPGRAM_KEY);
+    expect(written).not.toContain(CARTESIA_KEY);
+  });
+
+  it("needs no speech credential to conduct a chat simulation at all", async () => {
+    const world = await aCustomer("claims_models_chat_needs_only_thinking", {
+      models: RECOMMENDED_PERSONA_MODELS,
+    });
+    // The thinking key alone, which under a rule that demanded all three would
+    // stop a chat test this organization had everything for.
+    await storeModelProviderCredential(contextFor(world.ada, "admin"), {
+      provider: "openai",
+      key: OPENAI_KEY,
+    });
+    await aQueuedRun(world);
+
+    const claimed = await claim(world.serviceToken, {
+      claimant: "sim-1",
+      capacity: 1,
+      wait_seconds: 0,
+      contract_versions: [1, 2],
+    });
+
+    expect(claimed.specs).toHaveLength(1);
+    expect(specComplaints(claimed.specs[0])).toEqual([]);
   });
 
   it("carries no inference credential, because nothing here is Egma's to spend", async () => {
@@ -457,8 +510,10 @@ describe("a provider credential the organization has not stored", () => {
   it("stops that simulation and says which model job named which provider", async () => {
     const world = await aCustomer("claims_models_missing_credential", {
       models: RECOMMENDED_PERSONA_MODELS,
+      modality: "voice",
     });
-    // Only the thinking key. The listening and speaking legs have nothing.
+    // Only the thinking key. The listening and speaking legs have nothing, and
+    // a voice simulation needs both.
     await storeModelProviderCredential(contextFor(world.ada, "admin"), {
       provider: "openai",
       key: OPENAI_KEY,
@@ -497,6 +552,7 @@ describe("a provider credential the organization has not stored", () => {
   it("says nothing a key could be read out of", async () => {
     const world = await aCustomer("claims_models_missing_says_no_secret", {
       models: RECOMMENDED_PERSONA_MODELS,
+      modality: "voice",
     });
     await storeModelProviderCredential(contextFor(world.ada, "admin"), {
       provider: "openai",

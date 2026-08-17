@@ -245,23 +245,38 @@ async function modelsBlock(
     );
   }
 
-  const resolved = await resolveModelProviderKeys(claim.auth, [
-    models.llm.provider,
-    models.stt.provider,
-    models.tts.provider,
-  ]);
+  /**
+   * The legs this simulation actually has.
+   *
+   * **Every simulation thinks; only a voice simulation speaks and listens.** So
+   * a chat simulation resolves one credential rather than three: the two speech
+   * keys would be secrets on a wire with no use for them, and an organization
+   * that has stored no speech credential would be stopped from running chat
+   * tests it had everything for. The selections still travel whole, because
+   * they are what the persona *is* — it is the keys that follow the legs.
+   */
+  const needed =
+    claim.modality === "voice"
+      ? ([
+          { job: "llm", provider: models.llm.provider },
+          { job: "stt", provider: models.stt.provider },
+          { job: "tts", provider: models.tts.provider },
+        ] as const)
+      : ([{ job: "llm", provider: models.llm.provider }] as const);
+
+  const resolved = await resolveModelProviderKeys(
+    claim.auth,
+    needed.map((one) => one.provider),
+  );
 
   if (resolved.missing.length > 0) {
     // Named by model job as well as by provider, because "add an OpenAI key"
     // is a different sentence from "your persona listens with a provider you
     // have no key for" — and the person reading it has to know which of their
-    // three selections stopped the simulation.
-    const jobs = [
-      { job: "llm", provider: models.llm.provider },
-      { job: "stt", provider: models.stt.provider },
-      { job: "tts", provider: models.tts.provider },
-    ].filter((one) => resolved.missing.includes(one.provider));
-    throw new ModelProviderCredentialMissingError(jobs);
+    // selections stopped the simulation.
+    throw new ModelProviderCredentialMissingError(
+      needed.filter((one) => resolved.missing.includes(one.provider)),
+    );
   }
 
   const keyFor = (provider: PersonaModels["llm"]["provider"]): string => {
@@ -271,6 +286,10 @@ async function modelsBlock(
     }
     return key;
   };
+  const speechKey = (
+    provider: PersonaModels["llm"]["provider"],
+  ): Record<string, string> =>
+    claim.modality === "voice" ? { key: keyFor(provider) } : {};
 
   return {
     access: access.mode,
@@ -282,12 +301,12 @@ async function modelsBlock(
     stt: {
       provider: models.stt.provider,
       model: models.stt.model,
-      key: keyFor(models.stt.provider),
+      ...speechKey(models.stt.provider),
     },
     tts: {
       provider: models.tts.provider,
       model: models.tts.model,
-      key: keyFor(models.tts.provider),
+      ...speechKey(models.tts.provider),
       voice_id: models.tts.voiceId,
       speed: models.tts.speed,
     },
