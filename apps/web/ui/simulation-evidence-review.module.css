@@ -5,7 +5,7 @@
   gap: var(--space-7);
 }
 
-.workspace {
+.reviewLayout {
   min-width: 0;
 }
 
@@ -149,7 +149,7 @@
 
 .graderHead p,
 .emptyGroup,
-.workspaceState p,
+.reviewState p,
 .recordingState,
 .recordingProblem,
 .transcriptNotice {
@@ -275,18 +275,18 @@
   color: var(--muted);
 }
 
-.workspaceState {
+.reviewState {
   padding: var(--space-5);
 }
 
-.workspaceState strong {
+.reviewState strong {
   color: var(--foreground);
   font-size: var(--text-body);
   font-weight: 400;
   line-height: var(--line-body);
 }
 
-.workspaceState p {
+.reviewState p {
   max-width: 62ch;
 }
 
@@ -576,7 +576,7 @@
   .recording,
   .recordingState,
   .recordingProblem,
-  .workspaceState,
+  .reviewState,
   .emptyGroup {
     padding-inline: var(--space-4);
   }

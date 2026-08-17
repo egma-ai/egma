@@ -35,7 +35,7 @@ import {
 import {
   SimulationEvidenceReview,
   useSimulationEvidenceRecording,
-} from "../../../../../../../ui/simulation-evidence-workspace.tsx";
+} from "../../../../../../../ui/simulation-evidence-review.tsx";
 import {
   AppShell,
   PageBody,

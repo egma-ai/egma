@@ -1,5 +1,5 @@
 /*
- * One authoring workspace and one supporting history rail.
+ * One authoring surface and one supporting history rail.
  *
  * The route owns this composition. Shared controls keep their own behavior;
  * this file only decides how the two parts of one persona sit together.
@@ -24,7 +24,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.workspace {
+.personaLayout {
   display: grid;
   min-width: 0;
   grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
@@ -71,7 +71,7 @@
   line-height: var(--line-normal);
 }
 
-/* The outer workspace is the surface, so its forms do not draw nested cards. */
+/* The outer layout is the surface, so its forms do not draw nested cards. */
 .editorSection > form {
   max-width: none;
   padding: 0;
@@ -149,7 +149,7 @@
 }
 
 @media (max-width: 68rem) {
-  .workspace {
+  .personaLayout {
     grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -17,11 +17,11 @@ import {
   type JudgedAssertion,
   type SimulationEvidence,
 } from "../lib/simulations.ts";
-import { humanizeIdentifier } from "../lib/transcripts.ts";
+import { humanizeIdentifier, milliseconds } from "../lib/transcripts.ts";
 import { Button } from "./controls.tsx";
 import { Dialog } from "./dialog.tsx";
 import { VerdictBadge } from "./run-status.tsx";
-import styles from "./simulation-evidence-workspace.module.css";
+import styles from "./simulation-evidence-review.module.css";
 
 type RecordingStatus = "absent" | "loading" | "ready" | "failed";
 
@@ -30,8 +30,9 @@ function durationOf(evidence: SimulationEvidence): number | null {
   if (Number.isFinite(measured)) return measured;
   const recorded = evidence.transcript?.duration_ns;
   if (recorded === undefined) return null;
-  const milliseconds = Number(recorded) / 1_000_000;
-  return Number.isFinite(milliseconds) ? milliseconds : null;
+  if (!/^-?\d+$/u.test(recorded)) return null;
+  const elapsedMilliseconds = milliseconds(recorded);
+  return Number.isFinite(elapsedMilliseconds) ? elapsedMilliseconds : null;
 }
 
 function shownDuration(milliseconds: number | null): string {
@@ -102,14 +103,14 @@ function peaksOf(
   bins = 360,
 ): readonly number[] {
   if (channel < 0 || channel >= buffer.numberOfChannels) return [];
-  const samples = buffer.getChannelData(channel);
-  const size = Math.max(1, Math.ceil(samples.length / bins));
+  const channelData = buffer.getChannelData(channel);
+  const size = Math.max(1, Math.ceil(channelData.length / bins));
   return Array.from({ length: bins }, (_, bin) => {
     const start = bin * size;
-    const end = Math.min(samples.length, start + size);
+    const end = Math.min(channelData.length, start + size);
     let peak = 0;
     for (let at = start; at < end; at += 1) {
-      peak = Math.max(peak, Math.abs(samples[at] ?? 0));
+      peak = Math.max(peak, Math.abs(channelData[at] ?? 0));
     }
     return peak;
   });
@@ -370,7 +371,7 @@ export function useSimulationEvidenceRecording(
   };
 }
 
-type WorkspaceAssertion = {
+type ReviewAssertion = {
   readonly key: string;
   readonly expected: string;
   readonly finding: string | null;
@@ -379,12 +380,12 @@ type WorkspaceAssertion = {
   readonly superseded: readonly EvidenceVerdict[];
 };
 
-type WorkspaceGrader = {
+type ReviewGrader = {
   readonly key: string;
   readonly name: string;
   readonly required: boolean;
   readonly verdict: VerdictWord | null;
-  readonly assertions: readonly WorkspaceAssertion[];
+  readonly assertions: readonly ReviewAssertion[];
 };
 
 function sameWords(left: string, right: string): boolean {
@@ -427,12 +428,12 @@ function readableAssertion(
   return `Criterion ${String(fallbackPosition)}`;
 }
 
-function workspaceRow(
+function reviewRow(
   row: JudgedAssertion,
   expected: readonly string[],
   fallbackPosition: number,
   evidence: SimulationEvidence,
-): WorkspaceAssertion {
+): ReviewAssertion {
   return {
     key: row.key,
     expected: readableAssertion(row, expected, fallbackPosition),
@@ -448,7 +449,7 @@ function workspaceRow(
 }
 
 /** Human-named grader groups, including expected behaviors awaiting judgment. */
-function workspaceGraders(evidence: SimulationEvidence): readonly WorkspaceGrader[] {
+function reviewGraders(evidence: SimulationEvidence): readonly ReviewGrader[] {
   if (evidence.grading === "not_required") return [];
   const expected = evidence.test.expected_behaviors ?? [];
   const judged = judgedAssertions(evidence.verdicts);
@@ -481,7 +482,7 @@ function workspaceGraders(evidence: SimulationEvidence): readonly WorkspaceGrade
     const rows = judged.filter((item) => item.graderId === id);
     const expectedGroup = isExpectedBehaviors(planItem?.name, rows) || id === expectedId;
     const used = new Set<string>();
-    const assertions: WorkspaceAssertion[] = expectedGroup
+    const assertions: ReviewAssertion[] = expectedGroup
       ? expected.map((behavior, at) => {
           const position = at + 1;
           const row = rows.find(
@@ -502,12 +503,12 @@ function workspaceGraders(evidence: SimulationEvidence): readonly WorkspaceGrade
             };
           }
           used.add(row.key);
-          return workspaceRow(row, expected, position, evidence);
+          return reviewRow(row, expected, position, evidence);
         })
       : [];
     rows.forEach((row, at) => {
       if (!used.has(row.key)) {
-        assertions.push(workspaceRow(row, expected, at + 1, evidence));
+        assertions.push(reviewRow(row, expected, at + 1, evidence));
       }
     });
 
@@ -688,7 +689,7 @@ function ChatTranscript({
 }) {
   if (transcript.turns.length === 0) {
     return (
-      <div className={styles.workspaceState}>
+      <div className={styles.reviewState}>
         <strong>Nothing was said</strong>
         <p>Egma filed no spoken turns for this simulation.</p>
       </div>
@@ -731,7 +732,7 @@ function verdictWord(verdict: VerdictWord): string {
 }
 
 function graderSummary(
-  grader: WorkspaceGrader,
+  grader: ReviewGrader,
   stillJudging: boolean,
 ): string {
   const passed = grader.assertions.filter(
@@ -768,7 +769,7 @@ function GraderGroup({
   stillJudging,
   onReadTurn,
 }: {
-  readonly grader: WorkspaceGrader;
+  readonly grader: ReviewGrader;
   readonly stillJudging: boolean;
   readonly onReadTurn: (turn: number) => void;
 }) {
@@ -845,11 +846,11 @@ function GraderGroup({
 }
 
 /**
- * The one evidence workspace used while grading and after grading completes.
+ * The one evidence review used while grading and after grading completes.
  * The grader review stays on the page. Audio and readable speech live in the
  * shared right-side sheet so a long recording never sets the page's height.
  */
-function SimulationEvidenceWorkspace({
+function SimulationEvidenceLayout({
   evidence,
   recording,
   evidenceOpen,
@@ -865,7 +866,7 @@ function SimulationEvidenceWorkspace({
     evidence.grading_jobs.some((job) =>
       ["pending", "claimed"].includes(job.status),
     );
-  const graders = workspaceGraders(evidence);
+  const graders = reviewGraders(evidence);
   const simulationActive = ["queued", "claimed", "running"].includes(
     evidence.status,
   );
@@ -890,7 +891,7 @@ function SimulationEvidenceWorkspace({
   }
 
   return (
-    <section className={styles.workspace} aria-label="Simulation evidence">
+    <section className={styles.reviewLayout} aria-label="Simulation evidence">
       <section className={`${styles.pane} ${styles.graderPane}`} aria-labelledby="evidence-graders">
         <header className={styles.paneHead}>
           <div>
@@ -911,12 +912,12 @@ function SimulationEvidenceWorkspace({
           </p>
         ) : null}
         {evidence.grading === "not_required" ? (
-          <div className={styles.workspaceState}>
+          <div className={styles.reviewState}>
             <strong>There was nothing to judge</strong>
             <p>Egma did not conduct this simulation, so it filed no grading work.</p>
           </div>
         ) : graders.length === 0 ? (
-          <div className={styles.workspaceState}>
+          <div className={styles.reviewState}>
             <strong>{stillJudging ? "Graders are preparing" : "Nobody has judged this yet"}</strong>
             <p>
               {stillJudging
@@ -958,7 +959,7 @@ function SimulationEvidenceWorkspace({
             <section className={styles.transcriptBlock} aria-labelledby="evidence-transcript">
               <h3 id="evidence-transcript">Transcript</h3>
               {evidence.transcript === null ? (
-                <div className={styles.workspaceState}>
+                <div className={styles.reviewState}>
                   <strong>No transcript was filed</strong>
                   <p>
                     Egma has no speech for this simulation. It may not have started,
@@ -998,7 +999,7 @@ export function SimulationEvidenceReview({
   return (
     <div className={styles.review}>
       <SimulationEvidenceSummary evidence={evidence} />
-      <SimulationEvidenceWorkspace
+      <SimulationEvidenceLayout
         evidence={evidence}
         recording={recording}
         evidenceOpen={evidenceOpen}

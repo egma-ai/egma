@@ -390,7 +390,7 @@ function PersonaDetail({
           />
         )}
 
-        <div className={personaStyles.workspace}>
+        <div className={personaStyles.personaLayout}>
           <div className={personaStyles.editorSurface}>
             <section
               className={personaStyles.editorSection}

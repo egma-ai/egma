@@ -41,6 +41,7 @@ import {
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
 import {
+  GradingState,
   SimulationStatus,
   VerdictBadge,
 } from "../../../../../ui/run-status.tsx";
@@ -554,6 +555,12 @@ function RunDetailView({
               </dd>
             </div>
             <div className={styles.overviewFact}>
+              <dt>Grading</dt>
+              <dd>
+                {String(read.graded_count)} of {String(read.gradable_count)} judged
+              </dd>
+            </div>
+            <div className={styles.overviewFact}>
               <dt>Verdict</dt>
               <dd>
                 <VerdictBadge verdict={read.verdict} compact />
@@ -765,9 +772,15 @@ function simulationColumns(
       ),
     },
     {
+      key: "grading",
+      header: "Grading",
+      width: "14%",
+      cell: (one) => <GradingState grading={one.grading} compact />,
+    },
+    {
       key: "verdict",
       header: "Verdict",
-      width: "16%",
+      width: "14%",
       cell: (one) => <VerdictBadge verdict={one.verdict} compact />,
     },
   ];
@@ -819,7 +832,8 @@ function SimulationReason({
   return (
     <span className={styles.why}>
       {simulation.reason ?? "Egma could not conduct this simulation."} This is an
-      execution problem, not a grader verdict, and says nothing about the agent.
+      execution problem, not a failed grader verdict, and says nothing about the
+      agent.
     </span>
   );
 }

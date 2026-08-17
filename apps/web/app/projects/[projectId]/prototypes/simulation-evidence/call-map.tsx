@@ -1,6 +1,6 @@
 "use client";
 
-import { SimulationEvidenceReview } from "../../../../../ui/simulation-evidence-workspace.tsx";
+import { SimulationEvidenceReview } from "../../../../../ui/simulation-evidence-review.tsx";
 import { type VariantProps } from "./shared.tsx";
 import styles from "./prototype.module.css";
 

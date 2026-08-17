@@ -244,7 +244,7 @@ function AgentDetailView({
         }
       />
       <PageBody>
-        <div className={styles.workspace}>
+        <div className={styles.agentLayout}>
           <nav className={styles.sectionNav} aria-label="Agent sections">
             <ul className={styles.sectionList}>
               {AGENT_SECTIONS.map((item) => (

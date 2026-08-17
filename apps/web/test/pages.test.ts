@@ -671,6 +671,10 @@ describe("the pages", () => {
       path.join(WEB, "app/judgment-card.tsx"),
       "utf8",
     );
+    const evidenceReview = await readFile(
+      path.join(WEB, "ui/simulation-evidence-review.tsx"),
+      "utf8",
+    );
 
     // A simulation egma could not conduct is egma's own failure, and both
     // surfaces say so in the same sentence rather than colouring it like a
@@ -688,7 +692,7 @@ describe("the pages", () => {
     expect(judgment).toContain("judgment.cited_turns");
     // `assertion`, never `dimension`: the verdict store renamed its column
     // with the grader redesign and the word is banned at every layer.
-    expect(simulation).toContain("judgedAssertions(read.verdicts)");
+    expect(evidenceReview).toContain("judgedAssertions(evidence.verdicts)");
   });
 
   it("shows the aggregate trace outcome", async () => {

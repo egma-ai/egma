@@ -790,7 +790,14 @@ describe("one run's page", () => {
       within(table)
         .getAllByRole("columnheader")
         .map((header) => header.textContent),
-    ).toEqual(["Simulation", "Persona", "Execution", "Verdict", ""]);
+    ).toEqual([
+      "Simulation",
+      "Persona",
+      "Execution",
+      "Grading",
+      "Verdict",
+      "",
+    ]);
     expect(within(table).getByText("Starter")).toBeTruthy();
     expect(within(table).queryByText("Persona: Starter")).toBeNull();
     expect(within(table).queryByText("Not judged yet")).toBeNull();
@@ -798,7 +805,7 @@ describe("one run's page", () => {
 
     // Egma could not conduct one of them, and the page says so in those words
     // rather than calling it a failed verdict.
-    const execution = await screen.findAllByText(/not a grader verdict/u);
+    const execution = await screen.findAllByText(/not a failed grader verdict/u);
     expect(execution.length).toBeGreaterThan(0);
 
     // And it declined to conduct another, naming what decided it.
@@ -839,7 +846,14 @@ describe("one run's page", () => {
       within(summary)
         .getAllByRole("term")
         .map((term) => term.textContent),
-    ).toEqual(["Started", "Status", "Verdict", "Agent", "Connection"]);
+    ).toEqual([
+      "Started",
+      "Status",
+      "Grading",
+      "Verdict",
+      "Agent",
+      "Connection",
+    ]);
     expect(within(summary).queryByText("retell · chat")).toBeNull();
     expect((await screen.findAllByText("Archived")).length).toBe(2);
     expect(summary.querySelector('[class*="badge"]')).toBeNull();

@@ -243,7 +243,21 @@ const GRADING_MARK: Readonly<Record<GradingWord, StateMarkKind>> = {
   graded: "complete",
 };
 
-export function GradingState({ grading }: { readonly grading: GradingWord }) {
+export function GradingState({
+  grading,
+  compact = false,
+}: {
+  readonly grading: GradingWord;
+  readonly compact?: boolean;
+}) {
+  if (compact) {
+    return (
+      <InlineState title={GRADING_MEANING[grading]}>
+        <StateMark kind={GRADING_MARK[grading]} />
+        {GRADING_WORD[grading]}
+      </InlineState>
+    );
+  }
   return (
     <Badge title={GRADING_MEANING[grading]}>
       <StateMark kind={GRADING_MARK[grading]} />
