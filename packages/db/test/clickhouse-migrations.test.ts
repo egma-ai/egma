@@ -400,8 +400,8 @@ describe("the schema a boot leaves behind", () => {
     ]);
 
     expect(
-      await store.rows<{ count: string }>("select count() as count from spans"),
-    ).toEqual([{ count: "1" }]);
+      await store.rows<{ count: number }>("select count() as count from spans"),
+    ).toEqual([{ count: 1 }]);
     await expect(
       store.rows("select audio_sample_rate_hz, audio_encoding from spans"),
     ).rejects.toThrow();

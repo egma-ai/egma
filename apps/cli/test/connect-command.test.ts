@@ -35,6 +35,7 @@ const ONE_AGENT: FakeRetellScript = {
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
+      channel: "chat",
       voice_id: "11labs-Adrian",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },
@@ -49,11 +50,16 @@ const ONE_AGENT: FakeRetellScript = {
   ],
 };
 
+const VOICE_AGENT: FakeRetellScript = {
+  ...ONE_AGENT,
+  agents: ONE_AGENT.agents.map((agent) => ({ ...agent, channel: "voice" as const })),
+};
+
 const TWO_AGENTS: FakeRetellScript = {
   keys: [KEY],
   agents: [
-    { agent_id: "agent_0001", agent_name: "order-line", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
-    { agent_id: "agent_0002", agent_name: "after-hours", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
+    { agent_id: "agent_0001", agent_name: "order-line", channel: "chat", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
+    { agent_id: "agent_0002", agent_name: "after-hours", channel: "chat", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
   ],
   llms: [{ llm_id: "llm_0001", general_prompt: PROMPT }],
 };
@@ -379,8 +385,27 @@ describe("egma connect", () => {
  * dial somebody's telephone.
  */
 describe("which connection egma creates", () => {
+  it("refuses an explicit reach that the Retell agent does not support before writing", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+
+    const result = await egma(["connect", "--reach", "text"], { stdin: KEY });
+
+    expect(result.code).toBe(CONNECT_EXIT.unchosen);
+    expect(facts(result.stdout).status).toBe("incompatible-reach");
+    expect(result.stdout).toContain("reach_option: phone");
+    expect(result.stdout).not.toContain("reach_option: text");
+    expect(result.stderr).toContain(
+      "Voice agents can be reached only by phone, not text. Choose phone and try again.",
+    );
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+    await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("creates only the phone connection, holding the number and nothing else", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(VOICE_AGENT);
 
     const result = await egma(["connect", "--reach", "phone"], { stdin: KEY });
 
@@ -405,14 +430,14 @@ describe("which connection egma creates", () => {
   });
 
   it("creates nothing at all when neither way was chosen", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(VOICE_AGENT);
 
     const result = await egma(["connect"], { stdin: KEY, env: { EGMA_REACH: "" } });
 
     expect(result.code).toBe(CONNECT_EXIT.unchosen);
     expect(facts(result.stdout).status).toBe("unchosen-reach");
-    // Both ways were put on the screen, and neither was taken.
-    expect(result.stdout).toContain("reach_option: text");
+    // Only the compatible way was put on the screen, and it was not taken.
+    expect(result.stdout).not.toContain("reach_option: text");
     expect(result.stdout).toContain("reach_option: phone");
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
@@ -433,9 +458,9 @@ describe("which connection egma creates", () => {
 
   it("says which numbers reach the agent when it will not guess between them", async () => {
     retell = await startFakeRetell({
-      ...ONE_AGENT,
+      ...VOICE_AGENT,
       numbers: [
-        ...(ONE_AGENT.numbers ?? []),
+        ...(VOICE_AGENT.numbers ?? []),
         {
           phone_number: "+14155550999",
           nickname: "overflow",
@@ -458,7 +483,7 @@ describe("which connection egma creates", () => {
   });
 
   it("says plainly when Retell routes no number to the agent", async () => {
-    retell = await startFakeRetell({ ...ONE_AGENT, numbers: [] });
+    retell = await startFakeRetell({ ...VOICE_AGENT, numbers: [] });
 
     const result = await egma(["connect", "--reach", "phone"], { stdin: KEY });
 
@@ -469,7 +494,7 @@ describe("which connection egma creates", () => {
   });
 
   it("is deterministic under retry, and says which half it wrote each time", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(VOICE_AGENT);
 
     const first = await egma(["connect", "--reach", "phone"], { stdin: KEY });
     const again = await egma(["connect", "--reach", "phone"], { stdin: KEY });
@@ -487,6 +512,45 @@ describe("which connection egma creates", () => {
 });
 
 describe("the whole walk, headless", () => {
+  it("prints the compatible Retell reach and stops before writing on a mismatch", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:found framework retell-sdk\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const result = await egma(
+      [
+        "--headless",
+        "--reach",
+        "text",
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        new URL("./support/fake-agent.ts", import.meta.url).pathname,
+        script,
+      ],
+      { env: { EGMA_RETELL_API_KEY: KEY } },
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain("reach_option: phone");
+    expect(result.stdout).not.toContain("reach_option: text");
+    expect(result.stdout).toContain(
+      "Egma could not finish: Retell says this is a voice agent. " +
+        "Voice agents can be reached only by phone, not text. Choose phone and try again. " +
+        "Nothing was written.",
+    );
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+    await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("finds the agent, connects it, and leaves one line behind", async () => {
     retell = await startFakeRetell(ONE_AGENT);
     await writeFile(path.join(workspace.dir, "prompt.md"), "Always quote a price.\n", "utf8");

@@ -83,7 +83,17 @@ class FakeTokenEndpoint:
 
     @property
     def url(self) -> str:
-        """Where a connection's ``tokenEndpoint`` points at this one."""
+        """The HTTPS URL shape a real connection stores.
+
+        The test backend maps this loopback-only address to :attr:`wire_url`
+        after the production parser has enforced HTTPS. The socket request is
+        still real; only the local test server's missing TLS layer is replaced.
+        """
+        return self.wire_url.replace("http://", "https://", 1)
+
+    @property
+    def wire_url(self) -> str:
+        """Where the local HTTP server actually listens in this test."""
         if self._server is None:
             raise RuntimeError("the endpoint is not serving")
         host, port = self._server.server_address[:2]

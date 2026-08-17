@@ -5,9 +5,9 @@
  * anybody wants: the platform writes the two together or neither, and this asks
  * for them together so that it can.
  *
- * The Retell key travels inside that one request body and is read out of the
- * key object exactly here, on the way to being sealed. Nothing in this module
- * writes a file, prints a line, or puts the body into an error.
+ * Provider credentials travel inside that one request body and are read out of
+ * their masked object exactly here, on the way to being sealed. Nothing in
+ * this module writes a file, prints a line, or puts the body into an error.
  *
  * **What the provider is running does not travel.** egma keeps identity,
  * credentials and what it learns; the agent's own content stays at the
@@ -24,11 +24,11 @@
  * belongs to rather than in a module of its own.
  */
 
-import type { RetellKey } from "../retell/key.ts";
+import type { ConnectionCredentials } from "./connection-credentials.ts";
 import type { Fetch } from "./device-flow.ts";
 
 export type NewConnection = {
-  /** Omit and the platform names it: `retell-1`, then `retell-2`. */
+  /** Omit and the platform chooses the next `<type>-<number>` name. */
   readonly name?: string | undefined;
   /**
    * What kind of reach this is.
@@ -38,12 +38,13 @@ export type NewConnection = {
    * configuration its own deployment holds. That is what makes a phone
    * connection provider-blind — nothing in it says who answers.
    */
-  readonly type: "retell" | "phone";
+  /** The platform's connection-type registry is the source of truth. */
+  readonly type: string;
   readonly modality: "voice" | "chat";
   readonly environment?: string | undefined;
   readonly config: Readonly<Record<string, string>>;
   /** Sealed by the platform. Never answered back and never stored here. */
-  readonly credentials?: RetellKey | undefined;
+  readonly credentials?: ConnectionCredentials | undefined;
 };
 
 export type Registration = {
@@ -67,11 +68,9 @@ export type RegisteredConnection = {
   /** The last characters of the sealed secret, which is all that comes back. */
   readonly credentialsHint: string | null;
   /**
-   * What to reach, as the platform stores it — the number for a phone
-   * connection, the vendor's agent id for a retell one. Never a secret: the
-   * config is the half of a connection that is public by construction, and it
-   * is what says whether a connection already on the platform is the one being
-   * asked for.
+   * What to reach, as the platform stores it — a number, provider agent id,
+   * server URL, or endpoint. Never a secret: config is the public half of a
+   * connection by construction.
    */
   readonly config: Readonly<Record<string, string>>;
 };
@@ -195,11 +194,12 @@ function connectionBody(connection: NewConnection): Record<string, unknown> {
       ? {}
       : { environment: connection.environment }),
     config: connection.config,
-    // The one place the key is read on the way to egma. It is sealed there
-    // and never answered back — what comes back is its last characters.
+    // The one place provider credentials are read on the way to egma. They are
+    // sealed there and never answered back — only the registry-defined hint is
+    // returned.
     ...(connection.credentials === undefined
       ? {}
-      : { credentials: { apiKey: connection.credentials.reveal() } }),
+      : { credentials: connection.credentials.reveal() }),
   };
 }
 

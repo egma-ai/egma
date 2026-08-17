@@ -12,7 +12,7 @@ These flags work with every command.
 
 | Flag | Description |
 |---|---|
-| `--coding-agent <id>` | Which coding agent to drive, using the name from the agent registry. Default: `claude-acp` |
+| `--coding-agent <id>` | Use one installed coding agent without asking: `claude`, `codex`, `cursor`, or `opencode` |
 | `--cwd <path>` | The folder to operate in. Default: the current directory |
 | `--url <address>` | Which Egma instance this command talks to. Overrides any value in `egma/config.yaml` |
 | `--force` | With `login`: sign in again even when this machine already holds a key |
@@ -57,7 +57,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | Flag | Description |
     |---|---|
     | `--url <address>` | Which Egma instance to use for this run |
-    | `--coding-agent <id>` | Which coding agent to drive. Default: `claude-acp` |
+    | `--coding-agent <id>` | Use one installed coding agent without showing the chooser: `claude`, `codex`, `cursor`, or `opencode` |
     | `--headless` | Run non-interactively; treats the task as already agreed |
     | `--existing-tests <path>` | Path to your existing test cases inside this folder. Your coding agent converts them to test files before generating new ones |
     | `--reach <text\|phone>` | Required in headless mode: how Egma should reach the agent |

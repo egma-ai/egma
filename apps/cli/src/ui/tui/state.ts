@@ -8,17 +8,27 @@
 
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent, RetellNumber } from "../../retell/client.ts";
-import type { KeyAsk } from "../../retell/connect.ts";
+import type { KeyAsk, Reach } from "../../retell/connect.ts";
 import type { RunView } from "../../run/view.ts";
 import type { SkillPlaces } from "../../skills/install.ts";
 import type { Detection } from "../../wizard/detection.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
-import type { AskId, DrivenAgent, PlatformNotice } from "../wizard-ui.ts";
+import type { WizardPhase } from "../../wizard/wizard-machine.ts";
+import type {
+  AskId,
+  CodingAgentChoice,
+  ConnectionAsk,
+  DrivenAgent,
+  PlatformNotice,
+} from "../wizard-ui.ts";
 
 export type WizardState = {
+  readonly phase: WizardPhase;
   readonly drivenAgent: DrivenAgent | null;
+  /** Supported coding agents found on this machine, before one is selected. */
+  readonly codingAgentChoices: readonly CodingAgentChoice[];
   /** Where the coding agent's own output is kept, for a screen that tails it. */
   readonly drivenAgentLog: string | null;
   /**
@@ -48,10 +58,12 @@ export type WizardState = {
   readonly keyAsk: KeyAsk | null;
   /** The agents a choice is open between, or `null` when none is. */
   readonly agentChoices: readonly RetellAgent[] | null;
-  /** True while the choice between text and phone is open. */
-  readonly reachOffered: boolean;
+  /** The Retell-compatible ways on offer, or `null` when none is. */
+  readonly reachOffer: readonly Reach[] | null;
   /** The numbers a choice is open between, or `null` when none is. */
   readonly numberChoices: readonly RetellNumber[] | null;
+  /** The provider field being collected. Its answer never enters this state. */
+  readonly connectionAsk: ConnectionAsk | null;
   /** The developer has read the intro and said go. */
   readonly begun: boolean;
   /** The developer has read the test list and said run them. */
@@ -79,7 +91,9 @@ export type WizardState = {
 
 export function emptyState(): WizardState {
   return {
+    phase: "coding-agent",
     drivenAgent: null,
+    codingAgentChoices: [],
     drivenAgentLog: null,
     platform: null,
     detection: null,
@@ -88,8 +102,9 @@ export function emptyState(): WizardState {
     loginCopied: false,
     keyAsk: null,
     agentChoices: null,
-    reachOffered: false,
+    reachOffer: null,
     numberChoices: null,
+    connectionAsk: null,
     begun: false,
     agreedToRun: false,
     running: false,

@@ -16,6 +16,7 @@ scripted one, which is why none of it can flake.
 from __future__ import annotations
 
 import asyncio
+import signal
 from datetime import datetime
 from itertools import pairwise
 
@@ -395,6 +396,88 @@ async def test_a_killed_simulator_just_stops_heartbeating(
     assert terminal_event_for(await workbench.records(), "sim-kill-001") is None, (
         "a killed simulator reported a terminal state it could not know"
     )
+
+
+async def test_the_first_stop_signal_drains_the_exchange_in_flight(
+    workbench, start_simulator
+):
+    """SIGTERM mid-exchange: the conversation finishes and reports, the
+    spec queued behind it is never claimed, and the process exits on its
+    own. This is what lets a deploy replace the simulator at any hour."""
+    await workbench.offer(
+        scripted_spec(
+            "sim-drain-001",
+            scenario=" ".join(f"Sentence number {n}." for n in range(1, 13)),
+            turn_seconds=0.15,
+            max_turns=200,
+            max_duration_seconds=600,
+        )
+    )
+    await workbench.offer(scripted_spec("sim-drain-queued"))
+    simulator = start_simulator(workbench, capacity=1)
+
+    records = await workbench.wait_for(
+        lambda records: len(turns_for(records, "sim-drain-001")) >= 2
+    )
+    turns_at_signal = len(turns_for(records, "sim-drain-001"))
+    simulator.process.send_signal(signal.SIGTERM)
+
+    records = await workbench.wait_for(has_terminal("sim-drain-001"))
+    terminal = terminal_event_for(records, "sim-drain-001")
+    assert terminal["status"] == "completed"
+    assert len(turns_for(records, "sim-drain-001")) > turns_at_signal, (
+        "the exchange was cut rather than finished"
+    )
+
+    assert simulator.process.wait(timeout=20) == 0
+
+    # Capacity was free the moment the exchange ended, and the queued spec
+    # was there for the taking. A draining simulator does not take it.
+    later = await workbench.records()
+    assert status_events_for(later, "sim-drain-queued") == []
+
+
+async def test_a_second_stop_signal_tears_down_at_once(
+    workbench, start_simulator
+):
+    """SIGTERM twice is the hard stop of old: the exchange is torn down
+    and nothing terminal is invented for it — the sweep's territory."""
+    await workbench.offer(
+        scripted_spec(
+            "sim-drain-hard-001",
+            scenario=LONG_SCENARIO,
+            turn_seconds=0.15,
+            max_turns=200,
+            max_duration_seconds=600,
+        )
+    )
+    simulator = start_simulator(workbench)
+
+    await workbench.wait_for(
+        lambda records: len(turns_for(records, "sim-drain-hard-001")) >= 2
+    )
+    simulator.process.send_signal(signal.SIGTERM)
+    await asyncio.sleep(0.3)
+    simulator.process.send_signal(signal.SIGTERM)
+
+    simulator.process.wait(timeout=15)
+    assert (
+        terminal_event_for(await workbench.records(), "sim-drain-hard-001")
+        is None
+    ), "a torn-down simulator reported a terminal state it could not know"
+
+
+async def test_an_idle_simulator_stops_at_once_on_the_first_signal(
+    workbench, start_simulator
+):
+    """Nothing in flight: the drain is over the moment it starts. A
+    self-hoster's `compose stop` never waits on an idle simulator."""
+    simulator = start_simulator(workbench)
+    await workbench.wait_for(
+        lambda records: any(record["kind"] == "claim" for record in records)
+    )
+    simulator.process.send_signal(signal.SIGTERM)
+    assert simulator.process.wait(timeout=10) == 0
 
 
 async def test_an_over_granting_control_plane_does_not_take_the_simulator_down(

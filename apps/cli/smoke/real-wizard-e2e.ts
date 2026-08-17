@@ -52,7 +52,7 @@
  *
  * Useful arguments:
  *
- *   --coding-agent <id>   Which agent to drive, as the registry names it.
+ *   --coding-agent <id>   Which installed supported agent to drive.
  *   --again               Walk a second time against the same egma, which is
  *                         what proves a second walk over the same provider
  *                         agent finds the registration the first one made
@@ -80,7 +80,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
-import { DEFAULT_DRIVEN_AGENT_ID, launchForId } from "../src/acp/registry.ts";
+import { discoverCodingAgents, installedCodingAgent } from "../src/acp/coding-agents.ts";
 import { folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { readCredentials } from "../src/platform/credentials.ts";
@@ -892,12 +892,16 @@ async function main(): Promise<void> {
     return;
   }
 
-  const drivenAgentId = argumentAfter("--coding-agent") ?? DEFAULT_DRIVEN_AGENT_ID;
+  const drivenAgentId = argumentAfter("--coding-agent") ?? "claude";
   const walks = process.argv.includes("--again") ? 2 : 1;
 
   // A name and a launch this machine can really start, before anything else is
   // brought up: a typo in the agent id should cost a second, not a boot.
-  const launch = launchForId(drivenAgentId);
+  const selectedAgent = installedCodingAgent(await discoverCodingAgents(), drivenAgentId);
+  if (selectedAgent === null) {
+    throw new Error(`The supported coding agent "${drivenAgentId}" is not installed.`);
+  }
+  const launch = selectedAgent.launch;
 
   const real = path.join(process.env.HOME ?? "", ".egma", "credentials");
   const before = await stat(real).then((found) => `${found.mtimeMs}`, () => "absent");

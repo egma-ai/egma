@@ -79,6 +79,15 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // column — the shape both junction tables have, for the same reason.
   idempotent_operation: "org",
   grading_job: "gjb",
+  // The exactly-once ledger for a conversation egma watched on somebody else's
+  // platform. Its identity is its own because the row outlives the write it
+  // guards: a sweep reads it back to replay an append that never landed.
+  production_trace_claim: "ptc",
+  // How many deliveries the receiving endpoint turned away, by reason. Below
+  // the tenancy tables like the platform's own settings, and for the same kind
+  // of reason: a delivery that matched no switched-on connection belongs to no
+  // customer, which is what being refused means on that door.
+  retell_webhook_refusal: "rwr",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])

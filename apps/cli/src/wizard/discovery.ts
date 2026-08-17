@@ -3,31 +3,32 @@
  *
  * Nothing about a repository tells egma where a voice agent is. A person would
  * read the code to work it out, so egma has a coding agent read it — the
- * developer's own, on the developer's own machine, with two Egma skills at the
- * top of the task saying what to look for and what to report. The repository
- * never leaves the machine and no skill is ever installed on it.
+ * developer's own, on the developer's own machine, with the public
+ * `find-voice-agent` skill saying what to look for. The task itself owns the
+ * marker protocol. The repository never leaves the machine and no skill is
+ * installed on it.
  *
  * What comes back is marker lines. They become the status lines the developer
  * watches and the card they read at the end; the agent's prose goes to the log.
  *
- * Teams split repositories, so a folder with no voice agent in it is not the end
- * of the walk. egma asks once for a pointer to the prompts, looks there, and
- * only then says plainly that this is the wrong folder to have started in.
+ * One ACP session has one working folder. If this folder has no voice agent,
+ * Egma says so and tells the developer to point the next run at the right
+ * folder or configure the agent in the Egma UI.
  */
 
-import { stat } from "node:fs/promises";
-import path from "node:path";
-
-import { driveOneTask } from "../acp/drive.ts";
-import type { DrivenAgentLaunch } from "../acp/registry.ts";
-import { instructionsWith } from "../skills/index.ts";
+import type { DrivenAgent } from "../acp/driven-agent.ts";
+import {
+  instructionsWith,
+  publicSkill,
+  publicSkillDirectory,
+} from "../skills/index.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import { FACTS, LABEL_WIDTH, labelFor } from "./facts.ts";
 import { MarkerStream, type Marker, type ParsedLine } from "./markers.ts";
 import { ACTION_MARK, DETAIL_MARK, FAILURE_MARK } from "./status.ts";
-import { stopReport, untilAborted } from "./stop.ts";
+import { stopReport } from "./stop.ts";
 
 /** What the coding agent reported, keyed by field name. */
 export type Facts = ReadonlyMap<string, string>;
@@ -50,31 +51,57 @@ export type DiscoveryOutcome =
 
 export type DiscoveryOptions = {
   readonly ui: WizardUI;
-  readonly launch: DrivenAgentLaunch;
+  readonly drivenAgent: DrivenAgent;
   /** The folder to look in. */
   readonly cwd: string;
   readonly signal: AbortSignal;
   readonly log: DrivenAgentLog;
 };
 
-/** What egma asks the coding agent to do, under the two skills. */
+/** What Egma adds to the public skill for this one wizard run. */
 export function discoveryTask(where: string): string {
+  const resources = publicSkillDirectory("find-voice-agent");
   return [
     "# Your task",
     "",
     `Find the voice agent in ${where} and report what you find.`,
     "",
-    "Work only in that folder. Read the files. Change nothing, install nothing,",
-    "and run no command that reaches the network.",
+    "## Resolve the skill's references",
     "",
-    "Report with the marker lines the skill above describes, and stop when you",
-    "have written them.",
+    `The public skill above came from \`${resources}\`. Resolve its relative`,
+    "reference links from that folder. Those public files are instructions, not",
+    "repository evidence. Read one only when the skill's matching evidence",
+    "branch says to. Reading that folder is the one exception to the skill's",
+    "repository-only rule.",
+    "",
+    "## Report through Egma's marker lines",
+    "",
+    "Write `egma:note <what you are reading>` while you work. If there is no",
+    "voice agent after a proper search, write `egma:none <reason>`. If something",
+    "prevents the search, write `egma:abort <reason>` and stop.",
+    "",
+    "When facts are ready, write one line per fact in this exact shape:",
+    "",
+    "```text",
+    "egma:found framework retell-sdk",
+    "egma:found agent-name front-desk",
+    "egma:found prompts prompts/greeter.md",
+    "egma:found tools src/tools/ (2 definitions)",
+    "egma:found deploy Retell-hosted, updated by scripts/deploy.ts",
+    "egma:found agent-id src/config.ts",
+    "```",
+    "",
+    "Use only these fact names: `framework`, `agent-name`, `prompts`, `tools`,",
+    "`deploy`, and `agent-id`. Put every found line in one final block with",
+    "nothing after it.",
+    "Start every marker at the beginning of a line, end it with a line break,",
+    "and put no ordinary words on that line.",
   ].join("\n");
 }
 
-/** The instructions dispatched for this step: both skills, then the task. */
+/** The public finder followed by the wizard-specific reference path and protocol. */
 export function discoveryInstructions(where: string): string {
-  return instructionsWith(["context-finding", "retell"], discoveryTask(where));
+  return instructionsWith([publicSkill("find-voice-agent")], discoveryTask(where));
 }
 
 /**
@@ -138,7 +165,7 @@ function isAFind(facts: Facts): boolean {
 
 /** Runs the step once, in one folder. */
 export async function discoverIn(options: DiscoveryOptions): Promise<DiscoveryOutcome> {
-  const { ui, launch, cwd, signal, log } = options;
+  const { ui, drivenAgent, cwd, log } = options;
 
   const facts = new Map<string, string>();
   const markers = new MarkerStream();
@@ -164,16 +191,9 @@ export async function discoverIn(options: DiscoveryOptions): Promise<DiscoveryOu
     return abort;
   };
 
-  const result = await driveOneTask({
-    launch,
-    cwd,
+  const result = await drivenAgent.run({
     instructions: discoveryInstructions(cwd),
-    ui,
-    signal,
-    logStderr: (chunk) => log.write(chunk),
     watch: (chunk) => take(markers.push(chunk)),
-    onLogin: (name) =>
-      ui.pushStatus(`${ACTION_MARK} ${name} needs you to log in. Handing you to its own login.`),
   });
 
   // An agent's last line often arrives without an ending, so it is read here
@@ -197,14 +217,6 @@ export async function discoverIn(options: DiscoveryOptions): Promise<DiscoveryOu
       return { kind: "aborted", reason: result.reason };
     case "done":
       return isAFind(facts) ? { kind: "found", facts } : { kind: "nothing-found" };
-  }
-}
-
-async function isFolder(candidate: string): Promise<boolean> {
-  try {
-    return (await stat(candidate)).isDirectory();
-  } catch {
-    return false;
   }
 }
 
@@ -232,15 +244,14 @@ export type Discovered = {
 const NO_FACTS: Facts = new Map<string, string>();
 
 /**
- * One look in one folder, and the ending it forces.
+ * One look in the selected repository folder, and the ending it forces.
  *
- * `null` is the one answer that is not an ending: the agent looked, there is
- * nothing here, and the walk has somewhere else to try. Both looks the step
- * makes are this same shape, so neither can grow an ending the other does not
- * have.
+ * `null` means the coding agent found no voice agent. The wizard keeps the ACP
+ * session rooted in this folder, so it ends with a clear next action instead
+ * of silently moving the same task to another folder.
  */
 async function lookIn(options: DiscoveryOptions): Promise<Discovered | null> {
-  const { ui, launch, log, signal } = options;
+  const { ui, drivenAgent, log, signal } = options;
 
   ui.taskStarted();
   const outcome = await discoverIn(options);
@@ -257,16 +268,16 @@ async function lookIn(options: DiscoveryOptions): Promise<Discovered | null> {
     case "aborted":
       return ending({
         kind: "coding-agent-stopped",
-        drivenAgentName: launch.name,
+        drivenAgentName: drivenAgent.name,
         reason: outcome.reason,
       });
     case "failed":
       // A failure is the one time the agent's own output is worth reading, so
       // it is the one time the developer is told where it is.
-      ui.pushStatus(`What ${launch.name} printed is in ${log.file}`);
+      ui.pushStatus(`What ${drivenAgent.name} printed is in ${log.file}`);
       return ending({ kind: "failed", reason: outcome.reason });
     case "interrupted":
-      return ending(stopReport(signal, launch.name));
+      return ending(stopReport(signal, drivenAgent.name));
     case "unreachable":
       return ending({ kind: "no-coding-agent" });
     case "needs-login":
@@ -278,32 +289,12 @@ async function lookIn(options: DiscoveryOptions): Promise<Discovered | null> {
 }
 
 /**
- * The whole step: look here, ask once if there is nothing, look there, or say
- * plainly that this is the wrong folder.
+ * The whole step: look in the ACP session's one folder, or say plainly how to
+ * point a new run at the right one.
  */
 export async function findTheAgent(options: DiscoveryOptions): Promise<Discovered> {
   const nothingHere: Discovered = { report: { kind: "no-agent-context" }, facts: NO_FACTS };
 
   const here = await lookIn(options);
-  if (here !== null) return here;
-
-  // Teams keep prompts in a repository of their own, so one folder saying no is
-  // not an answer about the team. This is the only question the step asks, and
-  // it is asked once. A developer who closes the wizard instead of answering has
-  // answered too, so the wait ends with the signal and not only with a keystroke.
-  const pointer = await untilAborted(options.ui.waitForAnswer("prompts-pointer"), options.signal);
-  if (options.signal.aborted) {
-    return { report: stopReport(options.signal, options.launch.name), facts: NO_FACTS };
-  }
-  if (pointer === undefined || pointer === null || pointer.trim() === "") {
-    return nothingHere;
-  }
-
-  const where = path.resolve(options.cwd, pointer.trim());
-  if (!(await isFolder(where))) {
-    options.ui.pushStatus(`${ACTION_MARK} There is no folder at ${pointer.trim()}.`);
-    return nothingHere;
-  }
-
-  return (await lookIn({ ...options, cwd: where })) ?? nothingHere;
+  return here ?? nothingHere;
 }

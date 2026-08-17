@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 
 import { ClickHouseError } from "@clickhouse/client";
@@ -19,9 +20,10 @@ import { TraceStoreRefusedError } from "./errors.ts";
  * update, no delete, no merge of a later part into an earlier one. A span
  * arrives once, complete. Duplicates are not resolved at read time on this
  * table — the obligation not to send twice belongs to whoever wrote the span.
- * ClickHouse's recent exact-block check is the only backstop. It suppresses a
- * byte-identical exporter retry, while changed evidence remains append-only
- * even when it carries the same trace and span ids.
+ * During the current rolling-deploy bridge, ClickHouse also receives the
+ * prior release's block token. Inside ClickHouse's recent deduplication window
+ * that token suppresses a block with the same ordered span ids, even if its
+ * bytes changed. There is no read-time or permanent per-span deduplication.
  */
 
 /**
@@ -245,6 +247,13 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
       FIELD_LIMITS.providerCallId,
     ),
     connection_type: truncated(span.connectionType, FIELD_LIMITS.connectionType),
+    // One-release rolling-deploy bridge. The prior API included these keys in
+    // every JSON row and used the resulting byte boundaries to form tokened
+    // blocks. The migrated columns are EPHEMERAL, so ClickHouse accepts but
+    // does not store them. Remove both keys only in a separate cutover after
+    // old replicas cannot return and pending retries and claims have drained.
+    audio_sample_rate_hz: 0,
+    audio_encoding: "",
     run_id: span.runId,
     agent_id: span.agentId,
     agent_version_id: span.agentVersionId,
@@ -267,6 +276,9 @@ type SerialisedRow = {
   readonly bytes: number;
   /** `YYYY-MM`, which is `toYYYYMM(started_at)` written the way the literal is. */
   readonly month: string;
+  /** Kept only to reproduce the prior release's block token. */
+  readonly traceId: string;
+  readonly spanId: string;
 };
 
 function serialised(auth: AuthContext, span: NewSpan): SerialisedRow {
@@ -276,18 +288,43 @@ function serialised(auth: AuthContext, span: NewSpan): SerialisedRow {
     line,
     bytes: Buffer.byteLength(line),
     month: String(row["started_at"]).slice(0, "YYYY-MM".length),
+    traceId: span.traceId,
+    spanId: span.spanId,
   };
 }
 
-/** One insert as it goes to the store. */
+/** One insert as it goes to the store during the rollout bridge. */
 type InsertBlock = {
   readonly lines: readonly string[];
+  readonly token: string;
 };
+
+/**
+ * The prior release's exact token algorithm.
+ *
+ * Every span path keeps it for one rolling-deploy and rollback window. This
+ * lets an exact exporter retry or a Retell claim replay move between old and
+ * new API replicas without changing its recent ClickHouse identity. It is not
+ * a permanent or global exactly-once guarantee. Remove it with the empty audio
+ * input fields only after old writers and pending retries have drained and the
+ * rollback path is closed.
+ */
+function compatibilityToken(
+  auth: AuthContext,
+  rows: readonly SerialisedRow[],
+): string {
+  const digest = createHash("sha256");
+  digest.update(`spans\n${auth.organizationId}\n${auth.projectId ?? "default"}`);
+  for (const row of rows) digest.update(`\n${row.traceId}/${row.spanId}`);
+  return digest.digest("hex");
+}
 
 /** The observable shape of the pure work done before ClickHouse is asked. */
 export type SpanInsertPlan = {
   readonly spans: number;
   readonly batches: number;
+  /** Exposed only on this internal test seam to pin the rollout identity. */
+  readonly compatibilityTokens: readonly string[];
 };
 
 /**
@@ -302,10 +339,14 @@ export type SpanInsertPlan = {
  * the engine's limit out of a client's hands.
  *
  * A single row larger than the byte cap still goes, alone: splitting is how a
- * big batch gets written, never a reason to refuse one. Deterministic, because
- * ClickHouse only recognises a retry when it produces an identical block.
+ * big batch gets written, never a reason to refuse one. The temporary input
+ * fields keep these boundaries identical to the prior release, so each block
+ * also keeps the same compatibility token during a rolling deploy.
  */
-function inserts(rows: readonly SerialisedRow[]): InsertBlock[] {
+function inserts(
+  auth: AuthContext,
+  rows: readonly SerialisedRow[],
+): InsertBlock[] {
   // Insertion-ordered, so the first month to arrive is the first block written
   // and a retry of the same batch produces the same blocks in the same order.
   const months = new Map<string, SerialisedRow[]>();
@@ -319,6 +360,7 @@ function inserts(rows: readonly SerialisedRow[]): InsertBlock[] {
   const close = (block: readonly SerialisedRow[]): void => {
     blocks.push({
       lines: block.map((row) => row.line),
+      token: compatibilityToken(auth, block),
     });
   };
 
@@ -357,9 +399,11 @@ export function planSpanInserts(
   auth: AuthContext,
   spans: readonly NewSpan[],
 ): SpanInsertPlan {
+  const blocks = preparedInserts(auth, spans);
   return {
     spans: spans.length,
-    batches: preparedInserts(auth, spans).length,
+    batches: blocks.length,
+    compatibilityTokens: blocks.map((block) => block.token),
   };
 }
 
@@ -368,7 +412,10 @@ function preparedInserts(
   auth: AuthContext,
   spans: readonly NewSpan[],
 ): InsertBlock[] {
-  return inserts(spans.map((span) => serialised(auth, span)));
+  return inserts(
+    auth,
+    spans.map((span) => serialised(auth, span)),
+  );
 }
 
 /**
@@ -431,10 +478,11 @@ function* lines(block: readonly string[]): Generator<string> {
 /**
  * File these spans under the caller's organization and project.
  *
- * Nothing is read first and nothing is overwritten. Sending the same batch
- * twice is not an error. ClickHouse drops a byte-identical recent insert block,
- * which is what an OpenTelemetry exporter's retry repeats. Changed bytes are a
- * different append even when their trace and span ids match existing rows.
+ * Nothing is read first and nothing is overwritten. For this one rolling
+ * release, every insert repeats the prior release's token. ClickHouse drops a
+ * recent block with that token, so old and new API replicas agree on an exact
+ * exporter retry. The token expires with ClickHouse's recent deduplication
+ * window; there is no read-time or permanent per-span collapse.
  */
 export async function appendSpans(
   auth: AuthContext,
@@ -453,6 +501,9 @@ export async function appendSpans(
       const { stream } = await traceStore().exec({
         query: `INSERT INTO ${SPANS_TABLE} FORMAT JSONEachRow`,
         values: Readable.from(lines(block.lines), { objectMode: false }),
+        clickhouse_settings: {
+          insert_deduplication_token: block.token,
+        },
       });
       // An insert answers with an empty body, and the empty body still has to
       // be read: a response left undrained keeps its socket out of the pool

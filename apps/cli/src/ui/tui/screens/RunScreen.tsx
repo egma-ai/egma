@@ -46,6 +46,7 @@ const STATUS_SAID: Readonly<Record<SimulationStatus, string>> = {
   completed: "done",
   failed: "did not run",
   canceled: "stopped",
+  skipped: "skipped",
 };
 
 /**

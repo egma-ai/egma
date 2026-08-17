@@ -59,6 +59,7 @@ const ACCOUNT: FakeRetellScript = {
     {
       agent_id: "agent_quillfeather_order_line",
       agent_name: "order-line",
+      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_quillfeather" },
     },
   ],
@@ -254,8 +255,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
       await showing(terminal, "Paste your Retell API key");
       terminal.write(`${KEY}\r`);
 
-      // Text or phone. Not this check's subject, and not skippable
-      // either: egma never picks one of the two for a developer.
+      // This Retell chat agent supports text. Egma still requires confirmation.
       await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 
@@ -344,8 +344,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
       await showing(terminal, "Paste your Retell API key");
       terminal.write(`${KEY}\r`);
 
-      // Text or phone. Not this check's subject, and not skippable
-      // either: egma never picks one of the two for a developer.
+      // This Retell chat agent supports text. Egma still requires confirmation.
       await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 

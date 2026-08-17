@@ -1,5 +1,5 @@
 /**
- * Driving one task on the developer's own coding agent.
+ * Driving the wizard's turns through one coding-agent process and ACP session.
  *
  * The agent runs as a subprocess speaking the protocol over stdio. egma is the
  * client: it approves everything except a fenced file, streams every action it
@@ -20,9 +20,9 @@ import { ActionStream, drivenAgentTextIn } from "../wizard/status.ts";
 import { FENCE_MESSAGE, fenceStatusLine, fencedReferenceIn, isFenced } from "./fence.ts";
 import { sessionMetaFor } from "./hardening.ts";
 import { zeroPromptMode } from "./modes.ts";
-import type { DrivenAgentLaunch } from "./registry.ts";
+import type { DrivenAgentLaunch } from "./coding-agents.ts";
 
-/** How the one task ended. */
+/** How one turn with the coding agent ended. */
 export type DriveResult =
   | { readonly kind: "done"; readonly summary: string }
   /** The agent said it could not go on, and egma ended the task on that word. */
@@ -33,22 +33,30 @@ export type DriveResult =
   | { readonly kind: "needs-login"; readonly drivenAgentName: string }
   | { readonly kind: "failed"; readonly reason: string };
 
-export type DriveOptions = {
+export type DrivenAgentTurn = {
+  readonly instructions: string;
+  /**
+   * Sees the coding agent's own words as they arrive, in order. Answer a reason
+   * to end this turn now, or `null` to let it carry on.
+   */
+  readonly watch?: (text: string) => string | null;
+};
+
+/** One coding agent and one ACP session, kept for the wizard's whole flow. */
+export interface DrivenAgent {
+  readonly id: string;
+  readonly name: string;
+  run(turn: DrivenAgentTurn): Promise<DriveResult>;
+}
+
+export type DrivenAgentOptions = {
   readonly launch: DrivenAgentLaunch;
   readonly cwd: string;
-  readonly instructions: string;
   readonly ui: WizardUI;
-  /** Aborts the task and shuts the agent down. */
+  /** Aborts the flow and shuts the agent down. */
   readonly signal: AbortSignal;
   /** Where the agent's own noise goes. Omit to drop it. */
   readonly logStderr?: (chunk: string) => void;
-  /**
-   * Sees the coding agent's own words as they arrive, in order. Answer a reason
-   * to end the task now, or `null` to let it carry on. This is where a step
-   * enforces its own abort: egma stops on the word, rather than waiting for the
-   * agent to agree that it has finished.
-   */
-  readonly watch?: (text: string) => string | null;
   /** Told when the coding agent has to log in before egma can drive it. */
   readonly onLogin?: (drivenAgentName: string) => void;
 };
@@ -58,6 +66,9 @@ const AUTH_REQUIRED = -32000;
 
 /** How long a shut-down agent gets to leave before it is killed outright. */
 const SHUTDOWN_GRACE_MS = 2_000;
+
+/** How long a cancelled turn gets to acknowledge the protocol cancellation. */
+const CANCEL_GRACE_MS = 2_000;
 
 class DrivenAgentProcess {
   private killed = false;
@@ -201,6 +212,16 @@ function isAuthRequired(error: unknown): boolean {
   return error instanceof acp.RequestError && error.code === AUTH_REQUIRED;
 }
 
+function extensionParams(params: unknown): Record<string, unknown> {
+  if (typeof params === "object" && params !== null && !Array.isArray(params)) {
+    return params as Record<string, unknown>;
+  }
+  throw new acp.RequestError(-32602, "Cursor sent invalid extension parameters.");
+}
+
+const CURSOR_QUESTION_SKIPPED = "Egma owns this wizard's questions.";
+const CURSOR_PLAN_REJECTED = "Egma does not need a separate plan approval.";
+
 /**
  * The login egma can hand the developer to.
  *
@@ -219,27 +240,47 @@ function ownLoginMethod(response: acp.InitializeResponse): string | null {
   return null;
 }
 
-/** What one prompt turn came to. */
-type TurnOutcome =
-  | { readonly kind: "spoken"; readonly text: string }
-  | { readonly kind: "aborted"; readonly reason: string };
-
 function reasonFrom(error: unknown): string {
   if (error instanceof Error && error.message !== "") return error.message;
   return String(error);
 }
 
-/** Runs one task on the agent and returns how it ended. Never throws. */
-export async function driveOneTask(options: DriveOptions): Promise<DriveResult> {
-  const { launch, cwd, instructions, ui, signal } = options;
+function after<T>(milliseconds: number, answer: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(answer), milliseconds);
+    timer.unref();
+  });
+}
 
-  if (signal.aborted) return { kind: "interrupted" };
+/** A driver that gives every turn the same startup failure. */
+function unavailable(launch: DrivenAgentLaunch, result: DriveResult): DrivenAgent {
+  return {
+    id: launch.id,
+    name: launch.name,
+    run: () => Promise.resolve(result),
+  };
+}
+
+/**
+ * Keep one coding-agent process and one ACP session for the supplied work.
+ *
+ * The callback may send several turns. They all share the coding agent's
+ * context, mode, permissions and working folder. Process and session lifetime
+ * are hidden here, so no wizard step can accidentally start a second context.
+ */
+export async function withDrivenAgent<T>(
+  options: DrivenAgentOptions,
+  use: (agent: DrivenAgent) => Promise<T>,
+): Promise<T> {
+  const { launch, cwd, ui, signal } = options;
+  if (signal.aborted) return use(unavailable(launch, { kind: "interrupted" }));
 
   const { child, handle, startup } = start(launch, cwd, options.logStderr);
-
-  // Once the agent has answered `initialize` it is reachable, whatever happens
-  // afterwards. Before that, every failure means the same thing to a developer.
   let reached = false;
+  let handedToWizard = false;
+  let wizardFinished = false;
+  let wizardAnswer!: T;
+  let wizardWork: Promise<T> | null = null;
   let interrupted = false;
   const onAbort = (): void => {
     interrupted = true;
@@ -251,7 +292,12 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
     const stdin = child.stdin;
     const stdout = child.stdout;
     if (stdin === null || stdout === null) {
-      return { kind: "failed", reason: `Egma could not talk to ${launch.name}.` };
+      return use(
+        unavailable(launch, {
+          kind: "failed",
+          reason: `Egma could not talk to ${launch.name}.`,
+        }),
+      );
     }
 
     const stream = acp.ndJsonStream(
@@ -259,7 +305,7 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
       Readable.toWeb(stdout) as ReadableStream<Uint8Array>,
     );
 
-    const outcome = await acp
+    return await acp
       .client({ name: "egma" })
       .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
         permissionHandler(ui)(ctx.params),
@@ -270,12 +316,22 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
       .onRequest(acp.methods.client.fs.writeTextFile, (ctx) =>
         writeTextFileHandler(cwd, ui)(ctx.params),
       )
+      // Cursor can block a prompt on either extension. Egma owns the wizard's
+      // questions and does not run Cursor in plan mode, so both get an explicit
+      // answer instead of leaving the session waiting forever.
+      .onRequest("cursor/ask_question", extensionParams, () => ({
+        outcome: { outcome: "skipped", reason: CURSOR_QUESTION_SKIPPED },
+      }))
+      .onRequest("cursor/create_plan", extensionParams, () => ({
+        outcome: { outcome: "rejected", reason: CURSOR_PLAN_REJECTED },
+      }))
+      .onNotification("cursor/update_todos", extensionParams, () => undefined)
+      .onNotification("cursor/task", extensionParams, () => undefined)
+      .onNotification("cursor/generate_image", extensionParams, () => undefined)
       .connectWith(stream, async (ctx) => {
         const greeting = await ctx.request(acp.methods.agent.initialize, {
           protocolVersion: acp.PROTOCOL_VERSION,
           clientCapabilities: {
-            // Reading and writing through egma is what puts the fence in the
-            // path of a file the agent asks for.
             fs: { readTextFile: true, writeTextFile: true },
           },
         });
@@ -288,10 +344,8 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
           ...(meta === null ? {} : { _meta: meta }),
         };
 
-        const runTask = async (): Promise<TurnOutcome> =>
+        const useSession = async (): Promise<T> =>
           ctx.buildSession(request).withSession(async (session) => {
-            // The first belt: start in the most permissive mode the agent
-            // offers, so most requests are never raised at all.
             const mode = zeroPromptMode(session.modes);
             if (mode !== null) {
               await ctx.request(acp.methods.agent.session.setMode, {
@@ -300,61 +354,135 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
               });
             }
 
-            const turn = session.prompt(instructions);
-            turn.catch(() => undefined);
+            let running = false;
+            let usable = true;
+            const agent: DrivenAgent = {
+              id: launch.id,
+              name: launch.name,
+              run: async (turn): Promise<DriveResult> => {
+                if (signal.aborted || interrupted) return { kind: "interrupted" };
+                if (!usable) {
+                  return {
+                    kind: "failed",
+                    reason: `${launch.name}'s ACP session stopped. Run Egma again to start a new context.`,
+                  };
+                }
+                if (running) {
+                  return {
+                    kind: "failed",
+                    reason: `Egma tried to give ${launch.name} two tasks at once.`,
+                  };
+                }
 
-            const actions = new ActionStream(cwd);
-            let spoken = "";
-            for (;;) {
-              const message = await session.nextUpdate();
-              if (message.kind === "stop") return { kind: "spoken", text: spoken.trim() };
+                running = true;
+                try {
+                  const prompt = session.prompt(turn.instructions);
+                  prompt.catch(() => undefined);
 
-              for (const line of actions.lines(message.update)) ui.pushStatus(line);
+                  const actions = new ActionStream(cwd);
+                  let spoken = "";
+                  let stoppedBecause: string | null = null;
+                  for (;;) {
+                    const next = session.nextUpdate();
+                    const message =
+                      stoppedBecause === null
+                        ? await next
+                        : await Promise.race([
+                            next,
+                            after(CANCEL_GRACE_MS, { kind: "cancel-timeout" } as const),
+                          ]);
 
-              const said = drivenAgentTextIn(message.update);
-              if (said === "") continue;
-              spoken += said;
+                    if (message.kind === "cancel-timeout") {
+                      usable = false;
+                      handle.shutDown();
+                      return {
+                        kind: "failed",
+                        reason: `${launch.name} did not stop after Egma cancelled its task. Run Egma again to start a new context.`,
+                      };
+                    }
+                    if (message.kind === "stop") {
+                      return stoppedBecause === null
+                        ? { kind: "done", summary: spoken.trim() }
+                        : { kind: "aborted", reason: stoppedBecause };
+                    }
 
-              const reason = options.watch?.(said) ?? null;
-              if (reason === null) continue;
-              // egma ends the turn itself rather than asking the agent to stop
-              // and hoping. The cancel is a courtesy to the agent; the task is
-              // over either way.
-              await ctx
-                .notify(acp.methods.agent.session.cancel, { sessionId: session.sessionId })
-                .catch(() => undefined);
-              return { kind: "aborted", reason };
-            }
+                    for (const line of actions.lines(message.update)) ui.pushStatus(line);
+                    const said = drivenAgentTextIn(message.update);
+                    if (said === "") continue;
+                    spoken += said;
+
+                    if (stoppedBecause !== null) continue;
+                    const reason = turn.watch?.(said) ?? null;
+                    if (reason === null) continue;
+                    stoppedBecause = reason;
+                    await ctx
+                      .notify(acp.methods.agent.session.cancel, {
+                        sessionId: session.sessionId,
+                      })
+                      .catch(() => undefined);
+                  }
+                } catch (error) {
+                  if (interrupted || signal.aborted) return { kind: "interrupted" };
+                  usable = false;
+                  if (isAuthRequired(error)) {
+                    return { kind: "needs-login", drivenAgentName: launch.name };
+                  }
+                  return { kind: "failed", reason: reasonFrom(error) };
+                } finally {
+                  running = false;
+                }
+              },
+            };
+
+            handedToWizard = true;
+            wizardWork = use(agent);
+            const answer = await wizardWork;
+            wizardAnswer = answer;
+            wizardFinished = true;
+            return answer;
           });
 
         try {
-          return await runTask();
+          return await useSession();
         } catch (error) {
-          // A cold machine answers the first session with "log in first". That
-          // is the agent's own login to run, not egma's, so egma asks it to run
-          // it and then carries straight on with the same task.
           if (!isAuthRequired(error)) throw error;
           const method = ownLoginMethod(greeting);
           if (method === null) throw error;
           options.onLogin?.(launch.name);
           await ctx.request(acp.methods.agent.authenticate, { methodId: method });
-          return await runTask();
+          // The refused request created no session and carried no task. After
+          // login this retry creates the one successful session that receives
+          // every wizard turn.
+          return useSession();
         }
       });
-
-    if (interrupted) return { kind: "interrupted" };
-    if (outcome.kind === "aborted") return { kind: "aborted", reason: outcome.reason };
-    return { kind: "done", summary: outcome.text };
   } catch (error) {
-    if (interrupted) return { kind: "interrupted" };
-    if (!reached) {
-      return {
-        kind: "unreachable",
-        reason: startup.failure ?? reasonFrom(error),
-      };
+    // An error after the callback began belongs to the wizard, not to ACP
+    // startup. Preserve it instead of turning a platform fault into an agent
+    // fault.
+    // A global stop ends the whole process group immediately. The SDK can then
+    // report that closed pipe while it tears the already-finished session
+    // down. The wizard's own interrupted result is the useful answer; the
+    // teardown error is only a consequence of honoring Ctrl-C.
+    if (handedToWizard && interrupted) {
+      if (wizardFinished) return wizardAnswer;
+      if (wizardWork !== null) {
+        try {
+          return await wizardWork;
+        } catch {
+          // The original ACP close below is the more useful failure.
+        }
+      }
     }
-    if (isAuthRequired(error)) return { kind: "needs-login", drivenAgentName: launch.name };
-    return { kind: "failed", reason: reasonFrom(error) };
+    if (handedToWizard) throw error;
+    const result: DriveResult = interrupted
+      ? { kind: "interrupted" }
+      : !reached
+        ? { kind: "unreachable", reason: startup.failure ?? reasonFrom(error) }
+        : isAuthRequired(error)
+          ? { kind: "needs-login", drivenAgentName: launch.name }
+          : { kind: "failed", reason: reasonFrom(error) };
+    return use(unavailable(launch, result));
   } finally {
     signal.removeEventListener("abort", onAbort);
     handle.shutDown();

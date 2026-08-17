@@ -76,6 +76,19 @@ export const ID_PREFIXES = [
    * on its face — a caller who read `3` would sooner or later send `4`.
    */
   "rev",
+  /**
+   * One production trace's claim: the row a transport inserts before it writes
+   * anything, carrying the vendor payload it holds. Its own identity because
+   * the row outlives the write it guards — a sweep reads it back to replay a
+   * conversation whose append never landed.
+   */
+  "ptc",
+  /**
+   * One reason a webhook delivery was refused, and how many times. Its own
+   * identity because the row belongs to the deployment rather than to any
+   * customer: a delivery that matched nobody has no tenancy to be filed under.
+   */
+  "rwr",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

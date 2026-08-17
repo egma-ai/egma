@@ -41,7 +41,7 @@
     "smoke": "node smoke/real-claude-code.ts && node smoke/real-claude-code-fence.ts && node smoke/real-claude-code-discovery.ts && node smoke/real-claude-code-generation.ts",
     "smoke:platform": "node smoke/real-platform-login.ts",
     "smoke:retell": "node smoke/real-retell-connect.ts",
-    "smoke:walk": "pnpm -w build && node smoke/real-whole-walk.ts",
+    "smoke:wizard-flow": "pnpm -w build && node smoke/real-wizard-flow.ts",
     "smoke:e2e": "node smoke/real-wizard-e2e.ts"
   },
   "dependencies": {

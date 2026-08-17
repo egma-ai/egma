@@ -40,6 +40,7 @@ it("verifies an explicitly selected platform and commits its identity on first o
         {
           agent_id: "synthetic-first-onboarding-agent",
           agent_name: "First receptionist",
+          channel: "chat",
           response_engine: { type: "retell-llm", llm_id: "synthetic-first-llm" },
         },
       ],

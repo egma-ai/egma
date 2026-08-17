@@ -1,76 +1,71 @@
 /**
- * egma's skills: content, not code.
+ * The instructions Egma gives coding agents.
  *
- * A skill is a markdown file that teaches a coding agent one concern. It ships
- * inside this package and it is read out of the package at dispatch time and
- * put at the top of the task's instructions. Nothing is installed, nothing is
- * copied, and nothing is written to the developer's disk while the wizard runs
- * — a skill reaches the coding agent the same way a sentence does.
- *
- * The files sit beside `dist` rather than inside it, at the same depth from
- * this module either way, so the one relative path works in the source tree, in
- * the built output, and in the published package.
+ * Public Agent Skills are authored once in the repository-root `skills/` tree.
+ * `tools/project-agent-skills.mjs` projects those exact bytes into this npm
+ * package, so the CLI can read the release snapshot without a network or a
+ * checkout. The wizard composes those public instructions with its own task
+ * protocol instead of maintaining another authored copy.
  */
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/** One skill, named by its file. */
-export type SkillName = "context-finding" | "retell" | "writing-tests";
+export type PublicSkillName = "egma" | "find-voice-agent" | "write-egma-tests";
+export const PUBLIC_SKILL_NAMES: readonly PublicSkillName[] = [
+  "egma",
+  "find-voice-agent",
+  "write-egma-tests",
+];
 
-export const SKILL_NAMES: readonly SkillName[] = ["context-finding", "retell", "writing-tests"];
-
-/** Where the packaged skill files live, relative to the package root. */
 export const SKILLS_DIRECTORY = "skills";
 
-const cache = new Map<SkillName, string>();
+const cache = new Map<string, string>();
 
-/** The absolute path of a skill's file, wherever this package is running from. */
-export function skillFile(name: SkillName): string {
-  return fileURLToPath(new URL(`../../${SKILLS_DIRECTORY}/${name}.md`, import.meta.url));
+function packageFile(relative: string): string {
+  return fileURLToPath(new URL(`../../${relative}`, import.meta.url));
 }
 
-/**
- * The one skill egma offers to *install* rather than to send.
- *
- * It ships as `skills/egma/SKILL.md` — a directory and a file name, rather
- * than one flat markdown file like the sent ones — because that is the shape a
- * coding agent reads a skill in, and the install is a copy of this file to the
- * same file name somewhere else. Keeping it in that shape here means the thing
- * that ships is the thing that lands.
- */
-export const INSTALLABLE_SKILL_PATH = `${SKILLS_DIRECTORY}/egma/SKILL.md`;
-
-/** Where the installable skill is, wherever this package is running from. */
-export function installableSkillFile(): string {
-  return fileURLToPath(new URL(`../../${INSTALLABLE_SKILL_PATH}`, import.meta.url));
+/** One public Agent Skill in the package projection. */
+export function publicSkillFile(name: PublicSkillName): string {
+  return packageFile(`${SKILLS_DIRECTORY}/${name}/SKILL.md`);
 }
 
-let installable: string | null = null;
-
-/** Its content, read from the package. */
-export function installableSkill(): string {
-  installable ??= readFileSync(installableSkillFile(), "utf8").trimEnd();
-  return installable;
+/** The folder relative references in a projected public skill resolve from. */
+export function publicSkillDirectory(name: PublicSkillName): string {
+  return packageFile(`${SKILLS_DIRECTORY}/${name}/`);
 }
 
-/** A skill's content, read from the package. */
-export function skill(name: SkillName): string {
-  const held = cache.get(name);
+function contentAt(file: string): string {
+  const held = cache.get(file);
   if (held !== undefined) return held;
-  const content = readFileSync(skillFile(name), "utf8").trimEnd();
-  cache.set(name, content);
+  const content = readFileSync(file, "utf8").trimEnd();
+  cache.set(file, content);
   return content;
 }
 
+export function publicSkill(name: PublicSkillName): string {
+  return contentAt(publicSkillFile(name));
+}
+
+/** The public skill the wizard offers to install after a run. */
+export const INSTALLABLE_SKILL_PATH = `${SKILLS_DIRECTORY}/egma/SKILL.md`;
+
+export function installableSkillFile(): string {
+  return publicSkillFile("egma");
+}
+
+export function installableSkill(): string {
+  return publicSkill("egma");
+}
+
 /**
- * The instructions for one dispatched task: the skills it needs, then the task
- * itself. The skills come first because they are what the coding agent has to
- * know before the task makes sense, and last place in a long prompt is where
- * the thing to actually do belongs.
+ * Compose reusable instruction content before the run-specific task.
+ *
+ * Public skills and task-specific adapter text are already complete strings
+ * here. The caller therefore makes the delivery seam visible instead of
+ * hiding a public skill behind an internal alias.
  */
-export function instructionsWith(skills: readonly SkillName[], task: string): string {
-  const parts = skills.map((name) => skill(name));
-  parts.push(task.trim());
-  return parts.join("\n\n---\n\n");
+export function instructionsWith(parts: readonly string[], task: string): string {
+  return [...parts, task.trim()].join("\n\n---\n\n");
 }

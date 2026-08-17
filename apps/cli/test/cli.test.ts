@@ -213,7 +213,7 @@ describe("the egma command", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("prints the same message when the registry names an agent it cannot start", async () => {
+  it("prints the same message when the requested coding agent is not installed", async () => {
     const result = await egma(
       ["--headless", "--cwd", workspace.dir, "--coding-agent", "not-a-real-agent"],
       workspace,
@@ -242,7 +242,7 @@ describe("the egma command", () => {
 
     expect(result.code).toBe(1);
     expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(
-      "Egma found no voice agent to test. Run egma again where your agent is defined.",
+      "Egma could not find a voice agent. Use its folder or configure it in the UI.",
     );
   });
 

@@ -1,5 +1,5 @@
 {
-  "id": "3ae6f632-892c-4f39-b1cd-2e4c195962c1",
+  "id": "e6634a49-a6ca-4688-8468-8e5688424a06",
   "prevId": "600d097c-4927-24b4-b3fc-85cebe34d202",
   "version": "7",
   "dialect": "postgresql",
@@ -2015,6 +2015,31 @@
           "primaryKey": false,
           "notNull": false
         },
+        "watch_production": {
+          "name": "watch_production",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "production_cursor": {
+          "name": "production_cursor",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "webhook_registered_at": {
+          "name": "webhook_registered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "webhook_delivered_at": {
+          "name": "webhook_delivered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "revision": {
           "name": "revision",
           "type": "text COLLATE \"C\"",
@@ -2203,6 +2228,252 @@
         "connection_capabilities_supported_were_measured": {
           "name": "connection_capabilities_supported_were_measured",
           "value": "\"connection\".\"capabilities_supported\" is null or \"connection\".\"capabilities_supported\" <@ \"connection\".\"capabilities_measured\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.production_trace_claim": {
+      "name": "production_trace_claim",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "trace_id": {
+          "name": "trace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_call_id": {
+          "name": "provider_call_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "transport": {
+          "name": "transport",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "degraded": {
+          "name": "degraded",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "written_at": {
+          "name": "written_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "production_trace_claim_unwritten_idx": {
+          "name": "production_trace_claim_unwritten_idx",
+          "columns": [
+            {
+              "expression": "claimed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"production_trace_claim\".\"status\" = 'claimed'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "production_trace_claim_organization_id_organization_id_fk": {
+          "name": "production_trace_claim_organization_id_organization_id_fk",
+          "tableFrom": "production_trace_claim",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "production_trace_claim_connection_id_connection_id_fk": {
+          "name": "production_trace_claim_connection_id_connection_id_fk",
+          "tableFrom": "production_trace_claim",
+          "tableTo": "connection",
+          "columnsFrom": [
+            "connection_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "production_trace_claim_project_organization_fk": {
+          "name": "production_trace_claim_project_organization_fk",
+          "tableFrom": "production_trace_claim",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "production_trace_claim_trace_id_unique": {
+          "name": "production_trace_claim_trace_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "trace_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "production_trace_claim_id_prefix": {
+          "name": "production_trace_claim_id_prefix",
+          "value": "\"production_trace_claim\".\"id\" ~ '^ptc_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "production_trace_claim_status_allowed": {
+          "name": "production_trace_claim_status_allowed",
+          "value": "\"production_trace_claim\".\"status\" in ('claimed', 'written')"
+        },
+        "production_trace_claim_transport_allowed": {
+          "name": "production_trace_claim_transport_allowed",
+          "value": "\"production_trace_claim\".\"transport\" in ('webhook', 'pull')"
+        },
+        "production_trace_claim_written_agrees": {
+          "name": "production_trace_claim_written_agrees",
+          "value": "(\"production_trace_claim\".\"status\" = 'written') = (\"production_trace_claim\".\"written_at\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.retell_webhook_refusal": {
+      "name": "retell_webhook_refusal",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "how_many": {
+          "name": "how_many",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "retell_webhook_refusal_reason_unique": {
+          "name": "retell_webhook_refusal_reason_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "reason"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "retell_webhook_refusal_id_prefix": {
+          "name": "retell_webhook_refusal_id_prefix",
+          "value": "\"retell_webhook_refusal\".\"id\" ~ '^rwr_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "retell_webhook_refusal_reason_allowed": {
+          "name": "retell_webhook_refusal_reason_allowed",
+          "value": "\"retell_webhook_refusal\".\"reason\" in ('unknown_agent', 'switched_off', 'bad_signature', 'other_kind')"
         }
       },
       "isRLSEnabled": false
@@ -4516,6 +4787,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "measured_audio_band_hertz": {
+          "name": "measured_audio_band_hertz",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "recording_reference": {
           "name": "recording_reference",
           "type": "text",
@@ -4915,7 +5192,7 @@
         },
         "simulation_report_only_when_ended": {
           "name": "simulation_report_only_when_ended",
-          "value": "\"simulation\".\"ended_at\" is not null or \"simulation\".\"recording_reference\" is null"
+          "value": "\"simulation\".\"ended_at\" is not null\n        or (\"simulation\".\"recording_reference\" is null\n          and \"simulation\".\"measured_audio_band_hertz\" is null)"
         },
         "simulation_summary_facts_only_when_ended": {
           "name": "simulation_summary_facts_only_when_ended",
@@ -4931,7 +5208,11 @@
         },
         "simulation_audio_facts_are_voice_facts": {
           "name": "simulation_audio_facts_are_voice_facts",
-          "value": "\"simulation\".\"modality\" = 'voice' or \"simulation\".\"recording_reference\" is null"
+          "value": "\"simulation\".\"modality\" = 'voice'\n        or (\"simulation\".\"measured_audio_band_hertz\" is null\n          and \"simulation\".\"recording_reference\" is null)"
+        },
+        "simulation_audio_band_is_a_rate": {
+          "name": "simulation_audio_band_is_a_rate",
+          "value": "\"simulation\".\"measured_audio_band_hertz\" is null or \"simulation\".\"measured_audio_band_hertz\" > 0"
         }
       },
       "isRLSEnabled": false

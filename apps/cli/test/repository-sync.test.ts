@@ -1034,7 +1034,7 @@ describe("two egmas that read different shapes", () => {
       expect(refused.code, verb).toBe(7);
       expect(factOf(refused.stdout, "status"), verb).toBe("outdated");
       expect(refused.stderr, verb).toContain("This copy of Egma is older than the platform");
-      expect(refused.stderr, verb).toContain("npx egma@latest");
+      expect(refused.stderr, verb).toContain("npx @egma/cli@latest");
       expect(refused.stderr, verb).toContain("Nothing was read and nothing was uploaded.");
     }
 
@@ -1054,6 +1054,6 @@ describe("two egmas that read different shapes", () => {
 
     expect(refused.code).toBe(7);
     expect(refused.stderr).toContain("The platform is older than this copy of Egma");
-    expect(refused.stderr).not.toContain("npx egma@latest");
+    expect(refused.stderr).not.toContain("npx @egma/cli@latest");
   });
 });

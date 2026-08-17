@@ -196,7 +196,7 @@ describe("a batch too big for one insert", () => {
       }),
     );
 
-    expect(planSpanInserts(at(acme), spans)).toEqual({
+    expect(planSpanInserts(at(acme), spans)).toMatchObject({
       spans: months,
       batches: months,
     });
@@ -236,6 +236,39 @@ describe("a batch too big for one insert", () => {
       span({ traceId: "3333333333333333333333333333dddd" }),
     ]);
     expect(written.batches).toBe(1);
+  });
+
+  it("keeps the prior release's byte boundary during the rollout bridge", () => {
+    const bridgeAuth: AuthContext = {
+      userId: "usr_test",
+      organizationId: "org_test",
+      projectId: "prj_test",
+      role: "admin",
+      via: "api_key",
+    };
+    const traceId = "cccccccccccccccccccccccccccccccc";
+
+    expect(
+      planSpanInserts(bridgeAuth, [
+        span({
+          traceId,
+          spanId: "0000000000000001",
+          // With the prior release's two input-only audio fields, these rows
+          // are 90 bytes over the 16 MiB block limit. Without them they fit
+          // exactly, which would regroup the ids and change both old tokens.
+          payload: "x".repeat(16_776_034),
+        }),
+        span({ traceId, spanId: "0000000000000002" }),
+      ]),
+    ).toEqual({
+      spans: 2,
+      batches: 2,
+      // Exact origin/main token algorithm, one token for each old-sized block.
+      compatibilityTokens: [
+        "5d273b46059e6076be2e6571073439eb187c02f3d9aca71b5168e2590c3681f5",
+        "b07425a4f82f2ef3ab2177d2e9dcf699cf8331697a030dee794640231b8cbb17",
+      ],
+    });
   });
 
   it("is not an insert at all when there is nothing in it", async () => {
@@ -364,7 +397,7 @@ describe("sending the same batch twice", () => {
     ).toBe(2);
   });
 
-  it("retains changed evidence even when its span ids match an earlier block", async () => {
+  it("keeps the first recent block while the rollout bridge still names blocks by ids", async () => {
     const traceId = "aaaa2222aaaa2222aaaa2222aaaa2222";
     const batch = Array.from({ length: 5 }, (_, index) =>
       span({ traceId, spanId: index.toString(16).padStart(16, "0") }),
@@ -380,20 +413,21 @@ describe("sending the same batch twice", () => {
       await countOf(
         `select count() as n from spans where trace_id = '${traceId}'`,
       ),
-    ).toBe(batch.length * 2);
+    ).toBe(batch.length);
     expect(
       await countOf(
         `select count() as n from spans where trace_id = '${traceId}' ` +
           `and text = 're-serialised on the way'`,
       ),
-    ).toBe(batch.length);
-    // There is no global or view-time id collapse either. Only a literal
-    // repeat of the same recent insert block is suppressed by ClickHouse.
+    ).toBe(0);
+    // This is only the one-release rolling-deploy bridge. ClickHouse forgets
+    // the token after its recent deduplication window, and there is no
+    // read-time or global per-span collapse.
     expect(
       await countOf(
         `select count() as n from turns where trace_id = '${traceId}'`,
       ),
-    ).toBe(batch.length * 2);
+    ).toBe(batch.length);
   });
 
   /** Tenant stamps are part of each stored row. Two customers may mint the
