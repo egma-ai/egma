@@ -34,13 +34,14 @@ import type { Execution, Judgment } from "./contract.ts";
  * made — and the rationale says which measurement decided, so nobody has to
  * guess.
  *
- * **And it says who measured, when that was not egma.** The measure module
+ * **Who measured is on the row, and not in the sentence.** The measure module
  * reads three sources — egma's own timing spans, a derivation off a recognised
  * framework's spans, and the block an agent platform reported about its own
- * conversation — and a verdict decided by the third names the platform in its
- * rationale. The bound is applied identically whoever took the number; what
- * changes is that the record does not let a platform's account of its own agent
- * pass silently as egma's observation of it.
+ * conversation — and every measurement carries which one it came from. The
+ * bound is applied identically whoever took the number, and so is the rationale:
+ * one sentence shape for all three, because a verdict says what was measured and
+ * against what. The provenance stays machine-readable on the measure for any
+ * surface that later asks for it.
  *
  * ## What it says when it cannot say anything
  *
@@ -255,9 +256,12 @@ function boundIn(entry: Readonly<Record<string, string | number>>): Bounded | un
  * seconds" are different things to go and look at, and a rationale that hid the
  * difference would leave a developer opening the wrong transcript.
  *
- * And it says **who measured, when it was not egma** — see `whoMeasured` below.
- * The two sentence shapes are otherwise the ones they have always been, word
- * for word, so a verdict on a conversation egma timed reads exactly as it did.
+ * It says nothing about **who measured**. A number egma timed, a number egma
+ * worked out and a number a platform reported are held to the bound the same
+ * way, and they are read the same way: the two sentence shapes here are the ones
+ * they have always been, word for word, whatever the source. Provenance lives on
+ * the measure itself, where a surface can ask for it without a rationale having
+ * to carry it.
  */
 function rationaleFor(
   asked: Bounded,
@@ -272,28 +276,7 @@ function rationaleFor(
   const against = held
     ? `within the bound of ${asked.bound}`
     : `over the bound of ${asked.bound}`;
-  return `${asked.metric} ${taken}, ${against}${whoMeasured(measured)}.`;
-}
-
-/**
- * The clause that names the platform, on a verdict decided by a number egma did
- * not take.
- *
- * **A verdict computed from what a platform reported has to say so.** The
- * number is real and the bound is real, but the evidence is the platform's
- * account of its own agent rather than something egma watched happen — and the
- * two are not the same kind of fact. A developer deciding whether to believe a
- * failing check needs to know which one they are holding, and a rationale is the
- * only place on a verdict row where that can be said in words a person reads.
- *
- * Nothing at all for a measure egma timed or derived, so those rationales are
- * byte-for-byte what they were. The empty reporter is guarded too: the contract
- * refuses a block without one, and a clause reading "as reported by" with
- * nothing after it would be worse than the silence.
- */
-function whoMeasured(measured: MeasuredFromSpans): string {
-  if (measured.origin !== "reported" || measured.reportedBy === "") return "";
-  return `, as reported by ${measured.reportedBy} — the platform's own measurement, not Egma's observation`;
+  return `${asked.metric} ${taken}, ${against}.`;
 }
 
 /** egma could not make this check. Never `failed`: nothing is said about the agent. */

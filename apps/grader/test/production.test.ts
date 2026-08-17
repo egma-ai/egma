@@ -413,7 +413,7 @@ describe("a production trace whose platform reported its own latency", () => {
     ],
   });
 
-  it("fails the bound the platform's own worst measurement missed, and says whose it was", async () => {
+  it("fails the bound the platform's own worst measurement missed", async () => {
     const graderId = await seedGrader(
       world,
       aLatencyCopy({ name: "Two seconds in the wild", scope: "production" }),
@@ -437,10 +437,10 @@ describe("a production trace whose platform reported its own latency", () => {
     });
     expect(mine?.rationale).toContain("2145 milliseconds at its worst");
     expect(mine?.rationale).toContain("over the bound of 2000");
-    // And the record says whose measurement decided it, because a platform's
-    // account of its own agent is not egma's observation of it.
-    expect(mine?.rationale).toContain("as reported by retell");
-    expect(mine?.rationale).toContain("not Egma's observation");
+    // And it names nobody: the sentence a person reads is the same sentence
+    // whoever took the number, while which source it was stays on the measure.
+    expect(mine?.rationale).not.toContain("reported by");
+    expect(mine?.rationale).not.toContain("retell");
     // Cited on the root span the block rode in on, which is the only span an
     // aggregate over the whole conversation can honestly point at.
     expect(mine?.citedSpanIds).toHaveLength(1);
@@ -462,7 +462,7 @@ describe("a production trace whose platform reported its own latency", () => {
 
     expect(mine).toMatchObject({ verdict: "passed", score: 1 });
     expect(mine?.rationale).toContain("517 milliseconds at its worst");
-    expect(mine?.rationale).toContain("as reported by retell");
+    expect(mine?.rationale).not.toContain("reported by");
   });
 });
 
