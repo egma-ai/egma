@@ -134,13 +134,25 @@ export type Measured = {
   readonly measure: string;
   readonly unit: string;
   /**
-   * True when Egma worked the number out from the framework's own timings
-   * rather than reading one Egma's simulator timed itself.
+   * True when Egma did not time the number itself — either it worked the figure
+   * out from the framework's own timings, or the agent platform handed it over.
+   * `reported_by` beside this is what tells the two apart.
    *
    * Optional because an answer from an older platform does not carry it, which
    * is a page that says nothing about provenance rather than one that breaks.
    */
   readonly derived?: boolean;
+  /**
+   * The agent platform that measured this figure — `retell` — on the figures a
+   * platform reported rather than Egma measured.
+   *
+   * **Absent on everything else, and that absence is the whole signal.** Egma
+   * working a number out from your framework's spans and a platform reporting
+   * its own number are different claims, and the page must not word one as the
+   * other: `derived` alone cannot tell them apart, so a figure carrying this
+   * field is said differently from one that does not.
+   */
+  readonly reported_by?: string;
   /** One sample, or the series a per-turn measure produced. Never empty. */
   readonly samples: readonly number[];
   /** The span each sample came off, in the same order. */

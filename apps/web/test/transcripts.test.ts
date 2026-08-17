@@ -1014,6 +1014,45 @@ describe("saying which numbers Egma worked out", () => {
     expect(copy.MEASURES.derivedOne).toContain("framework");
   });
 
+  /**
+   * **A figure the agent platform measured is said differently, and the
+   * difference is not decoration.** Retell publishes no per-turn timing, so
+   * there is nothing for Egma to have worked anything out from: the number is
+   * Retell's own measurement of its own agent, handed over and judged as it
+   * stands. The sentence above would claim Egma observed it, and a caveat that
+   * is itself untrue is worse than none — it is the sentence a developer
+   * decides how far to believe a failing check on.
+   */
+  it("says a platform-reported figure in its own words, never the worked-out ones", async () => {
+    const page = await readFile(path.join(WEB, DETAIL_PAGE), "utf8");
+
+    expect(page).toContain("one.reported_by");
+    expect(page).toContain("MEASURES.reported");
+    expect(page).toContain("MEASURES.reportedOne");
+
+    const said = copy.MEASURES.reported("retell");
+    expect(said).toContain("retell");
+    expect(said).toContain("not observed by Egma");
+    // And none of the worked-out wording, which is the whole point of there
+    // being two sentences rather than one.
+    expect(said).not.toContain("worked out");
+    expect(said).not.toContain("framework");
+
+    // Marked on the figure too, in the words the verdict's own rationale uses.
+    expect(copy.MEASURES.reportedOne("retell")).toBe("as reported by retell");
+  });
+
+  /**
+   * The two caveats never speak for each other. A page whose only untimed
+   * figures were reported by a platform must not also say Egma worked
+   * something out from a framework's timings, because it did not.
+   */
+  it("does not show the worked-out caveat for a figure a platform reported", async () => {
+    const page = await readFile(path.join(WEB, DETAIL_PAGE), "utf8");
+
+    expect(page).toContain("one.reported_by === undefined");
+  });
+
   it("keeps the nothing-was-measured sentence exactly as it was", () => {
     expect(copy.MEASURES.none).toBe(
       "Nothing was measured here. Egma's own simulations time their turns; an " +
@@ -1032,6 +1071,8 @@ describe("saying which numbers Egma worked out", () => {
     for (const said of [
       copy.MEASURES.derived,
       copy.MEASURES.derivedOne,
+      copy.MEASURES.reported("retell"),
+      copy.MEASURES.reportedOne("retell"),
       copy.MEASURES.none,
     ]) {
       expect(said.toLowerCase()).not.toContain("span");

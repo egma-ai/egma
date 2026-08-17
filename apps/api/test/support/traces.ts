@@ -357,6 +357,14 @@ export type DetailSpan = {
 export type DetailMeasure = {
   readonly measure: string;
   readonly unit: string;
+  /** True when Egma did not time this itself. Absent on an older answer. */
+  readonly derived?: boolean;
+  /**
+   * The agent platform that measured this, on the figures a platform reported
+   * rather than Egma measured — and **absent on every other measure**, which is
+   * the whole of what keeps simulation traffic what it always was.
+   */
+  readonly reported_by?: string;
   readonly samples: readonly number[];
   readonly span_ids: readonly string[];
   /**
