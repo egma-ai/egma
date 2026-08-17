@@ -96,6 +96,13 @@ export type NewConnection = {
   readonly config: Readonly<Record<string, unknown>>;
   /** Required or refused per type; sealed before it touches the row. */
   readonly credentials?: Readonly<Record<string, unknown>> | undefined;
+  /**
+   * Whether egma starts storing this connection's production traffic the
+   * moment the row exists. Absent is off, and off is what every connection
+   * gets: watching is something somebody turns on, and a create that defaulted
+   * it on would be egma storing traffic nobody asked it to store.
+   */
+  readonly watchProduction?: boolean | undefined;
 };
 
 export type Connection = {
@@ -522,7 +529,26 @@ type AdmittedConnection = {
   readonly config: Record<string, string>;
   readonly credentials: string | null;
   readonly credentialsHint: string | null;
+  readonly watchProduction: boolean;
 };
+
+/**
+ * The one sentence a connection hears when it asks to be watched and is not a
+ * kind egma can ask for finished conversations.
+ *
+ * Both writes lean on it, so a create and an edit refuse the same thing the
+ * same way — a switch that stored `true` and polled nothing would be a setting
+ * somebody turned on and then waited on forever.
+ */
+function refusingUnwatchableType(type: ConnectionType): never {
+  throw new AgentWriteRefusedError(
+    "not_admitted",
+    `Egma watches production traffic over a retell connection, and this ` +
+      `one is ${type}. A ${type} agent runs where Egma can be pointed at ` +
+      `it directly, so its production traces arrive through the telemetry ` +
+      `door rather than by Egma asking the platform for them.`,
+  );
+}
 
 /**
  * Pure validation — nothing here touches the database, so a bad payload dies
@@ -535,6 +561,15 @@ function admitConnection(input: NewConnection): AdmittedConnection {
   // The config comes in beside the credentials because a type can come in more
   // than one shape, and the config is what says which shape this is.
   const sealed = validCredentials(input.type, input.config, input.credentials);
+
+  // Watching is a fact about a platform egma can ask for finished
+  // conversations, and today Retell is the one it can ask. Refused here rather
+  // than after the insert, so a connection is never written and then told the
+  // switch it was created with could not be honored.
+  const watchProduction = input.watchProduction === true;
+  if (watchProduction && input.type !== "retell") {
+    refusingUnwatchableType(input.type);
+  }
 
   return {
     name:
@@ -550,6 +585,7 @@ function admitConnection(input: NewConnection): AdmittedConnection {
     config,
     credentials: sealed === null ? null : sealCredentials(sealed.sealed),
     credentialsHint: sealed === null ? null : sealed.hint,
+    watchProduction,
   };
 }
 
@@ -642,6 +678,11 @@ async function insertConnection(
       config: admitted.config,
       credentials: admitted.credentials,
       credentialsHint: admitted.credentialsHint,
+      watchProduction: admitted.watchProduction,
+      // Created watching means watching from here on, exactly as the edit's
+      // off→on edge means it: the cursor opens at the moment of the switch, so
+      // whatever the provider already holds from before it stays where it is.
+      ...(admitted.watchProduction ? { productionCursor: new Date() } : {}),
       createdBy: auth.userId,
     })
     .returning(CONNECTION_COLUMNS)
@@ -1573,18 +1614,9 @@ export async function updateConnection(
   // since the read above, because nothing can change it at all.
   const type = current.type as ConnectionType;
 
-  // Watching is a fact about a platform egma can ask for finished
-  // conversations, and today Retell is the one it can ask. A switch that
-  // stored `true` and polled nothing would be a setting somebody turned on
-  // and then waited on forever, so it is refused by name instead.
+  // Switching watching on is held to the same rule a create is held to.
   if (changes.watchProduction === true && type !== "retell") {
-    throw new AgentWriteRefusedError(
-      "not_admitted",
-      `Egma watches production traffic over a retell connection, and this ` +
-        `one is ${type}. A ${type} agent runs where Egma can be pointed at ` +
-        `it directly, so its production traces arrive through the telemetry ` +
-        `door rather than by Egma asking the platform for them.`,
-    );
+    refusingUnwatchableType(type);
   }
   const config =
     changes.config === undefined

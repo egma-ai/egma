@@ -20,6 +20,7 @@ import { canAuthor } from "../../../../../../../lib/roles.ts";
 import {
   Button,
   ButtonLink,
+  Checkbox,
   Field,
   Form,
   FormActions,
@@ -87,6 +88,7 @@ function NewConnection({
   const [name, setName] = useState("");
   const [environment, setEnvironment] = useState("");
   const [draft, setDraft] = useState<Draft>({ config: {}, credentials: {} });
+  const [watching, setWatching] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
@@ -131,6 +133,12 @@ function NewConnection({
   );
 
   const mayAuthor = role !== null && canAuthor(role);
+  /**
+   * Retell is the one platform Egma can ask for finished production
+   * conversations today, so it is the one type that offers the switch. Another
+   * type showing it would be a promise nothing behind the form can keep.
+   */
+  const mayWatch = described?.type === "retell";
 
   function chooseType(next: string): void {
     setType(next);
@@ -140,6 +148,10 @@ function NewConnection({
     // The keys belong to the shape, so nothing typed under the old one is
     // carried into a form that has no place for it.
     setDraft({ config: {}, credentials: {} });
+    // The switch belongs to the type as well. A box ticked under Retell and
+    // then left behind by a change of type would be consent carried somewhere
+    // it was never given.
+    setWatching(false);
   }
 
   function chooseVariant(next: string): void {
@@ -190,6 +202,9 @@ function NewConnection({
             : { environment: environment.trim() }),
           config,
           ...(withoutCredential ? {} : { credentials }),
+          // Sent only when it was ticked, and only for the type that offers
+          // it. Nothing sent means off, which is what Egma stores.
+          ...(mayWatch && watching ? { watch_production: true } : {}),
         },
       },
     );
@@ -331,6 +346,29 @@ function NewConnection({
             onChange={setDraft}
             credentialsEditable
           />
+
+          {/*
+            Off unless somebody ticks it, and both readings are spelled out
+            beside the box: what Egma stores when it is on, and where the line
+            sits — from the moment of the switch, never behind it.
+          */}
+          {mayWatch ? (
+            <Field
+              label="Watch production"
+              hint={
+                watching
+                  ? "Production conversations over this connection appear in Monitoring as transcripts. Egma stores them from the moment you add this connection, and stores nothing from before it."
+                  : "Egma stores none of this connection's production conversations. Switch this on to read them in Monitoring as transcripts, from that moment on."
+              }
+              htmlFor="connection-watch-production"
+            >
+              <Checkbox
+                id="connection-watch-production"
+                checked={watching}
+                onChange={setWatching}
+              />
+            </Field>
+          ) : null}
 
           {described.simulator_adapter ? null : (
             <Problem>

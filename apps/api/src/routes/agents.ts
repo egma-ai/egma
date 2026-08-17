@@ -31,7 +31,11 @@ import {
   type RestoreCredential,
 } from "@egma/db";
 import { isId } from "@egma/ids";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type {
+  FastifyBaseLogger,
+  FastifyInstance,
+  FastifyReply,
+} from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import {
@@ -393,6 +397,45 @@ const CONNECTION_KEYS = [
 ] as const;
 
 /**
+ * The attach's own list: everything a connection body holds, and the switch.
+ *
+ * The switch is here and not in the list above because attaching is the one
+ * create that can honor it. Registering an agent writes its inline connection
+ * through a reuse rule that may write no connection at all, so a switch
+ * arriving there would sometimes be a setting somebody sent and egma silently
+ * dropped. Turning watching on for that connection is the edit below, which is
+ * one request more and never ambiguous.
+ */
+const ATTACHED_CONNECTION_KEYS = [
+  ...CONNECTION_KEYS,
+  "watch_production",
+] as const;
+
+/**
+ * What a body says when its `watch_production` is not a boolean.
+ *
+ * One sentence for the create and the edit, because a client that learns it
+ * from one has learned it from both.
+ */
+const WATCH_PRODUCTION_WORDING =
+  "watch_production is true or false: whether Egma stores this " +
+  "connection's production traffic as production traces";
+
+/**
+ * The switch as a body carries it: absent, or a boolean, and nothing else.
+ *
+ * **Absent is off and stays off.** Egma never begins storing a customer's
+ * production traffic because a field was left out, so there is no default
+ * hiding in here — the caller either asked for watching or did not.
+ */
+function watchingIn(body: Body): boolean | undefined | Refusal {
+  const said = body.watch_production;
+  if (said === undefined) return undefined;
+  if (typeof said !== "boolean") return invalid(WATCH_PRODUCTION_WORDING);
+  return said;
+}
+
+/**
  * One connection payload, read the one way — inline on a registration and
  * standalone on an attach.
  *
@@ -406,20 +449,28 @@ const CONNECTION_KEYS = [
  * **Topology is not in the list on purpose.** It is derived from the type — it
  * predicts who moves first when a simulation starts — so a guess would just be
  * wrong, and a supplied one is refused as the unknown key it is.
+ *
+ * `held` is which keys this call site takes: the attach takes one key more,
+ * for reasons written where that list is.
  */
-function connectionIn(value: unknown): NewConnection | Refusal {
+function connectionIn(
+  value: unknown,
+  held: readonly string[] = CONNECTION_KEYS,
+): NewConnection | Refusal {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return invalid("a connection is an object, or is left out entirely");
   }
   const body = value as Body;
 
-  const unknown = unknownKeyIn(body, CONNECTION_KEYS, "a connection");
+  const unknown = unknownKeyIn(body, held, "a connection");
   if (unknown !== undefined) return unknown;
 
   const name = textWhenGiven(body.name, "a connection's name");
   if (isRefusal(name)) return name;
   const environment = textWhenGiven(body.environment, "a connection's environment");
   if (isRefusal(environment)) return environment;
+  const watching = watchingIn(body);
+  if (isRefusal(watching)) return watching;
 
   return {
     // A name sent blank is passed on rather than dropped, so the factory's own
@@ -440,6 +491,9 @@ function connectionIn(value: unknown): NewConnection | Refusal {
       : {
           credentials: body.credentials as Readonly<Record<string, unknown>>,
         }),
+    // Absent is left absent rather than sent as `false`, so the one place the
+    // default lives is the row's own.
+    ...(watching === undefined ? {} : { watchProduction: watching }),
   };
 }
 
@@ -658,6 +712,51 @@ export async function agentRoutes(
     provider: options.provider,
     rateLimit: options.rateLimit,
   });
+
+  /**
+   * What follows the switch moving on a Retell connection, for the create and
+   * the edit alike: bring the provider's own webhook into line with it, then
+   * read the row back, because a successful registration stamped it.
+   *
+   * **Never fatal.** Registration is an accelerator on top of a pull floor that
+   * is already running, so a deployment with no public address completes
+   * silently and a Retell that would not take the change costs seconds rather
+   * than conversations.
+   *
+   * Answers the settled row, or `undefined` where the read back found nothing
+   * — the caller then answers with the row it already has, which is the same
+   * connection minus a stamp nothing wrote.
+   */
+  async function settledAfterWatching(
+    acting: AuthContext,
+    agentId: string,
+    connectionId: string,
+    watching: boolean,
+    log: FastifyBaseLogger,
+  ): Promise<Connection | undefined> {
+    const outcome = await reconcileRetellWebhook(
+      acting,
+      connectionId,
+      watching,
+      options.baseUrl,
+      options.retellReach ?? {},
+    ).catch((cause: unknown) => {
+      log.error(
+        { err: cause },
+        "could not reach Retell to bring the webhook into line; Egma polls this connection",
+      );
+      return undefined;
+    });
+
+    if (outcome?.kind === "not-taken") {
+      log.info(
+        { connectionId, reason: outcome.reason },
+        "Retell did not take the webhook change; Egma polls this connection",
+      );
+    }
+
+    return getConnection(acting, agentId, connectionId);
+  }
 
   /**
    * Every connection type egma supports, as a form may be drawn from it.
@@ -893,12 +992,18 @@ export async function agentRoutes(
    * Another way of reaching an agent that already exists — the same body an
    * inline connection travels in, and the defaulted name one number further
    * along.
+   *
+   * **This is where watching can start.** A developer adding a Retell
+   * connection may send `watch_production: true` and be watching from that one
+   * request, rather than adding the connection and then hunting for a switch.
+   * Left out, it is off: egma never begins storing a customer's production
+   * traffic because a feature shipped.
    */
   app.post("/api/agents/:agentId/connections", async (request, reply) => {
     const { auth } = requesterOf(request);
     const { agentId } = request.params as { agentId: string };
 
-    const wanted = connectionIn(request.body ?? {});
+    const wanted = connectionIn(request.body ?? {}, ATTACHED_CONNECTION_KEYS);
     if (isRefusal(wanted)) return refused(reply, wanted);
 
     const acting = await actingProject(auth, request, "writes into");
@@ -906,6 +1011,22 @@ export async function agentRoutes(
 
     const added = await addConnection(acting, agentId, wanted);
     if (added === undefined) return refused(reply, NO_SUCH_AGENT);
+
+    // Created watching, so the provider's webhook is brought into line with it
+    // exactly as the edit below does — and the row is read back, because a
+    // successful registration stamped it.
+    if (added.watchProduction && added.type === "retell") {
+      const settled = await settledAfterWatching(
+        acting,
+        agentId,
+        added.id,
+        true,
+        request.log,
+      );
+      if (settled !== undefined) {
+        return reply.code(201).send({ connection: describedConnection(settled) });
+      }
+    }
 
     return reply.code(201).send({ connection: describedConnection(added) });
   });
@@ -1068,16 +1189,8 @@ export async function agentRoutes(
       const acting = await actingProject(auth, request, "writes into");
       if (isRefusal(acting)) return refused(reply, acting);
 
-      const watching = body.watch_production;
-      if (watching !== undefined && typeof watching !== "boolean") {
-        return refused(
-          reply,
-          invalid(
-            "watch_production is true or false: whether Egma stores this " +
-              "connection's production traffic as production traces",
-          ),
-        );
-      }
+      const watching = watchingIn(body);
+      if (isRefusal(watching)) return refused(reply, watching);
 
       const updated = await updateConnection(acting, agentId, connectionId, {
         ...(name === undefined ? {} : { name }),
@@ -1099,34 +1212,15 @@ export async function agentRoutes(
       if (updated === undefined) return refused(reply, NO_SUCH_CONNECTION);
 
       // The switch moved, so the provider's own webhook is brought into line
-      // with it. **Never fatal.** Registration is an accelerator on top of a
-      // pull floor that is already running, so a deployment with no public
-      // address completes silently and a Retell that would not take the change
-      // costs seconds rather than conversations.
+      // with it, on the same terms the create above is held to.
       if (watching !== undefined && updated.type === "retell") {
-        const outcome = await reconcileRetellWebhook(
+        const settled = await settledAfterWatching(
           acting,
+          agentId,
           connectionId,
           watching,
-          options.baseUrl,
-          options.retellReach ?? {},
-        ).catch((cause: unknown) => {
-          request.log.error(
-            { err: cause },
-            "could not reach Retell to bring the webhook into line; Egma polls this connection",
-          );
-          return undefined;
-        });
-
-        if (outcome?.kind === "not-taken") {
-          request.log.info(
-            { connectionId, reason: outcome.reason },
-            "Retell did not take the webhook change; Egma polls this connection",
-          );
-        }
-
-        // Read back, because a successful registration stamped the row.
-        const settled = await getConnection(acting, agentId, connectionId);
+          request.log,
+        );
         if (settled !== undefined) {
           return reply.send({ connection: describedConnection(settled) });
         }

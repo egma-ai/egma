@@ -1051,9 +1051,9 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'connection has no "pulled" key. Drop it and send name, type, ' +
-        "modality, environment, config, credentials; the agent's content " +
-        "stays at the provider, where Egma reads it fresh rather than out of " +
-        "a copy that would go stale.",
+        "modality, environment, config, credentials, watch_production; the " +
+        "agent's content stays at the provider, where Egma reads it fresh " +
+        "rather than out of a copy that would go stale.",
     });
   });
 

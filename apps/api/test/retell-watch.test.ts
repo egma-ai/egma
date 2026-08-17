@@ -1485,3 +1485,151 @@ describe("watching switched on a second time", () => {
     retell.calls.delete(REENABLE_AGENT);
   });
 });
+
+/* ------------------------------------------------------------------- *
+ * Consent given in the same breath as the connection.
+ * ------------------------------------------------------------------- */
+
+/** The Retell agent nobody stubs, so nothing this section adds is ever polled. */
+const ATTACH_AGENT = "agent_attached_with_the_switch";
+
+describe("a connection added with the switch already on", () => {
+  /** One attach against acme's agent, carrying whatever the case is about. */
+  async function attach(body: Record<string, unknown>) {
+    return request(
+      api.app,
+      "POST",
+      `/api/agents/${acmeWired.agentId}/connections`,
+      acme.secret,
+      {
+        type: "retell",
+        modality: "chat",
+        config: { retellAgentId: ATTACH_AGENT },
+        credentials: { apiKey: ACME_KEY },
+        ...body,
+      },
+    );
+  }
+
+  it("is watching from the moment it exists, poll-only with no public address", async () => {
+    retell.webhooks.clear();
+
+    const added = await attach({
+      name: "Attached watching",
+      watch_production: true,
+    });
+    expect(added.statusCode, JSON.stringify(added.body)).toBe(201);
+
+    const connection = added.body.connection as Record<string, unknown>;
+    expect(connection.watch_production).toBe(true);
+    // The webhook was reconciled and there is no address a provider could
+    // reach, so nothing was said to Retell — and nothing is wrong. Pull is the
+    // transport, and the reply says so rather than claiming a registration
+    // that never happened.
+    expect(connection.webhook_registered).toBe(false);
+    expect(retell.webhooks.size).toBe(0);
+
+    // Watching means from here on, so the pull floor is armed at the create.
+    expect(await cursorOf(String(connection.id))).not.toBeNull();
+
+    // And it is the row that is watching, not only the reply.
+    const read = await request(
+      api.app,
+      "GET",
+      `/api/agents/${acmeWired.agentId}/connections/${String(connection.id)}`,
+      acme.secret,
+    );
+    expect(
+      (read.body.connection as Record<string, unknown>).watch_production,
+    ).toBe(true);
+
+    await request(
+      api.app,
+      "PATCH",
+      `/api/agents/${acmeWired.agentId}/connections/${String(connection.id)}`,
+      acme.secret,
+      { watch_production: false },
+    );
+  });
+
+  it("is off when the switch was left out, and off when it was sent false", async () => {
+    const silent = await attach({ name: "Attached silent" });
+    expect(silent.statusCode, JSON.stringify(silent.body)).toBe(201);
+    const quiet = silent.body.connection as Record<string, unknown>;
+    expect(quiet.watch_production).toBe(false);
+    // Nothing was armed either, so a switch flipped later still means from
+    // there on.
+    expect(await cursorOf(String(quiet.id))).toBeNull();
+
+    const declined = await attach({
+      name: "Attached declined",
+      watch_production: false,
+    });
+    expect(declined.statusCode, JSON.stringify(declined.body)).toBe(201);
+    expect(
+      (declined.body.connection as Record<string, unknown>).watch_production,
+    ).toBe(false);
+  });
+
+  it("refuses a switch that is not a switch, in the words the edit uses", async () => {
+    const refusedCreate = await attach({
+      name: "Attached wrongly",
+      watch_production: "yes",
+    });
+    expect(refusedCreate.statusCode).toBe(400);
+    expect(refusedCreate.body.message).toBe(
+      "watch_production is true or false: whether Egma stores this " +
+        "connection's production traffic as production traces",
+    );
+
+    // Word for word what the edit answers, because a client that learned the
+    // sentence from one has learned it from both.
+    const refusedEdit = await request(
+      api.app,
+      "PATCH",
+      `/api/agents/${acmeWired.agentId}/connections/${acmeWired.connectionId}`,
+      acme.secret,
+      { watch_production: "yes" },
+    );
+    expect(refusedEdit.statusCode).toBe(400);
+    expect(refusedEdit.body.message).toBe(refusedCreate.body.message);
+  });
+
+  it("refuses to watch a type Egma cannot ask for conversations, and writes nothing", async () => {
+    const before = await request(
+      api.app,
+      "GET",
+      `/api/agents/${acmeWired.agentId}`,
+      acme.secret,
+    );
+    const held = (before.body.connections as unknown[]).length;
+
+    const refusedType = await request(
+      api.app,
+      "POST",
+      `/api/agents/${acmeWired.agentId}/connections`,
+      acme.secret,
+      {
+        name: "Attached over the wrong platform",
+        type: "phone",
+        modality: "voice",
+        config: { phoneNumber: "+15551230000" },
+        watch_production: true,
+      },
+    );
+    expect(refusedType.statusCode).toBe(400);
+    expect(String(refusedType.body.message)).toContain(
+      "Egma watches production traffic over a retell connection",
+    );
+
+    // The refusal ran before the insert, so there is no connection somebody
+    // has to go and find and archive.
+    const after = await request(
+      api.app,
+      "GET",
+      `/api/agents/${acmeWired.agentId}`,
+      acme.secret,
+    );
+    expect((after.body.connections as unknown[]).length).toBe(held);
+  });
+});

@@ -668,6 +668,65 @@ describe("adding a connection", () => {
     expect(Object.keys(sent[0]?.body ?? {})).not.toContain("environment");
   });
 
+  it("offers watching only for the type Egma can watch, and offers it off", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    const watch = (await screen.findByLabelText(
+      "Watch production",
+    )) as HTMLInputElement;
+    // Nobody has said Egma may store anything yet, so the box arrives empty.
+    expect(watch.checked).toBe(false);
+
+    // A phone connection is not something Egma can ask for finished
+    // conversations, so the switch is not on its form at all.
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "phone" },
+    });
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Watch production")).toBeNull(),
+    );
+  });
+
+  // The test above proves the other half: a form nobody ticked sends no
+  // `watch_production` at all, which is what leaves Egma storing nothing.
+  it("sends the switch when somebody ticked it", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    fireEvent.change(await screen.findByLabelText("Retell agent ID"), {
+      target: { value: "agent_abc" },
+    });
+    fireEvent.change(screen.getByLabelText("Retell API key"), {
+      target: { value: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    fireEvent.click(screen.getByLabelText("Watch production"));
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
+      type: "retell",
+      modality: "chat",
+      config: { retellAgentId: "agent_abc" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      watch_production: true,
+    });
+  });
+
   it("draws the credential as a field a shoulder cannot read", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
