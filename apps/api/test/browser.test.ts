@@ -838,8 +838,35 @@ describe("what a project recorded in production", () => {
       await page.evaluate(() => {
         Reflect.set(globalThis, "__egma_same_document_navigation", true);
       });
-      await page.getByRole("link", { name: "Tests", exact: true }).first().click();
-      await page.waitForURL(new RegExp(`/projects/${project}/tests$`));
+      // Clicked until the address answers. The shell has just re-rendered
+      // around the Settings page, and a click can land on a link node the
+      // re-render is replacing — dispatched at something already detached,
+      // handled by nobody, navigating nowhere; that is how this step once
+      // timed out with the click reported delivered. Each poll turn clicks
+      // again unless the address already moved, so the settled node gets
+      // the next attempt. The marker above still proves what this test
+      // exists to prove: retried clicks never reload the document, and a
+      // product that did reload would wipe the marker and fail below
+      // exactly as before.
+      const atTests = new RegExp(`/projects/${project}/tests$`);
+      await expect
+        .poll(
+          async () => {
+            if (!atTests.test(page.url())) {
+              await page
+                .getByRole("link", { name: "Tests", exact: true })
+                .first()
+                .click({ timeout: 2_000 })
+                .catch(() => undefined);
+              await page
+                .waitForURL(atTests, { timeout: 2_000 })
+                .catch(() => undefined);
+            }
+            return page.url();
+          },
+          { timeout: 30_000 },
+        )
+        .toMatch(atTests);
 
       expect(
         await page.evaluate(() =>
