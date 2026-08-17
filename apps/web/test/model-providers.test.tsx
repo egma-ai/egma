@@ -244,6 +244,7 @@ describe("an installation with choices left over from the upgrade", () => {
         id: "mua_1",
         kind: "select_model_provider_credential",
         subject: "openai",
+        subject_name: "openai",
         detail:
           "Egma found 2 stored openai keys on this installation and cannot tell whether they are the same account, so none was activated.",
         created_at: "2026-08-17T00:00:00.000Z",
@@ -252,6 +253,7 @@ describe("an installation with choices left over from the upgrade", () => {
         id: "mua_2",
         kind: "select_persona_models",
         subject: "prs_1",
+        subject_name: "Nora",
         detail:
           "this persona's own voice is elevenlabs and this deployment speaks with cartesia. Egma will not choose between them.",
         created_at: "2026-08-17T00:00:00.000Z",
@@ -291,12 +293,16 @@ describe("an installation with choices left over from the upgrade", () => {
     outstanding: ["personas"],
   };
 
-  it("says what to do and why, in Egma's own words and never a key", async () => {
+  it("says what to do, which one, and why — in Egma's own words and never a key", async () => {
     await open(accessAnswer({}), OUTSTANDING);
 
     expect(screen.getByText("Still to choose")).toBeDefined();
     expect(screen.getByText("Choose a provider key")).toBeDefined();
     expect(screen.getByText("Select a persona's models")).toBeDefined();
+    // Which persona, because two blocked personas read the same two words twice
+    // and an identifier is not something anybody can tell them apart by.
+    const table = screen.getByRole("table", { name: "Choices the upgrade left" });
+    expect(within(table).getByText("Nora")).toBeDefined();
     expect(
       screen.getByText(/Egma will not choose between them/u),
     ).toBeDefined();

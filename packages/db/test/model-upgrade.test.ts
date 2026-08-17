@@ -6,8 +6,16 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  claimGradingJobs,
+  claimSimulations,
+  completeSimulation,
+  finishGradingJob,
   connect,
+  createAgent,
   createPersona,
+  createTest,
+  startRun,
+  startSimulation,
   disconnect,
   editPersona,
   getPersona,
@@ -137,6 +145,9 @@ let nora: { id: string; versionId: string };
 let ownJudge: string;
 let projectsJudge: string;
 let upgrade: ModelUpgradeReport;
+let history: { runId: string; simulationId: string };
+/** Every column of the record the previous release wrote, before the upgrade. */
+let before: Record<string, Record<string, unknown> | undefined>;
 
 beforeAll(async () => {
   database = await createEmptyDatabase("model_upgrade");
@@ -205,6 +216,81 @@ beforeAll(async () => {
   await editGrader(actingAsAcme(), own.id, {
     judgeModel: { provider: "openai", model: "gpt-4o-mini" },
   });
+
+  /**
+   * And one run, conducted and finished the way that release finished one.
+   *
+   * **History is the thing an upgrade is most easily wrong about**, and a
+   * database holding only personas and graders cannot say whether this one is:
+   * every assertion about "nothing was rewritten" would be about definitions
+   * rather than about the record of what happened. So this seeds a real run
+   * with a real simulation, lands it terminal, and the case below reads every
+   * column of both back afterwards.
+   *
+   * Verdicts are deliberately not here: they are ClickHouse rows, and this
+   * migration adds no ClickHouse file at all — `clickhouse-migrations` is
+   * untouched by this release, which is a stronger statement than any assertion
+   * this suite could make about one.
+   */
+  const agent = await createAgent(actingAsAcme(), {
+    name: "Front desk",
+    connection: {
+      type: "retell",
+      modality: "chat",
+      environment: "staging",
+      config: { retellAgentId: "agent_in_retell_1" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    },
+  });
+  const authored = await createTest(actingAsAcme(), {
+    name: "Reschedules a booked appointment",
+    scenario: "Their cleaning is booked for Thursday morning and has to move.",
+    expectedBehaviors: ["confirms the new time back before finishing"],
+    personaIds: [madeRita.id],
+  });
+  const run = await startRun(actingAsAcme(), {
+    agentId: agent.id,
+    connectionId: agent.connection?.id ?? "",
+    testVersionIds: [authored.versionId],
+  });
+  const [claimed] = await claimSimulations({
+    claimant: "sim-of-the-old-release",
+    capacity: 1,
+  });
+  if (claimed === undefined) throw new Error("the seeded run claimed nothing");
+  await startSimulation(actingAsAcme(), claimed.id, "sim-of-the-old-release");
+  await completeSimulation(
+    actingAsAcme(),
+    claimed.id,
+    "sim-of-the-old-release",
+    { endingReason: "persona_concluded", turnCount: 6 },
+  );
+  // And the grading job it enqueued, judged and finished — because the record
+  // this suite is about is a *finished* one, and a job left pending would be
+  // outstanding work rather than history.
+  const [judging] = await claimGradingJobs({
+    claimant: "grader-of-the-old-release",
+    capacity: 1,
+  });
+  if (judging === undefined) throw new Error("the seeded run enqueued no grading");
+  await finishGradingJob(judging.auth, judging.id, "grader-of-the-old-release");
+  history = { runId: run.id, simulationId: claimed.id };
+
+  // Every column of both, exactly as the previous release left them.
+  before = {
+    run: (await client.sql("select * from run where id = $1", [run.id])).rows[0],
+    simulation: (
+      await client.sql("select * from simulation where id = $1", [claimed.id])
+    ).rows[0],
+    plan: (
+      await client.sql("select * from grading_plan where run_id = $1", [run.id])
+    ).rows[0],
+    job: (
+      await client.sql("select * from grading_job where simulation_id = $1", [
+        claimed.id,
+      ])
+    ).rows[0],
+  };
 
   // Then the upgrade a self-hoster runs: the whole of what is pending, and the
   // boot act that finishes it.
@@ -472,6 +558,56 @@ describe("the keys the deployment already held", () => {
   });
 });
 
+describe("the record of what already happened", () => {
+  /**
+   * Every column of the run, the conversation, the frozen plan and the grading
+   * job, compared whole rather than field by field — a comparison that names
+   * the fields it checks is a comparison that cannot notice the one somebody
+   * added.
+   */
+  it("comes back byte for byte, run, simulation, plan and grading job alike", async () => {
+    const now = {
+      run: (
+        await client.sql("select * from run where id = $1", [history.runId])
+      ).rows[0],
+      simulation: (
+        await client.sql("select * from simulation where id = $1", [
+          history.simulationId,
+        ])
+      ).rows[0],
+      plan: (
+        await client.sql("select * from grading_plan where run_id = $1", [
+          history.runId,
+        ])
+      ).rows[0],
+      job: (
+        await client.sql("select * from grading_job where simulation_id = $1", [
+          history.simulationId,
+        ])
+      ).rows[0],
+    };
+
+    expect(now).toEqual(before);
+  });
+
+  /**
+   * And the conversation still says who conducted it — pinned to the version
+   * that ran, which is now *not* the persona's current one. That is the whole
+   * worth of pinning, and an upgrade that moved the pin would have rewritten
+   * history while leaving every row's own columns intact.
+   */
+  it("stays pinned to the persona version that really ran, not the successor", async () => {
+    const { rows } = await client.sql<{ persona_version_id: string }>(
+      "select persona_version_id from simulation where id = $1",
+      [history.simulationId],
+    );
+    const current = await getPersona(actingAsAcme(), rita.id);
+
+    expect(rows[0]?.persona_version_id).toBe(rita.versionId);
+    expect(rows[0]?.persona_version_id).not.toBe(current?.versionId);
+  });
+});
+
 describe("what the upgrade must not touch", () => {
   it("leaves the carrier settings byte for byte as they were", async () => {
     const { rows } = await client.sql<{ name: string; hint: string }>(
@@ -547,13 +683,60 @@ describe("the completion marker", () => {
     const asking = await listModelUpgradeActions(actingAsAcme());
 
     expect(standing.outstanding).toEqual([]);
-    expect(standing.completed).toBe(false);
+    // Answered from the conditions rather than from the stamp — which has not
+    // been written yet, and is a record of a moment rather than a permission.
+    expect(standing.completed).toBe(true);
+    expect(standing.completedAt).toBeNull();
     expect(asking.map((one) => one.kind)).toEqual([
       "select_model_provider_credential",
     ]);
   });
 
-  it("is written once every persona and grader carries selections", async () => {
+  /**
+   * The latch that is not one, and the reason the read may never short-circuit
+   * on the stamp.
+   *
+   * **Authoring keeps working during the compatibility period** — that is what
+   * makes it a period — so an ordinary `createPersona` with no selections is a
+   * legitimate write on a stamped installation, and it puts this deployment
+   * back to having outstanding work. A read that answered "finished" because a
+   * timestamp existed would tell the next release it may remove a path this
+   * persona still needs.
+   */
+  it("goes back to unfinished when new work arrives on the old path", async () => {
+    await recordModelUpgradeCompletion();
+    const stamped = await readModelUpgradeCompletion();
+    expect(stamped.completed).toBe(true);
+    expect(stamped.completedAt).toBeInstanceOf(Date);
+
+    const late = await createPersona(actingAsAcme(), {
+      name: "Authored during the transition",
+      traits: RITA,
+    });
+
+    const standing = await readModelUpgradeCompletion();
+    expect(standing.outstanding).toEqual(["personas"]);
+    expect(standing.completed).toBe(false);
+    // The stamp stays, because the moment it records really happened.
+    expect(standing.completedAt).toEqual(stamped.completedAt);
+
+    // And putting it right again puts the answer right again, with no restart.
+    await editPersona(actingAsAcme(), late.id, {
+      models: {
+        llm: { provider: "openai", model: "gpt-4o-mini" },
+        stt: { provider: "deepgram", model: "nova-3-general" },
+        tts: {
+          provider: "cartesia",
+          model: "sonic-3.5",
+          voiceId: "a-voice-somebody-chose",
+          speed: 1,
+        },
+      },
+    });
+    expect((await readModelUpgradeCompletion()).completed).toBe(true);
+  });
+
+  it("is stamped once every persona and grader carries selections", async () => {
     const recorded = await recordModelUpgradeCompletion();
 
     expect(recorded.completed).toBe(true);

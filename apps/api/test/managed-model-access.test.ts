@@ -523,10 +523,16 @@ describe("hosted Egma, managed by Egma", () => {
     const pushed = await ask(api.app, "POST", "/api/tests", key, RESCHEDULING);
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
+    const seededAgent = registered.body.agent as {
+      id: string;
+      version_id: string;
+    };
     const spec = await oneWorkOrder({
       ada,
       key,
       connectionId: (registered.body.connection as { id: string }).id,
+      agentId: seededAgent.id,
+      agentVersionId: seededAgent.version_id,
       versionId: String(pushed.body.version_id),
       serviceToken: api.config.simulatorServiceToken,
     });

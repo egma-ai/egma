@@ -1,6 +1,8 @@
 import { newId } from "@egma/ids";
 import {
+  completeSimulation,
   createPersona,
+  getGradingPlan,
   getGrader,
   getPersona,
   listGraders,
@@ -8,6 +10,7 @@ import {
   readModelUpgradeCompletion,
   recordModelUpgradeCompletion,
   seedPlatformSettings,
+  startSimulation,
   upgradeModelSetup,
   type PersonaTraits,
 } from "@egma/db";
@@ -491,6 +494,88 @@ describe("a simulator built before selections existed", () => {
     const waiting = (both.json() as { specs: Record<string, unknown>[] }).specs;
     expect(waiting).toHaveLength(1);
     expect(waiting[0]?.contract_version).toBe(2);
+  });
+});
+
+/**
+ * The condition that is easiest to get wrong, and was.
+ *
+ * A run frozen before the upgrade pins grader versions with no selection of
+ * their own, and its plan records the judge those graders will ask. On a
+ * deployment judged by its **own** judge that plan names no credential at all —
+ * the sentinel word goes in place of an id — so a marker that only read the
+ * credential index would declare this installation finished with grading jobs
+ * still queued behind exactly the configuration the next release removes.
+ */
+describe("grading work frozen before the upgrade", () => {
+  it("holds the marker back even though its plan names no credential", async () => {
+    await standUpProviders();
+    api = await createApi("upgraded_run_platform_judge", {
+      singleOrganization: true,
+    });
+    await seedPlatformSettings(CONFIGURED_BEFORE_THE_CATALOG);
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const registered = await ask(api.app, "POST", "/api/agents", key, {
+      name: "Front desk",
+      connection: RETELL_VOICE,
+    });
+    await createPersona(contextFor(ada, "member"), { name: "Rita", traits: RITA });
+    const pushed = await ask(api.app, "POST", "/api/tests", key, {
+      name: "Reschedules a booked appointment",
+      scenario: "Their cleaning is booked for Thursday and has to move.",
+      expected_behaviors: ["confirms the new time back before finishing"],
+      personas: ["Rita"],
+    });
+
+    // Started and conducted *before* the upgrade, so the plan it froze pins
+    // grader versions that carry no selection.
+    const started = await ask(api.app, "POST", "/api/runs", key, {
+      connection: (registered.body.connection as { id: string }).id,
+      test_versions: [String(pushed.body.version_id)],
+      idempotency_key: newId("run"),
+    });
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+    const claimed = await api.app.inject({
+      method: "POST",
+      url: CLAIMS_PATH,
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: { claimant: "sim-1", capacity: 1, wait_seconds: 0 },
+    });
+    const [spec] = (claimed.json() as { specs: Record<string, unknown>[] }).specs;
+    const simulationId = String(spec?.simulation_id);
+    const admin = contextFor(ada, "admin");
+    await startSimulation(admin, simulationId, "sim-1");
+    await completeSimulation(admin, simulationId, "sim-1", {
+      endingReason: "persona_concluded",
+      turnCount: 4,
+    });
+
+    // The plan really does name no credential, which is the trap.
+    const plan = await getGradingPlan(admin, String(started.body.id));
+    expect(plan?.state).toBe("run_start");
+    const { rows } = await api.database.sql<{ ids: unknown; status: string }>(
+      `select p.judge_credential_ids as ids, j.status
+         from grading_plan p
+         join simulation s on s.run_id = p.run_id
+         join grading_job j on j.simulation_id = s.id
+        where p.run_id = $1`,
+      [String(started.body.id)],
+    );
+    expect(rows[0]?.ids).toEqual([]);
+    expect(rows[0]?.status).toBe("pending");
+
+    await upgradeModelSetup({ singleOrganization: true });
+
+    const standing = await readModelUpgradeCompletion();
+    expect(standing.completed).toBe(false);
+    // Two conditions standing, and `grading` is the one this case is about:
+    // the job frozen against the old judge configuration, on a plan that names
+    // no credential at all. (`personas` is the seeded starter persona, whose
+    // own voice this release's catalog does not carry — see the case above.)
+    expect(standing.outstanding).toEqual(["personas", "grading"]);
+    expect((await recordModelUpgradeCompletion()).completed).toBe(false);
   });
 });
 

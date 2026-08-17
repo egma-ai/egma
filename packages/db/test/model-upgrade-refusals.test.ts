@@ -304,6 +304,8 @@ describe("a deployment speaking through a provider this release does not carry",
     const [action] = (await listModelUpgradeActions(acting(solo))).filter(
       (one) => one.subject === nora.id,
     );
+    // Named, so an organization with two blocked personas can tell them apart.
+    expect(action?.subjectName).toBe("Nora");
     expect(action?.detail).toContain("elevenlabs");
     expect(action?.detail).toContain("not a provider in this release's model catalog");
     // Never a substitute. The other speaking providers this release does carry
@@ -311,7 +313,15 @@ describe("a deployment speaking through a provider this release does not carry",
     expect(action?.detail).not.toContain("cartesia");
   });
 
-  it("keeps its key, shows where it came from, and refuses to spend it", async () => {
+  /**
+   * The key is kept, and — the half that was missing — it is *said out loud*.
+   *
+   * A stored key nothing can spend and nothing mentions is a deployment
+   * speaking through a provider the product no longer offers, with the only
+   * sign being the persona actions naming it. So the provider gets an action of
+   * its own, and the screen shows the key as kept and unusable.
+   */
+  it("keeps its key, says so in an action, and refuses to spend it", async () => {
     const candidates = await listCredentialCandidates(acting(solo));
     const theirs = candidates.find((one) => one.provider === "elevenlabs");
 
@@ -319,6 +329,13 @@ describe("a deployment speaking through a provider this release does not carry",
     expect(theirs?.sourceName).toBe("text_to_speech_key");
     expect(theirs?.selectable).toBe(false);
     expect(theirs?.active).toBe(false);
+
+    const [named] = (await listModelUpgradeActions(acting(solo))).filter(
+      (one) => one.subject === "elevenlabs",
+    );
+    expect(named?.kind).toBe("select_model_provider_credential");
+    expect(named?.subjectName).toBe("elevenlabs");
+    expect(named?.detail).toContain("not a provider in this release's model catalog");
     await expect(
       activateCredentialCandidate(acting(solo), String(theirs?.id)),
     ).rejects.toThrow(/not a provider in this release's model catalog/);

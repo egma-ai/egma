@@ -107,11 +107,22 @@ describe("what the upgrade left to decide", () => {
     const answer = await ask(api.app, "GET", MODEL_UPGRADE_PATH, adminKey);
 
     expect(answer.statusCode).toBe(200);
-    const kinds = (answer.body.actions as { kind: string }[]).map(
-      (one) => one.kind,
-    );
+    const actions = answer.body.actions as {
+      kind: string;
+      subject_name: string | null;
+    }[];
+    const kinds = actions.map((one) => one.kind);
     expect(kinds).toContain("select_model_provider_credential");
     expect(kinds).toContain("select_persona_models");
+    // Named, so two blocked personas are two rows a person can tell apart —
+    // and this installation really has two: the seeded starter persona and the
+    // one authored here, both speaking through a provider this release's
+    // catalog does not carry.
+    const blocked = actions
+      .filter((one) => one.kind === "select_persona_models")
+      .map((one) => one.subject_name);
+    expect(blocked.length).toBeGreaterThan(1);
+    expect(blocked).toContain("Nora");
     for (const key of Object.values(LEGACY)) {
       expect(JSON.stringify(answer.body)).not.toContain(key);
     }

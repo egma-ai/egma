@@ -394,22 +394,21 @@ describe("the two schemas, as one contract", () => {
    * Version 2 carries the carrier settings and refuses the rest.
    */
   it("narrow the platform block on version 2 to the carrier settings alone", () => {
-    const blockOf = (schema: Record<string, unknown>): readonly string[] =>
-      Object.keys(
-        (
-          (schema.properties as Record<string, Record<string, unknown>>)
-            .platform.properties as Record<string, unknown>
-        ) ?? {},
+    const blockOf = (schema: Record<string, unknown>): readonly string[] => {
+      const platform = (
+        schema.properties as Record<string, Record<string, unknown> | undefined>
+      ).platform;
+      return Object.keys(
+        (platform?.properties as Record<string, unknown> | undefined) ?? {},
       ).sort();
+    };
 
     expect(blockOf(specSchema)).toEqual(["carrier", "model", "speech"]);
     expect(blockOf(specSchemaV2)).toEqual(["carrier"]);
     // Closed, so the two it drops are refused rather than ignored.
     expect(
-      (
-        (specSchemaV2.properties as Record<string, Record<string, unknown>>)
-          .platform as Record<string, unknown>
-      ).additionalProperties,
+      (specSchemaV2.properties as Record<string, Record<string, unknown>>)
+        .platform?.additionalProperties,
     ).toBe(false);
   });
 
