@@ -7,6 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import SimulationEvidencePage from "../app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx";
@@ -649,6 +650,59 @@ describe("one simulation's evidence", () => {
     expect(screen.queryByText("Credential")).toBeNull();
     expect(screen.queryByText("Model")).toBeNull();
     expect(screen.queryByText("Score")).toBeNull();
+  });
+
+  it("can leave the recording view after its waveform is ready", async () => {
+    for (const failure of ["throws", "rejects"] as const) {
+      page({ recording: true, read: evidence({ has_recording: true }) });
+      let opened = 0;
+      let closed = 0;
+      class ClosingAudioContext {
+        private isClosed = false;
+
+        constructor() {
+          opened += 1;
+        }
+
+        async decodeAudioData() {
+          return {
+            duration: 2,
+            numberOfChannels: 2,
+            getChannelData: (channel: number) =>
+              new Float32Array(channel === 0 ? [0, 0.8, 0] : [0, 0.4, 0]),
+          };
+        }
+
+        close() {
+          if (this.isClosed) {
+            throw new DOMException(
+              "Cannot close a closed AudioContext.",
+              "InvalidStateError",
+            );
+          }
+          this.isClosed = true;
+          closed += 1;
+          const failureReason = new DOMException(
+            "The AudioContext could not close.",
+            "OperationError",
+          );
+          if (failure === "throws") throw failureReason;
+          return Promise.reject(failureReason);
+        }
+      }
+      vi.stubGlobal("AudioContext", ClosingAudioContext);
+
+      const rendered = render(
+        <StrictMode>
+          <SimulationEvidencePage />
+        </StrictMode>,
+      );
+      await screen.findByRole("slider", { name: "Seek the recording" });
+
+      expect(() => rendered.unmount()).not.toThrow();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(closed).toBe(opened);
+    }
   });
 
   it("uses one evidence workspace without separate setup or execution sections", async () => {

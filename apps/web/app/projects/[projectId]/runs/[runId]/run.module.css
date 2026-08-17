@@ -169,7 +169,8 @@
 
 /*
  * The shared table wrapper permits overflow for data sets that need it. This
- * route does not: four compact columns fit, and long names or reasons wrap.
+ * route does not: its facts and trailing action fit, and long names or reasons
+ * wrap.
  */
 .simulationsTable {
   min-width: 0;
@@ -204,12 +205,6 @@
   color: var(--muted);
   font-size: var(--text-sm);
   line-height: var(--line-normal);
-}
-
-@media (min-width: 901px) {
-  .simulationsTable :is(th, td) {
-    padding-inline: var(--space-2);
-  }
 }
 
 @media (max-width: 900px) {

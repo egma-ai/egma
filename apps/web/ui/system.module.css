@@ -1169,6 +1169,23 @@
   vertical-align: middle;
 }
 
+/* Row controls use one trailing-edge seam instead of page-specific padding. */
+.table th.tableHeaderAction {
+  text-align: right;
+}
+
+.tableCellAction {
+  text-align: right;
+}
+
+.tableCellAction .cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .table tbody tr:first-child td {
   border-top: 0;
 }
@@ -1198,6 +1215,7 @@
 
 .tableRowInteractive .tableCellPrimary a:first-of-type {
   position: static;
+  transition: color var(--duration-hover) var(--ease-out);
 }
 
 .tableRowInteractive .tableCellPrimary a:first-of-type::after {
@@ -1287,6 +1305,15 @@
 
   .tableConstrained .table td[data-label=""] {
     justify-content: flex-end;
+  }
+
+  .tableConstrained .table td.tableCellAction {
+    align-items: center;
+    margin-top: var(--space-2);
+  }
+
+  .tableConstrained .table td.tableCellAction .cell {
+    max-width: none;
   }
 
   .tableConstrained .table td[data-label=""]:has(.cell:empty) {
@@ -1401,8 +1428,8 @@
     background: var(--surface);
   }
 
-  .tableRowInteractive:hover td {
-    background: var(--surface-soft);
+  .tableRowInteractive:hover .tableCellPrimary a:first-of-type {
+    color: var(--accent);
   }
 }
 
@@ -1656,6 +1683,19 @@
     min-width: 0;
     max-width: 70%;
     text-align: right;
+  }
+
+  .table td.tableCellAction {
+    align-items: center;
+    margin-top: var(--space-2);
+  }
+
+  .table td.tableCellAction .cell {
+    max-width: none;
+  }
+
+  .tableCellAction:has(.cell:empty) {
+    display: none;
   }
 
   .tableCellPrimary {

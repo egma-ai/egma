@@ -34,6 +34,8 @@ export type Column<Row> = {
   readonly hideOnMobile?: boolean;
   /** Identifiers, counts and times, which read straight in the mono face. */
   readonly mono?: boolean;
+  /** A row control. It stays at the trailing edge in both table layouts. */
+  readonly action?: boolean;
   readonly width?: string;
 };
 
@@ -85,6 +87,14 @@ export function DataTable<Row>({
       .join(" ");
   }
 
+  function tableCellClass(column: Column<Row>): string | undefined {
+    const classes = [
+      column === primary ? styles.tableCellPrimary : "",
+      column.action === true ? styles.tableCellAction : "",
+    ].filter((one) => one !== "");
+    return classes.length === 0 ? undefined : classes.join(" ");
+  }
+
   return (
     <div className={stackWhenConstrained ? styles.tableConstrained : undefined}>
       <div className={styles.tableWrap}>
@@ -93,6 +103,9 @@ export function DataTable<Row>({
             <tr>
               {columns.map((column) => (
                 <th
+                  className={
+                    column.action === true ? styles.tableHeaderAction : undefined
+                  }
                   data-mobile-hidden={mobileHidden(column)}
                   key={column.key}
                   scope="col"
@@ -113,7 +126,7 @@ export function DataTable<Row>({
               >
                 {columns.map((column) => (
                   <td
-                    className={column === primary ? styles.tableCellPrimary : undefined}
+                    className={tableCellClass(column)}
                     data-label={column.header}
                     data-mobile-hidden={mobileHidden(column)}
                     key={column.key}

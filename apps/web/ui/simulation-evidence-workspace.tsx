@@ -215,6 +215,16 @@ export function useSimulationEvidenceRecording(
     if (source === null || source.recordingId !== recordingId) return undefined;
     let current = true;
     let context: AudioContext | null = null;
+    const closeContext = (): void => {
+      const owned = context;
+      context = null;
+      if (owned === null) return;
+      try {
+        void owned.close().catch(() => undefined);
+      } catch {
+        // Cleanup is best-effort. The page no longer owns this context.
+      }
+    };
     const attempt = resolvedAttempt.current;
     setWaveformLoading(true);
     void fetch(source.url)
@@ -247,11 +257,11 @@ export function useSimulationEvidenceRecording(
       })
       .finally(() => {
         if (current) setWaveformLoading(false);
-        if (context !== null) void context.close();
+        closeContext();
       });
     return () => {
       current = false;
-      if (context !== null) void context.close();
+      closeContext();
     };
   }, [recordingId, source]);
 

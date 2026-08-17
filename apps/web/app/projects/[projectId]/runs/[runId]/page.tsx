@@ -776,7 +776,8 @@ function simulationColumns(
     result.push({
       key: "rerun",
       header: "",
-      width: "108px",
+      action: true,
+      width: "128px",
       cell: (one) =>
         !isTerminalSimulation(one.status) ? null : (
           <Button onClick={() => onRerun(one)}>Run again</Button>
