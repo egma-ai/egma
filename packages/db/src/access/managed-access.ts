@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+
 import { db } from "../client.ts";
 import {
   managedDeployment,
@@ -136,26 +138,40 @@ export async function connectManagedAccess(
     );
   }
 
-  const [existing] = await db()
-    .select({ cloudOrganizationId: managedAccessKey.cloudOrganizationId })
-    .from(managedAccessKey)
-    .where(within(auth, managedAccessKey))
-    .limit(1);
-
-  if (
-    existing !== undefined &&
-    existing.cloudOrganizationId !== input.cloudOrganizationId
-  ) {
-    throw new ManagedAccessBoundElsewhereError(existing.cloudOrganizationId);
-  }
-
+  /**
+   * **The binding is enforced by the write and by nothing before it.**
+   *
+   * This used to read the stored binding, compare it, and then upsert
+   * unconditionally — and between the read and the write there was a window.
+   * Two administrators connecting at once both read the same answer, both
+   * passed, and the second write silently rebound the deployment to another
+   * Egma Cloud organization with no disconnect: every later simulation's spend
+   * attributed to an account nobody chose, and the administrator who lost the
+   * race told "Connected" with their own key's hint. Exactly what the rule
+   * exists to prevent, arrived at by timing.
+   *
+   * So the comparison moved inside the statement. The `UPDATE` arm fires only
+   * when the row already says what this key says, which makes the three cases
+   * one atomic decision Postgres takes while holding the row:
+   *
+   * - **no row** — the `INSERT` lands, and this deployment is bound. A second
+   *   connect racing it conflicts, finds the winner's organization in the row,
+   *   and is refused rather than overwriting it;
+   * - **the same organization** — the arm fires. Ordinary rotation, unchanged;
+   * - **another organization** — the arm is suppressed, nothing is written, and
+   *   no row comes back. That silence is the refusal.
+   *
+   * Nothing is read first, on purpose: a check in front of this would look
+   * load-bearing and would not be, which is how the window got there.
+   */
   const now = new Date();
+  const sealed = sealCredentials({ key });
   const [row] = await db()
     .insert(managedAccessKey)
     .values({
       organizationId: auth.organizationId,
       cloudOrganizationId: input.cloudOrganizationId,
-      credentials: sealCredentials({ key }),
+      credentials: sealed,
       credentialsHint: key.slice(-HINT_LENGTH),
       connectedBy: auth.userId,
       updatedAt: now,
@@ -163,12 +179,19 @@ export async function connectManagedAccess(
     .onConflictDoUpdate({
       target: managedAccessKey.organizationId,
       set: {
-        cloudOrganizationId: input.cloudOrganizationId,
-        credentials: sealCredentials({ key }),
+        credentials: sealed,
         credentialsHint: key.slice(-HINT_LENGTH),
         connectedBy: auth.userId,
         updatedAt: now,
       },
+      // The whole guard. `cloud_organization_id` is deliberately absent from
+      // `set` as well: an arm that could rewrite the binding is an arm that
+      // could rebind, and the only value it may ever hold is the one it
+      // already has.
+      setWhere: eq(
+        managedAccessKey.cloudOrganizationId,
+        input.cloudOrganizationId,
+      ),
     })
     .returning({
       hint: managedAccessKey.credentialsHint,
@@ -177,7 +200,21 @@ export async function connectManagedAccess(
     });
 
   if (row === undefined) {
-    throw new Error("the organization's managed-access key was not written");
+    // The arm was suppressed, so a binding stands and it is not this key's.
+    // Read it now — only to name it in the sentence, and after the refusal has
+    // already been decided by the write.
+    const [bound] = await db()
+      .select({ cloudOrganizationId: managedAccessKey.cloudOrganizationId })
+      .from(managedAccessKey)
+      .where(within(auth, managedAccessKey))
+      .limit(1);
+
+    if (bound === undefined) {
+      // No row at all and no insert: nothing in this schema produces that, so
+      // it is Egma being broken rather than an administrator being refused.
+      throw new Error("the organization's managed-access key was not written");
+    }
+    throw new ManagedAccessBoundElsewhereError(bound.cloudOrganizationId);
   }
   return {
     connected: true,

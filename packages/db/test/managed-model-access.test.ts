@@ -29,6 +29,7 @@ import {
 
 import {
   createConnectedDatabase,
+  openSingleConnection,
   type MigratedDatabase,
 } from "./support/database.ts";
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
@@ -408,6 +409,145 @@ describe("a self-hosted organization connecting one", () => {
 
     const read = await readManagedAccessConnection(actingAsAcme());
     expect(read.hint).toBe(CLOUD_KEY.slice(-4));
+  });
+
+  /**
+   * **The refusal is the write's, not a check in front of it.**
+   *
+   * This is the distinction the rule lives or dies on, and it is why these
+   * three cases assert on the row rather than on the exception. A comparison
+   * made before the write has a window: two administrators connecting at once
+   * both read the same answer, both pass, and the second write rebinds the
+   * deployment to another Egma Cloud organization with no disconnect — every
+   * later simulation's spend on an account nobody chose, and the administrator
+   * who lost the race told "Connected" with their own key's hint.
+   *
+   * So the comparison is inside the statement, and what these prove is that
+   * *the write itself* declines: the `UPDATE` arm fires only when the row
+   * already says what the key says, and a suppressed arm writes nothing at
+   * all. Racing threads would prove nothing here — a race that happens not to
+   * interleave passes against the broken version too, which is exactly how
+   * this survived the first round. What settles it is the semantics.
+   */
+  it("declines in the write even when a check made before it would have passed", async () => {
+    /**
+     * The race, made deterministic — no threads, one explicit transaction.
+     *
+     * A second connection opens a transaction and inserts the binding for one
+     * Egma Cloud organization *without committing*, so it holds that row. The
+     * ordinary connect path then runs for a **different** organization: any
+     * check it made before writing would see no binding at all and pass, and
+     * its write blocks on the held row. Committing releases it, and what
+     * happens next is the whole question — Postgres re-evaluates the conflict
+     * against the row that is now really there.
+     *
+     * With the comparison inside the statement the arm is suppressed and the
+     * connect is refused. With a comparison in front of the statement it
+     * fires, and the deployment is silently rebound to an organization nobody
+     * disconnected from — which is the failure this reproduces rather than
+     * describes.
+     */
+    await disconnectManagedAccess(actingAsAcme());
+
+    const holder = await openSingleConnection(database.url);
+    let refused: unknown;
+    try {
+      await holder.sql("begin");
+      await holder.sql(
+        `insert into managed_access_key
+           (organization_id, cloud_organization_id, credentials, credentials_hint, connected_by, updated_at)
+         values ($1, $2, 'v1.held-by-the-other-administrator', 'HELD', $3, now())`,
+        [acme.organization, globex.organization, ada],
+      );
+
+      // Its write blocks on the held row; the commit is what lets it proceed.
+      const connecting = connectManagedAccess(actingAsAcme(), {
+        key: "egma_ik_sentinel-lost-the-race-Zz5Aa6",
+        cloudOrganizationId: acme.organization,
+      }).catch((fault: unknown) => fault);
+
+      await new Promise((settle) => setTimeout(settle, 100));
+      await holder.sql("commit");
+      refused = await connecting;
+    } finally {
+      await holder.close();
+    }
+
+    expect(refused).toBeInstanceOf(ManagedAccessBoundElsewhereError);
+
+    // And the binding the other administrator established still stands, with
+    // their key still sealed under it.
+    const read = await readManagedAccessConnection(actingAsAcme());
+    expect(read.cloudOrganizationId).toBe(globex.organization);
+    expect(read.hint).toBe("HELD");
+
+    // Put it back where the rest of this file expects it.
+    await disconnectManagedAccess(actingAsAcme());
+    await connectManagedAccess(actingAsAcme(), {
+      key: OTHER_CLOUD_KEY,
+      cloudOrganizationId: globex.organization,
+    });
+  });
+
+  it("declines in the write itself, leaving the stored key and binding untouched", async () => {
+    const before = await readManagedAccessConnection(actingAsAcme());
+    expect(before.cloudOrganizationId).toBe(globex.organization);
+
+    await expect(
+      connectManagedAccess(actingAsAcme(), {
+        key: "egma_ik_sentinel-another-cloud-organization-Rr7Ss8",
+        cloudOrganizationId: acme.organization,
+      }),
+    ).rejects.toBeInstanceOf(ManagedAccessBoundElsewhereError);
+
+    // Nothing moved: not the binding, not the sealed key, not the hint, and
+    // not the moment it was last connected.
+    const after = await readManagedAccessConnection(actingAsAcme());
+    expect(after).toEqual(before);
+    expect(await storedEnvelope(acme.organization)).not.toContain(
+      "Rr7Ss8",
+    );
+  });
+
+  it("names the organization the deployment is really bound to, not the one that asked", async () => {
+    const refused = await connectManagedAccess(actingAsAcme(), {
+      key: "egma_ik_sentinel-wrong-cloud-Tt9Uu0",
+      cloudOrganizationId: acme.organization,
+    }).catch((fault: unknown) => fault);
+
+    expect(refused).toBeInstanceOf(ManagedAccessBoundElsewhereError);
+    expect((refused as ManagedAccessBoundElsewhereError).cloudOrganizationId).toBe(
+      globex.organization,
+    );
+  });
+
+  it("still lets the same organization's key land, which is what rotation is", async () => {
+    const rotated = "egma_ik_sentinel-rotated-same-organization-Vv1Ww2";
+    const landed = await connectManagedAccess(actingAsAcme(), {
+      key: rotated,
+      cloudOrganizationId: globex.organization,
+    });
+
+    expect(landed.hint).toBe(rotated.slice(-4));
+    expect(landed.cloudOrganizationId).toBe(globex.organization);
+  });
+
+  it("lets another organization's key land once the binding has been given up", async () => {
+    expect(await disconnectManagedAccess(actingAsAcme())).toBe(true);
+
+    const moved = await connectManagedAccess(actingAsAcme(), {
+      key: "egma_ik_sentinel-after-disconnect-Xx3Yy4",
+      cloudOrganizationId: acme.organization,
+    });
+
+    expect(moved.cloudOrganizationId).toBe(acme.organization);
+
+    // Put it back where the rest of this file expects it.
+    await disconnectManagedAccess(actingAsAcme());
+    await connectManagedAccess(actingAsAcme(), {
+      key: CLOUD_KEY,
+      cloudOrganizationId: globex.organization,
+    });
   });
 
   it("replaces a key from the same Egma Cloud organization, which is ordinary rotation", async () => {
