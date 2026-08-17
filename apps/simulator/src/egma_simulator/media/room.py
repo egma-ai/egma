@@ -7,6 +7,7 @@ import contextlib
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from ..contract import ERROR
@@ -21,6 +22,8 @@ ROOM_PREFIX = "egma-sim"
 PERSONA_IDENTITY = "egma-persona"
 CONNECT_SECONDS = 30.0
 AUDIO_STREAM_CLOSE_SECONDS = 2.0
+PIPECAT_VERSION = "1.7.0"
+LIVEKIT_VERSION = "1.1.14"
 QUOTED_REFUSAL_CHARS = 200
 
 
@@ -66,94 +69,169 @@ async def first_of(*events: asyncio.Event, within: float) -> bool:
     return bool(done)
 
 
+class _JoinAfterPipecatConversion(asyncio.Queue[Any]):
+    """Make Pipecat's stock client iterator joinable without replacing it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._borrowed = False
+
+    async def get(self) -> Any:
+        # Pipecat asks for the next item only after it converted and put the
+        # prior one into BaseInput. That point is the missing queue ack in
+        # 1.7.0, so a join covers the unchanged conversion/push path.
+        if self._borrowed:
+            self.task_done()
+            self._borrowed = False
+        item = await super().get()
+        self._borrowed = True
+        return item
+
+
 class _Pipecat17InputDrain:
     """Order participant departure after Pipecat 1.7.0's inbound queues.
 
-    Pipecat has no public input-drain operation. Its LiveKit client queue also
-    omits ``task_done``, and it cancels the track producer during close. The
-    pinned 1.7.0 shim makes that queue joinable, lets the producer finish, then
-    joins BaseInput before it places one ordinary control frame in the stream.
-    The focused room-driver test must fail if those pinned fields move.
+    Pipecat has no public input-drain operation. LiveKit 1.1.14's iterator also
+    stops as soon as its native task ends, before it reads buffered frames that
+    precede the queue's explicit end marker. This exact-version shim replaces
+    only Pipecat's stream reader, makes its existing client iterator joinable,
+    then joins BaseInput before one ordinary control frame enters the pipeline.
     """
 
     def __init__(self, input_transport: object) -> None:
         try:
+            from livekit import rtc
+            from livekit.rtc._utils import RingQueue
+
+            installed_pipecat = version("pipecat-ai")
+            installed_livekit = version("livekit")
+        except (ImportError, PackageNotFoundError) as changed:
+            raise MediaBackendError(
+                "the installed voice transport no longer matches its pinned "
+                "media drain",
+                ending=ERROR,
+            ) from changed
+        if (
+            installed_pipecat != PIPECAT_VERSION
+            or installed_livekit != LIVEKIT_VERSION
+            or not callable(RingQueue.get)
+            or not callable(rtc.AudioStream.aclose)
+        ):
+            raise MediaBackendError(
+                "the installed voice transport no longer matches its pinned "
+                "media drain",
+                ending=ERROR,
+            )
+        try:
             client = input_transport._client
             audio_queue = client._audio_queue
             streams = client._audio_streams
+            reader = client._process_audio_stream
+            client_iterator = client.get_next_audio_frame
+            stream_closer = client._close_audio_stream
         except AttributeError as changed:
             raise MediaBackendError(
                 "pipecat 1.7 no longer exposes the livekit input drain needed "
                 "to order participant departure after audio",
                 ending=ERROR,
             ) from changed
+        if (
+            type(audio_queue) is not asyncio.Queue
+            or not audio_queue.empty()
+            or not isinstance(streams, dict)
+            or not callable(reader)
+            or not callable(client_iterator)
+            or not callable(stream_closer)
+        ):
+            raise MediaBackendError(
+                "pipecat 1.7 no longer exposes the livekit input drain needed "
+                "to order participant departure after audio",
+                ending=ERROR,
+            )
         self._input = input_transport
-        self._audio_queue: asyncio.Queue[Any] = audio_queue
+        self._audio_queue = _JoinAfterPipecatConversion()
+        client._audio_queue = self._audio_queue
+        self._ring_queue_type = RingQueue
+        self._audio_event_type = rtc.AudioFrameEvent
         self._streams: dict[str, tuple[object, asyncio.Task[Any]]] = streams
-        self._closing: dict[str, asyncio.Task[None]] = {}
-        client.get_next_audio_frame = self._tracked_audio_frames
-        client._close_audio_stream = self._finish_stream
+        self._departures: dict[str, asyncio.Task[None]] = {}
+        client._process_audio_stream = self._read_audio_stream
 
-    async def _tracked_audio_frames(self):
-        while True:
-            audio = await self._audio_queue.get()
-            try:
-                yield audio
-            finally:
-                self._audio_queue.task_done()
-
-    async def _finish_stream(self, participant_id: str) -> None:
-        closing = self._closing.get(participant_id)
-        if closing is None:
-            closing = asyncio.create_task(
-                self._finish_owned_stream(participant_id),
-                name="livekit-audio-stream-close",
-            )
-            self._closing[participant_id] = closing
+    async def _read_audio_stream(self, stream: object, participant_id: str) -> None:
+        """Read LiveKit 1.1.14 through its explicit end marker."""
         try:
-            await asyncio.shield(closing)
-        finally:
-            if closing.done() and self._closing.get(participant_id) is closing:
-                self._closing.pop(participant_id, None)
-
-    async def _finish_owned_stream(self, participant_id: str) -> None:
-        entry = self._streams.pop(participant_id, None)
-        if entry is None:
-            return
-        stream, producer = entry
-        try:
-            await asyncio.wait_for(
-                stream.aclose(), timeout=AUDIO_STREAM_CLOSE_SECONDS
-            )
-            await asyncio.wait_for(
-                asyncio.shield(producer), timeout=AUDIO_STREAM_CLOSE_SECONDS
-            )
-        except Exception as unfinished:
-            if not producer.done():
-                producer.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await producer
+            queue = stream._queue
+        except AttributeError as changed:
             raise RuntimeError(
-                "pipecat did not finish the livekit participant's audio stream"
-            ) from unfinished
+                "livekit no longer exposes the pinned audio stream queue"
+            ) from changed
+        if not isinstance(queue, self._ring_queue_type):
+            raise RuntimeError(
+                "livekit no longer exposes the pinned audio stream queue"
+            )
+        while True:
+            event = await queue.get()
+            if event is None:
+                return
+            if not isinstance(event, self._audio_event_type):
+                raise RuntimeError("livekit produced an invalid audio stream event")
+            await self._audio_queue.put((event, participant_id))
 
     async def participant_left(
         self, participant_id: str, completed: asyncio.Event
     ) -> None:
-        await self._finish_stream(participant_id)
-        await self._audio_queue.join()
+        departure = self._departures.get(participant_id)
+        if departure is None:
+            departure = asyncio.create_task(
+                self._finish_departure(participant_id, completed),
+                name="livekit-participant-departure",
+            )
+            self._departures[participant_id] = departure
+        await asyncio.shield(departure)
+
+    async def _finish_departure(
+        self, participant_id: str, completed: asyncio.Event
+    ) -> None:
+        reader: asyncio.Task[Any] | None = None
         try:
-            input_queue = self._input._audio_in_queue
-        except AttributeError as changed:
-            raise MediaBackendError(
-                "pipecat 1.7 no longer exposes the livekit input drain needed "
-                "to order participant departure after audio",
-                ending=ERROR,
-            ) from changed
-        await input_queue.join()
-        marker = RemoteParticipantLeftFrame(completed=completed)
-        await self._input.push_frame(marker)
-        await marker.completed.wait()
+            async with asyncio.timeout(AUDIO_STREAM_CLOSE_SECONDS):
+                entry = self._streams.pop(participant_id, None)
+                if entry is not None:
+                    stream, reader = entry
+                    await stream.aclose()
+                    await reader
+                await self._audio_queue.join()
+                try:
+                    input_queue = self._input._audio_in_queue
+                except AttributeError as changed:
+                    raise RuntimeError(
+                        "pipecat no longer exposes its audio input queue"
+                    ) from changed
+                if not isinstance(input_queue, asyncio.Queue):
+                    raise RuntimeError(
+                        "pipecat no longer exposes its audio input queue"
+                    )
+                await input_queue.join()
+                acknowledged = asyncio.Event()
+                marker = RemoteParticipantLeftFrame(completed=acknowledged)
+                await self._input.push_frame(marker)
+                await acknowledged.wait()
+                completed.set()
+        finally:
+            if reader is not None and not reader.done():
+                reader.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await reader
+
+    async def cancel(self) -> None:
+        """Cancel and reap owned departures before local transport cleanup."""
+        pending = [task for task in self._departures.values() if not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(AUDIO_STREAM_CLOSE_SECONDS):
+                    await asyncio.gather(*pending, return_exceptions=True)
 
 
 class JoinedRoom:
@@ -172,6 +250,7 @@ class JoinedRoom:
         self._room_name = room_name
         self._quotable = quotable
         self._transport: object | None = None
+        self._input_drain: _Pipecat17InputDrain | None = None
         self._connected = asyncio.Event()
         self.arrivals = asyncio.Event()
         self.carrying_audio = asyncio.Event()
@@ -197,16 +276,29 @@ class JoinedRoom:
         )
         self._transport = transport
         input_transport = transport.input()
-        input_drain = _Pipecat17InputDrain(input_transport)
+        try:
+            input_drain = _Pipecat17InputDrain(input_transport)
+        except Exception:
+            self.failed.set()
+            raise
+        self._input_drain = input_drain
 
         @transport.event_handler("on_connected")
         async def _connected(_transport: object) -> None:
             self._connected.set()
 
+        @transport.event_handler("on_before_disconnect")
+        async def _before_disconnect(_transport: object) -> None:
+            # Pipecat fires this awaited event before its own stop/cancel path
+            # closes streams. Take down an in-flight remote departure first.
+            self._leaving = True
+            await input_drain.cancel()
+
         @transport.event_handler("on_disconnected")
         async def _disconnected(_transport: object) -> None:
             if not self._leaving:
                 self.failed.set()
+                await input_drain.cancel()
 
         @transport.event_handler("on_participant_connected")
         async def _arrived(_transport: object, _participant: str) -> None:
@@ -276,8 +368,11 @@ class JoinedRoom:
     async def leave(self) -> None:
         """Release transport event handlers after the pipeline has ended."""
         transport, self._transport = self._transport, None
+        input_drain, self._input_drain = self._input_drain, None
         self._leaving = True
         self.ended.set()
+        if input_drain is not None:
+            await input_drain.cancel()
         if transport is not None:
             try:
                 await transport.cleanup()

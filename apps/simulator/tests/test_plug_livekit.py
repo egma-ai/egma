@@ -128,6 +128,11 @@ async def test_room_transport_loss_is_not_remote_participant_departure(
             raise AssertionError("the pinned drain wrapper was not installed")
             yield
 
+        async def _process_audio_stream(
+            self, _stream: object, _participant_id: str
+        ) -> None:
+            raise AssertionError("the pinned drain wrapper was not installed")
+
         async def _close_audio_stream(self, _participant_id: str) -> None:
             raise AssertionError("the pinned drain wrapper was not installed")
 
@@ -155,99 +160,319 @@ async def test_room_transport_loss_is_not_remote_participant_departure(
     assert lost.value.ending == ERROR
 
     media.failed.clear()
-    await transport.handlers["on_participant_disconnected"](
-        transport, AGENT_IDENTITY
-    )
+    await transport.handlers["on_participant_disconnected"](transport, AGENT_IDENTITY)
     assert media.ended.is_set()
 
     await room.leave()
     assert not media.failed.is_set()
 
 
-async def test_pipecat_17_departure_waits_for_both_inbound_audio_queues():
-    """The pinned shim orders departure after conversion and pipeline input."""
-
-    class Stream:
-        def __init__(self) -> None:
-            self.closed = asyncio.Event()
-
-        async def aclose(self) -> None:
-            self.closed.set()
-
-    class Client:
-        def __init__(self) -> None:
-            self._audio_queue: asyncio.Queue[object] = asyncio.Queue()
-            self._audio_streams: dict[str, tuple[Stream, asyncio.Task[None]]] = {}
-
-        async def get_next_audio_frame(self):
-            raise AssertionError("the pinned drain wrapper was not installed")
-            yield
-
-        async def _close_audio_stream(self, _participant_id: str) -> None:
-            raise AssertionError("the pinned drain wrapper was not installed")
-
-    class Input:
-        def __init__(self, client: Client) -> None:
-            self._client = client
-            self._audio_in_queue: asyncio.Queue[object] = asyncio.Queue()
-            self.order: list[str] = []
-
-        async def push_frame(self, frame: object) -> None:
-            self.order.append("departure")
-            frame.completed.set()
-
-    client = Client()
-    input_transport = Input(client)
-    drain = room_media._Pipecat17InputDrain(input_transport)
-    stream = Stream()
-    produced = asyncio.Event()
-
-    async def produce() -> None:
-        await client._audio_queue.put("last audio")
-        produced.set()
-        await stream.closed.wait()
-
-    producer = asyncio.create_task(produce())
-    client._audio_streams[AGENT_IDENTITY] = (stream, producer)
-    converted = asyncio.Event()
-
-    async def convert() -> None:
-        async for frame in client.get_next_audio_frame():
-            await converted.wait()
-            await input_transport._audio_in_queue.put(frame)
-
-    converter = asyncio.create_task(convert())
-    forwarded = asyncio.Event()
-
-    async def forward() -> None:
-        frame = await input_transport._audio_in_queue.get()
-        await forwarded.wait()
-        input_transport.order.append(str(frame))
-        input_transport._audio_in_queue.task_done()
-
-    forwarder = asyncio.create_task(forward())
-    await produced.wait()
-    ended = asyncio.Event()
-    departing = asyncio.create_task(
-        drain.participant_left(AGENT_IDENTITY, ended)
+async def test_the_pinned_reader_keeps_livekit_frames_buffered_before_eos():
+    """LiveKit 1.1.14's iterator drops these; Egma's reader must not."""
+    from livekit import rtc
+    from livekit.rtc._utils import RingQueue
+    from pipecat.transports.livekit.transport import (
+        LiveKitInputTransport,
+        LiveKitTransportClient,
     )
 
-    await asyncio.sleep(0)
-    assert not ended.is_set()
-    converted.set()
-    await asyncio.sleep(0)
-    assert not ended.is_set()
-    forwarded.set()
-    await asyncio.wait_for(departing, timeout=1.0)
+    class BufferedAudioStream(rtc.AudioStream):
+        def __del__(self) -> None:
+            pass
 
-    assert ended.is_set()
-    assert input_transport.order == ["last audio", "departure"]
-    assert stream.closed.is_set()
-    assert producer.done() and not producer.cancelled()
-    await forwarder
-    converter.cancel()
+    stream = object.__new__(BufferedAudioStream)
+    stream._queue = RingQueue(0)
+    finished = asyncio.get_running_loop().create_future()
+    finished.set_result(None)
+    stream._task = finished
+    first = rtc.AudioFrameEvent(
+        rtc.AudioFrame(
+            data=bytes(320),
+            sample_rate=16000,
+            num_channels=1,
+            samples_per_channel=160,
+        )
+    )
+    second = rtc.AudioFrameEvent(
+        rtc.AudioFrame(
+            data=bytes(320),
+            sample_rate=16000,
+            num_channels=1,
+            samples_per_channel=160,
+        )
+    )
+    stream._queue.put(first)
+    stream._queue.put(second)
+    stream._queue.put(None)
+
+    with pytest.raises(StopAsyncIteration):
+        await stream.__anext__()
+
+    room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    media = room.create_transport()
+    input_transport = media.input[0]
+    client = input_transport._client
+
+    # This is the exact private Pipecat 1.7.0 seam the production guard pins.
+    # Only its faulty stream reader is replaced; conversion, iteration, and
+    # stream close stay on Pipecat's installed implementations.
+    assert (
+        input_transport._audio_in_task_handler.__func__
+        is LiveKitInputTransport._audio_in_task_handler
+    )
+    assert (
+        client.get_next_audio_frame.__func__
+        is LiveKitTransportClient.get_next_audio_frame
+    )
+    assert (
+        client._close_audio_stream.__func__
+        is LiveKitTransportClient._close_audio_stream
+    )
+    await client._process_audio_stream(stream, AGENT_IDENTITY)
+
+    assert client._audio_queue.qsize() == 2
+    assert client._audio_queue.get_nowait() == (first, AGENT_IDENTITY)
+    client._audio_queue.task_done()
+    assert client._audio_queue.get_nowait() == (second, AGENT_IDENTITY)
+    client._audio_queue.task_done()
+
+
+async def test_pipecat_17_departure_waits_for_both_inbound_audio_queues():
+    """One departure follows both real Pipecat queues and one timeline ack."""
+    from livekit import rtc
+    from livekit.rtc._utils import RingQueue
+    from pipecat.frames.frames import AudioRawFrame
+
+    class BufferedAudioStream(rtc.AudioStream):
+        def __del__(self) -> None:
+            pass
+
+    class Handle:
+        def __init__(self) -> None:
+            self.disposed = False
+
+        def dispose(self) -> None:
+            self.disposed = True
+
+    room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    media = room.create_transport()
+    input_transport = media.input[0]
+    client = input_transport._client
+    drain = room._input_drain
+    input_transport._audio_in_queue = asyncio.Queue()
+
+    conversion_started = asyncio.Event()
+    convert = asyncio.Event()
+
+    async def gated_conversion(_event: object) -> AudioRawFrame:
+        conversion_started.set()
+        await convert.wait()
+        return AudioRawFrame(audio=bytes(320), sample_rate=16000, num_channels=1)
+
+    input_transport._convert_livekit_audio_to_pipecat = gated_conversion
+    receiving = asyncio.create_task(input_transport._audio_in_task_handler())
+
+    order: list[str] = []
+    forwarding_started = asyncio.Event()
+    forward = asyncio.Event()
+
+    async def forward_input() -> None:
+        frame = await input_transport._audio_in_queue.get()
+        forwarding_started.set()
+        await forward.wait()
+        order.append(type(frame).__name__)
+        input_transport._audio_in_queue.task_done()
+
+    forwarding = asyncio.create_task(forward_input())
+    marker_started = asyncio.Event()
+    acknowledge = asyncio.Event()
+    markers: list[object] = []
+
+    async def push_marker(frame: object, *_args: object) -> None:
+        markers.append(frame)
+        order.append("departure")
+        marker_started.set()
+        await acknowledge.wait()
+        frame.completed.set()
+
+    input_transport.push_frame = push_marker
+
+    stream = object.__new__(BufferedAudioStream)
+    stream._queue = RingQueue(0)
+    stream._track = None
+    stream._ffi_handle = Handle()
+    stream._processor = None
+    source = asyncio.get_running_loop().create_future()
+    source.set_result(None)
+    stream._task = source
+    final_audio = rtc.AudioFrameEvent(
+        rtc.AudioFrame(
+            data=bytes(320),
+            sample_rate=16000,
+            num_channels=1,
+            samples_per_channel=160,
+        )
+    )
+    stream._queue.put(final_audio)
+    stream._queue.put(None)
+    reader = asyncio.create_task(client._process_audio_stream(stream, AGENT_IDENTITY))
+    client._audio_streams[AGENT_IDENTITY] = (stream, reader)
+    await conversion_started.wait()
+
+    first = asyncio.create_task(drain.participant_left(AGENT_IDENTITY, media.ended))
+    second = asyncio.create_task(drain.participant_left(AGENT_IDENTITY, media.ended))
+    await asyncio.sleep(0)
+    assert not markers
+    assert not media.ended.is_set()
+
+    convert.set()
+    await forwarding_started.wait()
+    assert not markers
+    assert not media.ended.is_set()
+
+    forward.set()
+    await marker_started.wait()
+    assert len(markers) == 1
+    assert not media.ended.is_set()
+
+    acknowledge.set()
+    await asyncio.wait_for(asyncio.gather(first, second), timeout=1.0)
+    assert media.ended.is_set()
+    assert len(markers) == 1
+    assert order == ["UserAudioRawFrame", "departure"]
+    assert stream._ffi_handle.disposed
+    assert reader.done() and not reader.cancelled()
+
+    await forwarding
+    receiving.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await converter
+        await receiving
+
+
+async def test_a_stalled_departure_fails_remotely_but_local_leave_reaps_it():
+    """The one drain deadline is bounded; local teardown stays intentional."""
+    from livekit import rtc
+    from livekit.rtc._utils import RingQueue
+
+    assert room_media.AUDIO_STREAM_CLOSE_SECONDS == 2.0
+
+    class RemoteAudioStream(rtc.AudioStream):
+        def __del__(self) -> None:
+            pass
+
+    class RemoteHandle:
+        def dispose(self) -> None:
+            pass
+
+    remote_room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    remote_media = remote_room.create_transport()
+    remote_input = remote_media.input[0]
+    remote_client = remote_input._client
+    remote_stream = object.__new__(RemoteAudioStream)
+    remote_stream._queue = RingQueue(0)
+    remote_stream._track = None
+    remote_stream._ffi_handle = RemoteHandle()
+    remote_stream._processor = None
+    remote_source = asyncio.get_running_loop().create_future()
+    remote_stream._task = remote_source
+    remote_reader = asyncio.create_task(
+        remote_client._process_audio_stream(remote_stream, AGENT_IDENTITY)
+    )
+    remote_client._audio_streams[AGENT_IDENTITY] = (
+        remote_stream,
+        remote_reader,
+    )
+    remote_markers: list[object] = []
+
+    async def catch_remote_marker(frame: object, *_args: object) -> None:
+        remote_markers.append(frame)
+
+    remote_input.push_frame = catch_remote_marker
+    remote_transport = remote_room._transport
+    remote_handler = remote_transport._event_handlers[
+        "on_participant_disconnected"
+    ].handlers[0]
+    remote_started = asyncio.get_running_loop().time()
+    await remote_handler(remote_transport, AGENT_IDENTITY)
+    remote_elapsed = asyncio.get_running_loop().time() - remote_started
+
+    assert 1.8 <= remote_elapsed < 2.5
+    assert remote_media.failed.is_set()
+    assert not remote_media.ended.is_set()
+    assert not remote_markers
+    assert remote_source.cancelled()
+    assert remote_reader.cancelled()
+
+    class LocalAudioStream(rtc.AudioStream):
+        def __del__(self) -> None:
+            pass
+
+    class LocalHandle:
+        def __init__(self) -> None:
+            self.disposed = asyncio.Event()
+
+        def dispose(self) -> None:
+            self.disposed.set()
+
+    local_room = JoinedRoom(url=A_URL, token=A_SECRET, room_name="local-leave")
+    local_media = local_room.create_transport()
+    local_input = local_media.input[0]
+    local_client = local_input._client
+    local_drain = local_room._input_drain
+    assert local_drain is not None
+    local_stream = object.__new__(LocalAudioStream)
+    local_stream._queue = RingQueue(0)
+    local_stream._track = None
+    local_stream._ffi_handle = LocalHandle()
+    local_stream._processor = None
+    local_source = asyncio.get_running_loop().create_future()
+    local_stream._task = local_source
+    local_reader = asyncio.create_task(
+        local_client._process_audio_stream(local_stream, AGENT_IDENTITY)
+    )
+    local_client._audio_streams[AGENT_IDENTITY] = (
+        local_stream,
+        local_reader,
+    )
+    local_markers: list[object] = []
+
+    async def catch_local_marker(frame: object, *_args: object) -> None:
+        local_markers.append(frame)
+
+    local_input.push_frame = catch_local_marker
+    local_transport = local_room._transport
+    cleaned = asyncio.Event()
+
+    async def clean_after_departure() -> None:
+        assert all(task.done() for task in local_drain._departures.values())
+        cleaned.set()
+
+    local_transport.cleanup = clean_after_departure
+    local_handler = local_transport._event_handlers[
+        "on_participant_disconnected"
+    ].handlers[0]
+    leaving_remotely = asyncio.create_task(
+        local_handler(local_transport, AGENT_IDENTITY)
+    )
+    await local_stream._ffi_handle.disposed.wait()
+
+    before_disconnect = local_transport._event_handlers[
+        "on_before_disconnect"
+    ].handlers[0]
+    local_started = asyncio.get_running_loop().time()
+    await asyncio.wait_for(before_disconnect(local_transport), timeout=0.5)
+    local_elapsed = asyncio.get_running_loop().time() - local_started
+    with pytest.raises(asyncio.CancelledError):
+        await leaving_remotely
+    await asyncio.wait_for(local_room.leave(), timeout=0.5)
+
+    assert local_elapsed < 0.5
+    assert cleaned.is_set()
+    assert local_media.ended.is_set()
+    assert not local_media.failed.is_set()
+    assert not local_markers
+    assert local_source.cancelled()
+    assert local_reader.cancelled()
 
 
 def livekit_spec(
@@ -451,8 +676,7 @@ async def test_a_livekit_spec_conducts_a_whole_simulation_in_a_room(
         monkeypatch,
         agent_name="front-desk",
         scenario=(
-            "I need to move my Tuesday cleaning to Thursday. "
-            "My name is Margaret Hale."
+            "I need to move my Tuesday cleaning to Thursday. My name is Margaret Hale."
         ),
     )
 
@@ -551,9 +775,7 @@ async def test_a_room_turn_span_is_anchored_to_the_audio_timeline(
 
     recorded_begins = audio_offsets([began for _speaker, began, _ended in heard])
     recorded_ends = audio_offsets([ended for _speaker, _began, ended in heard])
-    spanned_begins = span_offsets(
-        [began for _speaker, _text, began, _ended in spoken]
-    )
+    spanned_begins = span_offsets([began for _speaker, _text, began, _ended in spoken])
     spanned_ends = span_offsets([ended for _speaker, _text, _began, ended in spoken])
     assert recorded_begins == pytest.approx(spanned_begins, abs=FRAME_SECONDS)
     assert recorded_ends == pytest.approx(spanned_ends, abs=FRAME_SECONDS)
@@ -655,9 +877,7 @@ async def test_the_dispatch_carries_egmas_context_and_none_of_the_test(
 
 def test_egmas_context_is_the_same_string_wherever_it_is_built():
     """Written out once, so the sentence a worker parses cannot drift."""
-    assert json.loads(
-        dispatch_metadata("sim_01ABC", egma_identity="egma-persona")
-    ) == {
+    assert json.loads(dispatch_metadata("sim_01ABC", egma_identity="egma-persona")) == {
         "simulationId": "sim_01ABC",
         "modality": "voice",
         "egmaIdentity": "egma-persona",
@@ -681,9 +901,7 @@ async def test_the_dispatch_names_the_participant_the_token_really_opens(
     )
 
     named = json.loads(stub.dispatches[0].metadata)["egmaIdentity"]
-    minted = jwt_identity(
-        room_token(A_KEY, A_SECRET, stub.rooms[0].name)
-    )
+    minted = jwt_identity(room_token(A_KEY, A_SECRET, stub.rooms[0].name))
     assert named == minted == PERSONA_IDENTITY
 
 
@@ -896,9 +1114,7 @@ async def test_a_livekit_that_answers_nowhere_fails_without_a_credential(
         {"url": "http://127.0.0.1:1"},
         {"apiKey": A_KEY, "apiSecret": A_SECRET},
     )
-    driver = LiveKitRoomBackend(
-        settings=settings, simulation_id=A_SIMULATION
-    )
+    driver = LiveKitRoomBackend(settings=settings, simulation_id=A_SIMULATION)
 
     with pytest.raises(MediaBackendError) as refusal:
         await driver.create_transport()
@@ -965,9 +1181,7 @@ async def test_a_platform_that_says_the_secret_back_still_leaks_nothing(
     """A careless platform's own words can include the key pair it was
     just given. The driver is what has to survive that: nothing downstream
     may repeat a secret because somebody else did first."""
-    stub = RoomStub(
-        refuses_dispatch=f"auth failed for key {A_KEY} secret {A_SECRET}"
-    )
+    stub = RoomStub(refuses_dispatch=f"auth failed for key {A_KEY} secret {A_SECRET}")
 
     with pytest.raises(PlugError) as refused:
         await room_walk(
@@ -996,9 +1210,7 @@ async def test_nothing_a_simulation_produces_carries_the_api_secret(
     """
     monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
     caplog.set_level(logging.DEBUG)
-    stub = RoomStub(
-        greeting="Front desk.", replies=["Noted."], agent_joins=agent_joins
-    )
+    stub = RoomStub(greeting="Front desk.", replies=["Noted."], agent_joins=agent_joins)
 
     produced: list[str] = []
     try:
@@ -1164,9 +1376,7 @@ def test_the_room_is_made_fresh_and_never_reused():
         {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
     )
     built = [
-        LiveKitRoomBackend(
-            settings=settings, simulation_id=A_SIMULATION
-        ).room_name
+        LiveKitRoomBackend(settings=settings, simulation_id=A_SIMULATION).room_name
         for _ in range(2)
     ]
     assert all(name.startswith(f"{ROOM_PREFIX}-") for name in built)
@@ -1579,9 +1789,7 @@ async def test_an_endpoint_that_redirects_is_answered_rather_than_followed():
     status it cannot work with.
     """
     stub = RoomStub()
-    with serving(
-        status=302, body={"token": "never.minted.here"}
-    ) as endpoint:
+    with serving(status=302, body={"token": "never.minted.here"}) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
         with pytest.raises(PlugError) as refused:
             await plug.prepare()
@@ -1726,9 +1934,7 @@ async def test_nothing_a_token_endpoint_simulation_produces_carries_the_header(
     """
     monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
     caplog.set_level(logging.DEBUG)
-    stub = RoomStub(
-        greeting="Front desk.", replies=["Noted."], agent_joins=agent_joins
-    )
+    stub = RoomStub(greeting="Front desk.", replies=["Noted."], agent_joins=agent_joins)
 
     produced: list[str] = []
     with serving() as endpoint:
@@ -1759,9 +1965,7 @@ async def test_an_endpoint_that_says_the_header_back_still_leaks_nothing():
     """A careless endpoint can echo the header it was just sent straight
     into its own error body. The driver is what has to survive that."""
     stub = RoomStub()
-    with serving(
-        status=403, raw=f"forbidden for Bearer {A_HEADER_SECRET}"
-    ) as endpoint:
+    with serving(status=403, raw=f"forbidden for Bearer {A_HEADER_SECRET}") as endpoint:
         plug = endpoint_room(stub, endpoint.url)
         with pytest.raises(PlugError) as refused:
             await plug.prepare()
