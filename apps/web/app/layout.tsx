@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 
+import { ProductShellBoundary } from "../ui/shell.tsx";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -46,8 +47,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       data-theme="light"
       suppressHydrationWarning
     >
-      <head><script dangerouslySetInnerHTML={{ __html: themeScript }} /></head>
-      <body>{children}</body>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
+      <body>
+        <ProductShellBoundary>{children}</ProductShellBoundary>
+      </body>
     </html>
   );
 }

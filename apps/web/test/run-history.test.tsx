@@ -12,7 +12,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RunDetailPage from "../app/projects/[projectId]/runs/[runId]/page.tsx";
 import RunsPage from "../app/projects/[projectId]/runs/page.tsx";
 import type { Me } from "../lib/me.ts";
-import { retryKeyFor } from "../lib/runs.ts";
 
 /**
  * The run history and one run's page, rendered and driven.
@@ -354,8 +353,10 @@ function history(
 
 describe("the run list", () => {
   it("keeps the four facts apart on one row", async () => {
+    const createdAt = new Date(Date.now() - 5 * 60_000).toISOString();
     history([
       runRow({
+        created_at: createdAt,
         status: "completed",
         verdict: "failed",
         simulation_counts: { ...NO_SIMULATIONS, completed: 1, skipped: 1 },
@@ -365,16 +366,46 @@ describe("the run list", () => {
     ]);
     render(<RunsPage />);
 
+    expect(screen.getByRole("heading", { name: "Simulation runs" })).toBeTruthy();
+    expect(screen.queryByText("Project")).toBeNull();
+    expect(
+      screen.queryByText(/Every execution of a selection of tests/u),
+    ).toBeNull();
+
+    const table = await screen.findByRole("table", {
+      name: "Runs in this project",
+    });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((header) => header.textContent),
+    ).toEqual([
+      "Run",
+      "Started",
+      "Status",
+      "Simulations",
+      "Grading",
+      "Verdict",
+      "",
+    ]);
+
     // The machinery finished, and what it found was bad. Both are on the row,
     // and neither is the other.
     await screen.findAllByText("completed");
     await screen.findAllByText("failed");
+    expect(within(table).getByText("1 of 1 judged")).toBeTruthy();
     // The skipped conversation is counted as itself and never as a failure.
     const tallies = await screen.findAllByText(/1 completed · 1 skipped/u);
     expect(tallies.length).toBeGreaterThan(0);
     for (const tally of tallies) {
       expect(tally.textContent).not.toContain("failed");
     }
+
+    // The list scans by age, while the machine instant and exact local moment
+    // stay on the semantic time element.
+    const started = await screen.findByText("5 minutes ago");
+    expect(started.closest("time")?.dateTime).toBe(createdAt);
+    expect(started.closest("time")?.title).toMatch(/^\d{4}-\d{2}-\d{2} /u);
   });
 
   it("says a run nobody has judged has no verdict, rather than showing a failure", async () => {
@@ -535,7 +566,6 @@ function detail(
     readonly run?: Record<string, unknown> | readonly Record<string, unknown>[];
     readonly events?: Stubbed | readonly Stubbed[];
     readonly cancel?: Stubbed;
-    readonly retry?: Stubbed;
     readonly secondRun?: Record<string, unknown>;
   } = {},
 ): void {
@@ -549,10 +579,6 @@ function detail(
       status: 200,
       body: runDetail({ status: "canceled" }),
     },
-    "/api/runs/run_1/retry": options.retry ?? {
-      status: 201,
-      body: runDetail({ id: "run_9" }),
-    },
     "/api/runs/run_2": {
       status: 200,
       body: options.secondRun ?? runDetail({ id: "run_2", label: "Second" }),
@@ -562,7 +588,38 @@ function detail(
 }
 
 describe("one run's page", () => {
-  it("keeps machinery, grading and verdict apart on every simulation", async () => {
+  it("uses the shared parent trail and shows no terminal action", async () => {
+    const createdAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    detail({ run: runDetail({ created_at: createdAt }) });
+    render(<RunDetailPage />);
+
+    const breadcrumb = await screen.findByRole("navigation", {
+      name: "Breadcrumb",
+    });
+    const runs = within(breadcrumb).getByRole("link", { name: "Runs" });
+    const current = within(breadcrumb).getByText("Nightly smoke");
+
+    expect(runs.getAttribute("href")).toBe("/projects/prj_1/runs");
+    expect(current.getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByRole("link", { name: "All runs" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.queryByText(/already finished/u)).toBeNull();
+
+    const summary = screen.getByRole("group", { name: "Run summary" });
+    const started = within(summary).getByText("5 minutes ago");
+    expect(started.closest("time")?.dateTime).toBe(createdAt);
+    expect(started.closest("time")?.title).toMatch(/^\d{4}-\d{2}-\d{2} /u);
+    expect(within(summary).getByText("Status")).toBeTruthy();
+    expect(within(summary).getByText("completed")).toBeTruthy();
+    expect(within(summary).getByText("Verdict")).toBeTruthy();
+    expect(within(summary).getByText("passed")).toBeTruthy();
+    // The summary reads as one compact line of facts. Status and verdict are
+    // text with symbols, not chips that change the line's height.
+    expect(summary.querySelector('[class*="badge"]')).toBeNull();
+  });
+
+  it("keeps compact execution and verdict states apart on every simulation", async () => {
     detail({
       run: runDetail({
         status: "completed",
@@ -573,15 +630,15 @@ describe("one run's page", () => {
           failed: 1,
           skipped: 1,
         },
-        verdict: "errored",
+        verdict: null,
         simulations: [
-          simulationRow(),
+          simulationRow({ persona_name: "Starter" }),
           simulationRow({
             id: "sim_2",
             position: 2,
             status: "failed",
             grading: "pending",
-            verdict: "errored",
+            verdict: null,
             counts: null,
             score: null,
             reason: "not_answered",
@@ -602,7 +659,6 @@ describe("one run's page", () => {
     });
     render(<RunDetailPage />);
 
-    await screen.findAllByText("errored");
     await screen.findAllByText("skipped");
     const table = await screen.findByRole("table", {
       name: "Simulations in this run",
@@ -610,13 +666,16 @@ describe("one run's page", () => {
     expect(
       within(table)
         .getAllByRole("columnheader")
-        .slice(0, 2)
         .map((header) => header.textContent),
-    ).toEqual(["Simulation", "Status"]);
+    ).toEqual(["Simulation", "Persona", "Execution", "Verdict"]);
+    expect(within(table).getByText("Starter")).toBeTruthy();
+    expect(within(table).queryByText("Persona: Starter")).toBeNull();
+    expect(within(table).queryByText("Not judged yet")).toBeNull();
+    expect(within(table).getByText("Not judged")).toBeTruthy();
 
     // Egma could not conduct one of them, and the page says so in those words
     // rather than calling it a failed verdict.
-    const execution = await screen.findAllByText(/not an?\s*failed grader verdict/u);
+    const execution = await screen.findAllByText(/not a grader verdict/u);
     expect(execution.length).toBeGreaterThan(0);
 
     // And it declined to conduct another, naming what decided it.
@@ -636,31 +695,7 @@ describe("one run's page", () => {
     expect(screen.queryAllByTitle(JUDGED_THE_AGENT)).toEqual([]);
   });
 
-  it("shows the frozen plan and says when it was decided", async () => {
-    detail();
-    render(<RunDetailPage />);
-
-    await screen.findByText("Expected behaviors");
-    expect(screen.queryByText("expected_behaviors")).toBeNull();
-    await screen.findByText(/Frozen when this run started/u);
-    // A judge choice names a credential reference and never a key.
-    await screen.findByText(/openai\/gpt-4\.1-mini · credential jcr_1/u);
-  });
-
-  it("says an unrecorded plan was never recorded, and reconstructs nothing", async () => {
-    detail({
-      run: runDetail({
-        grading_plan: { state: "not_recorded", captured_at: null, groups: [] },
-      }),
-    });
-    render(<RunDetailPage />);
-
-    await screen.findByText(/predates frozen grading plans/u);
-    await screen.findByText("No grading plan was recorded");
-    expect(screen.queryByText("Expected behaviors")).toBeNull();
-  });
-
-  it("names what it ran against after both have been archived", async () => {
+  it("puts the agent before the connection and keeps archived names readable", async () => {
     detail({
       run: runDetail({
         agent: { id: "agt_1", name: "Front desk", archived: true },
@@ -674,9 +709,17 @@ describe("one run's page", () => {
     });
     render(<RunDetailPage />);
 
-    await screen.findByText("Front desk");
-    await screen.findByText("retell-staging");
+    const summary = await screen.findByRole("group", { name: "Run summary" });
+    await within(summary).findByText("Front desk");
+    await within(summary).findByText("retell-staging");
+    expect(
+      within(summary)
+        .getAllByRole("term")
+        .map((term) => term.textContent),
+    ).toEqual(["Started", "Status", "Verdict", "Agent", "Connection"]);
+    expect(within(summary).queryByText("retell · chat")).toBeNull();
     expect((await screen.findAllByText("Archived")).length).toBe(2);
+    expect(summary.querySelector('[class*="badge"]')).toBeNull();
   });
 
   /**
@@ -731,6 +774,8 @@ describe("one run's page", () => {
 
     // It starts as the read described it…
     await screen.findAllByText("running");
+    // A live simulation uses the shared active mark, not the old static arrow.
+    expect(document.querySelector('[data-motion="active"]')).toBeTruthy();
     // …and the feed moves it, with no second read of the run.
     await screen.findAllByText("failed");
     await waitFor(() => {
@@ -747,35 +792,16 @@ describe("one run's page", () => {
     // they are absent. Asserting the absence first would pass because nothing
     // had rendered yet, and would keep passing after the rule was deleted.
     await screen.findByRole("heading", { name: "Nightly smoke" });
-    await screen.findByText("Expected behaviors");
+    await screen.findByRole("table", { name: "Simulations in this run" });
 
     expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(sentWith("/api/runs/run_1/retry", "POST")).toEqual([]);
     expect(sentWith("/api/runs/run_1/cancel", "POST")).toEqual([]);
 
-    // Everything else on the page is theirs: the progress, the pins, the
-    // identities, and the sentence saying what a Retry would do.
-    await screen.findAllByText(/prsv_7/u);
-    await screen.findByText(/not an exact replay of the original conditions/u);
-    await screen.findByText(/cannot start or stop runs/u);
-  });
-
-  it("shows the pins a conversation actually executed", async () => {
-    detail();
-    render(<RunDetailPage />);
-
-    const pinned = await screen.findAllByText(/tstv_1 · prsv_7/u);
-    expect(pinned.length).toBeGreaterThan(0);
-  });
-
-  it("offers no Cancel for a run that has already finished", async () => {
-    detail();
-    render(<RunDetailPage />);
-
-    const cancel = await screen.findByRole("button", { name: "Cancel run" });
-    expect((cancel as HTMLButtonElement).disabled).toBe(true);
-    await screen.findByText(/already finished/u);
+    await screen.findByText("Front desk");
+    await screen.findByText("retell-staging");
+    expect(screen.queryByText(/tstv_1|prsv_7/u)).toBeNull();
   });
 
   it("cancels an active run, and never reports it completed afterwards", async () => {
@@ -833,6 +859,7 @@ describe("one run's page", () => {
     });
     render(<RunDetailPage />);
 
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
     // Wait for the dialog itself before reaching for its control: the header
     // carries a button of the same name, so taking "the last one" before the
@@ -852,102 +879,10 @@ describe("one run's page", () => {
     expect(sentWith("/api/runs/run_1/cancel", "POST")[0]?.url).toBe(
       "/api/runs/run_1/cancel?project=prj_1",
     );
-    await screen.findByText(/This run was canceled/u);
+    await screen.findAllByText("canceled");
     // Stopping early never reads as a suite that went green.
     expect(screen.queryAllByText("completed")).toEqual([]);
     expect(screen.queryAllByText("passed")).toEqual([]);
-  });
-
-  it("says Retry is not a replay before it starts one, and carries one key", async () => {
-    detail();
-    render(<RunDetailPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
-    // The page carries the same sentence, so the one inside the confirmation is
-    // asked for by the dialog it belongs to rather than by text alone.
-    const asking = await screen.findByRole("dialog", {
-      name: "Retry run “Nightly smoke”?",
-    });
-    expect(asking.textContent).toContain(
-      "not an exact replay of the original conditions",
-    );
-
-    fireEvent.click(await screen.findByRole("button", { name: "Start the retry" }));
-    await waitFor(() => {
-      expect(sentWith("/api/runs/run_1/retry", "POST")).toHaveLength(1);
-    });
-    const [asked] = sentWith("/api/runs/run_1/retry", "POST");
-    /*
-     * **The key is derived from the run, not minted fresh on every press.** A
-     * non-empty assertion passes for a per-press random key, which is exactly
-     * the failure the idempotency fix was written about: two presses on a slow
-     * answer would become two runs against a real agent. So the key is asserted
-     * by value, against the one function that decides it.
-     */
-    expect(asked?.body?.idempotency_key).toBe(retryKeyFor("run_1"));
-    expect(retryKeyFor("run_1")).toBe(retryKeyFor("run_1"));
-    // And which project the retry lands in, for the same reason Cancel above
-    // says it.
-    expect(asked?.url).toBe("/api/runs/run_1/retry?project=prj_1");
-    // The new run is where somebody lands, and the old one is not touched.
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_9");
-  });
-
-  it("shows a refused Retry's own sentence and the way back to the builder", async () => {
-    detail({
-      retry: {
-        status: 409,
-        body: {
-          error: "retry_unavailable",
-          message:
-            "Run run_1 cannot be retried because connection con_1 is not active or no longer applies. Open the run builder and choose active resources; the original run was not changed.",
-        },
-      },
-    });
-    render(<RunDetailPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Start the retry" }));
-
-    await screen.findByText(/connection con_1 is not active or no longer applies/u);
-    const back = await screen.findByRole("link", { name: "Open the run builder" });
-    expect(back.getAttribute("href")).toBe("/projects/prj_1/runs/new");
-    // Nothing was started, so nothing navigated.
-    expect(routed.push).not.toHaveBeenCalled();
-  });
-
-  /**
-   * Opening a different run in the same page: two clears, and each survives the
-   * other's fix. The feed's accumulation belongs to the run it was read for, and
-   * so does a pending refusal.
-   */
-  it("drops a refused Retry when a different run is opened", async () => {
-    detail({
-      retry: {
-        status: 409,
-        body: {
-          error: "retry_unavailable",
-          message: "Run run_1 cannot be retried because agent agt_1 is not active.",
-        },
-      },
-    });
-    const view = render(<RunDetailPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Start the retry" }));
-    // Wait for the refusal to be on screen before switching, so the assertion
-    // below is about the clearing rather than about the timing.
-    await screen.findByText(/agent agt_1 is not active/u);
-
-    routed.params = { projectId: "prj_1", runId: "run_2" };
-    view.rerender(<RunDetailPage />);
-
-    // Wait for the read that draws the other run before asserting an absence,
-    // so this cannot pass because nothing had rendered yet.
-    await screen.findByRole("heading", { name: "Second" });
-    await waitFor(() => {
-      expect(screen.queryByText(/agent agt_1 is not active/u)).toBeNull();
-    });
   });
 
   it("drops what one run's feed moved when a different run is opened", async () => {

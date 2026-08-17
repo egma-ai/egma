@@ -692,7 +692,11 @@ export const CONNECTION_REGISTRY: Readonly<
 > = {
   retell: {
     label: "Retell",
-    modalities: ["chat", "voice"],
+    // The direct Retell adapter uses the chat-session API. Voice agents are
+    // reached through a phone connection after provider setup resolves one of
+    // their routed numbers. Admitting `voice` here would create a connection
+    // the simulator cannot conduct and fail it only after dispatch.
+    modalities: ["chat"],
     topology: "hosted-broker",
     variants: [
       {
@@ -994,6 +998,29 @@ export function conductableConnectionTypes(): readonly ConnectionType[] {
 }
 
 /**
+ * Whether this exact stored connection can be handed to a simulator.
+ *
+ * The modality is checked here as well as at write time. Old rows can outlive
+ * a registry correction, and dispatch must not trust a row only because it was
+ * accepted by an older build. That is how legacy direct Retell voice rows are
+ * stopped while Retell chat rows and provider-blind phone rows keep working.
+ * This check cannot know whether an id inside a chat-labelled row belongs to a
+ * provider voice agent; the Retell read in the API claim assembler owns that
+ * second, provider-aware check.
+ */
+export function connectionIsConductable(
+  type: string,
+  modality: string,
+): boolean {
+  const descriptor = CONNECTION_REGISTRY[type as ConnectionType];
+  return (
+    descriptor !== undefined &&
+    descriptor.simulatorAdapter &&
+    descriptor.modalities.includes(modality as Modality)
+  );
+}
+
+/**
  * What a run over a type nothing can conduct is told.
  *
  * The wording is the platform's own and a client relays it word for word to
@@ -1003,9 +1030,13 @@ export function conductableConnectionTypes(): readonly ConnectionType[] {
  * than out of the sentence, so it can never name an adapter that has not
  * shipped or miss one that has.
  */
-export function noSimulatorAdapterMessage(type: string): string {
+export function noSimulatorAdapterMessage(
+  type: string,
+  modality?: string,
+): string {
+  const reach = modality === undefined ? `${type}` : `${type} ${modality}`;
   return (
-    `Egma has no simulator adapter for a ${type} connection yet, ` +
+    `Egma has no simulator adapter for a ${reach} connection yet, ` +
     `so it will not start a run it cannot conduct. Run these tests over a ` +
     `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`
   );

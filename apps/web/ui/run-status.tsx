@@ -3,7 +3,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { asMoment } from "../lib/instants.ts";
 import { projectPath } from "../lib/project-context.ts";
 import {
   runsQuery,
@@ -19,6 +18,7 @@ import {
 import { Badge, ButtonLink, type BadgeTone } from "./controls.tsx";
 import { DataTable, type Column } from "./data-table.tsx";
 import { Empty, Failure, Loading } from "./page-state.tsx";
+import { RelativeInstant, useMinuteClock } from "./relative-time.tsx";
 import { useProjectRead } from "./resource.ts";
 import { Section } from "./shell.tsx";
 import styles from "./run-status.module.css";
@@ -87,18 +87,23 @@ type StateMarkKind =
  * badges easier to scan and keeps their difference visible without asking a
  * reader to learn the temporary green, amber, and red compatibility palette.
  */
-function StateMark({ kind }: { readonly kind: StateMarkKind }) {
+function StateMark({
+  kind,
+  moving = false,
+}: {
+  readonly kind: StateMarkKind;
+  readonly moving?: boolean;
+}) {
   return (
     <svg
-      className={styles.stateMark}
+      className={`${styles.stateMark}${moving ? ` ${styles.stateMarkMoving}` : ""}`}
+      data-motion={moving ? "active" : undefined}
       viewBox="0 0 12 12"
       aria-hidden="true"
       focusable="false"
     >
       {kind === "waiting" ? <circle cx="6" cy="6" r="3.75" /> : null}
-      {kind === "active" ? (
-        <path d="M2 6h7M6.5 3.5 9 6 6.5 8.5" />
-      ) : null}
+      {kind === "active" ? <path d="M6 2a4 4 0 1 1-4 4" /> : null}
       {kind === "complete" ? <path d="m2.5 6 2.25 2.25L9.5 3.5" /> : null}
       {kind === "stopped" || kind === "failed" ? (
         <path d="m3 3 6 6M9 3 3 9" />
@@ -124,7 +129,7 @@ const RUN_STATUS_MARK: Readonly<Record<RunStatusWord, StateMarkKind>> = {
 export function RunStatus({ status }: { readonly status: RunStatusWord }) {
   return (
     <Badge tone={RUN_STATUS_TONE[status]} title={RUN_STATUS_MEANING[status]}>
-      <StateMark kind={RUN_STATUS_MARK[status]} />
+      <StateMark kind={RUN_STATUS_MARK[status]} moving={status === "running"} />
       {status}
     </Badge>
   );
@@ -179,15 +184,34 @@ const SIMULATION_STATUS_MARK: Readonly<
 
 export function SimulationStatus({
   status,
+  compact = false,
 }: {
   readonly status: SimulationStatusWord;
+  readonly compact?: boolean;
 }) {
+  const mark = (
+    <StateMark
+      kind={SIMULATION_STATUS_MARK[status]}
+      moving={status === "running"}
+    />
+  );
+  if (compact) {
+    return (
+      <InlineState
+        tone={SIMULATION_STATUS_TONE[status]}
+        title={SIMULATION_STATUS_MEANING[status]}
+      >
+        {mark}
+        {status}
+      </InlineState>
+    );
+  }
   return (
     <Badge
       tone={SIMULATION_STATUS_TONE[status]}
       title={SIMULATION_STATUS_MEANING[status]}
     >
-      <StateMark kind={SIMULATION_STATUS_MARK[status]} />
+      {mark}
       {status}
     </Badge>
   );
@@ -262,13 +286,37 @@ const VERDICT_MARK: Readonly<Record<VerdictWord, StateMarkKind>> = {
 
 export const NOT_JUDGED_YET = "Not judged yet";
 
-export function VerdictBadge({ verdict }: { readonly verdict: VerdictWord | null }) {
+export function VerdictBadge({
+  verdict,
+  compact = false,
+}: {
+  readonly verdict: VerdictWord | null;
+  readonly compact?: boolean;
+}) {
   if (verdict === null) {
+    const title =
+      "Nobody has finished judging this yet. That is not a result, and it is certainly not a failure.";
+    if (compact) {
+      return (
+        <InlineState title={title}>
+          <StateMark kind="waiting" />
+          Not judged
+        </InlineState>
+      );
+    }
     return (
-      <Badge title="Nobody has finished judging this yet. That is not a result, and it is certainly not a failure.">
+      <Badge title={title}>
         <StateMark kind="waiting" />
         {NOT_JUDGED_YET}
       </Badge>
+    );
+  }
+  if (compact) {
+    return (
+      <InlineState tone={VERDICT_TONE[verdict]} title={VERDICT_MEANING[verdict]}>
+        <StateMark kind={VERDICT_MARK[verdict]} />
+        {verdict}
+      </InlineState>
     );
   }
   return (
@@ -276,6 +324,22 @@ export function VerdictBadge({ verdict }: { readonly verdict: VerdictWord | null
       <StateMark kind={VERDICT_MARK[verdict]} />
       {verdict}
     </Badge>
+  );
+}
+
+function InlineState({
+  tone = "neutral",
+  title,
+  children,
+}: {
+  readonly tone?: BadgeTone;
+  readonly title: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <span className={styles.inlineState} data-tone={tone} title={title}>
+      {children}
+    </span>
   );
 }
 
@@ -449,6 +513,7 @@ export function RecentRuns({
   readonly filters: RunFilters;
   readonly limit?: number;
 }) {
+  const now = useMinuteClock();
   const path = runsQuery({ ...filters, limit });
   const { answer, reload } = useProjectRead<RunHistoryPage>(path, projectId);
 
@@ -459,7 +524,7 @@ export function RecentRuns({
       primary: true,
       cell: (run) => (
         <Link href={projectPath(projectId, "runs", run.id)}>
-          {run.label ?? asMoment(run.created_at)}
+          {run.label ?? <RelativeInstant instant={run.created_at} now={now} />}
         </Link>
       ),
     },
@@ -507,6 +572,7 @@ export function RecentRuns({
             rows={answer.value.items}
             keyOf={(run) => run.id}
             stretchPrimaryLink
+            stackWhenConstrained
           />
         )
       ) : (

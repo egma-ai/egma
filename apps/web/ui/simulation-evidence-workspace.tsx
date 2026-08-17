@@ -1,0 +1,999 @@
+"use client";
+
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from "react";
+
+import { graderDisplayName } from "../lib/presentation.ts";
+import type { VerdictWord } from "../lib/runs.ts";
+import {
+  citedTurnPositions,
+  judgedAssertions,
+  type EvidenceVerdict,
+  type JudgedAssertion,
+  type SimulationEvidence,
+} from "../lib/simulations.ts";
+import { humanizeIdentifier } from "../lib/transcripts.ts";
+import { Button } from "./controls.tsx";
+import { Dialog } from "./dialog.tsx";
+import { VerdictBadge } from "./run-status.tsx";
+import styles from "./simulation-evidence-workspace.module.css";
+
+type RecordingStatus = "absent" | "loading" | "ready" | "failed";
+
+function durationOf(evidence: SimulationEvidence): number | null {
+  const measured = evidence.measures.duration_ms;
+  if (Number.isFinite(measured)) return measured;
+  const recorded = evidence.transcript?.duration_ns;
+  if (recorded === undefined) return null;
+  const milliseconds = Number(recorded) / 1_000_000;
+  return Number.isFinite(milliseconds) ? milliseconds : null;
+}
+
+function shownDuration(milliseconds: number | null): string {
+  if (milliseconds === null) return "Not recorded";
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${String(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${String(minutes)}m ${String(rest)}s`;
+}
+
+function turnsOf(evidence: SimulationEvidence): number | null {
+  const measured = evidence.measures.turn_count;
+  if (Number.isFinite(measured)) return measured;
+  const counts = evidence.transcript?.turn_counts;
+  return counts === undefined ? null : counts.human + counts.agent;
+}
+
+/** The only three simulation-level facts required before reading evidence. */
+export function SimulationEvidenceSummary({
+  evidence,
+}: {
+  readonly evidence: SimulationEvidence;
+}) {
+  const turns = turnsOf(evidence);
+  return (
+    <section className={styles.summary} aria-label="Simulation summary">
+      <div>
+        <span>Overall verdict</span>
+        <VerdictBadge verdict={evidence.verdict} />
+      </div>
+      <div>
+        <span>Duration</span>
+        <strong>{shownDuration(durationOf(evidence))}</strong>
+      </div>
+      <div>
+        <span>Total turns</span>
+        <strong>{turns === null ? "Not recorded" : String(turns)}</strong>
+      </div>
+    </section>
+  );
+}
+
+export type SimulationEvidenceRecording = {
+  readonly status: RecordingStatus;
+  readonly message: string | null;
+  readonly url: string | null;
+  readonly audioRef: RefObject<HTMLAudioElement | null>;
+  readonly currentTime: number;
+  readonly duration: number;
+  readonly playing: boolean;
+  readonly waveform: {
+    readonly human: readonly number[];
+    readonly agent: readonly number[];
+  } | null;
+  readonly waveformLoading: boolean;
+  readonly seek: (seconds: number, play?: boolean) => void;
+  readonly onTimeUpdate: () => void;
+  readonly onLoadedMetadata: () => void;
+  readonly onError: () => void;
+  readonly onPlay: () => void;
+  readonly onPause: () => void;
+};
+
+function peaksOf(
+  buffer: AudioBuffer,
+  channel: number,
+  bins = 360,
+): readonly number[] {
+  if (channel < 0 || channel >= buffer.numberOfChannels) return [];
+  const samples = buffer.getChannelData(channel);
+  const size = Math.max(1, Math.ceil(samples.length / bins));
+  return Array.from({ length: bins }, (_, bin) => {
+    const start = bin * size;
+    const end = Math.min(samples.length, start + size);
+    let peak = 0;
+    for (let at = start; at < end; at += 1) {
+      peak = Math.max(peak, Math.abs(samples[at] ?? 0));
+    }
+    return peak;
+  });
+}
+
+/**
+ * One signed recording controller for the prototype and the shipped page.
+ *
+ * A failed media request or stereo decode refreshes the short-lived link once.
+ * The listener returns to the same point, and a same-second byte-identical URL
+ * is loaded explicitly instead of being mistaken for no change.
+ */
+export function useSimulationEvidenceRecording(
+  evidence: SimulationEvidence | null,
+  projectId: string,
+): SimulationEvidenceRecording {
+  const recordingId = evidence?.id ?? null;
+  const hasRecording = evidence?.has_recording ?? false;
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const activeRecording = useRef<string | null>(null);
+  const [status, setStatus] = useState<RecordingStatus>(
+    hasRecording ? "loading" : "absent",
+  );
+  const [message, setMessage] = useState<string | null>(null);
+  const [source, setSource] = useState<{
+    readonly recordingId: string;
+    readonly url: string;
+  } | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [waveform, setWaveform] = useState<
+    SimulationEvidenceRecording["waveform"]
+  >(null);
+  const [waveformLoading, setWaveformLoading] = useState(false);
+  const [asked, setAsked] = useState(0);
+  const resumeAt = useRef(0);
+  const isASecondTry = useRef(false);
+  const resolvedAttempt = useRef(-1);
+  const mediaReadyAttempt = useRef(-1);
+  const decodeReadyAttempt = useRef(-1);
+
+  useEffect(() => {
+    let current = true;
+    const changed = activeRecording.current !== recordingId;
+    activeRecording.current = recordingId;
+    setSource(null);
+    setMessage(null);
+    setWaveform(null);
+    setPlaying(false);
+    if (changed) {
+      setCurrentTime(0);
+      setDuration(0);
+      resumeAt.current = 0;
+      isASecondTry.current = false;
+    }
+    if (!hasRecording || recordingId === null) {
+      setStatus("absent");
+      setWaveformLoading(false);
+      return () => {
+        current = false;
+      };
+    }
+
+    setStatus("loading");
+    resolvedAttempt.current = -1;
+    const attempt = asked;
+    void fetch(
+      `/api/simulations/${encodeURIComponent(recordingId)}/recording?project=${encodeURIComponent(projectId)}`,
+      { cache: "no-store", headers: { accept: "application/json" } },
+    )
+      .then(async (answer) => {
+        const body = (await answer.json().catch(() => ({}))) as {
+          readonly url?: string;
+          readonly message?: string;
+        };
+        if (!answer.ok || body.url === undefined) {
+          throw new Error(body.message ?? "The recording could not be opened.");
+        }
+        if (!current) return;
+        resolvedAttempt.current = attempt;
+        mediaReadyAttempt.current = -1;
+        decodeReadyAttempt.current = -1;
+        setWaveformLoading(true);
+        setSource({ recordingId, url: body.url });
+        setStatus("ready");
+      })
+      .catch((why: unknown) => {
+        if (!current) return;
+        setStatus("failed");
+        setMessage(
+          why instanceof Error
+            ? why.message
+            : "The recording could not be opened.",
+        );
+      });
+    return () => {
+      current = false;
+    };
+  }, [asked, hasRecording, recordingId, projectId]);
+
+  useEffect(() => {
+    if (source === null || source.recordingId !== recordingId) return undefined;
+    let current = true;
+    let context: AudioContext | null = null;
+    const attempt = resolvedAttempt.current;
+    setWaveformLoading(true);
+    void fetch(source.url)
+      .then((answer) => {
+        if (!answer.ok) throw new Error("The audio file could not be decoded.");
+        return answer.arrayBuffer();
+      })
+      .then(async (bytes) => {
+        context = new AudioContext();
+        const decoded = await context.decodeAudioData(bytes);
+        if (!current) return;
+        setDuration(decoded.duration);
+        setWaveform(
+          decoded.numberOfChannels === 2
+            ? {
+                human: peaksOf(decoded, 0),
+                agent: peaksOf(decoded, 1),
+              }
+            : null,
+        );
+        markReady(attempt, "decode");
+      })
+      .catch(() => {
+        if (!current) return;
+        const retryFailure =
+          isASecondTry.current && attempt === resolvedAttempt.current;
+        setWaveform(null);
+        recoverSignedLink(attempt, "decode");
+        if (retryFailure) markReady(attempt, "decode");
+      })
+      .finally(() => {
+        if (current) setWaveformLoading(false);
+        if (context !== null) void context.close();
+      });
+    return () => {
+      current = false;
+      if (context !== null) void context.close();
+    };
+  }, [recordingId, source]);
+
+  useEffect(() => {
+    if (source === null || asked === 0) return;
+    audioRef.current?.load();
+  }, [asked, source]);
+
+  useEffect(() => {
+    if (!playing) return undefined;
+    let frame = 0;
+    const follow = (): void => {
+      setCurrentTime(audioRef.current?.currentTime ?? 0);
+      frame = requestAnimationFrame(follow);
+    };
+    frame = requestAnimationFrame(follow);
+    return () => cancelAnimationFrame(frame);
+  }, [playing]);
+
+  function markReady(attempt: number, part: "decode" | "media"): void {
+    if (attempt < 0 || attempt !== resolvedAttempt.current) return;
+    if (part === "media") mediaReadyAttempt.current = attempt;
+    else decodeReadyAttempt.current = attempt;
+    if (
+      mediaReadyAttempt.current === attempt &&
+      decodeReadyAttempt.current === attempt
+    ) {
+      isASecondTry.current = false;
+    }
+  }
+
+  function recoverSignedLink(
+    attempt: number,
+    sourceOfFailure: "decode" | "media",
+  ): void {
+    if (attempt < 0 || attempt !== resolvedAttempt.current) return;
+    if (isASecondTry.current) {
+      if (sourceOfFailure === "media") {
+        setPlaying(false);
+        setStatus("failed");
+        setMessage(
+          "The recording still could not be played after Egma refreshed its link.",
+        );
+      }
+      return;
+    }
+    isASecondTry.current = true;
+    resumeAt.current = audioRef.current?.currentTime ?? currentTime;
+    setPlaying(false);
+    setStatus("loading");
+    setSource(null);
+    setAsked((again) => again + 1);
+  }
+
+  function readClock(): void {
+    setCurrentTime(audioRef.current?.currentTime ?? 0);
+  }
+
+  function readDuration(): void {
+    const heard = audioRef.current?.duration;
+    if (heard !== undefined && Number.isFinite(heard)) setDuration(heard);
+    const attempt = resolvedAttempt.current;
+    if (resumeAt.current > 0 && audioRef.current !== null) {
+      const limit =
+        heard !== undefined && Number.isFinite(heard) ? heard : resumeAt.current;
+      audioRef.current.currentTime = Math.min(resumeAt.current, limit);
+      setCurrentTime(audioRef.current.currentTime);
+      resumeAt.current = 0;
+    }
+    markReady(attempt, "media");
+  }
+
+  function seek(seconds: number, play = false): void {
+    const audio = audioRef.current;
+    if (audio === null) return;
+    const limit = Number.isFinite(audio.duration) ? audio.duration : duration;
+    audio.currentTime = Math.min(Math.max(0, seconds), Math.max(0, limit));
+    setCurrentTime(audio.currentTime);
+    if (play) void audio.play().catch(() => undefined);
+  }
+
+  const currentSource =
+    source?.recordingId === recordingId ? source.url : null;
+  const currentStatus: RecordingStatus = !hasRecording
+    ? "absent"
+    : currentSource === null && status !== "failed"
+      ? "loading"
+      : status;
+
+  return {
+    status: currentStatus,
+    message,
+    url: currentSource,
+    audioRef,
+    currentTime,
+    duration,
+    playing,
+    waveform: currentSource === null ? null : waveform,
+    waveformLoading: currentSource === null ? false : waveformLoading,
+    seek,
+    onTimeUpdate: readClock,
+    onLoadedMetadata: readDuration,
+    onError: () => recoverSignedLink(resolvedAttempt.current, "media"),
+    onPlay: () => setPlaying(true),
+    onPause: () => setPlaying(false),
+  };
+}
+
+type WorkspaceAssertion = {
+  readonly key: string;
+  readonly expected: string;
+  readonly finding: string | null;
+  readonly verdict: VerdictWord | null;
+  readonly citedTurns: readonly number[];
+  readonly superseded: readonly EvidenceVerdict[];
+};
+
+type WorkspaceGrader = {
+  readonly key: string;
+  readonly name: string;
+  readonly required: boolean;
+  readonly verdict: VerdictWord | null;
+  readonly assertions: readonly WorkspaceAssertion[];
+};
+
+function sameWords(left: string, right: string): boolean {
+  return left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
+}
+
+function behaviorPosition(assertion: string): number | null {
+  const found = /^behavior_(\d+)$/u.exec(assertion)?.[1];
+  if (found === undefined) return null;
+  const position = Number(found);
+  return Number.isInteger(position) && position > 0 ? position : null;
+}
+
+function isExpectedBehaviors(
+  name: string | undefined,
+  rows: readonly JudgedAssertion[],
+): boolean {
+  return (
+    name === "expected_behaviors" ||
+    (name === undefined && rows.some((row) => behaviorPosition(row.assertion) !== null))
+  );
+}
+
+function readableAssertion(
+  row: JudgedAssertion,
+  expected: readonly string[],
+  fallbackPosition: number,
+): string {
+  if (row.assertionText !== null && row.assertionText.trim() !== "") {
+    return row.assertionText;
+  }
+  const position = behaviorPosition(row.assertion);
+  if (position !== null) {
+    const behavior = expected[position - 1];
+    if (behavior !== undefined) return behavior;
+  }
+  // `row.assertion` is a durable storage key, not product copy. When display
+  // text is absent, use this local reading order instead of turning a key such
+  // as `keeps_brand_voice` into something that only looks authored.
+  return `Criterion ${String(fallbackPosition)}`;
+}
+
+function workspaceRow(
+  row: JudgedAssertion,
+  expected: readonly string[],
+  fallbackPosition: number,
+  evidence: SimulationEvidence,
+): WorkspaceAssertion {
+  return {
+    key: row.key,
+    expected: readableAssertion(row, expected, fallbackPosition),
+    finding:
+      row.speaking.rationale.trim() === "" ? null : row.speaking.rationale,
+    verdict: row.speaking.verdict,
+    citedTurns: citedTurnPositions(
+      row.speaking.cited_turns,
+      evidence.transcript?.turns ?? [],
+    ),
+    superseded: row.superseded,
+  };
+}
+
+/** Human-named grader groups, including expected behaviors awaiting judgment. */
+function workspaceGraders(evidence: SimulationEvidence): readonly WorkspaceGrader[] {
+  if (evidence.grading === "not_required") return [];
+  const expected = evidence.test.expected_behaviors ?? [];
+  const judged = judgedAssertions(evidence.verdicts);
+  const planItems = evidence.grading_plan?.items ?? [];
+  const ids = new Set<string>([
+    ...planItems.map((item) => item.grader_id),
+    ...evidence.by_grader.map((item) => item.grader_id),
+    ...judged.map((item) => item.graderId),
+  ]);
+  let expectedId = planItems.find(
+    (item) => item.name === "expected_behaviors",
+  )?.grader_id;
+  expectedId ??= judged.find(
+    (row) => behaviorPosition(row.assertion) !== null,
+  )?.graderId;
+  if (expected.length > 0 && expectedId === undefined) {
+    expectedId = "expected-behaviors";
+    ids.add(expectedId);
+  }
+
+  const ordered = [...ids];
+  if (expectedId !== undefined) {
+    const withoutExpected = ordered.filter((id) => id !== expectedId);
+    ordered.splice(0, ordered.length, expectedId, ...withoutExpected);
+  }
+
+  return ordered.map((id) => {
+    const planItem = planItems.find((item) => item.grader_id === id);
+    const summary = evidence.by_grader.find((item) => item.grader_id === id);
+    const rows = judged.filter((item) => item.graderId === id);
+    const expectedGroup = isExpectedBehaviors(planItem?.name, rows) || id === expectedId;
+    const used = new Set<string>();
+    const assertions: WorkspaceAssertion[] = expectedGroup
+      ? expected.map((behavior, at) => {
+          const position = at + 1;
+          const row = rows.find(
+            (one) =>
+              !used.has(one.key) &&
+              (behaviorPosition(one.assertion) === position ||
+                (one.assertionText !== null &&
+                  sameWords(one.assertionText, behavior))),
+          );
+          if (row === undefined) {
+            return {
+              key: `expected:${String(at)}`,
+              expected: behavior,
+              finding: null,
+              verdict: null,
+              citedTurns: [],
+              superseded: [],
+            };
+          }
+          used.add(row.key);
+          return workspaceRow(row, expected, position, evidence);
+        })
+      : [];
+    rows.forEach((row, at) => {
+      if (!used.has(row.key)) {
+        assertions.push(workspaceRow(row, expected, at + 1, evidence));
+      }
+    });
+
+    return {
+      key: id,
+      name: expectedGroup
+        ? "Expected behaviors"
+        : planItem === undefined
+          ? "Grader name unavailable"
+          : humanizeIdentifier(graderDisplayName(planItem.name)),
+      required:
+        summary?.required ?? planItem?.required ?? rows[0]?.required ?? true,
+      verdict: summary?.verdict ?? null,
+      assertions,
+    };
+  });
+}
+
+function waveformPath(peaks: readonly number[]): string {
+  if (peaks.length === 0) return "";
+  const width = 1000;
+  const middle = 32;
+  const scale = 27;
+  const step = width / Math.max(1, peaks.length - 1);
+  const top = peaks.map(
+    (peak, at) =>
+      `${(at * step).toFixed(2)},${(middle - peak * scale).toFixed(2)}`,
+  );
+  const bottom = [...peaks].reverse().map((peak, reverseAt) => {
+    const at = peaks.length - reverseAt - 1;
+    return `${(at * step).toFixed(2)},${(middle + peak * scale).toFixed(2)}`;
+  });
+  return `M ${top.join(" L ")} L ${bottom.join(" L ")} Z`;
+}
+
+function clockText(seconds: number): string {
+  const whole = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  const minutes = Math.floor(whole / 60);
+  const rest = whole % 60;
+  return `${String(minutes)}:${String(rest).padStart(2, "0")}`;
+}
+
+function WaveformLane({
+  label,
+  peaks,
+  progress,
+}: {
+  readonly label: "Human" | "Agent";
+  readonly peaks: readonly number[];
+  readonly progress: number;
+}) {
+  return (
+    <div className={styles.waveLane}>
+      <span>{label}</span>
+      <div className={styles.waveTrack}>
+        <svg aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 1000 64">
+          <path d={waveformPath(peaks)} />
+        </svg>
+        <span
+          className={styles.playhead}
+          style={{ "--playhead": `${String(progress)}%` } as CSSProperties}
+          aria-hidden="true"
+        />
+      </div>
+    </div>
+  );
+}
+
+function RecordingEvidence({
+  recording,
+  active,
+}: {
+  readonly recording: SimulationEvidenceRecording;
+  readonly active: boolean;
+}) {
+  if (recording.status === "absent") {
+    return (
+      <p className={styles.recordingState} role={active ? "status" : undefined}>
+        {active
+          ? "Recording will be available after the call ends."
+          : "No audio was recorded."}
+      </p>
+    );
+  }
+  if (recording.status === "loading") {
+    return (
+      <p className={styles.recordingState} role="status">
+        Opening the recording…
+      </p>
+    );
+  }
+  if (recording.status === "failed" || recording.url === null) {
+    return (
+      <p className={styles.recordingProblem} role="alert">
+        {recording.message ?? "The recording could not be opened."}
+      </p>
+    );
+  }
+
+  const limit = Math.max(1, recording.duration);
+  const progress = Math.min(
+    100,
+    Math.max(0, (recording.currentTime / limit) * 100),
+  );
+  const elapsed = clockText(recording.currentTime);
+  const total = clockText(recording.duration);
+
+  return (
+    <div className={styles.recording}>
+      <audio
+        ref={recording.audioRef}
+        aria-label="Simulation recording"
+        className={styles.audio}
+        controls
+        preload="metadata"
+        src={recording.url}
+        onError={recording.onError}
+        onLoadedMetadata={recording.onLoadedMetadata}
+        onPause={recording.onPause}
+        onPlay={recording.onPlay}
+        onTimeUpdate={recording.onTimeUpdate}
+      >
+        Your browser cannot play this recording.
+      </audio>
+      {recording.waveformLoading ? (
+        <p className={styles.recordingState} role="status">
+          Drawing both audio channels…
+        </p>
+      ) : recording.waveform === null ? (
+        <p className={styles.recordingState}>
+          The recording is playable, but its stereo channel map is unavailable.
+        </p>
+      ) : (
+        <div className={styles.waveform}>
+          <WaveformLane
+            label="Human"
+            peaks={recording.waveform.human}
+            progress={progress}
+          />
+          <WaveformLane
+            label="Agent"
+            peaks={recording.waveform.agent}
+            progress={progress}
+          />
+          <input
+            className={styles.waveSeek}
+            type="range"
+            min="0"
+            max={limit}
+            step="0.05"
+            value={Math.min(recording.currentTime, limit)}
+            aria-label="Seek the recording"
+            aria-valuetext={`${elapsed} of ${total}`}
+            disabled={recording.duration <= 0}
+            onChange={(event) => recording.seek(Number(event.currentTarget.value))}
+          />
+          <output className={styles.waveTime}>{elapsed} / {total}</output>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type EvidenceTranscript = NonNullable<SimulationEvidence["transcript"]>;
+
+/**
+ * Readable speech in the sheet, with the two sides laid out like messages.
+ *
+ * This is still one ordered transcript. The alignment makes the speaker change
+ * visible at a glance; the written Human and Agent labels keep that distinction
+ * available without colour, and no timing or storage identifiers enter the
+ * reading surface.
+ */
+function ChatTranscript({
+  transcript,
+}: {
+  readonly transcript: EvidenceTranscript;
+}) {
+  if (transcript.turns.length === 0) {
+    return (
+      <div className={styles.workspaceState}>
+        <strong>Nothing was said</strong>
+        <p>Egma filed no spoken turns for this simulation.</p>
+      </div>
+    );
+  }
+
+  return (
+    <ol className={styles.chatTranscript} aria-label="Transcript messages">
+      {transcript.turns.map((turn, at) => {
+        const human = turn.kind === "turn:human";
+        const speaker = human ? "Human" : "Agent";
+        return (
+          <li
+            className={`${styles.chatTurn} ${
+              human ? styles.chatHuman : styles.chatAgent
+            }`}
+            id={`transcript-turn-${String(at + 1)}`}
+            key={turn.span_id}
+            aria-label={`Turn ${String(at + 1)}, ${speaker}`}
+          >
+            <div className={styles.chatMessage}>
+              <p className={styles.chatSpeaker}>{speaker}</p>
+              <p className={styles.chatText}>
+                {turn.text === "" ? (
+                  <span className={styles.chatEmpty}>Nothing was said.</span>
+                ) : (
+                  turn.text
+                )}
+              </p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function verdictWord(verdict: VerdictWord): string {
+  return `${verdict.slice(0, 1).toUpperCase()}${verdict.slice(1)}`;
+}
+
+function graderSummary(
+  grader: WorkspaceGrader,
+  stillJudging: boolean,
+): string {
+  const passed = grader.assertions.filter(
+    (assertion) => assertion.verdict === "passed",
+  ).length;
+  const failed = grader.assertions.filter(
+    (assertion) => assertion.verdict === "failed",
+  ).length;
+  const skipped = grader.assertions.filter(
+    (assertion) => assertion.verdict === "skipped",
+  ).length;
+  const errored = grader.assertions.filter(
+    (assertion) => assertion.verdict === "errored",
+  ).length;
+  const waiting = grader.assertions.filter(
+    (assertion) => assertion.verdict === null,
+  ).length;
+  const parts = [
+    grader.required ? "Required grader" : "Reports only",
+    `${String(grader.assertions.length)} check${grader.assertions.length === 1 ? "" : "s"}`,
+  ];
+  if (passed > 0) parts.push(`${String(passed)} passed`);
+  if (failed > 0) parts.push(`${String(failed)} failed`);
+  if (skipped > 0) parts.push(`${String(skipped)} skipped`);
+  if (errored > 0) parts.push(`${String(errored)} errored`);
+  if (waiting > 0) {
+    parts.push(`${String(waiting)} ${stillJudging ? "waiting" : "not judged"}`);
+  }
+  return parts.join(" · ");
+}
+
+function GraderGroup({
+  grader,
+  stillJudging,
+  onReadTurn,
+}: {
+  readonly grader: WorkspaceGrader;
+  readonly stillJudging: boolean;
+  readonly onReadTurn: (turn: number) => void;
+}) {
+  return (
+    <section className={styles.graderGroup} aria-label={grader.name}>
+      <header className={styles.graderHead}>
+        <div>
+          <span className={styles.graderKind}>Grader</span>
+          <h3>{grader.name}</h3>
+          <p>{graderSummary(grader, stillJudging)}</p>
+        </div>
+        <VerdictBadge verdict={grader.verdict} compact />
+      </header>
+      {grader.assertions.length === 0 ? (
+        <p className={styles.emptyGroup}>
+          {stillJudging
+            ? "Waiting for this grader to return its assertions."
+            : "This grader returned no assertions."}
+        </p>
+      ) : (
+        <div className={styles.assertions}>
+          {grader.assertions.map((assertion, at) => (
+            <article className={styles.assertion} key={assertion.key}>
+              <header className={styles.assertionHead}>
+                <span>Check {String(at + 1).padStart(2, "0")}</span>
+                <VerdictBadge verdict={assertion.verdict} compact />
+              </header>
+              <div className={styles.comparison}>
+                <section className={styles.expectedCell}>
+                  <h4>Expected behavior</h4>
+                  <p>{assertion.expected}</p>
+                </section>
+                <section className={styles.findingCell}>
+                  <h4>Judge finding</h4>
+                  <p>
+                    {assertion.finding ??
+                      (stillJudging
+                        ? "Waiting for this grader."
+                        : "No judge finding was filed.")}
+                  </p>
+                  {assertion.citedTurns.length === 0 ? null : (
+                    <p className={styles.citations}>
+                      {assertion.citedTurns.map((turn, turnAt) => (
+                        <span key={turn}>
+                          {turnAt === 0 ? "" : ", "}
+                          <button type="button" onClick={() => onReadTurn(turn)}>
+                            Read turn {turn}
+                          </button>
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                  {assertion.superseded.length === 0 ? null : (
+                    <details className={styles.earlier}>
+                      <summary>
+                        {assertion.superseded.length} earlier finding
+                        {assertion.superseded.length === 1 ? "" : "s"}
+                      </summary>
+                      {assertion.superseded.map((row) => (
+                        <p key={row.judged_at}>
+                          {verdictWord(row.verdict)} — {row.rationale}
+                        </p>
+                      ))}
+                    </details>
+                  )}
+                </section>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The one evidence workspace used while grading and after grading completes.
+ * The grader review stays on the page. Audio and readable speech live in the
+ * shared right-side sheet so a long recording never sets the page's height.
+ */
+function SimulationEvidenceWorkspace({
+  evidence,
+  recording,
+  evidenceOpen,
+  onEvidenceChange,
+}: {
+  readonly evidence: SimulationEvidence;
+  readonly recording: SimulationEvidenceRecording;
+  readonly evidenceOpen: boolean;
+  readonly onEvidenceChange: (open: boolean) => void;
+}) {
+  const stillJudging =
+    evidence.grading === "pending" ||
+    evidence.grading_jobs.some((job) =>
+      ["pending", "claimed"].includes(job.status),
+    );
+  const graders = workspaceGraders(evidence);
+  const simulationActive = ["queued", "claimed", "running"].includes(
+    evidence.status,
+  );
+  const pendingTurn = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!evidenceOpen || pendingTurn.current === null) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const turn = pendingTurn.current;
+      if (turn === null) return;
+      const target = document.getElementById(`transcript-turn-${String(turn)}`);
+      target?.scrollIntoView({ block: "center" });
+      window.history.replaceState(null, "", `#transcript-turn-${String(turn)}`);
+      pendingTurn.current = null;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [evidenceOpen]);
+
+  function readTurn(turn: number): void {
+    pendingTurn.current = turn;
+    onEvidenceChange(true);
+  }
+
+  return (
+    <section className={styles.workspace} aria-label="Simulation evidence">
+      <section className={`${styles.pane} ${styles.graderPane}`} aria-labelledby="evidence-graders">
+        <header className={styles.paneHead}>
+          <div>
+            <span className={styles.paneKind}>Review</span>
+            <h2 id="evidence-graders">Grader results</h2>
+          </div>
+          <Button
+            ariaControls="transcript-audio-evidence"
+            ariaExpanded={evidenceOpen}
+            onClick={() => onEvidenceChange(true)}
+          >
+            Open transcript and audio
+          </Button>
+        </header>
+        {stillJudging ? (
+          <p className={styles.pending} role="status">
+            Grading is still running. Findings appear here as they land.
+          </p>
+        ) : null}
+        {evidence.grading === "not_required" ? (
+          <div className={styles.workspaceState}>
+            <strong>There was nothing to judge</strong>
+            <p>Egma did not conduct this simulation, so it filed no grading work.</p>
+          </div>
+        ) : graders.length === 0 ? (
+          <div className={styles.workspaceState}>
+            <strong>{stillJudging ? "Graders are preparing" : "Nobody has judged this yet"}</strong>
+            <p>
+              {stillJudging
+                ? "No grader has returned an assertion yet."
+                : "No grader has written a verdict for this simulation."}
+            </p>
+          </div>
+        ) : (
+          <div className={styles.graderGroups}>
+            {graders.map((grader) => (
+              <GraderGroup
+                grader={grader}
+                key={grader.key}
+                stillJudging={stillJudging}
+                onReadTurn={readTurn}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {evidenceOpen ? (
+        <Dialog
+          kind="sheet"
+          title="Transcript and audio"
+          onClose={() => onEvidenceChange(false)}
+        >
+          <div
+            className={styles.evidenceSheetBody}
+            id="transcript-audio-evidence"
+          >
+            <section className={styles.recordingBlock} aria-labelledby="evidence-recording">
+              <h3 id="evidence-recording">Recording</h3>
+              <RecordingEvidence
+                active={simulationActive}
+                recording={recording}
+              />
+            </section>
+            <section className={styles.transcriptBlock} aria-labelledby="evidence-transcript">
+              <h3 id="evidence-transcript">Transcript</h3>
+              {evidence.transcript === null ? (
+                <div className={styles.workspaceState}>
+                  <strong>No transcript was filed</strong>
+                  <p>
+                    Egma has no speech for this simulation. It may not have started,
+                    or it may have stopped before the first turn.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {evidence.transcript.spans_truncated ? (
+                    <p className={styles.transcriptNotice}>
+                      {`This simulation filed ${String(evidence.transcript.span_count)} steps. This view shows the first steps in order.`}
+                    </p>
+                  ) : null}
+                  <ChatTranscript transcript={evidence.transcript} />
+                </>
+              )}
+            </section>
+          </div>
+        </Dialog>
+      ) : null}
+    </section>
+  );
+}
+
+/** Summary, grader review, and the default-open supporting evidence pane. */
+export function SimulationEvidenceReview({
+  evidence,
+  recording,
+}: {
+  readonly evidence: SimulationEvidence;
+  readonly recording: SimulationEvidenceRecording;
+}) {
+  const [evidenceOpen, setEvidenceOpen] = useState(true);
+
+  useEffect(() => setEvidenceOpen(true), [evidence.id]);
+
+  return (
+    <div className={styles.review}>
+      <SimulationEvidenceSummary evidence={evidence} />
+      <SimulationEvidenceWorkspace
+        evidence={evidence}
+        recording={recording}
+        evidenceOpen={evidenceOpen}
+        onEvidenceChange={setEvidenceOpen}
+      />
+    </div>
+  );
+}

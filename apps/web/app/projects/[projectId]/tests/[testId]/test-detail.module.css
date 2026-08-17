@@ -1,0 +1,72 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(340px, 0.85fr);
+  align-items: start;
+  gap: var(--space-7);
+}
+
+.editor {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.group + .group {
+  border-top: 1px solid var(--border);
+}
+
+.groupTitle,
+.fieldHeading {
+  margin: 0;
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.groupTitle {
+  font-size: var(--text-lg);
+  line-height: var(--line-tight);
+}
+
+.fieldHeading {
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+.activity {
+  position: sticky;
+  top: var(--space-5);
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-7);
+}
+
+.activity > section {
+  margin-top: 0;
+}
+
+@media (max-width: 72rem) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .activity {
+    position: static;
+  }
+}
+
+@media (max-width: 40rem) {
+  .group {
+    padding: var(--space-4);
+  }
+}

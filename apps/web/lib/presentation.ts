@@ -59,9 +59,14 @@ export function graderDisplayName(name: string): string {
  * running copy on a project nobody was looking at. A constant href cannot say
  * which project it means; this asks.
  */
+export const GRADER_VIEW_LABELS = {
+  library: "Library",
+  running: "Running",
+} as const;
+
 const GRADER_TABS = [
-  { id: "library", label: "Library", rest: [] },
-  { id: "running", label: "Running", rest: ["running"] },
+  { id: "library", label: GRADER_VIEW_LABELS.library, rest: [] },
+  { id: "running", label: GRADER_VIEW_LABELS.running, rest: ["running"] },
 ] as const satisfies readonly {
   readonly id: string;
   readonly label: string;

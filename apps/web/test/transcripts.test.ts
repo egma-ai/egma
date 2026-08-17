@@ -26,7 +26,6 @@ import {
   transcriptReadPath,
   transcriptsPath,
   watchesProduction,
-  whenItWas,
   windowAround,
   windowChoiceOf,
   WINDOW_PARAMETER,
@@ -541,14 +540,6 @@ describe("the numbers the contract sends", () => {
     );
   });
 
-  /**
-   * UTC, and said so. Traces are read beside logs and beside a provider's own
-   * dashboard, and a page that quietly shifted the numbers into the reader's
-   * timezone would make the two disagree with nothing on screen to say why.
-   */
-  it("shows an instant in UTC and names the zone", () => {
-    expect(whenItWas(FACTS.started_at)).toBe("2026-08-02 18:04:40 UTC");
-  });
 });
 
 describe("reading the shape of a turn", () => {

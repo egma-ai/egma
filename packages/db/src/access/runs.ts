@@ -51,7 +51,10 @@ import {
 } from "../mock-tools/resolve.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
-import { descriptorOf, noSimulatorAdapterMessage } from "./connection-registry.ts";
+import {
+  connectionIsConductable,
+  noSimulatorAdapterMessage,
+} from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
 import {
   IdempotencyConflictError,
@@ -107,11 +110,11 @@ import { within } from "./within.ts";
  * said; the standing resolver derives that same context again from the row,
  * and the other two derive their narrowness the same way, from the row
  * rather than from any caller.
- * `resolveSimulationConnection` and `failSimulationDispatch` are the two
- * doors only such a claim-minted context may open — the secret the dispatch
- * needs, and the honest landing when the dispatch cannot happen — and each
- * refuses every other kind. The whole argument is written out on the
- * functions themselves.
+ * `resolveSimulationConnection`, `failSimulationDispatch`, and
+ * `releaseSimulationClaim` are the doors only such a claim-minted context may
+ * open — the secret dispatch needs, its honest terminal failure, and the
+ * non-terminal release used when a provider preflight could not answer. Each
+ * refuses every other kind. The whole argument is written on the functions.
  *
  * Writers keep to one lock order — simulation rows first, the run header last
  * — so the claim path, the cancel path and the report path do not deadlock
@@ -1174,8 +1177,11 @@ export async function startRun(
             NAME_THE_RIGHT_AGENT,
         );
       }
-      if (!descriptorOf(reached.type).simulatorAdapter) {
-        refuseRun("no_adapter", noSimulatorAdapterMessage(reached.type));
+      if (!connectionIsConductable(reached.type, reached.modality)) {
+        refuseRun(
+          "no_adapter",
+          noSimulatorAdapterMessage(reached.type, reached.modality),
+        );
       }
 
       if (retryOfRunId !== null) {
@@ -2454,6 +2460,7 @@ export async function resolveSimulationConnection(
     .select({
       connectionId: connection.id,
       type: connection.type,
+      modality: connection.modality,
       config: connection.config,
       credentials: connection.credentials,
     })
@@ -2474,6 +2481,10 @@ export async function resolveSimulationConnection(
     .limit(1);
 
   if (row === undefined) return undefined;
+
+  if (!connectionIsConductable(row.type, row.modality)) {
+    throw new Error(noSimulatorAdapterMessage(row.type, row.modality));
+  }
 
   const malformed = (held: string) => () =>
     new Error(
@@ -2752,6 +2763,59 @@ export async function failSimulationDispatch(
   return landSimulation(auth, id, claimant, {
     from: ["claimed"],
     write: { status: "failed", endingReason: "dispatch_failed" },
+  });
+}
+
+/**
+ * Give a claimed simulation back when a provider preflight could not answer.
+ *
+ * A temporary provider outage is not evidence that the simulation or agent is
+ * broken. The claim path therefore clears only its own lease and lets a later
+ * claim try again. A concurrent cancel wins: this update requires no cancel
+ * intent, so the existing claimant remains responsible for honoring one.
+ */
+export async function releaseSimulationClaim(
+  auth: AuthContext,
+  id: string,
+  claimant: string,
+): Promise<boolean> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  if (auth.via !== "simulator") {
+    throw new Error(
+      "only the claim path may release a provider preflight it could not finish",
+    );
+  }
+
+  const now = new Date();
+  return db().transaction(async (tx) => {
+    const [released] = await tx
+      .update(simulation)
+      .set({
+        status: "queued",
+        claimedBy: null,
+        claimedAt: null,
+        heartbeatAt: null,
+      })
+      .where(
+        within(
+          auth,
+          simulation,
+          and(
+            eq(simulation.id, id),
+            eq(simulation.status, "claimed"),
+            eq(simulation.claimedBy, validClaimant(claimant)),
+            isNull(simulation.cancelRequestedAt),
+            inActingProject(auth, simulation),
+          ),
+        ),
+      )
+      .returning({ id: simulation.id, runId: simulation.runId });
+    if (released === undefined) return false;
+
+    await appendRunEvents(tx, released.runId, now, [
+      { kind: "simulation", simulationId: released.id, status: "queued" },
+    ]);
+    return true;
   });
 }
 

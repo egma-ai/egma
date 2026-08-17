@@ -27,6 +27,27 @@ import { startInstance, type Instance } from "./support/instance.ts";
 /** The value `startInstance` configures the API with. */
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
 
+/** The direct Retell fixture in this socket test is a chat agent. */
+const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
+  const url = String(input);
+  if (!url.includes("/v2/list-agents")) {
+    throw new Error(`Unexpected Retell read: ${url}`);
+  }
+  return new Response(
+    JSON.stringify({
+      items: [
+        {
+          agent_id: "agent_in_retell_1",
+          agent_name: "Front desk",
+          channel: "chat",
+        },
+      ],
+      has_more: false,
+    }),
+    { status: 200 },
+  );
+};
+
 let instance: Instance;
 
 /** Somebody with a key, an agent, and a test — everything a run needs. */
@@ -88,7 +109,10 @@ async function aQueuedRun(): Promise<void> {
 }
 
 beforeAll(async () => {
-  instance = await startInstance("claims_hold", { web: false });
+  instance = await startInstance("claims_hold", {
+    web: false,
+    retellFetch: RETELL_CHAT_FETCH,
+  });
 
   const signedUp = await api("POST", "/api/signup", {}, {
     email: "ada@acme.example",

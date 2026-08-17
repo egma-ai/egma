@@ -59,8 +59,8 @@ const ONE_AGENT: FakeRetellScript = {
 const TWO_AGENTS: FakeRetellScript = {
   keys: [KEY],
   agents: [
-    { agent_id: "agent_0001", agent_name: "order-line", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
-    { agent_id: "agent_0002", agent_name: "after-hours", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
+    { agent_id: "agent_0001", agent_name: "order-line", channel: "chat", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
+    { agent_id: "agent_0002", agent_name: "after-hours", channel: "chat", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
   ],
   llms: [{ llm_id: "llm_0001", general_prompt: "You answer the order line.\n" }],
 };
@@ -172,8 +172,7 @@ describe("the key screen", () => {
 
     run.write("\r");
 
-    // Text or phone, put to the person at the keyboard. Text is taken here;
-    // the phone has a check of its own below.
+    // This is a voice agent, so phone is the only safe path offered.
     await showing(run, "How should Egma reach this agent?", "[enter] reach it this way");
     run.write("\r");
 
@@ -203,7 +202,7 @@ describe("the key screen", () => {
     // The one agent on the account was named on screen along the way, with
     // nothing to answer about it.
     expect(run.raw()).toContain("order-line");
-    expect(platform.registered.sealed).toEqual([KEY]);
+    expect(platform.registered.sealed).toEqual([]);
   });
 });
 
@@ -286,8 +285,8 @@ describe("the picker", () => {
   });
 });
 
-describe("the choice between text and phone", () => {
-  it("is a screen, and taking the phone creates the phone connection and no other", async () => {
+describe("the provider-safe reach choice", () => {
+  it("offers only phone for a voice agent and creates no other connection", async () => {
     retell = await startFakeRetell(ONE_AGENT);
     const run = await wizard();
 
@@ -297,16 +296,11 @@ describe("the choice between text and phone", () => {
     const offered = await showing(
       run,
       "How should Egma reach this agent?",
-      "Text — Egma exchanges messages with the agent.",
       "Phone — Egma dials one of the agent's numbers",
       "Egma creates the one you choose, and only that one.",
     );
-    // Nothing is chosen for the developer: the phone is the second row, and
-    // reaching it takes a keystroke.
-    expect(offered).toContain("\u203a Text");
-
-    run.write("\u001B[B");
-    await showing(run, "\u203a Phone");
+    expect(offered).toContain("\u203a Phone");
+    expect(offered).not.toContain("Text —");
     run.write("\r");
 
     await showing(run, "Do you already have test cases", "[n] none");
@@ -349,9 +343,7 @@ describe("the choice between text and phone", () => {
 
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\n`);
-    await showing(run, "How should Egma reach this agent?");
-    run.write("\u001B[B");
-    await showing(run, "\u203a Phone");
+    await showing(run, "How should Egma reach this agent?", "\u203a Phone");
     run.write("\r");
 
     // Two numbers reach this agent, so there is a real choice and the wizard
@@ -398,7 +390,7 @@ describe("the choice between text and phone", () => {
     run.write("\u001B");
 
     expect(await run.exited).toBe(1);
-    expect(run.scrollback()).toContain("text or by phone");
+    expect(run.scrollback()).toContain("nobody chose phone");
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
   });

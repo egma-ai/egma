@@ -1,10 +1,10 @@
 /*
  * The parts one run's page needs and no other page has: a conversation's two
- * lines in one cell, the sentence a following page shows while it follows, and
- * the frozen plan drawn group by group.
+ * lines in one cell, the sentence shown while it follows, the run's compact
+ * overview, and an execution reason.
  *
  * They live beside the page rather than in the shared system module, because
- * they are this page's and nothing else uses them. Every value is a token.
+ * they are this page's and nothing else uses them.
  */
 
 .following {
@@ -17,6 +17,100 @@
   line-height: var(--line-caption);
 }
 
+.overview {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.overviewFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-4) var(--space-6);
+  margin: 0;
+}
+
+.overviewFact,
+.overviewFact dd {
+  min-width: 0;
+}
+
+.overviewFact dt {
+  margin-bottom: var(--space-1);
+  color: var(--faint);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.overviewFact dd {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+  overflow-wrap: anywhere;
+}
+
+.overviewFact time {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The run's machinery and its verdict are ordinary labelled facts here.
+ * Symbols keep nearby states easy to scan without turning either value into a
+ * pill or suggesting that execution and judgment are the same thing.
+ */
+.summaryState {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  line-height: var(--line-caption);
+  white-space: nowrap;
+}
+
+.summaryState[data-tone="warn"] {
+  color: var(--warn);
+}
+
+.summaryMark {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-caption);
+  line-height: 1;
+  transform-origin: center;
+}
+
+.summaryState[data-active="true"] .summaryMark {
+  animation: summary-mark-spin calc(var(--duration-drawer-in) * 3) linear
+    infinite;
+}
+
+.archivedNote {
+  color: var(--warn);
+  font-size: var(--text-caption);
+}
+
+@keyframes summary-mark-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.simulationState {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
 /*
  * One conversation in one cell: its position, then what it was.
  *
@@ -25,8 +119,12 @@
  */
 .conversation {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: var(--space-3);
+  min-width: 0;
+}
+
+.conversation > :last-child {
   min-width: 0;
 }
 
@@ -36,10 +134,8 @@
   color: var(--foreground);
 }
 
-.conversation small {
-  display: block;
-  color: var(--muted);
-  font-size: var(--text-caption);
+.conversation :is(a, strong) {
+  overflow-wrap: anywhere;
 }
 
 .position {
@@ -66,77 +162,51 @@
 /* A name and, where it applies, the badge saying it has been archived. */
 .identity {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
 
-.plan {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.planGroup {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-5);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-}
-
-.planHead {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-3);
-  font-size: var(--text-caption);
-}
-
-.planItems {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.planItem {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2);
-  padding-block: var(--space-2);
-  border-top: 1px solid var(--border);
-  font-size: var(--text-caption);
-}
-
-.planItem:first-child {
-  border-top: 0;
-}
-
-.planItemName {
-  color: var(--foreground);
-}
-
-.planItemNote {
-  color: var(--muted);
-  font-size: var(--text-caption);
-}
-
 /*
- * The frozen versions a conversation executed, under the two names.
- *
- * Quiet and mono, because they are identifiers rather than prose — and present
- * rather than hidden behind a disclosure, because "what exactly ran" is the
- * question this page exists to answer.
+ * The shared table wrapper permits overflow for data sets that need it. This
+ * route does not: four compact columns fit, and long names or reasons wrap.
  */
-.pins {
-  display: block;
-  font-family: var(--mono);
-  color: var(--muted);
-  font-size: var(--text-caption);
-  overflow-wrap: anywhere;
+.simulationsTable {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.simulationsTable table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.simulationsTable td > span {
+  min-width: 0;
+  white-space: normal;
+}
+
+/* Fixed columns leave enough room for the short inline execution states. */
+.simulationsTable td:nth-child(n + 2) > span {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+@media (min-width: 901px) {
+  .simulationsTable :is(th, td) {
+    padding-inline: var(--space-2);
+  }
+}
+
+@media (max-width: 900px) {
+  .overview {
+    padding: var(--space-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .summaryState[data-active="true"] .summaryMark {
+    animation: none;
+  }
 }

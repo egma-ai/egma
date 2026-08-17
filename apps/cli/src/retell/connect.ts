@@ -77,13 +77,10 @@ export const DEFAULT_AGENT_NAME = "voice-agent";
 /**
  * How egma reaches the agent, chosen by the developer and never by egma.
  *
- * One voice agent can be reached both ways, and the two answer different
- * questions: text exercises the prompt, the reasoning and the tools; phone
- * exercises all of that plus the speech stack and the line it is carried on.
- * The same test over both is the product's sharpest diagnostic — so both are
- * offered, and **only the one that was chosen is created.** A wizard that made
- * both would put a connection in somebody's project that they never asked for
- * and would be billed for the day something ran over it.
+ * A Retell voice agent is reached by phone. A genuine Retell chat agent is
+ * reached by text. Voice-over-text stays unavailable until Egma implements
+ * Retell Agent Playground Completion; the shipped chat adapter cannot safely
+ * conduct that path.
  */
 export type Reach = "text" | "phone";
 
@@ -105,8 +102,7 @@ export const NUMBER_ASK_LINE =
 /** The exact failure for an agent Retell routes no number to. */
 export const NO_NUMBERS_LINE =
   "Retell routes no phone number to that agent, so there is nothing for Egma to " +
-  "dial. Assign a number to it in the Retell dashboard, under Phone Numbers — " +
-  "or reach it over text instead.";
+  "dial. Assign a number to it in the Retell dashboard, under Phone Numbers.";
 
 /**
  * What egma says when connecting found something already there.
@@ -198,8 +194,8 @@ export type ConnectOutcome =
   | { readonly kind: "no-agents" }
   /** Several agents, and nobody said which. */
   | { readonly kind: "unchosen"; readonly agents: readonly RetellAgent[] }
-  /** Nobody said whether egma should reach the agent by text or by phone. */
-  | { readonly kind: "unchosen-reach" }
+  /** Nobody chose one of the provider-safe ways offered for this agent. */
+  | { readonly kind: "unchosen-reach"; readonly offered: readonly Reach[] }
   /** Retell routes no number to the chosen agent, so there is nothing to dial. */
   | { readonly kind: "no-numbers" }
   /** Several numbers reach the agent, and nobody said which to dial. */
@@ -226,7 +222,7 @@ export type ConnectOptions = {
    * is a fact about *that* agent, so there is nothing honest to offer until
    * egma knows which one is under test.
    */
-  readonly chooseReach: () => Promise<Reach | null>;
+  readonly chooseReach: (offered: readonly Reach[]) => Promise<Reach | null>;
   /**
    * Which number to dial, in E.164, or `null` when nobody chose.
    *
@@ -346,9 +342,9 @@ type Selected = {
 /**
  * The one connection the chosen reach means.
  *
- * **Text is a chat connection over the selected voice agent**, not a second
- * Retell agent: the identity is the voice agent's own, and what changes is how
- * egma talks to it. **Phone carries the destination number and nothing else** —
+ * **Text is only a direct connection to a genuine Retell chat agent.** A voice
+ * agent cannot take this branch until the Agent Playground Completion adapter
+ * exists. **Phone carries the destination number and nothing else** —
  * no Retell identifier and no credential — because the public telephone network
  * neither knows nor cares what answers, and a phone connection that named a
  * provider would be claiming knowledge egma does not use.
@@ -376,24 +372,6 @@ function selectionFor(
     reach,
     connection: {
       type: "retell",
-      // Chat, whichever kind of agent this is: the modality says which layer is
-      // under test, and text exercises the prompt, the reasoning and the tools
-      // rather than the speech stack. It is *not* read off `config.modality`,
-      // which is the agent's own channel — reaching a voice agent by text is
-      // exactly what this choice is for.
-      //
-      // **A row written here is not conductable today, and that is not this
-      // step's to fix.** `spec.md` says text uses Retell's Agent Playground
-      // Completion — `POST /agent-playground-completion/{agent_id}`, which
-      // takes the whole message history per turn and works against an agent of
-      // either channel. The shipped plug
-      // (`apps/simulator/src/egma_simulator/plugs/retell.py`) speaks Retell's
-      // *chat-agent* API instead — `create-chat`, `create-chat-completion`,
-      // `end-chat` — and whether that accepts a voice agent's id is untested.
-      // Nothing in this ticket runs a text simulation, so nothing here can find
-      // out. Whoever ships the text path replaces that plug rather than
-      // pointing it somewhere else; the identity written down is already the
-      // right one.
       modality: "chat",
       config: { retellAgentId: config.agentId },
       credentials: key,
@@ -796,9 +774,20 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
   // The agent is settled, so what egma may offer is settled with it. Asking
   // before this point would be offering a phone the agent may have no number
   // for.
-  const reach = await options.chooseReach();
+  const offered: readonly Reach[] =
+    config.modality === "voice" ? ["phone"] : ["text"];
+  const reach = await options.chooseReach(offered);
   if (options.signal.aborted) return { kind: "interrupted" };
-  if (reach === null) return { kind: "unchosen-reach" };
+  if (reach === null) return { kind: "unchosen-reach", offered };
+  if (!offered.includes(reach)) {
+    return {
+      kind: "failed",
+      reason:
+        config.modality === "voice"
+          ? "Retell voice agents can only be connected by phone until Agent Playground Completion is supported."
+          : "Retell chat agents can only be connected by text.",
+    };
+  }
 
   // Read once at most, and only where it is needed: by the phone branch, which
   // needs it to offer anything at all, and by a name clash that has nothing

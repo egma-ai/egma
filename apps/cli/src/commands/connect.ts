@@ -27,6 +27,7 @@ import {
   CUSTODY_LINE,
   KEY_ASK_LINE,
   keyAskLines,
+  NO_NUMBERS_LINE,
   NUMBER_ASK_LINE,
   REACH_ASK_LINE,
   REACH_LINES,
@@ -291,9 +292,9 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
     // coding agent reading this is told exactly what a person is told. There is
     // nobody here to answer it, so it is answered in the command or not at all
     // — and not at all creates nothing, which is the point.
-    chooseReach: () => {
+    chooseReach: (offered) => {
       options.out(`note: ${REACH_ASK_LINE}`);
-      for (const way of ["text", "phone"] as const) {
+      for (const way of offered) {
         options.out(`reach_option: ${way} ${REACH_LINES[way]}`);
       }
       return Promise.resolve(named === null ? null : named.reach);
@@ -390,8 +391,8 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
     case "unchosen-reach":
       options.out("status: unchosen-reach");
       options.fail(
-        "Egma creates the one connection you choose and never both. Say " +
-          `--reach text or --reach phone, or set ${REACH_VARIABLE}. Nothing was written.`,
+        `Choose ${outcome.offered.map((reach) => `--reach ${reach}`).join(" or ")}, ` +
+          `or set ${REACH_VARIABLE}. Nothing was written.`,
       );
       break;
     case "unchosen-number":
@@ -404,10 +405,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       break;
     case "no-numbers":
       options.out("status: no-numbers");
-      options.fail(
-        "Retell routes no phone number to that agent, so there is nothing for Egma to " +
-          "dial. Assign one in the Retell dashboard, or connect over text with --reach text.",
-      );
+      options.fail(NO_NUMBERS_LINE);
       break;
     case "no-key":
       options.out("status: no-key");

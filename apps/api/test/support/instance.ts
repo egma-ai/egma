@@ -114,6 +114,8 @@ export type InstanceOptions = {
    * provider, routes, approval, token exchange, and stored key stay real.
    */
   readonly deviceAuthorizationInterval?: ServerOptions["deviceAuthorizationInterval"];
+  /** Provider-read seam for the one browser journey that configures Retell. */
+  readonly retellFetch?: ServerOptions["retellFetch"];
 };
 
 export type ObservedInstanceRequest = {
@@ -217,6 +219,9 @@ export async function startInstance(
     ...(options.deviceAuthorizationInterval === undefined
       ? {}
       : { deviceAuthorizationInterval: options.deviceAuthorizationInterval }),
+    ...(options.retellFetch === undefined
+      ? {}
+      : { retellFetch: options.retellFetch }),
   });
   if (options.observeRequest !== undefined) {
     // `prependListener` puts this before Fastify's own request listener. A

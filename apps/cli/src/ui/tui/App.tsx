@@ -83,7 +83,12 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
     );
   }
   if (screen === "reach") {
-    return <ReachScreen onAnswer={(reach) => store.answer("reach", reach)} />;
+    return (
+      <ReachScreen
+        options={state.reachOptions ?? []}
+        onAnswer={(reach) => store.answer("reach", reach)}
+      />
+    );
   }
   if (screen === "phone-number") {
     return (

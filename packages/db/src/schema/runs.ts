@@ -65,9 +65,13 @@ export type RunTrigger = (typeof RUN_TRIGGERS)[number];
  * fix — the same paths the composite foreign keys defend.
  *
  *   queued → claimed → running → completed | failed | canceled
+ *              ↘ queued
  *
- * `queued → canceled` is the cancel-before-claim path, and a canceled row can
- * never be claimed. A terminal row is frozen entirely.
+ * `claimed → queued` releases a lease when a bounded provider preflight could
+ * not answer before dispatch. It clears every claim fact in the same write;
+ * the queued-shape constraint refuses a partial release. `queued → canceled`
+ * is the cancel-before-claim path, and a canceled row can never be claimed. A
+ * terminal row is frozen entirely.
  *
  * `skipped` is outside that lifecycle entirely and is the one status a row can
  * be **born** in. It is written by run creation, terminal from its first

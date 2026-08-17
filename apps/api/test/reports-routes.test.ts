@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
 import { reportPathFor } from "../src/routes/reports.ts";
 import { fixedWindowRateLimit } from "../src/http/rate-limit.ts";
-import { createApi, type TestApi } from "./support/api.ts";
+import {
+  createApi,
+  type TestApi,
+  type TestApiOptions,
+} from "./support/api.ts";
 import {
   contextFor,
   NEUTRAL_TRAITS,
@@ -47,6 +51,34 @@ const RETELL = {
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+} as const;
+
+/** The direct Retell fixture in this file is a chat agent. */
+const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
+  const url = String(input);
+  if (!url.includes("/v2/list-agents")) {
+    throw new Error(`Unexpected Retell read: ${url}`);
+  }
+  return new Response(
+    JSON.stringify({
+      items: [
+        {
+          agent_id: "agent_in_retell_1",
+          agent_name: "Front desk",
+          channel: "chat",
+        },
+      ],
+      has_more: false,
+    }),
+    { status: 200 },
+  );
+};
+
+/** The minimum platform settings required to conduct a phone simulation. */
+const PHONE_IS_SET_UP = {
+  carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
+  carrier_trunk_number: "+18885550123",
+  text_to_speech_provider: "openai",
 } as const;
 
 /** The claimant every claim in this file conducts under. */
@@ -129,14 +161,20 @@ function terminalEvent(
 }
 
 /** A customer with an agent, a persona, and a test — everything a run needs. */
-async function aCustomerReadyToRun(label: string): Promise<{
+async function aCustomerReadyToRun(
+  label: string,
+  options: TestApiOptions = {},
+): Promise<{
   ada: Customer;
   key: string;
   agentId: string;
   connectionId: string;
   versionId: string;
 }> {
-  api = await createApi(label);
+  api = await createApi(label, {
+    ...options,
+    retellFetch: options.retellFetch ?? RETELL_CHAT_FETCH,
+  });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
@@ -413,12 +451,12 @@ describe("the lifecycle lands", () => {
   it("lands a voice conversation's measured band and recording reference", async () => {
     const { ada, key, agentId, versionId } = await aCustomerReadyToRun(
       "reports_voice",
+      { platformSettings: PHONE_IS_SET_UP },
     );
     const attached = await ask(api.app, "POST", `/api/agents/${agentId}/connections`, key, {
-      type: "retell",
+      type: "phone",
       modality: "voice",
-      config: { retellAgentId: "agent_in_retell_voice" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      config: { phoneNumber: "+15551234567" },
     });
     expect(attached.statusCode, JSON.stringify(attached.body)).toBe(201);
     const voiceConnection = (attached.body.connection as { id: string }).id;

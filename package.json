@@ -9,9 +9,9 @@
   },
   "scripts": {
     "lint": "node packages/lint/src/cli.ts",
-    "build": "pnpm lint && tsc -b packages/ids packages/db packages/lint apps/api apps/grader apps/cli",
+    "build": "pnpm lint && tsc -b packages/ids packages/retell packages/db packages/lint apps/api apps/grader apps/cli",
     "typecheck": "pnpm build && tsc -p tsconfig.tests.json && pnpm --filter @egma/web typecheck",
-    "clean": "tsc -b --clean packages/ids packages/db packages/lint apps/api apps/grader apps/cli",
+    "clean": "tsc -b --clean packages/ids packages/retell packages/db packages/lint apps/api apps/grader apps/cli",
     "db:up": "node packages/db/test/support/start-stores.ts && node packages/db/test/support/sweep-stale-databases.ts",
     "db:down": "node packages/db/test/support/stop-stores.ts",
     "db:generate": "pnpm --filter @egma/db generate",

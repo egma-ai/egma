@@ -71,11 +71,6 @@ export type PersonaVersionPage = {
   readonly next_cursor: string | null;
 };
 
-/** A test as the usage read names one: enough to go and open it. */
-export type UsingTest = { readonly id: string; readonly name: string };
-
-export type PersonaUsage = { readonly tests: readonly UsingTest[] };
-
 export const PERSONAS_PATH = "/api/personas";
 
 /** Where the persona form's server-owned metadata comes from. */
@@ -111,15 +106,29 @@ export function providerOptions(
   return known.includes(held) || held === "" ? known : [...known, held];
 }
 
+/** One server-side search and one cursor page of a lifecycle state. */
+export function personasQuery(options: {
+  readonly archived?: boolean;
+  readonly search?: string;
+  readonly cursor?: string;
+}): string {
+  const query = new URLSearchParams();
+  if (options.archived === true) query.set("archived", "true");
+  const wanted = options.search?.trim() ?? "";
+  if (wanted !== "") query.set("search", wanted);
+  if (options.cursor !== undefined) query.set("cursor", options.cursor);
+  const written = query.toString();
+  return written === "" ? PERSONAS_PATH : `${PERSONAS_PATH}?${written}`;
+}
+
 /** The list of one lifecycle state. Two lists, never one with a column. */
 export function personasPath(archived: boolean): string {
-  return archived ? `${PERSONAS_PATH}?archived=true` : PERSONAS_PATH;
+  return personasQuery({ archived });
 }
 
 /** The next page of the same list, carrying the same filter. */
 export function personasAfter(cursor: string, archived: boolean): string {
-  const from = personasPath(archived);
-  return `${from}${from.includes("?") ? "&" : "?"}cursor=${encodeURIComponent(cursor)}`;
+  return personasQuery({ archived, cursor });
 }
 
 export function personaPath(personaId: string): string {
@@ -128,10 +137,6 @@ export function personaPath(personaId: string): string {
 
 export function personaVersionsPath(personaId: string): string {
   return `${PERSONAS_PATH}/${personaId}/versions`;
-}
-
-export function personaUsagePath(personaId: string): string {
-  return `${PERSONAS_PATH}/${personaId}/usage`;
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -281,15 +282,63 @@ function evidence(overrides: Record<string, unknown> = {}) {
       started_at: "2026-08-15T10:00:00.000000Z",
       ended_at: "2026-08-15T10:00:40.000000Z",
       duration_ns: "40000000000",
-      span_count: 3,
+      span_count: 5,
       turn_counts: { human: 1, agent: 1 },
       tool_span_count: 1,
-      errored_span_count: 0,
+      errored_span_count: 1,
       turns: [
         turn("span_human", "turn:human", "Move Thursday's clean to next week.", 1),
-        turn("span_agent", "turn:agent", "You are all set.", 4),
+        {
+          ...turn("span_agent", "turn:agent", "You are all set.", 4),
+          spans: [
+            {
+              span_id: "span_tool",
+              parent_span_id: "span_agent",
+              name: "reschedule_appointment",
+              kind: "tool",
+              status: "error",
+              started_at: "2026-08-15T10:00:05.000000Z",
+              duration_ns: "500000000",
+              text: "",
+              audio_url: "",
+              tool_name: "reschedule_appointment",
+              tool_arguments: "{}",
+              tool_result: "{}",
+              spans: [],
+            },
+          ],
+        },
       ],
-      spans: [],
+      spans: [
+        {
+          ...turn("span_root", "turn:agent", "", 0),
+          parent_span_id: "",
+          name: "simulation",
+          kind: "simulation",
+          duration_ns: "40000000000",
+          spans: [
+            {
+              ...turn(
+                "span_human",
+                "turn:human",
+                "Move Thursday's clean to next week.",
+                1,
+              ),
+              parent_span_id: "span_root",
+            },
+            {
+              ...turn("span_agent", "turn:agent", "You are all set.", 4),
+              parent_span_id: "span_root",
+            },
+          ],
+        },
+        {
+          ...turn("span_system", "turn:agent", "", 3),
+          parent_span_id: "",
+          name: "dispatch",
+          kind: "system",
+        },
+      ],
       spans_truncated: false,
     },
     ...overrides,
@@ -300,6 +349,7 @@ function page(
   options: {
     readonly role?: string;
     readonly read?: Record<string, unknown> | readonly Record<string, unknown>[];
+    readonly recording?: boolean;
     /** One answer, or one per ask in order — a page may regrade twice. */
     readonly regrade?: Stubbed | readonly Stubbed[];
   } = {},
@@ -319,6 +369,15 @@ function page(
         already_waiting: 0,
       },
     },
+    ...(options.recording === true
+      ? {
+          "/api/simulations/sim_1/recording": {
+            status: 200,
+            body: { url: "http://egma.test/recording.wav" },
+          },
+          "/recording.wav": { status: 200, body: "stereo audio fixture" },
+        }
+      : {}),
   });
 }
 
@@ -336,6 +395,10 @@ beforeEach(() => {
     value: { ...window.location, search: "", replace: vi.fn() },
   });
   vi.stubGlobal("scrollTo", vi.fn());
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
 });
 
 afterEach(() => {
@@ -344,13 +407,51 @@ afterEach(() => {
 });
 
 describe("one simulation's evidence", () => {
+  it("shows the run hierarchy before the simulation actions", async () => {
+    const startedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    page({
+      read: evidence({
+        status: "running",
+        grading: "waiting",
+        verdict: null,
+        counts: null,
+        started_at: startedAt,
+        ended_at: null,
+        has_recording: false,
+        grading_jobs: [],
+        verdicts: [],
+        by_grader: [],
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    const breadcrumb = await screen.findByRole("navigation", {
+      name: "Breadcrumb",
+    });
+    expect(within(breadcrumb).getByRole("link", { name: "Runs" }).getAttribute("href"))
+      .toBe("/projects/prj_1/runs");
+    expect(
+      within(breadcrumb).getByRole("link", { name: "Nightly smoke" }).getAttribute("href"),
+    ).toBe("/projects/prj_1/runs/run_1");
+    expect(within(breadcrumb).getByText("Simulation 01").getAttribute("aria-current"))
+      .toBe("page");
+    const started = screen.getByText("5 minutes ago");
+    expect(started.closest("time")?.dateTime).toBe(startedAt);
+    expect(started.closest("time")?.title).toMatch(/^\d{4}-\d{2}-\d{2} /u);
+    expect(screen.queryByRole("link", { name: "Back to the run" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Regrade" })).toBeTruthy();
+    expect(
+      screen.getByText("Recording will be available after the call ends."),
+    ).toBeTruthy();
+  });
+
   it("reads the whole page in one request", async () => {
     page();
     render(<SimulationEvidencePage />);
 
     // Wait for the read that produces everything below, then count what was
     // asked for. `/api/me` is the shell's own and is not this page's read.
-    await screen.findByText("call_abc123");
+    await screen.findByRole("region", { name: "Simulation summary" });
     expect(sentWith("/api/simulations/sim_1", "GET")).toHaveLength(1);
     expect(
       sent.filter((one) => one.path.startsWith("/api/simulations")),
@@ -361,87 +462,249 @@ describe("one simulation's evidence", () => {
     );
   });
 
-  it("shows the pins, the identities and the provider's own reference", async () => {
+  it("shows only the three useful summary facts above the evidence", async () => {
     page();
     render(<SimulationEvidencePage />);
 
-    // The exact frozen versions, which never move, beside names that read as
-    // they stand today.
-    await screen.findByText("tstv_1");
-    await screen.findByText("prsv_7");
-    await screen.findByText("Their cleaning has to move to any afternoon next week.");
-    // The one join between egma's record and the agent's own telemetry.
-    await screen.findByText("call_abc123");
-    await screen.findByText("retell · voice · hosted-broker");
+    const summary = await screen.findByRole("region", {
+      name: "Simulation summary",
+    });
+    expect(within(summary).getByText("Overall verdict")).toBeTruthy();
+    expect(within(summary).getByText("Duration")).toBeTruthy();
+    expect(within(summary).getByText("40s")).toBeTruthy();
+    expect(within(summary).getByText("Total turns")).toBeTruthy();
+    expect(within(summary).getByText("2")).toBeTruthy();
+
+    expect(screen.queryByText("Technical details")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Measures" })).toBeNull();
+    expect(screen.queryByText("tstv_1")).toBeNull();
+    expect(screen.queryByText("prsv_7")).toBeNull();
+    expect(screen.queryByText("call_abc123")).toBeNull();
+    expect(
+      screen.queryByText("Their cleaning has to move to any afternoon next week."),
+    ).toBeNull();
     expect(
       (await screen.findAllByText("Expected behaviors")).length,
     ).toBeGreaterThan(0);
     expect(screen.queryByText("expected_behaviors")).toBeNull();
   });
 
-  it("puts verdict evidence before technical detail and calls the unit a simulation", async () => {
-    page();
+  it("puts human-named graders behind default-open transcript and audio", async () => {
+    const read = evidence({ has_recording: true });
+    page({
+      recording: true,
+      read: {
+        ...read,
+        grading_plan: {
+          ...read.grading_plan,
+          items: [
+            ...read.grading_plan.items,
+            {
+              ...read.grading_plan.items[0],
+              grader_id: "grd_2",
+              grader_version_id: "grv_2",
+              name: "brand_tone",
+              required: false,
+            },
+          ],
+        },
+        verdicts: [
+          ...read.verdicts,
+          machineVerdict({
+            grader_id: "grd_2",
+            assertion: "keeps_brand_voice",
+            assertion_text: null,
+            required: false,
+            verdict: "passed",
+            score: 1,
+            rationale: "The agent kept the approved voice.",
+            cited_turns: [],
+          }),
+        ],
+        by_grader: [
+          ...read.by_grader,
+          {
+            grader_id: "grd_2",
+            required: false,
+            verdict: "passed",
+            score: 1,
+            counts: { ...NO_COUNTS, passed: 1, total: 1 },
+          },
+          {
+            grader_id: "grd_without_plan",
+            required: false,
+            verdict: null,
+            score: null,
+            counts: NO_COUNTS,
+          },
+        ],
+      },
+    });
+    class StereoAudioContext {
+      async decodeAudioData() {
+        return {
+          duration: 2,
+          numberOfChannels: 2,
+          getChannelData: (channel: number) =>
+            new Float32Array(channel === 0 ? [0, 0.8, 0] : [0, 0.4, 0]),
+        };
+      }
+
+      async close() {}
+    }
+    vi.stubGlobal("AudioContext", StereoAudioContext);
     render(<SimulationEvidencePage />);
 
     await screen.findByText("The agent never said the new time back.");
-    const verdicts = screen.getByRole("heading", { name: "Verdicts" });
-    const transcript = screen.getByRole("heading", { name: "Transcript" });
+    const workspace = screen.getByRole("region", {
+      name: "Simulation evidence",
+    });
+    const graders = within(workspace).getByRole("region", {
+      name: "Grader results",
+    });
+    const evidenceSheet = screen.getByRole("dialog", {
+      name: "Transcript and audio",
+    });
+    const transcript = within(evidenceSheet).getByRole("region", {
+      name: "Transcript",
+    });
+    const messages = within(transcript).getByRole("list", {
+      name: "Transcript messages",
+    });
+    const turns = within(messages).getAllByRole("listitem");
 
+    expect(evidenceSheet.getAttribute("aria-modal")).toBe("true");
+    expect(evidenceSheet.getAttribute("data-kind")).toBe("sheet");
+    expect(evidenceSheet.contains(document.activeElement)).toBe(true);
+    expect(turns).toHaveLength(2);
+    expect(within(turns[0]!).getByText("Human")).toBeTruthy();
+    expect(within(turns[1]!).getByText("Agent")).toBeTruthy();
+    expect(within(graders).getByRole("heading", { name: "Expected behaviors" }))
+      .toBeTruthy();
+    expect(within(graders).getAllByRole("heading", { name: "Expected behavior" }))
+      .toHaveLength(2);
+    expect(within(graders).getAllByRole("heading", { name: "Judge finding" }))
+      .toHaveLength(2);
+    const customGrader = within(graders).getByRole("region", {
+      name: "Brand tone",
+    });
+    expect(within(customGrader).getByText("Criterion 1")).toBeTruthy();
+    expect(within(customGrader).getByText("The agent kept the approved voice."))
+      .toBeTruthy();
     expect(
-      verdicts.compareDocumentPosition(transcript) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).not.toBe(0);
-    expect(screen.getByText("Simulation")).not.toBeNull();
-    expect(
-      screen.queryByRole("heading", { name: "Conversation" }),
-    ).toBeNull();
+      within(graders).getByRole("region", { name: "Grader name unavailable" }),
+    ).toBeTruthy();
+    const visibleEvidence = document.body.textContent ?? "";
+    for (const internal of [
+      "grd_1",
+      "grd_2",
+      "grd_without_plan",
+      "grv_1",
+      "grv_2",
+      "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+      "jcr_1",
+      "gpt-4.1-mini",
+      "keeps_brand_voice",
+      "Keeps brand voice",
+      "tstv_1",
+      "prsv_7",
+      "call_abc123",
+      "0.00",
+      "1.00",
+    ]) {
+      expect(visibleEvidence).not.toContain(internal);
+    }
+    expect(await within(evidenceSheet).findByLabelText("Simulation recording"))
+      .toBeTruthy();
+    const seek = await within(evidenceSheet).findByRole("slider", {
+      name: "Seek the recording",
+    });
+    fireEvent.change(seek, { target: { value: "1" } });
+    await waitFor(() => expect((seek as HTMLInputElement).value).toBe("1"));
+    fireEvent.click(within(evidenceSheet).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Transcript and audio" })).toBeNull();
+
+    const opener = within(graders).getByRole("button", {
+      name: "Open transcript and audio",
+    });
+    opener.focus();
+    fireEvent.click(opener);
+    const reopened = screen.getByRole("dialog", { name: "Transcript and audio" });
+    fireEvent.click(within(reopened).getByRole("button", { name: "Close" }));
+    expect(document.activeElement).toBe(opener);
+
+    fireEvent.click(within(graders).getByRole("button", { name: "Read turn 2" }));
+    expect(screen.getByRole("dialog", { name: "Transcript and audio" })).toBeTruthy();
+    await waitFor(() => {
+      expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
+        block: "center",
+      });
+    });
+    expect(screen.getByText("Simulation 01")).not.toBeNull();
+    expect(screen.queryByText("Technical details")).toBeNull();
+    expect(screen.queryByText("Frozen record")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Execution flow" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Test setup" })).toBeNull();
+    expect(screen.queryByText("Provider reference")).toBeNull();
+    expect(screen.queryByText("Credential")).toBeNull();
+    expect(screen.queryByText("Model")).toBeNull();
+    expect(screen.queryByText("Score")).toBeNull();
   });
 
-  it("keeps the transcript, the timing and the measures three separate things", async () => {
+  it("uses one evidence workspace without separate setup or execution sections", async () => {
     page();
     render(<SimulationEvidencePage />);
 
-    // The transcript is what was said, at reading density, with the two
-    // speakers the domain model labels.
-    const said = await screen.findByText("You are all set.");
-    expect(screen.getAllByText("human:").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("agent:").length).toBeGreaterThan(0);
-
-    // What was measured is its own block and is never inside a turn.
-    const outcome = screen.getByRole("heading", { name: "Outcome" });
-    expect(outcome).not.toBe(null);
-    await screen.findByText("40.0 s");
-    // The measure is not drawn inside the transcript's turn.
-    expect(said.closest("section")).not.toBe(outcome.closest("section"));
-
-    // And the timed view exists as its own section rather than being folded in.
-    expect(screen.getByRole("heading", { name: "Execution" })).not.toBe(null);
+    const workspace = await screen.findByRole("region", {
+      name: "Simulation evidence",
+    });
+    expect(within(workspace).getByText("You are all set.")).toBeTruthy();
+    expect(
+      within(workspace).getByText("The agent never said the new time back."),
+    ).toBeTruthy();
+    expect(screen.getByText("No audio was recorded.")).toBeTruthy();
+    expect(screen.getAllByRole("region", { name: "Simulation evidence" })).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "Test setup" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Execution" })).toBeNull();
   });
 
-  it("says which tools ran for real, and never offers to author one", async () => {
+  it("keeps raw timing and nested execution data out of the transcript", async () => {
     page();
     render(<SimulationEvidencePage />);
 
-    await screen.findByText("Answered by Egma");
-    await screen.findByText("charge_card");
-    // A record of what was served, not an editor of the project's world.
-    expect(
-      screen.queryByRole("button", { name: /mock tool/iu }),
-    ).toBeNull();
+    await screen.findByText("You are all set.");
+    expect(screen.queryByText("+4.0 s")).toBeNull();
+    expect(screen.queryByText("1.0 s")).toBeNull();
+    expect(screen.queryByText("something failed inside")).toBeNull();
+    expect(screen.queryByText("charge_card")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Mock tools" })).toBeNull();
   });
 
-  it("says a plan was not recorded rather than showing today's graders", async () => {
+  it("does not turn a recorded plan into verdicts when nothing was judged", async () => {
     page({
       read: evidence({
-        grading_plan: { state: "not_recorded", captured_at: null, items: [] },
+        status: "skipped",
+        grading: "not_required",
+        verdict: "skipped",
+        score: null,
+        counts: { ...NO_COUNTS, skipped: 1, total: 1 },
+        skip_reason: "required_capability_unsupported",
+        skipped_capabilities: ["raw_audio"],
+        verdicts: [],
+        by_grader: [],
+        grading_jobs: [],
       }),
     });
     render(<SimulationEvidencePage />);
 
-    await screen.findByText(/No plan was recorded when this run started/u);
-    await screen.findByText(
-      "No grading plan was recorded for this simulation",
-    );
+    const graders = await screen.findByRole("region", {
+      name: "Grader results",
+    });
+    await within(graders).findByText("There was nothing to judge");
+    expect(
+      within(graders).queryByRole("heading", { name: "Expected behaviors" }),
+    ).toBeNull();
+    expect(screen.queryByText("Technical details")).toBeNull();
   });
 });
 
@@ -515,7 +778,7 @@ describe("asking for it to be judged again", () => {
     await screen.findByText(/queued to be judged again/u);
   });
 
-  it("shows egma's own sentence when a regrade is refused", async () => {
+  it("shows a regrade refusal without its storage identifier", async () => {
     page({
       regrade: {
         status: 422,
@@ -532,7 +795,10 @@ describe("asking for it to be judged again", () => {
       await screen.findByRole("button", { name: "Judge it again" }),
     );
 
-    await screen.findByText("simulation sim_1 has no grading to ask for again.");
+    await screen.findByText(
+      "This simulation has no grading to ask for again. It was not conducted or did not finish, so there is nothing to judge again.",
+    );
+    expect(screen.queryByText(/sim_1/u)).toBeNull();
   });
 
   /**
@@ -583,7 +849,10 @@ describe("asking for it to be judged again", () => {
       await screen.findByRole("button", { name: "Judge it again" }),
     );
 
-    await screen.findByText(inFlight);
+    await screen.findByText(
+      "One grader is already judging this simulation and does not cover what you asked for. Nothing was queued. Ask again after those verdicts arrive.",
+    );
+    expect(screen.queryByText(inFlight)).toBeNull();
     // And the reassurance from the first ask is gone rather than sitting above
     // the refusal that contradicts it.
     expect(screen.queryByText(/queued to be judged again/u)).toBeNull();
@@ -612,7 +881,7 @@ describe("what a viewer sees", () => {
     // Every piece of evidence is theirs to read.
     await screen.findByText("The agent never said the new time back.");
     await screen.findByText("You are all set.");
-    await screen.findByText("call_abc123");
+    await screen.findByRole("region", { name: "Simulation summary" });
 
     // **Waited for the read that would have supplied them**: the two lines
     // above only exist once the answer landed, so an absence here is an
@@ -620,5 +889,6 @@ describe("what a viewer sees", () => {
     expect(screen.queryByRole("button", { name: "Regrade" })).toBeNull();
     // And it says why, rather than leaving somebody hunting for a control.
     await screen.findByText(/viewer role can read every piece of evidence/u);
+    expect(screen.queryByText("Technical details")).toBeNull();
   });
 });

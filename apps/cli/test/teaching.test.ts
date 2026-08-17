@@ -44,6 +44,7 @@ const ACCOUNT: FakeRetellScript = {
   agents: [
     {
       agent_id: "agent_quillfeather_order_line",
+      channel: "chat",
       agent_name: "order-line",
       response_engine: { type: "retell-llm", llm_id: "llm_quillfeather" },
     },

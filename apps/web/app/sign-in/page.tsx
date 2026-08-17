@@ -56,7 +56,7 @@ export default function SignInPage() {
     <AuthShell
       animated
       eyebrow="Welcome back"
-      title="Trust starts with what happened."
+      title="Sign in"
       lead="Sign in to continue to your organization."
     >
       <Form onSubmit={() => void submit()}>
@@ -109,7 +109,7 @@ export default function SignInPage() {
       <p className={styles.linkLine}>
         No account yet?{" "}
         <a href={returnTo === null ? "/signup" : withReturnTo("/signup", returnTo)}>
-          Set up Egma
+          Sign up
         </a>
         .
       </p>

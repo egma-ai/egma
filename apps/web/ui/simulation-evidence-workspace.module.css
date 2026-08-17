@@ -1,0 +1,621 @@
+.review {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-7);
+}
+
+.workspace {
+  min-width: 0;
+}
+
+.summary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.summary > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+}
+
+.summary > div + div {
+  border-inline-start: 1px solid var(--border);
+}
+
+.summary span {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.summary strong {
+  color: var(--foreground);
+  font-family: var(--mono);
+  font-size: var(--text-body);
+  font-weight: 400;
+  line-height: var(--line-body);
+}
+
+.pane {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.graderPane {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+.paneHead {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.paneHead > div {
+  min-width: 0;
+}
+
+.paneKind,
+.graderKind {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+  letter-spacing: var(--tracking-label);
+  line-height: var(--line-caption);
+  text-transform: uppercase;
+}
+
+.paneHead h2,
+.graderHead h3 {
+  margin: 0;
+  color: var(--foreground);
+  font-weight: 400;
+}
+
+.paneHead h2 {
+  font-size: var(--text-lead);
+  letter-spacing: var(--tracking-lead);
+  line-height: var(--line-lead);
+}
+
+.pending {
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  border-inline-start: 3px solid var(--accent);
+  background: var(--surface-active);
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.graderGroups {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.graderGroup {
+  min-width: 0;
+}
+
+.graderGroup + .graderGroup {
+  border-top: 1px solid var(--border);
+}
+
+.graderHead {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: var(--surface-soft);
+}
+
+.graderHead > div {
+  min-width: 0;
+}
+
+.graderHead h3 {
+  overflow-wrap: anywhere;
+  font-size: var(--text-lead);
+  letter-spacing: var(--tracking-lead);
+  line-height: var(--line-lead);
+}
+
+.graderHead p,
+.emptyGroup,
+.workspaceState p,
+.recordingState,
+.recordingProblem,
+.transcriptNotice {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.emptyGroup {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+}
+
+.assertions {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--background);
+}
+
+.assertion {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.assertionHead {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+
+.assertionHead > span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+  text-transform: uppercase;
+}
+
+.comparison {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.comparison > section {
+  min-width: 0;
+  padding: var(--space-4);
+}
+
+.comparison > section + section {
+  border-inline-start: 1px solid var(--border);
+}
+
+.comparison h4 {
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  letter-spacing: var(--tracking-label);
+  line-height: var(--line-caption);
+  text-transform: uppercase;
+}
+
+.assertion p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.findingCell {
+  background: var(--surface-soft);
+}
+
+.findingCell .citations {
+  margin-top: var(--space-2);
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.citations button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+.earlier {
+  margin-top: var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+.earlier summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--foreground);
+}
+
+.earlier p {
+  margin-top: var(--space-2);
+  color: var(--muted);
+}
+
+.workspaceState {
+  padding: var(--space-5);
+}
+
+.workspaceState strong {
+  color: var(--foreground);
+  font-size: var(--text-body);
+  font-weight: 400;
+  line-height: var(--line-body);
+}
+
+.workspaceState p {
+  max-width: 62ch;
+}
+
+.evidenceSheetBody {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-6);
+  overflow-y: auto;
+  padding: var(--space-5);
+  background: var(--background);
+}
+
+.recordingBlock,
+.transcriptBlock {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.recordingBlock h3,
+.transcriptBlock h3 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-body);
+  font-weight: 500;
+  line-height: var(--line-body);
+}
+
+.recording {
+  min-width: 0;
+}
+
+.audio {
+  display: block;
+  width: 100%;
+  height: 40px;
+}
+
+.recordingState,
+.recordingProblem {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.recording .recordingState {
+  padding: var(--space-3) 0 0;
+}
+
+.recordingProblem {
+  color: var(--bad);
+}
+
+.waveform {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.waveform:has(.waveSeek:focus-visible) {
+  outline-color: var(--accent);
+}
+
+.waveLane {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.waveLane > span {
+  color: var(--foreground);
+  font-size: var(--text-caption);
+}
+
+.waveTrack {
+  position: relative;
+  height: 52px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 49.5%,
+      var(--border) 49.5%,
+      var(--border) 50.5%,
+      transparent 50.5%
+    ),
+    var(--background);
+}
+
+.waveTrack svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.waveTrack path {
+  fill: color-mix(in srgb, var(--foreground) 72%, transparent);
+}
+
+.playhead {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: var(--playhead);
+  width: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.waveSeek {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 68px;
+  width: calc(100% - 68px);
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  cursor: ew-resize;
+  opacity: 0.001;
+}
+
+.waveSeek:disabled {
+  cursor: default;
+}
+
+.waveSeek::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+
+.waveSeek::-webkit-slider-thumb {
+  width: 24px;
+  height: 100%;
+  appearance: none;
+  background: transparent;
+}
+
+.waveSeek::-moz-range-track {
+  height: 100%;
+  background: transparent;
+}
+
+.waveSeek::-moz-range-thumb {
+  width: 24px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.waveTime {
+  position: absolute;
+  z-index: 1;
+  right: var(--space-2);
+  bottom: var(--space-1);
+  padding: 0 var(--space-1);
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.transcriptBlock {
+  flex: 1 1 auto;
+}
+
+/*
+ * One ordered transcript, drawn as a quiet two-sided message exchange.
+ * Alignment makes turn-taking visible; written labels carry the meaning, so
+ * the layout does not depend on colour and still reads correctly when zoomed.
+ */
+.chatTranscript {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chatTurn {
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  scroll-margin-block: var(--space-7);
+}
+
+.chatHuman {
+  justify-content: flex-start;
+  padding-inline-end: 14%;
+}
+
+.chatAgent {
+  justify-content: flex-end;
+  padding-inline-start: 14%;
+}
+
+.chatMessage {
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.chatHuman .chatMessage {
+  border-end-start-radius: var(--radius-sm);
+}
+
+.chatAgent .chatMessage {
+  border-end-end-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+
+.chatTurn:target .chatMessage {
+  border-color: var(--accent);
+  background: var(--surface-active);
+}
+
+.chatSpeaker,
+.chatText {
+  margin: 0;
+}
+
+.chatSpeaker {
+  margin-bottom: var(--space-1);
+  color: var(--muted);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: var(--line-caption);
+}
+
+.chatText {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+  white-space: pre-wrap;
+}
+
+.chatEmpty {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.transcriptNotice {
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  border-inline-start: 3px solid var(--accent);
+  background: var(--surface-active);
+  color: var(--foreground);
+}
+
+@media (max-width: 40rem) {
+  .summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .summary > div + div {
+    border-top: 1px solid var(--border);
+    border-inline-start: 0;
+  }
+
+  .paneHead,
+  .graderHead,
+  .recording,
+  .recordingState,
+  .recordingProblem,
+  .workspaceState,
+  .emptyGroup {
+    padding-inline: var(--space-4);
+  }
+
+  .comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .comparison > section + section {
+    border-top: 1px solid var(--border);
+    border-inline-start: 0;
+  }
+
+  .assertions,
+  .evidenceSheetBody {
+    padding: var(--space-4);
+  }
+
+  .waveLane {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+
+  .waveSeek {
+    left: 56px;
+    width: calc(100% - 56px);
+  }
+
+  .chatHuman {
+    padding-inline-end: var(--space-5);
+  }
+
+  .chatAgent {
+    padding-inline-start: var(--space-5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waveform {
+    scroll-behavior: auto;
+  }
+}

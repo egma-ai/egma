@@ -573,6 +573,7 @@ export {
   listSimulations,
   markSimulationCanceled,
   recordSimulationHeartbeat,
+  releaseSimulationClaim,
   resolveSimulationConnection,
   resolveSimulationStanding,
   startRun,

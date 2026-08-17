@@ -50,6 +50,7 @@ export function DataTable<Row>({
   rows,
   keyOf,
   stretchPrimaryLink = false,
+  stackWhenConstrained = false,
   more,
 }: {
   /** What this table is a table of. Read out where there is no visible caption. */
@@ -62,6 +63,11 @@ export function DataTable<Row>({
    * row. There is still only one link in the accessibility tree.
    */
   readonly stretchPrimaryLink?: boolean;
+  /**
+   * Switches this same semantic table to labelled rows when its own container,
+   * rather than the browser viewport, is too narrow for all of its columns.
+   */
+  readonly stackWhenConstrained?: boolean;
   readonly more?: More;
 }) {
   const primary = columns.find((column) => column.primary) ?? columns[0];
@@ -80,7 +86,7 @@ export function DataTable<Row>({
   }
 
   return (
-    <div>
+    <div className={stackWhenConstrained ? styles.tableConstrained : undefined}>
       <div className={styles.tableWrap}>
         <table className={styles.table} aria-label={label}>
           <thead>

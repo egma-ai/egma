@@ -2,6 +2,7 @@ import { newId } from "@egma/ids";
 import {
   createPersona,
   getSimulation,
+  listRunEvents,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
 import { afterEach, describe, expect, it } from "vitest";
@@ -58,6 +59,24 @@ const RETELL = {
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
+/** The ordinary direct Retell target in these route tests is a chat agent. */
+const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
+  const url = String(input);
+  if (!url.includes("/v2/list-agents")) {
+    throw new Error(`Unexpected Retell read: ${url}`);
+  }
+  return new Response(
+    JSON.stringify({
+      items: [
+        { agent_id: "agent_in_retell_1", agent_name: "Front desk", channel: "chat" },
+        { agent_id: "agent_in_retell_2", agent_name: "Second desk", channel: "chat" },
+      ],
+      has_more: false,
+    }),
+    { status: 200 },
+  );
+};
+
 /** One claim as the simulator makes it, with whatever token the test says. */
 async function claim(
   token: string | undefined,
@@ -88,7 +107,10 @@ async function aCustomerReadyToRun(
   connectionId: string;
   versionId: string;
 }> {
-  api = await createApi(label, options);
+  api = await createApi(label, {
+    ...options,
+    retellFetch: options.retellFetch ?? RETELL_CHAT_FETCH,
+  });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
@@ -269,7 +291,9 @@ describe("claiming work", () => {
   });
 
   it("carries the answers this simulation serves, resolved into one world", async () => {
-    api = await createApi("claims_mock_tools");
+    api = await createApi("claims_mock_tools", {
+      retellFetch: RETELL_CHAT_FETCH,
+    });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
@@ -339,7 +363,9 @@ describe("claiming work", () => {
   });
 
   it("goes on serving the world its run froze after the mock tool is edited", async () => {
-    api = await createApi("claims_mock_snapshot");
+    api = await createApi("claims_mock_snapshot", {
+      retellFetch: RETELL_CHAT_FETCH,
+    });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
@@ -557,6 +583,200 @@ describe("what the claim door never touches", () => {
 });
 
 describe("a simulation the platform cannot hand over", () => {
+  it("blocks a legacy text-labelled row when Retell says its agent is voice", async () => {
+    const providerReads: string[] = [];
+    const retellFetch: typeof fetch = async (input) => {
+      providerReads.push(String(input));
+      return new Response(
+        JSON.stringify({
+          items: [
+            {
+              agent_id: "agent_in_retell_1",
+              agent_name: "Voice front desk",
+              channel: "voice",
+            },
+          ],
+          has_more: false,
+        }),
+        { status: 200 },
+      );
+    };
+    const { ada, key, connectionId, versionId } =
+      await aCustomerReadyToRun("claims_retell_voice_mismatch", {
+        retellFetch,
+      });
+    const doomed = await aQueuedRun(key, connectionId, versionId);
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 1,
+      wait_seconds: 0,
+    });
+
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+    expect(answered.body.specs).toEqual([]);
+    expect(providerReads).toHaveLength(1);
+    expect(providerReads[0]).toContain("/v2/list-agents");
+    const row = await getSimulation(
+      contextFor(ada, "member"),
+      doomed.simulationId,
+    );
+    expect(row?.status).toBe("failed");
+    expect(row?.endingReason).toBe("dispatch_failed");
+  });
+
+  it("releases a transient claim, and lands a cancel that arrives during its next check", async () => {
+    let holdProvider = false;
+    let providerStarted!: () => void;
+    let letProviderFinish!: () => void;
+    const providerDidStart = new Promise<void>((resolve) => {
+      providerStarted = resolve;
+    });
+    const providerMayFinish = new Promise<void>((resolve) => {
+      letProviderFinish = resolve;
+    });
+    const { ada, key, connectionId, versionId } =
+      await aCustomerReadyToRun("claims_retell_temporarily_unavailable", {
+        retellFetch: async () => {
+          if (holdProvider) {
+            providerStarted();
+            await providerMayFinish;
+          }
+          return new Response("temporarily unavailable", { status: 503 });
+        },
+      });
+    const waiting = await aQueuedRun(key, connectionId, versionId);
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 1,
+      wait_seconds: 0,
+    });
+
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+    expect(answered.body.specs).toEqual([]);
+    const row = await getSimulation(
+      contextFor(ada, "member"),
+      waiting.simulationId,
+    );
+    expect(row?.status).toBe("queued");
+    expect(row?.endingReason).toBeNull();
+    expect(row?.claimedBy).toBeNull();
+    const feed = await listRunEvents(contextFor(ada, "member"), waiting.runId);
+    expect(
+      feed?.events
+        .filter((event) => event.simulationId === waiting.simulationId)
+        .map((event) => event.status),
+    ).toEqual(["claimed", "queued"]);
+
+    // The same row is claimed again. This time Cancel lands while Retell is
+    // still being checked, before any simulator receives a spec.
+    holdProvider = true;
+    const checking = claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 1,
+      wait_seconds: 0,
+    });
+    await providerDidStart;
+    const canceled = await ask(
+      api.app,
+      "POST",
+      `/api/runs/${waiting.runId}/cancel`,
+      key,
+    );
+    expect(canceled.statusCode, JSON.stringify(canceled.body)).toBe(200);
+    letProviderFinish();
+
+    const afterCancel = await checking;
+    expect(afterCancel.statusCode, JSON.stringify(afterCancel.body)).toBe(200);
+    expect(afterCancel.body.specs).toEqual([]);
+    const stopped = await getSimulation(
+      contextFor(ada, "member"),
+      waiting.simulationId,
+    );
+    expect(stopped?.status).toBe("canceled");
+    expect(stopped?.endingReason).toBeNull();
+    const settled = await ask(
+      api.app,
+      "GET",
+      `/api/runs/${waiting.runId}`,
+      key,
+    );
+    expect(settled.body).toMatchObject({
+      status: "canceled",
+      canceled_count: 1,
+      finished_at: expect.any(String),
+    });
+    const finalFeed = await listRunEvents(
+      contextFor(ada, "member"),
+      waiting.runId,
+    );
+    expect(
+      finalFeed?.events
+        .filter((event) => event.simulationId === waiting.simulationId)
+        .map((event) => event.status),
+    ).toEqual(["claimed", "queued", "claimed", "canceled"]);
+  });
+
+  it(
+    "starts independent Retell checks together and bounds a provider that never answers",
+    async () => {
+      let active = 0;
+      let mostActive = 0;
+      let reads = 0;
+      const retellFetch: typeof fetch = async (_input, init) => {
+        reads += 1;
+        active += 1;
+        mostActive = Math.max(mostActive, active);
+        const signal = init?.signal;
+        if (signal === undefined || signal === null) {
+          throw new Error("the Retell check had no deadline");
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          const stopped = (): void => {
+            active -= 1;
+            reject(signal.reason ?? new Error("the Retell check ended"));
+          };
+          if (signal.aborted) stopped();
+          else signal.addEventListener("abort", stopped, { once: true });
+        });
+      };
+      const { key, agentId, connectionId, versionId } =
+        await aCustomerReadyToRun("claims_retell_bounded_batch", {
+          retellFetch,
+        });
+      const second = await ask(api.app, "POST", "/api/agents", key, {
+        name: "Second desk",
+        connection: {
+          ...RETELL,
+          config: { retellAgentId: "agent_in_retell_2" },
+        },
+      });
+      expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
+      const secondAgent = (second.body.agent as { id: string }).id;
+      const secondConnection = (second.body.connection as { id: string }).id;
+      await applyTo(key, versionId, [agentId, secondAgent]);
+      await Promise.all([
+        aQueuedRun(key, connectionId, versionId),
+        aQueuedRun(key, secondConnection, versionId),
+      ]);
+
+      const startedAt = Date.now();
+      const answered = await claim(api.config.simulatorServiceToken, {
+        claimant: "sim-under-test",
+        capacity: 2,
+        wait_seconds: 0,
+      });
+
+      expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+      expect(answered.body.specs).toEqual([]);
+      expect(reads).toBe(2);
+      expect(mostActive).toBe(2);
+      expect(Date.now() - startedAt).toBeLessThan(20_000);
+    },
+    25_000,
+  );
+
   it("lands as dispatch_failed at once, while the rest of the batch still dispatches", async () => {
     const { ada, key, agentId, connectionId, versionId } =
       await aCustomerReadyToRun("claims_skip");

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { readJson, type Answer } from "../lib/api.ts";
@@ -25,6 +26,7 @@ import { ProductStatePage } from "../ui/shell.tsx";
  * person can see it and change it.
  */
 export default function RootPage() {
+  const router = useRouter();
   const [attempt, setAttempt] = useState(0);
   const [answer, setAnswer] = useState<Answer<Me> | null>(null);
 
@@ -36,14 +38,14 @@ export default function RootPage() {
       if (!current) return;
 
       if (next.status === "signed-out") {
-        window.location.replace("/sign-in");
+        router.replace("/sign-in");
         return;
       }
 
       if (next.status === "ready") {
         const first = firstProjectOf(next.value);
         if (first !== undefined) {
-          window.location.replace(projectLanding(first.id));
+          router.replace(projectLanding(first.id));
           return;
         }
       }
@@ -54,7 +56,7 @@ export default function RootPage() {
     return () => {
       current = false;
     };
-  }, [attempt]);
+  }, [attempt, router]);
 
   if (answer === null || answer.status === "signed-out") {
     return (

@@ -444,6 +444,15 @@ describe("the running graders of one project", () => {
       "/api/grader-library?project=prj_1",
     );
 
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(
+      within(breadcrumb)
+        .getByRole("link", { name: "Graders" })
+        .getAttribute("href"),
+    ).toBe("/projects/prj_1/graders");
+    expect(within(breadcrumb).getByText("Running").getAttribute("aria-current"))
+      .toBe("page");
+
     // What `required` decides, rather than the flag's own value.
     expect(screen.getAllByText("Blocks")).not.toHaveLength(0);
     expect(screen.getAllByText("Diagnostic")).not.toHaveLength(0);
@@ -752,8 +761,6 @@ describe("changing a running copy", () => {
       },
       "GET /api/grader-library": SHELF,
     });
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirm);
     render(<RunningGradersPage />);
 
     const edits = await screen.findAllByRole("button", { name: "Edit" });
@@ -763,7 +770,10 @@ describe("changing a running copy", () => {
     });
 
     fireEvent.click(edits[1]!);
-    expect(confirm).toHaveBeenLastCalledWith("Discard your unsaved changes?");
+    expect(screen.getByRole("dialog").textContent).toContain(
+      "Leave without saving?",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(screen.getByRole("region", {
       name: "Edit Expected behaviors",
     })).toBeTruthy();
@@ -772,13 +782,13 @@ describe("changing a running copy", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(confirm).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
       "Draft behavior grader",
     );
 
-    confirm.mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(screen.queryByRole("region", {
       name: "Edit Expected behaviors",
     })).toBeNull();
@@ -793,8 +803,6 @@ describe("changing a running copy", () => {
       },
       "GET /api/grader-library": SHELF,
     });
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirm);
     render(<RunningGradersPage />);
 
     fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
@@ -815,8 +823,9 @@ describe("changing a running copy", () => {
       cancelable: true,
       button: 0,
     });
-    library.dispatchEvent(tabClick);
+    fireEvent(library, tabClick);
     expect(tabClick.defaultPrevented).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
     const product = screen.getByRole("navigation", {
       name: "Product navigation",
@@ -827,8 +836,9 @@ describe("changing a running copy", () => {
       cancelable: true,
       button: 0,
     });
-    agents.dispatchEvent(productClick);
+    fireEvent(agents, productClick);
     expect(productClick.defaultPrevented).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
     const selectors = await screen.findAllByRole("button", {
       name: /^Organization Acme, project Default\./,
@@ -836,8 +846,9 @@ describe("changing a running copy", () => {
     fireEvent.click(selectors[0]!);
     fireEvent.click(screen.getByRole("button", { name: "Outbound" }));
     expect(routed.push).not.toHaveBeenCalled();
-    expect(confirm).toHaveBeenCalledTimes(3);
-    expect(confirm).toHaveBeenLastCalledWith("Discard your unsaved changes?");
+    expect(screen.getByRole("dialog").textContent).toContain(
+      "Leave without saving?",
+    );
     expect(
       (screen.getByLabelText(
         runningCopy.EDIT.description,

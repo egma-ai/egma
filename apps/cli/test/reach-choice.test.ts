@@ -53,6 +53,13 @@ const ACCOUNT: FakeRetellScript = {
   ],
 };
 
+/** A genuine Retell chat agent, which the shipped direct adapter supports. */
+const CHAT_ACCOUNT: FakeRetellScript = {
+  ...ACCOUNT,
+  agents: ACCOUNT.agents.map((agent) => ({ ...agent, channel: "chat" })),
+  numbers: [],
+};
+
 /** The same account, with two numbers routed to the agent under test. */
 const TWO_NUMBERS: FakeRetellScript = {
   ...ACCOUNT,
@@ -129,34 +136,6 @@ async function run(answers: Answers, fetchImpl?: typeof fetch) {
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
   });
   return { ui, report, connected };
-}
-
-/**
- * The other terminal, getting there first.
- *
- * The first attempt to attach a connection is really made — so the platform
- * really holds it, exactly as it would if a second `connect` had won — and then
- * this run is told the name is taken, which is what the loser of that race is
- * told. Nothing is faked but the timing.
- */
-function losingTheRace(): typeof fetch {
-  let raced = false;
-  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const where = typeof input === "string" ? input : String(input);
-    if (raced || init?.method !== "POST" || !where.endsWith("/connections")) {
-      return fetch(input, init);
-    }
-    raced = true;
-    // The winner's write, made through the same door and committed.
-    await fetch(input, init);
-    return new Response(
-      JSON.stringify({
-        error: "name_taken",
-        message: 'a connection named "phone-1" already exists on this agent',
-      }),
-      { status: 409, headers: { "content-type": "application/json" } },
-    );
-  }) as typeof fetch;
 }
 
 describe("choosing the phone", () => {
@@ -262,27 +241,26 @@ describe("choosing the phone", () => {
 });
 
 describe("choosing text", () => {
-  it("creates one Retell chat connection over the selected voice agent", async () => {
-    retell = await startFakeRetell(ACCOUNT);
+  it("creates one direct connection for a genuine Retell chat agent", async () => {
+    retell = await startFakeRetell(CHAT_ACCOUNT);
 
-    const { connected } = await run({ reach: "text" });
+    const { connected, ui } = await run({ reach: "text" });
 
     expect(connected?.reach).toBe("text");
     expect(connected?.number).toBeNull();
+    expect(ui.record.reachOptions).toEqual(["text"]);
 
     expect(platform.registered.connections).toHaveLength(1);
     const [connection] = platform.registered.connections;
     expect(connection?.type).toBe("retell");
     expect(connection?.modality).toBe("chat");
-    // The selected *voice* agent's own identity, which is the point: text is a
-    // way of reaching that agent, not a second agent to reach.
     expect(connection?.config).toEqual({ retellAgentId: "agent_0001" });
     expect(connection?.credentialsHint).toBe(KEY.slice(-4));
     expect(platform.registered.sealed).toEqual([KEY]);
   });
 
   it("reads no phone number at all, because nothing is going to be dialled", async () => {
-    const account = await startFakeRetell(ACCOUNT);
+    const account = await startFakeRetell(CHAT_ACCOUNT);
     retell = account;
 
     await run({ reach: "text" });
@@ -301,9 +279,7 @@ describe("choosing neither", () => {
     expect(ui.record.reachOffered).toBe(true);
     expect(report).toEqual({
       kind: "failed",
-      reason:
-        "nobody said whether Egma should reach this agent by text or by phone, " +
-        "so nothing was created.",
+      reason: "nobody chose phone, so nothing was created.",
     });
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
@@ -353,142 +329,18 @@ describe("running it twice", () => {
     expect(platform.registered.connections).toHaveLength(1);
   });
 
-  it("adds the phone to the agent text already reached, rather than a second agent", async () => {
+  it("never writes a text connection for a Retell voice agent", async () => {
     retell = await startFakeRetell(ACCOUNT);
 
-    const text = await run({ reach: "text" });
-    const phone = await run({ reach: "phone" });
+    const { report, ui } = await run({ reach: "text" });
 
-    expect(phone.connected?.registration).toEqual({
-      agent: "reused",
-      connection: "created",
+    expect(ui.record.reachOptions).toEqual(["phone"]);
+    expect(report).toEqual({
+      kind: "failed",
+      reason:
+        "Retell voice agents can only be connected by phone until Agent Playground Completion is supported.",
     });
-    expect(phone.connected?.registered.agent.id).toBe(text.connected?.registered.agent.id);
-
-    expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.registered.connections.map((one) => one.type)).toEqual([
-      "retell",
-      "phone",
-    ]);
-  });
-
-  it("still takes the next name for a different voice agent called the same thing", async () => {
-    // Two agents on the account with one name between them, which a real
-    // account does produce. The second is a different agent and gets its own
-    // egma agent — the name loop this replaced was there for exactly this, and
-    // reading the refusal rather than working around it must not lose it.
-    retell = await startFakeRetell({
-      ...ACCOUNT,
-      agents: [
-        ...ACCOUNT.agents,
-        {
-          agent_id: "agent_0002",
-          agent_name: "front-desk",
-          response_engine: { type: "retell-llm", llm_id: "llm_0001" },
-        },
-      ],
-    });
-
-    // The first walk leaves an agent reached only by phone, so nothing on it
-    // names a vendor at all. What tells the second walk that this is somebody
-    // else's agent is the number: Retell routes it to agent_0001 and not to
-    // agent_0002, and that is as good an answer as a vendor id would be.
-    const first = await run({ reach: "phone", agent: "agent_0001" });
-    const second = await run({ reach: "text", agent: "agent_0002" });
-
-    expect(first.connected?.registered.agent.name).toBe("front-desk");
-    expect(second.connected?.registered.agent.name).toBe("front-desk-2");
-    expect(second.connected?.registration).toEqual({
-      agent: "created",
-      connection: "created",
-    });
-    expect(platform.registered.agents).toHaveLength(2);
-    expect(platform.registered.connections).toHaveLength(2);
-  });
-
-  /**
-   * The one case where neither signal answers, and the direction it goes.
-   *
-   * A phone-only agent names no vendor, so the numbers are the only way to tell
-   * whose it is — and here Retell will not list them. egma cannot identify the
-   * agent, and the two ways of being wrong are not equally bad: a merged
-   * results history cannot be unpicked, and a spare agent is one delete. So it
-   * takes the next name.
-   */
-  it("takes the next name when Retell will not say which numbers reach the agent", async () => {
-    retell = await startFakeRetell(ACCOUNT);
-    const phone = await run({ reach: "phone" });
-    await retell.close();
-
-    // The same account, with the number listing broken and nothing else.
-    retell = await startFakeRetell({
-      ...ACCOUNT,
-      refusing: [{ path: "/list-phone-numbers", status: 500 }],
-    });
-    const text = await run({ reach: "text" });
-
-    expect(text.connected?.registered.agent.name).toBe("front-desk-2");
-    expect(text.connected?.registration).toEqual({
-      agent: "created",
-      connection: "created",
-    });
-    // Two agents, and neither of them holds a connection it cannot account for.
-    expect(platform.registered.agents.map((one) => one.name)).toEqual([
-      "front-desk",
-      "front-desk-2",
-    ]);
-    expect(text.connected?.registered.agent.id).not.toBe(
-      phone.connected?.registered.agent.id,
-    );
-  });
-
-  /**
-   * Two terminals attaching the same reach at the same instant.
-   *
-   * Both get past the check that says the reach is not there yet, because
-   * neither has written anything when either looks. One then loses the
-   * connection-name index — and the right answer for the loser is the
-   * connection the winner just wrote, because that is what it was going to
-   * create. Telling them their egma is out of date would send a developer to
-   * check a version when the only thing that happened is that their other
-   * terminal got there first.
-   */
-  it("reads the winner's connection as a reuse when it loses the race to attach", async () => {
-    retell = await startFakeRetell(ACCOUNT);
-
-    const text = await run({ reach: "text" });
-    const phone = await run({ reach: "phone" }, losingTheRace());
-
-    expect(phone.report.kind).toBe("connected");
-    expect(phone.connected?.registration).toEqual({
-      agent: "reused",
-      connection: "reused",
-    });
-    expect(phone.connected?.registered.agent.id).toBe(text.connected?.registered.agent.id);
-    expect(phone.connected?.registered.connection.name).toBe("phone-1");
-    expect(phone.connected?.number).toBe(DIALLED);
-
-    // One agent, one connection each way, and no second phone connection left
-    // behind by the write that lost.
-    expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.registered.connections.map((one) => one.name)).toEqual([
-      "retell-1",
-      "phone-1",
-    ]);
-  });
-
-  it("joins a phone-only agent when the number is one Retell routes to this agent", async () => {
-    retell = await startFakeRetell(ACCOUNT);
-
-    const phone = await run({ reach: "phone" });
-    const text = await run({ reach: "text" });
-
-    // Nothing on the agent named a vendor, and the number said this was it.
-    expect(text.connected?.registered.agent.id).toBe(phone.connected?.registered.agent.id);
-    expect(text.connected?.registration).toEqual({
-      agent: "reused",
-      connection: "created",
-    });
-    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
   });
 });

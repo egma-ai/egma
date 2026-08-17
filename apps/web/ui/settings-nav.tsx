@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId, type ReactNode } from "react";
+import { useId, useRef, type ReactNode } from "react";
 
 import { projectPath } from "../lib/project-context.ts";
 import styles from "./settings-nav.module.css";
@@ -108,13 +108,81 @@ export function SettingsNav({
 }
 
 /**
+ * Switch between peer views inside one Settings page.
+ *
+ * This is a tab list, not a form choice: changing it changes the visible
+ * panel and does not submit a value. Roving focus gives the group one Tab stop,
+ * while arrow, Home and End keys follow the tabs pattern.
+ */
+export function SettingsTabs<Value extends string>({
+  id,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  readonly id: string;
+  readonly label: string;
+  readonly value: Value;
+  readonly options: readonly { readonly value: Value; readonly label: string }[];
+  readonly onChange: (value: Value) => void;
+}) {
+  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const move = (to: number) => {
+    const option = options[to];
+    if (option === undefined) return;
+    onChange(option.value);
+    tabs.current[to]?.focus();
+  };
+
+  return (
+    <div className={styles.tabs} role="tablist" aria-label={label}>
+      {options.map((option, at) => (
+        <button
+          key={option.value}
+          ref={(held) => {
+            tabs.current[at] = held;
+          }}
+          className={styles.tab}
+          id={`${id}-${option.value}-tab`}
+          type="button"
+          role="tab"
+          aria-selected={value === option.value}
+          aria-controls={`${id}-${option.value}-panel`}
+          tabIndex={value === option.value ? 0 : -1}
+          onClick={() => onChange(option.value)}
+          onKeyDown={(event) => {
+            const last = options.length - 1;
+            const next =
+              event.key === "ArrowRight" || event.key === "ArrowDown"
+                ? (at + 1) % options.length
+                : event.key === "ArrowLeft" || event.key === "ArrowUp"
+                  ? (at - 1 + options.length) % options.length
+                  : event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? last
+                      : null;
+            if (next === null) return;
+            event.preventDefault();
+            move(next);
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
  * The stable frame every Settings state uses.
  *
  * Settings navigation is local to this area, so it stays beside the page on a
  * wide screen instead of becoming a large card above every form. On a narrow
- * screen the same navigation becomes a compact, horizontally scrollable band.
- * Loading and failure states use this frame too, which stops the page from
- * moving when its data arrives.
+ * screen the same links wrap into a compact grid without creating a second
+ * horizontal scroll area. Loading and failure states use this frame too,
+ * which stops the page from moving when its data arrives.
  */
 export function SettingsLayout({
   projectId,

@@ -120,7 +120,7 @@ describe("adding a connection", () => {
     const added = await addConnection(actingAsAcme(), agentId, {
       name: "staging",
       type: "retell",
-      modality: "voice",
+      modality: "chat",
       environment: "staging",
       config: { retellAgentId: "agent_abc" },
       credentials: { apiKey: "sk-retell-000011112222WXYZ" },
@@ -134,7 +134,7 @@ describe("adding a connection", () => {
       agentId,
       name: "staging",
       type: "retell",
-      modality: "voice",
+      modality: "chat",
       topology: "hosted-broker",
       environment: "staging",
       config: { retellAgentId: "agent_abc" },

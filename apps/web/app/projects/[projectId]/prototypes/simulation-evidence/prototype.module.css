@@ -1,0 +1,639 @@
+.stage {
+  padding-bottom: var(--space-10);
+}
+
+.variant {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-7);
+}
+
+.summary {
+  display: grid;
+  overflow: hidden;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.summary > div {
+  display: flex;
+  min-width: 0;
+  min-height: 76px;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+}
+
+.summary > div + div {
+  border-left: 1px solid var(--border);
+}
+
+.summary span:first-child,
+.scenario > span,
+.dossierIndex > span,
+.graderName {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.summary strong {
+  font-family: var(--mono);
+  font-size: var(--text-body);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.scenario {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: var(--space-5);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.scenario p {
+  max-width: 760px;
+  margin: 0;
+}
+
+.matrixLayout,
+.mapLower {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.mapLower {
+  grid-template-columns: minmax(320px, 0.85fr) minmax(520px, 1.15fr);
+}
+
+.panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.panelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.panelHead h2,
+.dossier h2,
+.dossier h3,
+.finding h3,
+.mapCriteria h3 {
+  margin: 0;
+  font-weight: 400;
+}
+
+.panelHead h2 {
+  font-size: var(--text-lead);
+  letter-spacing: var(--tracking-lead);
+  line-height: var(--line-lead);
+}
+
+.panelHead p,
+.recording > p,
+.quiet,
+.problem {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.quiet,
+.problem {
+  padding: var(--space-4) var(--space-5);
+}
+
+.problem {
+  color: var(--bad);
+}
+
+.recording {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.variant > .recording {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.recording audio {
+  display: block;
+  width: 100%;
+  height: var(--tap-target);
+}
+
+.criteria {
+  display: flex;
+  flex-direction: column;
+}
+
+.criterion + .criterion {
+  border-top: 1px solid var(--border);
+}
+
+.criterion > button {
+  display: grid;
+  width: 100%;
+  min-height: var(--tap-target);
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  text-align: left;
+}
+
+.criterion > button strong {
+  line-height: var(--line-caption);
+  font-weight: 400;
+}
+
+.criterionActive > button {
+  background: var(--surface-soft);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.criterionNumber {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+}
+
+.finding {
+  display: none;
+  padding: 0 var(--space-5) var(--space-5) 64px;
+  background: var(--surface-soft);
+}
+
+.criterionActive .finding {
+  display: block;
+}
+
+.finding > span {
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+.finding h3 {
+  margin-top: var(--space-4);
+  font-size: var(--text-body);
+}
+
+.finding p,
+.mapCriteria p,
+.dossier p,
+.quotes p {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.citations {
+  color: var(--muted);
+}
+
+.citations a,
+.quotes a,
+.dossierIndex a {
+  text-decoration-color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+}
+
+.turn {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  align-items: baseline;
+  padding: var(--space-4) var(--space-5);
+  border-left: 3px solid transparent;
+  scroll-margin-top: var(--space-7);
+}
+
+.turn + .turn {
+  border-top: 1px solid var(--border);
+}
+
+.turnMarked,
+.turn:target {
+  border-left-color: var(--accent);
+  background: var(--surface-soft);
+}
+
+.speaker,
+.evidenceMark {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+}
+
+.turn p {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.evidenceMark {
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+.mapPanel {
+  overflow: visible;
+}
+
+.waveform {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+
+.waveLane {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.waveLane > span {
+  font-size: var(--text-caption);
+}
+
+.waveTrack {
+  position: relative;
+  height: 56px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(to bottom, transparent 49.5%, var(--border) 49.5%, var(--border) 50.5%, transparent 50.5%),
+    var(--background);
+}
+
+.waveTrack svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.waveTrack path {
+  fill: color-mix(in srgb, var(--foreground) 72%, transparent);
+}
+
+.playhead {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: var(--playhead);
+  width: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.seek {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: center;
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+.seekControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+}
+
+.seekControl input {
+  width: 100%;
+  min-height: var(--tap-target);
+  accent-color: var(--accent);
+}
+
+.seekControl output {
+  color: var(--foreground);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.mapCriteria {
+  display: flex;
+  flex-direction: column;
+}
+
+.mapCriteriaLabels,
+.mapCriteria article {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 32px minmax(0, 0.9fr) minmax(0, 1.1fr) 104px;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3) var(--space-5);
+}
+
+.mapCriteriaLabels {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.mapCriteria article {
+  padding-block: var(--space-4);
+}
+
+.mapCriteria article + article {
+  border-top: 1px solid var(--border);
+}
+
+.mapCriterionNumber,
+.mapCellLabel {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.mapCriterionNumber {
+  font-family: var(--mono);
+}
+
+.mapCriterionExpected,
+.mapCriterionFinding,
+.mapCriterionResult {
+  min-width: 0;
+}
+
+.mapCriterionExpected,
+.mapCriterionFinding {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mapCriterionFinding > p {
+  margin: 0;
+}
+
+.mapCriterionExpected h3,
+.mapCriterionFinding p {
+  overflow-wrap: anywhere;
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.mapCriterionResult {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mapCellLabel {
+  display: none;
+}
+
+.dossierLayout {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--space-7);
+  align-items: start;
+}
+
+.dossierIndex {
+  position: sticky;
+  top: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.dossierIndex > span,
+.dossierIndex a {
+  padding: var(--space-3) var(--space-4);
+}
+
+.dossierIndex a {
+  display: grid;
+  min-height: var(--tap-target);
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.dossierIndex a span {
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.dossier {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.dossier > article {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  scroll-margin-top: var(--space-6);
+}
+
+.dossier > article > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-5);
+  background: var(--surface-soft);
+}
+
+.dossier > article > header span,
+.quotes span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+}
+
+.dossier h2 {
+  max-width: 760px;
+  margin-top: var(--space-2);
+  font-size: var(--text-lead);
+  line-height: var(--line-lead);
+}
+
+.dossier > article > section {
+  padding: var(--space-5);
+}
+
+.dossier > article > section + section {
+  border-top: 1px solid var(--border);
+}
+
+.dossier h3 {
+  font-size: var(--text-body);
+}
+
+.graderName {
+  display: block;
+  margin-top: var(--space-3);
+}
+
+.quotes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.quotes blockquote {
+  margin: 0;
+  padding: var(--space-4);
+  border-left: 3px solid var(--accent);
+  background: var(--background);
+}
+
+.quotes a {
+  display: inline-block;
+  margin-top: var(--space-3);
+  font-size: var(--text-caption);
+}
+
+.fullTranscript {
+  scroll-margin-top: var(--space-6);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .criterion > button:hover,
+  .dossierIndex a:hover {
+    background: var(--surface-soft);
+  }
+}
+
+@media (max-width: 70rem) {
+  .matrixLayout,
+  .mapLower {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dossierLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dossierIndex {
+    position: static;
+  }
+}
+
+@media (max-width: 40rem) {
+  .summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .summary > div + div {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .scenario,
+  .turn,
+  .seek {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .criterion > button {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .criterion > button > :last-child {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .finding {
+    padding-left: var(--space-5);
+  }
+
+  .turn {
+    gap: var(--space-1);
+  }
+
+  .mapCriteriaLabels {
+    display: none;
+  }
+
+  .mapCriteria article {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .mapCriterionExpected,
+  .mapCriterionFinding {
+    grid-column: 1 / -1;
+  }
+
+  .mapCriterionNumber {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .mapCriterionResult {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .mapCellLabel {
+    display: block;
+  }
+
+  .mapCriterionResult .mapCellLabel {
+    display: none;
+  }
+
+  .evidenceMark {
+    white-space: normal;
+  }
+}

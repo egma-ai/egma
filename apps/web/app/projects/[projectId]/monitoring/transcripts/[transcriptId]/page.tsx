@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { Fragment, use, useEffect, useState, type CSSProperties } from "react";
 
 import { readJson } from "../../../../../../lib/api.ts";
 import { GRADING } from "../../../../../../lib/grading-copy.ts";
+import { asSecond } from "../../../../../../lib/instants.ts";
 import {
   DETAIL,
   FACTS,
@@ -26,7 +26,6 @@ import {
   stepsInside,
   transcriptReadPath,
   transcriptsPath,
-  whenItWas,
   turnsCited,
   type Detail,
   type Facts as TraceFacts,
@@ -36,6 +35,11 @@ import {
 } from "../../../../../../lib/transcripts.ts";
 import { JudgmentCard } from "../../../../../judgment-card.tsx";
 import { RecordingPlayer } from "../../../../../recording-player.tsx";
+import { PageNavigation } from "../../../../../../ui/page-navigation.tsx";
+import {
+  RelativeInstant,
+  useMinuteClock,
+} from "../../../../../../ui/relative-time.tsx";
 import {
   AppShell,
   Notice,
@@ -82,6 +86,7 @@ export default function TranscriptPage({
   params: Promise<{ projectId: string; transcriptId: string }>;
 }) {
   const { projectId, transcriptId } = use(params);
+  const now = useMinuteClock();
   const [state, setState] = useState<State>({ status: "loading" });
   const [view, setView] = useState<View>("transcript");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -129,7 +134,16 @@ export default function TranscriptPage({
   }, [projectId, transcriptId]);
 
   if (state.status === "loading") {
-    return <ProductStatePage title={DETAIL.title} lead={DETAIL.loading} />;
+    return (
+      <ProductStatePage
+        title={DETAIL.title}
+        lead={DETAIL.loading}
+        breadcrumbs={[
+          { label: LIST.title, href: transcriptsPath(projectId) },
+          { label: DETAIL.title },
+        ]}
+      />
+    );
   }
 
   if (state.status === "signed-out") {
@@ -145,31 +159,40 @@ export default function TranscriptPage({
 
   if (state.status === "no-window") {
     return (
-      <ProductStatePage title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
-        <p className={styles.linkLine}>
-          <Link href={transcriptsPath(projectId)}>{DETAIL.back}</Link>
-        </p>
-      </ProductStatePage>
+      <ProductStatePage
+        title={DETAIL.needsWindow}
+        lead={DETAIL.needsWindowLead}
+        breadcrumbs={[
+          { label: LIST.title, href: transcriptsPath(projectId) },
+          { label: DETAIL.title },
+        ]}
+      />
     );
   }
 
   if (state.status === "missing") {
     return (
-      <ProductStatePage title={DETAIL.missing} lead={DETAIL.missingLead}>
-        <p className={styles.linkLine}>
-          <Link href={transcriptsPath(projectId)}>{DETAIL.back}</Link>
-        </p>
-      </ProductStatePage>
+      <ProductStatePage
+        title={DETAIL.missing}
+        lead={DETAIL.missingLead}
+        breadcrumbs={[
+          { label: LIST.title, href: transcriptsPath(projectId) },
+          { label: DETAIL.title },
+        ]}
+      />
     );
   }
 
   if (state.status === "failed") {
     return (
-      <ProductStatePage title={DETAIL.title}>
+      <ProductStatePage
+        title={DETAIL.title}
+        breadcrumbs={[
+          { label: LIST.title, href: transcriptsPath(projectId) },
+          { label: DETAIL.title },
+        ]}
+      >
         <Notice tone="error">{state.why}</Notice>
-        <p className={styles.linkLine}>
-          <Link href={transcriptsPath(projectId)}>{DETAIL.back}</Link>
-        </p>
       </ProductStatePage>
     );
   }
@@ -201,12 +224,21 @@ export default function TranscriptPage({
   return (
     <AppShell>
       <ProductPage wide>
-        <Link className={styles.backLink} href={transcriptsPath(projectId)}>← {DETAIL.back}</Link>
+        <PageNavigation
+          items={[
+            { label: LIST.title, href: transcriptsPath(projectId) },
+            { label: DETAIL.title },
+          ]}
+        />
         <header className={styles.detailHeader}>
           <div>
             <p className={styles.eyebrow}>{detail.trace.source} / {detail.trace.environment}</p>
             <h1>{DETAIL.title}</h1>
-            <p className={styles.detailLead}>{whenItWas(openedAt)} · {howLong(detail.trace.duration_ns)}</p>
+            <p className={styles.detailLead}>
+              <RelativeInstant instant={openedAt} now={now} precision="second" />
+              {" · "}
+              {howLong(detail.trace.duration_ns)}
+            </p>
           </div>
           <span className={`${styles.status} ${detail.trace.errored_span_count > 0 ? styles.statusBad : ""}`}>
             {detail.trace.errored_span_count === 0 ? DETAIL.recorded : DETAIL.errors(detail.trace.errored_span_count)}
@@ -767,7 +799,7 @@ function Inspector({
 
           <dl className={styles.inspectorFacts}>
             <div><dt>{FACTS.status}</dt><dd className={selected.status === "error" ? styles.wrong : undefined}>{readableStatus(selected.status)}</dd></div>
-            <div><dt>{FACTS.started}</dt><dd>{whenItWas(selected.started_at)}</dd></div>
+            <div><dt>{FACTS.started}</dt><dd>{asSecond(selected.started_at)}</dd></div>
             <div><dt>{FACTS.duration}</dt><dd>{howLong(selected.duration_ns)}</dd></div>
           </dl>
 
@@ -816,8 +848,8 @@ function Payload({ label, value }: { label: string; value: string }) {
  */
 function WhereItCameFrom({ facts }: { facts: TraceFacts }) {
   const shown: readonly (readonly [string, string])[] = [
-    [FACTS.started, whenItWas(facts.started_at)],
-    [FACTS.ended, whenItWas(facts.ended_at)],
+    [FACTS.started, asSecond(facts.started_at)],
+    [FACTS.ended, asSecond(facts.ended_at)],
     [FACTS.source, facts.source],
     [FACTS.environment, facts.environment],
     [FACTS.connection, facts.connection_type],
@@ -841,7 +873,7 @@ function Recorded({ step, openedAt }: { step: Step; openedAt: string }) {
     [FACTS.kind, stepLabel(step.kind)],
     [FACTS.name, step.name],
     [FACTS.status, step.status],
-    [FACTS.started, `${whenItWas(step.started_at)} (${howFarIn(step.started_at, openedAt)})`],
+    [FACTS.started, `${asSecond(step.started_at)} (${howFarIn(step.started_at, openedAt)})`],
     [FACTS.duration, howLong(step.duration_ns)],
     [FACTS.nanoseconds, step.duration_ns],
     [FACTS.identifier, step.span_id],

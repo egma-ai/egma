@@ -31,7 +31,10 @@ import {
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
-import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
+import {
+  SettingsLayout,
+  settingsPath,
+} from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
@@ -73,7 +76,7 @@ export default function OrganizationSettingsPage() {
 }
 
 function OrganizationSettingsBody({ projectId }: { readonly projectId: string }) {
-  const { me } = useShellSession();
+  const { me, refresh: refreshSession } = useShellSession();
   // Null until the session read answers. An unsettled session is neither an
   // admin nor a viewer, and claiming either would be a guess shown as a fact.
   const role = me === null ? null : roleOf(me);
@@ -155,13 +158,21 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
     confirmingSave.current = submittedEditVersion;
     setConfirmingRead(true);
     setSaved(editVersion.current === submittedEditVersion);
+    refreshSession();
     reload();
   }
 
   if (answer === null) {
     return (
-      <ProductPage>
-        <PageHeader eyebrow="Settings" title="Organization" />
+      <ProductPage viewport>
+        <PageHeader
+          eyebrow="Settings"
+          title="Organization"
+          breadcrumbs={[
+            { label: "Settings", href: settingsPath(projectId) },
+            { label: "Organization" },
+          ]}
+        />
         <PageBody>
           <SettingsLayout projectId={projectId} current="organization">
             <Loading what="this organization" />
@@ -173,8 +184,15 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
 
   if (answer.status !== "ready") {
     return (
-      <ProductPage>
-        <PageHeader eyebrow="Settings" title="Organization" />
+      <ProductPage viewport>
+        <PageHeader
+          eyebrow="Settings"
+          title="Organization"
+          breadcrumbs={[
+            { label: "Settings", href: settingsPath(projectId) },
+            { label: "Organization" },
+          ]}
+        />
         <PageBody>
           <SettingsLayout projectId={projectId} current="organization">
             <Failure
@@ -192,10 +210,14 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   }
 
   return (
-    <ProductPage>
+    <ProductPage viewport>
       <PageHeader
         eyebrow="Settings"
         title="Organization"
+        breadcrumbs={[
+          { label: "Settings", href: settingsPath(projectId) },
+          { label: "Organization" },
+        ]}
         lead="The customer every project below belongs to."
       />
       <PageBody>

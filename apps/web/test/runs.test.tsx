@@ -22,10 +22,9 @@ import type { Me } from "../lib/me.ts";
  *
  * The claims worth having in the fast lane are the ones the page decides for
  * itself: that the steps narrow in order, that arriving from an agent's page
- * fills the first one in, that the review shows what the server said would be
- * frozen and skipped rather than anything the browser worked out, that Start
- * carries one idempotency key for one selection, and that nothing bound to the
- * open test row can reach a different one.
+ * fills the first one in, that tests stay compact and selectable, that a run
+ * needs a name and a confirmation, and that Start carries one idempotency key
+ * for one selection.
  */
 
 const routed = vi.hoisted(() => ({
@@ -300,20 +299,12 @@ function planQueries(): string[] {
     .map((one) => one.url);
 }
 
-/**
- * The builder, with everything it reads stubbed.
- *
- * The versions read is separate from the plan because it is the open row's own,
- * which is the whole subject of the last group of tests in this file.
- */
+/** The builder, with everything it reads stubbed. */
 function builder(
   options: {
     readonly role?: string;
     readonly tests?: unknown[];
     readonly plan?: Stubbed | readonly Stubbed[];
-    readonly versions?: Stubbed | readonly Stubbed[];
-    /** The second row's own read, so a test can leave it unanswered. */
-    readonly secondVersions?: Stubbed | readonly Stubbed[];
     readonly started?: Stubbed | readonly Stubbed[];
   } = {},
 ): void {
@@ -328,23 +319,6 @@ function builder(
       status: 200,
       body: {
         items: options.tests ?? [testRow()],
-        next_cursor: null,
-      },
-    },
-    "/api/tests/tst_1/versions": options.versions ?? {
-      status: 200,
-      body: {
-        items: [
-          { id: "tstv_1", test_id: "tst_1", version: 3, current: true },
-          { id: "tstv_0", test_id: "tst_1", version: 2, current: false },
-        ],
-        next_cursor: null,
-      },
-    },
-    "/api/tests/tst_2/versions": options.secondVersions ?? {
-      status: 200,
-      body: {
-        items: [{ id: "tstv_2", test_id: "tst_2", version: 1, current: true }],
         next_cursor: null,
       },
     },
@@ -375,6 +349,25 @@ async function chooseEverything(): Promise<void> {
   );
 }
 
+/** Give the selected run the required name. */
+function nameRun(name = "Morning check"): void {
+  fireEvent.change(screen.getByLabelText("Run name"), {
+    target: { value: name },
+  });
+}
+
+/** Open the confirmation and accept it. */
+async function confirmStart(count = 1): Promise<void> {
+  fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+  const dialog = await screen.findByRole("dialog", { name: "Start this run?" });
+  expect(
+    within(dialog).getByText(
+      `${String(count)} ${count === 1 ? "simulation" : "simulations"} will be conducted.`,
+    ),
+  ).toBeDefined();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Start run" }));
+}
+
 /* ------------------------------------------------------------------------ */
 
 describe("the way into the builder", () => {
@@ -397,6 +390,64 @@ describe("the way into the builder", () => {
 });
 
 describe("the steps", () => {
+  it("does not let the parent breadcrumb silently discard a selection", async () => {
+    builder();
+    render(<NewRunPage />);
+
+    fireEvent.change(await screen.findByLabelText("Agent"), {
+      target: { value: "agt_1" },
+    });
+    const parent = within(
+      screen.getByRole("navigation", { name: "Breadcrumb" }),
+    ).getByRole("link", { name: "Runs" });
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    parent.dispatchEvent(click);
+
+    expect(click.defaultPrevented).toBe(true);
+    expect(
+      await screen.findByRole("dialog", { name: "Leave without saving?" }),
+    ).toBeDefined();
+    expect(routed.push).not.toHaveBeenCalled();
+  });
+
+  it("keeps the three setup steps in one named order", async () => {
+    builder();
+    render(<NewRunPage />);
+
+    expect(
+      await screen.findByText(
+        "Choose one agent, one connection and the tests to run.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText(/Every simulation it produces/u)).toBeNull();
+
+    const setup = await screen.findByRole("list", { name: "Run setup" });
+    const steps = within(setup).getAllByRole("listitem");
+    expect(steps).toHaveLength(3);
+    const names = ["Agent", "Connection", "Tests"];
+    for (const [index, step] of steps.entries()) {
+      const name = names[index]!;
+      const region = within(step).getByRole("region", {
+        name: `Step ${String(index + 1)} of 3: ${name}`,
+      });
+      const header = region.querySelector("header");
+      expect(header).not.toBeNull();
+      expect(header?.children[0]?.textContent).toBe(String(index + 1));
+      expect(
+        within(header as HTMLElement).getByRole("heading", { name }),
+      ).toBeDefined();
+    }
+    expect(within(steps[0]!).getByText("Select the agent under test.")).toBeDefined();
+    expect(within(steps[1]!).getByText("Select how Egma reaches the agent.")).toBeDefined();
+    expect(within(steps[2]!).getByText("Select the tests to run.")).toBeDefined();
+    expect(document.querySelector('label[for="run-agent"]')).toBeNull();
+    expect(screen.queryByText(/Needs selection|Complete/u)).toBeNull();
+  });
+
   it("asks for a connection only once an agent is chosen", async () => {
     builder();
     render(<NewRunPage />);
@@ -408,6 +459,7 @@ describe("the steps", () => {
       target: { value: "agt_1" },
     });
     await screen.findByLabelText("Connection");
+    expect(document.querySelector('label[for="run-connection"]')).toBeNull();
   });
 
   it("offers only the tests that apply to the chosen agent", async () => {
@@ -468,27 +520,46 @@ describe("the steps", () => {
   });
 });
 
-describe("the review", () => {
-  it("shows the versions, the personas and the graders the server said it would freeze", async () => {
+describe("the server-owned run plan", () => {
+  it("keeps plan details and planned counts out of the builder", async () => {
     builder();
     render(<NewRunPage />);
     await chooseEverything();
 
-    // The version and the persona version are the server's answer, shown as it
-    // came: this page pins nothing and works nothing out.
-    await screen.findByText("tstv_1");
-    await screen.findByText("Impatient Rita (prsv_7)");
-    await screen.findByText("Expected behaviors");
-    expect(screen.queryByText("expected_behaviors")).toBeNull();
-    await screen.findByText("Never promises a price");
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
+    expect(screen.queryByText("Plan details")).toBeNull();
+    expect(screen.queryByText("tstv_1")).toBeNull();
+    expect(screen.queryByText("prsv_7")).toBeNull();
+    expect(screen.queryByText("simulations planned")).toBeNull();
+    expect(screen.queryByText("would be conducted")).toBeNull();
+    expect(screen.queryByText("would be skipped, not failed")).toBeNull();
   });
 
-  it("shows the judge the run would spend, and never a key", async () => {
-    builder();
+  it("keeps connection, capability and judge facts out of the builder", async () => {
+    builder({
+      tests: [testRow({ required_capabilities: ["raw_audio"] })],
+    });
     render(<NewRunPage />);
     await chooseEverything();
 
-    await screen.findByText(/openai\/gpt-4\.1-mini · credential jcr_1/u);
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
+    expect(screen.queryByText(/credential jcr_1/u)).toBeNull();
+    expect(screen.queryByText(/measured raw_audio/u)).toBeNull();
+    expect(screen.queryByText(/^Capabilities$/u)).toBeNull();
+    expect(screen.queryByText(/^Judge$/u)).toBeNull();
+    expect(screen.queryByText("Impatient Rita")).toBeNull();
+    expect(screen.queryByText(/Version 3/u)).toBeNull();
+    expect(screen.queryByText(/Requires raw_audio/u)).toBeNull();
   });
 
   /**
@@ -571,7 +642,6 @@ describe("the review", () => {
     render(<NewRunPage />);
     await chooseEverything();
 
-    await screen.findByText("Answers inside two seconds");
     expect(screen.queryByText(/no LLM judge configured/u)).toBeNull();
     await waitFor(() => {
       expect(
@@ -610,7 +680,7 @@ describe("the review", () => {
     });
   });
 
-  it("names a skipped test as skipped, and never as a failure of the agent", async () => {
+  it("does not add a skipped-test summary to the builder", async () => {
     builder({
       plan: {
         status: 200,
@@ -632,12 +702,9 @@ describe("the review", () => {
     render(<NewRunPage />);
     await chooseEverything();
 
-    const said = await screen.findAllByText(/does not support raw_audio/u);
-    expect(said.length).toBeGreaterThan(0);
-    for (const one of said) {
-      expect(one.textContent).toContain("say nothing about the agent");
-      expect(one.textContent).not.toContain("failed");
-    }
+    await screen.findByText(/would conduct nothing/u);
+    expect(screen.queryByText(/does not support raw_audio/u)).toBeNull();
+    expect(screen.queryByText("would be skipped, not failed")).toBeNull();
   });
 
   it("refuses to offer Start for a run that would conduct nothing", async () => {
@@ -672,9 +739,54 @@ describe("the review", () => {
 });
 
 describe("starting", () => {
-  it("sends the selection with one idempotency key, and reuses it on a retry", async () => {
+  it("shows the phone setup refusal and keeps every selected item", async () => {
+    const phoneSetup =
+      "this Egma instance has not been set up to place phone calls, so nothing was dialed and nothing was charged. It is missing the text-to-speech provider. Whoever runs this platform makes it ready with one command in the platform workspace: egma self-host setup.";
+    builder({
+      started: {
+        status: 409,
+        body: { error: "phone_setup_required", message: phoneSetup },
+      },
+    });
+    render(<NewRunPage />);
+    await chooseEverything();
+
+    await screen.findByRole("button", { name: "Start run" });
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+
+    expect(await screen.findByText("Enter a run name.")).toBeDefined();
+    expect(sentTo("/api/runs")).toEqual([]);
+    expect(screen.queryByRole("dialog", { name: "Start this run?" })).toBeNull();
+
+    nameRun("Phone check");
+    await confirmStart();
+
+    expect(await screen.findByText(phoneSetup)).toBeDefined();
+    expect((screen.getByLabelText("Agent") as HTMLSelectElement).value).toBe(
+      "agt_1",
+    );
+    expect(
+      (screen.getByLabelText("Connection") as HTMLSelectElement).value,
+    ).toBe("con_1");
+    expect(
+      (
+        screen.getByLabelText(
+          "Include Reschedules a booked appointment",
+        ) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+  });
+
+  it("reuses one key for a retry and mints another when the run name changes", async () => {
     builder({
       started: [
+        { status: 502, body: { error: "unavailable", message: "Egma could not answer." } },
         { status: 502, body: { error: "unavailable", message: "Egma could not answer." } },
         {
           status: 201,
@@ -690,41 +802,122 @@ describe("starting", () => {
     render(<NewRunPage />);
     await chooseEverything();
 
-    const start = await screen.findByRole("button", { name: "Start run" });
+    await screen.findByRole("button", { name: "Start run" });
     await waitFor(() => {
-      expect((start as HTMLButtonElement).disabled).toBe(false);
+      expect(
+        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
     });
 
-    fireEvent.click(start);
+    nameRun();
+    await confirmStart();
     await screen.findByText("Egma could not answer.");
-    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    await confirmStart();
 
     await waitFor(() => {
       expect(sentTo("/api/runs")).toHaveLength(2);
     });
-    const [first, second] = sentTo("/api/runs");
+    nameRun("Evening check");
+    await confirmStart();
+    await waitFor(() => {
+      expect(sentTo("/api/runs")).toHaveLength(3);
+    });
+
+    const [first, second, renamed] = sentTo("/api/runs");
     const key = (first?.body as { idempotency_key: string }).idempotency_key;
     expect(key).not.toBe("");
+    expect((first?.body as { label: string }).label).toBe("Morning check");
     // The same selection under the same word: a lost answer becomes the run
     // that already exists rather than a second conversation with the agent.
     expect((second?.body as { idempotency_key: string }).idempotency_key).toBe(
       key,
     );
+    expect(
+      (renamed?.body as { idempotency_key: string }).idempotency_key,
+    ).not.toBe(key);
+    expect((renamed?.body as { label: string }).label).toBe("Evening check");
     expect((first?.body as { test_versions: string[] }).test_versions).toEqual([
       "tstv_1",
     ]);
+  });
+
+  it("starts the same selection as a new run from a fresh builder", async () => {
+    builder({
+      started: [
+        {
+          status: 201,
+          body: {
+            id: "run_1",
+            status: "pending",
+            expected_simulation_count: 1,
+            skipped_count: null,
+          },
+        },
+        {
+          status: 201,
+          body: {
+            id: "run_2",
+            status: "pending",
+            expected_simulation_count: 1,
+            skipped_count: null,
+          },
+        },
+      ],
+    });
+
+    const firstBuilder = render(<NewRunPage />);
+    await chooseEverything();
+    nameRun("First run");
+    await screen.findByRole("button", { name: "Start run" });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    await confirmStart();
+    await waitFor(() => expect(sentTo("/api/runs")).toHaveLength(1));
+    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_1");
+    const firstKey = (
+      sentTo("/api/runs")[0]?.body as { idempotency_key: string }
+    ).idempotency_key;
+
+    firstBuilder.unmount();
+    render(<NewRunPage />);
+    await chooseEverything();
+    nameRun("Second run");
+    await screen.findByRole("button", { name: "Start run" });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    await confirmStart();
+    await waitFor(() => expect(sentTo("/api/runs")).toHaveLength(2));
+    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_2");
+    const secondKey = (
+      sentTo("/api/runs")[1]?.body as { idempotency_key: string }
+    ).idempotency_key;
+
+    expect(secondKey).not.toBe(firstKey);
   });
 
   it("mints a different key for a different selection, because it is a different run", async () => {
     builder({ tests: [testRow(), testRow({ id: "tst_2", name: "Cancels", version_id: "tstv_2" })] });
     render(<NewRunPage />);
     await chooseEverything();
+    nameRun();
 
-    const start = await screen.findByRole("button", { name: "Start run" });
+    await screen.findByRole("button", { name: "Start run" });
     await waitFor(() => {
-      expect((start as HTMLButtonElement).disabled).toBe(false);
+      expect(
+        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
     });
-    fireEvent.click(start);
+    await confirmStart();
     await waitFor(() => {
       expect(sentTo("/api/runs")).toHaveLength(1);
     });
@@ -737,7 +930,7 @@ describe("starting", () => {
         ).disabled,
       ).toBe(false);
     });
-    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    await confirmStart();
 
     await waitFor(() => {
       expect(sentTo("/api/runs")).toHaveLength(2);
@@ -760,96 +953,57 @@ describe("starting", () => {
   });
 });
 
-/**
- * The panel under the table is drawn once, for whichever row is open, so
- * everything it holds is shared by every row. Each of these is a different way
- * of showing somebody the wrong test's answer, and the two fixes are genuinely
- * two: clearing the read does not clear the pending failure, and the failure
- * outlives the panel.
- */
-describe("what belongs to the open test row", () => {
-  async function detailsFor(testName: string): Promise<HTMLElement> {
-    const table = await screen.findByRole("table", {
-      name: "Tests that apply to this agent",
-    });
-    const named = within(table).getByText(testName);
-    const row = named.closest("tr");
-    if (row === null) throw new Error(`${testName} should be in a table row`);
-    return within(row).getByRole("button", { name: "Details" });
-  }
-
-  /**
-   * Two rows, and the second row's own read left unanswered.
-   *
-   * **The unanswered read is the whole experiment.** A second read that lands
-   * immediately overwrites whatever the first row left behind, so the defect is
-   * invisible and a test that watched for it would pass either way. Holding the
-   * second read open is what opens the window the stale value would be shown
-   * in, which is the window a real slow network opens on its own.
-   */
-  function twoTests(versions?: Stubbed | readonly Stubbed[]): void {
+describe("test selection", () => {
+  function twoTests(): void {
     builder({
       tests: [
         testRow(),
         testRow({ id: "tst_2", name: "Cancels", version_id: "tstv_2" }),
       ],
-      secondVersions: "never",
-      ...(versions === undefined ? {} : { versions }),
     });
   }
 
-  it("empties one test's version history when a different row opens", async () => {
+  it("selects every test and clears every test", async () => {
     twoTests();
     render(<NewRunPage />);
     fireEvent.change(await screen.findByLabelText("Agent"), {
       target: { value: "agt_1" },
     });
 
-    const firstDetails = await detailsFor("Reschedules a booked appointment");
-    const secondDetails = await detailsFor("Cancels");
+    fireEvent.click(await screen.findByRole("button", { name: "Select all" }));
+    expect(
+      (screen.getByLabelText("Include Reschedules a booked appointment") as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    expect((screen.getByLabelText("Include Cancels") as HTMLInputElement).checked).toBe(
+      true,
+    );
 
-    fireEvent.click(firstDetails);
-    // **Wait for the read that produces the sentence** before asserting it is
-    // gone — asserting an absence before the read has answered would pass for
-    // the wrong reason and keep passing after the behaviour was deleted.
-    await screen.findByText(/2 versions; this run would pin v3\./u);
-
-    fireEvent.click(secondDetails);
-    await waitFor(() => {
-      expect(screen.queryByText(/2 versions/u)).toBeNull();
-    });
-    // The second row is open and its own read has not answered, so the panel
-    // says it is reading rather than showing the first row's answer under the
-    // second row's name.
-    await screen.findByText(/Reading this test's version history…/u);
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(
+      (screen.getByLabelText("Include Reschedules a booked appointment") as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    expect((screen.getByLabelText("Include Cancels") as HTMLInputElement).checked).toBe(
+      false,
+    );
   });
 
-  it("drops a failed read's Try again when a different row opens", async () => {
-    twoTests([
-      { status: 500, body: { error: "unavailable", message: "Egma could not answer." } },
-    ]);
+  it("shows every test in one compact list without a details table", async () => {
+    twoTests();
     render(<NewRunPage />);
     fireEvent.change(await screen.findByLabelText("Agent"), {
       target: { value: "agt_1" },
     });
 
-    const firstDetails = await detailsFor("Reschedules a booked appointment");
-    const secondDetails = await detailsFor("Cancels");
-    fireEvent.click(firstDetails);
-    // Wait for the failure to actually be on screen before switching, so the
-    // assertion below is about the clearing rather than about the timing.
-    await screen.findByRole("button", { name: "Try again" });
-
-    fireEvent.click(secondDetails);
-
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    const list = await screen.findByRole("list", {
+      name: "Tests that apply to this agent",
     });
-    // The heading is the only thing on screen saying which test the panel is
-    // about, so a retry left behind would draw one test's answer under
-    // another's name and report it as a success.
-    expect(
-      screen.getAllByRole("heading", { name: "Cancels" }).length,
-    ).toBeGreaterThan(0);
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(list).getByText("Reschedules a booked appointment")).toBeDefined();
+    expect(within(list).getByText("Cancels")).toBeDefined();
+    expect(within(list).queryByText(/Impatient Rita · Version 3/u)).toBeNull();
+    expect(screen.queryByRole("table", { name: "Tests that apply to this agent" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Details" })).toBeNull();
   });
 });

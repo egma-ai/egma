@@ -298,6 +298,33 @@ describe("an illegal simulation move", () => {
     );
   });
 
+  it("releases a claimed row to queued only when its whole lease is cleared", async () => {
+    const id = await insertSimulation("claimed");
+
+    await moveSimulation(id, "queued", {
+      claimed_by: null,
+      claimed_at: null,
+      heartbeat_at: null,
+    });
+
+    const released = await db.sql<{
+      status: string;
+      claimed_by: string | null;
+      claimed_at: Date | null;
+      heartbeat_at: Date | null;
+    }>(
+      `select status, claimed_by, claimed_at, heartbeat_at
+         from simulation where id = $1`,
+      [id],
+    );
+    expect(released.rows[0]).toEqual({
+      status: "queued",
+      claimed_by: null,
+      claimed_at: null,
+      heartbeat_at: null,
+    });
+  });
+
   it("cannot reopen a terminal row, or rewrite what one reported", async () => {
     const id = await insertSimulation("completed");
 

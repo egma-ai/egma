@@ -9,6 +9,7 @@ The first open-source platform purpose-built to help teams shipping voice agents
 0. ALWAYS use the built in /wait-what skill while communicating to the developer.
 1. whenever you are taking to the developer iterating on this project with you - speak in simple human language, no overcomplicated jargons. always talk in ASD-STE100 Simplified Technical English. 
 2. trace the full story (what is being worked on, why its important, what's the decsion in front and its consequences). be truthful. 
+3. for a batch of UI annotations, inventory every comment first, group the work by product surface with one owner per surface, finish each group before one independent review, then run one integrated test, build, and browser proof.
 
 # design system
 

@@ -22,6 +22,7 @@ import {
   REACH_ASK_LINE,
   REACH_LINES,
   type KeyAsk,
+  type Reach,
 } from "../retell/connect.ts";
 import { simulationLine } from "../run/lines.ts";
 import type { RunView } from "../run/view.ts";
@@ -46,6 +47,8 @@ export type HeadlessRecord = {
   agentChoices: RetellAgent[];
   /** Whether the choice between text and phone was ever put to anybody. */
   reachOffered: boolean;
+  /** The provider-safe options shown at that choice. */
+  reachOptions: Reach[];
   /** The numbers a choice was offered between, when one was. */
   numberChoices: RetellNumber[];
   statuses: string[];
@@ -80,6 +83,7 @@ export class HeadlessUI implements WizardUI {
     keyAsks: [],
     agentChoices: [],
     reachOffered: false,
+    reachOptions: [],
     numberChoices: [],
     statuses: [],
     summary: "",
@@ -171,15 +175,15 @@ export class HeadlessUI implements WizardUI {
   /**
    * The offer, printed the same way the screen draws it.
    *
-   * It is printed even though nobody is here to answer it, because whoever
-   * reads this output afterwards has to be able to see that both ways were
-   * offered and that egma chose neither on their behalf.
+   * It is printed even though nobody is here to answer it, so the output says
+   * exactly which provider-safe paths were available.
    */
-  setReachOffer(open: boolean): void {
-    if (!open) return;
+  setReachOffer(offered: readonly Reach[] | null): void {
+    if (offered === null) return;
     this.record.reachOffered = true;
+    this.record.reachOptions = [...offered];
     this.write(REACH_ASK_LINE);
-    for (const way of ["text", "phone"] as const) {
+    for (const way of offered) {
       this.write(`reach_option: ${way} ${REACH_LINES[way]}`);
     }
   }

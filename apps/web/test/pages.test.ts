@@ -567,18 +567,25 @@ describe("the pages", () => {
       ),
       "utf8",
     );
+    const rootLayout = await readFile(
+      path.join(WEB, "app/layout.tsx"),
+      "utf8",
+    );
     const root = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
     expect(shell).toContain("export function ProductStatePage");
-    // The Settings pages keep the shell a stronger way than the state page
-    // does: they draw `AppShell` themselves and put loading, failure and
-    // not-found states inside it, so the navigation, selector and account menu
-    // never leave the screen while a read is in flight. The run and the
-    // simulation inside it do the same.
-    for (const page of [members, run, simulation]) {
-      expect(page).toContain("<AppShell>");
+    // Every signed-in product page shares one persistent shell. Individual reads keep
+    // their loading, failure and not-found states inside that frame, so page
+    // data can change without resetting organization, project or account.
+    expect(rootLayout).toContain("<ProductShellBoundary>");
+    for (const page of [run, simulation]) {
       expect(page).toContain("<Loading ");
       expect(page).not.toContain("<StatePage");
     }
+    // `/members` is intentionally outside project navigation and still owns
+    // its shell directly.
+    expect(members).toContain("<AppShell>");
+    expect(members).toContain("<Loading ");
+    expect(members).not.toContain("<StatePage");
     expect(transcript).toContain("<ProductStatePage");
     expect(forwarder).toContain("<ProductStatePage");
     expect(root).toContain('<ProductStatePage');

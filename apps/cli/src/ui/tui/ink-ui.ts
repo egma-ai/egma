@@ -7,7 +7,7 @@
 
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent, RetellNumber } from "../../retell/client.ts";
-import type { KeyAsk } from "../../retell/connect.ts";
+import type { KeyAsk, Reach } from "../../retell/connect.ts";
 import type { RunView } from "../../run/view.ts";
 import type { SkillPlaces } from "../../skills/install.ts";
 import type { Detection } from "../../wizard/detection.ts";
@@ -59,8 +59,8 @@ export class InkUI implements WizardUI {
     this.store.setAgentChoices(agents);
   }
 
-  setReachOffer(open: boolean): void {
-    this.store.setReachOffer(open);
+  setReachOffer(offered: readonly Reach[] | null): void {
+    this.store.setReachOffer(offered);
   }
 
   setNumberChoices(numbers: readonly RetellNumber[] | null): void {

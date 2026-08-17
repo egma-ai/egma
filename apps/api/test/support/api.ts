@@ -7,6 +7,7 @@ import {
   seedPlatformSettings,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
+import type { Fetch as RetellFetch } from "@egma/retell";
 
 import { loadConfig, type Config } from "../../src/config.ts";
 import type { Email, EmailSender } from "../../src/auth/email.ts";
@@ -143,6 +144,8 @@ export type TestApiOptions = {
    * not read the log has no reason to collect one.
    */
   readonly logTo?: { write(line: string): void };
+  /** Provider-read seam for Retell discovery and legacy dispatch checks. */
+  readonly retellFetch?: RetellFetch;
 };
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
@@ -224,6 +227,9 @@ export async function createApi(
           orphanSweepIntervalMilliseconds:
             options.orphanSweepIntervalMilliseconds,
         }),
+    ...(options.retellFetch === undefined
+      ? {}
+      : { retellFetch: options.retellFetch }),
   });
   await app.ready();
 

@@ -23,7 +23,10 @@ import {
   type RunningPage,
 } from "../../../../../lib/graders.ts";
 import { firstProjectOf, roleOf } from "../../../../../lib/me.ts";
-import { graderDisplayName } from "../../../../../lib/presentation.ts";
+import {
+  graderDisplayName,
+  GRADER_VIEW_LABELS,
+} from "../../../../../lib/presentation.ts";
 import {
   projectLanding,
   projectPath,
@@ -36,6 +39,7 @@ import {
 } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
+import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
 import {
   Empty,
   Failure,
@@ -43,10 +47,7 @@ import {
   NotFound,
 } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
-import {
-  confirmUnsavedNavigation,
-  useUnsavedChanges,
-} from "../../../../../ui/settings-read.ts";
+import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
   PageBody,
@@ -273,6 +274,7 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
   const editorHeading = useRef<HTMLHeadingElement>(null);
   const editButtons = useRef(new Map<string, HTMLButtonElement>());
   const returnFocusTo = useRef<string | null>(null);
+  const draftNavigation = useDraftNavigation();
 
   useUnsavedChanges(editorState.atRisk, editorState.busy);
 
@@ -332,19 +334,20 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
     // buttons are disabled too; this guard keeps programmatic callers honest.
     if (open?.act === "edit" && editorState.busy) return;
 
-    if (
-      open?.act === "edit" &&
-      editorState.atRisk &&
-      !confirmUnsavedNavigation()
-    ) {
+    const replaceOpen = () => {
+      if (open?.act === "edit" && next === null) {
+        returnFocusTo.current = open.copy.id;
+      }
+      setEditorState({ atRisk: false, busy: false });
+      setOpen(next);
+    };
+
+    if (open?.act === "edit" && editorState.atRisk) {
+      draftNavigation.request(replaceOpen);
       return;
     }
 
-    if (open?.act === "edit" && next === null) {
-      returnFocusTo.current = open.copy.id;
-    }
-    setEditorState({ atRisk: false, busy: false });
-    setOpen(next);
+    replaceOpen();
   }
 
   function settled(sentence: string): void {
@@ -443,7 +446,18 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage wide>
-      <PageHeader eyebrow="Project" title={RUNNING.title} lead={RUNNING.lead} />
+      <PageHeader
+        eyebrow="Project"
+        title={RUNNING.title}
+        lead={RUNNING.lead}
+        breadcrumbs={[
+          {
+            label: "Graders",
+            href: projectPath(projectId, GRADERS_SECTION),
+          },
+          { label: GRADER_VIEW_LABELS.running },
+        ]}
+      />
       <PageBody>
         <GraderTabs projectId={projectId} active="running" />
         <div className={styles.viewContent}>

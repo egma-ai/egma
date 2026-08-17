@@ -3,7 +3,6 @@
 import {
   Field,
   Help,
-  Problem,
   TextArea,
   TextInput,
 } from "../../../../../../ui/controls.tsx";
@@ -143,9 +142,7 @@ export function ConnectionFields({
         />
       ))}
 
-      {variant.credential_rule === "forbidden" ? (
-        <Help>{variant.credential_help}</Help>
-      ) : credentialsEditable ? (
+      {credentialsEditable && variant.credential_rule !== "forbidden" ? (
         <>
           <Help>{variant.credential_help}</Help>
           {variant.credential_fields.map((field) => (
@@ -156,12 +153,6 @@ export function ConnectionFields({
               onChange={(value) => setCredential(field.field, value)}
             />
           ))}
-          {variant.credential_rule === "optional" ? (
-            <Problem>
-              This shape works with or without a credential. Leave the fields
-              empty to store none.
-            </Problem>
-          ) : null}
         </>
       ) : null}
     </>

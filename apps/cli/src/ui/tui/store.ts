@@ -19,7 +19,7 @@ import { WizardRouter, type ScreenName, type Sequence } from "./router.ts";
 import { emptyState, type WizardState } from "./state.ts";
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent, RetellNumber } from "../../retell/client.ts";
-import type { KeyAsk } from "../../retell/connect.ts";
+import type { KeyAsk, Reach } from "../../retell/connect.ts";
 import type { RunView } from "../../run/view.ts";
 import type { SkillPlaces } from "../../skills/install.ts";
 import type { Detection } from "../../wizard/detection.ts";
@@ -200,8 +200,8 @@ export class WizardStore {
     this.change({ agentChoices });
   }
 
-  setReachOffer(reachOffered: boolean): void {
-    this.change({ reachOffered });
+  setReachOffer(reachOptions: readonly Reach[] | null): void {
+    this.change({ reachOptions });
   }
 
   setNumberChoices(numberChoices: readonly RetellNumber[] | null): void {
