@@ -76,31 +76,40 @@ export const COLUMNS = {
 } as const;
 
 /**
- * What a quiet Monitoring page says, in three states that never overlap.
+ * What a quiet Monitoring page says, in four states that never overlap.
  *
  * A page with nothing on it is where a developer decides whether egma works.
  * Each of these answers a different question, and the wrong one costs an
  * afternoon:
  *
- * 1. **Nothing has arrived.** The whole export setup, in the shortest form
- *    there is: the address this deployment listens on, the two variables that
- *    point an agent at it, and where to mint the key they carry.
- * 2. **Nothing has arrived, and a key names the whole organization.** The one
- *    step of that setup that fails silently — everything is accepted and stored,
- *    and none of it is in a project, so a correct-looking export shows nothing.
- *    Telling somebody who already exported to go and export would be the
- *    unhelpful answer, so this replaces the teaching rather than joining it.
- * 3. **Traffic is arriving and nothing judges it.** Every grader starts scoped
+ * 1. **Nothing in this window.** The list is empty because of the window rather
+ *    than because of the project — a week of traffic read at the last hour. One
+ *    line and the way out, and none of the teaching below: greeting a working
+ *    export with a setup tutorial tells somebody their export is broken.
+ * 2. **Nothing has arrived at all.** The whole export setup, in the shortest
+ *    form there is: the address this deployment listens on, the two variables
+ *    that point an agent at it, where to mint the key they carry, and the
+ *    caution about the key that fails in silence.
+ * 3. **Nothing has arrived, and a key that names the whole organization is
+ *    visible.** The one step of that setup that fails silently — everything is
+ *    accepted and stored, and none of it is in a project, so a correct-looking
+ *    export shows nothing. Telling somebody who already exported to go and
+ *    export would be the unhelpful answer, so this replaces the teaching rather
+ *    than joining it.
+ * 4. **Traffic is arriving and nothing judges it.** Every grader starts scoped
  *    to simulations and the seeded one can only ever judge a simulation, so an
  *    absence of verdicts here is the ordinary first state rather than a fault.
  */
 export const QUIET = {
+  narrowWindow: {
+    title: "Nothing in this window",
+    lead: "Widen the window above to look further back.",
+  },
   setUp: {
     title: "Nothing has been recorded here yet",
     lead:
       "Point an agent's OpenTelemetry export at Egma and what it does in " +
-      "production lands on this page. If it already does, widen the window " +
-      "above.",
+      "production lands on this page.",
     endpoint: "This deployment listens for OpenTelemetry at",
     variables:
       "Set these two where the agent runs. The exporter adds the rest of the " +
@@ -114,6 +123,21 @@ export const QUIET = {
     keyLead:
       "The key that export carries has to name this project. Egma shows the " +
       "secret once.",
+    /**
+     * The caution that rides with the teaching, and the reason it rides here at
+     * all.
+     *
+     * State 3 below says the same thing louder, and it can only fire for
+     * somebody the key list answers for — the server shows an ordinary member
+     * their own keys and nobody else's, so a member looking at a project whose
+     * exporter uses an admin's organization-wide key would never meet that
+     * state. The sentence therefore lives in both places: once as a caution
+     * everybody reads, once as the whole answer for whoever can see the key.
+     */
+    caution:
+      "Already exporting and still seeing nothing? Check what the key names. " +
+      "A key minted for the whole organization files its telemetry outside " +
+      "every project, and none of it appears here.",
   },
   organizationKey: {
     title: "A key here names the whole organization",

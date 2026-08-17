@@ -84,12 +84,8 @@ export function sectionIn(pathname: string): string | null {
  *   first project on purpose because People is the organization's and any
  *   project serves as its frame.
  *
- * The two transcript addresses used to be on that list. They are inside the
- * project now — `/projects/{projectId}/monitoring/transcripts` and one
- * conversation beneath it — so switching project from Monitoring lands on the
- * other project's Monitoring rather than throwing somebody out to Agents.
- *
- * **The last two forward, and forwarding is not the same as never being here.**
+ * **`/runs/{runId}` and `/members` forward, and forwarding is not the same as
+ * never being here.**
  * Both draw `ProductStatePage`, which is this shell around a page, so the
  * selector is on screen for as long as the read takes — and longer than that
  * when the read does not end in a forward at all. Open a `results_url` for a
@@ -101,6 +97,13 @@ export function sectionIn(pathname: string): string | null {
  *
  * All three land on the same answer, which is the right one for each: there is
  * no area on any of these addresses to carry into the project just picked.
+ *
+ * **The two transcript addresses used to be a fourth and a fifth on that list**,
+ * at `/traces` and `/traces/{traceId}`. They are inside the project now —
+ * `/projects/{projectId}/monitoring/transcripts` and one exchange beneath it —
+ * so they go through the ordinary path above instead: the area is kept, the
+ * exchange is dropped, and switching project from Monitoring lands on the other
+ * project's Monitoring rather than throwing somebody out to Agents.
  */
 export function inProject(pathname: string, projectId: string): string {
   const address = addressIn(pathname);

@@ -140,16 +140,22 @@ function apiAnswers(answers: Record<string, { status: number; body: unknown }>):
   return { asked };
 }
 
+const REFUSED = {
+  status: 503,
+  body: { error: "store_unavailable", message: "Egma could not read that." },
+};
+
 /**
  * One page, with all four reads answered.
  *
  * `rows`, `graders` and `keys` are the three inputs the quiet states are decided
- * from, so a case says only which of them it is about.
+ * from, so a case says only which of them it is about. Either supporting read
+ * can be refused instead, which is a case of its own: a refusal is not a zero.
  */
 function stub(options: {
   readonly rows?: readonly Listed[];
-  readonly graders?: readonly ReturnType<typeof grader>[];
-  readonly keys?: readonly ReturnType<typeof key>[];
+  readonly graders?: readonly ReturnType<typeof grader>[] | "refused";
+  readonly keys?: readonly ReturnType<typeof key>[] | "refused";
 }) {
   return apiAnswers({
     "/api/me": { status: 200, body: ME },
@@ -161,13 +167,33 @@ function stub(options: {
         window: { from: "", to: "" },
       },
     },
-    "/api/graders": {
-      status: 200,
-      body: { items: options.graders ?? [], next_cursor: null },
-    },
-    "/api/keys": { status: 200, body: { keys: options.keys ?? [] } },
+    "/api/graders":
+      options.graders === "refused"
+        ? REFUSED
+        : {
+            status: 200,
+            body: { items: options.graders ?? [], next_cursor: null },
+          },
+    "/api/keys":
+      options.keys === "refused"
+        ? REFUSED
+        : { status: 200, body: { keys: options.keys ?? [] } },
   });
 }
+
+/**
+ * Which window the address this page opens on names.
+ *
+ * It decides what an empty list *means* — narrowed and empty is a fact about
+ * the window, widest and empty is a fact about the project — so every case that
+ * is about an empty page has to say which one it is.
+ */
+function atWindow(choice: string): void {
+  globalThis.history.replaceState(null, "", `/?window=${choice}`);
+}
+
+/** The widest the control offers, which is where "nothing here" means the project. */
+const WIDEST = "30d";
 
 /** Which read this page made of the list, as the address it sent. */
 function listedAt(asked: readonly string[]): URLSearchParams {
@@ -178,6 +204,7 @@ function listedAt(asked: readonly string[]): URLSearchParams {
 beforeEach(() => {
   routed.projectId = "prj_2";
   routed.pathname = "/projects/prj_2/monitoring/transcripts";
+  atWindow(WIDEST);
 });
 
 afterEach(() => {
@@ -267,20 +294,26 @@ describe("what the Monitoring list shows", () => {
 });
 
 /**
- * The three quiet states, each asserted present **and** the other two absent.
+ * The four quiet states, each asserted present **and** the other three absent.
  *
- * Showing two at once is the failure this guards: somebody with no export told
- * that no grader watches production goes looking for a grader, and somebody
- * whose key names the whole organization told to point an export at egma points
- * it a second time.
+ * Showing two at once is the failure this guards: somebody reading the last
+ * hour of a busy project told to go and set up the export they already have,
+ * somebody with no export told that no grader watches production, somebody
+ * whose key names the whole organization told to point an export at egma a
+ * second time.
  */
 describe("what a quiet Monitoring page says", () => {
   /**
-   * Which of the three is on screen, read by the one thing each puts there and
-   * nothing else does: two headings and a link.
+   * Which of the four is on screen, read by the one thing each puts there and
+   * nothing else does: three headings and a link.
    */
   function guidance(): readonly string[] {
     return [
+      ...(screen.queryByRole("heading", {
+        name: QUIET.narrowWindow.title,
+      }) === null
+        ? []
+        : ["nothing-in-this-window"]),
       ...(screen.queryByRole("heading", { name: QUIET.setUp.title }) === null
         ? []
         : ["set-up-capture"]),
@@ -294,6 +327,26 @@ describe("what a quiet Monitoring page says", () => {
         : ["nothing-watches-production"]),
     ];
   }
+
+  /**
+   * **An empty list on a narrowed window is a fact about the window.**
+   *
+   * A project with a week of traffic, read at the last hour, is empty and
+   * perfectly healthy. Greeting that with the setup tutorial tells a developer
+   * their working export is broken, so the page says the one thing it knows and
+   * points at the control that fixes it.
+   */
+  it("blames the window, and teaches nothing, when the window is narrowed", async () => {
+    atWindow("1h");
+    stub({ rows: [], keys: [key(null)], graders: [grader("simulations")] });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByRole("heading", { name: QUIET.narrowWindow.title });
+    expect(guidance()).toEqual(["nothing-in-this-window"]);
+    // No tutorial, and no sentence about a key — neither is known to be wrong.
+    expect(screen.queryByText(/OTEL_EXPORTER_OTLP_ENDPOINT/)).toBeNull();
+    expect(screen.getByText(QUIET.narrowWindow.lead)).toBeDefined();
+  });
 
   it("teaches the export setup when nothing has been recorded", async () => {
     stub({ rows: [], keys: [key("prj_2")], graders: [grader("simulations")] });
@@ -321,6 +374,38 @@ describe("what a quiet Monitoring page says", () => {
     expect(
       screen.getByRole("link", { name: QUIET.setUp.key }).getAttribute("href"),
     ).toBe("/projects/prj_2/settings/keys");
+    /*
+     * The caution rides with the teaching, and this is why. The key list
+     * answers for an admin and for whoever minted the key, so a member whose
+     * project is fed by somebody else's organization-wide key never reaches the
+     * state below — and that key is the one step of this setup that fails
+     * without saying anything.
+     */
+    expect(screen.getByText(QUIET.setUp.caution)).toBeDefined();
+  });
+
+  /**
+   * **A refused read is not a zero.** Folding it into a count would put "no
+   * grader watches production" on screen on the strength of an answer egma
+   * never got — the same collapse `ui/page-state.tsx` forbids between failed and
+   * empty. A supporting read that did not land means one thing less is said.
+   */
+  it("claims nothing about graders when the grader read was refused", async () => {
+    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: "refused" });
+    render(<MonitoringTranscriptsPage />);
+
+    // The rows are the page, and they arrive whatever the supporting read did.
+    await screen.findByRole("table", { name: LIST.tableLabel });
+    expect(guidance()).toEqual([]);
+  });
+
+  /** And the same for the keys read, which decides between two empty states. */
+  it("teaches the setup, claiming no key, when the key read was refused", async () => {
+    stub({ rows: [], keys: "refused", graders: [grader("simulations")] });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByRole("heading", { name: QUIET.setUp.title });
+    expect(guidance()).toEqual(["set-up-capture"]);
   });
 
   it("names the organization-wide key instead, when the organization holds one", async () => {

@@ -12,6 +12,7 @@ import {
   howLong,
   humanizeIdentifier,
   isHuman,
+  isWidestWindow,
   milliseconds,
   monitoringPath,
   namesWholeOrganization,
@@ -313,21 +314,50 @@ describe("what the monitoring list asks for", () => {
 });
 
 /**
- * What a quiet Monitoring page owes its reader — three states, and never two at
+ * What a quiet Monitoring page owes its reader — four states, and never two at
  * once.
  *
  * Each answers a different question, and the wrong one costs an afternoon:
- * somebody with no export told that no grader watches production goes looking
- * for a grader, and somebody whose key names the whole organization told to
- * point an export at egma goes and points it a second time.
+ * somebody with a week of traffic reading the last hour told to set up an
+ * export they already have, somebody with no export told that no grader watches
+ * production, somebody whose key names the whole organization told to point an
+ * export at egma a second time.
  */
 describe("which guidance a quiet page shows", () => {
-  const WATCHED = { listed: 3, organizationWideKeys: 0, watchingProduction: 1 };
+  /** Nothing narrowed, nothing failed: the plain reading of each case. */
+  function seen(overrides: Partial<Parameters<typeof quietState>[0]>) {
+    return quietState({
+      listed: 0,
+      narrowedWindow: false,
+      organizationWideKeys: 0,
+      watchingProduction: 0,
+      ...overrides,
+    });
+  }
 
-  it("teaches the setup when nothing has arrived", () => {
+  /**
+   * **The window is a reason for an empty list, and it is not the project's
+   * fault.** A project with a week of traffic read at the last hour is empty
+   * and healthy, and a setup tutorial there tells somebody their working export
+   * is broken.
+   */
+  it("blames the window when the window is narrowed", () => {
+    expect(seen({ listed: 0, narrowedWindow: true })).toBe(
+      "nothing-in-this-window",
+    );
+    // Even where everything else would have had something to say.
     expect(
-      quietState({ listed: 0, organizationWideKeys: 0, watchingProduction: 0 }),
-    ).toBe("set-up-capture");
+      seen({ listed: 0, narrowedWindow: true, organizationWideKeys: 3 }),
+    ).toBe("nothing-in-this-window");
+  });
+
+  /** And the widest window is the one where an empty list means the project. */
+  it("teaches the setup only at the widest window this page can ask for", () => {
+    expect(seen({ listed: 0, narrowedWindow: false })).toBe("set-up-capture");
+    expect(isWidestWindow("30d")).toBe(true);
+    for (const narrower of ["1h", "24h", "7d"] as const) {
+      expect(isWidestWindow(narrower), narrower).toBe(false);
+    }
   });
 
   /**
@@ -336,21 +366,35 @@ describe("which guidance a quiet page shows", () => {
    * exported to go and export is the unhelpful answer, so this replaces the
    * teaching rather than joining it.
    */
-  it("names the organization-wide key instead, when there is one", () => {
-    expect(
-      quietState({ listed: 0, organizationWideKeys: 1, watchingProduction: 0 }),
-    ).toBe("key-names-the-organization");
+  it("names the organization-wide key instead, when one is visible", () => {
+    expect(seen({ organizationWideKeys: 1 })).toBe("key-names-the-organization");
   });
 
   it("says nothing watches production once traffic is arriving", () => {
-    expect(
-      quietState({ listed: 4, organizationWideKeys: 1, watchingProduction: 0 }),
-    ).toBe("nothing-watches-production");
+    expect(seen({ listed: 4, organizationWideKeys: 1 })).toBe(
+      "nothing-watches-production",
+    );
   });
 
-  /** A healthy project gets no guidance at all, which is the fourth answer. */
+  /** A healthy project gets no guidance at all, which is the fifth answer. */
   it("says nothing at all when traffic is arriving and something judges it", () => {
-    expect(quietState(WATCHED)).toBeNull();
+    expect(seen({ listed: 3, watchingProduction: 1 })).toBeNull();
+  });
+
+  /**
+   * **A read that never answered is not a zero**, which is the same rule
+   * `ui/page-state.tsx` states between failed and empty. A failed grader read
+   * folded into a count would put "no grader watches production" on screen on
+   * the strength of an answer egma never got, so a supporting read that did not
+   * land means one thing less is said and never one thing more.
+   */
+  it("says nothing rather than guessing, when a supporting read did not answer", () => {
+    expect(seen({ listed: 4, watchingProduction: null })).toBeNull();
+    // And the keys read failing leaves the teaching, which claims nothing about
+    // any key — its caution line covers the case for every reader anyway.
+    expect(seen({ listed: 0, organizationWideKeys: null })).toBe(
+      "set-up-capture",
+    );
   });
 
   /**
@@ -358,23 +402,26 @@ describe("which guidance a quiet page shows", () => {
    * noise about a problem they do not have yet — so the order is fixed and
    * exactly one state can ever be on screen.
    */
-  it("never shows two of them, whatever the three counts say", () => {
+  it("never shows two of them, whatever the four inputs say", () => {
+    const named = [
+      "nothing-in-this-window",
+      "set-up-capture",
+      "key-names-the-organization",
+      "nothing-watches-production",
+    ];
+
     for (const listed of [0, 5]) {
-      for (const organizationWideKeys of [0, 2]) {
-        for (const watchingProduction of [0, 1]) {
-          const state = quietState({
-            listed,
-            organizationWideKeys,
-            watchingProduction,
-          });
-          expect(
-            state === null ||
-              [
-                "set-up-capture",
-                "key-names-the-organization",
-                "nothing-watches-production",
-              ].includes(state),
-          ).toBe(true);
+      for (const narrowedWindow of [false, true]) {
+        for (const organizationWideKeys of [0, 2, null]) {
+          for (const watchingProduction of [0, 1, null]) {
+            const state = quietState({
+              listed,
+              narrowedWindow,
+              organizationWideKeys,
+              watchingProduction,
+            });
+            expect(state === null || named.includes(state)).toBe(true);
+          }
         }
       }
     }
@@ -393,8 +440,26 @@ describe("which guidance a quiet page shows", () => {
   });
 
   it("reads a key with no project as one that names the whole organization", () => {
-    expect(namesWholeOrganization({ project_id: null })).toBe(true);
-    expect(namesWholeOrganization({ project_id: "prj_2" })).toBe(false);
+    expect(
+      namesWholeOrganization({ project_id: null, revoked_at: null }),
+    ).toBe(true);
+    expect(
+      namesWholeOrganization({ project_id: "prj_2", revoked_at: null }),
+    ).toBe(false);
+  });
+
+  /**
+   * A revoked key authenticates nothing, so it files nothing anywhere. Counting
+   * one would explain an empty page with a key somebody already dealt with —
+   * a wrong answer wearing the clothes of a knowledgeable one.
+   */
+  it("does not count a key that has been revoked", () => {
+    expect(
+      namesWholeOrganization({
+        project_id: null,
+        revoked_at: "2026-08-15T09:00:00.000000Z",
+      }),
+    ).toBe(false);
   });
 });
 

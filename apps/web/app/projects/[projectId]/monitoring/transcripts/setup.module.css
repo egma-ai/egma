@@ -26,7 +26,14 @@
   margin: 0;
   overflow-x: auto;
   padding: var(--space-3) var(--space-4);
-  white-space: pre;
+  /*
+   * Wrapped rather than cut, the way every other block of machine text in this
+   * application is (see `.payload pre`). A long deployment address on a narrow
+   * screen is a variable somebody has to copy whole, and a line that scrolls
+   * sideways out of view is a line half of them will copy half of.
+   */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   width: 100%;
 }
 

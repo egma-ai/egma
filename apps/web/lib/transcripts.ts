@@ -282,6 +282,25 @@ function hoursIn(choice: WindowChoice): number {
   return known?.hours ?? fallback?.hours ?? 24;
 }
 
+/**
+ * Whether this is the widest window the control offers.
+ *
+ * It is what separates *nothing here* from *nothing in this hour*. A project
+ * with a week of traffic read at the last hour is an empty list and a healthy
+ * project, and the widest choice is as close to "everything" as this page can
+ * ask for — the store caps a read at thirty-one days, so nothing wider exists
+ * to offer.
+ *
+ * Derived from the offered windows rather than written down, so adding a wider
+ * one moves this with it.
+ */
+export function isWidestWindow(choice: WindowChoice): boolean {
+  const widest = WINDOWS.reduce((one, other) =>
+    other.hours > one.hours ? other : one,
+  );
+  return choice === widest.id;
+}
+
 /** The last day, or whichever span of time was chosen instead. */
 export function recentWindow(choice: WindowChoice, now: Date): Window {
   const hours = hoursIn(choice);
@@ -425,32 +444,46 @@ export function transcriptReadPath(asking: {
  * ------------------------------------------------------------------ */
 
 /**
- * Which guidance a quiet Monitoring page owes its reader — one of three, and
+ * Which guidance a quiet Monitoring page owes its reader — one of four, and
  * never two at once.
  *
  * Each answers a different question, and showing the wrong one sends somebody
  * the wrong way for an afternoon:
  *
- * - `set-up-capture` — nothing has arrived. The reader has an agent and no
- *   export, so what they need is the address, the two variables and a key.
- * - `key-names-the-organization` — nothing has arrived **and** this
- *   organization holds a key that names no project. That key is the one thing
- *   on the setup path that fails silently: everything is accepted and stored,
- *   and none of it is in any project, so a correct-looking exporter shows
- *   nothing here. Saying "point an export at Egma" to somebody who already did
- *   is the unhelpful answer.
+ * - `nothing-in-this-window` — the list is empty because of the **window**, not
+ *   because of the project. A week of traffic read at the last hour is an empty
+ *   page and a healthy project, and greeting it with a setup tutorial tells
+ *   somebody their working export is broken. One line and the way out; nothing
+ *   else, because nothing else is known to be wrong.
+ * - `set-up-capture` — nothing has arrived at the widest window this page can
+ *   ask for. The reader has an agent and no export, so what they need is the
+ *   address, the two variables and a key — and the caution about the key that
+ *   fails silently, which rides with the teaching so that every role meets it.
+ * - `key-names-the-organization` — the same emptiness, with a key that names no
+ *   project actually **visible** to this reader. That key is the one step of
+ *   the setup path that fails in silence: everything is accepted and stored,
+ *   and none of it is in any project, so a correct-looking export shows nothing
+ *   here. Saying "point an export at Egma" to somebody who already did is the
+ *   unhelpful answer, so this replaces the teaching rather than joining it.
  * - `nothing-watches-production` — traffic is arriving and no grader is scoped
  *   to it, so verdicts will stay absent. Every new grader defaults to
  *   simulations, and the seeded expected-behaviors copy is structurally
  *   simulations-only, so this is the ordinary state rather than the odd one.
  *
- * Nothing at all is the fourth answer, and it is the one a healthy project
- * gets: traffic arriving, something judging it.
+ * Nothing at all is the fifth answer, and it is the one a healthy project gets:
+ * traffic arriving, something judging it.
  *
  * The order is the point. With no traffic, telling somebody that no grader
  * watches production is noise about a problem they do not have yet.
+ *
+ * **A count nobody answered is `null`, and it is never read as a zero.** A
+ * failed grader read folded into "no grader watches production" would put a
+ * claim on screen that egma has no answer for — the same collapse
+ * `ui/page-state.tsx` forbids between failed and empty — so a supporting read
+ * that did not land means one less thing this page says, and never one more.
  */
 export type Quiet =
+  | "nothing-in-this-window"
   | "set-up-capture"
   | "key-names-the-organization"
   | "nothing-watches-production";
@@ -458,13 +491,16 @@ export type Quiet =
 export function quietState(seen: {
   /** How many production conversations this window holds. */
   readonly listed: number;
-  /** Keys this organization holds that name no project. */
-  readonly organizationWideKeys: number;
-  /** Running graders whose scope reaches production. */
-  readonly watchingProduction: number;
+  /** Whether the window is narrower than the widest one on offer. */
+  readonly narrowedWindow: boolean;
+  /** Visible keys that name no project, or `null` where nothing answered. */
+  readonly organizationWideKeys: number | null;
+  /** Graders whose scope reaches production, or `null` where nothing answered. */
+  readonly watchingProduction: number | null;
 }): Quiet | null {
   if (seen.listed === 0) {
-    return seen.organizationWideKeys > 0
+    if (seen.narrowedWindow) return "nothing-in-this-window";
+    return seen.organizationWideKeys !== null && seen.organizationWideKeys > 0
       ? "key-names-the-organization"
       : "set-up-capture";
   }
@@ -482,11 +518,19 @@ export function watchesProduction(grader: { readonly scope: string }): boolean {
   return grader.scope === PRODUCTION || grader.scope === "both";
 }
 
-/** Keys minted against the whole organization, which file outside every project. */
+/**
+ * Keys minted against the whole organization, which file outside every project.
+ *
+ * **A revoked one is not one of them.** It authenticates nothing, so it can file
+ * nothing anywhere — and a page that counted it would explain an empty list with
+ * a key somebody already dealt with, which is a wrong answer that looks like a
+ * knowledgeable one.
+ */
 export function namesWholeOrganization(key: {
   readonly project_id: string | null;
+  readonly revoked_at: string | null;
 }): boolean {
-  return key.project_id === null;
+  return key.project_id === null && key.revoked_at === null;
 }
 
 /* ------------------------------------------------------------------ *

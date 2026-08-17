@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { readJson } from "../../../../../lib/api.ts";
+import { readJson, type Answer } from "../../../../../lib/api.ts";
 import { GRADERS_PATH, type RunningPage } from "../../../../../lib/graders.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import {
@@ -22,6 +22,7 @@ import {
 } from "../../../../../lib/transcript-copy.ts";
 import {
   howLong,
+  isWidestWindow,
   namesWholeOrganization,
   productionListPath,
   quietState,
@@ -128,10 +129,16 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
   /**
    * The two reads that decide what a quiet page says, beside the list itself.
    *
-   * The graders answer is this project's; the keys answer is the
-   * organization's, because a key is minted against the customer even when it
-   * names one project. Neither is asked about a window: what each says is true
-   * of the project rather than of the last day.
+   * The graders answer is this project's. The keys answer names no project,
+   * because a key is minted against the customer even when it is scoped to one
+   * — but it is **what this reader may see rather than what the organization
+   * holds**: the server shows an ordinary member their own keys and an admin
+   * everybody's. So an empty answer is not proof that no organization-wide key
+   * exists, which is why the caution about one rides with the setup teaching as
+   * well as having a state of its own.
+   *
+   * Neither is asked about a window: what each says is true of the project
+   * rather than of the last day.
    */
   const { answer: graders } = useProjectRead<RunningPage>(GRADERS_PATH, projectId);
   const { answer: keys } = useOrganizationRead<ApiKeyList>(API_KEYS_PATH);
@@ -251,27 +258,39 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
   const more = state.status === "loaded" ? state.more : null;
 
   /**
-   * Which of the three quiet states this page is in, or none.
+   * Which of the four quiet states this page is in, or none.
    *
    * Nothing at all while either supporting read is still out, and that wait is
    * deliberate: guessing would put the setup teaching on screen for a moment in
    * front of somebody whose real trouble is a key that names the organization,
    * and guidance that flickers between two different instructions is worse than
    * guidance that arrives a beat late.
+   *
+   * **A read that answered a refusal counts as nothing, never as a zero.** An
+   * `Answer` that is not `ready` is `null` here, and `quietState` reads `null`
+   * as "no answer" — so a failed grader read means this page says one thing
+   * less, rather than announcing that no grader watches production on the
+   * strength of an answer it never got. That is the same rule `ui/page-state`
+   * states between failed and empty, applied to the reads that only decide what
+   * a page says about itself.
    */
+  const counted = <T,>(answer: Answer<T> | null, count: (value: T) => number) =>
+    answer !== null && answer.status === "ready" ? count(answer.value) : null;
+
   const quiet: Quiet | null =
     state.status !== "loaded" || graders === null || keys === null
       ? null
       : quietState({
           listed: state.rows.length,
-          organizationWideKeys:
-            keys.status === "ready"
-              ? rowsIn(keys.value.keys).filter(namesWholeOrganization).length
-              : 0,
-          watchingProduction:
-            graders.status === "ready"
-              ? graders.value.items.filter(watchesProduction).length
-              : 0,
+          narrowedWindow: !isWidestWindow(choice ?? DEFAULT_WINDOW),
+          organizationWideKeys: counted(
+            keys,
+            (page) => rowsIn(page.keys).filter(namesWholeOrganization).length,
+          ),
+          watchingProduction: counted(
+            graders,
+            (page) => page.items.filter(watchesProduction).length,
+          ),
         });
 
   return (
@@ -306,6 +325,19 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
               {QUIET.unwatched.graders}
             </Link>
           </Notice>
+        ) : null}
+
+        {/*
+          The list is empty because of the window rather than because of the
+          project, so the way out is the control above and nothing else is
+          known to be wrong. A setup tutorial here would tell somebody with a
+          week of traffic that their working export is broken.
+        */}
+        {quiet === "nothing-in-this-window" ? (
+          <Empty
+            title={QUIET.narrowWindow.title}
+            lead={QUIET.narrowWindow.lead}
+          />
         ) : null}
 
         {quiet === "set-up-capture" ? <SetUp projectId={projectId} /> : null}
@@ -353,13 +385,21 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
  * written down anywhere, because a self-hoster's egma is wherever they put it
  * and a printed example would be somebody else's. The exporter appends the
  * signal's own path, so what is shown is the base and nothing after it.
+ *
+ * **Nothing is drawn until that address is known.** It only exists in a
+ * browser, so it arrives one render after this component mounts — and the
+ * render before it would print `OTEL_EXPORTER_OTLP_ENDPOINT=` with nothing after
+ * the sign, which is a variable somebody could copy and an instruction that is
+ * wrong for as long as it is on screen. Teaching arrives once and complete.
  */
 function SetUp({ projectId }: { readonly projectId: string }) {
-  const [origin, setOrigin] = useState("");
+  const [origin, setOrigin] = useState<string | null>(null);
 
   useEffect(() => {
     setOrigin(globalThis.location.origin);
   }, []);
+
+  if (origin === null) return null;
 
   return (
     <Empty
@@ -375,6 +415,14 @@ function SetUp({ projectId }: { readonly projectId: string }) {
           <ButtonLink weight="strong" href={settingsPath(projectId, "keys")}>
             {QUIET.setUp.key}
           </ButtonLink>
+          {/*
+            The caution, which the state below says louder and to fewer people:
+            the key list answers for an admin and for whoever minted the key,
+            so a member whose project is fed by somebody else's
+            organization-wide key would otherwise never be told what to look
+            at. It is one line here and the whole answer there.
+          */}
+          <p className={setup.note}>{QUIET.setUp.caution}</p>
         </div>
       }
     />
@@ -452,7 +500,7 @@ function columnsFor(projectId: string): readonly Column<Listed>[] {
     cell,
     hideOnMobile: !MOBILE_COLUMNS.has(header),
     primary: index === 0,
-    mono: index === 0,
+    mono: MEASURED_COLUMNS.has(header),
   }));
 }
 
@@ -461,6 +509,26 @@ const MOBILE_COLUMNS = new Set<string>([
   COLUMNS.started,
   COLUMNS.duration,
   COLUMNS.preview,
+  COLUMNS.errors,
+]);
+
+/**
+ * The columns somebody scans down rather than reads across.
+ *
+ * `DESIGN.md` asks for tabular numerals on metrics, dates and durations, and
+ * the mono face is where this table gets them. A count and a duration are worth
+ * nothing on their own — what they are for is the row that is three times the
+ * others — and a proportional face puts every figure at a different width, so
+ * the eye has to read each one instead of seeing the shape of the column.
+ *
+ * Turns is deliberately out: it is a sentence with two numbers in it rather
+ * than a figure. So are the two words at the end.
+ */
+const MEASURED_COLUMNS = new Set<string>([
+  COLUMNS.started,
+  COLUMNS.duration,
+  COLUMNS.steps,
+  COLUMNS.tools,
   COLUMNS.errors,
 ]);
 
