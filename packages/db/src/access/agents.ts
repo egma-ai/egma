@@ -1640,15 +1640,34 @@ export async function updateConnection(
         ? {}
         : {
             watchProduction: changes.watchProduction,
-            // **Switching on starts the cursor at now**, and that is what makes
-            // watching mean *from here on*. A null cursor asks the provider for
-            // everything it holds, which is a backfill — a deliberate, deferred
-            // feature — rather than the thing somebody just switched on. A
-            // connection switched off and on again keeps the cursor it had, so
-            // it resumes rather than restarting.
+            /**
+             * **Every switch-on starts the cursor at now**, and that is the
+             * whole of what watching means: *from here on*.
+             *
+             * It used to keep whatever cursor the connection already had, so
+             * that only the first switch-on stamped one. That was consent
+             * running backwards. Watching is off, a team's agent takes calls
+             * all afternoon, somebody switches watching back on — and the next
+             * poll's window opens at the old cursor and sweeps in every
+             * conversation that happened while capture was deliberately off.
+             * The switch is the one place a customer says what egma may store,
+             * and an off switch has to mean it.
+             *
+             * **Only the off→on edge stamps.** Writing `true` over a connection
+             * that is already watching is not a switch-on — it is a form
+             * submitting the value it was already showing — and moving the
+             * cursor for it would drop whatever the poller had not yet drained.
+             * The `case` reads the row's own pre-update value inside the same
+             * statement, so there is no window between deciding and writing for
+             * a second request to land in.
+             *
+             * Switching off leaves the cursor exactly where it is. Nothing is
+             * re-read from it — the next switch-on overwrites it — and what was
+             * already stored stays stored.
+             */
             ...(changes.watchProduction
               ? {
-                  productionCursor: sql`coalesce(${connection.productionCursor}, now())`,
+                  productionCursor: sql`case when ${connection.watchProduction} then ${connection.productionCursor} else now() end`,
                 }
               : // Switching off deregisters, so the stamp goes with it.
                 { webhookRegisteredAt: null }),

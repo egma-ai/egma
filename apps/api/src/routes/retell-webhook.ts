@@ -109,12 +109,18 @@ export async function retellWebhookRoutes(app: FastifyInstance): Promise<void> {
     // Every Retell connection on the deployment naming this agent, switched on
     // or not — read in one pass, because "switched off" and "never heard of it"
     // are two different refusals and both have to be countable.
+    //
+    // **Narrowed in the query, not after it.** Finding the candidates has to
+    // happen before the signature can be checked — the signature is what says
+    // which candidate this is — so this read is reachable by anybody who can
+    // POST. Asking for every connection and filtering here meant unsealing the
+    // whole deployment's Retell keys on each such request; asking for the agent
+    // the body names unseals the one or two that could have signed it, and none
+    // at all when nobody registered that agent.
     const named =
       retellAgentId === ""
         ? []
-        : (await resolveRetellWatch({ everyConnection: true })).filter(
-            (target) => target.retellAgentId === retellAgentId,
-          );
+        : await resolveRetellWatch({ everyConnection: true, retellAgentId });
 
     if (named.length === 0) {
       await countRetellWebhookRefusal("unknown_agent");

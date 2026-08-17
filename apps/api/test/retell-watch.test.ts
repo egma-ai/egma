@@ -68,6 +68,7 @@ const GLOBEX_KEY = "retell-secret-globex-E5F6G7H8QRST";
 const INITECH_KEY = "retell-secret-initech-J9K0L1M2NPQR";
 const SHARED_AGENT = "agent_shared_between_projects";
 const INITECH_AGENT = "agent_with_a_long_backlog";
+const REENABLE_AGENT = "agent_watched_then_not";
 
 /* ------------------------------------------------------------------- *
  * A Retell-shaped server on loopback.
@@ -752,6 +753,30 @@ describe("the receiving endpoint", () => {
     expect((await refusalCounts()).unknown_agent).toBe(before + 1);
   });
 
+  it("resolves only the connections naming the agent, so a delivery unseals no more", async () => {
+    // The candidates have to be found before a signature can say which of them
+    // this is, so this read is reachable by anybody who can POST. Asking for
+    // every connection and filtering afterwards meant unsealing the whole
+    // deployment's Retell keys once per request.
+    const everything = await resolveRetellWatch({ everyConnection: true });
+    const named = await resolveRetellWatch({
+      everyConnection: true,
+      retellAgentId: SHARED_AGENT,
+    });
+
+    expect(named.length).toBeGreaterThan(0);
+    expect(named.length).toBeLessThan(everything.length);
+    expect(named.every((one) => one.retellAgentId === SHARED_AGENT)).toBe(true);
+
+    // And an agent nobody registered opens nothing at all.
+    expect(
+      await resolveRetellWatch({
+        everyConnection: true,
+        retellAgentId: "agent_nobody_registered",
+      }),
+    ).toEqual([]);
+  });
+
   it("refuses a body nobody's key signed, and counts it", async () => {
     const before = (await refusalCounts()).bad_signature ?? 0;
     const call = callFixture("call_unsigned", BASE + AHEAD + 41_000);
@@ -1373,5 +1398,89 @@ describe("switching watching off", () => {
 
     // Nothing new, and nothing lost.
     expect(await tracesOf(acme)).toHaveLength(stored);
+  });
+});
+
+/* ------------------------------------------------------------------- *
+ * Switching back on.
+ * ------------------------------------------------------------------- */
+
+describe("watching switched on a second time", () => {
+  it("stores nothing from the window it was switched off for", async () => {
+    // Its own connection, because this is the one case whose whole subject is
+    // the cursor, and it has to start from a switch nobody else has flipped.
+    const wired = await wire(acme, "Re-enable desk", ACME_KEY, REENABLE_AGENT);
+
+    await setWatching(wired, true);
+    const firstStamp = (await cursorOf(wired.connectionId))?.getTime() ?? 0;
+    expect(firstStamp).toBeGreaterThan(0);
+
+    // One conversation while watching is on. It is stored, and the cursor
+    // follows it.
+    const during = callFixture("call_while_watching", firstStamp + 1, {
+      agent_id: REENABLE_AGENT,
+      transcript_object: [],
+    });
+    retell.calls.set(REENABLE_AGENT, [during]);
+    await sweep();
+    expect((await cursorOf(wired.connectionId))?.getTime()).toBe(firstStamp + 1);
+
+    // Off. What was stored stays stored, and the agent keeps taking calls —
+    // which is the ordinary reason somebody switches capture off.
+    await setWatching(wired, false);
+    const offWindow = [
+      callFixture("call_off_window_b", firstStamp + 2, {
+        agent_id: REENABLE_AGENT,
+        transcript_object: [],
+      }),
+      callFixture("call_off_window_c", firstStamp + 3, {
+        agent_id: REENABLE_AGENT,
+        transcript_object: [],
+      }),
+    ];
+    retell.calls.set(REENABLE_AGENT, [during, ...offWindow]);
+
+    const listingsWhileOff = retell.listings;
+    await sweep();
+    expect(retell.listings).toBe(listingsWhileOff);
+
+    // On again. **Every switch-on means from here on**, so the cursor is
+    // stamped afresh rather than kept — otherwise the next window would open
+    // where capture stopped and sweep in everything that happened while it was
+    // deliberately off.
+    await setWatching(wired, true);
+    const secondStamp = (await cursorOf(wired.connectionId))?.getTime() ?? 0;
+    expect(secondStamp).not.toBe(firstStamp + 1);
+    // The off window really is behind the new stamp, or this proves nothing.
+    expect(secondStamp).toBeGreaterThan(firstStamp + 3);
+
+    const after = callFixture("call_after_re_enable", secondStamp + 1_000, {
+      agent_id: REENABLE_AGENT,
+      transcript_object: [],
+    });
+    retell.calls.set(REENABLE_AGENT, [during, ...offWindow, after]);
+    await sweep();
+
+    const stored = (await tracesOf(acme)).map((one) => one.provider_call_id);
+    expect(stored).toContain("call_while_watching");
+    expect(stored).toContain("call_after_re_enable");
+    // The two the customer had switched capture off for. Never asked for,
+    // never stored.
+    expect(stored).not.toContain("call_off_window_b");
+    expect(stored).not.toContain("call_off_window_c");
+    expect((await cursorOf(wired.connectionId))?.getTime()).toBe(
+      secondStamp + 1_000,
+    );
+
+    // And writing `true` over a connection that is already watching is a form
+    // submitting what it was already showing, not a switch-on. It must not move
+    // the cursor, or it would drop whatever the poller had not yet drained.
+    await setWatching(wired, true);
+    expect((await cursorOf(wired.connectionId))?.getTime()).toBe(
+      secondStamp + 1_000,
+    );
+
+    await setWatching(wired, false);
+    retell.calls.delete(REENABLE_AGENT);
   });
 });

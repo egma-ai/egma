@@ -129,6 +129,23 @@ export type RetellWatchQuery = {
    * asking twice would read the switch at two different moments.
    */
   readonly everyConnection?: boolean | undefined;
+  /**
+   * Only the connections that name this Retell agent.
+   *
+   * **This is what keeps an unauthenticated delivery from costing the whole
+   * deployment's key material.** The receiving endpoint has to find the
+   * candidates before it can check a signature — that is the order the work
+   * comes in — so without this, anybody who could POST a body with an agent id
+   * in it made egma unseal every active Retell connection's key, once per
+   * request. Narrowing here means a delivery unseals the one or two keys that
+   * could possibly have signed it, and a delivery naming an agent nobody
+   * registered unseals none at all.
+   *
+   * The agent id is a config key, which is the clear half of a connection by
+   * construction — *what to reach, never how to prove* — so it can be matched
+   * in the query rather than after decrypting to look at it.
+   */
+  readonly retellAgentId?: string | undefined;
 };
 
 type TargetRow = {
@@ -225,6 +242,13 @@ export async function resolveRetellWatch(
           : query.everyConnection === true
             ? undefined
             : eq(connection.watchProduction, true),
+        // Matched in the statement rather than after unsealing every row, so a
+        // request nobody has authenticated cannot decide how much key material
+        // egma opens. `->>` is the clear config, and a connection whose config
+        // holds no such key simply does not match.
+        query.retellAgentId === undefined
+          ? undefined
+          : sql`${connection.config} ->> 'retellAgentId' = ${query.retellAgentId}`,
       ),
     )
     .orderBy(asc(connection.id));
