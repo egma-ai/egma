@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -193,6 +194,44 @@ export const connection = pgTable(
     capabilitiesCheckedAt: moment("capabilities_checked_at"),
     /** Which adapter measured it — evidence travels with the answer. */
     capabilitySource: text("capability_source"),
+    /**
+     * Whether egma watches this connection's production traffic.
+     *
+     * **Off for every connection that exists, and off for every connection
+     * made from now on.** Connecting an agent so it can be tested must never
+     * silently become storing the customer's real conversations, so watching is
+     * a switch somebody flips rather than a consequence of a feature shipping.
+     * Flipping it on starts the poller and registers the webhook where the
+     * deployment has a public address; flipping it off stops both and keeps
+     * what was already stored.
+     */
+    watchProduction: boolean("watch_production").notNull().default(false),
+    /**
+     * Everything this connection has produced at or before this instant has
+     * been **drained by the poller**. A statement of fact, never a statement of
+     * intent: it moves only after a conversation is written, so a poller that
+     * dies mid-sweep resumes exactly where the last durable write left it.
+     *
+     * A webhook never moves it. A delivery lands the conversation that just
+     * ended while the poller is still working through what came before it, and
+     * a cursor dragged forward by one would skip the rest for good. The
+     * delivered conversation is stored either way — the poller is offered it
+     * again on its way past, and the ledger skips it.
+     */
+    productionCursor: moment("production_cursor"),
+    /**
+     * When egma registered its receiving endpoint with the provider, or null
+     * for a connection egma polls and nothing more. Null is the ordinary state
+     * of a deployment with no public address, and it is not a fault.
+     */
+    webhookRegisteredAt: moment("webhook_registered_at"),
+    /**
+     * When a delivery for this connection was last accepted. What decides
+     * whether the poller is running at full cadence or at the safety-net one:
+     * webhooks arriving means the poller is a backstop, and webhooks stopping
+     * means it is the transport again.
+     */
+    webhookDeliveredAt: moment("webhook_delivered_at"),
     /** See the agent's own: the opaque revision an edit is written against. */
     revision: idText("revision").notNull(),
     /** When this connection stopped being reachable for new work, or null. */
