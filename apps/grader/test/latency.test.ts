@@ -71,7 +71,8 @@ function measured(
   return {
     measure,
     unit: "milliseconds",
-    derived: false,
+    origin: "timed",
+    reportedBy: "",
     // Each measurement carries the span it happened in, which is what a
     // judgment cites — one list, so nothing here has to keep two in step.
     samples: values.map((value, at) => ({
@@ -80,6 +81,30 @@ function measured(
     })),
   };
 }
+
+/**
+ * The same series, as the platform reported it rather than as egma measured it.
+ *
+ * Every sample cites the root span, which is what the measure module does with
+ * a block: an aggregate describes the whole conversation and happened at no
+ * moment inside it.
+ */
+function asReportedBy(
+  platform: string,
+  measure: string,
+  values: readonly number[],
+): MeasuredFromSpans {
+  return {
+    measure,
+    unit: "milliseconds",
+    origin: "reported",
+    reportedBy: platform,
+    samples: values.map((value) => ({ value, spanId: ROOT_SPAN })),
+  };
+}
+
+/** The root span a reported measurement rides in on. */
+const ROOT_SPAN = "00000000000000ff";
 
 function execution(
   entries: readonly Readonly<Record<string, string | number>>[],
@@ -162,6 +187,79 @@ describe("one config entry, one assertion", () => {
     );
 
     expect(only).toMatchObject({ verdict: "passed", score: 1 });
+  });
+});
+
+/**
+ * **A verdict decided by a number the platform reported, rather than one egma
+ * took.**
+ *
+ * The bound is applied identically — the platform's measurements are raw
+ * samples, so "every measurement holds the bound, the worst decides" means what
+ * it always meant. And the sentence is identical too: a rationale says what was
+ * measured, what it came to and what it was held to, whoever took the number.
+ * Which source it came from is on the measure, where a surface can ask for it.
+ *
+ * The numbers are the live proof's own: a Retell production conversation whose
+ * worst turn took 2145 ms, over the two-second bound the project already had
+ * wired, with nothing to say so until the block was read.
+ */
+describe("a verdict computed from what the platform reported", () => {
+  it("fails the bound the platform's own worst measurement missed", () => {
+    const [only] = executeLatency(
+      execution([{ metric: "turn_response_latency", bound: 2_000 }], {
+        source: "production",
+        measures: [
+          asReportedBy("retell", "turn_response_latency", [517, 2_145]),
+        ],
+      }),
+    );
+
+    expect(only).toMatchObject({
+      assertion: "turn_response_latency",
+      verdict: "failed",
+      score: 0,
+    });
+    expect(only?.rationale).toBe(
+      "turn_response_latency was 2145 milliseconds at its worst, across 2 measurements, over the bound of 2000.",
+    );
+    // Nobody is named. The provenance rides the measure, not the sentence.
+    expect(only?.rationale).not.toContain("reported by");
+    expect(only?.rationale).not.toContain("retell");
+    // The root span the block rode in on, which is the only span an aggregate
+    // over the whole conversation can honestly cite.
+    expect(only?.citedSpanIds).toEqual([ROOT_SPAN]);
+  });
+
+  it("passes a fast conversation, in the same words a timed one passes in", () => {
+    const [only] = executeLatency(
+      execution([{ metric: "turn_response_latency", bound: 2_000 }], {
+        source: "production",
+        measures: [asReportedBy("retell", "turn_response_latency", [412, 517])],
+      }),
+    );
+
+    expect(only).toMatchObject({ verdict: "passed", score: 1 });
+    expect(only?.rationale).toBe(
+      "turn_response_latency was 517 milliseconds at its worst, across 2 measurements, within the bound of 2000.",
+    );
+    expect(only?.rationale).not.toContain("reported by");
+  });
+
+  /**
+   * One sentence shape for every source, checked from the other side: a verdict
+   * on a number egma timed reads exactly as a verdict on a number a platform
+   * reported. That is what makes the source a fact about the measure rather than
+   * a difference a reader has to account for.
+   */
+  it("says nothing about a platform on a measure egma measured itself", () => {
+    const [only] = executeLatency(
+      execution([{ metric: "turn_response_latency", bound: 2_000 }]),
+    );
+
+    expect(only?.rationale).toBe(
+      "turn_response_latency was 1100 milliseconds at its worst, across 2 measurements, within the bound of 2000.",
+    );
   });
 });
 

@@ -24,12 +24,16 @@ In practice:
 - **Remove in two releases, not one.** Stop reading the thing first and ship
   that; drop it in a later release than the one that stopped using it. A
   rename is an add and a remove, in that order, never one statement.
-- **Never rewrite an applied file.** The runner refuses a changed file
-  rather than skipping it (`packages/db/src/migrate.ts`), so the history
-  here is what production actually ran.
+- **Freeze shipped history, not local state.** Before merge, a migration may be
+  rewritten or squashed even if a local development database applied it;
+  repair that local ledger. After merge or use outside local development, add
+  a new file instead; the runner refuses a changed recorded file.
 - **ClickHouse migrations must resume safely.** There is no transaction around
   a file, so every statement uses `IF EXISTS` or `IF NOT EXISTS` and survives a
   second run after a partial failure.
+- **Pack compatible ClickHouse changes to one table into one `ALTER`.** If they
+  must be separate, keep them ordered and let the runner retry only
+  `517 CANNOT_ASSIGN_ALTER` while table metadata catches up.
 
 A change that cannot follow the rule in one step — a type change, a backfill
 that must rewrite — ships as expand, migrate, contract across releases, and

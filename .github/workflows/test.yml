@@ -11,10 +11,9 @@ name: Tests
 # real-browser proof, the simulator tests, the Python SDK tests and the fixture
 # tests. That is the handoff gate, and nothing in it is allowed to skip.
 #
-# The deploy pipeline is the third caller: on every push to main it runs this
-# workflow with `full: true` before anything builds, because a merge commit is
-# a tree no pull request ever tested and a direct push is a tree nothing
-# tested at all. Same complete proof, one more door.
+# A push to `main` runs the same six jobs again on the tree `main` now owns.
+# One `Deploy` job then waits for all six. This keeps the test names identical
+# on pull requests and main, and gives production one gate and one owner.
 #
 # The split is deliberate rather than thrifty. An effort lands as a dozen pull
 # requests into one integration branch and then one pull request from that
@@ -40,17 +39,18 @@ name: Tests
 
 on:
   pull_request:
-  workflow_call:
-    inputs:
-      full:
-        description: Run the complete proof, whatever the base branch says
-        type: boolean
-        default: false
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
 concurrency:
-  # A newer push to the same pull request makes the run underway pointless.
-  group: tests-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push makes an older pull-request run pointless. Main is different:
+  # its run may already be changing production, so later merges wait their turn.
+  # Keep the old production group name so the first new run also waits for any
+  # `Deploy platform` run that started before this workflow replaced it.
+  group: ${{ github.ref == 'refs/heads/main' && 'deploy-platform' || format('tests-{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -60,15 +60,15 @@ jobs:
     name: Lint and typecheck
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - name: Say which lanes this pull request runs
-        # So the tick on a pull request can be read back to the proof it stands
-        # for, rather than to whichever jobs happened to be enabled that day.
+      - name: Say which lanes this run uses
+        # So a tick can be read back to the proof it stands for, rather than to
+        # whichever jobs happened to be enabled that day.
         env:
           BASE: ${{ github.base_ref }}
-          FULL: ${{ inputs.full }}
+          REF: ${{ github.ref }}
         run: |
-          if [ "$FULL" = "true" ]; then
-            echo "Called by the deploy pipeline — the complete proof, on the commit main actually carries."
+          if [ "$REF" = "refs/heads/main" ]; then
+            echo "On main — the complete proof runs before Deploy."
           elif [ "$BASE" = "main" ]; then
             echo "Into main — the complete proof: lint, typecheck, the fast lane, the browser lane, the simulator, SDK and fixture tests."
           else
@@ -155,7 +155,7 @@ jobs:
         # Only where a skip is not allowed. The recording suites start a MinIO
         # of their own from the image the compose file deploys, so pulling it
         # through compose keeps one version in one place.
-        if: ${{ github.base_ref == 'main' || inputs.full }}
+        if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
         # **Compose interpolates every service before it pulls one**, and the
         # self-hosted phone platform declares ten variables with no default —
         # the LiveKit pair, the recording store's four credentials, the auth
@@ -181,7 +181,7 @@ jobs:
           # object store could be started would report the opposite of what
           # happened. Everywhere else the skip is the promise that contributing
           # costs no new infrastructure.
-          EGMA_REQUIRE_OBJECT_STORAGE: ${{ (github.base_ref == 'main' || inputs.full) && '1' || '' }}
+          EGMA_REQUIRE_OBJECT_STORAGE: ${{ (github.ref == 'refs/heads/main' || github.base_ref == 'main') && '1' || '' }}
         run: |
           node -e 'const os = require("node:os"); console.log(`Fast Lane capacity: ${os.availableParallelism()} CPUs, 2 Vitest workers`);'
           pnpm test:fast
@@ -193,7 +193,7 @@ jobs:
     # matrix here would not make it faster, it would make it wrong — see
     # `apps/api/test/support/instance.ts` and `apps/web/tools/output-lock.ts`.
     name: Browser lane (one job, never sharded)
-    if: ${{ github.base_ref == 'main' || inputs.full }}
+    if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -244,7 +244,7 @@ jobs:
 
   simulator:
     name: Simulator tests
-    if: ${{ github.base_ref == 'main' || inputs.full }}
+    if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -278,7 +278,7 @@ jobs:
 
   sdk:
     name: Python SDK tests
-    if: ${{ github.base_ref == 'main' || inputs.full }}
+    if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -309,7 +309,7 @@ jobs:
 
   fixture:
     name: Fixture agent tests
-    if: ${{ github.base_ref == 'main' || inputs.full }}
+    if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -337,3 +337,225 @@ jobs:
 
       - name: Run the fixture agent tests
         run: pnpm test:fixture
+
+  deploy:
+    name: Deploy
+    needs: [checks, fast, browser, simulator, sdk, fixture]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      REGISTRY: ${{ vars.ECR_REGISTRY }}
+      INSTANCE: ${{ vars.PLATFORM_INSTANCE_ID }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The path decision compares this tree with the last green main run.
+          fetch-depth: 0
+
+      - name: Decide what this push deploys
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "platform=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "Dispatched by hand: the whole deployment runs."
+            exit 0
+          fi
+          base=$(curl -fsS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs?branch=main&status=success&per_page=100" \
+            | python3 -c 'import json,sys; runs=json.load(sys.stdin).get("workflow_runs",[]); print(next((r["head_sha"] for r in runs if r.get("event") in {"push", "workflow_dispatch"} and r.get("name") in {"Tests", "Deploy platform"}), ""))')
+          if [ -n "$base" ]; then
+            echo "Diffing against the last successful main test/deploy run: $base"
+          else
+            echo "platform=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "No successful main test/deploy run found: the whole deployment runs."
+            exit 0
+          fi
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "platform=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "No usable base commit: the whole deployment runs."
+            exit 0
+          fi
+          changed=$(git diff --name-only "$base" "${{ github.sha }}")
+          printf 'Changed:\n%s\n' "$changed"
+          platform=false
+          web=false
+          while IFS= read -r path; do
+            case "$path" in
+              apps/api/*|apps/grader/*|apps/simulator/*|packages/*) platform=true ;;
+              docker-compose.yml|docker-compose.managed.yml|.env.example) platform=true ;;
+              pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) platform=true ;;
+              .github/workflows/test.yml) platform=true ;;
+              apps/web/*|tools/*) web=true ;;
+            esac
+          done <<< "$changed"
+          echo "platform=$platform" >> "$GITHUB_OUTPUT"
+          echo "web=$web" >> "$GITHUB_OUTPUT"
+          if [ "$platform" = "true" ]; then
+            echo "Platform paths changed: deploy the platform, then the web."
+          elif [ "$web" = "true" ]; then
+            echo "Only the web changed."
+          else
+            echo "Nothing here deploys."
+          fi
+
+      - name: Check the platform deployment is configured
+        if: steps.decide.outputs.platform == 'true'
+        run: |
+          missing=""
+          for v in DEPLOY_ROLE REGISTRY INSTANCE; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "Set these repository variables before deploying:$missing" >&2
+            echo "AWS_DEPLOY_ROLE_ARN is the role this workflow assumes." >&2
+            echo "ECR_REGISTRY is <account>.dkr.ecr.<region>.amazonaws.com." >&2
+            echo "PLATFORM_INSTANCE_ID is the box to restart." >&2
+            exit 1
+          fi
+
+      - name: Take a short-lived AWS credential
+        if: steps.decide.outputs.platform == 'true'
+        run: |
+          set -euo pipefail
+          token=$(curl -sS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')
+          creds=$(aws sts assume-role-with-web-identity \
+            --role-arn "$DEPLOY_ROLE" \
+            --role-session-name "deploy-${GITHUB_RUN_ID}" \
+            --web-identity-token "$token" \
+            --duration-seconds 3600 \
+            --query Credentials --output json)
+          python3 - "$creds" >> "$GITHUB_ENV" <<'PY'
+          import json, sys
+          c = json.loads(sys.argv[1])
+          print(f"AWS_ACCESS_KEY_ID={c['AccessKeyId']}")
+          print(f"AWS_SECRET_ACCESS_KEY={c['SecretAccessKey']}")
+          print(f"AWS_SESSION_TOKEN={c['SessionToken']}")
+          PY
+          echo "::add-mask::$(echo "$creds" | python3 -c 'import json,sys; print(json.load(sys.stdin)["SecretAccessKey"])')"
+          echo "::add-mask::$(echo "$creds" | python3 -c 'import json,sys; print(json.load(sys.stdin)["SessionToken"])')"
+
+      - name: Build and push the three images
+        if: steps.decide.outputs.platform == 'true'
+        run: |
+          set -euo pipefail
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+          for app in api simulator grader; do
+            echo "::group::$app"
+            docker build -f "apps/$app/Dockerfile" \
+              -t "$REGISTRY/egma/$app:$GITHUB_SHA" \
+              -t "$REGISTRY/egma/$app:latest" .
+            docker push "$REGISTRY/egma/$app:$GITHUB_SHA"
+            docker push "$REGISTRY/egma/$app:latest"
+            echo "::endgroup::"
+          done
+
+      - name: Replace what is running, and wait for it
+        if: steps.decide.outputs.platform == 'true'
+        run: |
+          set -euo pipefail
+          ACCOUNT="${REGISTRY%%.*}"
+          command_id=$(aws ssm send-command \
+            --instance-ids "$INSTANCE" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy $GITHUB_SHA" \
+            --parameters commands="aws s3 sync s3://egma-deploy-${ACCOUNT}/deployment /opt/egma/deployment --delete && bash /opt/egma/deployment/deploy.sh $GITHUB_SHA" \
+            --query Command.CommandId --output text)
+          echo "SSM command: $command_id"
+          for _ in $(seq 1 120); do
+            status=$(aws ssm get-command-invocation \
+              --command-id "$command_id" --instance-id "$INSTANCE" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in
+              Success|Failed|Cancelled|TimedOut|Undeliverable|Terminated) break ;;
+            esac
+            sleep 10
+          done
+          aws ssm get-command-invocation \
+            --command-id "$command_id" --instance-id "$INSTANCE" \
+            --query '[Status,StandardOutputContent,StandardErrorContent]' \
+            --output text
+          status=$(aws ssm get-command-invocation \
+            --command-id "$command_id" --instance-id "$INSTANCE" \
+            --query Status --output text)
+          [ "$status" = "Success" ] || { echo "Deployment failed: $status" >&2; exit 1; }
+
+      - name: Prove the platform answers
+        if: steps.decide.outputs.platform == 'true'
+        run: |
+          set -euo pipefail
+          url="${{ vars.PLATFORM_URL || 'https://app.egma.ai' }}/api/platform"
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -sS -o /tmp/platform.json -w '%{http_code}' --max-time 20 "$url" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "$url answered 200:"; cat /tmp/platform.json; exit 0
+            fi
+            echo "attempt $attempt: $code"
+            sleep 10
+          done
+          echo "$url never answered 200 after the deployment." >&2
+          exit 1
+
+      - name: Yield when a newer merge owns the web deployment
+        id: yield
+        if: steps.decide.outputs.platform == 'true' || steps.decide.outputs.web == 'true'
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          head=$(git rev-parse origin/main)
+          if [ "$head" = "${{ github.sha }}" ]; then
+            echo "fire=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          deployable=false
+          while IFS= read -r path; do
+            case "$path" in
+              apps/api/*|apps/grader/*|apps/simulator/*|packages/*) deployable=true ;;
+              docker-compose.yml|docker-compose.managed.yml|.env.example) deployable=true ;;
+              pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) deployable=true ;;
+              .github/workflows/test.yml) deployable=true ;;
+              apps/web/*|tools/*) deployable=true ;;
+            esac
+          done <<< "$(git diff --name-only "${{ github.sha }}" "$head")"
+          if [ "$deployable" = "true" ]; then
+            echo "main moved to $head with deployable changes; that run owns the web deployment."
+            echo "fire=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "main moved only by changes that do not deploy; this run still owns the web deployment."
+            echo "fire=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tell Vercel to ship
+        if: >-
+          (steps.decide.outputs.platform == 'true' || steps.decide.outputs.web == 'true') &&
+          steps.yield.outputs.fire == 'true'
+        env:
+          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$HOOK" ]; then
+            echo "VERCEL_DEPLOY_HOOK_URL is not set, so the web cannot deploy." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "$HOOK" >/dev/null
+          echo "Vercel told to ship the web application."

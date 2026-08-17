@@ -1005,6 +1005,52 @@ describe("saying which numbers Egma worked out", () => {
     expect(copy.MEASURES.derivedOne).toContain("framework");
   });
 
+  /**
+   * **A figure an agent platform measured reads bare — no mark, no caveat.**
+   *
+   * Who took a number is a fact about the record, and the record keeps it: the
+   * measure still arrives carrying `reported_by`. What it no longer does is
+   * appear in a sentence a customer reads, so a platform-reported figure sits on
+   * this page exactly as a figure Egma timed does. The day a surface wants
+   * provenance back, the answer already carries it.
+   */
+  it("renders a platform-reported figure bare, with nothing said about it", async () => {
+    const page = await readFile(path.join(WEB, DETAIL_PAGE), "utf8");
+
+    // No sentence and no mark on the page, and no words left in the copy for
+    // either: a phrase nothing renders is a phrase somebody re-wires by mistake.
+    expect(page).not.toContain("MEASURES.reported");
+    expect(Object.keys(copy.MEASURES)).not.toContain("reported");
+    expect(Object.keys(copy.MEASURES)).not.toContain("reportedOne");
+    // And nothing anywhere in the page's words names a platform.
+    expect(page).not.toContain("as reported by");
+  });
+
+  /**
+   * **The wording that must never come back.** A figure a platform reported
+   * arrives `derived: true` as well, because Egma did not time it either — so a
+   * page reading `derived` alone would tell a developer their platform's number
+   * was "worked out from your framework's own timings", about an observation
+   * Egma never made. A caveat that is itself untrue is worse than none: it is
+   * the sentence somebody decides how far to believe a failing check on.
+   *
+   * One predicate answers it for both the mark and the panel's sentence, so the
+   * two can never come to disagree about a figure.
+   */
+  it("never words a platform-reported figure as one Egma worked out", async () => {
+    const page = await readFile(path.join(WEB, DETAIL_PAGE), "utf8");
+
+    // The gate itself: reported figures are outside it, by the field that is
+    // the only thing telling them from worked-out ones.
+    expect(page).toContain(
+      "return one.derived === true && one.reported_by === undefined;",
+    );
+    // And it is the only way to either the caveat or the mark.
+    expect(page).toContain("{measured.some(workedOut) ? (");
+    expect(page).toContain("const from = workedOut(one)");
+    expect(page.split("MEASURES.derivedOne")).toHaveLength(2);
+  });
+
   it("keeps the nothing-was-measured sentence exactly as it was", () => {
     expect(copy.MEASURES.none).toBe(
       "Nothing was measured here. Egma's own simulations time their turns; an " +
