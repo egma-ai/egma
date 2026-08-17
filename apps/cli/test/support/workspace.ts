@@ -9,7 +9,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import type { DrivenAgentLaunch } from "../../src/acp/registry.ts";
+import type { DrivenAgentLaunch } from "../../src/acp/coding-agents.ts";
 import { writeCredentials } from "../../src/platform/credentials.ts";
 import type { FakeScript } from "./fake-agent.ts";
 

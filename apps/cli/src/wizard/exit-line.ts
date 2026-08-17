@@ -94,8 +94,13 @@ export type ExitReport =
    * answer a shell as though it finished.
    */
   | { readonly kind: "tests-kept"; readonly count: number; readonly stopped: boolean }
-  /** Nothing here looks like a voice agent, and the pointer did not help. */
+  /** The selected repository folder does not contain a voice agent we can prove. */
   | { readonly kind: "no-agent-context" }
+  /** The repository is understood, but this CLI has no setup path for it yet. */
+  | {
+      readonly kind: "unsupported-agent-platform";
+      readonly platform: "pipecat" | "vapi";
+    }
   /** There is no coding agent on this machine for egma to drive. */
   | { readonly kind: "no-coding-agent" }
   /**
@@ -207,7 +212,14 @@ export function buildExitLine(report: ExitReport): string {
       return report.stopped ? `Egma stopped. ${where}` : `Nothing was uploaded. ${where}`;
     }
     case "no-agent-context":
-      return "Egma found no voice agent to test. Run egma again where your agent is defined.";
+      return "Egma could not find a voice agent. Use its folder or configure it in the UI.";
+    case "unsupported-agent-platform": {
+      const named = report.platform === "pipecat" ? "Pipecat" : "Vapi";
+      return (
+        `Egma found a ${named} voice agent, but this CLI cannot connect ${named} yet. ` +
+        "Configure it in the Egma UI; CLI support is coming soon."
+      );
+    }
     case "no-coding-agent":
       return "Egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead.";
     case "coding-agent-stopped":

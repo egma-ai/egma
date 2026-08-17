@@ -8,8 +8,10 @@
     "node": ">=24"
   },
   "scripts": {
+    "skills:sync": "node tools/project-agent-skills.mjs --write",
+    "skills:check": "node tools/project-agent-skills.mjs --check",
     "lint": "node packages/lint/src/cli.ts",
-    "build": "pnpm lint && tsc -b packages/ids packages/db packages/lint apps/api apps/grader apps/cli",
+    "build": "pnpm skills:check && pnpm lint && tsc -b packages/ids packages/db packages/lint apps/api apps/grader apps/cli",
     "typecheck": "pnpm build && tsc -p tsconfig.tests.json && pnpm --filter @egma/web typecheck",
     "clean": "tsc -b --clean packages/ids packages/db packages/lint apps/api apps/grader apps/cli",
     "db:up": "node packages/db/test/support/start-stores.ts && node packages/db/test/support/sweep-stale-databases.ts",
@@ -26,6 +28,7 @@
   "devDependencies": {
     "@types/node": "^24.10.1",
     "playwright-core": "^1.62.1",
+    "skills": "1.5.22",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }

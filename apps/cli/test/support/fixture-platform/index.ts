@@ -21,6 +21,7 @@ export type { DeviceControls } from "./device.ts";
 export type { MockToolControls, SeedMockTool, SeededMockTool } from "./mock-tools.ts";
 export type {
   AdvanceStep,
+  GradeStep,
   RunControls,
   RunStatus,
   SeededRun,

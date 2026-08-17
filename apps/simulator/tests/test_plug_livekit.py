@@ -26,7 +26,10 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import socket
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import (
@@ -45,9 +48,11 @@ from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import LINE_SLICE_SAMPLES
 from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR, contract_dir
 from egma_simulator.media import MediaBackend, MediaBackendError, MediaSession
+from egma_simulator.media import livekit_room as livekit_room_module
 from egma_simulator.media import room as room_module
 from egma_simulator.media.livekit_room import (
     ROOM_BAND_HZ,
+    TOKEN_RESPONSE_BYTES,
     LiveKitRoomBackend,
     RoomSettings,
     dispatch_metadata,
@@ -78,6 +83,24 @@ A_SECRET = "SENTINEL-livekit-api-secret-7f3b0c19d2a4"
 below is scanned for it, on the way through and on the way out."""
 
 A_SIMULATION = "sim-room-001"
+
+
+def local_endpoint_socket(addr_info: tuple[object, ...]) -> socket.socket:
+    """Connect to the local contract endpoint in tests that need the next hop."""
+    family, kind, protocol, _canonical_name, _sockaddr = addr_info
+    return socket.socket(family=family, type=kind, proto=protocol)  # type: ignore[arg-type]
+
+
+class LocalEndpointBackend(LiveKitRoomBackend):
+    """A test driver that reaches the local plaintext contract server."""
+
+    def _endpoint_connector(self, aiohttp: Any, resolver: Any) -> tuple[Any, Any]:
+        connector = aiohttp.TCPConnector(
+            resolver=resolver,
+            socket_factory=local_endpoint_socket,
+            use_dns_cache=False,
+        )
+        return resolver, connector
 
 FAILED_ENDINGS = frozenset(
     json.loads(
@@ -1114,8 +1137,9 @@ def test_a_room_session_is_the_same_surface_every_driver_answers_with():
 
 def test_the_fake_is_the_real_driver_with_its_network_answered():
     """The claim the fake's fidelity rests on: everything CI exercises
-    above the three calls it stands in for is the driver a customer's
-    server will run."""
+    above the three LiveKit calls it stands in for is the driver a customer's
+    server will run. Its fourth override is the explicit test-only route to
+    the loopback token endpoint."""
     stub = RoomStub()
     driver = stub.driver(
         settings=RoomSettings.from_connection(
@@ -1130,7 +1154,12 @@ def test_the_fake_is_the_real_driver_with_its_network_answered():
         for name in vars(type(driver))
         if not name.startswith("__") and hasattr(LiveKitRoomBackend, name)
     }
-    assert overridden == {"_asked", "_joined_room", "_delete_room"}
+    assert overridden == {
+        "_asked",
+        "_joined_room",
+        "_delete_room",
+        "_endpoint_connector",
+    }
 
 
 # -- The golden fixture ------------------------------------------------------
@@ -1178,6 +1207,143 @@ async def test_the_golden_livekit_fixture_is_a_connection_the_plug_accepts(
 # HTTP server on loopback, and the driver really posts to it. What is
 # proved here about the request and about every answer is therefore proved
 # about the code, over a socket.
+
+
+@pytest.mark.parametrize(
+    "token_endpoint",
+    [
+        "https://127.0.0.1/egma/livekit-token",
+        "https://10.0.0.4/egma/livekit-token",
+        "https://169.254.169.254/latest/meta-data",
+        "https://0.0.0.0/egma/livekit-token",
+        "https://224.0.0.1/egma/livekit-token",
+        "https://[::1]/egma/livekit-token",
+        "https://[::ffff:127.0.0.1]/egma/livekit-token",
+        "https://localhost/egma/livekit-token",
+    ],
+)
+async def test_an_unsafe_token_endpoint_is_refused_before_a_request_leaves_egma(
+    token_endpoint: str,
+):
+    """No stored connection can turn into an internal request."""
+    plug = LiveKitRoom(
+        modality="voice",
+        config={"url": A_URL, "tokenEndpoint": token_endpoint},
+        credentials={"headers": AN_AUTH_HEADER},
+        simulation_id=A_SIMULATION,
+    )
+
+    with pytest.raises(PlugError) as refused:
+        await plug.open()
+    await plug.close()
+
+    assert "non-public network address" in str(refused.value)
+
+
+def test_a_saved_http_token_endpoint_is_refused_before_auth_headers_leave_egma():
+    """A malformed record cannot send a secret or token over cleartext."""
+    with pytest.raises(MediaBackendError) as refused:
+        RoomSettings.from_connection(
+            {
+                "url": A_URL,
+                "tokenEndpoint": "http://tokens.example/egma/livekit-token",
+            },
+            {"headers": AN_AUTH_HEADER},
+        )
+
+    assert "https" in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    ("addresses", "opens_socket"),
+    [
+        (["127.0.0.1"], False),
+        (["::1"], False),
+        (["::ffff:127.0.0.1"], False),
+        (["169.254.169.254"], False),
+        (["224.0.0.1"], False),
+        (["93.184.216.34", "10.0.0.4"], False),
+        (["93.184.216.34"], True),
+    ],
+)
+async def test_a_token_endpoint_name_must_resolve_only_to_public_addresses(
+    addresses: list[str], opens_socket: bool, monkeypatch: pytest.MonkeyPatch
+):
+    """The checked address is the address the socket would connect to."""
+
+    class Resolver:
+        async def resolve(
+            self, host: str, port: int = 0, family: int = socket.AF_UNSPEC
+        ) -> list[dict[str, object]]:
+            del family
+            return [
+                {
+                    "hostname": host,
+                    "host": address,
+                    "port": port,
+                    "family": socket.AF_INET6 if ":" in address else socket.AF_INET,
+                    "proto": socket.IPPROTO_TCP,
+                    "flags": socket.AI_NUMERICHOST,
+                }
+                for address in addresses
+            ]
+
+        async def close(self) -> None:
+            return None
+
+    settings = RoomSettings.from_connection(
+        {"url": A_URL, "tokenEndpoint": "https://tokens.example/token"},
+        {"headers": AN_AUTH_HEADER},
+    )
+    driver = LiveKitRoomBackend(
+        settings=settings,
+        band_hz=ROOM_BAND_HZ,
+        simulation_id=A_SIMULATION,
+        endpoint_resolver=Resolver(),
+    )
+    opened: list[tuple[object, ...]] = []
+
+    def record_socket(*arguments: object, **keywords: object) -> socket.socket:
+        del keywords
+        opened.append(arguments)
+        raise OSError("test stopped after the address policy")
+
+    monkeypatch.setattr(livekit_room_module.socket, "socket", record_socket)
+
+    with pytest.raises(MediaBackendError) as refused:
+        await driver.create_session()
+
+    diagnosis = str(refused.value)
+    if opens_socket:
+        assert "could not be reached over HTTPS" in diagnosis
+    else:
+        assert "non-public network address" in diagnosis
+    assert bool(opened) is opens_socket
+
+
+async def test_an_unexpected_endpoint_client_bug_is_not_hidden_as_customer_fault():
+    """Only known network failures become safe customer-facing messages."""
+
+    class BrokenResolver:
+        async def resolve(self, *_arguments: object) -> list[dict[str, object]]:
+            raise RuntimeError("SENTINEL programming failure")
+
+        async def close(self) -> None:
+            return None
+
+    settings = RoomSettings.from_connection(
+        {"url": A_URL, "tokenEndpoint": "https://tokens.example/token"},
+        {"headers": AN_AUTH_HEADER},
+    )
+    driver = LiveKitRoomBackend(
+        settings=settings,
+        band_hz=ROOM_BAND_HZ,
+        simulation_id=A_SIMULATION,
+        endpoint_resolver=BrokenResolver(),
+    )
+
+    with pytest.raises(RuntimeError, match="SENTINEL programming failure"):
+        await driver.create_session()
 
 
 async def test_a_token_endpoint_spec_conducts_a_whole_simulation(
@@ -1289,26 +1455,23 @@ async def test_the_endpoints_auth_headers_are_sent_and_go_nowhere_else(
     assert endpoint.asked[0].header("authorization") == f"Bearer {A_HEADER_SECRET}"
 
 
-async def test_an_endpoint_that_wants_no_credential_is_asked_without_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("credentials", [None, {}])
+def test_a_token_endpoint_without_auth_headers_is_refused_before_a_request(
+    credentials: object,
 ):
-    """An endpoint on a private network can be open to egma alone. The
-    docs say not to leave it that way; the driver does not refuse to work
-    with what it is given."""
-    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    """Every token endpoint is authenticated; there is no legacy shape."""
     with serving() as endpoint:
-        conducted, _turns, _measures, _assembled = await room_walk(
-            tmp_path,
-            stub,
-            monkeypatch,
-            built_by=livekit_endpoint_spec,
-            token_endpoint=endpoint.url,
-            credentials={},
-            scenario="One point.",
-        )
+        with pytest.raises(PlugError) as refused:
+            LiveKitRoom(
+                modality="voice",
+                config={"url": A_URL, "tokenEndpoint": endpoint.url},
+                credentials=credentials,
+                simulation_id=A_SIMULATION,
+                driver=RoomStub().driver,
+            )
 
-    assert conducted.ending == "persona_concluded"
-    assert endpoint.asked[0].header("authorization") is None
+        assert endpoint.asked == []
+    assert "headers" in str(refused.value)
 
 
 @pytest.mark.parametrize("alias", ["token", "participantToken", "accessToken"])
@@ -1351,82 +1514,112 @@ async def test_the_connections_own_url_is_where_egma_joins_without_one():
 # -- Every way an endpoint answers badly -------------------------------------
 
 
+async def test_a_token_endpoint_response_body_never_reaches_the_simulation_error():
+    """An internal HTTP response is not customer-visible diagnostic text."""
+    internal_body = "SENTINEL internal service response must stay private"
+    with serving(status=500, raw=internal_body) as endpoint:
+        plug = endpoint_room(RoomStub(), endpoint.url)
+        with pytest.raises(PlugError) as refused:
+            await plug.open()
+        await plug.close()
+
+    told = str(refused.value)
+    assert "answered 500" in told
+    assert internal_body not in told
+
+
+async def test_a_token_endpoint_response_is_bounded_before_json_parsing():
+    """A customer endpoint cannot make one simulation hold an unbounded body."""
+    with serving(raw="x" * (TOKEN_RESPONSE_BYTES + 1)) as endpoint:
+        plug = endpoint_room(RoomStub(), endpoint.url)
+        with pytest.raises(PlugError) as refused:
+            await plug.open()
+        await plug.close()
+
+    told = str(refused.value)
+    assert f"more than {TOKEN_RESPONSE_BYTES} bytes" in told
+    assert "x" * 100 not in told
+
+
 @pytest.mark.parametrize(
-    ("named", "scripted", "quoted"),
+    ("named", "scripted", "diagnosis", "private_text"),
     [
         (
             "a refusal",
             {"status": 401, "raw": '{"error":"that key is not ours"}'},
+            "answered 401",
             "that key is not ours",
         ),
         (
             "a server that broke",
             {"status": 500, "raw": "<html><title>Internal Server Error</title>"},
+            "answered 500",
             "Internal Server Error",
         ),
         (
             "something that is not JSON at all",
             {"raw": "<html><body>proxy: no upstream</body></html>"},
+            "not a JSON object",
             "no upstream",
         ),
         (
             "JSON that is not an object",
             {"raw": '["a token would go here"]'},
+            "not a JSON object",
             "a token would go here",
         ),
         (
             "an object with no token under any of the names it could be",
             {"body": {"jwt": "wrong-key-entirely"}},
+            "answered no token",
             "wrong-key-entirely",
         ),
         (
             "a token that is there and blank",
-            {"body": {"token": "   "}},
-            "token",
+            {"body": {"token": "   ", "detail": "SENTINEL blank token"}},
+            "answered no token",
+            "SENTINEL blank token",
         ),
         (
             "a serverUrl that is not a string",
             {"body": {"token": "fine.token.here", "serverUrl": 7}},
-            "serverUrl",
+            "serverUrl that is not a string",
+            "fine.token.here",
         ),
         (
             "a serverUrl egma cannot join",
             {"body": {"token": "fine.token.here", "serverUrl": "sip:acme.example"}},
-            "serverUrl",
+            "serverUrl Egma cannot join",
+            "sip:acme.example",
         ),
     ],
 )
-async def test_an_endpoint_that_answers_badly_is_a_fault_in_its_own_words(
-    named: str, scripted: dict, quoted: str
+async def test_an_endpoint_that_answers_badly_names_the_contract_not_its_body(
+    named: str, scripted: dict, diagnosis: str, private_text: str
 ):
-    """An endpoint outside the contract is somebody's own handler to fix,
-    so what it really said is quoted back — the fix is a line in their
-    code, and they need to see what came out of it."""
+    """The error stays useful without turning an HTTP body into output."""
     stub = RoomStub()
     with serving(**scripted) as endpoint:
         plug = endpoint_room(stub, endpoint.url)
         with pytest.raises(PlugError) as refused:
             await plug.open()
         await plug.close()
-        served = endpoint.url
+        served = endpoint.wire_url
 
     told = str(refused.value)
     assert failed_ending(refused.value) == ERROR
     assert served in told, "the reason has to name what was asked"
-    assert quoted in told, f"{named}: its own words are the diagnosis"
+    assert diagnosis in told, f"{named}: the broken contract part is the diagnosis"
+    assert private_text not in told, f"{named}: response text reached the error"
     assert A_HEADER_SECRET not in told
 
 
 async def test_a_token_the_endpoint_minted_is_never_quoted_back():
-    """The leak that lives between a good token and a bad answer.
+    """A good token inside a bad answer never becomes diagnostic text.
 
-    An endpoint may hand over a working token and still say something
-    egma cannot use — here a ``serverUrl`` that is not a string. The
-    refusal quotes the whole answer back, because that is what makes a
-    handler's own mistake fixable, and the whole answer contains the
-    token. A token registered only after that quoting would reach a
-    reason, a log line and the traceback under it, and it opens a room in
-    the customer's project.
+    The refusal names the broken ``serverUrl`` contract and hides the whole
+    endpoint body. Registering the token as a secret also protects later error
+    paths that may handle it.
     """
     minted = "a.working.token.nobody.should.read"
     stub = RoomStub()
@@ -1452,12 +1645,9 @@ async def test_a_token_in_a_failing_answer_is_never_quoted_back(
 ):
     """An endpoint can fail and still have minted a working credential.
 
-    A 500 whose body carries a token, a 403 that echoes one back, a
-    redirect that answers with one — all three are quoted from a branch
-    that runs long before anything reads a token out of the body. The
-    token is protected where the quoting happens rather than where the
-    reading does, so a path that fails early is covered by the same door
-    as one that fails late.
+    A 500 whose body carries a token, a 403 that echoes one back, and a
+    redirect that answers with one all report only the status. The response
+    body is never copied into the simulation error.
     """
     minted = "a.token.the.failure.still.carried"
     stub = RoomStub()
@@ -1497,20 +1687,54 @@ async def test_an_endpoint_that_redirects_is_answered_rather_than_followed():
     assert A_HEADER_SECRET not in told
 
 
-async def test_an_endpoint_that_answers_nowhere_is_a_fault_naming_it():
-    """A closed port on loopback: the failure a wrong address really hits,
-    hermetically and through the real driver."""
-    stub = RoomStub()
-    plug = endpoint_room(stub, "http://127.0.0.1:1/egma/livekit-token")
+async def test_an_endpoint_that_answers_nowhere_is_a_fault_naming_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A public HTTPS name can fail without exposing a network exception."""
 
-    with pytest.raises(PlugError) as refused:
-        await plug.open()
-    await plug.close()
+    class PublicResolver:
+        async def resolve(
+            self, host: str, port: int = 0, family: int = socket.AF_UNSPEC
+        ) -> list[dict[str, object]]:
+            del family
+            return [
+                {
+                    "hostname": host,
+                    "host": "93.184.216.34",
+                    "port": port,
+                    "family": socket.AF_INET,
+                    "proto": socket.IPPROTO_TCP,
+                    "flags": socket.AI_NUMERICHOST,
+                }
+            ]
+
+        async def close(self) -> None:
+            return None
+
+    def closed_socket(*_arguments: object, **_keywords: object) -> socket.socket:
+        raise OSError("SENTINEL private network exception")
+
+    monkeypatch.setattr(livekit_room_module.socket, "socket", closed_socket)
+    endpoint = "https://tokens.example:443/egma/livekit-token"
+    settings = RoomSettings.from_connection(
+        {"url": A_URL, "tokenEndpoint": endpoint},
+        {"headers": AN_AUTH_HEADER},
+    )
+    driver = LiveKitRoomBackend(
+        settings=settings,
+        band_hz=ROOM_BAND_HZ,
+        simulation_id=A_SIMULATION,
+        endpoint_resolver=PublicResolver(),
+    )
+
+    with pytest.raises(MediaBackendError) as refused:
+        await driver.create_session()
 
     told = str(refused.value)
     assert failed_ending(refused.value) == ERROR
-    assert "127.0.0.1:1" in told
+    assert endpoint in told
     assert "could not be reached" in told
+    assert "SENTINEL" not in told
     assert A_HEADER_SECRET not in told
 
 
@@ -1535,8 +1759,11 @@ async def test_a_token_the_server_rejects_is_a_fault_in_the_servers_words(
             {"url": "ws://127.0.0.1:1", "tokenEndpoint": endpoint.url},
             {"headers": AN_AUTH_HEADER},
         )
-        room_driver = LiveKitRoomBackend(
-            settings=settings, band_hz=ROOM_BAND_HZ, simulation_id=A_SIMULATION
+        settings = replace(settings, token_endpoint=endpoint.wire_url)
+        room_driver = LocalEndpointBackend(
+            settings=settings,
+            band_hz=ROOM_BAND_HZ,
+            simulation_id=A_SIMULATION,
         )
 
         with pytest.raises(MediaBackendError) as refusal:
@@ -1709,7 +1936,8 @@ async def test_an_endpoint_that_says_the_header_back_still_leaks_nothing():
 
     told = str(refused.value)
     assert A_HEADER_SECRET not in told
-    assert REDACTED in told
+    assert "answered 403" in told
+    assert "forbidden" not in told
 
 
 def test_the_settings_never_show_the_endpoints_headers_when_printed():

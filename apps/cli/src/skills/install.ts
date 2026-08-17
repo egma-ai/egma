@@ -1,11 +1,11 @@
 /**
  * Putting the Egma skill where the developer's coding agent will find it.
  *
- * Every skill egma has until now is content it *sends* — read out of this
- * package at the moment a task is dispatched, never written anywhere. This is
- * the one that is offered as a file, at the end of the walk, so that the
- * developer's own coding agent can drive egma later, on its own, without egma
- * being there.
+ * Public Egma skills can be installed independently from the repository. The
+ * wizard also carries their release snapshot: it sends `write-egma-tests` as
+ * task context and offers this `egma` skill as a local file at the end of the
+ * walk. That lets the developer's coding agent drive Egma later without a
+ * network install or the wizard being there.
  *
  * Three rules, and each one is a decision the offer would be worthless without.
  *
@@ -42,30 +42,50 @@ export type SkillChoice = SkillScope | "skip";
 /**
  * Where one coding agent keeps its skills.
  *
- * Both of the agents egma drives today keep them the same way: a directory of
- * skills, one directory per skill, a `SKILL.md` inside it. They differ only in
- * which dot-directory the tree hangs from — so the convention is described
- * once, per agent, as that one name.
+ * All four agents use one directory per skill and a `SKILL.md` inside it.
+ * Their project and global roots differ, so both are named explicitly.
  */
 type SkillConvention = {
-  /** The directory in a repository, and under a home, e.g. `.claude`. */
-  readonly home: string;
+  readonly projectRoot: readonly string[];
+  readonly globalRoot: readonly string[];
   /** What the developer calls the agent, for the sentence that offers this. */
   readonly name: string;
 };
 
 /**
- * The agents whose skill convention egma knows, by the id the protocol
- * registry gives them.
+ * The agents whose skill convention egma knows, by Egma's stable public id.
  *
  * It is deliberately a short list rather than a guess: writing a `SKILL.md`
  * into a directory an agent does not read would be egma leaving litter in
  * somebody's repository and telling them it had done something useful. An
  * agent that is not here gets no offer at all, which is honest.
  */
+const CLAUDE: SkillConvention = {
+  projectRoot: [".claude"],
+  globalRoot: [".claude"],
+  name: "Claude Code",
+};
+const CODEX: SkillConvention = {
+  projectRoot: [".codex"],
+  globalRoot: [".codex"],
+  name: "Codex",
+};
 const CONVENTIONS: Readonly<Record<string, SkillConvention>> = {
-  "claude-acp": { home: ".claude", name: "Claude Code" },
-  "codex-acp": { home: ".codex", name: "Codex" },
+  claude: CLAUDE,
+  codex: CODEX,
+  cursor: {
+    projectRoot: [".cursor"],
+    globalRoot: [".cursor"],
+    name: "Cursor",
+  },
+  opencode: {
+    projectRoot: [".opencode"],
+    globalRoot: [".config", "opencode"],
+    name: "OpenCode",
+  },
+  // Accepted by older release scripts and saved invocations.
+  "claude-acp": CLAUDE,
+  "codex-acp": CODEX,
 };
 
 /** What the skill directory is called, under whichever tree it lands in. */
@@ -116,14 +136,14 @@ export function skillPlacesFor(
   const convention = CONVENTIONS[drivenAgentId];
   if (convention === undefined) return null;
 
-  const under = (root: string): string =>
-    path.join(root, convention.home, "skills", SKILL_DIRECTORY_NAME, SKILL_FILE_NAME);
+  const under = (root: string, parts: readonly string[]): string =>
+    path.join(root, ...parts, "skills", SKILL_DIRECTORY_NAME, SKILL_FILE_NAME);
 
   return {
     drivenAgentId,
     name: convention.name,
-    project: under(options.repository),
-    global: under(options.home),
+    project: under(options.repository, convention.projectRoot),
+    global: under(options.home, convention.globalRoot),
   };
 }
 

@@ -64,6 +64,8 @@ const EVERY_ENDING: readonly ExitReport[] = [
     skill: { kind: "not-offered" },
   },
   { kind: "no-agent-context" },
+  { kind: "unsupported-agent-platform", platform: "pipecat" },
+  { kind: "unsupported-agent-platform", platform: "vapi" },
   { kind: "no-coding-agent" },
   {
     kind: "coding-agent-stopped",
@@ -101,8 +103,12 @@ describe("the exit line", () => {
     ).toBe("Egma found your voice agent: retell-sdk, prompts in prompts/order-line.md.");
 
     expect(buildExitLine({ kind: "no-agent-context" })).toContain(
-      "Run egma again where your agent is defined",
+      "Use its folder or configure it in the UI",
     );
+
+    expect(
+      buildExitLine({ kind: "unsupported-agent-platform", platform: "pipecat" }),
+    ).toContain("CLI support is coming soon");
 
     expect(buildExitLine({ kind: "interrupted", drivenAgentName: "Claude Agent" })).toContain(
       "stopped before the task finished",

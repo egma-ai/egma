@@ -28,6 +28,7 @@
 
 import type { Fetch } from "../platform/device-flow.ts";
 import {
+  getRun,
   runEvents,
   type PlatformRun,
   type PlatformSimulation,
@@ -75,6 +76,8 @@ export type RunTally = {
 /** One change worth telling somebody about. */
 export type RunChange = {
   readonly row: SimulationRow;
+  /** True when this change moved the execution state. */
+  readonly statusChanged: boolean;
   /** True when this change is a verdict arriving. */
   readonly verdictLanded: boolean;
   /** True when it is the first verdict of the whole run. */
@@ -83,7 +86,7 @@ export type RunChange = {
 
 /** How a follow ended. */
 export type FollowEnding =
-  /** The run itself finished. */
+  /** Execution and grading both finished. */
   | "finished"
   /** What the caller was waiting for happened, and the run carries on. */
   | "enough"
@@ -192,6 +195,52 @@ export class RunFollower {
     return this.tally.pending === 0 && this.tally.total > 0;
   }
 
+  /** True while at least one finished simulation is waiting for its grader. */
+  get awaitingVerdicts(): boolean {
+    return this.rows.some(
+      (row) =>
+        ["completed", "failed", "canceled", "skipped"].includes(row.status) &&
+        row.verdict === null,
+    );
+  }
+
+  private apply(
+    simulationId: string,
+    incoming: Pick<SimulationRow, "status" | "verdict" | "reason">,
+  ): RunChange | null {
+    const held = this.byId.get(simulationId);
+    if (held === undefined) return null;
+
+    const statusOrder: Readonly<Record<SimulationStatus, number>> = {
+      queued: 0,
+      claimed: 1,
+      running: 2,
+      completed: 3,
+      failed: 3,
+      canceled: 3,
+      skipped: 3,
+    };
+    const statusChanged = statusOrder[incoming.status] > statusOrder[held.status];
+    const status = statusChanged ? incoming.status : held.status;
+    const verdict = held.verdict ?? incoming.verdict;
+    const verdictLanded = held.verdict === null && verdict !== null;
+    const reason = incoming.reason ?? held.reason;
+    const reasonChanged = reason !== held.reason;
+    if (!statusChanged && !verdictLanded && !reasonChanged) return null;
+
+    const first = verdictLanded && this.firstHeld === null;
+    if (first) this.firstHeld = simulationId;
+    const row: SimulationRow = {
+      ...held,
+      status,
+      verdict,
+      reason,
+      first: held.first || first,
+    };
+    this.byId.set(simulationId, row);
+    return { row, statusChanged, verdictLanded, first };
+  }
+
   /**
    * Take one page of changes, in order, and answer the ones a caller would
    * want to say out loud. A change to a simulation this follower has never
@@ -212,24 +261,36 @@ export class RunFollower {
         this.runStatusHeld = event.status;
         continue;
       }
-      const held = this.byId.get(event.simulationId);
-      if (held === undefined) continue;
-
-      const verdictLanded = held.verdict === null && event.verdict !== null;
-      const first = verdictLanded && this.firstHeld === null;
-      if (first) this.firstHeld = event.simulationId;
-
-      const row: SimulationRow = {
-        ...held,
-        status: event.status,
-        verdict: event.verdict,
-        reason: event.reason,
-        first: held.first || first,
-      };
-      this.byId.set(event.simulationId, row);
-      changes.push({ row, verdictLanded, first });
+      const change = this.apply(event.simulationId, event);
+      if (change !== null) changes.push(change);
     }
     this.cursor = Math.max(this.cursor, next);
+    return changes;
+  }
+
+  /**
+   * Merge the platform's current run snapshot.
+   *
+   * Grading is asynchronous and does not append to the execution event feed,
+   * so verdicts arrive here. The merge is monotonic: a snapshot or a later
+   * event can move a row forward, but neither can clear a verdict or rewind a
+   * finished simulation.
+   */
+  refresh(run: PlatformRun): readonly RunChange[] {
+    if (run.id !== this.runId) return [];
+    const runOrder: Readonly<Record<RunStatus, number>> = {
+      pending: 0,
+      running: 1,
+      completed: 2,
+      canceled: 2,
+    };
+    if (runOrder[run.status] > runOrder[this.runStatusHeld]) this.runStatusHeld = run.status;
+
+    const changes: RunChange[] = [];
+    for (const simulation of run.simulations) {
+      const change = this.apply(simulation.id, simulation);
+      if (change !== null) changes.push(change);
+    }
     return changes;
   }
 }
@@ -311,10 +372,21 @@ export async function followRun(options: FollowOptions): Promise<FollowEnding> {
     }
     for (const change of follower.take(page.events, page.next)) onChange(change);
 
+    if (follower.awaitingVerdicts) {
+      let snapshot;
+      try {
+        snapshot = await getRun(signedIn, follower.runId, options.fetchImpl, signal);
+      } catch (cause) {
+        if (stopped()) return "interrupted";
+        throw cause;
+      }
+      if (snapshot !== null) {
+        for (const change of follower.refresh(snapshot)) onChange(change);
+      }
+    }
+
     if (options.until?.(follower) === true) return "enough";
-    // A finished run has nothing left to say, however many simulations it left
-    // ungraded — the header is the authority on that, not the count.
-    if (page.done) return "finished";
+    if (page.done && follower.everythingGraded) return "finished";
 
     // Stopping is checked at the top of the loop and nowhere else, so there is
     // one place it can happen; the pause above returns at once on a signal that

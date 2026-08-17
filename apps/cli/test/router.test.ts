@@ -4,11 +4,38 @@ import { dispatchKey, hintBar, hintsFor, type KeyBinding } from "../src/ui/tui/k
 import { WizardStore } from "../src/ui/tui/store.ts";
 
 describe("which screen is on", () => {
+  it("shows every installed coding agent before the consent screen", async () => {
+    const store = new WizardStore();
+    store.setPhase("coding-agent");
+    store.setCodingAgentChoices([
+      {
+        id: "claude",
+        name: "Claude Code",
+        version: "2.1.233",
+        executable: "/usr/local/bin/claude",
+      },
+      {
+        id: "codex",
+        name: "Codex",
+        version: "0.148.0",
+        executable: "/usr/local/bin/codex",
+      },
+    ]);
+
+    expect(store.activeScreen).toBe("coding-agent");
+    const answer = store.ask("coding-agent");
+    store.answer("coding-agent", "codex");
+    await expect(answer).resolves.toBe("codex");
+  });
+
   it("is worked out from state, so nothing has to navigate", () => {
     const store = new WizardStore();
 
+    expect(store.activeScreen).toBe("coding-agent");
+    store.setPhase("intro");
     expect(store.activeScreen).toBe("intro");
     store.begin();
+    store.setPhase("test-writing");
     expect(store.activeScreen).toBe("task");
 
     // The two screens the generate step writes: the files arriving, and the
@@ -33,6 +60,7 @@ describe("which screen is on", () => {
       destination: null,
       suite: "first-suite",
     });
+    store.setPhase("review");
     // The list is the thing to deal with, even while the pane is still set.
     expect(store.activeScreen).toBe("gate");
 
@@ -54,6 +82,25 @@ describe("which screen is on", () => {
     store.runTests();
     await store.getGate("run-tests");
     expect(past).toBe(true);
+  });
+
+  it("asks again after an invalid answer instead of reusing the old value", async () => {
+    const store = new WizardStore();
+
+    const first = store.ask("retell-key");
+    store.answer("retell-key", "wrong-key");
+    await expect(first).resolves.toBe("wrong-key");
+
+    let settled = false;
+    const second = store.ask("retell-key");
+    void second.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    store.answer("retell-key", "correct-key");
+    await expect(second).resolves.toBe("correct-key");
   });
 
   /**

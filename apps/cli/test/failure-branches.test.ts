@@ -22,7 +22,7 @@ import { INVALID_KEY_LINE } from "../src/retell/connect.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine, buildExitNotice } from "../src/wizard/exit-line.ts";
 import { alreadyAsked } from "../src/wizard/login-step.ts";
-import { walk } from "../src/wizard/walk.ts";
+import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -45,6 +45,7 @@ const ACCOUNT: FakeRetellScript = {
     {
       agent_id: "agent_quillfeather_order_line",
       agent_name: "order-line",
+      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_quillfeather" },
     },
   ],
@@ -101,7 +102,7 @@ afterEach(async () => {
 /** The walk, with whatever the developer would have answered written down. */
 async function walkWith(options: {
   readonly script: string;
-  readonly answers?: Partial<Record<"prompts-pointer" | "retell-key" | "reach", string>>;
+  readonly answers?: Partial<Record<"retell-key" | "reach", string>>;
 }) {
   // Text unless a check says otherwise: every branch here is about a way the
   // walk can fail before or after the choice, not about the choice itself.
@@ -114,7 +115,7 @@ async function walkWith(options: {
   const grading = gradeEveryRun(platform);
   let report;
   try {
-    report = await walk({
+    report = await runWizard({
       ui,
       launch: workspace.launch(options.script),
       cwd: workspace.dir,
@@ -199,8 +200,21 @@ describe("a coding agent that is not logged in", () => {
     // The login was handed off and the walk resumed on the other side of it.
     const observed = JSON.parse(
       await readFile(path.join(workspace.dir, "fake-agent-report.json"), "utf8"),
-    ) as { loggedInWith: string | null };
+    ) as {
+      loggedInWith: string | null;
+      initializeCount: number;
+      processIds: number[];
+      sessionIds: string[];
+      promptSessionIds: string[];
+      instructions: string[];
+    };
     expect(observed.loggedInWith).toBe("own-login");
+    expect(observed.initializeCount).toBe(1);
+    expect(new Set(observed.processIds).size).toBe(1);
+    expect(observed.sessionIds).toHaveLength(1);
+    expect(observed.promptSessionIds).toEqual(
+      observed.instructions.map(() => observed.sessionIds[0]),
+    );
     expect(ui.record.statuses.join("\n")).toContain("needs you to log in");
 
     expect(report.kind).toBe("run-started");
@@ -208,8 +222,8 @@ describe("a coding agent that is not logged in", () => {
   });
 });
 
-describe("no voice agent anywhere", () => {
-  it("asks once where the prompts are, then says plainly to run it elsewhere", async () => {
+describe("no voice agent in this folder", () => {
+  it("says plainly how to point Egma elsewhere or configure through the UI", async () => {
     const script = await workspace.script({
       steps: [
         { kind: "say", text: "egma:none There is no voice agent in this folder.\n" },
@@ -219,11 +233,10 @@ describe("no voice agent anywhere", () => {
 
     const { ui, report } = await walkWith({ script });
 
-    // Asked once, and only once: a second question would be egma hoping.
-    expect(ui.record.asked).toEqual(["prompts-pointer"]);
+    expect(ui.record.asked).toEqual([]);
     expect(report).toEqual({ kind: "no-agent-context" });
     expect(buildExitLine(report)).toBe(
-      "Egma found no voice agent to test. Run egma again where your agent is defined.",
+      "Egma could not find a voice agent. Use its folder or configure it in the UI.",
     );
 
     // Nothing was registered and no folder was made, because egma never got as

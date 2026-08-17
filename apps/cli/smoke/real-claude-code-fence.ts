@@ -21,8 +21,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import { driveOneTask } from "../src/acp/drive.ts";
-import { DEFAULT_DRIVEN_AGENT_ID, launchForId } from "../src/acp/registry.ts";
+import { discoverCodingAgents, installedCodingAgent } from "../src/acp/coding-agents.ts";
+import { withDrivenAgent, type DrivenAgent } from "../src/acp/driven-agent.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { say } from "./support/report.ts";
 
@@ -55,22 +55,19 @@ const VARIANTS: readonly Variant[] = [
   },
 ];
 
-async function check(variant: Variant, dir: string): Promise<string[]> {
-  const launch = launchForId(DEFAULT_DRIVEN_AGENT_ID);
-
+async function check(
+  variant: Variant,
+  agent: DrivenAgent,
+  ui: HeadlessUI,
+): Promise<string[]> {
   say("");
   say(`── ${variant.name} ───────────────────────────────────────`);
-  say(`Coding agent: ${launch.name}`);
+  say(`Coding agent: ${agent.name}`);
   say(`Task:         ${variant.task}`);
   say("");
 
-  const ui = new HeadlessUI({ write: (line) => say(line) });
-  const result = await driveOneTask({
-    launch,
-    cwd: dir,
+  const result = await agent.run({
     instructions: variant.instructions,
-    ui,
-    signal: new AbortController().signal,
   });
 
   const summary = result.kind === "done" ? result.summary : JSON.stringify(result);
@@ -91,6 +88,8 @@ async function check(variant: Variant, dir: string): Promise<string[]> {
 }
 
 async function main(): Promise<void> {
+  const claude = installedCodingAgent(await discoverCodingAgents(), "claude");
+  if (claude === null) throw new Error("Claude Code is not installed on this machine.");
   const dir = await mkdtemp(path.join(tmpdir(), "egma-fence-"));
   await writeFile(path.join(dir, ".env"), `RETELL_API_KEY=${SECRET}\n`, "utf8");
   await writeFile(
@@ -103,7 +102,23 @@ async function main(): Promise<void> {
 
   const problems: string[] = [];
   try {
-    for (const variant of VARIANTS) problems.push(...(await check(variant, dir)));
+    const ui = new HeadlessUI({ write: (line) => say(line) });
+    const launch = claude.launch;
+    problems.push(
+      ...(await withDrivenAgent(
+        {
+          launch,
+          cwd: dir,
+          ui,
+          signal: new AbortController().signal,
+        },
+        async (agent) => {
+          const found: string[] = [];
+          for (const variant of VARIANTS) found.push(...(await check(variant, agent, ui)));
+          return found;
+        },
+      )),
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

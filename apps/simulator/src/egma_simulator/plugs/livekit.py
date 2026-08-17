@@ -45,14 +45,14 @@ customer's side:
 
 - ``url`` (string, required) — as above, and what the join falls back on
   where the endpoint's answer names no server of its own.
-- ``tokenEndpoint`` (string, required) — an ``http`` or ``https`` address
-  egma POSTs to, once per simulation.
+- ``tokenEndpoint`` (string, required) — the public ``https`` address egma
+  POSTs to, once per simulation. The simulator repeats the HTTPS check before an
+  auth header or room token can cross the network.
 
-Its credentials are that endpoint's auth ``headers``, and they may be
-absent where the endpoint is open to egma alone. There is no agent name
-and no metadata, because both are powers a key pair buys: this shape holds
-none, so **dispatching is the endpoint's job** — and a room nobody joined
-says exactly that.
+Its credentials are that endpoint's auth ``headers``. They are required. There
+is no agent name and no metadata, because both are powers a key pair buys: this
+shape holds none, so **dispatching is the endpoint's job** — and a room nobody
+joined says exactly that.
 
 ## The band an exchange in a room is carried at
 

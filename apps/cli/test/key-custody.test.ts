@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MASKED, RetellKey } from "../src/retell/key.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { alreadyAsked } from "../src/wizard/login-step.ts";
-import { walk } from "../src/wizard/walk.ts";
+import { runWizard } from "../src/wizard/wizard-flow.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { gradeEveryRun } from "./support/grading.ts";
@@ -47,6 +47,7 @@ const SCRIPT: FakeRetellScript = {
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
+      channel: "chat",
       voice_id: "11labs-Adrian",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },
@@ -142,7 +143,7 @@ describe("a whole run, swept afterwards", () => {
     const grading = gradeEveryRun(platform);
     let report;
     try {
-      report = await walk({
+      report = await runWizard({
         ui,
         launch: workspace.launch(script),
         cwd: workspace.dir,

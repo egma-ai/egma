@@ -7,14 +7,23 @@
 
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent, RetellNumber } from "../../retell/client.ts";
-import type { KeyAsk } from "../../retell/connect.ts";
+import type { ConnectionAsk } from "../wizard-ui.ts";
+import type { KeyAsk, Reach } from "../../retell/connect.ts";
 import type { RunView } from "../../run/view.ts";
 import type { SkillPlaces } from "../../skills/install.ts";
 import type { Detection } from "../../wizard/detection.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
-import type { AskId, DrivenAgent, GateId, PlatformNotice, WizardUI } from "../wizard-ui.ts";
+import type { WizardPhase } from "../../wizard/wizard-machine.ts";
+import type {
+  AskId,
+  CodingAgentChoice,
+  DrivenAgent,
+  GateId,
+  PlatformNotice,
+  WizardUI,
+} from "../wizard-ui.ts";
 import type { WizardStore } from "./store.ts";
 
 export class InkUI implements WizardUI {
@@ -31,8 +40,16 @@ export class InkUI implements WizardUI {
     success: (message: string): void => this.store.pushStatus(message),
   };
 
+  setPhase(phase: WizardPhase): void {
+    this.store.setPhase(phase);
+  }
+
   setDrivenAgent(drivenAgent: DrivenAgent | null): void {
     this.store.setDrivenAgent(drivenAgent);
+  }
+
+  setCodingAgentChoices(agents: readonly CodingAgentChoice[]): void {
+    this.store.setCodingAgentChoices(agents);
   }
 
   setDrivenAgentLog(file: string): void {
@@ -59,12 +76,16 @@ export class InkUI implements WizardUI {
     this.store.setAgentChoices(agents);
   }
 
-  setReachOffer(open: boolean): void {
-    this.store.setReachOffer(open);
+  setReachOffer(reaches: readonly Reach[] | null): void {
+    this.store.setReachOffer(reaches);
   }
 
   setNumberChoices(numbers: readonly RetellNumber[] | null): void {
     this.store.setNumberChoices(numbers);
+  }
+
+  setConnectionAsk(ask: ConnectionAsk | null): void {
+    this.store.setConnectionAsk(ask);
   }
 
   setGeneration(progress: GenerationProgress | null): void {

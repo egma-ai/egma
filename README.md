@@ -274,7 +274,7 @@ at all.
 
 ## Your first run, from a terminal
 
-With an instance up and an account on it, the walk is one command:
+With an instance up and an account on it, the wizard is one command:
 
 ```bash
 cd ~/your-voice-agent
@@ -298,9 +298,10 @@ node ~/egma/apps/cli/dist/bin.js --url http://localhost:3101
 
 `~/egma` is this checkout. The published package is `@egma/cli`; the command it installs is `egma`.
 
-It signs that machine in — a short code, approved in the browser you signed up
-in — registers your voice agent together with the way Egma reaches it, writes a
-first suite of tests with the coding agent you already have, puts them on your
+It lists the installed Claude Code, Codex, Cursor, and OpenCode agents and asks
+which one to use. It then signs that machine in — a short code, approved in the
+browser you signed up in — registers your voice agent together with the way
+Egma reaches it, writes a first suite of tests with that coding agent, puts them on your
 instance, and starts a run over the exact versions it pushed. Every step is also
 a verb (`egma login`, `egma connect`, `egma push`, `egma run`) that prints one
 fact per line and answers with a number, for a coding agent driving it with
@@ -316,14 +317,14 @@ whose calls have all finished is not yet a run whose judgment is in.
 Everything before that is real, and the run you started is yours — at
 the address the terminal printed, with no token on it.
 
-The same walk runs as a check. On a checkout that has had `pnpm install`, and on
+The same wizard flow runs as a check. On a checkout that has had `pnpm install`, and on
 a machine with a Chrome — or with `PLAYWRIGHT_BROWSERS_PATH` pointing at a
 Playwright Chromium, since the approval really happens in a browser — it is two
 commands:
 
 ```bash
 pnpm db:up
-pnpm --filter @egma/cli smoke:walk
+pnpm --filter @egma/cli smoke:wizard-flow
 ```
 
 They start a whole Egma of its own, sign in through a real browser, register,
@@ -610,6 +611,31 @@ boring agent to try this path against before you point Egma at a real one. For
 teams that will not hand a testing tool their project's key pair, the
 token-endpoint mode keeps the secret on your side: your service mints each
 room's token.
+
+## Agent Skills
+
+The public repository is the source for three Agent Skills:
+
+- `egma` operates the CLI, keeps repository tests in step with Egma, starts a
+  run, and reads its verdicts.
+- `find-voice-agent` maps a repository's voice-agent framework, prompts, tools,
+  deployment path, and provider identifier location. Its provider references
+  currently include Retell and LiveKit, and it recognizes Pipecat and Vapi.
+- `write-egma-tests` writes and edits the Markdown tests in `egma/tests/`.
+
+Install any skill into a supported coding agent with:
+
+```bash
+npx skills add egma-ai/egma --skill egma
+npx skills add egma-ai/egma --skill find-voice-agent
+npx skills add egma-ai/egma --skill write-egma-tests
+```
+
+Leave out `--skill` to choose from all three.
+
+The CLI also carries the exact skill snapshot from its release tag. This lets
+the wizard use `find-voice-agent` and `write-egma-tests` without downloading
+them, and offer the `egma` skill for direct installation after a run.
 
 ## Working on it
 

@@ -36,6 +36,7 @@ import {
   type RegisteredConnection,
   type RegisterOptions,
 } from "../platform/agents.ts";
+import { ConnectionCredentials } from "../platform/connection-credentials.ts";
 import {
   confirmNumber,
   listAgents,
@@ -75,15 +76,8 @@ export const NO_AGENTS_LINE =
 export const DEFAULT_AGENT_NAME = "voice-agent";
 
 /**
- * How egma reaches the agent, chosen by the developer and never by egma.
- *
- * One voice agent can be reached both ways, and the two answer different
- * questions: text exercises the prompt, the reasoning and the tools; phone
- * exercises all of that plus the speech stack and the line it is carried on.
- * The same test over both is the product's sharpest diagnostic — so both are
- * offered, and **only the one that was chosen is created.** A wizard that made
- * both would put a connection in somebody's project that they never asked for
- * and would be billed for the day something ran over it.
+ * How egma reaches the agent, confirmed by the developer and never guessed by
+ * egma. Retell voice agents use phone. Retell chat agents use text.
  */
 export type Reach = "text" | "phone";
 
@@ -98,15 +92,30 @@ export const REACH_LINES: Readonly<Record<Reach, string>> = {
     "telephone network, the way the people who call it do.",
 };
 
+/** What a developer can do after asking Retell for the wrong connection kind. */
+export const VOICE_REQUIRES_PHONE_LINE =
+  "Retell says this is a voice agent. Voice agents can be reached only by phone, not text. " +
+  "Choose phone and try again. Nothing was written.";
+
+/** What a developer can do after asking Retell for a phone connection to chat. */
+export const CHAT_REQUIRES_TEXT_LINE =
+  "Retell says this is a chat agent. Chat agents can be reached only by text, not phone. " +
+  "Choose text and try again. Nothing was written.";
+
 /** What the developer is asked when the phone was chosen. */
 export const NUMBER_ASK_LINE =
   "Which number should Egma dial? These are the numbers Retell routes to this agent.";
 
+/** The exact target, said before Egma stores a phone connection. */
+export function dialLine(number: string): string {
+  return `Egma will dial ${number}.`;
+}
+
 /** The exact failure for an agent Retell routes no number to. */
 export const NO_NUMBERS_LINE =
   "Retell routes no phone number to that agent, so there is nothing for Egma to " +
-  "dial. Assign a number to it in the Retell dashboard, under Phone Numbers — " +
-  "or reach it over text instead.";
+  "dial. Assign a number to it in the Retell dashboard, under Phone Numbers, " +
+  "then try again.";
 
 /**
  * What egma says when connecting found something already there.
@@ -200,6 +209,13 @@ export type ConnectOutcome =
   | { readonly kind: "unchosen"; readonly agents: readonly RetellAgent[] }
   /** Nobody said whether egma should reach the agent by text or by phone. */
   | { readonly kind: "unchosen-reach" }
+  /** The requested reach does not match the selected Retell agent's channel. */
+  | {
+      readonly kind: "incompatible-reach";
+      readonly requested: Reach;
+      readonly compatible: Reach;
+      readonly reason: string;
+    }
   /** Retell routes no number to the chosen agent, so there is nothing to dial. */
   | { readonly kind: "no-numbers" }
   /** Several numbers reach the agent, and nobody said which to dial. */
@@ -226,7 +242,7 @@ export type ConnectOptions = {
    * is a fact about *that* agent, so there is nothing honest to offer until
    * egma knows which one is under test.
    */
-  readonly chooseReach: () => Promise<Reach | null>;
+  readonly chooseReach: (compatible: Reach) => Promise<Reach | null>;
   /**
    * Which number to dial, in E.164, or `null` when nobody chose.
    *
@@ -236,7 +252,7 @@ export type ConnectOptions = {
    */
   readonly chooseNumber: (numbers: readonly RetellNumber[]) => Promise<string | null>;
   /** One line about what is happening, for whoever is watching. */
-  readonly say: (line: string) => void;
+  readonly say: (line: string, kind?: "action") => void;
   /**
    * Run at the last moment before egma is asked to create anything, and only
    * then.
@@ -376,27 +392,11 @@ function selectionFor(
     reach,
     connection: {
       type: "retell",
-      // Chat, whichever kind of agent this is: the modality says which layer is
-      // under test, and text exercises the prompt, the reasoning and the tools
-      // rather than the speech stack. It is *not* read off `config.modality`,
-      // which is the agent's own channel — reaching a voice agent by text is
-      // exactly what this choice is for.
-      //
-      // **A row written here is not conductable today, and that is not this
-      // step's to fix.** `spec.md` says text uses Retell's Agent Playground
-      // Completion — `POST /agent-playground-completion/{agent_id}`, which
-      // takes the whole message history per turn and works against an agent of
-      // either channel. The shipped plug
-      // (`apps/simulator/src/egma_simulator/plugs/retell.py`) speaks Retell's
-      // *chat-agent* API instead — `create-chat`, `create-chat-completion`,
-      // `end-chat` — and whether that accepts a voice agent's id is untested.
-      // Nothing in this ticket runs a text simulation, so nothing here can find
-      // out. Whoever ships the text path replaces that plug rather than
-      // pointing it somewhere else; the identity written down is already the
-      // right one.
+      // Only Retell chat agents reach this branch. Their vendor identity is the
+      // connection target, and no phone number is read or stored.
       modality: "chat",
       config: { retellAgentId: config.agentId },
-      credentials: key,
+      credentials: ConnectionCredentials.defer(() => ({ apiKey: key.reveal() })),
     },
     number: null,
   };
@@ -437,28 +437,24 @@ type Written = {
  * Writes the selected connection, and the agent under it when there is not one
  * already.
  *
- * **A second walk over one voice agent must land on the first walk's agent**,
- * whichever way it chose to reach it. Two egma agents for one Retell agent
- * splits a team's results history in half, and that is the failure this whole
- * function exists to prevent — a retry after a network failure nobody could
- * read is the ordinary case, not a rare one.
+ * **A second walk over one Retell agent must land on the first walk's agent.**
+ * Two egma agents for one Retell agent split a team's results history in half,
+ * and that is the failure this whole function exists to prevent.
  *
  * The platform settles the easy half itself: a retell connection carries the
  * vendor's own agent id, so registering the same one twice answers what is
  * already there with the key rotated whole. What it cannot settle is a **phone**
  * connection, which carries a number and no vendor identity at all — the
  * platform has nothing to match on, so it would write a second agent every
- * time, and a developer who connected over text and came back for the phone
- * would end up with two.
+ * time.
  *
  * So the refusal is read rather than worked around. `name-taken` means a living
  * agent in this project already holds the name egma derives from the Retell
  * agent's own, and exactly one of two things is true of it:
  *
- * - **It is this voice agent**, reached some other way. The chosen connection
- *   joins it — or, when the same reach is already attached, that connection
- *   answers and nothing is written at all.
- * - **It is a different voice agent** wearing the same name, which a real
+ * - **It is this agent.** When the same reach is already attached, that
+ *   connection answers and nothing is written at all.
+ * - **It is a different agent** wearing the same name, which a real
  *   account does produce. Then the name is taken and the next one is tried,
  *   exactly as before.
  *
@@ -743,6 +739,8 @@ async function pickNumber(
     };
   }
 
+  options.say(dialLine(wanted), "action");
+
   return {
     kind: "number",
     number: confirmed.number.number,
@@ -796,9 +794,26 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
   // The agent is settled, so what egma may offer is settled with it. Asking
   // before this point would be offering a phone the agent may have no number
   // for.
-  const reach = await options.chooseReach();
+  const compatibleReach: Reach = config.modality === "voice" ? "phone" : "text";
+  const reach = await options.chooseReach(compatibleReach);
   if (options.signal.aborted) return { kind: "interrupted" };
   if (reach === null) return { kind: "unchosen-reach" };
+  if (config.modality === "voice" && reach !== "phone") {
+    return {
+      kind: "incompatible-reach",
+      requested: reach,
+      compatible: compatibleReach,
+      reason: VOICE_REQUIRES_PHONE_LINE,
+    };
+  }
+  if (config.modality === "chat" && reach !== "text") {
+    return {
+      kind: "incompatible-reach",
+      requested: reach,
+      compatible: compatibleReach,
+      reason: CHAT_REQUIRES_TEXT_LINE,
+    };
+  }
 
   // Read once at most, and only where it is needed: by the phone branch, which
   // needs it to offer anything at all, and by a name clash that has nothing

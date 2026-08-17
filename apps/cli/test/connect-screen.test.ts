@@ -43,6 +43,7 @@ const ONE_AGENT: FakeRetellScript = {
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
+      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },
   ],
@@ -56,11 +57,16 @@ const ONE_AGENT: FakeRetellScript = {
   ],
 };
 
+const VOICE_AGENT: FakeRetellScript = {
+  ...ONE_AGENT,
+  agents: ONE_AGENT.agents.map((agent) => ({ ...agent, channel: "voice" as const })),
+};
+
 const TWO_AGENTS: FakeRetellScript = {
   keys: [KEY],
   agents: [
-    { agent_id: "agent_0001", agent_name: "order-line", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
-    { agent_id: "agent_0002", agent_name: "after-hours", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
+    { agent_id: "agent_0001", agent_name: "order-line", channel: "chat", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
+    { agent_id: "agent_0002", agent_name: "after-hours", channel: "chat", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
   ],
   llms: [{ llm_id: "llm_0001", general_prompt: "You answer the order line.\n" }],
 };
@@ -288,7 +294,7 @@ describe("the picker", () => {
 
 describe("the choice between text and phone", () => {
   it("is a screen, and taking the phone creates the phone connection and no other", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(VOICE_AGENT);
     const run = await wizard();
 
     await showing(run, "Paste your Retell API key");
@@ -297,16 +303,14 @@ describe("the choice between text and phone", () => {
     const offered = await showing(
       run,
       "How should Egma reach this agent?",
-      "Text — Egma exchanges messages with the agent.",
       "Phone — Egma dials one of the agent's numbers",
-      "Egma creates the one you choose, and only that one.",
+      "Egma creates this connection only after you confirm it.",
     );
-    // Nothing is chosen for the developer: the phone is the second row, and
-    // reaching it takes a keystroke.
-    expect(offered).toContain("\u203a Text");
+    // Retell voice agents support only phone. It is the only row, and the
+    // developer must still confirm before Egma can dial it.
+    expect(offered).toContain("\u203a Phone");
+    expect(offered).not.toContain("Text —");
 
-    run.write("\u001B[B");
-    await showing(run, "\u203a Phone");
     run.write("\r");
 
     await showing(run, "Do you already have test cases", "[n] none");
@@ -335,9 +339,9 @@ describe("the choice between text and phone", () => {
 
   it("asks which number to dial when Retell routes the agent more than one", async () => {
     retell = await startFakeRetell({
-      ...ONE_AGENT,
+      ...VOICE_AGENT,
       numbers: [
-        ...(ONE_AGENT.numbers ?? []),
+        ...(VOICE_AGENT.numbers ?? []),
         {
           phone_number: ALSO_DIALLED,
           nickname: "overflow",
@@ -350,8 +354,6 @@ describe("the choice between text and phone", () => {
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\n`);
     await showing(run, "How should Egma reach this agent?");
-    run.write("\u001B[B");
-    await showing(run, "\u203a Phone");
     run.write("\r");
 
     // Two numbers reach this agent, so there is a real choice and the wizard
@@ -389,7 +391,7 @@ describe("the choice between text and phone", () => {
   });
 
   it("creates nothing when the developer takes neither way", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+    retell = await startFakeRetell(VOICE_AGENT);
     const run = await wizard();
 
     await showing(run, "Paste your Retell API key");

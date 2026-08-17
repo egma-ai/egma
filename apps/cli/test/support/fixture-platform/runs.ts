@@ -19,10 +19,9 @@
  *   written once. The same transitions the real `simulation_lifecycle_guard`
  *   enforces, refused here with the same shape of message.
  * - **A verdict is not a status.** The status says how far the simulation
- *   got; the verdict says what the graders made of it. `passed`,
- *   `failed`, `skipped` and `errored`, and the last two are never folded into
- *   the third — a test that could not run is not a test that failed, so the
- *   fixture refuses a pairing that would say it did.
+ *   got; the verdict says what the graders made of it. Grading can land after
+ *   execution ends, as it does on the real platform. `passed`, `failed`,
+ *   `skipped` and `errored` are never folded into one another.
  *
  * Advancing a simulation is a control, not a contract. On a real instance the
  * simulator claims the work and reports what it found; here a test says so
@@ -171,8 +170,18 @@ export type AdvanceStep = {
   /** A simulation id, a test name, or a 1-based position. */
   readonly simulation: string;
   readonly status: SimulationStatus;
-  /** Required for a terminal status, refused for any other. */
+  /** Optional when grading happens after the simulation reaches its ending. */
   readonly verdict?: Verdict;
+  readonly reason?: string;
+};
+
+/** One grader result that lands after a simulation has reached its ending. */
+export type GradeStep = {
+  /** Omit when there is only one run. */
+  readonly run?: string;
+  /** A simulation id, a test name, or a 1-based position. */
+  readonly simulation: string;
+  readonly verdict: Verdict;
   readonly reason?: string;
 };
 
@@ -198,11 +207,12 @@ export type RunControls = {
   /** Every simulation of a run, in position order. */
   simulationsOf(runId?: string): readonly SeededSimulation[];
   /**
-   * Move one simulation along, and deliver the verdict that goes with the
-   * ending. This is what lets a check choreograph the exact sequence it wants
-   * to see on a screen or on standard output.
+   * Move one simulation along. A check can deliver the verdict with the
+   * ending or later through `grade`, matching both platform timings.
    */
   advance(step: AdvanceStep): void;
+  /** Record a verdict after execution has finished, as the real grader does. */
+  grade(step: GradeStep): void;
   /**
    * Make this egma refuse a run over a connection of this type, because no
    * simulator adapter for it has shipped. The refusal is the platform's own
@@ -338,11 +348,7 @@ export function runRoutes(options: {
       if (verdict !== undefined) {
         throw new Error(`a ${to} simulation has no verdict yet, and one was given`);
       }
-    } else if (verdict === undefined) {
-      throw new Error(
-        `a ${to} simulation carries a verdict: one of ${allowed.join(", ")}`,
-      );
-    } else if (!allowed.includes(verdict)) {
+    } else if (verdict !== undefined && !allowed.includes(verdict)) {
       throw new Error(
         `a ${to} simulation is ${allowed.join(" or ")}, never ${verdict}`,
       );
@@ -706,7 +712,7 @@ export function runRoutes(options: {
     ],
   };
 
-  const find = (step: AdvanceStep): StoredSimulation => {
+  const find = (step: AdvanceStep | GradeStep): StoredSimulation => {
     const run =
       step.run === undefined
         ? runs.at(-1)
@@ -748,6 +754,25 @@ export function runRoutes(options: {
     },
     advance(step) {
       move(find(step), step.status, step.verdict, step.reason);
+    },
+    grade(step) {
+      const simulation = find(step);
+      if (!TERMINAL.includes(simulation.status)) {
+        throw new Error(
+          `simulation ${simulation.id} is ${simulation.status}, and only a finished simulation can be graded`,
+        );
+      }
+      if (simulation.verdict !== null) {
+        throw new Error(`simulation ${simulation.id} already has a verdict`);
+      }
+      const allowed = VERDICTS_FOR[simulation.status];
+      if (!allowed.includes(step.verdict)) {
+        throw new Error(
+          `a ${simulation.status} simulation is ${allowed.join(" or ")}, never ${step.verdict}`,
+        );
+      }
+      simulation.verdict = step.verdict;
+      simulation.reason = step.reason ?? simulation.reason;
     },
     noAdapterFor(type) {
       withoutAdapter.add(type);

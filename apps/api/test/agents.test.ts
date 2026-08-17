@@ -449,35 +449,29 @@ describe("a livekit connection", () => {
     expect(connectionOf(registered)).not.toHaveProperty("credentials");
   });
 
-  /**
-   * An endpoint on a private network can be reachable only from egma and open
-   * to it. The hardening recipe says not to leave it that way and says what an
-   * open one means, but the door cannot see whose network the endpoint is on,
-   * so it does not turn that advice into a rule it would be lying about.
-   */
-  it("is registered with no credentials at all, when the endpoint is open", async () => {
+  it("refuses a literal private token endpoint", async () => {
     api = await createApi("agents_livekit_open_endpoint");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const registered = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/api/agents", withKey(ada.secret), {
       name: "Private-network agent",
       connection: {
         type: "livekit",
         modality: "voice",
         config: {
           url: "ws://livekit.internal:7880",
-          tokenEndpoint: "http://tokens.internal/egma",
+          tokenEndpoint: "https://127.0.0.1/egma",
         },
+        credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
     });
 
-    expect(registered.status).toBe(201);
-    expect(connectionOf(registered)).toMatchObject({
-      config: {
-        url: "ws://livekit.internal:7880",
-        tokenEndpoint: "http://tokens.internal/egma",
-      },
-      credentials_hint: null,
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        "the config's tokenEndpoint must be a public https URL, which " +
+        "looks like https://example.com/egma/livekit-token",
     });
   });
 
@@ -580,6 +574,23 @@ describe("a livekit connection", () => {
         "tokens from an apiKey and apiSecret.",
     },
     {
+      named: "a token endpoint with no auth headers",
+      slug: "endpoint_without_headers",
+      payload: {
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+        },
+        credentials: undefined,
+      },
+      message:
+        "a livekit connection whose config names a tokenEndpoint asks that " +
+        "endpoint for every token, so it holds no key pair of its own: its " +
+        "credentials are the endpoint's auth headers, shaped { headers }. " +
+        "Send those, or drop the tokenEndpoint and Egma will mint its own " +
+        "tokens from an apiKey and apiSecret.",
+    },
+    {
       named: "endpoint headers on a connection that names no endpoint",
       slug: "headers_no_endpoint",
       payload: {
@@ -604,7 +615,7 @@ describe("a livekit connection", () => {
         credentials: { headers: '{"Authorization":"Bearer not-real"}' },
       },
       message:
-        "the config's tokenEndpoint must be an http or https URL, which " +
+        "the config's tokenEndpoint must be a public https URL, which " +
         "looks like https://example.com/egma/livekit-token",
     },
     {

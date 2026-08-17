@@ -109,10 +109,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import json
 import logging
+import socket
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from ..contract import AGENT_NEVER_JOINED, ERROR
 from ..mock_tools import (
@@ -164,7 +167,7 @@ with is worse than one it refuses by name.
 """
 
 ENDPOINT_CREDENTIAL_KEYS = frozenset({"headers"})
-ENDPOINT_SCHEMES = ("http://", "https://")
+ENDPOINT_SCHEME = "https://"
 
 TOKEN_ALIASES = ("token", "participantToken", "accessToken")
 """The three names a minted token comes back under.
@@ -182,12 +185,89 @@ Short of the wait for the agent itself, so a slow endpoint reads as a slow
 endpoint rather than as a worker that never came.
 """
 
-QUOTED_ENDPOINT_CHARS = 200
-"""How much of an endpoint's answer is quoted back into a reason.
+TOKEN_RESPONSE_BYTES = 64 * 1024
+"""The most token-endpoint data read into the simulator."""
 
-Enough to carry a framework's own error page heading or a JSON error
-message, short of pasting a page of HTML into a simulation's record.
-"""
+
+class _UnsafeEndpointAddress(OSError):
+    """The token endpoint resolved to an address Egma must not reach."""
+
+
+def _public_endpoint_address(raw: object) -> None:
+    """Refuse every address that is not globally routable."""
+    if not isinstance(raw, str):
+        raise _UnsafeEndpointAddress
+    try:
+        address = ipaddress.ip_address(raw)
+    except ValueError as invalid:
+        raise _UnsafeEndpointAddress from invalid
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    if not address.is_global or address.is_multicast:
+        raise _UnsafeEndpointAddress
+
+
+def _unsafe_endpoint_failure(error: BaseException) -> bool:
+    """Whether an HTTP-client wrapper carries an address-policy refusal."""
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        held = pending.pop()
+        if id(held) in seen:
+            continue
+        seen.add(id(held))
+        if isinstance(held, _UnsafeEndpointAddress):
+            return True
+        for nested in (
+            getattr(held, "os_error", None),
+            held.__cause__,
+            held.__context__,
+        ):
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+    return False
+
+
+class _EndpointResolver:
+    """Check every DNS answer before aiohttp chooses one to connect to."""
+
+    def __init__(self, delegate: Any) -> None:
+        self._delegate = delegate
+
+    async def resolve(
+        self, host: str, port: int = 0, family: int = socket.AF_INET
+    ) -> list[dict[str, Any]]:
+        answers = await self._delegate.resolve(host, port, family)
+        for answer in answers:
+            _public_endpoint_address(answer.get("host"))
+        return answers
+
+    async def close(self) -> None:
+        await self._delegate.close()
+
+
+def _endpoint_socket(addr_info: tuple[Any, ...]) -> socket.socket:
+    """Open only the exact public address the HTTP client selected.
+
+    The check lives in the socket factory rather than in a separate DNS lookup.
+    That makes the checked address and the connected address the same value,
+    so changing DNS between two lookups cannot move the request onto a private
+    network. The resolver check above rejects a mixed answer before the
+    connector chooses one; this second check protects the final address too.
+    """
+    family, kind, protocol, _canonical_name, sockaddr = addr_info
+    _public_endpoint_address(sockaddr[0])
+    return socket.socket(family=family, type=kind, proto=protocol)
+
+
+async def _token_body(answer: Any) -> bytes:
+    """Read no more than one bounded token response plus one proof byte."""
+    held = bytearray()
+    async for chunk in answer.content.iter_chunked(16 * 1024):
+        held.extend(chunk)
+        if len(held) > TOKEN_RESPONSE_BYTES:
+            return bytes(held[: TOKEN_RESPONSE_BYTES + 1])
+    return bytes(held)
 
 
 def dispatch_metadata(simulation_id: str, *, egma_identity: str) -> str:
@@ -275,9 +355,7 @@ class RoomSettings:
     endpoint_headers: dict[str, str] = field(
         default_factory=dict, repr=False
     )
-    """What egma sends to authenticate itself to that endpoint. Empty
-    where the endpoint takes no credential, which the docs advise against
-    and a private network sometimes makes true."""
+    """What egma sends to authenticate itself to that endpoint."""
 
     @property
     def mints_its_own(self) -> bool:
@@ -390,13 +468,7 @@ class RoomSettings:
                 "livekit config: tokenEndpoint must be a non-empty string — "
                 "where Egma asks the customer for a token"
             )
-        endpoint = endpoint.strip()
-        if not endpoint.startswith(ENDPOINT_SCHEMES):
-            raise MediaBackendError(
-                f"livekit config: tokenEndpoint is where Egma posts a "
-                f"request, so it must start with one of "
-                f"{', '.join(ENDPOINT_SCHEMES)}; got {endpoint!r}"
-            )
+        endpoint = _token_endpoint_url(endpoint.strip())
 
         return cls(
             url=url,
@@ -422,23 +494,51 @@ def _server_url(config: dict[str, Any]) -> str:
     return url
 
 
+def _token_endpoint_url(endpoint: str) -> str:
+    """A stored endpoint in a shape the network guard can enforce.
+
+    The platform admits only public-looking HTTPS hostnames. This reader
+    independently applies the same transport rule before an auth header or
+    room token can cross the network. Permission to connect is decided later,
+    against the exact socket address; parsing a URL is never permission to
+    reach its host.
+    """
+    try:
+        parsed = urlsplit(endpoint)
+        hostname = parsed.hostname
+        # Accessing ``port`` is itself validation: malformed values raise.
+        _ = parsed.port
+    except ValueError:
+        parsed = None
+        hostname = None
+
+    if (
+        parsed is None
+        or not endpoint.lower().startswith(ENDPOINT_SCHEME)
+        or parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise MediaBackendError(
+            "livekit config: tokenEndpoint must be an https URL with "
+            "a hostname, like https://example.com/egma/livekit-token"
+        )
+    return endpoint
+
+
 def _endpoint_headers(credentials: Any) -> dict[str, str]:
     """What egma sends to authenticate itself to a token endpoint.
 
-    Absent is a whole answer: an endpoint on a private network can be open
-    to egma alone. What is not a whole answer is something egma cannot
-    send — a refusal here names the field and never quotes the value,
-    because the values are the credential.
+    Every endpoint is public, so every endpoint carries auth headers. A
+    refusal names the field and never quotes the value, because the values are
+    the credential.
     """
-    if credentials is None:
-        return {}
     if not isinstance(credentials, dict):
         raise MediaBackendError(
-            "a livekit connection that names a tokenEndpoint carries that "
-            "endpoint's auth headers, or nothing at all"
+            "a livekit connection that names a tokenEndpoint needs that "
+            "endpoint's auth headers under credentials.headers"
         )
-    if not credentials:
-        return {}
 
     stray = set(credentials) - ENDPOINT_CREDENTIAL_KEYS
     if stray:
@@ -472,26 +572,6 @@ def _endpoint_headers(credentials: Any) -> dict[str, str]:
             "name to header value"
         )
     return {name.strip(): value.strip() for name, value in held.items()}
-
-
-def _tokens_in(said: str) -> list[str]:
-    """Every token-shaped value an endpoint's answer carries.
-
-    Tolerant on purpose: this is handed whatever came back, including an
-    exception's repr and somebody's HTML error page, and anything it
-    cannot read as a JSON object simply holds no token to protect.
-    """
-    try:
-        held = json.loads(said)
-    except ValueError:
-        return []
-    if not isinstance(held, dict):
-        return []
-    return [
-        held[alias]
-        for alias in TOKEN_ALIASES
-        if isinstance(held.get(alias), str) and held[alias].strip()
-    ]
 
 
 def _configured_json(configured: object) -> str | None:
@@ -535,11 +615,13 @@ class LiveKitRoomBackend:
         band_hz: int,
         simulation_id: str,
         mock_tools: MockToolSeam | None = None,
+        endpoint_resolver: Any = None,
     ) -> None:
         self._settings = settings
         self._band_hz = band_hz
         self._simulation_id = simulation_id
         self._mock_tools = mock_tools
+        self._endpoint_resolver = endpoint_resolver
         # One registry per driver, so what this driver quotes from the
         # platform goes through the same scrubbing a log line does rather
         # than through a second implementation of it.
@@ -752,6 +834,20 @@ class LiveKitRoomBackend:
             f"the agent {self._settings.agent_name!r} could not be dispatched",
         )
 
+    def _endpoint_connector(self, aiohttp: Any, resolver: Any) -> tuple[Any, Any]:
+        """Build the guarded connector used for every token request.
+
+        A caller can supply a resolver for a system-boundary test, but it
+        still passes through the same policy before the connector can use it.
+        """
+        guarded = _EndpointResolver(resolver)
+        connector = aiohttp.TCPConnector(
+            resolver=guarded,
+            socket_factory=_endpoint_socket,
+            use_dns_cache=False,
+        )
+        return guarded, connector
+
     async def _token_from_endpoint(self) -> WayIn:
         """Ask the customer's endpoint for a way into the room.
 
@@ -764,8 +860,9 @@ class LiveKitRoomBackend:
         egma invents both names and sends them, so the endpoint can mint a
         token for exactly the identity egma will join as and exactly the
         room it will join, and can refuse anything else. Every way this
-        can go wrong ends the simulation with a fault quoting whoever said
-        so, scrubbed of the headers egma sent them.
+        can go wrong ends the simulation with a fault that names the status or
+        broken contract part. Endpoint bodies and network exceptions are never
+        customer-visible text.
         """
         import aiohttp
 
@@ -775,9 +872,12 @@ class LiveKitRoomBackend:
             "participant_name": self._participant_name,
         }
 
+        resolver = self._endpoint_resolver or aiohttp.resolver.DefaultResolver()
         try:
+            resolver, connector = self._endpoint_connector(aiohttp, resolver)
             async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=TOKEN_SECONDS)
+                timeout=aiohttp.ClientTimeout(total=TOKEN_SECONDS),
+                connector=connector,
             ) as session, session.post(
                 endpoint,
                 json=asked,
@@ -786,22 +886,47 @@ class LiveKitRoomBackend:
                 # else. Following a redirect would carry the customer's own
                 # auth headers to a host they never configured, chosen by
                 # whoever answered — so a redirect is read as the answer it
-                # is, and quoted like any other unexpected status.
+                # is, and only its status is reported.
                 allow_redirects=False,
             ) as answer:
                 status = answer.status
-                said = await answer.text()
+                said = (
+                    await _token_body(answer)
+                    if 200 <= status < 300
+                    else b""
+                )
         except Exception as unreachable:
-            raise MediaBackendError(
-                f"the token endpoint at {endpoint} could not be reached — "
-                f"{self._quotable_endpoint(repr(unreachable))}",
-                ending=ERROR,
-            ) from unreachable
+            if _unsafe_endpoint_failure(unreachable):
+                reason = (
+                    f"the token endpoint at {endpoint} resolved to a non-public "
+                    f"network address"
+                )
+            elif isinstance(unreachable, asyncio.TimeoutError):
+                reason = (
+                    f"the token endpoint at {endpoint} did not answer within "
+                    f"{TOKEN_SECONDS:g} seconds"
+                )
+            elif isinstance(unreachable, (aiohttp.ClientError, OSError)):
+                reason = (
+                    f"the token endpoint at {endpoint} could not be reached "
+                    f"over HTTPS"
+                )
+            else:
+                raise
+            raise MediaBackendError(reason, ending=ERROR) from unreachable
+        finally:
+            with contextlib.suppress(Exception):
+                await resolver.close()
 
         if status < 200 or status >= 300:
             raise MediaBackendError(
-                f"the token endpoint at {endpoint} answered {status} — "
-                f"{self._quotable_endpoint(said)}",
+                f"the token endpoint at {endpoint} answered {status}",
+                ending=ERROR,
+            )
+        if len(said) > TOKEN_RESPONSE_BYTES:
+            raise MediaBackendError(
+                f"the token endpoint at {endpoint} answered more than "
+                f"{TOKEN_RESPONSE_BYTES} bytes",
                 ending=ERROR,
             )
 
@@ -811,12 +936,12 @@ class LiveKitRoomBackend:
         # url is what egma falls back on when it says nothing.
         return WayIn(url=server_url or self._settings.url, token=token)
 
-    def _minted(self, endpoint: str, said: str) -> tuple[str, str]:
+    def _minted(self, endpoint: str, said: bytes) -> tuple[str, str]:
         """The token and the server URL out of one answer, or a refusal.
 
-        A body outside the contract is a fault worth naming precisely,
-        because the fix is a line in somebody's own handler: what came
-        back is quoted so they can see what their endpoint really said.
+        The refusal names the broken part of the published contract, never
+        bytes from the endpoint. Those bytes may have come from an internal
+        service and are not safe customer-visible diagnostic text.
         """
         try:
             held = json.loads(said)
@@ -826,7 +951,7 @@ class LiveKitRoomBackend:
         if not isinstance(held, dict):
             raise MediaBackendError(
                 f"the token endpoint at {endpoint} answered something that is "
-                f"not a JSON object — {self._quotable_endpoint(said)}",
+                f"not a JSON object",
                 ending=ERROR,
             )
 
@@ -841,26 +966,22 @@ class LiveKitRoomBackend:
         if token is None:
             raise MediaBackendError(
                 f"the token endpoint at {endpoint} answered no token: Egma "
-                f"reads one from {', '.join(TOKEN_ALIASES)} — "
-                f"{self._quotable_endpoint(said)}",
+                f"reads one from {', '.join(TOKEN_ALIASES)}",
                 ending=ERROR,
             )
 
         # From here the token is a credential like any other on this
         # connection: it opens a room in the customer's project, and it is
-        # registered before anything else can quote it. Everything below
-        # quotes the *whole* answer back — that is what makes a handler's
-        # own mistake fixable — and the answer it quotes contains this
-        # token. Registered late is registered too late: a refusal about a
-        # bad serverUrl would carry a working credential into a reason, a
-        # log line and the traceback under it.
+        # registered before anything else can handle it. Endpoint bodies are
+        # never copied into an error, and the token remains a secret for any
+        # future diagnostic path added below.
         self._secrets.register([token])
 
         server_url = held.get("serverUrl", "")
         if not isinstance(server_url, str):
             raise MediaBackendError(
                 f"the token endpoint at {endpoint} answered a serverUrl that "
-                f"is not a string — {self._quotable_endpoint(said)}",
+                f"is not a string",
                 ending=ERROR,
             )
         server_url = server_url.strip()
@@ -868,7 +989,7 @@ class LiveKitRoomBackend:
             raise MediaBackendError(
                 f"the token endpoint at {endpoint} answered a serverUrl Egma "
                 f"cannot join: it must start with one of "
-                f"{', '.join(URL_SCHEMES)} — {self._quotable_endpoint(said)}",
+                f"{', '.join(URL_SCHEMES)}",
                 ending=ERROR,
             )
         return token.strip(), server_url
@@ -964,22 +1085,3 @@ class LiveKitRoomBackend:
         enough to read. A server that echoed the api secret back must not
         get it repeated into a reason or into the traceback under one."""
         return self._secrets.redact(told)[:QUOTED_REFUSAL_CHARS]
-
-    def _quotable_endpoint(self, told: str) -> str:
-        """The same, for an endpoint's answer rather than a platform's.
-
-        Its own budget because what comes back from somebody's own handler
-        is often an HTML error page rather than a sentence, and the useful
-        part of one is at the top.
-
-        It also registers any token the answer carries before redacting,
-        and that ordering is the point rather than tidiness. An endpoint
-        that *failed* may still have minted a working credential — a 500
-        with a token in its body, or a redirect carrying one — and those
-        answers are quoted from branches that run long before anything
-        reads a token out of them. Registering here rather than at each
-        branch means every path that can quote an endpoint, now or later,
-        is covered by the one door it already goes through.
-        """
-        self._secrets.register(_tokens_in(told))
-        return self._secrets.redact(told).strip()[:QUOTED_ENDPOINT_CHARS]

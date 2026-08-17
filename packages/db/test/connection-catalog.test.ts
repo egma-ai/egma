@@ -87,7 +87,7 @@ describe("what a browser is told about a connection type", () => {
     expect(ruleOf("retell", "retell.api_key")).toBe("required");
     expect(ruleOf("phone", "phone.number")).toBe("forbidden");
     expect(ruleOf("livekit", "livekit.key_pair")).toBe("required");
-    expect(ruleOf("livekit", "livekit.token_endpoint")).toBe("optional");
+    expect(ruleOf("livekit", "livekit.token_endpoint")).toBe("required");
   });
 
   it("says a shape that takes no credential has no credential fields", () => {
@@ -132,7 +132,7 @@ describe("what a browser is told about a connection type", () => {
     // And a stored id reads back to the same shape without the config being
     // consulted — which is the whole point of storing it.
     expect(credentialRuleOf(variantById("livekit", "livekit.token_endpoint"))).toBe(
-      "optional",
+      "required",
     );
     expect(credentialRuleOf(variantById("livekit", "livekit.key_pair"))).toBe(
       "required",

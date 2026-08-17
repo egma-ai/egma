@@ -1,5 +1,5 @@
 /**
- * The smoke check: the whole walk, against a fully real egma.
+ * The smoke check: the whole wizard flow, against a fully real Egma.
  *
  * One command signs a machine in, registers a voice agent, pushes a suite of
  * tests and starts a run over the exact versions it pushed — every request to
@@ -38,7 +38,7 @@
  * had `pnpm install`:
  *
  *   pnpm db:up
- *   pnpm --filter @egma/cli smoke:walk
+ *   pnpm --filter @egma/cli smoke:wizard-flow
  *
  * The first starts the Postgres and the ClickHouse; the second builds
  * everything this needs and walks. Set `RETELL_API_KEY` in the environment of
@@ -659,7 +659,7 @@ function proven(): void {
 
 async function main(): Promise<void> {
   if (!(await stat(CLI_ENTRY).then((found) => found.isFile(), () => false))) {
-    say(`FAILED: ${CLI_ENTRY} is not built. Run pnpm --filter @egma/cli smoke:walk.`);
+    say(`FAILED: ${CLI_ENTRY} is not built. Run pnpm --filter @egma/cli smoke:wizard-flow.`);
     process.exitCode = 1;
     return;
   }

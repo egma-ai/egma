@@ -12,13 +12,14 @@
 
 import type { LoginPrompt } from "../platform/login.ts";
 import type { RetellAgent, RetellNumber } from "../retell/client.ts";
-import type { KeyAsk } from "../retell/connect.ts";
+import type { KeyAsk, Reach } from "../retell/connect.ts";
 import type { RunView } from "../run/view.ts";
 import type { SkillPlaces } from "../skills/install.ts";
 import type { Detection } from "../wizard/detection.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
 import type { GenerationProgress } from "../wizard/test-generation.ts";
+import type { WizardPhase } from "../wizard/wizard-machine.ts";
 
 /**
  * A point the flow waits at until the developer has moved past it.
@@ -29,6 +30,36 @@ import type { GenerationProgress } from "../wizard/test-generation.ts";
  */
 export type GateId = "begin" | "run-tests";
 
+export type ConnectionAskId = `connection:${string}`;
+
+export type ConnectionChoice = {
+  readonly value: string;
+  readonly label: string;
+  readonly help?: string | undefined;
+};
+
+/** One supported coding agent proved to be installed on this machine. */
+export type CodingAgentChoice = {
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
+  readonly executable: string;
+};
+
+/** One provider field, described by Egma's platform and drawn by the CLI. */
+export type ConnectionAsk = {
+  readonly id: ConnectionAskId;
+  readonly label: string;
+  readonly help: string;
+  readonly kind: "text" | "url" | "json" | "secret" | "choice";
+  readonly required: boolean;
+  readonly problem?: string | null | undefined;
+  readonly defaultValue?: string | undefined;
+  readonly choices?: readonly ConnectionChoice[] | undefined;
+  /** Where a secret goes. Omitted for non-secret fields. */
+  readonly custody?: string | undefined;
+};
+
 /**
  * A point the flow waits at for something only the developer knows.
  *
@@ -38,7 +69,8 @@ export type GateId = "begin" | "run-tests";
  * every key, and a developer who answers nothing answers `null`.
  */
 export type AskId =
-  | "prompts-pointer"
+  | ConnectionAskId
+  | "coding-agent"
   | "retell-key"
   | "retell-agent"
   /**
@@ -83,8 +115,14 @@ export type PlatformNotice = {
 };
 
 export interface WizardUI {
+  /** The one top-level phase, so unrelated screens cannot coexist. */
+  setPhase(phase: WizardPhase): void;
+
   /** Name the coding agent egma will drive, as soon as it is known. */
   setDrivenAgent(drivenAgent: DrivenAgent | null): void;
+
+  /** The supported coding agents found locally while the choice is open. */
+  setCodingAgentChoices(agents: readonly CodingAgentChoice[]): void;
 
   /** Where the coding agent's own output is being kept for this run. */
   setDrivenAgentLog(file: string): void;
@@ -149,16 +187,14 @@ export interface WizardUI {
   setAgentChoices(agents: readonly RetellAgent[] | null): void;
 
   /**
-   * Whether the two ways of reaching the agent are on offer right now.
+   * The ways Retell supports for this agent while the choice is open.
    *
    * A write and not a question, exactly as the agent choices are: the flow says
-   * the offer is open and the screen collects the word. It is a plain `true`
-   * and `false` rather than a value-or-`null` because there is nothing to
-   * carry — the two ways egma offers are the same two every time, and a screen
-   * that had to be told them could show a different pair from the one the flow
-   * would act on.
+   * the offer is open and the screen collects the word. `null` closes it. The
+   * list comes from the selected Retell agent's channel, so the screen cannot
+   * offer a connection Retell will refuse.
    */
-  setReachOffer(open: boolean): void;
+  setReachOffer(reaches: readonly Reach[] | null): void;
 
   /**
    * The numbers Retell routes to the chosen agent, while a choice among them is
@@ -168,6 +204,9 @@ export interface WizardUI {
    * screen that never appears is how a flow asks nothing.
    */
   setNumberChoices(numbers: readonly RetellNumber[] | null): void;
+
+  /** The current provider field, without the value the developer types. */
+  setConnectionAsk(ask: ConnectionAsk | null): void;
 
   /**
    * Park until the developer has let the flow past this point. A gate that the
