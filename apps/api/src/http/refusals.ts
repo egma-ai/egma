@@ -154,6 +154,8 @@ export const CODES = {
    * every substitution is the person's to make out loud.
    */
   retry_unavailable: 409,
+  /** The selected simulation cannot be used as a source for a new run. */
+  simulation_rerun_unavailable: 409,
   /**
    * A re-grade of a conversation egma is judging **this moment** under a
    * narrowing that does not cover what was asked for. Its own code because it

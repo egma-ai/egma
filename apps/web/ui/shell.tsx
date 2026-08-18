@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -21,7 +23,12 @@ import { projectIdIn } from "../lib/project-context.ts";
 import { canAuthor, VIEW_ONLY, type Role } from "../lib/roles.ts";
 import { Badge } from "./controls.tsx";
 import { Dialog } from "./dialog.tsx";
+import { DraftNavigationProvider } from "./draft-navigation.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
+import {
+  PageNavigation,
+  type PageNavigationItems,
+} from "./page-navigation.tsx";
 import { ProjectSelector } from "./project-selector.tsx";
 import { settingsPath } from "./settings-nav.tsx";
 import styles from "./system.module.css";
@@ -53,10 +60,14 @@ export type Session = {
   readonly me: Me | null;
   /** Whether the session read has settled, however it settled. */
   readonly settled: boolean;
+  /** Re-read changed organization or project context without clearing it. */
+  readonly refresh: () => Promise<void>;
+  /** Add a project returned by a successful create before navigating into it. */
+  readonly includeProject: (project: Project) => void;
 };
 
 /**
- * Who is signed in, read once per page.
+ * Who is signed in, read once for one continuous visit to the product.
  *
  * A failure is quiet on purpose: the shell keeps its navigation and its
  * account controls while a product request is in flight or has failed, because
@@ -67,23 +78,43 @@ export type Session = {
 export function useSession(initial?: Me): Session {
   const [me, setMe] = useState<Me | null>(initial ?? null);
   const [settled, setSettled] = useState(initial !== undefined);
+  const mounted = useRef(false);
+  const request = useRef(0);
 
   useEffect(() => {
-    if (initial !== undefined) return undefined;
-    let current = true;
-
-    void readJson<Me>("/api/me").then((answer) => {
-      if (!current) return;
-      if (answer.status === "ready") setMe(answer.value);
-      setSettled(true);
-    });
-
+    mounted.current = true;
     return () => {
-      current = false;
+      mounted.current = false;
     };
-  }, [initial]);
+  }, []);
 
-  return { me, settled };
+  const refresh = useCallback(async () => {
+    const thisRequest = request.current + 1;
+    request.current = thisRequest;
+    const answer = await readJson<Me>("/api/me");
+    if (!mounted.current || request.current !== thisRequest) return;
+
+    if (answer.status === "ready") setMe(answer.value);
+    if (answer.status === "signed-out") setMe(null);
+    setSettled(true);
+  }, []);
+  const includeProject = useCallback((project: Project) => {
+    setMe((current) => {
+      if (current === null) return current;
+      const projects = current.projects.some((one) => one.id === project.id)
+        ? current.projects.map((one) =>
+            one.id === project.id ? project : one,
+          )
+        : [...current.projects, project];
+      return { ...current, projects };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (initial === undefined) void refresh();
+  }, [initial, refresh]);
+
+  return { me, settled, refresh, includeProject };
 }
 
 /**
@@ -92,12 +123,43 @@ export function useSession(initial?: Me): Session {
  * A page needs the role to decide which controls are worth showing and needs
  * the projects to say where it is. Both are already in flight for the
  * navigation, so a page reads them from here rather than asking `/api/me`
- * again — one read per page, and one answer everything on it agrees with.
+ * again — one stable answer for the shell and every page below it.
  */
-const SessionContext = createContext<Session>({ me: null, settled: false });
+const EMPTY_SESSION: Session = {
+  me: null,
+  settled: false,
+  refresh: async () => {},
+  includeProject: () => {},
+};
+const SessionContext = createContext<Session | null>(null);
 
 export function useShellSession(): Session {
-  return useContext(SessionContext);
+  return useContext(SessionContext) ?? EMPTY_SESSION;
+}
+
+/**
+ * Keep one signed-in frame mounted while any product page changes below it.
+ *
+ * Access, invitation and device pages use their own composition and must not
+ * fetch a signed-in session. Every route that already draws AppShell is listed
+ * here, including the projectless forwarding and creation pages. Keeping this
+ * boundary in the root layout means moving between those route families does
+ * not remount the shell or flash empty organization, project and account text.
+ */
+export function ProductShellBoundary({ children }: { readonly children: ReactNode }) {
+  const pathname = usePathname() ?? "/";
+  const usesProductShell =
+    pathname === "/" ||
+    pathname === "/members" ||
+    pathname === "/new-project" ||
+    pathname === "/projects" ||
+    pathname.startsWith("/projects/") ||
+    pathname === "/runs" ||
+    pathname.startsWith("/runs/") ||
+    pathname === "/traces" ||
+    pathname.startsWith("/traces/");
+
+  return usesProductShell ? <AppShell>{children}</AppShell> : <>{children}</>;
 }
 
 const NAVIGATION_ICON_PATHS: Record<SectionId, readonly string[]> = {
@@ -243,13 +305,14 @@ function AccountMenu({
         </>
       }
     >
-      {() => (
+      {(close) => (
         <>
           <MenuLabel>{standing}</MenuLabel>
           <MenuItem
             href={
               projectId == null ? "/members" : settingsPath(projectId, "project")
             }
+            onClick={close}
           >
             Settings
           </MenuItem>
@@ -300,15 +363,44 @@ export function AppShell({
   readonly initialMe?: Me;
   readonly children: ReactNode;
 }) {
+  const inherited = useContext(SessionContext);
+
+  // The root product boundary owns one persistent shell. Route pages still
+  // compose AppShell so they remain honest when rendered in isolation by tests
+  // and component proofs. Inside the persistent boundary that
+  // second shell must be transparent: mounting it would clear the settled
+  // organization, project and account on every page change and ask `/api/me`
+  // again before drawing the same context.
+  if (inherited !== null) return <>{children}</>;
+
+  return <ShellFrame initialMe={initialMe}>{children}</ShellFrame>;
+}
+
+function ShellFrame({
+  initialMe,
+  children,
+}: {
+  readonly initialMe?: Me;
+  readonly children: ReactNode;
+}) {
   const pathname = usePathname() ?? "/";
   const session = useSession(initialMe);
   const { me } = session;
   const [drawer, setDrawer] = useState(false);
+  const previousPath = useRef(pathname);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
     setDrawer(false);
   }, [pathname]);
+
+  useEffect(() => {
+    const changed = previousPath.current !== pathname;
+    previousPath.current = pathname;
+    if (changed && session.settled && session.me === null) {
+      void session.refresh();
+    }
+  }, [pathname, session.me, session.refresh, session.settled]);
 
   const projects: readonly Project[] = me?.projects ?? [];
   /**
@@ -355,6 +447,7 @@ export function AppShell({
 
   return (
     <SessionContext.Provider value={session}>
+    <DraftNavigationProvider>
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
         {selector(false)}
@@ -411,6 +504,7 @@ export function AppShell({
         {children}
       </div>
     </div>
+    </DraftNavigationProvider>
     </SessionContext.Provider>
   );
 }
@@ -425,13 +519,20 @@ export function AppShell({
  */
 export function ProductPage({
   wide = false,
+  viewport = false,
   children,
 }: {
   readonly wide?: boolean;
+  /** Keep the page header fixed and let its body own the available scroll. */
+  readonly viewport?: boolean;
   readonly children: ReactNode;
 }) {
   return (
-    <main className={`${styles.page} ${wide ? styles.pageWide : ""}`}>
+    <main
+      className={`${styles.page} ${wide ? styles.pageWide : ""} ${
+        viewport ? styles.pageViewport : ""
+      }`}
+    >
       {children}
     </main>
   );
@@ -442,21 +543,31 @@ export function PageHeader({
   title,
   lead,
   action,
+  breadcrumbs,
 }: {
   readonly eyebrow?: string;
   readonly title: string;
   readonly lead?: ReactNode;
   readonly action?: ReactNode;
+  /** Parent links and the current page, in that order. */
+  readonly breadcrumbs?: PageNavigationItems;
 }) {
   return (
-    <header className={styles.pageHeader}>
-      <div>
-        {eyebrow === undefined ? null : <p className={styles.eyebrow}>{eyebrow}</p>}
-        <h1>{title}</h1>
-        {lead === undefined ? null : <p className={styles.pageLead}>{lead}</p>}
-      </div>
-      {action === undefined ? null : <div className={styles.pageActions}>{action}</div>}
-    </header>
+    <>
+      {breadcrumbs === undefined ? null : (
+        <PageNavigation items={breadcrumbs} />
+      )}
+      <header className={styles.pageHeader}>
+        <div>
+          {eyebrow === undefined || breadcrumbs !== undefined ? null : (
+            <p className={styles.eyebrow}>{eyebrow}</p>
+          )}
+          <h1>{title}</h1>
+          {lead === undefined ? null : <p className={styles.pageLead}>{lead}</p>}
+        </div>
+        {action === undefined ? null : <div className={styles.pageActions}>{action}</div>}
+      </header>
+    </>
   );
 }
 
@@ -475,17 +586,24 @@ export function ProductStatePage({
   eyebrow,
   title,
   lead,
+  breadcrumbs,
   children,
 }: {
   readonly eyebrow?: string;
   readonly title: string;
   readonly lead?: ReactNode;
+  readonly breadcrumbs?: PageNavigationItems;
   readonly children?: ReactNode;
 }) {
   return (
     <AppShell>
       <ProductPage>
-        <PageHeader eyebrow={eyebrow} title={title} lead={lead} />
+        <PageHeader
+          eyebrow={eyebrow}
+          title={title}
+          lead={lead}
+          breadcrumbs={breadcrumbs}
+        />
         {children === undefined ? null : <PageBody>{children}</PageBody>}
       </ProductPage>
     </AppShell>

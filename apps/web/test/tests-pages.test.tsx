@@ -88,6 +88,15 @@ function agentRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function personaChoice(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "prs_1",
+    name: "Impatient Rita",
+    archived_at: null,
+    ...overrides,
+  };
+}
+
 function testRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "tst_1",
@@ -119,7 +128,11 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-type Stubbed = { status: number; body: unknown } | "never";
+type Stubbed = {
+  status: number;
+  body: unknown;
+  waitFor?: Promise<void>;
+} | "never";
 
 /** Every request the browser makes, in the order it made them. */
 let sent: { url: string; method: string; body: unknown }[] = [];
@@ -150,6 +163,7 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
         : (held as Stubbed);
 
       if (answer === "never") return new Promise<Response>(() => undefined);
+      if (answer.waitFor !== undefined) await answer.waitFor;
       return json(answer.status, answer.body);
     }),
   );
@@ -281,12 +295,56 @@ describe("the list of tests", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("writing a test", () => {
-  function form(agents: unknown[] = [agentRow()]) {
+  function form(
+    agents: unknown[] = [agentRow()],
+    nextAgents: unknown[] = [],
+    personas: unknown[] = [],
+    nextPersonas: unknown[] = [],
+  ) {
     routed.pathname = "/projects/prj_1/tests/new";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": { status: 200, body: { items: agents, next_cursor: null } },
-      "/api/personas": { status: 200, body: { items: [], next_cursor: null } },
+      "/api/agents":
+        nextAgents.length === 0
+          ? { status: 200, body: { items: agents, next_cursor: null } }
+          : [
+              {
+                status: 200,
+                body: { items: agents, next_cursor: "older-agents" },
+              },
+              {
+                status: 200,
+                body: { items: nextAgents, next_cursor: null },
+              },
+              {
+                status: 200,
+                body: { items: nextAgents, next_cursor: null },
+              },
+              {
+                status: 503,
+                body: {
+                  error: "unavailable",
+                  message: "Agents could not be loaded. Try again.",
+                },
+              },
+            ],
+      "/api/personas":
+        nextPersonas.length === 0
+          ? { status: 200, body: { items: personas, next_cursor: null } }
+          : [
+              {
+                status: 200,
+                body: { items: personas, next_cursor: "older-personas" },
+              },
+              {
+                status: 200,
+                body: { items: nextPersonas, next_cursor: null },
+              },
+              {
+                status: 200,
+                body: { items: nextPersonas, next_cursor: null },
+              },
+            ],
       "/api/graders": { status: 200, body: { items: [], next_cursor: null } },
       "/api/capabilities": { status: 200, body: CAPABILITIES },
       "/api/tests": { status: 201, body: testRow() },
@@ -294,8 +352,31 @@ describe("writing a test", () => {
     render(<NewTestPage />);
   }
 
-  it("will not save until an agent is chosen, and says why", async () => {
+  it("does not let the parent breadcrumb silently discard a draft", async () => {
     form();
+
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "Keep this test" },
+    });
+    const parent = within(
+      screen.getByRole("navigation", { name: "Breadcrumb" }),
+    ).getByRole("link", { name: "Tests" });
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    parent.dispatchEvent(click);
+
+    expect(click.defaultPrevented).toBe(true);
+    expect(routed.push).not.toHaveBeenCalled();
+  });
+
+  it("will not save until an agent is chosen, and says why", async () => {
+    form(
+      [agentRow()],
+      [agentRow({ id: "agt_2", name: "Night desk" })],
+    );
     await screen.findByLabelText("Name");
 
     fireEvent.change(screen.getByLabelText("Name"), {
@@ -311,7 +392,24 @@ describe("writing a test", () => {
     // The agents this project offers, waited for rather than assumed: the
     // sentence asserted below is the one shown when there *are* agents and none
     // is chosen, and a project still waiting on that read shows a different one.
-    const choice = await screen.findByLabelText("Front desk");
+    fireEvent.click(screen.getByRole("button", { name: "Choose agents" }));
+    await screen.findByRole("checkbox", { name: "Front desk" });
+    expect(
+      sent.some((one) => one.url.includes("cursor=older-agents")),
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByRole("checkbox", { name: "Night desk" });
+    expect(
+      sent.some((one) => one.url.includes("cursor=older-agents")),
+    ).toBe(true);
+
+    const search = screen.getByLabelText("Search agents");
+    fireEvent.change(search, { target: { value: "Night" } });
+    await waitFor(() => {
+      expect(sent.some((one) => one.url.includes("search=Night"))).toBe(true);
+    });
+    const choice = await screen.findByRole("checkbox", { name: "Night desk" });
+    expect(screen.getByText("Page 1")).toBeTruthy();
 
     // The platform refuses a test with no target, so the form asks for one
     // rather than letting somebody meet that refusal after writing everything.
@@ -331,6 +429,14 @@ describe("writing a test", () => {
           .hasAttribute("disabled"),
       ).toBe(false);
     });
+
+    fireEvent.change(search, { target: { value: "unavailable" } });
+    expect(
+      await screen.findByText("Agents could not be loaded. Try again."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/No agents match/u)).toBeNull();
+    expect(screen.queryByText(/^Page /u)).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 
   it("will not save a test that could never fail", async () => {
@@ -343,7 +449,8 @@ describe("writing a test", () => {
     fireEvent.change(screen.getByLabelText("Scenario"), {
       target: { value: "Anything at all." },
     });
-    fireEvent.click(await screen.findByLabelText("Front desk"));
+    fireEvent.click(screen.getByRole("button", { name: "Choose agents" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Front desk" }));
 
     expect(
       screen.getByText(/A test needs at least one expected behavior/u),
@@ -363,8 +470,13 @@ describe("writing a test", () => {
    * test above — a test with no behavior at all cannot be saved.
    */
 
-  it("sends the behaviors in the order they are on screen", async () => {
-    form();
+  it("sends simple behavior sentences without exposing ordering controls", async () => {
+    form(
+      [agentRow()],
+      [],
+      [personaChoice()],
+      [personaChoice({ id: "prs_2", name: "Patient Omar" })],
+    );
     await screen.findByLabelText("Name");
 
     fireEvent.change(screen.getByLabelText("Name"), {
@@ -376,19 +488,34 @@ describe("writing a test", () => {
     fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
       target: { value: "first" },
     });
-    fireEvent.click(await screen.findByLabelText("Front desk"));
+    fireEvent.click(screen.getByRole("button", { name: "Choose agents" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Front desk" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
     fireEvent.click(
-      screen.getByRole("button", { name: "Add an expected behavior" }),
+      screen.getByRole("button", { name: "Add expected behavior" }),
     );
     fireEvent.change(await screen.findByLabelText("Expected behavior 2"), {
       target: { value: "second" },
     });
 
-    // Order is content: a version that reorders the list says something the
-    // version before it did not.
+    expect(
+      screen.queryByRole("button", { name: /Move expected behavior/u }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose personas" }));
+    await screen.findByRole("checkbox", { name: "Impatient Rita" });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByRole("checkbox", { name: "Patient Omar" });
+    fireEvent.change(screen.getByLabelText("Search personas"), {
+      target: { value: "Omar" },
+    });
+    await waitFor(() => {
+      expect(sent.some((one) => one.url.includes("search=Omar"))).toBe(true);
+    });
     fireEvent.click(
-      screen.getByRole("button", { name: "Move expected behavior 2 up" }),
+      await screen.findByRole("checkbox", { name: "Patient Omar" }),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
     fireEvent.click(screen.getByRole("button", { name: "Write the test" }));
 
     await waitFor(() => {
@@ -396,10 +523,13 @@ describe("writing a test", () => {
     });
     const body = sentTo("/api/tests").at(-1)?.body as {
       expected_behaviors: string[];
+      personas: string[];
     };
     // Plain sentences, in the order the page shows them, and nothing beside
     // them: the write door refuses the `{behavior, priority}` shape by name.
-    expect(body.expected_behaviors).toEqual(["second", "first"]);
+    expect(body.expected_behaviors).toEqual(["first", "second"]);
+    expect(body.personas).toEqual(["prs_2"]);
+    expect("required_capabilities" in body).toBe(false);
   });
 });
 
@@ -410,11 +540,15 @@ describe("one test's page", () => {
     role = "admin",
     test: Record<string, unknown> = testRow(),
     agents: unknown[] = [agentRow()],
+    saved?: Exclude<Stubbed, "never">,
   ) {
     routed.pathname = "/projects/prj_1/tests/tst_1";
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
-      "/api/tests/tst_1": { status: 200, body: test },
+      "/api/tests/tst_1":
+        saved === undefined
+          ? { status: 200, body: test }
+          : [{ status: 200, body: test }, saved],
       "/api/tests/tst_1/versions": {
         status: 200,
         body: {
@@ -439,29 +573,129 @@ describe("one test's page", () => {
     render(<TestDetailPage />);
   }
 
-  it("saves a rename with the identity revision alone", async () => {
+  it("protects a test edit from its parent breadcrumb", async () => {
     detail();
+
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "Keep this test edit" },
+    });
+    const parent = within(
+      screen.getByRole("navigation", { name: "Breadcrumb" }),
+    ).getByRole("link", { name: "Tests" });
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    parent.dispatchEvent(click);
+
+    expect(click.defaultPrevented).toBe(true);
+    expect(routed.push).not.toHaveBeenCalled();
+  });
+
+  it("saves a rename with the identity revision alone", async () => {
+    let finishSave: () => void = () => undefined;
+    const saving = new Promise<void>((resolve) => {
+      finishSave = resolve;
+    });
+    detail(
+      "admin",
+      testRow(),
+      [agentRow()],
+      {
+        status: 200,
+        body: testRow({ name: "Renamed", revision: "rev_2" }),
+        waitFor: saving,
+      },
+    );
     await screen.findByLabelText("Name");
+
+    expect(
+      screen.getByRole("heading", { name: "Test details" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("complementary", { name: "Test activity" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Recent runs" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "What it is" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "What it checks" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Who calls" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "This test" })).toBeNull();
 
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Renamed" },
     });
+    fireEvent.change(screen.getByLabelText("Scenario"), {
+      target: { value: "Keep this unsaved scenario" },
+    });
+    expect(screen.getAllByText("Unsaved changes")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => {
       expect(sentWith("/api/tests/tst_1", "PATCH").length).toBeGreaterThan(0);
     });
+    expect(screen.getAllByText("Saving…")).toHaveLength(2);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Keep this in-flight edit" },
+    });
+    finishSave();
+
+    await waitFor(() => {
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+        "Keep this in-flight edit",
+      );
+    });
+    expect((screen.getByLabelText("Scenario") as HTMLTextAreaElement).value).toBe(
+      "Keep this unsaved scenario",
+    );
+    expect(screen.getAllByText("Unsaved changes")).toHaveLength(2);
     const body = sentWith("/api/tests/tst_1", "PATCH").at(-1)?.body as Record<string, unknown>;
     expect(body.name).toBe("Renamed");
     expect(body.expected_revision).toBe("rev_1");
     // Sending the version too would make a rename fail because somebody else
     // sharpened a scenario, which is a conflict that never existed.
     expect(body.expected_version_id).toBeUndefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+    const leave = await screen.findByRole("dialog", {
+      name: "Leave without saving?",
+    });
+    expect(sentTo("/api/tests/tst_1/clone")).toHaveLength(0);
+    fireEvent.click(within(leave).getByRole("button", { name: "Keep editing" }));
+    expect(sentTo("/api/tests/tst_1/clone")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    const lifecycle = await screen.findByRole("dialog", {
+      name: /^Archive test/u,
+    });
+    fireEvent.click(
+      within(lifecycle).getByRole("button", { name: "Archive test" }),
+    );
+    const discard = await screen.findByRole("dialog", {
+      name: "Leave without saving?",
+    });
+    expect(sentTo("/api/tests/tst_1/archive")).toHaveLength(0);
+    fireEvent.click(
+      within(discard).getByRole("button", { name: "Keep editing" }),
+    );
+    expect(sentTo("/api/tests/tst_1/archive")).toHaveLength(0);
   });
 
-  it("saves content with the version alone, and never mentions the overrides it does not edit", async () => {
-    detail("admin", testRow({ override_count: 2 }));
+  it("saves content with the version alone and preserves hidden backend fields", async () => {
+    detail(
+      "admin",
+      testRow({ override_count: 2, required_capabilities: ["raw_audio"] }),
+    );
     await screen.findByLabelText("Scenario");
+
+    const expectedBehavior = screen.getByLabelText("Expected behavior 1");
+    expect(expectedBehavior.getAttribute("rows")).toBe("1");
+    expect(
+      within(expectedBehavior.closest("li") as HTMLElement).getByRole(
+        "button",
+        { name: "Remove" },
+      ),
+    ).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Scenario"), {
       target: { value: "They call from the station." },
@@ -475,20 +709,19 @@ describe("one test's page", () => {
     expect(body.expected_version_id).toBe("tstv_1");
     expect(body.expected_revision).toBeUndefined();
     // The whole of what stops a partial form erasing hidden versioned content:
-    // the form does not edit the overrides, so it does not send them.
+    // the form does not edit overrides or capabilities, so it sends neither.
     expect("mock_tools" in body).toBe(false);
-  });
-
-  it("says the overrides are there without showing or editing them", async () => {
-    detail("admin", testRow({ override_count: 2 }));
-    expect(await screen.findByText("Overrides present")).toBeTruthy();
+    expect("required_capabilities" in body).toBe(false);
+    expect(screen.queryByText("What else this test carries")).toBeNull();
   });
 
   it("saves the applicable agents through their own door, with their own token", async () => {
     detail("admin", testRow(), [agentRow(), agentRow({ id: "agt_2", name: "Weekend desk" })]);
-    await screen.findByLabelText("Weekend desk");
-
-    fireEvent.click(await screen.findByLabelText("Weekend desk"));
+    await screen.findByLabelText("Name");
+    fireEvent.click(screen.getByRole("button", { name: "Choose agents" }));
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "Weekend desk" }),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Save applicable agents" }),
     );
@@ -504,13 +737,14 @@ describe("one test's page", () => {
     // Target coverage is neither the live identity nor the versioned content.
     expect(body.expected_revision).toBeUndefined();
     expect(body.expected_version_id).toBeUndefined();
+    expect(await screen.findByText("Saved")).toBeTruthy();
   });
 
   it("will not let the last applicable agent be saved away", async () => {
     detail();
-    await screen.findByLabelText("Front desk");
-
-    fireEvent.click(await screen.findByLabelText("Front desk"));
+    await screen.findByLabelText("Name");
+    fireEvent.click(screen.getByRole("button", { name: "Choose agents" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Front desk" }));
 
     expect(
       screen
@@ -535,8 +769,12 @@ describe("one test's page", () => {
 
     // The project's active list does not hold it, and offering only that list
     // would drop the link the moment anybody saved.
-    const gone = await screen.findByLabelText(/Retired desk/u);
-    expect((gone as HTMLInputElement).checked).toBe(true);
+    await screen.findByLabelText("Name");
+    fireEvent.click(screen.getByRole("button", { name: "Choose agents" }));
+    const gone = await screen.findByRole("checkbox", {
+      name: /Retired desk, archived/u,
+    });
+    expect(gone.getAttribute("aria-checked")).toBe("true");
     expect(screen.getAllByText("Archived").length).toBeGreaterThan(0);
   });
 
@@ -568,6 +806,7 @@ describe("one test's page", () => {
     });
     render(<TestDetailPage />);
     await screen.findByLabelText("Name");
+    expect(screen.getAllByText("Unchanged")).toHaveLength(3);
 
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Typed and refused" },
@@ -577,6 +816,7 @@ describe("one test's page", () => {
     expect(
       await screen.findByText("Test tst_1 changed after you opened it."),
     ).toBeTruthy();
+    expect(screen.getByText("Save failed")).toBeTruthy();
     // A refusal that cleared the fields would make somebody retype their work to
     // find out whether the second attempt fails the same way.
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
@@ -688,6 +928,8 @@ describe("one test's page", () => {
     fireEvent.click(readers[1] as HTMLElement);
 
     expect(await screen.findByText("What it used to say.")).toBeTruthy();
+    const reading = screen.getByRole("article", { name: "Version 1" });
+    expect(within(reading).getByRole("list").tagName).toBe("UL");
     // Making an old version current is an edit somebody makes deliberately by
     // carrying it forward, never a control on a page opened to look at history.
     expect(screen.queryByRole("button", { name: /Restore this version/u })).toBeNull();
@@ -724,7 +966,7 @@ describe("one test's page", () => {
         agents: [],
       }),
     );
-    await screen.findByLabelText("Front desk");
+    await screen.findByLabelText("Name");
 
     // The state and the reason are both said, because the person finding it did
     // not choose it and the fix is to link an agent.
@@ -732,7 +974,8 @@ describe("one test's page", () => {
       screen.getByText(/Archived during an upgrade/u),
     ).toBeTruthy();
 
-    fireEvent.click(await screen.findByLabelText("Front desk"));
+    fireEvent.click(screen.getByRole("button", { name: "Choose agents" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Front desk" }));
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
 
     const dialog = await screen.findByRole("dialog", {
@@ -740,6 +983,14 @@ describe("one test's page", () => {
     });
     expect(sentTo("/api/tests/tst_1/restore")).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole("button", { name: "Restore test" }));
+
+    const leave = await screen.findByRole("dialog", {
+      name: "Leave without saving?",
+    });
+    expect(sentTo("/api/tests/tst_1/restore")).toHaveLength(0);
+    fireEvent.click(
+      within(leave).getByRole("button", { name: "Discard changes" }),
+    );
 
     await waitFor(() => {
       expect(sentTo("/api/tests/tst_1/restore").length).toBeGreaterThan(0);

@@ -1,6 +1,7 @@
 import {
   addConnection,
   AgentWriteRefusedError,
+  authorize,
   archiveAgent,
   archiveConnection,
   CAPABILITY_CATALOG,
@@ -46,6 +47,10 @@ import type { RetellReach } from "../retell/api.ts";
 import { reconcileRetellWebhook } from "../retell/registration.ts";
 import { given, projectNamed, text } from "../http/reading.ts";
 import {
+  discoverRetellVoiceAgents,
+  verifyRetellVoiceRoute,
+} from "../providers/retell.ts";
+import {
   CODES,
   identityConflict,
   type RefusalCode,
@@ -84,6 +89,8 @@ import {
 export type AgentRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
+  /** Test seam for Retell account reads. Production uses the global fetch. */
+  readonly retellFetch?: typeof fetch | undefined;
   /**
    * The origin this deployment is reached at. Switching production watching on
    * registers a webhook at it, when it is an address a provider could reach —
@@ -660,6 +667,152 @@ export async function agentRoutes(
   });
 
   /**
+   * Read the voice agents and routed numbers on one Retell account.
+   *
+   * The key is used for these two provider reads only. The response contains
+   * provider ids, display names, and phone numbers; it never contains the key
+   * or Retell's raw documents. Creating the selected connection remains the
+   * ordinary agent-rooted write below.
+   */
+  app.post("/api/providers/retell/voice-agents", async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const body = (request.body ?? {}) as Body;
+    const unknown = unknownKeyIn(body, ["api_key"], "a Retell account read");
+    if (unknown !== undefined) return refused(reply, unknown);
+
+    const apiKey = textWhenGiven(body.api_key, "a Retell API key");
+    if (isRefusal(apiKey)) return refused(reply, apiKey);
+    if (apiKey === undefined || apiKey.trim().length < 8) {
+      return refused(reply, {
+        refused: true,
+        error: "unprocessable",
+        message: "Paste a Retell API key, then try again.",
+      });
+    }
+
+    const acting = await actingProject(auth, request, "writes into");
+    if (isRefusal(acting)) return refused(reply, acting);
+    authorize(acting, "configure_agents", {
+      organizationId: acting.organizationId,
+      projectId: acting.projectId,
+    });
+
+    const found = await discoverRetellVoiceAgents(
+      apiKey.trim(),
+      options.retellFetch,
+    );
+    if (found.kind === "invalid_key") {
+      return refused(reply, {
+        refused: true,
+        error: "unprocessable",
+        message:
+          "Retell did not accept that API key. Copy it again from Retell, then try again.",
+      });
+    }
+    if (found.kind === "unavailable") {
+      return refused(reply, {
+        refused: true,
+        error: "unavailable",
+        message: found.message,
+      });
+    }
+    return reply.send({ agents: found.agents });
+  });
+
+  /**
+   * Confirm and attach one Retell-routed phone number in one operation.
+   *
+   * The key is used to re-read the chosen agent and number immediately before
+   * the write. Only the provider-blind E.164 number reaches the connection row.
+   */
+  app.post(
+    "/api/agents/:agentId/connections/retell-phone",
+    async (request, reply) => {
+      const { auth } = requesterOf(request);
+      const { agentId } = request.params as { agentId: string };
+      const body = (request.body ?? {}) as Body;
+      const unknown = unknownKeyIn(
+        body,
+        ["api_key", "retell_agent_id", "phone_number", "name"],
+        "a Retell phone connection",
+      );
+      if (unknown !== undefined) return refused(reply, unknown);
+
+      const apiKey = textWhenGiven(body.api_key, "a Retell API key");
+      if (isRefusal(apiKey)) return refused(reply, apiKey);
+      const retellAgentId = textWhenGiven(
+        body.retell_agent_id,
+        "a Retell agent id",
+      );
+      if (isRefusal(retellAgentId)) return refused(reply, retellAgentId);
+      const phoneNumber = textWhenGiven(body.phone_number, "a phone number");
+      if (isRefusal(phoneNumber)) return refused(reply, phoneNumber);
+      const name = textWhenGiven(body.name, "a connection name");
+      if (isRefusal(name)) return refused(reply, name);
+      if (
+        apiKey === undefined ||
+        apiKey.trim().length < 8 ||
+        retellAgentId === undefined ||
+        phoneNumber === undefined
+      ) {
+        return refused(reply, {
+          refused: true,
+          error: "unprocessable",
+          message:
+            "Choose a Retell voice agent and one of its phone numbers, then try again.",
+        });
+      }
+
+      const acting = await actingProject(auth, request, "writes into");
+      if (isRefusal(acting)) return refused(reply, acting);
+      authorize(acting, "configure_agents", {
+        organizationId: acting.organizationId,
+        projectId: acting.projectId,
+      });
+      if ((await getAgent(acting, agentId)) === undefined) {
+        return refused(reply, NO_SUCH_AGENT);
+      }
+      const checked = await verifyRetellVoiceRoute(
+        apiKey.trim(),
+        retellAgentId,
+        phoneNumber,
+        options.retellFetch,
+      );
+      if (checked.kind === "invalid_key") {
+        return refused(reply, {
+          refused: true,
+          error: "unprocessable",
+          message:
+            "Retell did not accept that API key. Copy it again from Retell, then try again.",
+        });
+      }
+      if (checked.kind === "rejected") {
+        return refused(reply, {
+          refused: true,
+          error: "unprocessable",
+          message: checked.message,
+        });
+      }
+      if (checked.kind === "unavailable") {
+        return refused(reply, {
+          refused: true,
+          error: "unavailable",
+          message: checked.message,
+        });
+      }
+
+      const added = await addConnection(acting, agentId, {
+        ...(name === undefined ? {} : { name }),
+        type: "phone",
+        modality: "voice",
+        config: { phoneNumber: checked.number },
+      });
+      if (added === undefined) return refused(reply, NO_SUCH_AGENT);
+      return reply.code(201).send({ connection: describedConnection(added) });
+    },
+  );
+
+  /**
    * Every connection type egma supports, as a form may be drawn from it.
    *
    * **The web application must never keep its own copy of any of this.** The
@@ -697,6 +850,7 @@ export async function agentRoutes(
             kind: field.kind,
             required: field.required,
             help: field.help,
+            after_credentials: field.afterCredentials === true,
           })),
           credential_rule: variant.credentialRule,
           credential_help: variant.credentialHelp,

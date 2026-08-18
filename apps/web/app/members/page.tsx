@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { readJson, type Answer } from "../../lib/api.ts";
@@ -24,6 +25,7 @@ import { ProductStatePage } from "../../ui/shell.tsx";
  * draw one, and is sent to make its first instead.
  */
 export default function MembersPage() {
+  const router = useRouter();
   const [answer, setAnswer] = useState<Answer<Me> | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -35,13 +37,13 @@ export default function MembersPage() {
       if (!current) return;
 
       if (next.status === "signed-out") {
-        window.location.replace("/sign-in");
+        router.replace("/sign-in");
         return;
       }
 
       if (next.status === "ready") {
         const first = firstProjectOf(next.value);
-        window.location.replace(
+        router.replace(
           first === undefined
             ? NEW_PROJECT_PATH
             : settingsPath(first.id, "people"),
@@ -55,7 +57,7 @@ export default function MembersPage() {
     return () => {
       current = false;
     };
-  }, [attempt]);
+  }, [attempt, router]);
 
   if (answer === null || answer.status === "ready") {
     return (

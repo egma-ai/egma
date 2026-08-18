@@ -105,15 +105,31 @@ describe("what a browser is told about a connection type", () => {
       .find((one) => one.type === "livekit")
       ?.variants.find((one) => one.id === "livekit.key_pair");
 
-    const required = new Map(
-      (keyPair?.fields ?? []).map((field) => [field.key, field.required]),
+    const fields = new Map(
+      (keyPair?.fields ?? []).map((field) => [field.key, field]),
     );
     // A blank agent name is automatic dispatch, which is the state every
     // quickstart agent runs in — so demanding it would make somebody write a
     // value down to mean the default they already had.
-    expect(required.get("url")).toBe(true);
-    expect(required.get("agentName")).toBe(false);
-    expect(required.get("metadata")).toBe(false);
+    expect(fields.get("url")).toMatchObject({
+      label: "LiveKit WebSocket URL",
+      required: true,
+    });
+    expect(fields.get("agentName")).toMatchObject({
+      label: "LiveKit agent name",
+      required: false,
+    });
+    expect(fields.get("metadata")).toMatchObject({
+      required: false,
+      afterCredentials: true,
+    });
+
+    const endpoint = connectionTypeMetadata()
+      .find((one) => one.type === "livekit")
+      ?.variants.find((one) => one.id === "livekit.token_endpoint");
+    expect(endpoint?.fields.find((field) => field.key === "url")?.label).toBe(
+      "LiveKit WebSocket URL",
+    );
   });
 
   it("says which shape a config lands in, and reads a stored one back", () => {

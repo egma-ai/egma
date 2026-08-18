@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   conductableConnectionTypes,
+  connectionIsConductable,
   descriptorOf,
   gatedConfig,
   noSimulatorAdapterMessage,
@@ -587,6 +588,12 @@ describe("what the shipped simulator can conduct", () => {
   it("counts phone among them, because the phone plug ships", () => {
     expect(descriptorOf("phone").simulatorAdapter).toBe(true);
     expect(conductableConnectionTypes()).toContain("phone");
+  });
+
+  it("checks the exact stored type and modality before dispatch", () => {
+    expect(connectionIsConductable("retell", "chat")).toBe(true);
+    expect(connectionIsConductable("retell", "voice")).toBe(false);
+    expect(connectionIsConductable("phone", "voice")).toBe(true);
   });
 
   it("names every shipped type in the refusal, and takes the list from the registry", () => {

@@ -18,7 +18,6 @@ import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
   Button,
-  ButtonLink,
   Field,
   Form,
   FormActions,
@@ -26,6 +25,7 @@ import {
   TextInput,
 } from "../../../../../ui/controls.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
   PageBody,
@@ -77,6 +77,14 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
+  const changed =
+    name !== "" ||
+    description !== "" ||
+    Object.entries(traits).some(
+      ([key, value]) => value !== BLANK_TRAITS[key as keyof TraitsDraft],
+    );
+  useUnsavedChanges(changed && !saving, saving);
+
   const mayAuthor = role !== null && canAuthor(role);
   const whyNot =
     role === null
@@ -120,12 +128,11 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
       <PageHeader
         eyebrow="Personas"
         title="New persona"
+        breadcrumbs={[
+          { label: "Personas", href: projectPath(projectId, "personas") },
+          { label: "New persona" },
+        ]}
         lead="Who calls, and how they behave — never what they want on a given occasion, which is the test's."
-        action={
-          <ButtonLink href={projectPath(projectId, "personas")}>
-            Back to personas
-          </ButtonLink>
-        }
       />
       <PageBody>
         {refusal === null ? null : <Refused message={refusal.message} />}

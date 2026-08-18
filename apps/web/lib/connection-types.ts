@@ -25,6 +25,8 @@ export type ConfigField = {
   readonly kind: FieldKind;
   readonly required: boolean;
   readonly help: string;
+  /** Draw this supporting field after the credential fields. */
+  readonly after_credentials: boolean;
 };
 
 export type CredentialField = {
@@ -63,6 +65,29 @@ export type ConnectionTypeCatalog = {
 };
 
 export const CONNECTION_TYPES_PATH = "/api/connection-types";
+
+export type RetellRoutedNumber = {
+  readonly number: string;
+  readonly label: string;
+};
+
+export type RetellVoiceAgent = {
+  readonly id: string;
+  readonly name: string;
+  readonly numbers: readonly RetellRoutedNumber[];
+};
+
+export type RetellVoiceAgents = {
+  readonly agents: readonly RetellVoiceAgent[];
+};
+
+/** A read-only provider setup step. The key is never returned. */
+export const RETELL_VOICE_AGENTS_PATH = "/api/providers/retell/voice-agents";
+
+/** Confirm a selected Retell route and attach its provider-blind phone number. */
+export function retellPhoneConnectionPath(agentId: string): string {
+  return `/api/agents/${encodeURIComponent(agentId)}/connections/retell-phone`;
+}
 
 export type CapabilityEntry = {
   readonly key: string;

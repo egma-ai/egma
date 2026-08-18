@@ -130,6 +130,7 @@ export {
   ProjectSlugTakenError,
   RunRetryRefusedError,
   RunWriteRefusedError,
+  SimulationRerunRefusedError,
   TestAgentRefusedError,
   TestDependencyInactiveError,
   TestMovedOnError,
@@ -147,6 +148,7 @@ export {
   type JudgeCredentialUse,
   type RetryBlocker,
   type RunWriteRefusal,
+  type SimulationRerunRefusal,
   type TestAgentRefusal,
   type TestNamingPersona,
 } from "./errors.ts";
@@ -600,6 +602,7 @@ export {
   listSimulations,
   markSimulationCanceled,
   recordSimulationHeartbeat,
+  releaseSimulationClaim,
   resolveSimulationConnection,
   resolveSimulationStanding,
   startRun,
@@ -656,11 +659,14 @@ export { RUN_STATUSES } from "../schema/runs.ts";
 export {
   listRunHistory,
   readRunFold,
+  rerunSimulation,
+  simulationRerunAlreadyStarted,
   retryRun,
   type RetryRequest,
   type RunHistoryEntry,
   type RunHistoryPage,
   type RunHistoryRequest,
+  type SimulationRerunRequest,
 } from "./run-history.ts";
 export type { RunFilter } from "./runs.ts";
 

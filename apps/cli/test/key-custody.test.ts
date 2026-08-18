@@ -46,8 +46,8 @@ const SCRIPT: FakeRetellScript = {
   agents: [
     {
       agent_id: "agent_0001",
-      agent_name: "order-line",
       channel: "chat",
+      agent_name: "order-line",
       voice_id: "11labs-Adrian",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },

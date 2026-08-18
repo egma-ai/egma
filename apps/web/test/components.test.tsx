@@ -21,9 +21,16 @@ import { Button, ButtonLink, Checkbox, Field } from "../ui/controls.tsx";
 import { DataTable, type Column } from "../ui/data-table.tsx";
 import { Dialog } from "../ui/dialog.tsx";
 import { Failure, NotFound } from "../ui/page-state.tsx";
+import { PageNavigation } from "../ui/page-navigation.tsx";
 import { ProjectSelector } from "../ui/project-selector.tsx";
 import { RunProgress } from "../ui/run-status.tsx";
-import { AppShell } from "../ui/shell.tsx";
+import { useUnsavedChanges } from "../ui/settings-read.ts";
+import {
+  AppShell,
+  PageHeader,
+  ProductShellBoundary,
+  useShellSession,
+} from "../ui/shell.tsx";
 
 /**
  * The shared components, rendered.
@@ -377,6 +384,46 @@ describe("the organization and project selector", () => {
   });
 });
 
+describe("nested page navigation", () => {
+  it("links every parent and names the current page without making it a link", () => {
+    render(
+      <PageNavigation
+        items={[
+          { label: "Runs", href: "/projects/prj_1/runs" },
+          { label: "Nightly smoke", href: "/projects/prj_1/runs/run_1" },
+          { label: "Simulation 01" },
+        ]}
+      />,
+    );
+
+    const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const runs = within(navigation).getByRole("link", { name: "Runs" });
+    const run = within(navigation).getByRole("link", { name: "Nightly smoke" });
+    const current = within(navigation).getByText("Simulation 01");
+
+    expect(runs.getAttribute("href")).toBe("/projects/prj_1/runs");
+    expect(run.getAttribute("href")).toBe("/projects/prj_1/runs/run_1");
+    expect(current.getAttribute("aria-current")).toBe("page");
+    expect(current.closest("a")).toBeNull();
+  });
+
+  it("lets the breadcrumb own section context instead of repeating the eyebrow", () => {
+    render(
+      <PageHeader
+        eyebrow="Runs"
+        title="Nightly smoke"
+        breadcrumbs={[
+          { label: "Runs", href: "/projects/prj_1/runs" },
+          { label: "Nightly smoke" },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByText("Runs")).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "Nightly smoke" })).toBeTruthy();
+  });
+});
+
 /* ------------------------------------------------------------------------ */
 
 describe("a control somebody may not use", () => {
@@ -583,6 +630,47 @@ describe("a dialog", () => {
     matches.mockRestore();
   });
 
+  it("uses the same modal lifecycle for a right-side sheet", () => {
+    function Example() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open evidence
+          </button>
+          {open ? (
+            <Dialog
+              kind="sheet"
+              title="Transcript and audio"
+              onClose={() => setOpen(false)}
+            >
+              <audio aria-label="Simulation recording" />
+            </Dialog>
+          ) : null}
+        </>
+      );
+    }
+
+    render(<Example />);
+    const opener = screen.getByRole("button", { name: "Open evidence" });
+    opener.focus();
+    fireEvent.click(opener);
+
+    const sheet = screen.getByRole("dialog", {
+      name: "Transcript and audio",
+    });
+    expect(sheet.getAttribute("data-kind")).toBe("sheet");
+    expect(sheet.getAttribute("aria-modal")).toBe("true");
+    expect(sheet.contains(document.activeElement)).toBe(true);
+    expect(within(sheet).getByRole("button", { name: "Close" })).toBeTruthy();
+
+    const cancel = new Event("cancel", { cancelable: true });
+    fireEvent(sheet, cancel);
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(screen.queryByRole("dialog", { name: "Transcript and audio" })).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
   it("keeps a pointer-dismissed dialog present through its short exit", () => {
     const onClose = vi.fn();
     render(
@@ -754,6 +842,82 @@ describe("a page that is not showing its data", () => {
 
 /* ------------------------------------------------------------------------ */
 
+describe("the shared draft navigation guard", () => {
+  function DraftPage({ busy = false }: { readonly busy?: boolean }) {
+    const [changed, setChanged] = useState(false);
+    const state = useUnsavedChanges(changed && !busy, busy);
+
+    return (
+      <AppShell initialMe={meWith("admin")}>
+        <button type="button" onClick={() => setChanged(true)}>Change name</button>
+        <span aria-label="Draft state">{state}</span>
+        <a href="/projects/prj_1/tests">Leave page</a>
+      </AppShell>
+    );
+  }
+
+  it("keeps a draft on the page until the discard action is explicit", () => {
+    render(<DraftPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Change name" }));
+    expect(screen.getByLabelText("Draft state").textContent).toBe("unsaved");
+
+    const destination = screen.getByRole("link", { name: "Leave page" });
+    destination.focus();
+    fireEvent.click(destination);
+
+    expect(routed.push).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" }))
+      .toBeNull();
+    expect(document.activeElement).toBe(destination);
+
+    const [projectSelector] = screen.getAllByRole("button", {
+      name: /^Organization Acme/u,
+    });
+    expect(projectSelector).toBeDefined();
+    if (projectSelector === undefined) throw new Error("project selector missing");
+    fireEvent.click(projectSelector);
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByText("Outbound"),
+    );
+    expect(routed.push).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(routed.push).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(projectSelector);
+
+    fireEvent.click(destination);
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/tests");
+  });
+
+  it("blocks in-product navigation and browser unload while a write is in flight", () => {
+    render(<DraftPage busy />);
+    expect(screen.getByLabelText("Draft state").textContent).toBe("saving");
+
+    const destination = screen.getByRole("link", { name: "Leave page" });
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    destination.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(routed.push).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" }))
+      .toBeNull();
+
+    const leaving = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
 /**
  * What the shell claims about somebody, and when.
  *
@@ -763,6 +927,102 @@ describe("a page that is not showing its data", () => {
  * they do not hold. Not knowing is its own answer.
  */
 describe("the role the shell shows", () => {
+  it("keeps resolved project context while the page changes", async () => {
+    apiAnswers({
+      "/api/me": [
+        { status: 200, body: meWith("admin") },
+        "never",
+      ],
+    });
+
+    const { rerender } = render(
+      <ProductShellBoundary>
+        <AppShell key="agents">
+          <p>Agents page</p>
+        </AppShell>
+      </ProductShellBoundary>,
+    );
+    expect(await screen.findAllByText("ada@acme.example")).not.toHaveLength(0);
+
+    routed.pathname = "/projects/prj_1/tests";
+    rerender(
+      <ProductShellBoundary>
+        <AppShell key="tests">
+          <p>Tests page</p>
+        </AppShell>
+      </ProductShellBoundary>,
+    );
+
+    expect(screen.getByText("Tests page")).toBeDefined();
+    expect(screen.queryAllByText("Checking your session…")).toHaveLength(0);
+    expect(screen.queryAllByText("No organization")).toHaveLength(0);
+    expect(screen.queryAllByText("Unknown project")).toHaveLength(0);
+    expect(screen.getAllByText("ada@acme.example")).not.toHaveLength(0);
+
+    routed.pathname = "/new-project";
+    rerender(
+      <ProductShellBoundary>
+        <AppShell key="new-project">
+          <p>New project page</p>
+        </AppShell>
+      </ProductShellBoundary>,
+    );
+
+    expect(screen.getByText("New project page")).toBeDefined();
+    expect(screen.queryAllByText("Checking your session…")).toHaveLength(0);
+    expect(screen.queryAllByText("No organization")).toHaveLength(0);
+    expect(screen.getAllByText("ada@acme.example")).not.toHaveLength(0);
+
+    const sessionReads = vi.mocked(fetch).mock.calls.filter(([input]) =>
+      new URL(String(input), "http://egma.test").pathname === "/api/me"
+    );
+    expect(sessionReads).toHaveLength(1);
+  });
+
+  it("refreshes changed shell context without first clearing the old answer", async () => {
+    const renamed: Me = {
+      ...meWith("admin"),
+      organizations: [{ ...ACME, name: "Analytical Engines" }],
+    };
+    apiAnswers({
+      "/api/me": [
+        { status: 200, body: meWith("admin") },
+        { status: 200, body: renamed },
+      ],
+    });
+
+    function RefreshProbe() {
+      const { me, refresh } = useShellSession();
+      return (
+        <button type="button" onClick={() => void refresh()}>
+          Refresh {me?.organizations[0]?.name ?? "unknown"}
+        </button>
+      );
+    }
+
+    render(
+      <ProductShellBoundary>
+        <RefreshProbe />
+      </ProductShellBoundary>,
+    );
+
+    const refresh = await screen.findByRole("button", { name: "Refresh Acme" });
+    fireEvent.click(refresh);
+
+    expect(screen.queryAllByText("Checking your session…")).toHaveLength(0);
+    expect(screen.queryAllByText("No organization")).toHaveLength(0);
+    expect(
+      await screen.findByRole("button", {
+        name: "Refresh Analytical Engines",
+      }),
+    ).toBeDefined();
+
+    const sessionReads = vi.mocked(fetch).mock.calls.filter(([input]) =>
+      new URL(String(input), "http://egma.test").pathname === "/api/me"
+    );
+    expect(sessionReads).toHaveLength(2);
+  });
+
   it("starts the signed-in sidebar with project context, not a repeated logo", () => {
     render(
       <AppShell initialMe={meWith("admin")}>
@@ -799,7 +1059,8 @@ describe("the role the shell shows", () => {
     expect(within(product).queryByRole("link", { name: "Settings" })).toBeNull();
 
     fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
-    expect(screen.getByRole("menuitem", { name: "Settings" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Settings" }));
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("claims nothing at all while the session read is in flight", async () => {

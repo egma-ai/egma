@@ -432,7 +432,6 @@ describe("project settings", () => {
     // Saving does not lock the fields. This edit is a new draft, made after
     // the submitted value was captured and before the confirming read lands.
     fireEvent.change(name, { target: { value: "Rename after saving" } });
-    confirm.mockReturnValue(false);
     await act(async () => {
       finishSave({ status: 200, body: renamed });
     });
@@ -447,11 +446,16 @@ describe("project settings", () => {
       cancelable: true,
       button: 0,
     });
-    within(screen.getByRole("navigation", { name: "Settings" }))
-      .getByRole("link", { name: "Judge" })
-      .dispatchEvent(clickWhileConfirming);
+    fireEvent(
+      within(screen.getByRole("navigation", { name: "Settings" }))
+        .getByRole("link", { name: "Judge" }),
+      clickWhileConfirming,
+    );
     expect(clickWhileConfirming.defaultPrevented).toBe(true);
-    expect(confirm).toHaveBeenLastCalledWith("Discard your unsaved changes?");
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(confirm).not.toHaveBeenCalled();
 
     await act(async () => {
       finishReload({
@@ -466,11 +470,15 @@ describe("project settings", () => {
       cancelable: true,
       button: 0,
     });
-    within(screen.getByRole("navigation", { name: "Settings" }))
-      .getByRole("link", { name: "Judge" })
-      .dispatchEvent(clickAfterFailure);
+    fireEvent(
+      within(screen.getByRole("navigation", { name: "Settings" }))
+        .getByRole("link", { name: "Judge" }),
+      clickAfterFailure,
+    );
     expect(clickAfterFailure.defaultPrevented).toBe(true);
-    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => {
@@ -516,11 +524,11 @@ describe("project settings", () => {
       cancelable: true,
       button: 0,
     });
-    judge.dispatchEvent(click);
+    fireEvent(judge, click);
     expect(click.defaultPrevented).toBe(true);
-    expect(confirm).toHaveBeenCalledWith(
-      "Discard your unsaved changes?",
-    );
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
     const selectors = await screen.findAllByRole("button", {
       name: /^Organization Acme, project Default\./,
@@ -529,10 +537,16 @@ describe("project settings", () => {
     const outbound = screen.getByRole("button", { name: "Outbound" });
     fireEvent.click(outbound);
     expect(routed.push).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(document.activeElement).toBe(selectors[0]);
 
-    confirm.mockReturnValue(true);
-    fireEvent.click(outbound);
+    fireEvent.click(selectors[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Outbound" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/settings");
+    expect(confirm).not.toHaveBeenCalled();
   });
 
   /**
@@ -599,7 +613,7 @@ describe("project settings", () => {
         expect(name.value).toBe("Default");
       });
       expect(name.disabled).toBe(true);
-      expect((screen.getByLabelText("Slug") as HTMLInputElement).disabled).toBe(true);
+      expect(screen.queryByLabelText("Slug")).toBeNull();
 
       const save = screen.getByRole("button", { name: "Save project" });
       expect(save.hasAttribute("disabled")).toBe(true);
@@ -634,9 +648,7 @@ describe("project settings", () => {
     });
 
     expect(name.disabled).toBe(false);
-    expect((screen.getByLabelText("Slug") as HTMLInputElement).disabled).toBe(
-      false,
-    );
+    expect(screen.queryByLabelText("Slug")).toBeNull();
       expect(
         screen
           .getByRole("button", { name: "Save project" })
@@ -687,9 +699,49 @@ describe("project settings", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("making a project", () => {
-  it("asks for a name, and lands in the project it made", async () => {
+  it("protects its draft from product navigation", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
+      "/api/projects": "never",
+    });
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    render(<NewProjectPage />);
+
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "Keep this project" },
+    });
+    const agents = within(
+      screen.getByRole("navigation", { name: "Product navigation" }),
+    ).getByRole("link", { name: "Agents" });
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    fireEvent(agents, click);
+
+    expect(click.defaultPrevented).toBe(true);
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("asks for a name, and lands in the project it made", async () => {
+    apiAnswers({
+      "/api/me": [
+        { status: 200, body: meWith("admin") },
+        {
+          status: 200,
+          body: {
+            ...meWith("admin"),
+            projects: [
+              ...PROJECTS,
+              { id: "prj_9", name: "Outbound sales", slug: "outbound-sales" },
+            ],
+          },
+        },
+      ],
       "/api/projects": {
         status: 201,
         body: { ...PROJECT, id: "prj_9", name: "Outbound sales" },
@@ -703,7 +755,7 @@ describe("making a project", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
 
     await waitFor(() => {
-      expect(wentTo).toContain("/projects/prj_9/agents");
+      expect(routed.push).toHaveBeenCalledWith("/projects/prj_9/agents");
     });
     expect(sent.find((one) => one.method === "POST")?.body).toEqual({
       name: "Outbound sales",
@@ -939,11 +991,16 @@ describe("organization settings", () => {
       cancelable: true,
       button: 0,
     });
-    within(screen.getByRole("navigation", { name: "Settings" }))
-      .getByRole("link", { name: "Judge" })
-      .dispatchEvent(clickWhileConfirming);
+    fireEvent(
+      within(screen.getByRole("navigation", { name: "Settings" }))
+        .getByRole("link", { name: "Judge" }),
+      clickWhileConfirming,
+    );
     expect(clickWhileConfirming.defaultPrevented).toBe(true);
-    expect(confirm).toHaveBeenLastCalledWith("Discard your unsaved changes?");
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(confirm).not.toHaveBeenCalled();
 
     await act(async () => {
       finishReload({
@@ -963,11 +1020,15 @@ describe("organization settings", () => {
       cancelable: true,
       button: 0,
     });
-    within(screen.getByRole("navigation", { name: "Settings" }))
-      .getByRole("link", { name: "Judge" })
-      .dispatchEvent(clickAfterFailure);
+    fireEvent(
+      within(screen.getByRole("navigation", { name: "Settings" }))
+        .getByRole("link", { name: "Judge" }),
+      clickAfterFailure,
+    );
     expect(clickAfterFailure.defaultPrevented).toBe(true);
-    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => {
@@ -1354,16 +1415,18 @@ describe("judge settings", () => {
     ).toBeTruthy();
   });
 
-  /**
-   * The way back to what the judge is for. It was taken off the page when the
-   * project-scoped graders route was deleted, rather than left pointing at an
-   * address that answered nothing; it returns with the route.
-   */
-  it("offers the way back to this project's graders", async () => {
+  it("puts the judge inside shared Settings navigation instead of a page action", async () => {
     open();
 
-    const back = await screen.findByRole("link", { name: "Back to graders" });
-    expect(back.getAttribute("href")).toBe("/projects/prj_1/graders");
+    const breadcrumb = await screen.findByRole("navigation", {
+      name: "Breadcrumb",
+    });
+    const settings = within(breadcrumb).getByRole("link", { name: "Settings" });
+    const judge = within(breadcrumb).getByText("Judge");
+
+    expect(settings.getAttribute("href")).toBe("/projects/prj_1/settings");
+    expect(judge.getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByRole("link", { name: "Back to graders" })).toBeNull();
   });
 
   /**
@@ -1643,11 +1706,16 @@ describe("judge settings", () => {
       cancelable: true,
       button: 0,
     });
-    within(screen.getByRole("navigation", { name: "Settings" }))
-      .getByRole("link", { name: "Organization" })
-      .dispatchEvent(clickWhileConfirming);
+    fireEvent(
+      within(screen.getByRole("navigation", { name: "Settings" }))
+        .getByRole("link", { name: "Organization" }),
+      clickWhileConfirming,
+    );
     expect(clickWhileConfirming.defaultPrevented).toBe(true);
-    expect(confirm).toHaveBeenLastCalledWith("Discard your unsaved changes?");
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(confirm).not.toHaveBeenCalled();
 
     await act(async () => {
       finishReload({
@@ -1662,11 +1730,15 @@ describe("judge settings", () => {
       cancelable: true,
       button: 0,
     });
-    within(screen.getByRole("navigation", { name: "Settings" }))
-      .getByRole("link", { name: "Organization" })
-      .dispatchEvent(clickAfterFailure);
+    fireEvent(
+      within(screen.getByRole("navigation", { name: "Settings" }))
+        .getByRole("link", { name: "Organization" }),
+      clickAfterFailure,
+    );
     expect(clickAfterFailure.defaultPrevented).toBe(true);
-    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => {
@@ -1869,7 +1941,7 @@ describe("people and invitations", () => {
           ?.hasAttribute("disabled"),
       ).toBe(true);
       expect(
-        screen.queryByRole("radio", { name: "Invitations" }),
+        screen.queryByRole("tab", { name: "Invitations" }),
       ).toBeNull();
     },
   );
@@ -1900,7 +1972,7 @@ describe("people and invitations", () => {
     });
     render(<PeoplePage />);
 
-    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
 
     fireEvent.change(await screen.findByLabelText("Email"), {
       target: { value: "bob@acme.example" },
@@ -1915,12 +1987,10 @@ describe("people and invitations", () => {
       "http://egma.test/invite?token=abc",
     );
 
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirm);
-    fireEvent.click(screen.getByRole("radio", { name: "People" }));
-    expect(confirm).toHaveBeenCalledWith(
-      "Discard your unsaved changes?",
-    );
+    fireEvent.click(screen.getByRole("tab", { name: "People" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(document.body.textContent).toContain(
       "http://egma.test/invite?token=abc",
     );
@@ -1951,7 +2021,7 @@ describe("people and invitations", () => {
     });
     render(<PeoplePage />);
 
-    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     fireEvent.change(await screen.findByLabelText("Email"), {
       target: { value: "bob@acme.example" },
     });
@@ -1966,7 +2036,7 @@ describe("people and invitations", () => {
   it("defaults a new invitation to Viewer", async () => {
     open("admin", true, [ADA], []);
 
-    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     expect((await screen.findByLabelText("Role") as HTMLSelectElement).value).toBe(
       "viewer",
     );
@@ -1975,20 +2045,21 @@ describe("people and invitations", () => {
   it("keeps an invitation draft when a tab click or popstate is declined", async () => {
     open("admin", true, [ADA], []);
 
-    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     const email = await screen.findByLabelText("Email");
     fireEvent.change(email, { target: { value: "draft@acme.example" } });
 
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirm);
-    fireEvent.click(screen.getByRole("radio", { name: "People" }));
-    expect(confirm).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("tab", { name: "People" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
     expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
       "draft@acme.example",
     );
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    expect(confirm).toHaveBeenCalledTimes(2);
+    fireEvent(window, new PopStateEvent("popstate"));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
+      .toBeTruthy();
     expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
       "draft@acme.example",
     );
@@ -1997,12 +2068,14 @@ describe("people and invitations", () => {
       "",
       "/projects/prj_1/settings?tab=invitations",
     );
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
     const pushes = vi.mocked(window.history.pushState).mock.calls.length;
     window.location.href = "http://egma.test/projects/prj_2/agents";
     window.location.pathname = "/projects/prj_2/agents";
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    expect(confirm).toHaveBeenCalledTimes(2);
+    fireEvent(window, new PopStateEvent("popstate"));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" }))
+      .toBeNull();
     expect(vi.mocked(window.history.pushState).mock.calls).toHaveLength(pushes);
     expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
       "draft@acme.example",
@@ -2011,8 +2084,8 @@ describe("people and invitations", () => {
     window.location.href = "http://egma.test/projects/prj_1/settings";
     window.location.pathname = "/projects/prj_1/settings";
 
-    confirm.mockReturnValue(true);
-    fireEvent.click(screen.getByRole("radio", { name: "People" }));
+    fireEvent.click(screen.getByRole("tab", { name: "People" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(screen.queryByLabelText("Email")).toBeNull();
     expect(await screen.findByRole("table", { name: "Members" })).toBeTruthy();
   });
@@ -2033,7 +2106,7 @@ describe("people and invitations", () => {
     });
     render(<PeoplePage />);
 
-    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     expect(await screen.findByText("Invitations are offline.")).toBeTruthy();
     expect(screen.queryByText("No invitations are outstanding.")).toBeNull();
   });
@@ -2049,7 +2122,7 @@ describe("people and invitations", () => {
     });
     render(<PeoplePage />);
 
-    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     expect(await screen.findByText("Loading outstanding invitations…")).toBeTruthy();
     expect(screen.queryByText("No invitations are outstanding.")).toBeNull();
   });
@@ -2063,7 +2136,7 @@ describe("people and invitations", () => {
   it("tells an invitation nobody can accept any more from one still waiting", async () => {
     open("admin", true, [ADA], [WAITING_INVITATION, DEAD_INVITATION]);
 
-    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
 
     // The invitations are their own read, answered after the roster that drew
     // this tab. Finding the table is what says that second answer landed —
@@ -2121,7 +2194,7 @@ describe("people and invitations", () => {
     });
     render(<PeoplePage />);
 
-    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
 
     const table = await screen.findByRole("table", { name: "Invitations" });
     fireEvent.click(within(table).getByRole("button", { name: "Send again" }));
@@ -2435,10 +2508,20 @@ describe("API keys", () => {
   });
 
   it("says which project or organization each of your own keys reaches", async () => {
-    open("member", [MY_KEY, { ...MY_KEY, id: "key_3", project_id: "prj_2", scope: "project" }]);
+    open("member", [
+      MY_KEY,
+      { ...MY_KEY, id: "key_3", project_id: "prj_2", scope: "project" },
+      {
+        ...MY_KEY,
+        id: "key_revoked",
+        name: "Old revoked key",
+        revoked_at: "2026-08-16T10:00:00.000Z",
+      },
+    ]);
 
     const mine = await screen.findByRole("table", { name: "Your API keys" });
     expect(mine.textContent).toContain("Whole organization");
     expect(mine.textContent).toContain("Project · Outbound");
+    expect(mine.textContent).not.toContain("Old revoked key");
   });
 });

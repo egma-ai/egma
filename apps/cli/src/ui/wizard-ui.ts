@@ -187,14 +187,15 @@ export interface WizardUI {
   setAgentChoices(agents: readonly RetellAgent[] | null): void;
 
   /**
-   * The ways Retell supports for this agent while the choice is open.
+   * The provider-safe ways on offer for this agent, or `null` when the choice
+   * is closed.
    *
    * A write and not a question, exactly as the agent choices are: the flow says
    * the offer is open and the screen collects the word. `null` closes it. The
-   * list comes from the selected Retell agent's channel, so the screen cannot
-   * offer a connection Retell will refuse.
+   * list comes from the selected provider agent, so the screen cannot offer a
+   * connection the provider will refuse.
    */
-  setReachOffer(reaches: readonly Reach[] | null): void;
+  setReachOffer(offered: readonly Reach[] | null): void;
 
   /**
    * The numbers Retell routes to the chosen agent, while a choice among them is

@@ -16,6 +16,40 @@
   stroke-width: 1.4;
 }
 
+.stateMarkMoving {
+  transform-origin: center;
+  animation: state-mark-spin calc(var(--duration-drawer-in) * 3) linear infinite;
+}
+
+.inlineState {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+  white-space: nowrap;
+}
+
+.inlineState[data-tone="good"] {
+  color: var(--good);
+}
+
+.inlineState[data-tone="bad"] {
+  color: var(--bad);
+}
+
+.inlineState[data-tone="warn"] {
+  color: var(--warn);
+}
+
+@keyframes state-mark-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .facts {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -105,6 +139,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .stateMarkMoving {
+    animation: none;
+  }
+
   .progressFill {
     transition-duration: 0.01ms;
   }

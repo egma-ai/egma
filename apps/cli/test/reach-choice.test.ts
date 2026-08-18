@@ -358,9 +358,7 @@ describe("choosing neither", () => {
     expect(ui.record.reachOffered).toBe(true);
     expect(report).toEqual({
       kind: "failed",
-      reason:
-        "nobody said whether Egma should reach this agent by text or by phone, " +
-        "so nothing was created.",
+      reason: "nobody chose phone, so nothing was created.",
     });
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);

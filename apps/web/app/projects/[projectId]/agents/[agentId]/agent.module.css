@@ -1,0 +1,107 @@
+.agentLayout {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-7);
+}
+
+.sectionNav {
+  min-width: 0;
+  border-inline-end: 1px solid var(--border);
+}
+
+.sectionList {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0 var(--space-4) 0 0;
+  list-style: none;
+}
+
+.sectionButton {
+  position: relative;
+  width: 100%;
+  min-height: var(--control-md);
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.sectionButton::before {
+  position: absolute;
+  inset-block: var(--space-3);
+  inset-inline-start: 0;
+  width: 2px;
+  background: transparent;
+  content: "";
+}
+
+.sectionButton[aria-current="page"] {
+  background: var(--surface-active);
+}
+
+.sectionButton[aria-current="page"]::before {
+  background: var(--action);
+}
+
+.sectionButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.content {
+  min-width: 0;
+}
+
+.content > section {
+  margin-top: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sectionButton:hover:not([aria-current="page"]) {
+    background: var(--surface-soft);
+  }
+}
+
+@media (max-width: 48rem) {
+  .agentLayout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-6);
+  }
+
+  .sectionNav {
+    border-block-end: 1px solid var(--border);
+    border-inline-end: 0;
+  }
+
+  .sectionList {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    padding: 0;
+  }
+
+  .sectionButton {
+    display: grid;
+    place-items: center;
+    padding-inline: var(--space-2);
+    text-align: center;
+  }
+
+  .sectionButton::before {
+    inset-block: auto 0;
+    inset-inline: var(--space-2);
+    width: auto;
+    height: 2px;
+  }
+}
+
+@media (pointer: coarse) {
+  .sectionButton {
+    min-height: 44px;
+  }
+}

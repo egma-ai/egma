@@ -4,21 +4,16 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
-import { agentsQuery, type AgentPage } from "../../../../../lib/agents.ts";
-import { asDay } from "../../../../../lib/instants.ts";
 import { roleOf } from "../../../../../lib/me.ts";
-import { personasPath, type PersonaPage } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
   availability,
   behaviorsAreUsable,
-  CAPABILITIES_PATH,
   testAgentsPath,
   testPath,
   testVersionsPath,
   whyBehaviorsRefuse,
-  type CapabilityCatalog,
   type ExpectedBehavior,
   type ListedTest,
   type TestVersionPage,
@@ -28,10 +23,7 @@ import {
   Actions,
   Badge,
   Button,
-  ButtonLink,
-  Facts,
   Field,
-  Help,
   Problem,
   Refused,
   Section,
@@ -39,8 +31,14 @@ import {
   TextInput,
 } from "../../../../../ui/controls.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
+import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
 import { Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
+import {
+  RelativeInstant,
+  useMinuteClock,
+} from "../../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import { RecentRuns } from "../../../../../ui/run-status.tsx";
 import {
   AppShell,
@@ -51,27 +49,19 @@ import {
 } from "../../../../../ui/shell.tsx";
 import {
   Behaviors,
-  CapabilityChoices,
-  NamedChoices,
+  NamedSelector,
+  SaveAction,
   VersionHistory,
 } from "../editor.tsx";
+import styles from "./test-detail.module.css";
 
 /**
- * One test: what it checks now, what it checked before, which agents it applies
- * to, and the three kinds of edit.
+ * One focused test editor beside its recent activity.
  *
- * **The page is built around the three-way split, because the split is what
- * somebody has to understand before they save.** Renaming a test, sharpening
- * its scenario and linking a second agent look like the same act in a form and
- * are not: one changes a label, one changes what a verdict *means*, and one
- * changes where the test may run. So the three sections say what saving them
- * does, and each carries its own expectation — the revision, the version, the
- * applicability revision — so that no one of them can make the other two stale.
- *
- * **Every piece of state here belongs to this test, in this project.** The
- * drafts are reset whenever the read answers for a different one, and a refusal
- * is cleared with them: a retry left over from another test would send this
- * test's typing against that test's revision.
+ * The fields read as one task, but the three safe write boundaries remain:
+ * identity, versioned test content, and applicable agents each carry their own
+ * concurrency token. A save in one area cannot erase an unsaved change in
+ * another area.
  */
 export default function TestDetailPage() {
   const { projectId, testId } = useParams<{
@@ -93,9 +83,17 @@ type Draft = {
   readonly scenario: string;
   readonly behaviors: readonly ExpectedBehavior[];
   readonly personas: readonly string[];
-  readonly capabilities: readonly string[];
   readonly agents: readonly string[];
 };
+
+type SaveArea = "settings" | "agents" | "version";
+
+function sameStrings(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 function TestDetail({
   projectId,
@@ -105,9 +103,11 @@ function TestDetail({
   readonly testId: string;
 }) {
   const router = useRouter();
+  const draftNavigation = useDraftNavigation();
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const mayAuthor = role !== null && canAuthor(role);
+  const now = useMinuteClock();
 
   const { answer, reload } = useProjectRead<ListedTest>(
     testPath(testId),
@@ -115,25 +115,26 @@ function TestDetail({
   );
   const { answer: history, reload: reloadHistory } =
     useProjectRead<TestVersionPage>(testVersionsPath(testId), projectId);
-  const { answer: agents } = useProjectRead<AgentPage>(agentsQuery({}), projectId);
-  const { answer: personas } = useProjectRead<PersonaPage>(
-    personasPath(false),
-    projectId,
-  );
-  const { answer: catalog } = useProjectRead<CapabilityCatalog>(
-    CAPABILITIES_PATH,
-    projectId,
-  );
-
-  const test = answer?.status === "ready" ? answer.value : null;
+  const readTest = answer?.status === "ready" ? answer.value : null;
 
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [baseline, setBaseline] = useState<ListedTest | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingArea, setSavingArea] = useState<SaveArea | null>(null);
+  const [savedAreas, setSavedAreas] = useState<ReadonlySet<SaveArea>>(new Set());
+  const [failedAreas, setFailedAreas] = useState<ReadonlySet<SaveArea>>(new Set());
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [reading, setReading] = useState<TestVersionRow | null>(null);
   const [confirmingLifecycle, setConfirmingLifecycle] = useState<
     "archive" | "restore" | null
   >(null);
+
+  const test =
+    baseline !== null &&
+    baseline.id === testId &&
+    baseline.project_id === projectId
+      ? baseline
+      : readTest;
 
   /**
    * The draft, and everything else that means "for the test on screen".
@@ -145,22 +146,24 @@ function TestDetail({
    * that test's version, reported as a success for a test nobody was looking at.
    */
   useEffect(() => {
-    if (test === null) return;
+    if (readTest === null) return;
+    setBaseline(readTest);
     setDraft({
-      testId: test.id,
+      testId: readTest.id,
       project: projectId,
-      name: test.name,
-      description: test.description ?? "",
-      scenario: test.scenario,
-      behaviors: test.expected_behaviors,
-      personas: test.personas.map((one) => one.id),
-      capabilities: test.required_capabilities,
-      agents: test.agents.map((one) => one.id),
+      name: readTest.name,
+      description: readTest.description ?? "",
+      scenario: readTest.scenario,
+      behaviors: readTest.expected_behaviors,
+      personas: readTest.personas.map((one) => one.id),
+      agents: readTest.agents.map((one) => one.id),
     });
     setRefused(null);
+    setSavedAreas(new Set());
+    setFailedAreas(new Set());
     setReading(null);
     setConfirmingLifecycle(null);
-  }, [test, projectId]);
+  }, [readTest, projectId]);
 
   useEffect(() => {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
@@ -171,13 +174,54 @@ function TestDetail({
     draft !== null && draft.testId === testId && draft.project === projectId
       ? draft
       : null;
+  const settingsChanged =
+    editing !== null &&
+    test !== null &&
+    (editing.name !== test.name ||
+      editing.description !== (test.description ?? ""));
+  const versionChanged =
+    editing !== null &&
+    test !== null &&
+    (editing.scenario !== test.scenario ||
+      !sameStrings(editing.behaviors, test.expected_behaviors) ||
+      !sameStrings(editing.personas, test.personas.map((one) => one.id)));
+  const agentsChanged =
+    editing !== null &&
+    test !== null &&
+    !sameStrings(editing.agents, test.agents.map((one) => one.id));
+  const changed = settingsChanged || versionChanged || agentsChanged;
+  useUnsavedChanges(changed && !saving, saving);
+
+  const saveState = (
+    area: SaveArea,
+    areaChanged: boolean,
+  ): "unchanged" | "saving" | "saved" | "failed" => {
+    if (savingArea === area) return "saving";
+    if (failedAreas.has(area)) return "failed";
+    if (savedAreas.has(area) && !areaChanged) return "saved";
+    return "unchanged";
+  };
 
   async function write(
     path: string,
     body: Record<string, unknown>,
     method: "POST" | "PATCH" = "PATCH",
+    area: SaveArea | null = null,
   ): Promise<ListedTest | null> {
     setRefused(null);
+    if (area !== null) {
+      setSavedAreas((held) => {
+        const next = new Set(held);
+        next.delete(area);
+        return next;
+      });
+      setFailedAreas((held) => {
+        const next = new Set(held);
+        next.delete(area);
+        return next;
+      });
+    }
+    setSavingArea(area);
     setSaving(true);
     const written = await writeJson<ListedTest>(path, {
       method,
@@ -185,6 +229,7 @@ function TestDetail({
       body,
     });
     setSaving(false);
+    setSavingArea(null);
 
     if (written.status === "signed-out") {
       window.location.replace("/sign-in");
@@ -192,13 +237,20 @@ function TestDetail({
     }
     if (written.status !== "ready") {
       setRefused(written.refusal);
+      if (area !== null) {
+        setFailedAreas((held) => new Set(held).add(area));
+      }
       return null;
+    }
+    if (area !== null) {
+      setSavedAreas((held) => new Set(held).add(area));
     }
     return written.value;
   }
 
   async function saveLive(): Promise<void> {
     if (editing === null || test === null) return;
+    const sent = editing;
     const written = await write(testPath(testId), {
       name: editing.name.trim(),
       description:
@@ -207,32 +259,69 @@ function TestDetail({
       // make a rename fail because somebody else sharpened a scenario, which is
       // a conflict that never existed.
       expected_revision: test.revision,
+    }, "PATCH", "settings");
+    if (written === null) return;
+
+    setBaseline(written);
+    setDraft((current) => {
+      if (
+        current === null ||
+        current.testId !== testId ||
+        current.project !== projectId ||
+        current.name !== sent.name ||
+        current.description !== sent.description
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        name: written.name,
+        description: written.description ?? "",
+      };
     });
-    if (written !== null) reload();
   }
 
   async function saveContent(): Promise<void> {
     if (editing === null || test === null) return;
+    const sent = editing;
     const written = await write(testPath(testId), {
       scenario: editing.scenario.trim(),
       expected_behaviors: editing.behaviors
         .map((one) => one.trim())
         .filter((one) => one !== ""),
       personas: [...editing.personas],
-      required_capabilities: [...editing.capabilities],
       // And the content half carries the version alone, for the mirror reason.
-      // `mock_tools` is deliberately absent: this form does not edit the
-      // overrides, so it does not send them, and leaving them out keeps them.
+      // Hidden capabilities and mock-tool overrides are deliberately absent.
+      // The form does not edit them, so leaving them out preserves them.
       expected_version_id: test.version_id,
-    });
+    }, "PATCH", "version");
     if (written !== null) {
-      reload();
+      setBaseline(written);
+      setDraft((current) => {
+        if (
+          current === null ||
+          current.testId !== testId ||
+          current.project !== projectId ||
+          current.scenario !== sent.scenario ||
+          !sameStrings(current.behaviors, sent.behaviors) ||
+          !sameStrings(current.personas, sent.personas)
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          scenario: written.scenario,
+          behaviors: written.expected_behaviors,
+          personas: written.personas.map((one) => one.id),
+        };
+      });
       reloadHistory();
     }
   }
 
   async function saveAgents(): Promise<void> {
     if (editing === null || test === null) return;
+    const sent = editing;
     const written = await write(
       testAgentsPath(testId),
       {
@@ -240,8 +329,25 @@ function TestDetail({
         expected_applicability_revision: test.applicability_revision,
       },
       "POST",
+      "agents",
     );
-    if (written !== null) reload();
+    if (written === null) return;
+
+    setBaseline(written);
+    setDraft((current) => {
+      if (
+        current === null ||
+        current.testId !== testId ||
+        current.project !== projectId ||
+        !sameStrings(current.agents, sent.agents)
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        agents: written.agents.map((one) => one.id),
+      };
+    });
   }
 
   async function clone(): Promise<void> {
@@ -273,7 +379,14 @@ function TestDetail({
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Tests" title="Test" />
+        <PageHeader
+          eyebrow="Tests"
+          title="Test"
+          breadcrumbs={[
+            { label: "Tests", href: projectPath(projectId, "tests") },
+            { label: "Test" },
+          ]}
+        />
         <PageBody>
           <Loading what="this test" />
         </PageBody>
@@ -284,16 +397,16 @@ function TestDetail({
   if (answer.status === "missing") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Tests" title="Test" />
+        <PageHeader
+          eyebrow="Tests"
+          title="Test"
+          breadcrumbs={[
+            { label: "Tests", href: projectPath(projectId, "tests") },
+            { label: "Test" },
+          ]}
+        />
         <PageBody>
-          <NotFound
-            message={answer.refusal.message}
-            action={
-              <ButtonLink href={projectPath(projectId, "tests")}>
-                Back to tests
-              </ButtonLink>
-            }
-          />
+          <NotFound message={answer.refusal.message} />
         </PageBody>
       </ProductPage>
     );
@@ -302,7 +415,14 @@ function TestDetail({
   if (answer.status === "failed" || test === null || editing === null) {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Tests" title="Test" />
+        <PageHeader
+          eyebrow="Tests"
+          title="Test"
+          breadcrumbs={[
+            { label: "Tests", href: projectPath(projectId, "tests") },
+            { label: "Test" },
+          ]}
+        />
         <PageBody>
           {answer.status === "failed" ? (
             <Failure message={answer.refusal.message} onRetry={reload} />
@@ -316,261 +436,35 @@ function TestDetail({
 
   const archived = test.archived_at !== null;
   const standing = availability(test);
-  const activeAgents =
-    agents?.status === "ready"
-      ? agents.value.items.filter((one) => one.archived_at === null)
-      : [];
-  const activePersonas =
-    personas?.status === "ready"
-      ? personas.value.items.filter((one) => one.archived_at === null)
-      : [];
-
-  /**
-   * The agents this editor offers: the project's active ones, plus every agent
-   * this test already applies to.
-   *
-   * The second half is what keeps an archived link visible. Offering only the
-   * active ones would make an archived agent silently disappear from the set
-   * the moment somebody opened the editor and saved anything at all.
-   */
-  const agentChoices = [
-    ...activeAgents.map((one) => ({
-      id: one.id,
-      name: one.name,
-      archived_at: one.archived_at,
-    })),
-    ...test.agents.filter(
-      (one) => !activeAgents.some((active) => active.id === one.id),
-    ),
-  ];
-
   const behaviorProblem = whyBehaviorsRefuse(editing.behaviors);
   const whyNot = mayAuthor
     ? undefined
     : `Your ${String(role ?? "")} role cannot change tests. Ask an organization admin to change your role.`;
 
   return (
-    <ProductPage>
+    <ProductPage wide>
       <PageHeader
         eyebrow="Tests"
         title={test.name}
+        breadcrumbs={[
+          { label: "Tests", href: projectPath(projectId, "tests") },
+          { label: test.name },
+        ]}
         lead={
           <>
-            v{test.version} · changed {asDay(test.updated_at)}{" "}
+            v{test.version} · changed{" "}
+            <RelativeInstant instant={test.updated_at} now={now} />{" "}
             {archived ? <Badge tone="warn">Archived</Badge> : null}{" "}
             {standing.runnable ? null : <Badge tone="bad">Cannot run</Badge>}
           </>
         }
         action={
-          <ButtonLink href={projectPath(projectId, "tests")}>
-            Back to tests
-          </ButtonLink>
-        }
-      />
-      <PageBody>
-        {refused === null ? null : (
-          <Refused
-            message={refused.message}
-            action={<Button onClick={reload}>Read the test again</Button>}
-          />
-        )}
-
-        {standing.why === null ? null : <Problem>{standing.why}</Problem>}
-
-        <Section
-          title="What it is"
-          lead="Live settings. They take effect the moment they are saved and change nothing about any verdict already made."
-        >
-          <Field label="Name" htmlFor="test-name">
-            <TextInput
-              id="test-name"
-              value={editing.name}
-              disabled={!mayAuthor}
-              onChange={(name) => setDraft({ ...editing, name })}
-            />
-          </Field>
-          <Field label="Description" htmlFor="test-description">
-            <TextInput
-              id="test-description"
-              value={editing.description}
-              disabled={!mayAuthor}
-              onChange={(description) => setDraft({ ...editing, description })}
-            />
-          </Field>
-          <Button
-            disabled={!mayAuthor || saving || editing.name.trim() === ""}
-            why={whyNot}
-            onClick={() => void saveLive()}
-          >
-            Save settings
-          </Button>
-        </Section>
-
-        <Section
-          title="Which agents it applies to"
-          lead="Target coverage. Changing it makes no version and no repository copy stale — a run may only pair an agent with a test linked to it."
-        >
-          <NamedChoices
-            legend="Applicable agents"
-            available={agentChoices}
-            chosen={editing.agents}
-            disabled={!mayAuthor}
-            onChange={(chosen) => setDraft({ ...editing, agents: chosen })}
-          />
-          {editing.agents.length === 0 ? (
-            <Problem>
-              Every test must apply to at least one active agent. Select an
-              active agent and save the test again.
-            </Problem>
-          ) : null}
-          <Button
-            disabled={!mayAuthor || saving || editing.agents.length === 0}
-            why={whyNot}
-            onClick={() => void saveAgents()}
-          >
-            Save applicable agents
-          </Button>
-        </Section>
-
-        <Section
-          title="What it checks"
-          lead="Immutable version content. Saving a change here makes a new version and applies from then on; runs already judged keep meaning what they meant. Saving content that has not changed makes no version at all."
-        >
-          <Field label="Scenario" htmlFor="test-scenario">
-            <TextArea
-              id="test-scenario"
-              value={editing.scenario}
-              rows={5}
-              disabled={!mayAuthor}
-              onChange={(scenario) => setDraft({ ...editing, scenario })}
-            />
-          </Field>
-
-          <h3>Expected behaviors</h3>
-          <Behaviors
-            behaviors={editing.behaviors}
-            disabled={!mayAuthor}
-            onChange={(behaviors) => setDraft({ ...editing, behaviors })}
-          />
-          {behaviorProblem === null ? null : <Problem>{behaviorProblem}</Problem>}
-          <Help>
-            Every one of these has to hold. A grader that reports rather than
-            blocks is a setting on the grader, not on a sentence.
-          </Help>
-
-          <h3>Who calls</h3>
-          <NamedChoices
-            legend="Personas"
-            available={[
-              ...activePersonas.map((one) => ({
-                id: one.id,
-                name: one.name,
-                archived_at: one.archived_at,
-              })),
-              ...test.personas.filter(
-                (one) => !activePersonas.some((active) => active.id === one.id),
-              ),
-            ]}
-            chosen={editing.personas}
-            disabled={!mayAuthor}
-            onChange={(personaIds) =>
-              setDraft({ ...editing, personas: personaIds })
-            }
-          />
-
-          <h3>What a connection has to be able to do</h3>
-          <CapabilityChoices
-            catalog={catalog?.status === "ready" ? catalog.value.items : []}
-            chosen={editing.capabilities}
-            disabled={!mayAuthor}
-            onChange={(capabilities) => setDraft({ ...editing, capabilities })}
-          />
-
-          <Button
-            disabled={
-              !mayAuthor ||
-              saving ||
-              editing.scenario.trim() === "" ||
-              !behaviorsAreUsable(editing.behaviors)
-            }
-            why={whyNot}
-            onClick={() => void saveContent()}
-          >
-            Save version
-          </Button>
-        </Section>
-
-        <Section
-          title="What else this test carries"
-          lead="Facts about the current version that this browser reads and does not author."
-        >
-          <Facts
-            facts={[
-              {
-                label: "Mock tool overrides",
-                value:
-                  test.override_count > 0 ? (
-                    <>
-                      <Badge>Overrides present</Badge> {test.override_count}{" "}
-                      {test.override_count === 1 ? "tool" : "tools"} answered by
-                      this test. They are versioned content, this browser does not
-                      edit them, and a clone copies them.
-                    </>
-                  ) : (
-                    "None. The project's mock tools are the whole world for this test."
-                  ),
-              },
-              { label: "Current version", value: test.version_id },
-              {
-                label: "Applies to",
-                value:
-                  test.agents.length === 0
-                    ? "nothing — restore it with an agent selected"
-                    : test.agents
-                        .map(
-                          (one) =>
-                            `${one.name}${(one.archived_at ?? null) === null ? "" : " (archived)"}`,
-                        )
-                        .join(", "),
-              },
-            ]}
-          />
-        </Section>
-
-        {/*
-          What this test has actually been run against lately. The same
-          component the agent page uses, because it is the same question asked
-          of a different subject — and the answer keeps machinery and judgment
-          apart on both.
-        */}
-        <RecentRuns
-          projectId={projectId}
-          title="Recent runs"
-          lead="The newest runs that executed a version of this test. Each row keeps the run's machinery and its verdict apart."
-          filters={{ test: testId }}
-        />
-
-        <Section
-          title="Version history"
-          lead="Every version stays exactly as it was written, because a run that pinned one has to stay interpretable."
-        >
-          {history?.status === "ready" ? (
-            <VersionHistory
-              versions={history.value.items}
-              reading={reading}
-              onRead={setReading}
-            />
-          ) : (
-            <Loading what="the version history" />
-          )}
-        </Section>
-
-        <Section
-          title="This test"
-          lead="Archive takes it out of every new run and keeps every version, every link and every run that used it."
-        >
           <Actions>
-            <Button disabled={!mayAuthor || saving} why={whyNot} onClick={() => void clone()}>
+            <Button
+              disabled={!mayAuthor || saving}
+              why={whyNot}
+              onClick={() => draftNavigation.request(() => void clone())}
+            >
               Clone
             </Button>
             <Button
@@ -583,13 +477,149 @@ function TestDetail({
               {archived ? "Restore" : "Archive"}
             </Button>
           </Actions>
-          {archived ? (
-            <Help>
-              Restore is refused while this test&rsquo;s current version names an
-              archived persona or grader. Restore those first.
-            </Help>
-          ) : null}
-        </Section>
+        }
+      />
+      <PageBody>
+        {refused === null ? null : (
+          <Refused
+            message={refused.message}
+            action={<Button onClick={reload}>Read the test again</Button>}
+          />
+        )}
+
+        {standing.why === null ? null : <Problem>{standing.why}</Problem>}
+
+        <div className={styles.layout}>
+          <section className={styles.editor} aria-labelledby="test-editor-title">
+            <div className={styles.group}>
+              <h2 className={styles.groupTitle} id="test-editor-title">
+                Test details
+              </h2>
+              <Field label="Name" htmlFor="test-name">
+                <TextInput
+                  id="test-name"
+                  value={editing.name}
+                  disabled={!mayAuthor}
+                  onChange={(name) => setDraft({ ...editing, name })}
+                />
+              </Field>
+              <Field label="Description" htmlFor="test-description">
+                <TextInput
+                  id="test-description"
+                  value={editing.description}
+                  disabled={!mayAuthor}
+                  onChange={(description) =>
+                    setDraft({ ...editing, description })
+                  }
+                />
+              </Field>
+              <SaveAction
+                label="Save settings"
+                changed={settingsChanged}
+                state={saveState("settings", settingsChanged)}
+                disabled={!mayAuthor || saving || editing.name.trim() === ""}
+                why={whyNot}
+                onSave={() => void saveLive()}
+              />
+            </div>
+
+            <div className={styles.group}>
+              <Field label="Scenario" htmlFor="test-scenario">
+                <TextArea
+                  id="test-scenario"
+                  value={editing.scenario}
+                  rows={4}
+                  disabled={!mayAuthor}
+                  onChange={(scenario) => setDraft({ ...editing, scenario })}
+                />
+              </Field>
+
+              <h3 className={styles.fieldHeading}>Expected behaviors</h3>
+              <Behaviors
+                behaviors={editing.behaviors}
+                disabled={!mayAuthor}
+                onChange={(behaviors) => setDraft({ ...editing, behaviors })}
+              />
+              {behaviorProblem === null ? null : <Problem>{behaviorProblem}</Problem>}
+
+              <h3 className={styles.fieldHeading}>Persona attached</h3>
+              <NamedSelector
+                label="Personas"
+                resource="personas"
+                project={projectId}
+                chosen={editing.personas}
+                selectedItems={test.personas}
+                disabled={!mayAuthor}
+                onChange={(personaIds) =>
+                  setDraft({ ...editing, personas: personaIds })
+                }
+              />
+
+              <SaveAction
+                label="Save version"
+                changed={versionChanged}
+                state={saveState("version", versionChanged)}
+                disabled={
+                  !mayAuthor ||
+                  saving ||
+                  editing.scenario.trim() === "" ||
+                  !behaviorsAreUsable(editing.behaviors)
+                }
+                why={whyNot}
+                onSave={() => void saveContent()}
+              />
+            </div>
+
+            <div className={styles.group}>
+              <h3 className={styles.fieldHeading}>Applies to agents</h3>
+              <NamedSelector
+                label="Agents"
+                resource="agents"
+                project={projectId}
+                chosen={editing.agents}
+                selectedItems={test.agents}
+                disabled={!mayAuthor}
+                onChange={(chosen) => setDraft({ ...editing, agents: chosen })}
+              />
+              {editing.agents.length === 0 ? (
+                <Problem>
+                  Every test must apply to at least one active agent. Select an
+                  active agent and save the test again.
+                </Problem>
+              ) : null}
+              <SaveAction
+                label="Save applicable agents"
+                changed={agentsChanged}
+                state={saveState("agents", agentsChanged)}
+                disabled={!mayAuthor || saving || editing.agents.length === 0}
+                why={whyNot}
+                onSave={() => void saveAgents()}
+              />
+            </div>
+          </section>
+
+          <aside className={styles.activity} aria-label="Test activity">
+            <RecentRuns
+              projectId={projectId}
+              title="Recent runs"
+              lead="Latest executions of this test."
+              filters={{ test: testId }}
+            />
+
+            <Section title="Version history">
+              {history?.status === "ready" ? (
+                <VersionHistory
+                  versions={history.value.items}
+                  reading={reading}
+                  now={now}
+                  onRead={setReading}
+                />
+              ) : (
+                <Loading what="the version history" />
+              )}
+            </Section>
+          </aside>
+        </div>
       </PageBody>
 
       {confirmingLifecycle === null ? null : (
@@ -602,7 +632,7 @@ function TestDetail({
               <p>
                 {confirmingLifecycle === "archive"
                   ? "This test leaves every new run. Its versions, links, and past run evidence stay available."
-                  : "This test returns to new runs. Egma will refuse the restore while its current version names an archived persona or grader."}
+                  : "This test returns to new runs. Egma will refuse the restore while its current version names an archived persona."}
               </p>
               <Actions>
                 <Button onClick={dismiss}>Cancel</Button>
@@ -611,7 +641,9 @@ function TestDetail({
                   tone={confirmingLifecycle === "archive" ? "destructive" : "default"}
                   disabled={saving}
                   onClick={() =>
-                    void setArchived(confirmingLifecycle === "archive")
+                    draftNavigation.request(() =>
+                      void setArchived(confirmingLifecycle === "archive")
+                    )
                   }
                 >
                   {saving

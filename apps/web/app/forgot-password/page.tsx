@@ -66,21 +66,13 @@ export default function ForgotPasswordPage() {
     return (
       <StatePage
         title="Check your email"
-        lead={`If ${email} has an Egma account, a link to set a new password is on its way to it. The link works once, and runs out in an hour.`}
-      >
-        <p className={styles.linkLine}>
-          Nothing arrived? On an Egma instance with no mail configured the message is
-          written to the platform's log instead.{" "}
-          <a
-            href={
-              returnTo === null ? "/sign-in" : withReturnTo("/sign-in", returnTo)
-            }
-          >
-            Sign in
-          </a>{" "}
-          once the password is set.
-        </p>
-      </StatePage>
+        lead={
+          <>
+            If <span className={styles.emphasizedEmail}>{email}</span> has an
+            account, a link to reset password has been sent
+          </>
+        }
+      />
     );
   }
 
@@ -88,7 +80,6 @@ export default function ForgotPasswordPage() {
     <AuthShell
       eyebrow="Forgotten password"
       title="Set a new password."
-      lead="Name the address you signed up with, and Egma sends a link to set a new one."
     >
       <Form onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
@@ -106,7 +97,7 @@ export default function ForgotPasswordPage() {
         </Field>
 
         <Button weight="strong" type="submit" disabled={submitting}>
-          {submitting ? "Sending…" : "Send the link"}
+          {submitting ? "Sending…" : "Send reset link"}
         </Button>
       </Form>
 

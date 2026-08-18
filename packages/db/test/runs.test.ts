@@ -1227,12 +1227,11 @@ describe("the summary facts a terminal landing carries", () => {
 
   it("lands a voice conversation's recording beside its summary facts", async () => {
     // The seeded connection speaks chat, and the row would refuse a recording
-    // on it, so the voice landing gets a voice connection of its own.
+    // on it, so the voice landing gets a routed phone connection of its own.
     const voice = await addConnection(actingAsAcme(), agentId, {
-      type: "retell",
+      type: "phone",
       modality: "voice",
-      config: { retellAgentId: "agent_in_retell_voice" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      config: { phoneNumber: "+15551234567" },
     });
     if (voice === undefined) throw new Error("the voice connection was not attached");
     const started = await startRun(

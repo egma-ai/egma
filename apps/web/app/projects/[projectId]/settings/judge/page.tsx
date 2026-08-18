@@ -4,7 +4,6 @@ import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
-import { GRADERS_SECTION } from "../../../../../lib/graders.ts";
 import {
   credentialLabel,
   credentialsFor,
@@ -19,7 +18,6 @@ import {
   type ProjectJudge,
 } from "../../../../../lib/judge.ts";
 import { roleOf } from "../../../../../lib/me.ts";
-import { projectPath } from "../../../../../lib/project-context.ts";
 import {
   Badge,
   Button,
@@ -232,8 +230,15 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
 
   if (judge === null) {
     return (
-      <ProductPage>
-        <PageHeader eyebrow="Settings" title="Judge" />
+      <ProductPage viewport>
+        <PageHeader
+          eyebrow="Settings"
+          title="Judge"
+          breadcrumbs={[
+            { label: "Settings", href: settingsPath(projectId) },
+            { label: "Judge" },
+          ]}
+        />
         <PageBody>
           <SettingsLayout projectId={projectId} current="judge">
             <Loading what="the judge" />
@@ -245,8 +250,15 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
 
   if (judge.status !== "ready") {
     return (
-      <ProductPage>
-        <PageHeader eyebrow="Settings" title="Judge" />
+      <ProductPage viewport>
+        <PageHeader
+          eyebrow="Settings"
+          title="Judge"
+          breadcrumbs={[
+            { label: "Settings", href: settingsPath(projectId) },
+            { label: "Judge" },
+          ]}
+        />
         <PageBody>
           <SettingsLayout projectId={projectId} current="judge">
             <Failure
@@ -264,23 +276,15 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
   }
 
   return (
-    <ProductPage>
+    <ProductPage viewport>
       <PageHeader
         eyebrow="Settings"
         title="Judge"
+        breadcrumbs={[
+          { label: "Settings", href: settingsPath(projectId) },
+          { label: "Judge" },
+        ]}
         lead="The model that decides an LLM judgment in this project, and the organization key it is asked with."
-        /*
-         * Back to the graders this judge is for. It points at the project's own
-         * Graders section, which is where a person arriving from a run's "no
-         * judge configured" message came from and where the graders that ask a
-         * model are listed. The action was removed when that route was, and
-         * comes back with it.
-         */
-        action={
-          <ButtonLink href={projectPath(projectId, GRADERS_SECTION)}>
-            Back to graders
-          </ButtonLink>
-        }
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="judge">

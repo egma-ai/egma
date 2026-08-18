@@ -1155,3 +1155,33 @@ export function refuseRetry(
     message: retryUnavailable(runId, resource),
   });
 }
+
+/** Why one stored simulation cannot be run again. */
+export type SimulationRerunRefusal =
+  | "not_terminal"
+  | "legacy"
+  | "name_required"
+  | "idempotency_key_required";
+
+/**
+ * One simulation cannot be used as the source of a new run.
+ *
+ * The reason is a value so the HTTP door can give an active simulation a
+ * conflict and malformed or legacy input an unprocessable answer without
+ * reading the prose back. The source is never changed.
+ */
+export class SimulationRerunRefusedError extends Error {
+  readonly simulationId: string;
+  readonly reason: SimulationRerunRefusal;
+
+  constructor(
+    simulationId: string,
+    reason: SimulationRerunRefusal,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SimulationRerunRefusedError";
+    this.simulationId = simulationId;
+    this.reason = reason;
+  }
+}

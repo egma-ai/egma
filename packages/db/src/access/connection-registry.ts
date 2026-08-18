@@ -73,6 +73,12 @@ export type ConfigFieldMetadata = {
   readonly kind: ConfigFieldKind;
   /** One sentence a person can act on. Never names a validator or a rule id. */
   readonly help: string;
+  /**
+   * Keep a supporting config field after the credential fields when that is
+   * the order a person needs to fill the form in. Most config comes first;
+   * this is only for a field such as room metadata that completes the setup.
+   */
+  readonly afterCredentials?: true;
 };
 
 /**
@@ -204,8 +210,9 @@ export type ConnectionVariant = {
   readonly label: string;
   readonly config: Readonly<Record<string, ConfigDemand>>;
   /**
-   * The same keys as `config`, in the order a form asks for them, with the
-   * words a person needs to answer each one.
+   * The same keys as `config`, in their relative form order, with the words a
+   * person needs to answer each one. A supporting field may explicitly follow
+   * the credential group, while keeping its order among the config fields.
    *
    * Two lists rather than one because they answer two questions that must not
    * be allowed to become one: `config` is what a write is *gated* by, and this
@@ -707,7 +714,11 @@ export const CONNECTION_REGISTRY: Readonly<
 > = {
   retell: {
     label: "Retell",
-    modalities: ["chat", "voice"],
+    // The direct Retell adapter uses the chat-session API. Voice agents are
+    // reached through a phone connection after provider setup resolves one of
+    // their routed numbers. Admitting `voice` here would create a connection
+    // the simulator cannot conduct and fail it only after dispatch.
+    modalities: ["chat"],
     topology: "hosted-broker",
     variants: [
       {
@@ -843,21 +854,22 @@ export const CONNECTION_REGISTRY: Readonly<
         fields: [
           {
             key: "url",
-            label: "LiveKit server URL",
+            label: "LiveKit WebSocket URL",
             kind: "url",
             help: "Your LiveKit project or self-hosted server, like wss://example.livekit.cloud.",
           },
           {
             key: "agentName",
-            label: "Agent name",
+            label: "LiveKit agent name",
             kind: "text",
-            help: "Which worker to dispatch. Leave it empty for automatic dispatch, where whichever worker is listening takes the room.",
+            help: "The LiveKit worker dispatch name. Leave it empty for automatic dispatch, where whichever worker is listening takes the room.",
           },
           {
             key: "metadata",
             label: "Room metadata",
             kind: "json",
             help: 'A JSON object handed to the agent as the room metadata, exactly as written, like {"tenant":"acme"}.',
+            afterCredentials: true,
           },
         ],
         credentialHelp:
@@ -906,7 +918,7 @@ export const CONNECTION_REGISTRY: Readonly<
         fields: [
           {
             key: "url",
-            label: "LiveKit server URL",
+            label: "LiveKit WebSocket URL",
             kind: "url",
             help: "Your LiveKit project or self-hosted server, like wss://example.livekit.cloud.",
           },
@@ -1005,6 +1017,29 @@ export function conductableConnectionTypes(): readonly ConnectionType[] {
 }
 
 /**
+ * Whether this exact stored connection can be handed to a simulator.
+ *
+ * The modality is checked here as well as at write time. Old rows can outlive
+ * a registry correction, and dispatch must not trust a row only because it was
+ * accepted by an older build. That is how legacy direct Retell voice rows are
+ * stopped while Retell chat rows and provider-blind phone rows keep working.
+ * This check cannot know whether an id inside a chat-labelled row belongs to a
+ * provider voice agent; the Retell read in the API claim assembler owns that
+ * second, provider-aware check.
+ */
+export function connectionIsConductable(
+  type: string,
+  modality: string,
+): boolean {
+  const descriptor = CONNECTION_REGISTRY[type as ConnectionType];
+  return (
+    descriptor !== undefined &&
+    descriptor.simulatorAdapter &&
+    descriptor.modalities.includes(modality as Modality)
+  );
+}
+
+/**
  * What a run over a type nothing can conduct is told.
  *
  * The wording is the platform's own and a client relays it word for word to
@@ -1014,9 +1049,13 @@ export function conductableConnectionTypes(): readonly ConnectionType[] {
  * than out of the sentence, so it can never name an adapter that has not
  * shipped or miss one that has.
  */
-export function noSimulatorAdapterMessage(type: string): string {
+export function noSimulatorAdapterMessage(
+  type: string,
+  modality?: string,
+): string {
+  const reach = modality === undefined ? `${type}` : `${type} ${modality}`;
   return (
-    `Egma has no simulator adapter for a ${type} connection yet, ` +
+    `Egma has no simulator adapter for a ${reach} connection yet, ` +
     `so it will not start a run it cannot conduct. Run these tests over a ` +
     `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`
   );

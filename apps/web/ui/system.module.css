@@ -159,10 +159,30 @@
 }
 
 /*
+ * Settings is a workspace, not a long document. Its page title stays visible
+ * while the selected settings view uses the remaining height. Other product
+ * pages keep their normal document scroll because only an explicit
+ * `ProductPage viewport` receives this class.
+ */
+.pageViewport {
+  display: flex;
+  height: 100svh;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pageViewport > .pageBody {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+/*
  * The heading, and whatever this page offers to do.
  *
- * **Both halves wrap**, and they have to. A run's page offers three controls —
- * All runs, Cancel run and Retry — and on a phone they measured 517px on one
+ * **Both halves wrap**, and they have to. A run can offer long action labels
+ * such as Cancel run and Retry, and on a phone they once sat on one
  * unbreakable line inside a 390px screen, which pushed the whole document
  * sideways: every page then scrolled horizontally, including the parts that fit
  * perfectly. `flex: 0 0 auto` is what a strip of controls needs beside a
@@ -1014,6 +1034,54 @@
   transition-duration: var(--duration-drawer-out);
 }
 
+.scrimSheet[open] {
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 0;
+}
+
+.dialogSheet {
+  display: flex;
+  width: min(640px, 100%);
+  height: 100%;
+  min-height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-block: 0;
+  border-right: 0;
+  border-radius: 0;
+  transform: translateX(0);
+  transform-origin: right center;
+}
+
+.dialogSheet .dialogHead {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.scrimSheet[data-input="pointer"]::backdrop {
+  transition-duration: var(--duration-drawer-in);
+  transition-timing-function: var(--ease-drawer);
+}
+
+.scrim[data-input="pointer"] .dialogSheet {
+  transition:
+    opacity var(--duration-drawer-in) var(--ease-drawer),
+    transform var(--duration-drawer-in) var(--ease-drawer);
+}
+
+.scrimSheet[data-input="pointer"][data-closing="true"]::backdrop {
+  transition-duration: var(--duration-drawer-out);
+}
+
+.scrimSheet[data-input="pointer"][data-closing="true"] .dialogSheet {
+  transform: translateX(100%);
+  transition-duration: var(--duration-drawer-out);
+}
+
 .dialogHead {
   display: flex;
   align-items: center;
@@ -1048,9 +1116,26 @@
     opacity: 1;
     transform: translateX(-100%);
   }
+
+  .scrimSheet[data-input="pointer"][open] .dialogSheet {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+@media (max-width: 40rem) {
+  .dialogSheet {
+    width: 100%;
+    border-left: 0;
+    border-radius: 0;
+  }
 }
 
 /* ------------------------------------------------------------ list, table */
+
+.tableConstrained {
+  container: data-table / inline-size;
+}
 
 .tableWrap {
   overflow-x: auto;
@@ -1084,6 +1169,23 @@
   vertical-align: middle;
 }
 
+/* Row controls use one trailing-edge seam instead of page-specific padding. */
+.table th.tableHeaderAction {
+  text-align: right;
+}
+
+.tableCellAction {
+  text-align: right;
+}
+
+.tableCellAction .cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .table tbody tr:first-child td {
   border-top: 0;
 }
@@ -1113,6 +1215,7 @@
 
 .tableRowInteractive .tableCellPrimary a:first-of-type {
   position: static;
+  transition: color var(--duration-hover) var(--ease-out);
 }
 
 .tableRowInteractive .tableCellPrimary a:first-of-type::after {
@@ -1128,6 +1231,94 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * A dense table can run out of room before the shell reaches its one viewport
+ * breakpoint. Pages opt in when every column must stay readable in that
+ * smaller content area. This changes the same semantic table into labelled
+ * rows; it does not draw a second mobile-only copy.
+ */
+@container data-table (max-width: 60rem) {
+  .tableConstrained .tableWrap {
+    overflow: visible;
+  }
+
+  .tableConstrained .table,
+  .tableConstrained .table tbody {
+    display: block;
+  }
+
+  .tableConstrained .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .tableConstrained .table tbody tr {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-3) var(--row-padding-x);
+    border-top: 1px solid var(--border);
+  }
+
+  .tableConstrained .table tbody tr:first-child {
+    border-top: 0;
+  }
+
+  .tableConstrained .table td {
+    display: flex;
+    height: auto;
+    min-height: 0;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: 0;
+    border: 0;
+    font-size: var(--text-sm);
+  }
+
+  .tableConstrained .table td:not(.tableCellPrimary)::before {
+    flex: 0 0 auto;
+    color: var(--faint);
+    content: attr(data-label);
+    font-size: var(--text-2xs);
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+  }
+
+  .tableConstrained .table td:not(.tableCellPrimary) .cell {
+    min-width: 0;
+    max-width: 70%;
+    text-align: right;
+  }
+
+  .tableConstrained .tableCellPrimary {
+    margin-bottom: var(--space-1);
+  }
+
+  .tableConstrained .table td[data-label=""] {
+    justify-content: flex-end;
+  }
+
+  .tableConstrained .table td.tableCellAction {
+    align-items: center;
+    margin-top: var(--space-2);
+  }
+
+  .tableConstrained .table td.tableCellAction .cell {
+    max-width: none;
+  }
+
+  .tableConstrained .table td[data-label=""]:has(.cell:empty) {
+    display: none;
+  }
 }
 
 .cellPrimary {
@@ -1237,8 +1428,8 @@
     background: var(--surface);
   }
 
-  .tableRowInteractive:hover td {
-    background: var(--surface-soft);
+  .tableRowInteractive:hover .tableCellPrimary a:first-of-type {
+    color: var(--accent);
   }
 }
 
@@ -1336,7 +1527,8 @@
 
   .menu[data-input="pointer"] .menuPanel,
   .scrim[data-input="pointer"] .dialog,
-  .scrim[data-input="pointer"] .dialogDrawer {
+  .scrim[data-input="pointer"] .dialogDrawer,
+  .scrim[data-input="pointer"] .dialogSheet {
     transform: none;
     transition: opacity var(--duration-popover-out) linear;
   }
@@ -1345,10 +1537,20 @@
     transition: opacity var(--duration-popover-out) linear;
   }
 
+  .scrimSheet[data-input="pointer"][data-closing="true"]::backdrop {
+    transition: opacity var(--duration-popover-out) linear;
+  }
+
+  .scrimSheet[data-input="pointer"][data-closing="true"] .dialogSheet {
+    transform: none;
+    transition: opacity var(--duration-popover-out) linear;
+  }
+
   @starting-style {
     .menu[data-input="pointer"] .menuPanel,
     .scrim[data-input="pointer"][open] .dialog,
-    .scrimDrawer[data-input="pointer"][open] .dialogDrawer {
+    .scrimDrawer[data-input="pointer"][open] .dialogDrawer,
+    .scrimSheet[data-input="pointer"][open] .dialogSheet {
       opacity: 0;
       transform: none;
     }
@@ -1375,6 +1577,10 @@
 
   .topbar {
     display: flex;
+  }
+
+  .pageViewport {
+    height: calc(100svh - var(--topbar-height));
   }
 
   .topbar .selectorCompact {
@@ -1477,6 +1683,19 @@
     min-width: 0;
     max-width: 70%;
     text-align: right;
+  }
+
+  .table td.tableCellAction {
+    align-items: center;
+    margin-top: var(--space-2);
+  }
+
+  .table td.tableCellAction .cell {
+    max-width: none;
+  }
+
+  .tableCellAction:has(.cell:empty) {
+    display: none;
   }
 
   .tableCellPrimary {

@@ -271,6 +271,17 @@ export function simulationRegradePath(simulationId: string): string {
   return `${simulationPath(simulationId)}/regrade`;
 }
 
+/**
+ * Start one new run from one finished conversation.
+ *
+ * The earlier simulation stays immutable. The server uses its pinned test
+ * version and persona identity, then resolves the rest of the new run under
+ * current conditions.
+ */
+export function simulationRerunPath(simulationId: string): string {
+  return `${simulationPath(simulationId)}/rerun`;
+}
+
 /** Where one conversation's evidence lives inside its run, inside its project. */
 export function simulationSection(runId: string): readonly string[] {
   return ["runs", runId, "simulations"];

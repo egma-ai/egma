@@ -46,9 +46,13 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.3.0",
+    "@egma/retell": "workspace:*",
     "ink": "^7.1.1",
     "react": "^19.2.8"
   },
+  "bundledDependencies": [
+    "@egma/retell"
+  ],
   "devDependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.65.0",
     "@egma/db": "workspace:*",

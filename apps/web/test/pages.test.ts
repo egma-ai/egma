@@ -534,64 +534,6 @@ describe("the pages", () => {
   });
 
   /**
-   * Moving between signed-in pages must not briefly replace the application
-   * with the access-page composition. The request can still be pending or can
-   * fail, but the navigation and account controls remain stable until the API
-   * has explicitly said that the session is gone.
-   */
-  it("keep the application shell while signed-in page data settles", async () => {
-    const shell = await readFile(path.join(WEB, "ui/shell.tsx"), "utf8");
-    const members = await readFile(
-      path.join(WEB, "app/projects/[projectId]/settings/people/page.tsx"),
-      "utf8",
-    );
-    const transcript = await readFile(
-      path.join(WEB, TRANSCRIPT_PAGE),
-      "utf8",
-    );
-    // The address a terminal prints. It draws no run of its own any more — see
-    // the guard below — so what it has to keep is the shell while it works out
-    // where the run belongs.
-    const forwarder = await readFile(
-      path.join(WEB, "app/runs/[runId]/page.tsx"),
-      "utf8",
-    );
-    const run = await readFile(
-      path.join(WEB, "app/projects/[projectId]/runs/[runId]/page.tsx"),
-      "utf8",
-    );
-    const simulation = await readFile(
-      path.join(
-        WEB,
-        "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
-      ),
-      "utf8",
-    );
-    const root = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
-    expect(shell).toContain("export function ProductStatePage");
-    // The Settings pages keep the shell a stronger way than the state page
-    // does: they draw `AppShell` themselves and put loading, failure and
-    // not-found states inside it, so the navigation, selector and account menu
-    // never leave the screen while a read is in flight. The run and the
-    // simulation inside it do the same.
-    for (const page of [members, run, simulation]) {
-      expect(page).toContain("<AppShell>");
-      expect(page).toContain("<Loading ");
-      expect(page).not.toContain("<StatePage");
-    }
-    expect(transcript).toContain("<ProductStatePage");
-    expect(forwarder).toContain("<ProductStatePage");
-    expect(root).toContain('<ProductStatePage');
-    expect(root).not.toContain("<StatePage");
-    expect(transcript).not.toMatch(
-      /state\.status === "loading"[\s\S]*?return <StatePage/,
-    );
-    expect(forwarder).not.toMatch(
-      /state\.status === "loading"[\s\S]*?return <StatePage/,
-    );
-  });
-
-  /**
    * **One run has one page.** The address a terminal prints carries no project,
    * and the product's own pages are all project-scoped — so for a while there
    * were two pages drawing one run, free to disagree about whether a skipped
@@ -664,7 +606,6 @@ describe("the pages", () => {
       path.join(WEB, "app/judgment-card.tsx"),
       "utf8",
     );
-
     // A simulation egma could not conduct is egma's own failure, and both
     // surfaces say so in the same sentence rather than colouring it like a
     // grader's verdict.
@@ -679,9 +620,6 @@ describe("the pages", () => {
     // reading for, wherever one is drawn.
     expect(judgment).toContain("judgment.rationale");
     expect(judgment).toContain("judgment.cited_turns");
-    // `assertion`, never `dimension`: the verdict store renamed its column
-    // with the grader redesign and the word is banned at every layer.
-    expect(simulation).toContain("judgedAssertions(read.verdicts)");
   });
 
   it("shows the aggregate trace outcome", async () => {

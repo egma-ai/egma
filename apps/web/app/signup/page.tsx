@@ -99,17 +99,20 @@ export default function SignUpPage() {
   }
 
   if (availability === null) {
-    return <StatePage title="Loading Egma" lead="Checking whether this instance is ready for setup." />;
+    return (
+      <StatePage
+        animated
+        title="Loading Egma"
+        lead="Checking whether this instance is ready for setup."
+      />
+    );
   }
 
   if (!availability.open) {
     return (
       <StatePage
-        title="This Egma instance has been claimed"
-        lead={
-          availability.message ??
-          "Somebody has already set this instance up. Ask them for an invitation."
-        }
+        animated
+        title="Ask an admin for an invitation to this Egma instance."
       >
         <p className={styles.linkLine}>
           Already have an account?{" "}
@@ -128,6 +131,7 @@ export default function SignUpPage() {
 
   return (
     <AuthShell
+      animated
       eyebrow="First setup"
       title="Set up Egma"
       lead="One step. Your organization and your first project are created together."

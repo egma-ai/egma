@@ -4,16 +4,12 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
-import { agentsQuery, type AgentPage } from "../../../../../lib/agents.ts";
-import { personasPath, type PersonaPage } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
   behaviorsAreUsable,
-  CAPABILITIES_PATH,
   whyBehaviorsRefuse,
-  type CapabilityCatalog,
   type ExpectedBehavior,
   type ListedTest,
 } from "../../../../../lib/tests.ts";
@@ -31,7 +27,7 @@ import {
   TextArea,
   TextInput,
 } from "../../../../../ui/controls.tsx";
-import { useProjectRead } from "../../../../../ui/resource.ts";
+import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
   PageBody,
@@ -41,8 +37,7 @@ import {
 } from "../../../../../ui/shell.tsx";
 import {
   Behaviors,
-  CapabilityChoices,
-  NamedChoices,
+  NamedSelector,
 } from "../editor.tsx";
 
 /**
@@ -74,26 +69,25 @@ function NewTest({ projectId }: { readonly projectId: string }) {
   const role = me === null ? null : roleOf(me);
   const mayAuthor = role !== null && canAuthor(role);
 
-  const { answer: agents } = useProjectRead<AgentPage>(agentsQuery({}), projectId);
-  const { answer: personas } = useProjectRead<PersonaPage>(
-    personasPath(false),
-    projectId,
-  );
-  const { answer: catalog } = useProjectRead<CapabilityCatalog>(
-    CAPABILITIES_PATH,
-    projectId,
-  );
-
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [scenario, setScenario] = useState("");
   const [behaviors, setBehaviors] = useState<readonly ExpectedBehavior[]>([""]);
   const [chosenAgents, setChosenAgents] = useState<readonly string[]>([]);
   const [chosenPersonas, setChosenPersonas] = useState<readonly string[]>([]);
-  const [capabilities, setCapabilities] = useState<readonly string[]>([]);
 
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
+
+  const changed =
+    name !== "" ||
+    description !== "" ||
+    scenario !== "" ||
+    behaviors.length !== 1 ||
+    behaviors[0] !== "" ||
+    chosenAgents.length > 0 ||
+    chosenPersonas.length > 0;
+  useUnsavedChanges(changed && !saving, saving);
 
   /**
    * Everything typed belongs to this project's form, so a project change starts
@@ -107,18 +101,8 @@ function NewTest({ projectId }: { readonly projectId: string }) {
     setBehaviors([""]);
     setChosenAgents([]);
     setChosenPersonas([]);
-    setCapabilities([]);
     setRefused(null);
   }, [projectId]);
-
-  const activeAgents =
-    agents?.status === "ready"
-      ? agents.value.items.filter((one) => one.archived_at === null)
-      : [];
-  const activePersonas =
-    personas?.status === "ready"
-      ? personas.value.items.filter((one) => one.archived_at === null)
-      : [];
 
   const behaviorProblem = whyBehaviorsRefuse(behaviors);
   const usable =
@@ -141,7 +125,6 @@ function NewTest({ projectId }: { readonly projectId: string }) {
           .map((one) => one.trim())
           .filter((one) => one !== ""),
         personas: [...chosenPersonas],
-        required_capabilities: [...capabilities],
         agents: [...chosenAgents],
       },
     });
@@ -167,12 +150,11 @@ function NewTest({ projectId }: { readonly projectId: string }) {
       <PageHeader
         eyebrow="Tests"
         title="Write a test"
+        breadcrumbs={[
+          { label: "Tests", href: projectPath(projectId, "tests") },
+          { label: "New test" },
+        ]}
         lead="The situation to put an agent in, who calls about it, and what should happen."
-        action={
-          <ButtonLink href={projectPath(projectId, "tests")}>
-            Back to tests
-          </ButtonLink>
-        }
       />
       <PageBody>
         {refused === null ? null : <Refused message={refused.message} />}
@@ -222,7 +204,7 @@ function NewTest({ projectId }: { readonly projectId: string }) {
 
           <Section
             title="What should happen"
-            lead="Statements about the agent's conduct, in order. Every one has to hold, and a test keeps at least one — a test that cannot fail is not a test."
+            lead="Statements about the agent's conduct. Every one has to hold, and a test keeps at least one — a test that cannot fail is not a test."
           >
             <Behaviors
               behaviors={behaviors}
@@ -243,24 +225,16 @@ function NewTest({ projectId }: { readonly projectId: string }) {
             title="Which agents it applies to"
             lead="The targets a run may execute this test against. At least one, and every one active in this project."
           >
-            <NamedChoices
-              legend="Applicable agents"
-              available={activeAgents.map((one) => ({
-                id: one.id,
-                name: one.name,
-                archived_at: one.archived_at,
-              }))}
+            <NamedSelector
+              label="Agents"
+              resource="agents"
+              project={projectId}
               chosen={chosenAgents}
+              emptyMessage="This project has no active agent. Register an agent first."
               disabled={!mayAuthor}
               onChange={setChosenAgents}
             />
-            {activeAgents.length === 0 ? (
-              <Problem>
-                This project has no active agent, so it can hold no test. Register
-                an agent first.
-              </Problem>
-            ) : null}
-            {activeAgents.length > 0 && chosenAgents.length === 0 ? (
+            {chosenAgents.length === 0 ? (
               <Problem>
                 Every test must apply to at least one active agent. Select an
                 active agent and save the test again.
@@ -272,28 +246,13 @@ function NewTest({ projectId }: { readonly projectId: string }) {
             title="Who calls"
             lead="Choose none and Egma takes the project's default persona, so a first test never waits on authoring a caller."
           >
-            <NamedChoices
-              legend="Personas"
-              available={activePersonas.map((one) => ({
-                id: one.id,
-                name: one.name,
-                archived_at: one.archived_at,
-              }))}
+            <NamedSelector
+              label="Personas"
+              resource="personas"
+              project={projectId}
               chosen={chosenPersonas}
               disabled={!mayAuthor}
               onChange={setChosenPersonas}
-            />
-          </Section>
-
-          <Section
-            title="What a connection has to be able to do"
-            lead="A connection that cannot do one of these skips this test with a reason, rather than failing it."
-          >
-            <CapabilityChoices
-              catalog={catalog?.status === "ready" ? catalog.value.items : []}
-              chosen={capabilities}
-              disabled={!mayAuthor}
-              onChange={setCapabilities}
             />
           </Section>
 

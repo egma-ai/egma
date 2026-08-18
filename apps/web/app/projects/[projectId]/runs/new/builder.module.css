@@ -1,173 +1,238 @@
-/*
- * The parts a run builder needs and no other page has: a step whose heading
- * says where it sits in an order, a panel drawn once under a table for
- * whichever row is open, and a strip of counted facts about what a run would
- * do.
- *
- * They live beside the builder rather than in the shared system module, because
- * they are this page's and nothing else uses them. Every value is a token:
- * density and colour are tuned once, in `tokens.css`, and nothing here decides
- * either for itself.
- */
+/* The run builder is one ordered, full-width path. */
 
+.builderLayout,
 .steps {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: var(--space-6);
 }
 
-/*
- * One step, numbered.
- *
- * The number is drawn rather than implied, because order is the whole of what a
- * builder promises: an agent decides which connections exist, a connection
- * decides which capabilities are measured, and both decide which tests can
- * honestly run. Somebody who changes the first step has to be able to see that
- * everything under it is downstream of that choice.
- */
-.step {
-  display: grid;
-  grid-template-columns: var(--control-lg) minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-4);
-}
-
-.stepNumber {
-  min-height: var(--control-lg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--text-caption);
-}
-
-.stepNumberDone {
-  border-color: var(--foreground);
-  background: var(--surface-soft);
-  color: var(--foreground);
-}
-
-.stepBody {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  min-width: 0;
-}
-
-/*
- * The panel drawn once, under the table, for whichever row is open.
- *
- * Once and never squeezed into a cell: the table keeps each row to one line of
- * reading, while this panel needs the full width and owns the expanded state.
- */
-.openRow {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-5);
-  border: 1px solid var(--border);
-  border-inline-start: 3px solid var(--accent);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-}
-
-.openRowTitle {
-  margin: 0;
-  color: var(--foreground);
-  font-size: var(--text-caption);
-  font-weight: 500;
-}
-
-.graders {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+.steps {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.grader {
+.step,
+.stepSection,
+.stepHeading,
+.stepContent {
+  min-width: 0;
+}
+
+.stepSection {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2);
-  padding-block: var(--space-2);
-  border-top: 1px solid var(--border);
-  font-size: var(--text-caption);
-}
-
-.grader:first-child {
-  border-top: 0;
-}
-
-.graderName {
-  color: var(--foreground);
-}
-
-.graderNote {
-  color: var(--muted);
-  font-size: var(--text-caption);
-}
-
-/* What a run would do, counted. */
-.tally {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  overflow: hidden;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
 }
 
-.tallyItem {
+.stepHeader {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: var(--control-lg) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.stepNumber {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-4) var(--space-5);
-}
-
-.tallyItem + .tallyItem {
-  border-inline-start: 1px solid var(--border);
-}
-
-.tallyNumber {
-  font-family: var(--mono);
-  font-size: var(--text-body);
-  font-variant-numeric: tabular-nums;
+  width: var(--control-lg);
+  min-height: var(--control-lg);
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
   color: var(--foreground);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
 }
 
-.tallyLabel {
+.stepHeading h2,
+.startHeader h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-lead);
+  font-weight: 500;
+  letter-spacing: var(--tracking-lead);
+  line-height: var(--line-lead);
+}
+
+.stepLead {
+  margin: var(--space-1) 0 0;
   color: var(--muted);
   font-size: var(--text-caption);
+  letter-spacing: var(--tracking-caption);
+  line-height: var(--line-caption);
+}
+
+.stepContent {
+  margin-inline-start: calc(var(--control-lg) + var(--space-4));
+}
+
+.stepContent > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.stepContent > select {
+  max-width: 40rem;
 }
 
 .selection {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: var(--space-3);
 }
 
+.testActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.testList {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  list-style: none;
+}
+
+.testChoice {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: var(--control-lg) minmax(0, 1fr);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+}
+
+.testChoice + .testChoice {
+  border-top: 1px solid var(--border);
+}
+
+.testChoiceCopy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block: var(--space-1);
+  cursor: pointer;
+}
+
+.testChoiceName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.testChoiceName {
+  color: var(--foreground);
+  font-size: var(--text-body);
+  line-height: var(--line-body);
+}
+
+.startPanel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.startHeader {
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.runNameField {
+  display: flex;
+  max-width: 40rem;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.fieldError {
+  margin: 0;
+  color: var(--bad);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.attention {
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.attention p,
+.confirmationCopy {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.attention .attentionTitle {
+  margin-bottom: var(--space-1);
+  font-weight: 500;
+}
+
+.startAction {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.startAction > button {
+  width: 100%;
+}
+
+.confirmationCopy {
+  padding: var(--space-5) var(--space-6) 0;
+}
+
+.confirmationActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-6) var(--space-6);
+}
+
+@media (max-width: 68rem) {
+  .stepContent {
+    margin-inline-start: 0;
+  }
+}
+
 @media (max-width: 40rem) {
-  .step {
-    grid-template-columns: 1fr;
+  .stepSection,
+  .startPanel {
+    padding: var(--space-4);
   }
 
-  .stepNumber {
-    width: var(--control-lg);
+  .testChoice {
+    padding-inline: var(--space-2);
   }
 
-  .tally {
-    grid-template-columns: 1fr;
+  .confirmationActions {
+    flex-direction: column-reverse;
   }
 
-  .tallyItem + .tallyItem {
-    border-top: 1px solid var(--border);
-    border-inline-start: 0;
+  .confirmationActions > button {
+    width: 100%;
   }
 }

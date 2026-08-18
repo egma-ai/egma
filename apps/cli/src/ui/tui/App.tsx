@@ -97,7 +97,7 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
   if (screen === "reach") {
     return (
       <ReachScreen
-        ways={state.reachOffer ?? []}
+        options={state.reachOptions ?? []}
         onAnswer={(reach) => store.answer("reach", reach)}
       />
     );

@@ -25,6 +25,7 @@ export const FIXTURE_WINDOW = {
 export const FIXTURE_PROVIDER_CALL_ID = "egma-fixture-capture-1";
 
 export const FIXTURE_TRACE = {
+  started_at: "2026-08-02T18:04:40.281989Z",
   spans: 133,
   humanTurns: 5,
   agentTurns: 8,

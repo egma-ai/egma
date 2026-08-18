@@ -58,6 +58,8 @@ export type HeadlessRecord = {
   agentChoices: RetellAgent[];
   /** Whether the choice between text and phone was ever put to anybody. */
   reachOffered: boolean;
+  /** The provider-safe options shown at that choice. */
+  reachOptions: Reach[];
   /** The numbers a choice was offered between, when one was. */
   numberChoices: RetellNumber[];
   /** Provider fields shown, never the answers typed into them. */
@@ -96,6 +98,7 @@ export class HeadlessUI implements WizardUI {
     keyAsks: [],
     agentChoices: [],
     reachOffered: false,
+    reachOptions: [],
     numberChoices: [],
     connectionAsks: [],
     statuses: [],
@@ -199,15 +202,15 @@ export class HeadlessUI implements WizardUI {
   /**
    * The offer, printed the same way the screen draws it.
    *
-   * It is printed even though nobody is here to answer it, because whoever
-   * reads this output afterwards has to be able to see the compatible way and
-   * that egma did not confirm it on their behalf.
+   * It is printed even though nobody is here to answer it, so the output says
+   * exactly which provider-safe paths were available.
    */
-  setReachOffer(reaches: readonly Reach[] | null): void {
-    if (reaches === null) return;
+  setReachOffer(offered: readonly Reach[] | null): void {
+    if (offered === null) return;
     this.record.reachOffered = true;
+    this.record.reachOptions = [...offered];
     this.write(REACH_ASK_LINE);
-    for (const way of reaches) {
+    for (const way of offered) {
       this.write(`reach_option: ${way} ${REACH_LINES[way]}`);
     }
   }

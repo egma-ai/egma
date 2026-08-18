@@ -8,16 +8,13 @@ import { readJson, type Refusal } from "../../../../lib/api.ts";
 import {
   agentsQuery,
   type AgentPage,
-  type ArchiveFilter,
   type ListedAgent,
 } from "../../../../lib/agents.ts";
-import { asDay } from "../../../../lib/instants.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import {
   ButtonLink,
-  Choice,
   TextInput,
   Toolbar,
 } from "../../../../ui/controls.tsx";
@@ -44,8 +41,8 @@ import {
  * Forward, a copied link and a second tab on a second project all work for the
  * same reason: there is no chosen project anywhere except the address.
  *
- * **The search and the archive filter are asked of the server, never applied to
- * what came back.** A filter that only reached the page already fetched would
+ * **Search is asked of the server, never applied to what came back.** A filter
+ * that only reached the page already fetched would
  * answer differently depending on how far somebody had scrolled — a list of
  * four hundred agents would find nothing in the three hundred it had not
  * loaded, and would say so as though the project did not hold it.
@@ -77,28 +74,8 @@ function columnsFor(projectId: string): readonly Column<ListedAgent>[] {
       hideOnMobile: true,
       cell: (agent) => agent.description ?? "—",
     },
-    {
-      key: "updated",
-      header: "Last changed",
-      mono: true,
-      width: "120px",
-      cell: (agent) => asDay(agent.updated_at),
-    },
-    {
-      key: "created",
-      header: "Registered",
-      hideOnMobile: true,
-      mono: true,
-      width: "120px",
-      cell: (agent) => asDay(agent.created_at),
-    },
   ];
 }
-
-const FILTERS: readonly { value: ArchiveFilter; label: string }[] = [
-  { value: "active", label: "Active" },
-  { value: "archived", label: "Archived" },
-];
 
 function Agents({ projectId }: { readonly projectId: string }) {
   const { me } = useShellSession();
@@ -108,7 +85,6 @@ function Agents({ projectId }: { readonly projectId: string }) {
 
   const [typed, setTyped] = useState("");
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<ArchiveFilter>("active");
 
   /**
    * The typed text is debounced into the text the request is made from, so
@@ -121,7 +97,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
   }, [typed]);
 
   const { answer, reload } = useProjectRead<AgentPage>(
-    agentsQuery({ search, filter }),
+    agentsQuery({ search }),
     projectId,
   );
 
@@ -235,23 +211,16 @@ function Agents({ projectId }: { readonly projectId: string }) {
     const cursor = carried === null ? answer.value.next_cursor : carried.next_cursor;
 
     if (items.length === 0) {
-      // Three different absences, and they point somewhere different: a
-      // project with nothing in it, a search that matched nothing, and an
-      // archive nobody has put anything in.
+      // A search with no match and an empty project lead somewhere different.
       if (search.trim() !== "") {
         return (
           <Empty
-            title={`No ${filter} agents match “${search.trim()}”`}
+            title={`No agents match “${search.trim()}”`}
             lead="Try part of another name, or clear the search."
           />
         );
       }
-      return filter === "archived" ? (
-        <Empty
-          title="No archived agents in this project"
-          lead="Archiving an agent takes it out of new work and keeps its history readable. Nothing here has been archived."
-        />
-      ) : (
+      return (
         <Empty
           title="No agents in this project yet"
           lead="Register the voice agent you want to test, then give Egma a way to reach it."
@@ -278,7 +247,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
       setLoadingMore(true);
 
       const next = await readJson<AgentPage>(
-        agentsQuery({ search, filter, cursor }),
+        agentsQuery({ search, cursor }),
         { project: asked },
       );
 
@@ -344,12 +313,6 @@ function Agents({ projectId }: { readonly projectId: string }) {
             label="Search agents by name"
             placeholder="Search by name"
             onChange={setTyped}
-          />
-          <Choice
-            label="Which agents"
-            value={filter}
-            options={FILTERS}
-            onChange={setFilter}
           />
         </Toolbar>
         {body()}

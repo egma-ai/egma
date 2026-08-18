@@ -196,11 +196,15 @@ describe("the agents a test applies to", () => {
     const { ada, agentId, test } = await aProjectWithATest("tests_link_agents");
     const second = await anAgent(ada, "Front desk, weekend");
 
-    const linked = await browse("POST", `/api/tests/${test.id}/agents`, ada, {
-      project: ada.projectId,
-      agents: [agentId, second],
-      expected_applicability_revision: test.applicability_revision,
-    });
+    const linked = await browse(
+      "POST",
+      `/api/tests/${test.id}/agents?project=${ada.projectId}`,
+      ada,
+      {
+        agents: [agentId, second],
+        expected_applicability_revision: test.applicability_revision,
+      },
+    );
 
     expect(linked.statusCode, JSON.stringify(linked.body)).toBe(200);
     const changed = testIn(linked);
@@ -353,10 +357,12 @@ describe("archiving and restoring a test", () => {
   it("keeps its links and its history, and shows it under the archive filter", async () => {
     const { ada, agentId, test } = await aProjectWithATest("tests_archive");
 
-    const archived = await browse("POST", `/api/tests/${test.id}/archive`, ada, {
-      project: ada.projectId,
-      expected_revision: test.revision,
-    });
+    const archived = await browse(
+      "POST",
+      `/api/tests/${test.id}/archive?project=${ada.projectId}`,
+      ada,
+      { expected_revision: test.revision },
+    );
 
     expect(archived.statusCode, JSON.stringify(archived.body)).toBe(200);
     expect(testIn(archived).archived_at).toEqual(expect.any(String));
@@ -439,10 +445,12 @@ describe("archiving and restoring a test", () => {
     expect(refused.statusCode).toBe(422);
     expect(refused.body.error).toBe("test_needs_agent");
 
-    const restored = await browse("POST", `/api/tests/${test.id}/restore`, ada, {
-      project: ada.projectId,
-      agents: [agentId],
-    });
+    const restored = await browse(
+      "POST",
+      `/api/tests/${test.id}/restore?project=${ada.projectId}`,
+      ada,
+      { agents: [agentId] },
+    );
     expect(restored.statusCode, JSON.stringify(restored.body)).toBe(200);
     expect(testIn(restored).archived_at).toBeNull();
     expect(testIn(restored).agents.map((applies) => applies.id)).toEqual([
@@ -462,9 +470,11 @@ describe("cloning a test from a browser", () => {
       expected_version_id: test.version_id,
     });
 
-    const cloned = await browse("POST", `/api/tests/${test.id}/clone`, ada, {
-      project: ada.projectId,
-    });
+    const cloned = await browse(
+      "POST",
+      `/api/tests/${test.id}/clone?project=${ada.projectId}`,
+      ada,
+    );
 
     expect(cloned.statusCode, JSON.stringify(cloned.body)).toBe(201);
     const copy = testIn(cloned);
