@@ -452,6 +452,15 @@ MAY_BE_ABSENT = {
     # an invitation hands its link back to whoever sent it.
     "EGMA_SMTP_URL": "optional by design",
     "EGMA_MAIL_FROM": "optional by design",
+    # Telemetry about egma itself, where empty is not hollow but the promise:
+    # one flag, off by default, and a deployment that sets nothing sends
+    # nothing anywhere. The other four are its address book, read only when
+    # the flag says on — see .env.example's telemetry section.
+    "EGMA_TELEMETRY": "off is the default, and the public repo's promise",
+    "EGMA_TELEMETRY_OTLP_ENDPOINT": "read only when EGMA_TELEMETRY is on",
+    "EGMA_TELEMETRY_OTLP_HEADERS": "read only when EGMA_TELEMETRY is on",
+    "EGMA_POSTHOG_KEY": "read only when EGMA_TELEMETRY is on",
+    "EGMA_POSTHOG_HOST": "read only when EGMA_TELEMETRY is on",
     # Per-container tuning. The spec puts these out of scope by name: how many
     # simulations one simulator takes at once and how often the grader sweeps
     # are properties of the host, not of the deployment.
