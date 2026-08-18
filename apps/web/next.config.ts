@@ -26,9 +26,20 @@ const config: NextConfig = {
   // EGMA_TELEMETRY every other process reads. A build that was not told `on`
   // bakes in an empty string, and the client initializes nothing even if a
   // PostHog key was left set: one flag is the whole decision, in the browser
-  // exactly as in the containers.
+  // exactly as in the containers. And exactly as in the containers, `on`
+  // without the key is refused here, by name, rather than built into pages
+  // that quietly report nothing.
   env: {
-    NEXT_PUBLIC_EGMA_TELEMETRY: process.env.EGMA_TELEMETRY ?? "",
+    NEXT_PUBLIC_EGMA_TELEMETRY: (() => {
+      const on = (process.env.EGMA_TELEMETRY ?? "").trim().toLowerCase() === "on";
+      if (on && !process.env.NEXT_PUBLIC_POSTHOG_KEY) {
+        throw new Error(
+          "EGMA_TELEMETRY is on, so NEXT_PUBLIC_POSTHOG_KEY must be set where the pages build — " +
+            "on means everything reports, and an absent key must never be a quiet no",
+        );
+      }
+      return on ? "on" : "";
+    })(),
   },
 
   async rewrites() {

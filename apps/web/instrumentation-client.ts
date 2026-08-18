@@ -21,11 +21,12 @@
 
 import posthog from "posthog-js";
 
-const enabled =
-  (process.env.NEXT_PUBLIC_EGMA_TELEMETRY ?? "").trim().toLowerCase() === "on";
+// One condition, the flag. next.config already refused any build that said
+// `on` without a key, so the key read below is TypeScript's concern, not a
+// second switch.
 const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
 
-if (enabled && key !== undefined && key !== "") {
+if (process.env.NEXT_PUBLIC_EGMA_TELEMETRY === "on" && key !== undefined && key !== "") {
   posthog.init(key, {
     api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
     // PostHog's dated defaults preset: history-change pageviews and the rest
