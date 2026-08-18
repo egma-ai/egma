@@ -20,6 +20,17 @@ const config: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: new URL("../../", import.meta.url).pathname,
 
+  // The one telemetry flag, made visible to the browser bundle. Pages cannot
+  // read a server variable at runtime — Next inlines only NEXT_PUBLIC_* at
+  // build — so the flag is mapped through here, at build, from the same
+  // EGMA_TELEMETRY every other process reads. A build that was not told `on`
+  // bakes in an empty string, and the client initializes nothing even if a
+  // PostHog key was left set: one flag is the whole decision, in the browser
+  // exactly as in the containers.
+  env: {
+    NEXT_PUBLIC_EGMA_TELEMETRY: process.env.EGMA_TELEMETRY ?? "",
+  },
+
   async rewrites() {
     return {
       // Ahead of this app's own files, so the API owns these paths outright.
