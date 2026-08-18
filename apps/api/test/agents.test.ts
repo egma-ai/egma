@@ -5,7 +5,7 @@ import {
   type Role,
 } from "@egma/db";
 import { newId } from "@egma/ids";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
 import {
@@ -36,6 +36,7 @@ import {
 let api: TestApi;
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await api?.close();
 });
 
@@ -121,12 +122,194 @@ function connectionPayload(
 ): Record<string, unknown> {
   return {
     type: "retell",
-    modality: "voice",
+    modality: "chat",
     config: { retellAgentId: "agent_in_retell_2" },
     credentials: { apiKey: "retell-secret-B2C3D4E5WXYZ" },
     ...overrides,
   };
 }
+
+describe("reading a Retell account for voice setup", () => {
+  it("returns only sanitized voice agents and their routed numbers, never the key", async () => {
+    api = await createApi("retell_voice_discovery");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const retellKey = "retell-secret-never-returned-WXYZ";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/v2/list-agents")) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  agent_id: "agent_voice_1",
+                  agent_name: " Front\u0000 desk ",
+                  channel: "voice",
+                  prompt: "must not cross the provider seam",
+                },
+                {
+                  agent_id: "agent_chat_1",
+                  agent_name: "Chat only",
+                  channel: "chat",
+                },
+              ],
+              has_more: false,
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.endsWith("/list-phone-numbers")) {
+          return new Response(
+            JSON.stringify([
+              {
+                phone_number: "+14155550100",
+                nickname: " Main\u0007 line ",
+                inbound_agents: [{ agent_id: "agent_voice_1" }],
+                outbound_agent_id: "must-not-cross",
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected Retell request ${url}`);
+      }),
+    );
+
+    const answer = await post(
+      `/api/providers/retell/voice-agents?project=${ada.projectId}`,
+      withKey(ada.secret),
+      { api_key: retellKey },
+    );
+
+    expect(answer.status).toBe(200);
+    expect(answer.body).toEqual({
+      agents: [
+        {
+          id: "agent_voice_1",
+          name: "Front desk",
+          numbers: [{ number: "+14155550100", label: "Main line" }],
+        },
+      ],
+    });
+    expect(JSON.stringify(answer.body)).not.toContain(retellKey);
+    expect(JSON.stringify(answer.body)).not.toContain("prompt");
+    expect(JSON.stringify(answer.body)).not.toContain("outbound_agent_id");
+  });
+
+  it("answers an invalid key without reflecting it", async () => {
+    api = await createApi("retell_voice_invalid_key");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const retellKey = "retell-secret-invalid-ABCD";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 401 })),
+    );
+
+    const answer = await post(
+      `/api/providers/retell/voice-agents?project=${ada.projectId}`,
+      withKey(ada.secret),
+      { api_key: retellKey },
+    );
+
+    expect(answer.status).toBe(422);
+    expect(answer.body).toEqual({
+      error: "unprocessable",
+      message:
+        "Retell did not accept that API key. Copy it again from Retell, then try again.",
+    });
+    expect(JSON.stringify(answer.body)).not.toContain(retellKey);
+  });
+
+  it("rechecks the selected route, then stores only its phone number", async () => {
+    const lines: string[] = [];
+    api = await createApi("retell_phone_connection", {
+      logTo: { write: (line) => lines.push(line) },
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/api/agents", withKey(ada.secret), {
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    const retellKey = "SENTINEL-retell-key-never-kept-WXYZ";
+    const providerReads: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        providerReads.push(url);
+        if (url.includes("/v2/list-agents")) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  agent_id: "agent_voice_1",
+                  agent_name: "Front desk",
+                  channel: "voice",
+                },
+              ],
+              has_more: false,
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/get-phone-number/")) {
+          return new Response(
+            JSON.stringify({
+              phone_number: "+14155550100",
+              nickname: "Main number",
+              inbound_agents: [{ agent_id: "agent_voice_1" }],
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected Retell request ${url}`);
+      }),
+    );
+
+    const answer = await post(
+      `/api/agents/${agentId}/connections/retell-phone?project=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        api_key: retellKey,
+        retell_agent_id: "agent_voice_1",
+        phone_number: "+14155550100",
+        name: "Retell main number",
+      },
+    );
+
+    expect(answer.status).toBe(201);
+    expect(connectionOf(answer)).toMatchObject({
+      name: "Retell main number",
+      type: "phone",
+      modality: "voice",
+      config: { phoneNumber: "+14155550100" },
+      credential_present: false,
+    });
+    expect(providerReads.some((url) => url.includes("/v2/list-agents"))).toBe(true);
+    expect(
+      providerReads.some((url) => url.includes("/get-phone-number/%2B14155550100")),
+    ).toBe(true);
+    const held = JSON.stringify({ body: answer.body, logs: lines });
+    expect(held).not.toContain(retellKey);
+    expect(held).not.toContain("agent_voice_1");
+    const stored = await api.database.sql<{
+      type: string;
+      config: Record<string, unknown>;
+      credentials: string | null;
+    }>(
+      "select type, config, credentials from connection where agent_id = $1",
+      [agentId],
+    );
+    expect(stored.rows).toEqual([
+      {
+        type: "phone",
+        config: { phoneNumber: "+14155550100" },
+        credentials: null,
+      },
+    ]);
+  });
+});
 
 describe("registering an agent", () => {
   it("writes the agent and the first way of reaching it in one request", async () => {
@@ -915,7 +1098,7 @@ describe("registering the same vendor agent again", () => {
     expect(rows[0]).toEqual({ agents: "1", connections: "1" });
   });
 
-  it("adds a second way of reaching the same agent when the modality changed", async () => {
+  it("refuses a direct Retell voice row before it can be stored", async () => {
     api = await createApi("agents_connection_added");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -930,22 +1113,18 @@ describe("registering the same vendor agent again", () => {
       registration({ modality: "voice" }),
     );
 
-    expect(voice.status).toBe(201);
-    expect(voice.body.result).toBe("connection_added");
-    expect(agentOf(voice).id).toBe(agentOf(chat).id);
-    expect(connectionOf(voice).id).not.toBe(connectionOf(chat).id);
-    expect(connectionOf(voice)).toMatchObject({
-      name: "retell-2",
-      modality: "voice",
+    expect(chat.status).toBe(201);
+    expect(voice.status).toBe(400);
+    expect(voice.body).toEqual({
+      error: "invalid_request",
+      message: "a retell connection speaks chat, and this one was asked for voice",
     });
 
     const one = await get(
       `/api/agents/${String(agentOf(chat).id)}`,
       withKey(ada.secret),
     );
-    expect(
-      (one.body.connections as { name: string }[]).map((held) => held.name),
-    ).toEqual(["retell-1", "retell-2"]);
+    expect(one.body.connections).toHaveLength(1);
     expect(await agentRowCount()).toBe(1);
   });
 
@@ -1392,6 +1571,23 @@ describe("what each role may do here", () => {
     );
     expect(attaching.status).toBe(403);
     expect(attaching.body).toEqual(refusal);
+
+    const providerRead = vi.fn(async () => {
+      throw new Error("a viewer must never reach Retell");
+    });
+    vi.stubGlobal("fetch", providerRead);
+    const retellPhone = await post(
+      `/api/agents/${String(agentOf(registered).id)}/connections/retell-phone`,
+      withKey(vic.secret),
+      {
+        api_key: "SENTINEL-viewer-key-never-sent",
+        retell_agent_id: "agent_voice_1",
+        phone_number: "+14155550100",
+      },
+    );
+    expect(retellPhone.status).toBe(403);
+    expect(retellPhone.body).toEqual(refusal);
+    expect(providerRead).not.toHaveBeenCalled();
 
     expect(await agentRowCount()).toBe(1);
   });

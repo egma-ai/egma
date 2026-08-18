@@ -3,6 +3,7 @@ import {
   and,
   desc,
   eq,
+  ilike,
   inArray,
   isNotNull,
   isNull,
@@ -827,6 +828,8 @@ export type PersonaPage = {
 export type PersonaListRequest = PageRequest & {
   /** `false`, the default, is the authoring list. `true` is the archive. */
   readonly archived?: boolean | undefined;
+  /** Part of the name, matched without regard to case. */
+  readonly search?: string | undefined;
 };
 
 export async function listPersonas(
@@ -844,13 +847,18 @@ export async function listPersonas(
     cursor === undefined ? undefined : lt(persona.id, cursor);
   const lifecycle =
     page?.archived === true ? isNotNull(persona.archivedAt) : notArchived;
+  const wanted = page?.search?.trim();
+  const named =
+    wanted === undefined || wanted === ""
+      ? undefined
+      : ilike(persona.name, `%${wanted.replace(/([\\%_])/g, "\\$1")}%`);
 
   const rows = await selectWithCurrentVersion()
     .where(
       within(
         auth,
         persona,
-        and(lifecycle, inActingProject(auth), olderThanCursor),
+        and(lifecycle, named, inActingProject(auth), olderThanCursor),
       ),
     )
     .orderBy(desc(persona.id))

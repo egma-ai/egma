@@ -76,8 +76,12 @@ export const NO_AGENTS_LINE =
 export const DEFAULT_AGENT_NAME = "voice-agent";
 
 /**
- * How egma reaches the agent, confirmed by the developer and never guessed by
- * egma. Retell voice agents use phone. Retell chat agents use text.
+ * How egma reaches the agent, chosen by the developer and never by egma.
+ *
+ * A Retell voice agent is reached by phone. A genuine Retell chat agent is
+ * reached by text. Voice-over-text stays unavailable until Egma implements
+ * Retell Agent Playground Completion; the shipped chat adapter cannot safely
+ * conduct that path.
  */
 export type Reach = "text" | "phone";
 
@@ -207,8 +211,8 @@ export type ConnectOutcome =
   | { readonly kind: "no-agents" }
   /** Several agents, and nobody said which. */
   | { readonly kind: "unchosen"; readonly agents: readonly RetellAgent[] }
-  /** Nobody said whether egma should reach the agent by text or by phone. */
-  | { readonly kind: "unchosen-reach" }
+  /** Nobody chose one of the provider-safe ways offered for this agent. */
+  | { readonly kind: "unchosen-reach"; readonly offered: readonly Reach[] }
   /** The requested reach does not match the selected Retell agent's channel. */
   | {
       readonly kind: "incompatible-reach";
@@ -242,7 +246,7 @@ export type ConnectOptions = {
    * is a fact about *that* agent, so there is nothing honest to offer until
    * egma knows which one is under test.
    */
-  readonly chooseReach: (compatible: Reach) => Promise<Reach | null>;
+  readonly chooseReach: (offered: readonly Reach[]) => Promise<Reach | null>;
   /**
    * Which number to dial, in E.164, or `null` when nobody chose.
    *
@@ -362,9 +366,9 @@ type Selected = {
 /**
  * The one connection the chosen reach means.
  *
- * **Text is a chat connection over the selected voice agent**, not a second
- * Retell agent: the identity is the voice agent's own, and what changes is how
- * egma talks to it. **Phone carries the destination number and nothing else** —
+ * **Text is only a direct connection to a genuine Retell chat agent.** A voice
+ * agent cannot take this branch until the Agent Playground Completion adapter
+ * exists. **Phone carries the destination number and nothing else** —
  * no Retell identifier and no credential — because the public telephone network
  * neither knows nor cares what answers, and a phone connection that named a
  * provider would be claiming knowledge egma does not use.
@@ -795,9 +799,10 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
   // before this point would be offering a phone the agent may have no number
   // for.
   const compatibleReach: Reach = config.modality === "voice" ? "phone" : "text";
-  const reach = await options.chooseReach(compatibleReach);
+  const offered: readonly Reach[] = [compatibleReach];
+  const reach = await options.chooseReach(offered);
   if (options.signal.aborted) return { kind: "interrupted" };
-  if (reach === null) return { kind: "unchosen-reach" };
+  if (reach === null) return { kind: "unchosen-reach", offered };
   if (config.modality === "voice" && reach !== "phone") {
     return {
       kind: "incompatible-reach",

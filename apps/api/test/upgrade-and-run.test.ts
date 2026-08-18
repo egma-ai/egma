@@ -108,11 +108,14 @@ const RITA: PersonaTraits = {
   voice: { provider: "cartesia", voiceId: "ritas-own-voice", speed: 1.15 },
 };
 
-const RETELL_VOICE = {
-  type: "retell",
+const LIVEKIT_VOICE = {
+  type: "livekit",
   modality: "voice",
-  config: { retellAgentId: "agent_in_retell_1" },
-  credentials: { apiKey: "retell-sentinel-upgraded-run-J9K0" },
+  config: { url: "wss://acme.livekit.cloud" },
+  credentials: {
+    apiKey: "APIsentinelupgraded0WXYZ",
+    apiSecret: "SENTINEL-livekit-upgraded-run-J9K0",
+  },
 } as const;
 
 type Models = {
@@ -181,7 +184,7 @@ async function anUpgradedInstallation(label: string): Promise<World> {
 
   const registered = await ask(api.app, "POST", "/api/agents", key, {
     name: "Front desk",
-    connection: RETELL_VOICE,
+    connection: LIVEKIT_VOICE,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
 
@@ -519,7 +522,7 @@ describe("grading work frozen before the upgrade", () => {
 
     const registered = await ask(api.app, "POST", "/api/agents", key, {
       name: "Front desk",
-      connection: RETELL_VOICE,
+      connection: LIVEKIT_VOICE,
     });
     await createPersona(contextFor(ada, "member"), { name: "Rita", traits: RITA });
     const pushed = await ask(api.app, "POST", "/api/tests", key, {

@@ -291,6 +291,14 @@ const CONTEXT_REQUIRING = [
   // comes off the earlier run and nothing a caller sends can name any of it —
   // which is what makes the link a retry writes worth trusting.
   "retryRun",
+  // One stored simulation, derived into one new named run. Its own verb keeps
+  // the source selection server-side rather than widening ordinary start.
+  "rerunSimulation",
+  // The read-only half of running one simulation again. A product door asks
+  // this before mutable deployment-readiness checks, so a repeated key answers
+  // the run it already created rather than being refused by conditions that
+  // changed after that run began.
+  "simulationRerunAlreadyStarted",
   "listSimulations",
   "listTests",
   "listTraces",
@@ -346,6 +354,7 @@ const CONTEXT_REQUIRING = [
   "registerAgent",
   "regrade",
   "releaseGradingJob",
+  "releaseSimulationClaim",
   "reopenGradingJob",
   "removeMember",
   // Archive's other half, for an agent and for one way of reaching it. They
@@ -670,6 +679,7 @@ const VALUES = [
   // silently substitute, and it names the resource that stopped it.
   "RunRetryRefusedError",
   "RunWriteRefusedError",
+  "SimulationRerunRefusedError",
   // An edit refused because somebody moved the test since it was written. It
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.

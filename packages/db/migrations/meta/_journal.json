@@ -257,29 +257,36 @@
     {
       "idx": 36,
       "version": "7",
-      "when": 1786990925130,
-      "tag": "0036_customer_owned_model_access",
+      "when": 1786994156000,
+      "tag": "0036_transient_claim_release",
       "breakpoints": true
     },
     {
       "idx": 37,
       "version": "7",
-      "when": 1786990925131,
-      "tag": "0037_managed_model_access",
+      "when": 1786994156001,
+      "tag": "0037_customer_owned_model_access",
       "breakpoints": true
     },
     {
       "idx": 38,
       "version": "7",
-      "when": 1786990925132,
-      "tag": "0038_model_upgrade",
+      "when": 1786994156002,
+      "tag": "0038_managed_model_access",
       "breakpoints": true
     },
     {
       "idx": 39,
       "version": "7",
-      "when": 1786990925133,
-      "tag": "0039_upgrade_tracks_its_sources",
+      "when": 1786994156003,
+      "tag": "0039_model_upgrade",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786994156004,
+      "tag": "0040_upgrade_tracks_its_sources",
       "breakpoints": true
     }
   ]

@@ -73,9 +73,7 @@ function reportFor(outcome: ConnectOutcome, signal: AbortSignal): ExitReport {
     case "unchosen-reach":
       return {
         kind: "failed",
-        reason:
-          "nobody said whether Egma should reach this agent by text or by phone, " +
-          "so nothing was created.",
+        reason: `nobody chose ${outcome.offered.join(" or ")}, so nothing was created.`,
       };
     case "incompatible-reach":
       return { kind: "failed", reason: outcome.reason };
@@ -171,8 +169,8 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
       ui.setAgentChoices(null);
       return chosen ?? null;
     },
-    chooseReach: async (compatible) => {
-      ui.setReachOffer([compatible]);
+    chooseReach: async (offered) => {
+      ui.setReachOffer(offered);
       const chosen = await untilAborted(ui.waitForAnswer("reach"), signal);
       ui.setReachOffer(null);
       return reachFrom(chosen ?? null);

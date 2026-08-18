@@ -9,7 +9,6 @@ import {
   type Answer,
   type Refusal,
 } from "../../../../../lib/api.ts";
-import { asDay } from "../../../../../lib/instants.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   ASSIGNABLE_ROLES,
@@ -26,7 +25,6 @@ import {
 import {
   Badge,
   Button,
-  Choice,
   Field,
   Form,
   FormActions,
@@ -39,10 +37,19 @@ import {
 } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
+import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
-import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
-  confirmUnsavedNavigation,
+  RelativeInstant,
+  useMinuteClock,
+} from "../../../../../ui/relative-time.tsx";
+import {
+  SettingsLayout,
+  SettingsTabs,
+  settingsPath,
+} from "../../../../../ui/settings-nav.tsx";
+import {
+  currentDraftState,
   useOrganizationRead,
   useUnsavedChanges,
 } from "../../../../../ui/settings-read.ts";
@@ -100,6 +107,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
     readonly action: "remove" | "deactivate";
     readonly member: Member;
   } | null>(null);
+  const draftNavigation = useDraftNavigation();
 
   /** The tab lives in the address, so Back works and a link can name one. */
   useEffect(() => {
@@ -127,21 +135,31 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       const next = tabInAddress(address);
       const current = tabRef.current;
       if (next === current) return;
-      if (!confirmUnsavedNavigation()) {
-        // Popstate already changed the address. Put the address for the tab
-        // whose draft remains on screen back without firing another popstate.
-        writeTabAddress(current);
+
+      const show = (writeAddress: boolean) => {
+        if (writeAddress) writeTabAddress(next);
+        tabRef.current = next;
+        setTab(next);
+      };
+      if (currentDraftState() === "unchanged") {
+        show(false);
         return;
       }
-      tabRef.current = next;
-      setTab(next);
+
+      // Browser Back changes the address before popstate and provides no
+      // cancellable event. Restore the tab whose draft is still on screen,
+      // then make the requested tab current only after the shared dialog is
+      // accepted. This is necessarily after-the-fact protection, unlike links
+      // and router controls, which the shell stops before navigation.
+      writeTabAddress(current);
+      draftNavigation.request(() => show(true));
     };
     const initial = tabInAddress(new URL(globalThis.location.href));
     tabRef.current = initial;
     setTab(initial);
     globalThis.addEventListener("popstate", readTab);
     return () => globalThis.removeEventListener("popstate", readTab);
-  }, []);
+  }, [draftNavigation]);
 
   useEffect(() => {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
@@ -167,13 +185,14 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
 
   function showTab(next: Tab): void {
     if (next === tabRef.current) return;
-    if (!confirmUnsavedNavigation()) return;
-    const address = new URL(globalThis.location.href);
-    if (next === "people") address.searchParams.delete("tab");
-    else address.searchParams.set("tab", next);
-    globalThis.history.pushState(null, "", `${address.pathname}${address.search}`);
-    tabRef.current = next;
-    setTab(next);
+    draftNavigation.request(() => {
+      const address = new URL(globalThis.location.href);
+      if (next === "people") address.searchParams.delete("tab");
+      else address.searchParams.set("tab", next);
+      globalThis.history.pushState(null, "", `${address.pathname}${address.search}`);
+      tabRef.current = next;
+      setTab(next);
+    });
   }
 
   async function act(path: string, body: Record<string, unknown>): Promise<void> {
@@ -196,8 +215,15 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
 
   if (answer === null) {
     return (
-      <ProductPage>
-        <PageHeader eyebrow="Settings" title="People" />
+      <ProductPage viewport>
+        <PageHeader
+          eyebrow="Settings"
+          title="People"
+          breadcrumbs={[
+            { label: "Settings", href: settingsPath(projectId) },
+            { label: "People" },
+          ]}
+        />
         <PageBody>
           <SettingsLayout projectId={projectId} current="people">
             <Loading what="this organization's people" />
@@ -209,8 +235,15 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
 
   if (answer.status !== "ready") {
     return (
-      <ProductPage>
-        <PageHeader eyebrow="Settings" title="People" />
+      <ProductPage viewport>
+        <PageHeader
+          eyebrow="Settings"
+          title="People"
+          breadcrumbs={[
+            { label: "Settings", href: settingsPath(projectId) },
+            { label: "People" },
+          ]}
+        />
         <PageBody>
           <SettingsLayout projectId={projectId} current="people">
             <Failure
@@ -293,10 +326,14 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   ];
 
   return (
-    <ProductPage>
+    <ProductPage viewport>
       <PageHeader
         eyebrow="Settings"
         title="People"
+        breadcrumbs={[
+          { label: "Settings", href: settingsPath(projectId) },
+          { label: "People" },
+        ]}
         lead="Everybody in this organization, and what each of them may do."
       />
       <PageBody>
@@ -304,8 +341,9 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
           {refused === null ? null : <Refused message={refused.message} />}
 
           {mayManage ? (
-            <Choice
-              label="Which list to show"
+            <SettingsTabs
+              id="people-view"
+              label="People views"
               value={shownTab}
               options={[
                 { value: "people", label: "People" },
@@ -316,27 +354,39 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
           ) : null}
 
           {shownTab === "people" ? (
-            <Section title="People">
-              {members.length === 0 ? (
-                <Empty title="Nobody is here yet." />
-              ) : (
-                <DataTable
-                  label="Members"
-                  columns={columns}
-                  rows={members}
-                  keyOf={(member) => member.user_id}
-                />
-              )}
-            </Section>
+            <div
+              id="people-view-people-panel"
+              role={mayManage ? "tabpanel" : undefined}
+              aria-labelledby={mayManage ? "people-view-people-tab" : undefined}
+            >
+              <Section title="People">
+                {members.length === 0 ? (
+                  <Empty title="Nobody is here yet." />
+                ) : (
+                  <DataTable
+                    label="Members"
+                    columns={columns}
+                    rows={members}
+                    keyOf={(member) => member.user_id}
+                  />
+                )}
+              </Section>
+            </div>
           ) : (
-            <Invitations
-              invitations={invitations}
-              busy={busy}
-              onSent={() => void refreshInvitations()}
-              onRetry={() => void refreshInvitations()}
-              onRefused={setRefused}
-              onBusy={setBusy}
-            />
+            <div
+              id="people-view-invitations-panel"
+              role="tabpanel"
+              aria-labelledby="people-view-invitations-tab"
+            >
+              <Invitations
+                invitations={invitations}
+                busy={busy}
+                onSent={() => void refreshInvitations()}
+                onRetry={() => void refreshInvitations()}
+                onRefused={setRefused}
+                onBusy={setBusy}
+              />
+            </div>
           )}
         </SettingsLayout>
       </PageBody>
@@ -411,6 +461,7 @@ function Invitations({
   readonly onRefused: (refusal: Refusal | null) => void;
   readonly onBusy: (busy: boolean) => void;
 }) {
+  const now = useMinuteClock();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<string>("viewer");
   const [link, setLink] = useState<string | null>(null);
@@ -490,7 +541,9 @@ function Invitations({
       key: "expiry",
       header: "Expiry",
       mono: true,
-      cell: (invitation) => asDay(invitation.expires_at),
+      cell: (invitation) => (
+        <RelativeInstant instant={invitation.expires_at} now={now} />
+      ),
     },
     {
       key: "actions",

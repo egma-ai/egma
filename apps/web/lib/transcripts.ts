@@ -661,20 +661,6 @@ export function howFarIn(startedAt: string, openedAt: string): string {
   return `+${seconds.toFixed(1)} s`;
 }
 
-/**
- * An instant, in UTC and said so.
- *
- * Deliberately not the reader's own timezone. Traces are correlated against
- * logs, against a provider's dashboard and against somebody else's screen
- * share, and every one of those speaks UTC; a page that silently shifted the
- * numbers would make the two disagree with nothing on screen to say why.
- */
-export function whenItWas(instant: string): string {
-  const at = Date.parse(instant);
-  if (Number.isNaN(at)) return instant;
-  return `${new Date(at).toISOString().slice(0, 19).replace("T", " ")} UTC`;
-}
-
 /* ------------------------------------------------------------------ *
  * Reading the shape.
  * ------------------------------------------------------------------ */

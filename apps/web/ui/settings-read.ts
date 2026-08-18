@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 
 import { readJson, type Answer } from "../lib/api.ts";
 
@@ -9,7 +9,16 @@ let protectedDrafts = 0;
 let busyDrafts = 0;
 let confirmedThisTurn = false;
 
-/** Ask once before an in-product control changes the current address. */
+export type DraftState = "unchanged" | "unsaved" | "saving";
+
+/** The strongest draft state currently held anywhere in the product shell. */
+export function currentDraftState(): DraftState {
+  if (busyDrafts > 0) return "saving";
+  if (protectedDrafts > 0) return "unsaved";
+  return "unchanged";
+}
+
+/** Native fallback for a control rendered outside the product shell. */
 export function confirmUnsavedNavigation(): boolean {
   // A person may choose to discard a local draft. They cannot choose to make
   // an unsettled write safe: leaving while it is in flight can hide whether
@@ -40,47 +49,11 @@ function protectUnload(event: BeforeUnloadEvent): void {
   event.returnValue = "";
 }
 
-function protectSameOriginLink(event: MouseEvent): void {
-  if (
-    protectedDrafts === 0 ||
-    event.defaultPrevented ||
-    event.button !== 0 ||
-    event.metaKey ||
-    event.ctrlKey ||
-    event.shiftKey ||
-    event.altKey ||
-    !(event.target instanceof Element)
-  ) {
-    return;
-  }
-
-  const link = event.target.closest<HTMLAnchorElement>("a[href]");
-  if (
-    link === null ||
-    link.target === "_blank" ||
-    link.hasAttribute("download")
-  ) {
-    return;
-  }
-
-  const here = new URL(globalThis.location.href);
-  const next = new URL(link.getAttribute("href") ?? link.href, here);
-  if (next.origin !== here.origin) return;
-  if (next.pathname === here.pathname && next.search === here.search) {
-    return;
-  }
-
-  if (confirmUnsavedNavigation()) return;
-  event.preventDefault();
-  event.stopPropagation();
-}
-
 function beginProtectingDraft(busy: boolean): () => void {
   protectedDrafts += 1;
   if (busy) busyDrafts += 1;
   if (protectedDrafts === 1) {
     globalThis.addEventListener("beforeunload", protectUnload);
-    document.addEventListener("click", protectSameOriginLink, true);
   }
 
   return () => {
@@ -88,7 +61,6 @@ function beginProtectingDraft(busy: boolean): () => void {
     if (busy) busyDrafts = Math.max(0, busyDrafts - 1);
     if (protectedDrafts === 0) {
       globalThis.removeEventListener("beforeunload", protectUnload);
-      document.removeEventListener("click", protectSameOriginLink, true);
     }
   };
 }
@@ -140,15 +112,23 @@ export function useOrganizationRead<T>(path: string): {
  * Keep an in-product link, a project switch, a reload, or a closed tab from
  * silently throwing an editable product draft away.
  *
- * Browsers own the warning text, so this does not promise wording that they do
- * not let a product control. In-product navigation uses one short product
- * question for a local draft. A busy write blocks in-product navigation without
- * asking because there is no safe discard decision while its result is unknown.
- * Callers turn protection off after the draft or write is safe.
+ * The browser owns the warning for reload, tab close, and external unload.
+ * Same-origin product navigation uses the shared Egma dialog instead. A busy
+ * write blocks in-product navigation because there is no safe discard decision
+ * while its result is unknown. Callers turn protection off after the draft or
+ * write is safe. The return value lets an editor show its state if that helps.
  */
-export function useUnsavedChanges(unsaved: boolean, busy = false): void {
-  useEffect(() => {
+export function useUnsavedChanges(
+  unsaved: boolean,
+  busy = false,
+): DraftState {
+  // Install the capture listener before the browser paints the changed field.
+  // A quick click on a breadcrumb must not fit between a draft becoming dirty
+  // and its protection becoming active.
+  useLayoutEffect(() => {
     if (!unsaved && !busy) return;
     return beginProtectingDraft(busy);
   }, [busy, unsaved]);
+
+  return busy ? "saving" : unsaved ? "unsaved" : "unchanged";
 }

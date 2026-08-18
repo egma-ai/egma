@@ -58,8 +58,8 @@ export type WizardState = {
   readonly keyAsk: KeyAsk | null;
   /** The agents a choice is open between, or `null` when none is. */
   readonly agentChoices: readonly RetellAgent[] | null;
-  /** The Retell-compatible ways on offer, or `null` when none is. */
-  readonly reachOffer: readonly Reach[] | null;
+  /** The provider-safe ways currently offered. */
+  readonly reachOptions: readonly Reach[] | null;
   /** The numbers a choice is open between, or `null` when none is. */
   readonly numberChoices: readonly RetellNumber[] | null;
   /** The provider field being collected. Its answer never enters this state. */
@@ -102,7 +102,7 @@ export function emptyState(): WizardState {
     loginCopied: false,
     keyAsk: null,
     agentChoices: null,
-    reachOffer: null,
+    reachOptions: null,
     numberChoices: null,
     connectionAsk: null,
     begun: false,

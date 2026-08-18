@@ -57,7 +57,36 @@ const RETELL = {
 } as const;
 
 /** The same agent reached over a voice line, for the cases about speech legs. */
-const RETELL_VOICE = { ...RETELL, modality: "voice" } as const;
+const LIVEKIT_VOICE = {
+  type: "livekit",
+  modality: "voice",
+  config: { url: "wss://acme.livekit.cloud" },
+  credentials: {
+    apiKey: "APIsentinelclaims0WXYZ",
+    apiSecret: "SENTINEL-livekit-claims-J9K0",
+  },
+} as const;
+
+/** The direct Retell target the chat cases stand on: a chat agent, answering. */
+const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
+  const url = String(input);
+  if (!url.includes("/v2/list-agents")) {
+    throw new Error(`Unexpected Retell read: ${url}`);
+  }
+  return new Response(
+    JSON.stringify({
+      items: [
+        {
+          agent_id: "agent_in_retell_1",
+          agent_name: "Front desk",
+          channel: "chat",
+        },
+      ],
+      has_more: false,
+    }),
+    { status: 200 },
+  );
+};
 
 /** Sentinels, so a leak anywhere is a string a scan can find. */
 const OPENAI_KEY = "sk-sentinel-thinking-with-A1B2";
@@ -101,13 +130,13 @@ async function aCustomer(
     readonly modality?: "chat" | "voice" | undefined;
   } = {},
 ): Promise<World> {
-  api = await createApi(label);
+  api = await createApi(label, { retellFetch: RETELL_CHAT_FETCH });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
   const registered = await ask(api.app, "POST", "/api/agents", key, {
     name: "Front desk",
-    connection: persona.modality === "voice" ? RETELL_VOICE : RETELL,
+    connection: persona.modality === "voice" ? LIVEKIT_VOICE : RETELL,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   const connectionId = (registered.body.connection as { id: string }).id;

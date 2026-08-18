@@ -571,6 +571,20 @@ describe("a published package importing one that is never published", () => {
     expect(rules(await check(root))).toEqual([]);
   });
 
+  it("allows a private workspace package bundled into the published tarball", async () => {
+    await workspace();
+    await write(
+      "apps/cli/package.json",
+      JSON.stringify({ bundledDependencies: ["@egma/ids"] }),
+    );
+    await write(
+      "apps/cli/src/a.ts",
+      'import { newId } from "@egma/ids";\nexport { newId };\n',
+    );
+
+    expect(rules(await check(root))).toEqual([]);
+  });
+
   it("leaves the private package alone everywhere this repository runs its own code", async () => {
     await workspace();
     // The API and the tests are this repository's own, installed from this

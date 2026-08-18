@@ -12,7 +12,7 @@ type Dot = {
   drift: number;
 };
 
-/** Variant C, kept only on the sign-in brand surface. */
+/** The shared animated trust field on the sign-in and sign-up brand surfaces. */
 export function TrustGate() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const seed = useMemo(() => "C".charCodeAt(0) * 997, []);

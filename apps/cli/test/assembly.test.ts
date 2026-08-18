@@ -69,8 +69,8 @@ function account(prompt: string): FakeRetellScript {
     agents: [
       {
         agent_id: RETELL_AGENT_ID,
-        agent_name: "order-line",
         channel: "chat",
+        agent_name: "order-line",
         response_engine: { type: "retell-llm", llm_id: "llm_quillfeather" },
       },
     ],

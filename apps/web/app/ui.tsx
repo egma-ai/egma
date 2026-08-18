@@ -78,8 +78,7 @@ export function AuthShell({
         <div className={styles.authBrandOverlay}>
           <Brand />
           <div className={styles.authStatement}>
-            <p className={styles.eyebrow}>{animated ? "Trust gate" : "Voice agent reliability"}</p>
-            <p>{animated ? "Raw behavior passes checks before it earns trust." : "Trust the voice agent you ship to production."}</p>
+            <p>Trust the voice agents you ship in production.</p>
           </div>
         </div>
       </aside>
@@ -99,14 +98,16 @@ export function AuthShell({
 export function StatePage({
   title,
   lead,
+  animated = false,
   children,
 }: {
   title: string;
   lead?: ReactNode;
+  animated?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <AuthShell title={title} lead={lead}>
+    <AuthShell title={title} lead={lead} animated={animated}>
       {children}
     </AuthShell>
   );

@@ -91,11 +91,14 @@ const CUSTOMER_KEY = {
 
 const INTERNAL_KEY = "sentinel-matrix-internal-gateway-signing-G7H8";
 
-const RETELL_VOICE = {
-  type: "retell",
+const LIVEKIT_VOICE = {
+  type: "livekit",
   modality: "voice",
-  config: { retellAgentId: "agent_in_retell_1" },
-  credentials: { apiKey: "retell-sentinel-matrix-J9K0" },
+  config: { url: "wss://acme.livekit.cloud" },
+  credentials: {
+    apiKey: "APIsentinelmatrix0WXYZ",
+    apiSecret: "SENTINEL-livekit-matrix-J9K0",
+  },
 } as const;
 
 const RESCHEDULING = {
@@ -214,7 +217,7 @@ async function aCustomer(
 
   const registered = await ask(api.app, "POST", "/api/agents", key, {
     name: "Front desk",
-    connection: RETELL_VOICE,
+    connection: LIVEKIT_VOICE,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
 
@@ -514,7 +517,7 @@ describe("hosted Egma, managed by Egma", () => {
 
     const registered = await ask(api.app, "POST", "/api/agents", key, {
       name: "Front desk",
-      connection: RETELL_VOICE,
+      connection: LIVEKIT_VOICE,
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
 

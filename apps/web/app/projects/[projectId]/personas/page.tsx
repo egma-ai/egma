@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { readJson, type Refusal } from "../../../../lib/api.ts";
-import { asDay } from "../../../../lib/instants.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import {
   personasAfter,
@@ -19,6 +18,10 @@ import { ButtonLink, Choice } from "../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
+import {
+  RelativeInstant,
+  useMinuteClock,
+} from "../../../../ui/relative-time.tsx";
 import {
   AppShell,
   PageBody,
@@ -53,7 +56,7 @@ export default function PersonasPage() {
 
 type Shown = "active" | "archived";
 
-function columnsFor(projectId: string): readonly Column<Persona>[] {
+function columnsFor(projectId: string, now: number): readonly Column<Persona>[] {
   return [
     {
       key: "name",
@@ -93,13 +96,16 @@ function columnsFor(projectId: string): readonly Column<Persona>[] {
       header: "Updated",
       mono: true,
       width: "120px",
-      cell: (persona) => asDay(persona.updated_at),
+      cell: (persona) => (
+        <RelativeInstant instant={persona.updated_at} now={now} />
+      ),
     },
   ];
 }
 
 function Personas({ projectId }: { readonly projectId: string }) {
   const { me } = useShellSession();
+  const now = useMinuteClock();
   // Null until the session read answers. A page that guessed would tell an
   // admin their role cannot do something it can, on every load.
   const role = me === null ? null : roleOf(me);
@@ -281,7 +287,7 @@ function Personas({ projectId }: { readonly projectId: string }) {
       <>
         <DataTable
           label={`${archived ? "Archived" : "Active"} personas in this project`}
-          columns={columnsFor(projectId)}
+          columns={columnsFor(projectId, now)}
           rows={items}
           keyOf={(persona) => persona.id}
           stretchPrimaryLink

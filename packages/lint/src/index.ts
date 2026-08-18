@@ -316,6 +316,33 @@ const AUTH_PROVIDER_PACKAGES = ["better-auth", "@better-auth/core"];
 const PUBLISHED_PACKAGES = ["apps/cli/src/"];
 
 /**
+ * Private workspace packages deliberately carried inside a published package.
+ *
+ * A bundled dependency resolves from the installed tarball's own
+ * `node_modules`, so it does not have to exist as a separate npm package. The
+ * release workflow packs and installs that tarball in a clean folder before it
+ * can publish, which is the runtime proof this exception needs.
+ */
+async function bundledWorkspacePackagesIn(root: string): Promise<Set<string>> {
+  const held = new Set<string>();
+  for (const manifestPath of ["apps/cli/package.json"]) {
+    try {
+      const manifest = JSON.parse(
+        await readFile(path.join(root, manifestPath), "utf8"),
+      ) as { bundledDependencies?: unknown };
+      if (Array.isArray(manifest.bundledDependencies)) {
+        for (const name of manifest.bundledDependencies) {
+          if (typeof name === "string") held.add(name);
+        }
+      }
+    } catch {
+      // A missing published manifest means there is nothing to exempt.
+    }
+  }
+  return held;
+}
+
+/**
  * The only files that may name the auth provider.
  *
  * One binds it to the five identity tables, because the pool is private and
@@ -892,6 +919,7 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
 export async function check(root: string): Promise<Violation[]> {
   const violations: Violation[] = await checkExportedCallShapes(root);
   const privateWorkspacePackages = await privateWorkspacePackagesIn(root);
+  const bundledWorkspacePackages = await bundledWorkspacePackagesIn(root);
 
   for (const absolute of await collectSourceFiles(root)) {
     const file = relative(root, absolute);
@@ -905,7 +933,8 @@ export async function check(root: string): Promise<Violation[]> {
     for (const record of imports) {
       if (
         PUBLISHED_PACKAGES.some((where) => file.startsWith(where)) &&
-        privateWorkspacePackages.has(workspaceNameOf(record.specifier) ?? "")
+        privateWorkspacePackages.has(workspaceNameOf(record.specifier) ?? "") &&
+        !bundledWorkspacePackages.has(workspaceNameOf(record.specifier) ?? "")
       ) {
         violations.push({
           file,

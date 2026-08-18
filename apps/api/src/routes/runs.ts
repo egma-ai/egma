@@ -8,6 +8,7 @@ import {
   getConnection,
   getGradingPlan,
   getRun,
+  getSimulation,
   IdempotencyConflictError,
   JudgeNotConfiguredError,
   listRunHistory,
@@ -20,9 +21,12 @@ import {
   readAssertionShelf,
   readRunVerdicts,
   readVerdicts,
+  rerunSimulation,
+  simulationRerunAlreadyStarted,
   retryRun,
   RUN_STATUSES,
   RunRetryRefusedError,
+  SimulationRerunRefusedError,
   RunWriteRefusedError,
   startRun,
   VERDICTS,
@@ -168,6 +172,9 @@ export const RUN_CANCEL_PATH = "/api/runs/:runId/cancel";
  * create body that could set `retry_of_run_id`, and there never will be.
  */
 export const RUN_RETRY_PATH = "/api/runs/:runId/retry";
+/** Run one terminal simulation again as one new run. */
+export const SIMULATION_RERUN_PATH =
+  "/api/simulations/:simulationId/rerun";
 
 type Body = Record<string, unknown>;
 
@@ -1343,6 +1350,92 @@ export async function runRoutes(
   });
 
   /**
+   * Run one terminal simulation again under today's conditions.
+   *
+   * The source in the address supplies the agent, connection, exact test
+   * version, and persona identity. The body can only name the new run and the
+   * client's attempt, so it cannot turn this action into a different
+   * simulation while claiming lineage to the source.
+   */
+  app.post(SIMULATION_RERUN_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { simulationId } = request.params as { simulationId: string };
+    const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
+
+    authorize(auth, "start_and_cancel_runs", {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+
+    const acting = await actingIn(auth, projectNamed(query, body));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    const label = given(text(body.label));
+    if (label === undefined) {
+      return unprocessable(
+        reply,
+        "Running a simulation again requires a run name. Send label with a " +
+          "name that will identify the new run, then try again.",
+      );
+    }
+    const idempotencyKey = given(text(body.idempotency_key));
+    if (idempotencyKey === undefined) {
+      return unprocessable(reply, REFUSALS.idempotencyKeyRequired);
+    }
+
+    // The first attempt already passed deployment readiness and may already be
+    // dialing. Answer it before mutable readiness is asked again; only a key
+    // with no remembered run reaches the carrier check below.
+    const remembered = await simulationRerunAlreadyStarted(
+      acting.auth,
+      simulationId,
+      { label, idempotencyKey },
+    );
+    if (remembered !== undefined) {
+      return reply
+        .code(201)
+        .send(describedRun(remembered, remembered.simulations, options.baseUrl));
+    }
+
+    const source = await getSimulation(acting.auth, simulationId);
+    if (source === undefined) {
+      return notFound(
+        reply,
+        `There is no simulation at this address. Check the link, or open the ` +
+          `run that contains it.`,
+      );
+    }
+
+    // A one-simulation re-run is still a run start. It must pass the same
+    // deployment readiness check as POST /api/runs before it can spend the
+    // platform's carrier.
+    const carrier = phoneReadiness(await platformFacts());
+    if (carrier.state !== "ready") {
+      const type = await connectionTypeOf(acting.auth, source.connectionId);
+      if (type !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(type)) {
+        return phoneSetupRequired(reply, phoneSetupRequiredMessage(carrier));
+      }
+    }
+
+    const started = await rerunSimulation(acting.auth, simulationId, {
+      label,
+      idempotencyKey,
+    });
+    if (started === undefined) {
+      return notFound(
+        reply,
+        `There is no simulation at this address. Check the link, or open the ` +
+          `run that contains it.`,
+      );
+    }
+
+    return reply
+      .code(201)
+      .send(describedRun(started, started.simulations, options.baseUrl));
+  });
+
+  /**
    * Stop a run.
    *
    * Conversations still queued end here and now; ones already with a simulator
@@ -1415,6 +1508,12 @@ export async function runRoutes(
     // was not touched.
     if (error instanceof RunRetryRefusedError) {
       return sendRefusal(reply, "retry_unavailable", error.message);
+    }
+
+    if (error instanceof SimulationRerunRefusedError) {
+      return error.reason === "not_terminal"
+        ? sendRefusal(reply, "simulation_rerun_unavailable", error.message)
+        : unprocessable(reply, error.message);
     }
 
     if (error instanceof RunWriteRefusedError) {

@@ -408,7 +408,7 @@ describe("the choice between text and phone", () => {
     run.write("\u001B");
 
     expect(await run.exited).toBe(1);
-    expect(run.scrollback()).toContain("text or by phone");
+    expect(run.scrollback()).toContain("nobody chose phone, so nothing was created");
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
   });

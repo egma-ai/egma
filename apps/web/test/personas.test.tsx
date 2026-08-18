@@ -537,7 +537,6 @@ describe("one persona's page", () => {
         next_cursor: null,
       },
     },
-    "GET /api/personas/prs_1/usage": { status: 200, body: { tests: [] } },
     "GET /api/persona-form": {
       status: 200,
       body: { voice_providers: ["elevenlabs", "cartesia", "openai"] },
@@ -587,9 +586,11 @@ describe("one persona's page", () => {
     fireEvent.change(await screen.findByLabelText("Accent"), {
       target: { value: "Glaswegian" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save traits" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save behavior and voice" }),
+    );
 
-    await screen.findByRole("button", { name: "Save traits" });
+    await screen.findByRole("button", { name: "Save behavior and voice" });
     const written = asked.find((one) => one.method === "PATCH")?.body as
       | Record<string, unknown>
       | undefined;
@@ -623,7 +624,9 @@ describe("one persona's page", () => {
     fireEvent.change(await screen.findByLabelText("Accent"), {
       target: { value: "Glaswegian" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save traits" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save behavior and voice" }),
+    );
 
     const said = await screen.findByRole("alert");
     expect(said.textContent).toContain("has moved on to prsv_2");
@@ -724,19 +727,6 @@ describe("one persona's page", () => {
     expect(screen.getAllByText("Archived").length).toBeGreaterThan(0);
   });
 
-  it("names the active tests that would refuse an Archive", async () => {
-    apiAnswers({
-      ...reads(),
-      "GET /api/personas/prs_1/usage": {
-        status: 200,
-        body: { tests: [{ id: "tst_1", name: "Reschedules an appointment" }] },
-      },
-    });
-    render(<PersonaPage />);
-
-    expect(await screen.findByText(/Reschedules an appointment/)).toBeDefined();
-  });
-
   it("leaves a viewer every field genuinely inert, and every write control disabled", async () => {
     apiAnswers({ ...reads(), "GET /api/me": { status: 200, body: meWith("viewer") } });
     render(<PersonaPage />);
@@ -746,7 +736,12 @@ describe("one persona's page", () => {
     expect((screen.getByLabelText("Personality") as HTMLTextAreaElement).disabled)
       .toBe(true);
 
-    for (const label of ["Save name", "Save traits", "Clone", "Archive"]) {
+    for (const label of [
+      "Save name",
+      "Save behavior and voice",
+      "Clone",
+      "Archive",
+    ]) {
       const control = screen.getByRole("button", { name: label }) as HTMLButtonElement;
       expect(control.disabled, label).toBe(true);
       expect(control.getAttribute("title"), label).toContain("viewer role cannot");
@@ -765,10 +760,6 @@ describe("one persona's page", () => {
         },
       },
       "GET /api/personas/prs_1/versions": {
-        status: 404,
-        body: { error: "not_found", message: "There is no persona prs_1." },
-      },
-      "GET /api/personas/prs_1/usage": {
         status: 404,
         body: { error: "not_found", message: "There is no persona prs_1." },
       },
@@ -868,7 +859,6 @@ describe("driving the Personas area without a pointer", () => {
           next_cursor: null,
         },
       },
-      "GET /api/personas/prs_1/usage": { status: 200, body: { tests: [] } },
       "GET /api/persona-form": {
         status: 200,
         body: { voice_providers: ["elevenlabs"] },
@@ -903,7 +893,6 @@ describe("what this page does when something goes wrong underneath it", () => {
       status: 200,
       body: { items: [], next_cursor: null },
     },
-    "GET /api/personas/prs_1/usage": { status: 200, body: { tests: [] } },
     "GET /api/persona-form": {
       status: 200,
       body: { voice_providers: ["elevenlabs"] },
@@ -1017,7 +1006,6 @@ describe("what this page does when something goes wrong underneath it", () => {
         if (at.pathname.endsWith("/versions")) {
           return json(200, { items: [], next_cursor: null });
         }
-        if (at.pathname.endsWith("/usage")) return json(200, { tests: [] });
         return personaFor(at.pathname.split("/").pop() ?? "prs_1");
       }),
     );
@@ -1068,7 +1056,9 @@ describe("what this page does when something goes wrong underneath it", () => {
     // And nothing claims anything about a role egma has not been told yet.
     expect(screen.queryByLabelText("Name")).toBeNull();
     expect(screen.queryByRole("button", { name: "Save name" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Save traits" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Save behavior and voice" }),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
     expect(screen.queryByText(/role cannot/)).toBeNull();
   });
@@ -1116,7 +1106,6 @@ describe("after a save lands", () => {
         status: 200,
         body: { items: [], next_cursor: null },
       },
-      "GET /api/personas/prs_1/usage": { status: 200, body: { tests: [] } },
       "GET /api/persona-form": {
         status: 200,
         body: { voice_providers: ["elevenlabs"] },
@@ -1137,7 +1126,9 @@ describe("after a save lands", () => {
     fireEvent.change(await screen.findByLabelText("Accent"), {
       target: { value: "  calm  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save traits" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save behavior and voice" }),
+    );
 
     // Sent as typed, because what may be trimmed is the server's rule.
     const written = asked.find((one) => one.method === "PATCH")?.body as
@@ -1189,7 +1180,6 @@ describe("a save answering while the author is still typing", () => {
         if (at.pathname.endsWith("/versions")) {
           return json(200, { items: [], next_cursor: null });
         }
-        if (at.pathname.endsWith("/usage")) return json(200, { tests: [] });
         return json(200, RITA);
       }),
     );
@@ -1264,7 +1254,6 @@ describe("a save from one form while the other holds an unsaved edit", () => {
         if (at.pathname.endsWith("/versions")) {
           return json(200, { items: [], next_cursor: null });
         }
-        if (at.pathname.endsWith("/usage")) return json(200, { tests: [] });
         return json(200, RITA);
       }),
     );

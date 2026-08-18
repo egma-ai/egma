@@ -10,7 +10,6 @@ import {
   type AgentPage,
   type ListedAgent,
 } from "../../../../lib/agents.ts";
-import { asMoment } from "../../../../lib/instants.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
@@ -36,6 +35,10 @@ import {
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
+import {
+  RelativeInstant,
+  useMinuteClock,
+} from "../../../../ui/relative-time.tsx";
 import {
   RunStatus,
   SimulationTally,
@@ -87,6 +90,7 @@ function columnsFor(
   /** Null while the session read has not answered, so no control is drawn. */
   mayControl: boolean | null,
   onCancel: (runId: string) => void,
+  now: number,
 ): readonly Column<RunRow>[] {
   return [
     {
@@ -102,9 +106,10 @@ function columnsFor(
     {
       key: "started",
       header: "Started",
-      mono: true,
-      width: "170px",
-      cell: (run) => asMoment(run.created_at),
+      width: "130px",
+      cell: (run) => (
+        <RelativeInstant instant={run.created_at} now={now} />
+      ),
     },
     {
       key: "status",
@@ -115,14 +120,12 @@ function columnsFor(
     {
       key: "simulations",
       header: "Simulations",
-      hideOnMobile: true,
       width: "220px",
       cell: (run) => <SimulationTally counts={run.simulation_counts} />,
     },
     {
       key: "grading",
       header: "Grading",
-      hideOnMobile: true,
       width: "120px",
       cell: (run) =>
         `${String(run.graded_count)} of ${String(run.gradable_count)} judged`,
@@ -173,6 +176,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
   /** The earliest day to show, as somebody typed it and as it was asked for. */
   const [typedSince, setTypedSince] = useState("");
   const [since, setSince] = useState("");
+  const now = useMinuteClock();
 
   const path = runsQuery({
     ...(agent === "" ? {} : { agent }),
@@ -428,12 +432,14 @@ function Runs({ projectId }: { readonly projectId: string }) {
     return (
       <>
         <DataTable
+          stackWhenConstrained
           label="Runs in this project"
           columns={columnsFor(
             projectId,
             agentRows,
             role === null ? null : mayStart,
             openCancel,
+            now,
           )}
           rows={items}
           keyOf={(run) => run.id}
@@ -450,7 +456,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
         {opened === undefined ? null : (
           <section className={styles.stopPanel} aria-label="Cancel this run">
             <h3 className={styles.stopTitle}>
-              Cancel {opened.label ?? asMoment(opened.created_at)}?
+              Cancel {opened.label ?? "this run"}?
             </h3>
             <p className={styles.stopLead}>
               Simulations still waiting stop here and now. Simulations
@@ -514,9 +520,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
   return (
     <ProductPage>
       <PageHeader
-        eyebrow="Project"
         title="Simulation runs"
-        lead="Every execution of a selection of tests against one agent over one connection. Machinery and judgment are shown apart, because a run that finished is not the same as a run that went well."
         action={plan()}
       />
       <PageBody>

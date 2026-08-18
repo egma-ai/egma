@@ -1,7 +1,8 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 
+import { asSecond } from "../lib/instants.ts";
 import {
   citedTurnPositions,
   type EvidenceCoverage,
@@ -12,8 +13,8 @@ import {
   type JudgedAssertion,
 } from "../lib/simulations.ts";
 import { graderDisplayName } from "../lib/presentation.ts";
-import { howFarIn, howLong, milliseconds } from "../lib/transcripts.ts";
-import { Badge, Help } from "./controls.tsx";
+import { howFarIn, howLong } from "../lib/transcripts.ts";
+import { Help } from "./controls.tsx";
 import { Empty } from "./page-state.tsx";
 import { VerdictBadge } from "./run-status.tsx";
 import styles from "./evidence.module.css";
@@ -64,6 +65,11 @@ export type TranscriptProps = {
    * reading cites. Empty marks nothing, which is the ordinary state.
    */
   readonly highlighted?: readonly number[];
+  /**
+   * Timing and nested-step metadata belong on diagnostic views, not on the
+   * evidence reading surface. The transcript remains the same semantic list.
+   */
+  readonly showMetadata?: boolean;
 };
 
 /**
@@ -78,7 +84,11 @@ export type TranscriptProps = {
  * Putting a tool call between two sentences would break the reading, and hiding
  * it would lose it — so it is named and lives one component down.
  */
-export function Transcript({ transcript, highlighted = [] }: TranscriptProps) {
+export function Transcript({
+  transcript,
+  highlighted = [],
+  showMetadata = true,
+}: TranscriptProps) {
   const marked = new Set(highlighted);
   const openedAt = transcript.started_at;
 
@@ -99,6 +109,7 @@ export function Transcript({ transcript, highlighted = [] }: TranscriptProps) {
         return (
           <div
             key={turn.span_id}
+            id={`transcript-turn-${String(at + 1)}`}
             className={`${styles.turn} ${marked.has(at + 1) ? styles.turnCited : ""}`}
             data-turn={String(at + 1)}
           >
@@ -115,21 +126,23 @@ export function Transcript({ transcript, highlighted = [] }: TranscriptProps) {
                   turn.text
                 )}
               </p>
-              <p className={styles.turnAside}>
-                <span>{howFarIn(turn.started_at, openedAt)}</span>
-                <span>{howLong(turn.duration_ns)}</span>
-                {inside.length === 0 ? null : (
-                  <span>
-                    {inside.length} step{inside.length === 1 ? "" : "s"}
-                  </span>
-                )}
-                {failed ? (
-                  <span className={styles.wrong}>something failed inside</span>
-                ) : null}
-                {marked.has(at + 1) ? (
-                  <span className={styles.citationMark}>cited by a verdict</span>
-                ) : null}
-              </p>
+              {!showMetadata ? null : (
+                <p className={styles.turnAside}>
+                  <span>{howFarIn(turn.started_at, openedAt)}</span>
+                  <span>{howLong(turn.duration_ns)}</span>
+                  {inside.length === 0 ? null : (
+                    <span>
+                      {inside.length} step{inside.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                  {failed ? (
+                    <span className={styles.wrong}>something failed inside</span>
+                  ) : null}
+                  {marked.has(at + 1) ? (
+                    <span className={styles.citationMark}>cited by a verdict</span>
+                  ) : null}
+                </p>
+              )}
             </div>
           </div>
         );
@@ -149,6 +162,17 @@ function flatten(steps: readonly EvidenceStep[], depth = 0): Placed[] {
     { step, depth },
     ...flatten(step.spans, depth + 1),
   ]);
+}
+
+/** Whether this stored tree is another wrapper around a projected turn. */
+function containsTurn(
+  step: EvidenceStep,
+  turnIds: ReadonlySet<string>,
+): boolean {
+  return (
+    turnIds.has(step.span_id) ||
+    step.spans.some((inside) => containsTurn(inside, turnIds))
+  );
 }
 
 /** What a stored step kind is called where a person reads it. */
@@ -172,22 +196,28 @@ function labelFor(step: EvidenceStep): string {
 }
 
 /**
- * Speech, tool work and system steps on one clock.
+ * Speech, tool work and system steps in one ordered flow.
  *
  * **This is where the three meet, and the transcript is where they do not.** A
  * tool call belongs to a moment in the conversation and a reader who doubts a
- * turn wants to see what the agent was doing while it said that — so every step
- * is here, in time order, indented by where it sat, with a bar for how long it
- * took. What none of it does is get folded into the transcript above: the
- * transcript stays a conversation.
+ * turn wants to see what the agent was doing while it said that. The default
+ * flow therefore shows turns and top-level system events as milestones. Work
+ * inside one milestone stays in a closed disclosure until somebody asks for
+ * it. Stored span ids and raw internal names do not become the interface.
  */
 export function ExecutionTimeline({
   transcript,
 }: {
   readonly transcript: EvidenceTranscript;
 }) {
-  const steps = [...flatten(transcript.turns), ...flatten(transcript.spans)];
-  if (steps.length === 0) {
+  const turnIds = new Set(transcript.turns.map((turn) => turn.span_id));
+  const standalone = transcript.spans.filter(
+    (step) => !containsTurn(step, turnIds),
+  );
+  const milestones = [...transcript.turns, ...standalone].sort(
+    (left, right) => Date.parse(left.started_at) - Date.parse(right.started_at),
+  );
+  if (milestones.length === 0) {
     return (
       <Empty
         title="Nothing was timed"
@@ -196,58 +226,75 @@ export function ExecutionTimeline({
     );
   }
 
-  const total = Math.max(milliseconds(transcript.duration_ns), 1);
-  const openedAt = Date.parse(transcript.started_at);
-
   return (
-    <div className={styles.scrolls}>
-      <div className={styles.timeline}>
-        {steps.map(({ step, depth }) => {
-          const offset = Math.max(Date.parse(step.started_at) - openedAt, 0);
-          const took = Math.max(milliseconds(step.duration_ns), 0);
-          const left = Math.min((offset / total) * 100, 100);
-          // A floor of just under a percent, so a step that took a millisecond
-          // is still a mark somebody can see rather than nothing at all.
-          const width = Math.max(Math.min((took / total) * 100, 100 - left), 0.8);
-          const failed = step.status === "error";
-
-          return (
-            <div
-              key={step.span_id}
-              className={styles.timelineRow}
-              style={
-                {
-                  "--timeline-left": `${String(left)}%`,
-                  "--timeline-width": `${String(width)}%`,
-                } as CSSProperties
-              }
-            >
-              <span className={styles.timelineAt}>
+    <ol className={styles.execution} aria-label="Execution flow">
+      {milestones.map((step) => {
+        const inside = flatten(step.spans);
+        const failed = step.status === "error";
+        const containsFailedStep = inside.some(
+          (nested) => nested.step.status === "error",
+        );
+        const detail = step.kind === "tool" ? step.tool_name : "";
+        return (
+          <li className={styles.executionStep} key={step.span_id}>
+            <div className={styles.executionMilestone}>
+              <span className={styles.executionAt}>
                 {howFarIn(step.started_at, transcript.started_at)}
               </span>
-              <span
-                className={styles.timelineWhat}
-                style={{ paddingLeft: `${String(Math.min(depth, 6) * 12)}px` }}
-              >
+              <span className={styles.executionMarker} aria-hidden="true" />
+              <span className={styles.executionWhat}>
                 <strong>{labelFor(step)}</strong>
-                <span>{step.tool_name === "" ? step.name : step.tool_name}</span>
+                {detail === "" ? null : <span>{detail}</span>}
               </span>
               <span
-                className={`${styles.timelineTrack} ${failed ? styles.timelineTrackBad : ""}`}
-                aria-hidden="true"
+                className={`${styles.executionHow} ${failed ? styles.executionHowBad : ""}`}
               >
-                <span />
-              </span>
-              <span
-                className={`${styles.timelineHow} ${failed ? styles.timelineHowBad : ""}`}
-              >
-                {failed ? "failed" : howLong(step.duration_ns)}
+                <span>{failed ? "Failed" : howLong(step.duration_ns)}</span>
+                {containsFailedStep ? (
+                  <span className={styles.executionContainsFailure}>
+                    Contains failed step
+                  </span>
+                ) : null}
               </span>
             </div>
-          );
-        })}
-      </div>
-    </div>
+
+            {inside.length === 0 ? null : (
+              <details className={styles.executionDetails}>
+                <summary>
+                  Show {inside.length} step{inside.length === 1 ? "" : "s"}
+                </summary>
+                <ul className={styles.executionChildren}>
+                  {inside.map(({ step: nested, depth }) => (
+                    <li
+                      key={nested.span_id}
+                      style={{ paddingInlineStart: `${String(Math.min(depth, 5) * 12)}px` }}
+                    >
+                      <span>
+                        <strong>{labelFor(nested)}</strong>
+                        {nested.kind === "tool" && nested.tool_name !== "" ? (
+                          <span>{nested.tool_name}</span>
+                        ) : null}
+                      </span>
+                      <span
+                        className={
+                          nested.status === "error"
+                            ? styles.executionHowBad
+                            : undefined
+                        }
+                      >
+                        {nested.status === "error"
+                          ? "Failed"
+                          : howLong(nested.duration_ns)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -423,10 +470,9 @@ export function MockToolEvidence({
  * writes a new row beside the old one, and a page that hid the old one would
  * make "this grader was tightened and now disagrees" invisible.
  *
- * **A diagnostic says so on the card.** A `required: false` copy is judged
- * exactly like any other and can fail nothing, so a red badge with no marking
- * beside it would read as a reason the run failed. That marking is what keeps
- * the header and the evidence beneath it from disagreeing.
+ * The page groups rows under their grader and marks that whole grader as
+ * required or reports-only once. Repeating a storage id and lane on every
+ * assertion makes the judgement harder to scan without adding information.
  *
  * `action` is where a page puts whatever it offers about this judgement, or
  * nothing at all for somebody who may not. This component never decides that:
@@ -462,13 +508,7 @@ export function VerdictEvidence({
             merely terse.
           */}
           <strong>{judged.assertionText ?? judged.assertion}</strong>
-          <span className={styles.verdictWho}>{judged.graderId}</span>
         </span>
-        {judged.required ? null : (
-          <Badge title="A diagnostic: judged and reported, and never able to fail this simulation.">
-            Reports only
-          </Badge>
-        )}
         <VerdictBadge verdict={speaking.verdict} />
         <span className={styles.mono}>
           {speaking.score.toFixed(2)}
@@ -479,7 +519,12 @@ export function VerdictEvidence({
       <p className={styles.rationale}>{speaking.rationale}</p>
       {cited.length === 0 ? null : (
         <p className={styles.cited}>
-          Cites turn{cited.length === 1 ? "" : "s"} {cited.join(", ")}
+          Cites {cited.map((turn, at) => (
+            <span key={turn}>
+              {at === 0 ? "" : ", "}
+              <a href={`#transcript-turn-${String(turn)}`}>turn {turn}</a>
+            </span>
+          ))}
         </p>
       )}
 
@@ -491,7 +536,7 @@ export function VerdictEvidence({
           </summary>
           {judged.superseded.map((row) => (
             <p className={styles.cited} key={row.judged_at}>
-              <span className={styles.mono}>{row.judged_at}</span>{" "}
+              <span className={styles.mono}>{asSecond(row.judged_at)}</span>{" "}
               {row.verdict} — {row.rationale}
             </p>
           ))}

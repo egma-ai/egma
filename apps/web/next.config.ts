@@ -66,6 +66,10 @@ const config: NextConfig = {
           destination: `${api}/api/connection-types`,
         },
         {
+          source: "/api/providers/retell/voice-agents",
+          destination: `${api}/api/providers/retell/voice-agents`,
+        },
+        {
           source: "/api/capabilities",
           destination: `${api}/api/capabilities`,
         },

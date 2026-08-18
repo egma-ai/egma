@@ -1,18 +1,24 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { readJson, writeJson, type Refusal } from "../../../../../../../lib/api.ts";
 import {
+  agentDetailQuery,
   connectionsPath,
+  type AgentDetail,
   type ListedConnection,
 } from "../../../../../../../lib/agents.ts";
 import {
   CONNECTION_TYPES_PATH,
+  RETELL_VOICE_AGENTS_PATH,
+  retellPhoneConnectionPath,
   typeNamed,
   type ConnectionTypeCatalog,
   type ConnectionVariant,
+  type RetellVoiceAgent,
+  type RetellVoiceAgents,
 } from "../../../../../../../lib/connection-types.ts";
 import { roleOf } from "../../../../../../../lib/me.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
@@ -23,11 +29,14 @@ import {
   Field,
   Form,
   FormActions,
+  Help,
   Problem,
   Select,
   TextInput,
 } from "../../../../../../../ui/controls.tsx";
-import { Failure, Loading, NotFound } from "../../../../../../../ui/page-state.tsx";
+import { Empty, Failure, Loading, NotFound } from "../../../../../../../ui/page-state.tsx";
+import { useProjectRead } from "../../../../../../../ui/resource.ts";
+import { useUnsavedChanges } from "../../../../../../../ui/settings-read.ts";
 import {
   AppShell,
   PageBody,
@@ -35,25 +44,17 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../../../ui/shell.tsx";
+import { AgentOnboardingProgress } from "../../../onboarding-progress.tsx";
 import { ConnectionFields, type Draft } from "../fields.tsx";
+import {
+  configForLiveKitDispatch,
+  liveKitDispatchForm,
+  LiveKitDispatchSetup,
+  newLiveKitDispatch,
+  type LiveKitDispatch,
+} from "../livekit-dispatch.tsx";
 
-/**
- * Adding a way for egma to reach an agent.
- *
- * **Every field on this form comes from the server.** Which config keys a shape
- * holds, which modalities the type speaks, and whether a credential is
- * required, forbidden or optional are the connection registry's to decide; a
- * second handwritten copy in this application would be a second opinion able to
- * disagree with the gate, and the disagreement would show up as a form that
- * asks for the wrong things and a create that then refuses for a reason the
- * form cannot explain.
- *
- * The type and the shape are chosen once and are then fixed for the life of the
- * connection. Changing either is a new connection rather than an edit, because
- * the two shapes of a type hold different config keys and different credentials
- * — and because the credential rule a Restore is held to is read from the shape
- * the row stores.
- */
+/** Provider setup first, then only the fields that provider actually needs. */
 export default function NewConnectionPage() {
   const { projectId, agentId } = useParams<{
     projectId: string;
@@ -66,6 +67,10 @@ export default function NewConnectionPage() {
   );
 }
 
+function voiceFirst(modalities: readonly string[]): string {
+  return modalities.includes("voice") ? "voice" : (modalities[0] ?? "");
+}
+
 function NewConnection({
   projectId,
   agentId,
@@ -74,156 +79,264 @@ function NewConnection({
   readonly agentId: string;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const onboarding = searchParams.get("onboarding") === "connection";
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
-
   const [catalog, setCatalog] = useState<ConnectionTypeCatalog | null>(null);
   const [catalogRefused, setCatalogRefused] = useState<Refusal | null>(null);
   const [attempt, setAttempt] = useState(0);
-
-  const [type, setType] = useState<string | null>(null);
+  const [provider, setProvider] = useState<string | null>(null);
   const [variantId, setVariantId] = useState<string | null>(null);
-  const [modality, setModality] = useState<string>("");
+  const [modality, setModality] = useState("");
   const [name, setName] = useState("");
-  const [environment, setEnvironment] = useState("");
   const [draft, setDraft] = useState<Draft>({ config: {}, credentials: {} });
+  const [livekitDispatch, setLivekitDispatch] =
+    useState<LiveKitDispatch>(newLiveKitDispatch);
+
+  const [retellKey, setRetellKey] = useState("");
+  const [retellAgents, setRetellAgents] = useState<readonly RetellVoiceAgent[] | null>(
+    null,
+  );
+  const [retellAgentId, setRetellAgentId] = useState("");
+  const [retellNumber, setRetellNumber] = useState("");
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverRefused, setDiscoverRefused] = useState<Refusal | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
-
   const back = projectPath(projectId, "agents", agentId);
+  const { answer: parentAgent } = useProjectRead<AgentDetail>(
+    agentDetailQuery(agentId, "active"),
+    projectId,
+  );
 
   useEffect(() => {
     let current = true;
     setCatalog(null);
     setCatalogRefused(null);
-
-    void readJson<ConnectionTypeCatalog>(CONNECTION_TYPES_PATH).then((answer) => {
+    void readJson<ConnectionTypeCatalog>(CONNECTION_TYPES_PATH).then((read) => {
       if (!current) return;
-      if (answer.status === "signed-out") {
+      if (read.status === "signed-out") {
         window.location.replace("/sign-in");
-        return;
-      }
-      // A catalog that did not arrive is a form that cannot be drawn. It says
-      // so and offers a retry rather than showing an empty type list, which
-      // would read as egma supporting nothing.
-      if (answer.status !== "ready") {
-        setCatalogRefused(answer.refusal);
-        return;
-      }
-      setCatalog(answer.value);
-      const first = answer.value.items[0];
-      if (first !== undefined) {
-        setType(first.type);
-        setVariantId(first.variants[0]?.id ?? null);
-        setModality(first.modalities[0] ?? "");
+      } else if (read.status === "ready") {
+        setCatalog(read.value);
+        const first = read.value.items[0];
+        if (first !== undefined) {
+          setProvider(first.type);
+          setVariantId(first.variants[0]?.id ?? null);
+          setModality(voiceFirst(first.modalities));
+        }
+      } else {
+        setCatalogRefused(read.refusal);
       }
     });
-
     return () => {
       current = false;
     };
   }, [attempt]);
 
-  const described = typeNamed(catalog, type ?? "");
-  const variant: ConnectionVariant | undefined = described?.variants.find(
-    (one) => one.id === variantId,
-  );
+  useEffect(() => {
+    if (parentAgent?.status === "signed-out") {
+      window.location.replace("/sign-in");
+    }
+  }, [parentAgent]);
+
+  const described = typeNamed(catalog, provider ?? "");
+  const variant = described?.variants.find((one) => one.id === variantId);
+  const chosenRetell = retellAgents?.find((one) => one.id === retellAgentId);
+  const liveKitForm = liveKitDispatchForm({
+    type: described?.type,
+    variant,
+    config: draft.config,
+    mode: livekitDispatch,
+  });
+  const changed =
+    name !== "" ||
+    livekitDispatch !== newLiveKitDispatch() ||
+    retellKey !== "" ||
+    retellAgents !== null ||
+    Object.values(draft.config).some((value) => value !== "") ||
+    Object.values(draft.credentials).some((value) => value !== "");
+  useUnsavedChanges(changed && !saving && !discovering, saving || discovering);
 
   const mayAuthor = role !== null && canAuthor(role);
 
-  function chooseType(next: string): void {
-    setType(next);
+  function chooseProvider(next: string): void {
     const chosen = typeNamed(catalog, next);
+    setProvider(next);
     setVariantId(chosen?.variants[0]?.id ?? null);
-    setModality(chosen?.modalities[0] ?? "");
-    // The keys belong to the shape, so nothing typed under the old one is
-    // carried into a form that has no place for it.
+    setModality(voiceFirst(chosen?.modalities ?? []));
     setDraft({ config: {}, credentials: {} });
+    setLivekitDispatch(newLiveKitDispatch());
+    setRetellKey("");
+    setRetellAgents(null);
+    setRetellAgentId("");
+    setRetellNumber("");
+    setDiscoverRefused(null);
+    setRefused(null);
   }
 
   function chooseVariant(next: string): void {
     setVariantId(next);
     setDraft({ config: {}, credentials: {} });
+    setLivekitDispatch(newLiveKitDispatch());
   }
 
-  async function add(): Promise<void> {
-    if (!mayAuthor || saving || type === null || variant === undefined) return;
+  function chooseLiveKitDispatch(next: LiveKitDispatch): void {
+    setLivekitDispatch(next);
+    setDraft((current) => ({
+      ...current,
+      config: configForLiveKitDispatch(current.config, next),
+    }));
+  }
 
-    setRefused(null);
-    setSaving(true);
+  function chooseRetellAgent(next: string, agents = retellAgents): void {
+    setRetellAgentId(next);
+    const agent = agents?.find((one) => one.id === next);
+    setRetellNumber(agent?.numbers[0]?.number ?? "");
+  }
 
-    /**
-     * Only what was filled in is sent. An empty box means the key was left
-     * out, which for an optional key is itself the setting — sending it as an
-     * empty string would make egma refuse a value nobody typed.
-     */
-    const config: Record<string, string> = {};
-    for (const field of variant.fields) {
-      const written = draft.config[field.key]?.trim() ?? "";
-      if (written !== "") config[field.key] = written;
-    }
-
-    const credentials: Record<string, string> = {};
-    for (const field of variant.credential_fields) {
-      const written = draft.credentials[field.field]?.trim() ?? "";
-      if (written !== "") credentials[field.field] = written;
-    }
-    // A shape that takes no credential, or one where nothing was typed. Both
-    // send none: for the shapes where a credential is optional, sending an
-    // empty object would be a credential nobody wrote.
-    const withoutCredential =
-      variant.credential_rule === "forbidden" ||
-      Object.keys(credentials).length === 0;
-
-    const answer = await writeJson<{ readonly connection: ListedConnection }>(
-      connectionsPath(agentId),
-      {
-        method: "POST",
-        project: projectId,
-        body: {
-          ...(name.trim() === "" ? {} : { name: name.trim() }),
-          type,
-          modality,
-          ...(environment.trim() === ""
-            ? {}
-            : { environment: environment.trim() }),
-          config,
-          ...(withoutCredential ? {} : { credentials }),
-        },
-      },
-    );
-
-    setSaving(false);
-
+  async function findRetellAgents(): Promise<void> {
+    if (discovering || retellKey.trim() === "") return;
+    setDiscoverRefused(null);
+    setDiscovering(true);
+    const answer = await writeJson<RetellVoiceAgents>(RETELL_VOICE_AGENTS_PATH, {
+      method: "POST",
+      project: projectId,
+      body: { api_key: retellKey },
+    });
+    setDiscovering(false);
     if (answer.status === "signed-out") {
       window.location.replace("/sign-in");
       return;
     }
     if (answer.status !== "ready") {
-      setRefused(answer.refusal);
+      setDiscoverRefused(answer.refusal);
+      return;
+    }
+    // Keep the key only in this password field until the selected route is
+    // confirmed immediately before the provider-blind phone write.
+    setRetellAgents(answer.value.agents);
+    const first =
+      answer.value.agents.find((agent) => agent.numbers.length > 0) ??
+      answer.value.agents[0];
+    chooseRetellAgent(first?.id ?? "", answer.value.agents);
+  }
+
+  async function add(): Promise<void> {
+    if (!mayAuthor || saving || described === undefined || variant === undefined) {
       return;
     }
 
-    router.push(
-      projectPath(
-        projectId,
-        "agents",
-        agentId,
-        "connections",
-        answer.value.connection.id,
-      ),
+    let body: Record<string, unknown>;
+    let path = connectionsPath(agentId);
+    if (described.type === "retell") {
+      if (
+        chosenRetell === undefined ||
+        retellNumber === "" ||
+        retellKey.trim() === ""
+      ) {
+        setRefused({
+          error: "unprocessable",
+          message: "Select a Retell voice agent and one of its routed phone numbers.",
+        });
+        return;
+      }
+      body = {
+        ...(name.trim() === "" ? {} : { name: name.trim() }),
+        api_key: retellKey,
+        retell_agent_id: chosenRetell.id,
+        phone_number: retellNumber,
+      };
+      path = retellPhoneConnectionPath(agentId);
+    } else {
+      const config: Record<string, string> = {};
+      for (const field of variant.fields) {
+        const written = draft.config[field.key]?.trim() ?? "";
+        if (written !== "") config[field.key] = written;
+      }
+      const credentials: Record<string, string> = {};
+      for (const field of variant.credential_fields) {
+        const written = draft.credentials[field.field]?.trim() ?? "";
+        if (written !== "") credentials[field.field] = written;
+      }
+      body = {
+        ...(name.trim() === "" ? {} : { name: name.trim() }),
+        type: described.type,
+        modality,
+        config,
+        ...(variant.credential_rule === "forbidden" ||
+        Object.keys(credentials).length === 0
+          ? {}
+          : { credentials }),
+      };
+    }
+
+    setRefused(null);
+    setSaving(true);
+    const answer = await writeJson<{ readonly connection: ListedConnection }>(
+      path,
+      {
+        method: "POST",
+        project: projectId,
+        body,
+      },
     );
+    setSaving(false);
+    if (answer.status === "signed-out") {
+      window.location.replace("/sign-in");
+    } else if (answer.status !== "ready") {
+      setRefused(answer.refusal);
+    } else {
+      if (described.type === "retell") setRetellKey("");
+      router.push(
+        onboarding
+          ? projectPath(projectId, "agents", agentId, "onboarding")
+          : projectPath(
+              projectId,
+              "agents",
+              agentId,
+              "connections",
+              answer.value.connection.id,
+            ),
+      );
+    }
   }
 
   const header = (
     <PageHeader
-      eyebrow="Connection"
-      title="Add a connection"
-      lead="How Egma reaches this agent. An agent can have several: a laptop today, a hosted assistant in staging, a phone number in production."
+      eyebrow={onboarding ? "Agent setup" : "Connection"}
+      title={onboarding ? "Connect the agent" : "Add a connection"}
+      breadcrumbs={[
+        { label: "Agents", href: projectPath(projectId, "agents") },
+        {
+          label:
+            parentAgent?.status === "ready"
+              ? parentAgent.value.agent.name
+              : "Agent",
+          href: back,
+        },
+        { label: "New connection" },
+      ]}
+      lead={
+        onboarding
+          ? "Choose how Egma reaches this agent. You can add another connection later."
+          : "Choose the platform that hosts this agent. Egma then asks only for that platform's setup."
+      }
     />
   );
 
+  if (parentAgent === null || parentAgent.status === "signed-out") {
+    return (
+      <ProductPage>
+        {header}
+        <PageBody>
+          <Loading what="this agent" />
+        </PageBody>
+      </ProductPage>
+    );
+  }
   if (role !== null && !mayAuthor) {
     return (
       <ProductPage>
@@ -231,13 +344,11 @@ function NewConnection({
         <PageBody>
           <NotFound
             message={`Your ${role} role cannot add connections. Ask an organization admin to change your role, then try again.`}
-            action={<ButtonLink href={back}>Back to the agent</ButtonLink>}
           />
         </PageBody>
       </ProductPage>
     );
   }
-
   if (catalogRefused !== null) {
     return (
       <ProductPage>
@@ -246,14 +357,18 @@ function NewConnection({
           <Failure
             title="Egma could not describe the connection types."
             message={catalogRefused.message}
-            onRetry={() => setAttempt((one) => one + 1)}
+            onRetry={() => setAttempt((current) => current + 1)}
           />
         </PageBody>
       </ProductPage>
     );
   }
-
-  if (catalog === null || described === undefined || variant === undefined) {
+  if (
+    catalog === null ||
+    described === undefined ||
+    variant === undefined ||
+    liveKitForm.variant === undefined
+  ) {
     return (
       <ProductPage>
         {header}
@@ -264,91 +379,240 @@ function NewConnection({
     );
   }
 
+  const retellReady =
+    described.type !== "retell" ||
+    (chosenRetell !== undefined &&
+      retellNumber !== "" &&
+      retellKey.trim() !== "");
+  const canSubmit = retellReady && liveKitForm.ready;
+  const submitWhy = !retellReady
+    ? "Load the Retell account, then select a voice agent and phone number."
+    : !liveKitForm.ready
+      ? "Enter the exact LiveKit agent name, or choose automatic dispatch."
+      : undefined;
+
   return (
     <ProductPage>
       {header}
       <PageBody>
+        {onboarding ? <AgentOnboardingProgress current="connection" /> : null}
         <Form onSubmit={() => void add()}>
-          <Field label="Type" htmlFor="connection-type">
+          <Field label="Platform" htmlFor="connection-type">
             <Select
               id="connection-type"
               value={described.type}
-              options={catalog.items.map((one) => ({
-                value: one.type,
-                label: one.label,
+              options={catalog.items.map((item) => ({
+                value: item.type,
+                label: item.label,
               }))}
-              onChange={chooseType}
+              onChange={chooseProvider}
             />
           </Field>
 
-          {described.variants.length > 1 ? (
-            <Field label="Shape" htmlFor="connection-variant">
-              <Select
-                id="connection-variant"
-                value={variant.id}
-                options={described.variants.map((one) => ({
-                  value: one.id,
-                  label: one.label,
-                }))}
-                onChange={chooseVariant}
-              />
-            </Field>
-          ) : null}
-
-          <Field label="Modality" htmlFor="connection-modality">
-            <Select
-              id="connection-modality"
-              value={modality}
-              options={described.modalities.map((one) => ({
-                value: one,
-                label: one,
-              }))}
-              onChange={setModality}
-            />
-          </Field>
-
-          <Field label="Name" htmlFor="connection-name">
+          <Field label="Connection name (optional)" htmlFor="connection-name">
             <TextInput
               id="connection-name"
               value={name}
-              placeholder="Left empty, Egma names it after the type"
+              placeholder="A name for this connection"
               onChange={setName}
             />
+            <Help>The label shown for this connection in Egma.</Help>
           </Field>
 
-          <Field label="Environment" htmlFor="connection-environment">
-            <TextInput
-              id="connection-environment"
-              value={environment}
-              placeholder="staging, production — a label, and optional"
-              onChange={setEnvironment}
+          {described.type === "retell" ? (
+            <RetellSetup
+              apiKey={retellKey}
+              agents={retellAgents}
+              selectedAgent={retellAgentId}
+              selectedNumber={retellNumber}
+              discovering={discovering}
+              refusal={discoverRefused}
+              onKeyChange={(value) => {
+                setRetellKey(value);
+                setRetellAgents(null);
+                setRetellAgentId("");
+                setRetellNumber("");
+                setDiscoverRefused(null);
+              }}
+              onDiscover={() => void findRetellAgents()}
+              onAgentChange={chooseRetellAgent}
+              onNumberChange={setRetellNumber}
             />
-          </Field>
+          ) : (
+            <>
+              {described.variants.length > 1 ? (
+                <Field label="Access" htmlFor="connection-variant">
+                  <Select
+                    id="connection-variant"
+                    value={variant.id}
+                    options={described.variants.map((item) => ({
+                      value: item.id,
+                      label: item.label,
+                    }))}
+                    onChange={chooseVariant}
+                  />
+                </Field>
+              ) : null}
 
-          <ConnectionFields
-            variant={variant}
-            draft={draft}
-            onChange={setDraft}
-            credentialsEditable
-          />
+              {described.modalities.length > 1 ? (
+                <Field label="Modality" htmlFor="connection-modality">
+                  <Select
+                    id="connection-modality"
+                    value={modality}
+                    options={described.modalities.map((item) => ({
+                      value: item,
+                      label: item === "voice" ? "Voice" : "Text",
+                    }))}
+                    onChange={setModality}
+                  />
+                </Field>
+              ) : null}
 
-          {described.simulator_adapter ? null : (
-            <Problem>
-              Egma has no simulator adapter for a {described.label} connection
-              yet, so a run cannot be conducted over it. You can still record it.
-            </Problem>
+              <ConnectionFields
+                variant={liveKitForm.variant}
+                draft={draft}
+                onChange={setDraft}
+                credentialsEditable
+                beforeCredentialFields={
+                  !liveKitForm.enabled ? undefined : (
+                    <LiveKitDispatchSetup
+                      mode={liveKitForm.mode}
+                      agentName={liveKitForm.agentName}
+                      onModeChange={chooseLiveKitDispatch}
+                      onAgentNameChange={(agentName) =>
+                        setDraft((current) => ({
+                          ...current,
+                          config: { ...current.config, agentName },
+                        }))
+                      }
+                    />
+                  )
+                }
+              />
+            </>
           )}
 
           {refused === null ? null : <Problem>{refused.message}</Problem>}
-
           <FormActions>
-            <Button type="submit" weight="strong" disabled={saving}>
+            <Button
+              type="submit"
+              weight="strong"
+              disabled={saving || !canSubmit}
+              why={submitWhy}
+            >
               {saving ? "Adding…" : "Add connection"}
             </Button>
-            <ButtonLink href={back}>Cancel</ButtonLink>
+            <ButtonLink
+              href={
+                onboarding
+                  ? projectPath(projectId, "agents", agentId, "onboarding")
+                  : back
+              }
+            >
+              {onboarding ? "Skip connection for now" : "Cancel"}
+            </ButtonLink>
           </FormActions>
+          {onboarding ? (
+            <Help>
+              Without a connection, Egma cannot run a simulation against this
+              agent. You can add one later from Configuration.
+            </Help>
+          ) : null}
         </Form>
       </PageBody>
     </ProductPage>
+  );
+}
+
+function RetellSetup({
+  apiKey,
+  agents,
+  selectedAgent,
+  selectedNumber,
+  discovering,
+  refusal,
+  onKeyChange,
+  onDiscover,
+  onAgentChange,
+  onNumberChange,
+}: {
+  readonly apiKey: string;
+  readonly agents: readonly RetellVoiceAgent[] | null;
+  readonly selectedAgent: string;
+  readonly selectedNumber: string;
+  readonly discovering: boolean;
+  readonly refusal: Refusal | null;
+  readonly onKeyChange: (value: string) => void;
+  readonly onDiscover: () => void;
+  readonly onAgentChange: (value: string) => void;
+  readonly onNumberChange: (value: string) => void;
+}) {
+  const agent = agents?.find((item) => item.id === selectedAgent);
+  return (
+    <>
+      <Field label="Retell API key" htmlFor="retell-api-key">
+        <TextInput
+          id="retell-api-key"
+          value={apiKey}
+          secret
+          autoComplete="off"
+          onChange={onKeyChange}
+        />
+        <Help>
+          Egma uses this key to load your Retell voice agents and their routed
+          phone numbers. It is not stored on the connection.
+        </Help>
+      </Field>
+      <Button
+        disabled={apiKey.trim() === ""}
+        busy={discovering}
+        onClick={onDiscover}
+      >
+        {discovering ? "Loading agents…" : "Load Retell agents"}
+      </Button>
+      {refusal === null ? null : <Problem>{refusal.message}</Problem>}
+
+      {agents === null ? null : agents.length === 0 ? (
+        <Empty
+          title="No Retell voice agents found"
+          lead="Use a key for the account that holds the voice agent you want to test."
+        />
+      ) : (
+        <>
+          <Field label="Retell voice agent" htmlFor="retell-agent">
+            <Select
+              id="retell-agent"
+              value={selectedAgent}
+              options={agents.map((item) => ({
+                value: item.id,
+                label: item.name === "" ? item.id : item.name,
+              }))}
+              onChange={onAgentChange}
+            />
+          </Field>
+          {agent === undefined || agent.numbers.length === 0 ? (
+            <Problem>
+              Retell routes no phone number to this agent. Assign a number in
+              Retell, or select another voice agent.
+            </Problem>
+          ) : (
+            <Field label="Phone number" htmlFor="retell-number">
+              <Select
+                id="retell-number"
+                value={selectedNumber}
+                options={agent.numbers.map((number) => ({
+                  value: number.number,
+                  label:
+                    number.label === ""
+                      ? number.number
+                      : `${number.label} · ${number.number}`,
+                }))}
+                onChange={onNumberChange}
+              />
+            </Field>
+          )}
+        </>
+      )}
+    </>
   );
 }

@@ -90,6 +90,7 @@ type Query = {
   readonly project?: string;
   readonly cursor?: string;
   readonly archived?: string;
+  readonly search?: string;
 };
 
 /* ---------------------------------------------------------------- refusals */
@@ -418,6 +419,7 @@ export async function personaRoutes(
     const page = await listPersonas(acting.auth, {
       cursor,
       archived: query.archived === "true",
+      search: given(text(query.search)),
     });
 
     return reply.send({

@@ -17,7 +17,6 @@ import {
   type MintedApiKey,
 } from "../../../../../lib/settings.ts";
 import {
-  Badge,
   Button,
   Field,
   Form,
@@ -32,7 +31,14 @@ import {
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
-import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
+import {
+  RelativeInstant,
+  useMinuteClock,
+} from "../../../../../ui/relative-time.tsx";
+import {
+  SettingsLayout,
+  settingsPath,
+} from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
@@ -128,6 +134,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const projects: readonly Project[] = me?.projects ?? [];
+  const now = useMinuteClock();
 
   const { answer, reload } = useOrganizationRead<ApiKeyList>(API_KEYS_PATH);
 
@@ -216,33 +223,42 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
         cell: (key) =>
           key.last_used_at === null
             ? "Never"
-            : new Date(key.last_used_at).toLocaleDateString(),
+            : (
+                <RelativeInstant instant={key.last_used_at} now={now} />
+              ),
       },
       {
-        key: "standing",
-        header: "Standing",
-        cell: (key) =>
-          key.revoked_at === null ? (
-            <Button disabled={busy} onClick={() => setConfirmingRevoke(key)}>
-              Revoke
-            </Button>
-          ) : (
-            <Badge tone="warn">Revoked</Badge>
-          ),
+        key: "actions",
+        header: "Actions",
+        cell: (key) => (
+          <Button disabled={busy} onClick={() => setConfirmingRevoke(key)}>
+            Revoke
+          </Button>
+        ),
       },
     ];
   }
 
+  // Revocation is permanent history for authentication and audit work, but it
+  // is not an item somebody can use or act on. Keep that history in the API and
+  // remove it only from this normal working list.
+  const activeKeys = rowsIn(
+    answer?.status === "ready" ? answer.value.keys : undefined,
+  ).filter((key) => key.revoked_at === null);
   const { mine, others } = keysOwnedBy(
-    rowsIn(answer?.status === "ready" ? answer.value.keys : undefined),
+    activeKeys,
     me?.user.id,
   );
 
   return (
-    <ProductPage>
+    <ProductPage viewport>
       <PageHeader
         eyebrow="Settings"
         title="API keys"
+        breadcrumbs={[
+          { label: "Settings", href: settingsPath(projectId) },
+          { label: "API keys" },
+        ]}
         lead="What a terminal or a script authenticates to Egma with."
       />
       <PageBody>
@@ -272,11 +288,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
               >
                 <Form onSubmit={() => void mint()}>
                   <FormRow>
-                    <Field
-                      label="Name"
-                      htmlFor="key-name"
-                      hint="Optional. What this key is for, so a key nobody needs is recognisable later."
-                    >
+                    <Field label="Name" htmlFor="key-name">
                       <TextInput
                         id="key-name"
                         value={name}
@@ -284,11 +296,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
                         onChange={setName}
                       />
                     </Field>
-                    <Field
-                      label="Scope"
-                      htmlFor="key-scope"
-                      hint="A project-scoped key reaches that project only. It cannot be widened later."
-                    >
+                    <Field label="Scope" htmlFor="key-scope">
                       <Select
                         id="key-scope"
                         value={scope}

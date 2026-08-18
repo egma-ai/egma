@@ -309,15 +309,30 @@ describe("what the Monitoring list shows", () => {
   /**
    * A row leads to the transcript inside this project, carrying the window the
    * exchange happened in — which is what makes one transcript a link somebody
-   * can send.
-   */
+  * can send.
+  */
   it("links each row into this project's transcript, window and all", async () => {
-    stub({ rows: [ONE_ROW] });
+    const startedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    stub({
+      rows: [
+        {
+          ...ONE_ROW,
+          started_at: startedAt,
+          ended_at: new Date(Date.parse(startedAt) + 60_000).toISOString(),
+        },
+      ],
+    });
     render(<MonitoringTranscriptsPage />);
 
     const table = await screen.findByRole("table", { name: LIST.tableLabel });
     const link = within(table).getAllByRole("link")[0];
     const href = link?.getAttribute("href") ?? "";
+    const started = within(link as HTMLAnchorElement).getByText("5 minutes ago");
+
+    expect(started.closest("time")?.dateTime).toBe(startedAt);
+    expect(started.closest("time")?.title).toMatch(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /u,
+    );
 
     expect(
       href.startsWith(

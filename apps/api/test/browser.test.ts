@@ -1,7 +1,8 @@
 import { newId } from "@egma/ids";
-import type { Browser, Page, Request } from "playwright-core";
+import type { Browser, Page, Request, Route } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { asSecond } from "../../web/lib/instants.ts";
 import { PLATFORM_IDENTITY_PATH } from "../src/routes/platform.ts";
 import { openBrowser } from "./support/browser.ts";
 import {
@@ -74,6 +75,66 @@ let browser: Browser;
 let page: Page;
 let origin: string;
 
+const BROWSER_RETELL_KEY = "retell-browser-fixture-key-WXYZ";
+const BROWSER_RETELL_AGENT = "agent_in_retell_journey";
+const BROWSER_RETELL_NUMBER = "+14155550100";
+const BROWSER_PHONE_SETTINGS = {
+  carrier_trunk_address: "browser-fixture.pstn.twilio.com",
+  carrier_trunk_number: "+14155550101",
+  text_to_speech_provider: "openai",
+} as const;
+
+/** Retell's read-only setup surface, with no network outside the test. */
+const browserRetellFetch: typeof fetch = async (input, init) => {
+  const url = new URL(String(input));
+  const authorization = new Headers(init?.headers).get("authorization");
+  if (authorization !== `Bearer ${BROWSER_RETELL_KEY}`) {
+    return new Response(JSON.stringify({ error_message: "Invalid API key" }), {
+      status: 401,
+    });
+  }
+  if (url.pathname === "/v2/list-agents") {
+    return new Response(
+      JSON.stringify({
+        items: [
+          {
+            agent_id: BROWSER_RETELL_AGENT,
+            agent_name: "The Support line",
+            channel: "voice",
+          },
+        ],
+        has_more: false,
+      }),
+      { status: 200 },
+    );
+  }
+  if (url.pathname === "/list-phone-numbers") {
+    return new Response(
+      JSON.stringify([
+        {
+          phone_number: BROWSER_RETELL_NUMBER,
+          nickname: "Support",
+          inbound_agents: [{ agent_id: BROWSER_RETELL_AGENT }],
+        },
+      ]),
+      { status: 200 },
+    );
+  }
+  if (url.pathname.startsWith("/get-phone-number/")) {
+    return new Response(
+      JSON.stringify({
+        phone_number: BROWSER_RETELL_NUMBER,
+        nickname: "Support",
+        inbound_agents: [{ agent_id: BROWSER_RETELL_AGENT }],
+      }),
+      { status: 200 },
+    );
+  }
+  return new Response(JSON.stringify({ error_message: "not found" }), {
+    status: 404,
+  });
+};
+
 /**
  * A real object store, for the one thing below that needs one.
  *
@@ -93,6 +154,8 @@ if (!storage.available) {
 beforeAll(async () => {
   instance = await startInstance("browser", {
     traces: true,
+    retellFetch: browserRetellFetch,
+    platformSettings: BROWSER_PHONE_SETTINGS,
     ...(storage.available ? { blob: storage.store } : {}),
     /**
      * The one outbound ask managed access makes, standing in.
@@ -294,10 +357,10 @@ describe("adding a colleague, with no mail configured", () => {
       await page.goto(`${origin}/members`);
       await page.waitForURL(/\/projects\/prj_[^/]+\/settings\/people$/);
       expect(await page.getByText("Invite somebody").count()).toBe(0);
-      // A radio group rather than a tablist: it is the product's shared "which
-      // of two lists is this page showing" control, and it is exactly one of a
-      // small closed set.
-      await page.getByRole("radio", { name: "Invitations" }).click();
+      // People and invitations are two views of this settings page. The tab
+      // keeps that navigation clear without making either view look like a
+      // form choice.
+      await page.getByRole("tab", { name: "Invitations" }).click();
       await page.waitForSelector("text=Invite somebody");
 
       await page.fill("#invite-email", "bob@acme.example");
@@ -798,6 +861,57 @@ describe("what a project recorded in production", () => {
       await selector.waitFor({ state: "visible" });
       await expect.poll(() => selector.innerText()).toMatch(/acme/i);
 
+      // From here on, changing the page must not replace or empty the shell.
+      // The old page-owned shell stayed in one document but still remounted,
+      // fetched `/api/me` again, and briefly drew three false placeholders.
+      const sessionReads: string[] = [];
+      const countSessionRead = (request: Request) => {
+        if (new URL(request.url()).pathname === "/api/me") {
+          sessionReads.push(request.url());
+        }
+      };
+      page.on("request", countSessionRead);
+      await page.evaluate(() => {
+        const pageDocument = Reflect.get(globalThis, "document") as {
+          readonly body: unknown;
+          querySelector(selector: string): {
+            readonly textContent: string | null;
+          } | null;
+        };
+        const Observer = Reflect.get(globalThis, "MutationObserver") as new (
+          callback: () => void,
+        ) => {
+          observe(
+            target: unknown,
+            options: {
+              readonly childList: boolean;
+              readonly characterData: boolean;
+              readonly subtree: boolean;
+            },
+          ): void;
+          disconnect(): void;
+        };
+        const shell = pageDocument.querySelector("aside");
+        const flickers: string[] = [];
+        const sample = () => {
+          const text = pageDocument.querySelector("aside")?.textContent ?? "";
+          if (/No organization|Unknown project|Checking your session/.test(text)) {
+            flickers.push(text);
+          }
+        };
+        const observer = new Observer(sample);
+        observer.observe(pageDocument.body, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+        Reflect.set(globalThis, "__egma_shell_navigation_watch", {
+          shell,
+          flickers,
+          observer,
+        });
+      });
+
       // The four product areas, and Personas and Graders beside them. Settings
       // is not one of them and neither is a simulation.
       for (const area of [
@@ -858,6 +972,7 @@ describe("what a project recorded in production", () => {
         .getByRole("navigation", { name: "Settings" })
         .getByRole("link", { name: "People" })
         .waitFor({ state: "visible" });
+      await expect.poll(() => page.getByRole("menu").count()).toBe(0);
 
       await page.evaluate(() => {
         Reflect.set(globalThis, "__egma_same_document_navigation", true);
@@ -892,11 +1007,53 @@ describe("what a project recorded in production", () => {
         )
         .toMatch(atTests);
 
+      // The shell also spans the projectless creation page. Choosing it and
+      // returning to the current project must keep the same settled context.
+      await selector.click();
+      await page
+        .getByRole("dialog")
+        .getByText("New project", { exact: true })
+        .click();
+      await page.waitForURL(new RegExp(`/new-project$`));
+      await selector.click();
+      await page
+        .getByRole("dialog")
+        .locator("button[data-menu-item]")
+        .first()
+        .click();
+      await page.waitForURL(new RegExp(`/projects/${project}/agents$`));
+
       expect(
         await page.evaluate(() =>
           Reflect.get(globalThis, "__egma_same_document_navigation"),
         ),
       ).toBe(true);
+      expect(
+        await page.evaluate(() => {
+          const pageDocument = Reflect.get(globalThis, "document") as {
+            querySelector(selector: string): unknown;
+          };
+          const watch = Reflect.get(
+            globalThis,
+            "__egma_shell_navigation_watch",
+          ) as { readonly shell: unknown; readonly flickers: readonly string[] };
+          return {
+            sameShell: watch.shell === pageDocument.querySelector("aside"),
+            flickers: watch.flickers,
+          };
+        }),
+      ).toEqual({ sameShell: true, flickers: [] });
+      expect(sessionReads).toEqual([]);
+
+      page.off("request", countSessionRead);
+      await page.evaluate(() => {
+        const watch = Reflect.get(
+          globalThis,
+          "__egma_shell_navigation_watch",
+        ) as { readonly observer: { disconnect(): void } };
+        watch.observer.disconnect();
+        Reflect.deleteProperty(globalThis, "__egma_shell_navigation_watch");
+      });
     },
     SETTLE,
   );
@@ -1013,7 +1170,14 @@ describe("what a project recorded in production", () => {
       expect(await page.inputValue("#window")).toBe("24h");
 
       // The facts the list endpoint returns, as columns.
-      expect(shown).toContain("2026-08-02 18:04:40 UTC");
+      const started = page.locator("tbody time").first();
+      expect(await started.innerText()).toBe("2 hours ago");
+      expect(await started.getAttribute("title")).toBe(
+        asSecond(FIXTURE_TRACE.started_at),
+      );
+      expect(await started.getAttribute("datetime")).toBe(
+        FIXTURE_TRACE.started_at,
+      );
       expect(shown).toContain("1m 13s");
       expect(shown).toContain(
         `${FIXTURE_TRACE.humanTurns} human · ${FIXTURE_TRACE.agentTurns} agent`,
@@ -1597,7 +1761,7 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
 
       await page.goto(`${inProject}/simulations/${run.heard}`);
 
-      const player = page.locator("audio[data-recording]");
+      const player = page.getByLabel("Simulation recording");
       await player.waitFor({ timeout: 30_000 });
 
       // The link points at the **store**, and never at egma. The bytes do not
@@ -1715,11 +1879,15 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       // absence.
       await page.goto(`${inProject}/simulations/${run.silent}`);
       // **Waited for the read that would have supplied a player**: the
-      // transcript heading is drawn from the same answer, so by here the page
-      // has been told everything it knows and is offering nothing.
-      await page
+      // default-open evidence sheet is drawn from the same answer, so by here
+      // the page has been told everything it knows and is offering nothing.
+      const silentEvidence = page.getByRole("dialog", {
+        name: "Transcript and audio",
+      });
+      await silentEvidence.waitFor({ timeout: 30_000 });
+      await silentEvidence
         .getByRole("heading", { name: "Transcript", exact: true })
-        .waitFor({ timeout: 30_000 });
+        .waitFor();
       expect(await page.locator("audio").count()).toBe(0);
     },
     SETTLE,
@@ -1749,11 +1917,16 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       await page.goto(
         `${origin}/projects/${who.auth.projectId ?? ""}/runs/${run.runId}/simulations/${run.heard}`,
       );
-      // The heading comes off the same answer a player would have, so waiting
-      // for it is waiting for the read that could contradict the absence below.
-      await page
+      // The default-open sheet comes off the same answer a player would have,
+      // so waiting for it is waiting for the read that could contradict the
+      // absence below.
+      const evidence = page.getByRole("dialog", {
+        name: "Transcript and audio",
+      });
+      await evidence.waitFor({ timeout: 30_000 });
+      await evidence
         .getByRole("heading", { name: "Transcript", exact: true })
-        .waitFor({ timeout: 30_000 });
+        .waitFor();
 
       expect(await page.locator("audio").count()).toBe(0);
       // Not even the line that says a recording is being looked for, which is
@@ -2329,8 +2502,8 @@ describe("the complete product, walked in order in a second project", () => {
           } | null;
         }>;
       };
-      for (const label of document.querySelectorAll("main span")) {
-        if ((label.textContent ?? "").trim() !== "Run") continue;
+      for (const label of document.querySelectorAll("main dt")) {
+        if ((label.textContent ?? "").trim() !== "Status") continue;
         return (label.nextElementSibling?.textContent ?? "").trim();
       }
       return "";
@@ -2450,33 +2623,53 @@ describe("the complete product, walked in order in a second project", () => {
       );
       await walk.getByRole("button", { name: "Register agent" }).click();
 
-      await walk.waitForURL(
-        new RegExp(`/projects/${second}/agents/agt_[^/]+$`),
-      );
-      agentAddress = walk.url();
-      await saysWithin(walk, "No active connections");
-
-      await walk.getByRole("link", { name: "Add connection" }).click();
-      await walk.waitForURL(/\/connections\/new$/);
+      await walk.waitForURL(/\/agents\/agt_[^/]+\/connections\/new\?onboarding=connection$/);
+      agentAddress = walk
+        .url()
+        .replace(/\/connections\/new\?onboarding=connection$/u, "");
       // The form is drawn from the registry rather than from a list in the
       // browser, so waiting for the first field is waiting for that read.
       await walk.waitForSelector("#connection-type");
 
-      await walk.selectOption("#connection-modality", "voice");
       await walk.fill("#connection-name", "Retell staging");
-      await walk.fill("#connection-environment", "staging");
-      await walk.fill("#config-retellAgentId", "agent_in_retell_journey");
-      await walk.fill("#credential-apiKey", "retell-secret-A1B2C3D4WXYZ");
+      await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
+      await walk.getByRole("button", { name: "Load Retell agents" }).click();
+      await walk.waitForSelector("#retell-agent");
+      await expect.poll(() => walk.inputValue("#retell-agent")).toBe(
+        BROWSER_RETELL_AGENT,
+      );
+      await expect.poll(() => walk.inputValue("#retell-number")).toBe(
+        BROWSER_RETELL_NUMBER,
+      );
       await walk.getByRole("button", { name: "Add connection" }).click();
 
-      await walk.waitForURL(/\/connections\/con_[^/]+$/);
-      connectionAddress = walk.url();
-      await saysWithin(walk, "Retell staging");
-      // The secret is never handed back, and the page says which key it is
-      // holding rather than pretending it has forgotten.
-      expect(await walk.innerText("main")).not.toContain(
-        "retell-secret-A1B2C3D4WXYZ",
+      await walk.waitForURL(/\/agents\/agt_[^/]+\/onboarding$/);
+      // Provider discovery rechecks the route immediately before the write.
+      // The resulting connection is only the public phone destination; the
+      // Retell key and agent id do not enter the stored connection.
+      const stored = await instance.database.sql<{
+        id: string;
+        type: string;
+        modality: string;
+        config: Record<string, unknown>;
+        credentials: string | null;
+      }>(
+        `select id, type, modality, config, credentials
+           from connection where name = 'Retell staging'`,
       );
+      expect(stored.rows).toHaveLength(1);
+      expect(stored.rows[0]).toMatchObject({
+        type: "phone",
+        modality: "voice",
+        config: { phoneNumber: BROWSER_RETELL_NUMBER },
+        credentials: null,
+      });
+      connectionAddress = `${agentAddress}/connections/${stored.rows[0]?.id ?? ""}`;
+      expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
+      expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
+      await walk.getByRole("link", { name: "Finish setup" }).click();
+      await walk.waitForURL(agentAddress);
+      await saysWithin(walk, "Recent runs");
     },
     SETTLE,
   );
@@ -2642,9 +2835,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(at("tests"));
       await walk.getByRole("link", { name: "Write a test" }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/tests/new$`));
-      // The agents and personas this form offers are read, so waiting for the
-      // agent to be on offer is waiting for both reads.
-      await saysWithin(walk, "The Support line");
+      await saysWithin(walk, "What should happen");
 
       await walk.fill("#test-name", "Reschedules a booked appointment");
       await walk.fill(
@@ -2654,8 +2845,12 @@ describe("the complete product, walked in order in a second project", () => {
       await walk
         .getByRole("textbox", { name: "Expected behavior 1" })
         .fill("confirms the new time back before finishing");
-      await walk.getByRole("checkbox", { name: "The Support line" }).check();
-      await walk.getByRole("checkbox", { name: "Impatient Rita" }).check();
+      await walk.getByRole("button", { name: "Choose agents" }).click();
+      await walk.getByRole("checkbox", { name: "The Support line" }).click();
+      await walk.getByRole("button", { name: "Done" }).click();
+      await walk.getByRole("button", { name: "Choose personas" }).click();
+      await walk.getByRole("checkbox", { name: "Impatient Rita" }).click();
+      await walk.getByRole("button", { name: "Done" }).click();
       await walk.getByRole("button", { name: "Write the test" }).click();
 
       await walk.waitForURL(new RegExp(`/projects/${second}/tests/tst_[^/]+$`));
@@ -2691,8 +2886,8 @@ describe("the complete product, walked in order in a second project", () => {
 
       // The review is the same resolution the start performs, so waiting for it
       // is waiting for egma to have said what it would freeze.
-      await walk.waitForSelector("#run-label");
-      await walk.fill("#run-label", "The first run in Support");
+      await walk.waitForSelector("#run-name");
+      await walk.fill("#run-name", "The first run in Support");
       // Nothing here is a run that judges nothing: a grader was switched on two
       // steps ago and every project is created holding another.
       expect(
@@ -2700,9 +2895,18 @@ describe("the complete product, walked in order in a second project", () => {
       ).toBe(0);
 
       await walk.getByRole("button", { name: "Start run" }).click();
-      await walk.waitForURL(new RegExp(`/projects/${second}/runs$`));
-
-      await walk.getByRole("link", { name: "The first run in Support" }).click();
+      const confirmation = walk.getByRole("dialog", { name: "Start this run?" });
+      await confirmation
+        .getByText("1 simulation will be conducted.")
+        .waitFor();
+      const startResponse = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/api/runs",
+      );
+      await confirmation.getByRole("button", { name: "Start run" }).click();
+      const started = await startResponse;
+      expect(started.status(), await started.text()).toBe(201);
       await walk.waitForURL(
         new RegExp(`/projects/${second}/runs/run_[^/]+$`),
       );
@@ -2723,8 +2927,7 @@ describe("the complete product, walked in order in a second project", () => {
       // What the run was against, as it now stands — the agent, and the
       // connection exactly as this run went over it.
       expect(shown).toContain("The Support line");
-      expect(shown).toContain("retell");
-      expect(shown).toContain("staging");
+      expect(shown).toContain("Retell staging");
 
       const row = walk
         .getByRole("link", { name: "Reschedules a booked appointment" })
@@ -2740,9 +2943,13 @@ describe("the complete product, walked in order in a second project", () => {
     "opens that conversation's own evidence, before anything has conducted it",
     async () => {
       await walk.goto(`${origin}${conversation}`);
-      await walk
+      const evidence = walk.getByRole("dialog", {
+        name: "Transcript and audio",
+      });
+      await evidence.waitFor({ timeout: 30_000 });
+      await evidence
         .getByRole("heading", { name: "Transcript", exact: true })
-        .waitFor({ timeout: 30_000 });
+        .waitFor();
 
       const shown = await walk.innerText("main");
       // It is the conversation it says it is: the test it will execute, and
@@ -2751,7 +2958,7 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).toContain("Impatient Rita");
       // And nothing has happened yet, said as an absence rather than as a
       // failure or as an empty space that could mean either.
-      expect(shown).toContain("No transcript was filed");
+      expect(await evidence.innerText()).toContain("No transcript was filed");
       expect(await walk.locator("audio").count()).toBe(0);
     },
     SETTLE,
@@ -2787,14 +2994,18 @@ describe("the complete product, walked in order in a second project", () => {
       );
 
       await walk.goto(`${origin}${conversation}`);
-      await walk
+      const evidence = walk.getByRole("dialog", {
+        name: "Transcript and audio",
+      });
+      await evidence.waitFor({ timeout: 30_000 });
+      await evidence
         .getByRole("heading", { name: "Transcript", exact: true })
-        .waitFor({ timeout: 30_000 });
+        .waitFor();
 
       await expect
-        .poll(() => walk.innerText("main"), { timeout: 30_000 })
+        .poll(() => evidence.innerText(), { timeout: 30_000 })
         .toContain("I need to move my cleaning to next week.");
-      const shown = await walk.innerText("main");
+      const shown = await evidence.innerText();
       expect(shown).toContain("Of course — which afternoon suits you?");
       expect(shown).not.toContain("No transcript was filed");
 
@@ -2872,7 +3083,7 @@ describe("the complete product, walked in order in a second project", () => {
         address: `${agentAddress}/connections/new`,
         // The form is drawn from the registry, so this field exists only once
         // that read has landed.
-        says: "Modality",
+        says: "Platform",
       },
       {
         what: "one connection",
@@ -2887,9 +3098,7 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Write a test",
         address: at("tests", "new"),
-        // The agents this form offers are read; the agent being on offer is
-        // that read having landed.
-        says: "The Support line",
+        says: "What should happen",
       },
       {
         what: "one test",
@@ -2929,7 +3138,7 @@ describe("the complete product, walked in order in a second project", () => {
         address: at("runs", "new"),
         // The whole page waits on the agents read, so its own sentence is
         // drawn only after that read answers.
-        says: "A run executes a selection of tests against one agent",
+        says: "Choose one agent, one connection and the tests to run.",
       },
       {
         what: "one run",
@@ -3484,83 +3693,45 @@ describe("the complete product, walked in order in a second project", () => {
       SETTLE,
     );
 
-    /**
-     * **A status, measured on the list and on the page the list links to.**
-     *
-     * The case above compares five lists with each other, which is the shape a
-     * copied *table* would break. It cannot say anything about the parts that
-     * appear on one list and one detail page — a status, a verdict, a measure —
-     * and those are named in this criterion too. A run's machinery word is the
-     * one to take: it is drawn by the same component in both places, and it is
-     * the word this product most has to keep telling apart from a conversation's
-     * and from a verdict, so a second implementation of it anywhere is exactly
-     * the thing worth catching.
-     */
+    /** The same shared status meaning appears in list and compact detail forms. */
     it(
-      "measures the same status on a list and on the page it links to",
+      "keeps one status meaning on a list and on the page it links to",
       async () => {
-        // The run's own `completed`, taken by the sentence that belongs to a
-        // *run's* machinery rather than by a colour or a hashed class.
         const theRunsStatus = 'main span[title^="The machinery finished"]';
-
-        /**
-         * One badge's shape, or an empty string while there is not one to
-         * measure.
-         *
-         * **Empty rather than thrown, because the run's page redraws itself.**
-         * It follows the run while the run moves, so the element a locator
-         * resolves can be detached by React before the measurement runs — and a
-         * detached element answers a zero box and a style declaration with
-         * nothing in it. That is a measurement of nothing, not a difference
-         * between two pages, so it is polled past rather than compared.
-         */
-        const shapeOf = async (): Promise<string> =>
+        const stateOf = async (): Promise<string> =>
           walk
             .locator(theRunsStatus)
             .first()
             .evaluate((element) => {
-              const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
-                target: unknown,
-              ) => {
-                readonly paddingTop: string;
-                readonly paddingRight: string;
-                readonly fontSize: string;
-                readonly textTransform: string;
-                readonly borderRadius: string;
-              };
-              const read = styleOf(element);
-              const box = element.getBoundingClientRect();
-              if (box.height === 0) return "";
-              return [
-                Math.round(box.height),
-                read.paddingTop,
-                read.paddingRight,
-                read.fontSize,
-                read.textTransform,
-                read.borderRadius,
-              ].join("/");
+              if (element.getBoundingClientRect().height === 0) return "";
+              return JSON.stringify({
+                meaning: element.getAttribute("title"),
+                text: element.textContent?.trim(),
+                moving:
+                  element.querySelector('[data-motion="active"]') !== null,
+              });
             })
             .catch(() => "");
 
-        const settledShape = async (): Promise<string> => {
-          let shape = "";
+        const settledState = async (): Promise<string> => {
+          let state = "";
           await expect
             .poll(
               async () => {
-                shape = await shapeOf();
-                return shape;
+                state = await stateOf();
+                return state;
               },
               { timeout: 30_000 },
             )
             .not.toBe("");
-          return shape;
+          return state;
         };
 
         await walk.goto(at("runs"));
-        const onTheList = await settledShape();
+        const onTheList = await settledState();
 
         await walk.goto(runAddress);
-        const onThePage = await settledShape();
+        const onThePage = await settledState();
 
         expect(onThePage, `${onTheList} on the list`).toBe(onTheList);
       },
@@ -3683,11 +3854,15 @@ describe("the complete product, walked in order in a second project", () => {
 
         // And a transcript is dense: its turns are lines rather than cards.
         await walk.goto(`${origin}${conversation}`);
-        await walk
+        const evidence = walk.getByRole("dialog", {
+          name: "Transcript and audio",
+        });
+        await evidence.waitFor({ timeout: 30_000 });
+        await evidence
           .getByRole("heading", { name: "Transcript", exact: true })
-          .waitFor({ timeout: 30_000 });
+          .waitFor();
         await expect
-          .poll(() => walk.innerText("main"), { timeout: 30_000 })
+          .poll(() => evidence.innerText(), { timeout: 30_000 })
           .toContain("I need to move my cleaning to next week.");
       },
       SETTLE,
@@ -4119,9 +4294,9 @@ describe("the complete product, walked in order in a second project", () => {
    * than assumed. Its own section rather than the narrow screen's, because two
    * of the three are checked at both widths.
    */
-  describe("loading, an absence, and something archived", () => {
+  describe("loading and an absence", () => {
     it(
-      "shows loading, an absence and an archived thing, on a phone and on a desktop",
+      "shows loading and an absence on a phone and on a desktop",
       async () => {
         for (const width of [390, 1280]) {
           await walk.setViewportSize({ width, height: 900 });
@@ -4139,11 +4314,11 @@ describe("the complete product, walked in order in a second project", () => {
           // on.
           const theAgentsRead = (asked: URL) =>
             asked.pathname === "/api/agents";
-          await walk.route(theAgentsRead, async (route) => {
+          const holdTheAgentsRead = async (route: Route) => {
             // The real answer is fetched at once; only its delivery is held.
             // The shorter spelling — await the gate, then `route.continue()`
-            // — parks the request itself across the release and removal
-            // below, and a continue that loses that race kills the fetch. A
+            // — parks the request itself across the release below, and a
+            // continue that loses the race kills the fetch. A
             // killed fetch carries no error for the page to react to, so it
             // renders as "Loading agents…" until the poll gives up — which
             // is exactly how this step once failed on a tree that passed
@@ -4152,19 +4327,24 @@ describe("the complete product, walked in order in a second project", () => {
             const answer = await route.fetch();
             await held;
             return route.fulfill({ response: answer });
-          });
+          };
+          await walk.route(theAgentsRead, holdTheAgentsRead);
           try {
             await walk.goto(at("agents"));
             await expect
               .poll(() => walk.innerText("main"), { timeout: 30_000 })
               .toContain("Loading");
+            release();
+            // Keep the handler installed until the page has consumed the
+            // released response. A finished route handler is not proof that
+            // the browser's fetch promise and React state update have run.
+            await saysWithin(walk, "The Support line");
           } finally {
             release();
-            // Wait for the handler to finish its delivery before removing it
-            // — a removal mid-delivery would strand the request it holds.
-            await walk.unrouteAll({ behavior: "wait" });
+            // Remove only this test's handler. Other routes on this page do
+            // not belong to this loading-state proof.
+            await walk.unroute(theAgentsRead, holdTheAgentsRead);
           }
-          await saysWithin(walk, "The Support line");
 
           // **An absence**, in egma's own words rather than in a page's
           // paraphrase of them — a project this organization has not got is
@@ -4180,65 +4360,6 @@ describe("the complete product, walked in order in a second project", () => {
             .toBeGreaterThan(0);
         }
 
-        // **Archived**, which is the one state that has to be made and then
-        // unmade: the rest of this journey is about an agent that works.
-        await walk.setViewportSize({ width: 1280, height: 900 });
-        await walk.goto(agentAddress);
-        await saysWithin(walk, "The Support line");
-        await walk.getByRole("button", { name: "Archive", exact: true }).click();
-        await walk.getByRole("dialog").waitFor();
-        await walk.getByRole("button", { name: "Archive agent" }).click();
-
-        /*
-         * **The barrier waits for the archive, and it has to be the page's own
-         * sentence.**
-         *
-         * `/archived/iu` was the first attempt and it proved nothing: the
-         * connections filter draws two radios, "Active" and "Archived", on
-         * every agent page whether or not anything is archived. So the pattern
-         * matched the page as it stood *before* the click, the poll returned on
-         * its first tick, and everything below it raced the archive it was
-         * supposed to be waiting for. It went green when the read won and red
-         * when the archive did, which is how one racing assertion turned this
-         * lane red one run in two — and it left the agent archived for the
-         * three cases that come after.
-         */
-        await saysWithin(walk, "This agent is archived");
-
-        // Out of new work, and still perfectly readable — which is the whole
-        // difference between archiving and deleting.
-        //
-        // **Its connections went with it**, which is the product's own
-        // behaviour and this page's own sentence: archiving an agent archives
-        // every way of reaching it, and Restore deliberately does not bring
-        // them back, because a connection carries a provider credential and a
-        // batch restore would put old keys back into use without anybody
-        // choosing to. So the Active half is empty here, and the way egma
-        // reaches this agent is still named under Archived — still readable,
-        // because a run that went over it stays interpretable.
-        expect(await walk.innerText("main")).toContain("No active connections");
-        await walk.getByRole("radio", { name: "Archived" }).click();
-        await saysWithin(walk, "Retell staging");
-
-        await walk.goto(at("agents"));
-        await saysWithin(walk, "No agents in this project yet");
-
-        await walk.goto(agentAddress);
-        await walk.getByRole("button", { name: "Restore", exact: true }).click();
-        await walk.getByRole("dialog").waitFor();
-        await walk.getByRole("button", { name: "Restore agent" }).click();
-        await expect
-          .poll(
-            () =>
-              walk.getByRole("button", { name: "Archive", exact: true }).count(),
-            { timeout: 30_000 },
-          )
-          .toBe(1);
-        // **And only the agent came back.** Each connection is restored on its
-        // own terms, against the credential typed again — a batch restore would
-        // put an old provider key back into use without anybody choosing to. So
-        // the agent is active and its way in is still on the archived half.
-        expect(await walk.innerText("main")).toContain("No active connections");
       },
       SETTLE,
     );
@@ -4337,9 +4458,9 @@ describe("the complete product, walked in order in a second project", () => {
           }),
         ).toBe("in the table");
 
-        // The archive filter is one stop on the way, not two: a roving radio
-        // group is a single Tab stop by design, and a group that had lost it
-        // would put every option between somebody and the rows.
+        // Lifecycle filters are not part of this UI. They must not add hidden
+        // keyboard stops before the rows either.
+        expect(trail.filter((name) => name === "Active")).toEqual([]);
         expect(trail.filter((name) => name === "Archived")).toEqual([]);
 
         await walk.keyboard.press("Enter");
@@ -4422,46 +4543,6 @@ describe("the complete product, walked in order in a second project", () => {
       SETTLE,
     );
 
-    it(
-      "opens a confirmation, and closes it with the keyboard without doing anything",
-      async () => {
-        await walk.goto(agentAddress);
-        await saysWithin(walk, "The Support line");
-
-        const archive = walk.getByRole("button", { name: "Archive" }).first();
-        await archive.focus();
-        await walk.keyboard.press("Enter");
-
-        const dialog = walk.getByRole("dialog");
-        await dialog.waitFor();
-        // The dialog takes the focus, so the next key press is answered by it.
-        expect(
-          await dialog.evaluate((element) =>
-            element.contains(element.ownerDocument.activeElement),
-          ),
-        ).toBe(true);
-
-        await walk.keyboard.press("Escape");
-        await expect.poll(() => walk.getByRole("dialog").count()).toBe(0);
-        await expect
-          .poll(() =>
-            archive.evaluate(
-              (element) => element === element.ownerDocument.activeElement,
-            ),
-          )
-          .toBe(true);
-        // Nothing happened: the agent is still active, so the control still
-        // offers to archive it rather than to bring it back.
-        expect(
-          await walk.getByRole("button", { name: "Archive", exact: true }).count(),
-        ).toBe(1);
-        expect(
-          await walk.getByRole("button", { name: "Restore", exact: true }).count(),
-        ).toBe(0);
-      },
-      SETTLE,
-    );
-
     /**
      * The recording controls, which are the browser's own.
      *
@@ -4474,7 +4555,7 @@ describe("the complete product, walked in order in a second project", () => {
       "reaches the recording controls with the keyboard",
       async () => {
         await walk.goto(`${origin}${conversation}`);
-        const player = walk.locator("audio[data-recording]");
+        const player = walk.getByLabel("Simulation recording");
         await player.waitFor({ timeout: 30_000 });
 
         expect(await player.getAttribute("controls")).not.toBeNull();
