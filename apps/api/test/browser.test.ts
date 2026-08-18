@@ -1,5 +1,5 @@
 import { newId } from "@egma/ids";
-import type { Browser, Page, Request } from "playwright-core";
+import type { Browser, Page, Request, Route } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { asSecond } from "../../web/lib/instants.ts";
@@ -3896,11 +3896,11 @@ describe("the complete product, walked in order in a second project", () => {
           // on.
           const theAgentsRead = (asked: URL) =>
             asked.pathname === "/api/agents";
-          await walk.route(theAgentsRead, async (route) => {
+          const holdTheAgentsRead = async (route: Route) => {
             // The real answer is fetched at once; only its delivery is held.
             // The shorter spelling — await the gate, then `route.continue()`
-            // — parks the request itself across the release and removal
-            // below, and a continue that loses that race kills the fetch. A
+            // — parks the request itself across the release below, and a
+            // continue that loses the race kills the fetch. A
             // killed fetch carries no error for the page to react to, so it
             // renders as "Loading agents…" until the poll gives up — which
             // is exactly how this step once failed on a tree that passed
@@ -3909,19 +3909,24 @@ describe("the complete product, walked in order in a second project", () => {
             const answer = await route.fetch();
             await held;
             return route.fulfill({ response: answer });
-          });
+          };
+          await walk.route(theAgentsRead, holdTheAgentsRead);
           try {
             await walk.goto(at("agents"));
             await expect
               .poll(() => walk.innerText("main"), { timeout: 30_000 })
               .toContain("Loading");
+            release();
+            // Keep the handler installed until the page has consumed the
+            // released response. A finished route handler is not proof that
+            // the browser's fetch promise and React state update have run.
+            await saysWithin(walk, "The Support line");
           } finally {
             release();
-            // Wait for the handler to finish its delivery before removing it
-            // — a removal mid-delivery would strand the request it holds.
-            await walk.unrouteAll({ behavior: "wait" });
+            // Remove only this test's handler. Other routes on this page do
+            // not belong to this loading-state proof.
+            await walk.unroute(theAgentsRead, holdTheAgentsRead);
           }
-          await saysWithin(walk, "The Support line");
 
           // **An absence**, in egma's own words rather than in a page's
           // paraphrase of them — a project this organization has not got is
