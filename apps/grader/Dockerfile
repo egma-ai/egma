@@ -28,4 +28,7 @@ ENV NODE_ENV=production
 # the encryption key while it does, so it runs as the image's own unprivileged
 # user and a compromise stays inside that user's reach.
 USER node
-CMD ["node", "apps/grader/dist/index.js"]
+# `--import` loads the telemetry module before the entry module — see the
+# API's Dockerfile; with the telemetry switches unset it checks two variables
+# and does nothing.
+CMD ["node", "--import", "./apps/grader/dist/telemetry.js", "apps/grader/dist/index.js"]
