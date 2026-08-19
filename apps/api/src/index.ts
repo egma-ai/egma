@@ -3,6 +3,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  reconcileDeploymentCarrierSettings,
   runClickHouseMigrations,
   runMigrations,
   seedDefaultJudge,
@@ -40,9 +41,18 @@ const judged =
 
 // The settings this environment offers, written for anything the platform does
 // not already hold. This is how an automated deployment configures itself with
-// no interview — and it never replaces a setting somebody has changed, so a
-// redeploy carrying a script's copy of an old key cannot undo a new one.
+// no interview. On a single-organization deployment that remains the whole
+// rule: a restart never replaces a setting somebody changed.
 const seeded = await seedPlatformSettings(config.platformSettings);
+
+// Hosted egma is the one exception. Its phone route belongs to the deployment,
+// not to any organization, and its deployment environment is the source of
+// truth. Reconcile that complete carrier bundle on every start so a changed
+// production secret reaches the platform store. All other settings remain
+// seed-only, and a local single-organization deployment never takes this path.
+const reconciled = config.singleOrganization
+  ? []
+  : await reconcileDeploymentCarrierSettings(config.platformSettings);
 
 // egma's own graders, written onto the shelf from egma's own catalog. After the
 // migrations because it writes rows, and before the first request because a
@@ -74,6 +84,14 @@ if (seeded.length > 0) {
   app.log.info(
     { settings: seeded },
     "the environment supplied platform settings this deployment was missing",
+  );
+}
+if (reconciled.length > 0) {
+  // Names only. A value or hint here would put a production credential in the
+  // deployment log, which is another credential store by accident.
+  app.log.info(
+    { settings: reconciled },
+    "the hosted deployment reconciled its carrier settings from the environment",
   );
 }
 if (shelved.length > 0) {

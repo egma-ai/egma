@@ -1,11 +1,12 @@
 import { newId } from "@egma/ids";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   NotPermittedError,
   platformFacts,
   PLATFORM_SETTINGS,
   readPlatformSettings,
+  reconcileDeploymentCarrierSettings,
   resolvePlatformSettings,
   seedPlatformSettings,
   writePlatformSettings,
@@ -585,6 +586,98 @@ describe("seeding one complete carrier bundle", () => {
 
     expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
       IP_AUTHENTICATED_ROUTE,
+    );
+  });
+});
+
+describe("reconciling a hosted deployment's carrier route", () => {
+  const STORED_ROUTE = {
+    carrier_trunk_address: "stored.pstn.twilio.com",
+    carrier_trunk_number: "+15550100100",
+    carrier_trunk_username: "egma-stored",
+    carrier_trunk_password: "stored-carrier-password",
+  } as const;
+  const DEPLOYED_ROUTE = {
+    carrier_trunk_address: "deployed.pstn.twilio.com",
+    carrier_trunk_number: "+15550100200",
+    carrier_trunk_username: "egma-production",
+    carrier_trunk_password: "deployed-carrier-password",
+  } as const;
+  const IP_AUTHENTICATED_ROUTE = {
+    carrier_trunk_address: "production-ip-auth.example.com",
+    carrier_trunk_number: "+15550100300",
+  } as const;
+
+  beforeEach(async () => {
+    await database.sql("delete from platform_setting");
+  });
+
+  it("replaces an old complete credential route with the deployment route", async () => {
+    await writePlatformSettings(owner(), ONE_TEAM, STORED_ROUTE);
+
+    expect(
+      [...(await reconcileDeploymentCarrierSettings(DEPLOYED_ROUTE))].sort(),
+    ).toEqual(Object.keys(DEPLOYED_ROUTE).sort());
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
+      DEPLOYED_ROUTE,
+    );
+  });
+
+  it("does nothing when the complete route already matches", async () => {
+    await writePlatformSettings(owner(), ONE_TEAM, DEPLOYED_ROUTE);
+    const before = await database.sql<{ name: string; value: string }>(
+      "select name, value from platform_setting order by name",
+    );
+
+    expect(await reconcileDeploymentCarrierSettings(DEPLOYED_ROUTE)).toEqual(
+      [],
+    );
+    const after = await database.sql<{ name: string; value: string }>(
+      "select name, value from platform_setting order by name",
+    );
+    expect(after.rows).toEqual(before.rows);
+  });
+
+  it("refuses a partial route and keeps the old complete route", async () => {
+    await writePlatformSettings(owner(), ONE_TEAM, STORED_ROUTE);
+
+    await expect(
+      reconcileDeploymentCarrierSettings({
+        carrier_trunk_address: "partial.pstn.twilio.com",
+        carrier_trunk_number: "+15550100400",
+        carrier_trunk_username: "egma-partial",
+      }),
+    ).rejects.toThrow(/carrier reconciliation.*missing/u);
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
+      STORED_ROUTE,
+    );
+  });
+
+  it("switches credential authentication to IP authentication and removes the credentials", async () => {
+    await writePlatformSettings(owner(), ONE_TEAM, STORED_ROUTE);
+
+    expect(
+      [
+        ...(await reconcileDeploymentCarrierSettings(
+          IP_AUTHENTICATED_ROUTE,
+        )),
+      ].sort(),
+    ).toEqual(Object.keys(IP_AUTHENTICATED_ROUTE).sort());
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
+      IP_AUTHENTICATED_ROUTE,
+    );
+  });
+
+  it("ignores environment values that are not part of the carrier route", async () => {
+    await writePlatformSettings(owner(), ONE_TEAM, STORED_ROUTE);
+
+    expect(
+      await reconcileDeploymentCarrierSettings({
+        persona_model_provider: "openai",
+      }),
+    ).toEqual([]);
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
+      STORED_ROUTE,
     );
   });
 });

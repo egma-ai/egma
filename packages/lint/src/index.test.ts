@@ -393,6 +393,28 @@ describe("an exported call that could reach the database without a customer", ()
     expect(await check(root)).toEqual([]);
   });
 
+  it("allows the hosted deployment to reconcile its own carrier route", async () => {
+    await withSurface(
+      'export { reconcileDeploymentCarrierSettings } from "./things.ts";\n',
+      "export type PlatformSettingValues = Readonly<Record<string, string>>;\nexport async function reconcileDeploymentCarrierSettings(values: PlatformSettingValues): Promise<readonly string[]> {\n  return Object.keys(values);\n}\n",
+    );
+
+    expect(await check(root)).toEqual([]);
+  });
+
+  it("refuses the carrier reconciliation exemption if it can name a customer", async () => {
+    await withSurface(
+      'export { reconcileDeploymentCarrierSettings } from "./things.ts";\n',
+      "export async function reconcileDeploymentCarrierSettings(organizationId: string): Promise<readonly string[]> {\n  return [organizationId];\n}\n",
+    );
+
+    const violations = await check(root);
+    expect(rules(violations)).toEqual([
+      "every-exported-call-carries-an-auth-context",
+    ]);
+    expect(violations[0]?.detail).toContain("wearing an exemption");
+  });
+
   it("refuses one of them the moment a caller can name a customer to it", async () => {
     await withSurface(
       'export { claimGradingJobs } from "./things.ts";\n',

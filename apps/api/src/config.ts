@@ -96,8 +96,8 @@ export type Config = {
    */
   readonly defaultJudge: DefaultJudge | undefined;
   /**
-   * The settings this environment offers the platform on start, for anything
-   * the platform does not already hold.
+   * The settings this environment offers the platform on start. Most values
+   * are written only where the platform does not already hold one.
    *
    * **This is the second of the two ways a setting gets in, and the operator
    * chooses which.** One is an interview — `egma self-host setup` asks for each
@@ -110,9 +110,14 @@ export type Config = {
    * one somebody supplies through the interface or the setup command, and the
    * platform says so in its readiness answer until they do.
    *
-   * Nothing here is ever *replaced* from the environment. See
-   * `seedPlatformSettings`: a redeploy carrying a script's copy of the old key
-   * must not undo a key the operator changed.
+   * On a single-organization deployment, nothing here is ever replaced from
+   * the environment. See `seedPlatformSettings`: a redeploy carrying a
+   * script's copy of the old key must not undo a key the operator changed.
+   *
+   * A hosted multi-organization deployment has one narrow exception. Its
+   * carrier route belongs to the deployment, and the deployment environment
+   * is its source of truth. Startup therefore reconciles the complete carrier
+   * bundle into the platform store. It does not replace any other setting.
    */
   readonly platformSettings: PlatformSettingValues;
   /**

@@ -542,13 +542,16 @@ manager as well as the sealed database copy. A database reset reads that local
 copy; it needs no synchronization with another database.
 
 Production uses the same trunk address and source number with its own SIP pair
-in the deployment secret. Normal setup never asks for the Twilio Account SID or
-Auth Token. It does not create, inspect, or change Twilio resources.
+in the deployment secret. Hosted Egma treats that complete carrier bundle as
+deployment-owned configuration. Each API start reconciles it into the platform
+store, because no customer organization owns the shared production route.
+Normal setup never asks for the Twilio Account SID or Auth Token. It does not
+create, inspect, or change Twilio resources.
 
-Normal setup also never replaces a bundle the platform already holds. To rotate
-one safely, a Twilio administrator first adds a new developer or production
-credential beside the old one. Export the trunk address, source number, new SIP
-username and new SIP password, then run:
+Normal self-hosted setup also never replaces a bundle the platform already
+holds. To replace one developer credential safely, a Twilio administrator first
+adds the new credential beside the old one. Export the trunk address, source
+number, new SIP username and new SIP password, then run:
 
 ```bash
 npx @egma/cli self-host setup --replace-carrier --yes
@@ -557,6 +560,11 @@ npx @egma/cli self-host setup --replace-carrier --yes
 That recovery command replaces all four stored values together. It still does
 not contact Twilio. Place a test call with the new bundle, then ask the
 administrator to revoke the old credential.
+
+For hosted production, update the deployment secret with the new production SIP
+pair and deploy. The API replaces the four stored carrier values together on
+startup. Place one production phone simulation before the administrator revokes
+the old credential.
 
 **The number must already be on your account.** Normal setup never searches the
 Twilio catalogue and never buys, ports or registers a number. It also cannot

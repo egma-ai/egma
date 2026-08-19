@@ -65,7 +65,9 @@ The platform seals every API key and credential before storing it. Keys are neve
 
 ## Configuration keys
 
-The table below covers every setting the platform stores. The **env var** column shows the `.env.example` variable that seeds a setting on first boot. The API never overwrites a complete stored configuration. If an older database holds only part of a carrier route, startup replaces that invalid partial route with the complete two-value or four-value route from the environment.
+The table below covers every setting the platform stores. The **env var** column shows the `.env.example` variable that seeds a setting on first boot. A self-hosted, single-organization deployment never overwrites a complete stored configuration from its environment. If an older database holds only part of a carrier route, startup replaces that invalid partial route with the complete two-value or four-value route from the environment.
+
+Hosted Egma is the narrow exception. It serves more than one organization, so its carrier route is deployment-owned configuration. On every start, the hosted deployment reconciles the complete carrier route from its environment into the platform store. This can replace an older stored carrier route. Other platform settings remain seed-only.
 
 ### Persona model
 

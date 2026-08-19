@@ -245,7 +245,7 @@ function rowFor(name: PlatformSettingName, value: unknown, now: Date) {
  */
 function requireWholeCarrier(
   values: PlatformSettingValues,
-  action: "write" | "seed",
+  action: "write" | "seed" | "reconciliation",
 ): void {
   const named = CARRIER_BUNDLE.filter((name) => values[name] !== undefined);
   if (named.length === 0) return;
@@ -664,4 +664,77 @@ export async function seedPlatformSettings(
     .returning({ name: platformSetting.name });
 
   return written.map((row) => row.name as PlatformSettingName);
+}
+
+/**
+ * Make the stored carrier route match this deployment's environment.
+ *
+ * **This is not ordinary boot seeding.** `seedPlatformSettings` preserves a
+ * complete route because a restart must not undo a choice an operator made.
+ * A hosted deployment has a different, explicit contract: its deployment
+ * secret is the source of truth, so a rollout must copy that complete route
+ * into the platform store when the two differ.
+ *
+ * The four carrier names are still one route. Validation finishes before the
+ * transaction starts. Inside the transaction, the small settings table is
+ * held while the stored plaintext is compared with the offered plaintext. A
+ * changed route is then removed and inserted as one unit. A validation error,
+ * an envelope that cannot be opened, or a failed insert therefore leaves the
+ * old complete route untouched.
+ *
+ * Non-carrier environment settings are ignored. Their existing seed and
+ * operator-write behavior stays exactly where it is.
+ */
+export async function reconcileDeploymentCarrierSettings(
+  values: PlatformSettingValues,
+): Promise<readonly PlatformSettingName[]> {
+  const offered: Partial<Record<PlatformSettingName, string>> = {};
+  for (const name of CARRIER_BUNDLE) {
+    const value = values[name];
+    if (value !== undefined) offered[name] = value;
+  }
+
+  const offeredNames = CARRIER_BUNDLE.filter(
+    (name) => offered[name] !== undefined,
+  );
+  if (offeredNames.length === 0) return [];
+
+  requireWholeCarrier(offered, "reconciliation");
+
+  // Settle every value before a transaction can remove the working route.
+  // `rowsFor` repeats these cheap checks when it seals the insert rows; doing
+  // them here is what makes the no-write-on-validation-error rule visible.
+  const settled: Partial<Record<PlatformSettingName, string>> = {};
+  for (const name of offeredNames) {
+    settled[name] = validValue(definitionOf(name), offered[name]);
+  }
+  const rows = rowsFor(settled, new Date());
+
+  return db().transaction(async (tx) => {
+    await tx.execute(
+      sql`lock table ${platformSetting} in share row exclusive mode`,
+    );
+
+    const held = await tx
+      .select({ name: platformSetting.name, value: platformSetting.value })
+      .from(platformSetting)
+      .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+    const heldInClear = new Map(
+      held.map((row) => [
+        row.name as PlatformSettingName,
+        openCredentials(row.value),
+      ]),
+    );
+    const unchanged =
+      held.length === offeredNames.length &&
+      offeredNames.every((name) => heldInClear.get(name) === settled[name]);
+    if (unchanged) return [];
+
+    await tx
+      .delete(platformSetting)
+      .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+    await tx.insert(platformSetting).values(rows);
+
+    return offeredNames;
+  });
 }

@@ -1,4 +1,9 @@
-import { PLATFORM_SETTINGS, seedPlatformSettings } from "@egma/db";
+import {
+  PLATFORM_SETTINGS,
+  platformFacts,
+  reconcileDeploymentCarrierSettings,
+  seedPlatformSettings,
+} from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { loadConfig } from "../src/config.ts";
@@ -62,6 +67,13 @@ const EVERYTHING_ELSE = {
   carrier_trunk_number: "+15550100",
   carrier_trunk_username: "acme-trunk",
   carrier_trunk_password: "the-carrier-issued-this-one",
+} as const;
+
+const REPLACEMENT_CARRIER = {
+  carrier_trunk_address: "production.pstn.twilio.com",
+  carrier_trunk_number: "+15550199",
+  carrier_trunk_username: "egma-production",
+  carrier_trunk_password: "the-production-sip-password",
 } as const;
 
 function request(
@@ -583,6 +595,61 @@ describe("a deployment that answers no questions", () => {
     const read = await request("GET", ada.secret);
     expect(settingsIn(read.body).persona_model_key).toMatchObject({
       hint: "WXYZ",
+    });
+  });
+
+  it("keeps a complete local carrier route when the environment contains a different one", async () => {
+    api = await createApi("platform_settings_local_carrier_is_seed_only", {
+      singleOrganization: true,
+      platformSettings: { ...EVERYTHING_ELSE },
+    });
+    const config = loadConfig({
+      ...A_CONTAINERS_ENVIRONMENT,
+      EGMA_PHONE_TRUNK_ADDRESS: REPLACEMENT_CARRIER.carrier_trunk_address,
+      EGMA_PHONE_SOURCE_NUMBER: REPLACEMENT_CARRIER.carrier_trunk_number,
+      EGMA_PHONE_TRUNK_USERNAME: REPLACEMENT_CARRIER.carrier_trunk_username,
+      EGMA_PHONE_TRUNK_PASSWORD: REPLACEMENT_CARRIER.carrier_trunk_password,
+    });
+
+    expect(config.singleOrganization).toBe(true);
+    expect(await seedPlatformSettings(config.platformSettings)).toEqual([]);
+    expect(await platformFacts()).toMatchObject({
+      carrier_trunk_address: EVERYTHING_ELSE.carrier_trunk_address,
+      carrier_trunk_number: EVERYTHING_ELSE.carrier_trunk_number,
+      carrier_trunk_username: EVERYTHING_ELSE.carrier_trunk_username,
+      carrier_trunk_password: null,
+    });
+  });
+
+  it("reconciles the hosted carrier route from its deployment environment", async () => {
+    api = await createApi("platform_settings_hosted_carrier_reconciles", {
+      singleOrganization: false,
+      platformSettings: {
+        ...EVERYTHING_ELSE,
+        persona_model_provider: "anthropic",
+      },
+    });
+    const config = loadConfig({
+      ...A_CONTAINERS_ENVIRONMENT,
+      EGMA_SINGLE_ORGANIZATION: "false",
+      EGMA_PERSONA_MODEL_PROVIDER: "openai",
+      EGMA_PHONE_TRUNK_ADDRESS: REPLACEMENT_CARRIER.carrier_trunk_address,
+      EGMA_PHONE_SOURCE_NUMBER: REPLACEMENT_CARRIER.carrier_trunk_number,
+      EGMA_PHONE_TRUNK_USERNAME: REPLACEMENT_CARRIER.carrier_trunk_username,
+      EGMA_PHONE_TRUNK_PASSWORD: REPLACEMENT_CARRIER.carrier_trunk_password,
+    });
+
+    expect(config.singleOrganization).toBe(false);
+    expect(await seedPlatformSettings(config.platformSettings)).toEqual([]);
+    expect(
+      [...(await reconcileDeploymentCarrierSettings(config.platformSettings))].sort(),
+    ).toEqual(Object.keys(REPLACEMENT_CARRIER).sort());
+    expect(await platformFacts()).toMatchObject({
+      persona_model_provider: "anthropic",
+      carrier_trunk_address: REPLACEMENT_CARRIER.carrier_trunk_address,
+      carrier_trunk_number: REPLACEMENT_CARRIER.carrier_trunk_number,
+      carrier_trunk_username: REPLACEMENT_CARRIER.carrier_trunk_username,
+      carrier_trunk_password: null,
     });
   });
 });

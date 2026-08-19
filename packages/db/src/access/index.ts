@@ -205,6 +205,11 @@ export { instanceIsClaimed, platformInstanceId } from "./instance.ts";
  * because who may be here depends on it: an organization owner may, and only
  * while this deployment serves one organization.
  *
+ * `reconcileDeploymentCarrierSettings` is the hosted deployment's explicit
+ * carrier path. Its environment is the source of truth, so it replaces only a
+ * differing complete carrier route. It takes no context because startup has no
+ * user or customer; like seeding, it is the deployment configuring itself.
+ *
  * `resolvePlatformSettings` is the one door to the plaintext, and it takes the
  * context like everything else — and then refuses every context that did not
  * come from a simulation claim, because conducting is the only thing egma does
@@ -214,6 +219,7 @@ export { instanceIsClaimed, platformInstanceId } from "./instance.ts";
 export {
   platformFacts,
   readPlatformSettings,
+  reconcileDeploymentCarrierSettings,
   resolvePlatformSettings,
   seedPlatformSettings,
   writePlatformSettings,

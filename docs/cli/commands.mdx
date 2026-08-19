@@ -385,7 +385,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 
     For phone setup, Egma asks for a trunk address, source number, SIP username, and SIP password. A Twilio administrator creates that limited credential in the list already attached to the shared trunk. Setup copies the four values into the platform as one bundle. It never asks for the Twilio Account SID or Auth Token and never reads or changes Twilio.
 
-    Normal setup never replaces a held bundle. To rotate one safely, an administrator first adds a new developer or production credential beside the old one. Export the trunk address, source number, new SIP username, and new SIP password, then use `--replace-carrier --yes` to replace them together in the platform store. Place a test call with the new bundle, then revoke the old credential.
+    Normal setup never replaces a held bundle. To replace one developer credential safely, an administrator first adds the new credential beside the old one. Export the trunk address, source number, new SIP username, and new SIP password, then use `--replace-carrier --yes` to replace them together in the platform store. Place a test call with the new bundle, then revoke the old credential. Hosted production uses its deployment secret instead of this command.
 
     **Usage**
 
