@@ -11,6 +11,9 @@ export type DefaultJudge = {
   readonly key: string;
 };
 
+/** Which source owns the carrier route after the platform has started. */
+export type CarrierSettingsSource = "platform" | "environment";
+
 export type Config = {
   readonly databaseUrl: string;
   /**
@@ -96,6 +99,21 @@ export type Config = {
    */
   readonly defaultJudge: DefaultJudge | undefined;
   /**
+   * Which source owns the carrier route.
+   *
+   * `platform` is the default. Environment values seed a missing route, and a
+   * complete route already in the platform store stays unchanged.
+   *
+   * `environment` makes the deployment environment the source of truth.
+   * Startup reconciles the carrier route after seeding on every start. A
+   * changed complete route replaces the stored route, and no carrier values
+   * removes it. Other platform settings remain seed-only in both modes.
+   *
+   * This decision is independent of whether the deployment serves one or
+   * several organizations. Tenancy does not say who owns a carrier route.
+   */
+  readonly carrierSettingsSource: CarrierSettingsSource;
+  /**
    * The settings this environment offers the platform on start. Most values
    * are written only where the platform does not already hold one.
    *
@@ -110,14 +128,9 @@ export type Config = {
    * one somebody supplies through the interface or the setup command, and the
    * platform says so in its readiness answer until they do.
    *
-   * On a single-organization deployment, nothing here is ever replaced from
-   * the environment. See `seedPlatformSettings`: a redeploy carrying a
-   * script's copy of the old key must not undo a key the operator changed.
-   *
-   * A hosted multi-organization deployment has one narrow exception. Its
-   * carrier route belongs to the deployment, and the deployment environment
-   * is its source of truth. Startup therefore reconciles the complete carrier
-   * bundle into the platform store. It does not replace any other setting.
+   * See `carrierSettingsSource` for the one explicit choice that can make the
+   * environment replace or remove the carrier route. It never changes the
+   * seed-only rule for any other setting.
    */
   readonly platformSettings: PlatformSettingValues;
   /**
@@ -159,6 +172,17 @@ function flag(
   if (["1", "true", "yes", "on"].includes(raw)) return true;
   if (["0", "false", "no", "off"].includes(raw)) return false;
   throw new Error(`${name} is not a yes or a no: ${environment[name]}`);
+}
+
+function carrierSettingsSource(
+  environment: NodeJS.ProcessEnv,
+): CarrierSettingsSource {
+  const raw = environment.EGMA_CARRIER_SETTINGS_SOURCE?.trim();
+  if (raw === undefined || raw === "") return "platform";
+  if (raw === "platform" || raw === "environment") return raw;
+  throw new Error(
+    "EGMA_CARRIER_SETTINGS_SOURCE must be platform or environment, not " + raw,
+  );
 }
 
 /**
@@ -342,6 +366,7 @@ export function loadConfig(
     authSecret,
     encryptionKey,
     singleOrganization: flag(environment, "EGMA_SINGLE_ORGANIZATION", true),
+    carrierSettingsSource: carrierSettingsSource(environment),
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,
     simulatorServiceToken,
@@ -378,8 +403,9 @@ export function loadConfig(
  * bundle.** A platform may be halfway through its model or speech setup and
  * finish it through the settings form. A Twilio credential is different: a
  * trunk from one bundle beside a username or password from another makes every
- * call fail. A carrier authenticated by source IP supplies the trunk address
- * and source number. A credential-authenticated carrier supplies all four.
+ * phone simulation fail. A carrier authenticated by source IP supplies the
+ * trunk address and source number. A credential-authenticated carrier supplies
+ * all four.
  * Every other subset is refused before it can become a mixed route.
  */
 function platformSettings(

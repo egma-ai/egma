@@ -759,10 +759,10 @@ credential.
 Normal setup does not replace a held carrier bundle. To replace one developer
 credential safely, an administrator first adds the new credential beside the
 old one. Export the trunk address, source number, new SIP username and new SIP
-password, then run `egma self-host setup --replace-carrier --yes`. Place a test
-call with the new bundle, then revoke the old credential. The command still
-does not contact Twilio. Hosted production uses its deployment secret instead
-of this self-hosted command.
+password, then run `egma self-host setup --replace-carrier --yes`. Run one phone
+simulation with the new bundle, then revoke the old credential. The command
+still does not contact Twilio. Hosted production uses its deployment secret
+instead of this self-hosted command.
 
 To run the command from this same checkout rather than from npm, build it:
 

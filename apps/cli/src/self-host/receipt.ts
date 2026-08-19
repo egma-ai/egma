@@ -10,8 +10,8 @@
  * that people commit, paste into issues and attach to support threads, so
  * nothing in it may be a secret — not an OpenAI key and not the SIP password
  * supplied by a developer. What it carries instead are setting names,
- * hostnames and the number a call comes from, which are the things a person
- * actually needs and which open nothing.
+ * hostnames and the source number for phone simulations, which are the things
+ * a person actually needs and which open nothing.
  *
  * The guard is not a review habit. `sweptOf` is applied to every receipt before
  * it is written, and it refuses to write one that contains any secret the

@@ -671,9 +671,11 @@ export async function seedPlatformSettings(
  *
  * **This is not ordinary boot seeding.** `seedPlatformSettings` preserves a
  * complete route because a restart must not undo a choice an operator made.
- * A hosted deployment has a different, explicit contract: its deployment
- * secret is the source of truth, so a rollout must copy that complete route
- * into the platform store when the two differ.
+ * A deployment can choose a different, explicit contract: its environment is
+ * the source of truth, so a rollout must copy that complete route into the
+ * platform store when the two differ. No carrier values means the deployment
+ * has explicitly disabled its phone route, so a stored route is removed rather
+ * than kept as hidden configuration.
  *
  * The four carrier names are still one route. Validation finishes before the
  * transaction starts. Inside the transaction, the small settings table is
@@ -697,8 +699,6 @@ export async function reconcileDeploymentCarrierSettings(
   const offeredNames = CARRIER_BUNDLE.filter(
     (name) => offered[name] !== undefined,
   );
-  if (offeredNames.length === 0) return [];
-
   requireWholeCarrier(offered, "reconciliation");
 
   // Settle every value before a transaction can remove the working route.
@@ -708,7 +708,8 @@ export async function reconcileDeploymentCarrierSettings(
   for (const name of offeredNames) {
     settled[name] = validValue(definitionOf(name), offered[name]);
   }
-  const rows = rowsFor(settled, new Date());
+  const rows =
+    offeredNames.length === 0 ? [] : rowsFor(settled, new Date());
 
   return db().transaction(async (tx) => {
     await tx.execute(
@@ -725,16 +726,17 @@ export async function reconcileDeploymentCarrierSettings(
         openCredentials(row.value),
       ]),
     );
-    const unchanged =
-      held.length === offeredNames.length &&
-      offeredNames.every((name) => heldInClear.get(name) === settled[name]);
+    const changed = CARRIER_BUNDLE.filter(
+      (name) => heldInClear.get(name) !== settled[name],
+    );
+    const unchanged = changed.length === 0;
     if (unchanged) return [];
 
     await tx
       .delete(platformSetting)
       .where(inArray(platformSetting.name, CARRIER_BUNDLE));
-    await tx.insert(platformSetting).values(rows);
+    if (rows.length > 0) await tx.insert(platformSetting).values(rows);
 
-    return offeredNames;
+    return changed;
   });
 }

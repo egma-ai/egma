@@ -84,7 +84,7 @@ function serviceBlock(service: string): string {
 }
 
 describe("the API's deployment story", () => {
-  it("keeps local settings seed-only and reconciles only the hosted carrier route", () => {
+  it("always seeds settings and reconciles only when the environment owns the carrier route", () => {
     const entry = readFileSync(path.join(API, "src/index.ts"), "utf8");
     const seed = entry.indexOf(
       "await seedPlatformSettings(config.platformSettings)",
@@ -98,11 +98,12 @@ describe("the API's deployment story", () => {
     );
     expect(
       reconcile,
-      "API startup no longer reconciles the hosted carrier route",
+      "API startup no longer reconciles an environment-owned carrier route",
     ).toBeGreaterThan(seed);
     expect(entry.slice(seed, reconcile)).toContain(
-      "config.singleOrganization\n  ? []\n  :",
+      'config.carrierSettingsSource === "environment"',
     );
+    expect(entry.slice(seed, reconcile)).not.toContain("singleOrganization");
   });
 
   it("passes every variable the API reads to the api container", () => {

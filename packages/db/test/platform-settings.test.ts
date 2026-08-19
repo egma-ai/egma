@@ -662,23 +662,29 @@ describe("reconciling a hosted deployment's carrier route", () => {
           IP_AUTHENTICATED_ROUTE,
         )),
       ].sort(),
-    ).toEqual(Object.keys(IP_AUTHENTICATED_ROUTE).sort());
+    ).toEqual(Object.keys(STORED_ROUTE).sort());
     expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
       IP_AUTHENTICATED_ROUTE,
     );
   });
 
-  it("ignores environment values that are not part of the carrier route", async () => {
+  it("removes a stored route when the authoritative environment offers none", async () => {
     await writePlatformSettings(owner(), ONE_TEAM, STORED_ROUTE);
 
     expect(
       await reconcileDeploymentCarrierSettings({
         persona_model_provider: "openai",
       }),
+    ).toEqual(Object.keys(STORED_ROUTE));
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual({});
+  });
+
+  it("does nothing when neither the store nor the environment has a carrier route", async () => {
+    expect(
+      await reconcileDeploymentCarrierSettings({
+        persona_model_provider: "openai",
+      }),
     ).toEqual([]);
-    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
-      STORED_ROUTE,
-    );
   });
 });
 

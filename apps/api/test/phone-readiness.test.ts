@@ -129,6 +129,30 @@ describe("phone readiness", () => {
     expect(Object.keys(config)).not.toContain("phone");
   });
 
+  it("uses an explicit carrier settings source and refuses every other value", () => {
+    expect(loadConfig({ ...BASE }).carrierSettingsSource).toBe("platform");
+    expect(
+      loadConfig({
+        ...BASE,
+        EGMA_CARRIER_SETTINGS_SOURCE: "platform",
+      }).carrierSettingsSource,
+    ).toBe("platform");
+    expect(
+      loadConfig({
+        ...BASE,
+        EGMA_CARRIER_SETTINGS_SOURCE: "environment",
+      }).carrierSettingsSource,
+    ).toBe("environment");
+    expect(() =>
+      loadConfig({
+        ...BASE,
+        EGMA_CARRIER_SETTINGS_SOURCE: "hosted",
+      }),
+    ).toThrow(
+      "EGMA_CARRIER_SETTINGS_SOURCE must be platform or environment, not hosted",
+    );
+  });
+
   it("refuses a partial phone bundle before it can seed a mixed credential", () => {
     const complete = {
       EGMA_PHONE_TRUNK_ADDRESS: "egma-simulator-abc.pstn.twilio.com",

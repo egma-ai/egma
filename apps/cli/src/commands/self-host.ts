@@ -699,7 +699,7 @@ type ExportedCarrierBundle =
  * account, trunk and credential list. The bundle lives outside the disposable
  * database, so a reset copies it again. All four values are complete or none
  * are: combining a trunk from one bundle with a credential from another would
- * fail every call.
+ * fail every phone simulation.
  */
 function exportedCarrierBundleIn(
   environment: NodeJS.ProcessEnv,

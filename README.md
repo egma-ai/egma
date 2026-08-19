@@ -145,20 +145,20 @@ perfectly well, so it is reported as its own fact beside the whole-platform one.
 
 **Normal setup never receives the Twilio Auth Token.** A running Egma receives
 only one developer or production SIP credential. That credential can
-authenticate calls on the shared trunk; it cannot manage the Twilio account.
+authenticate SIP requests on the shared trunk; it cannot manage the Twilio
+account.
 
 *Upgrading from a release that used `egma self-host phone setup`:* do not reuse
 its global `egma-simulator` SIP credential for every machine. Ask a Twilio
 administrator to add one named credential per developer and one for production
 to the existing credential list. Save each four-value bundle in that
-deployment's ignored `.env`, password manager, or secret store **before**
-running `egma self-host setup`. The command copies it into the platform store
-without contacting Twilio. Only remove the old carrier lines after the new
-credential has placed a test call and its durable recovery copy is confirmed.
-After every developer and production has moved and passed a test call, ask the
-Twilio administrator to revoke the old shared `egma-simulator` credential.
-The old file itself stays because it also holds the media server's key and
-secret, which a container reads when it is created.
+deployment's ignored `.env`, password manager, or secret store. On each existing
+local platform, run `egma self-host setup --replace-carrier --yes`; normal setup
+preserves the held bundle. For hosted production, update the deployment secret
+and deploy. Confirm the recovery copy and run one phone simulation on every
+platform. Only then ask the Twilio administrator to revoke the old shared
+`egma-simulator` credential. The old file itself stays because it also holds the
+media server's key and secret, which a container reads when it is created.
 
 Two of those lines are **not** settings and want different treatment.
 `EGMA_BASE_URL` stays where it is and is still read from that file. The three
@@ -558,12 +558,12 @@ npx @egma/cli self-host setup --replace-carrier --yes
 ```
 
 That recovery command replaces all four stored values together. It still does
-not contact Twilio. Place a test call with the new bundle, then ask the
+not contact Twilio. Run one phone simulation with the new bundle, then ask the
 administrator to revoke the old credential.
 
 For hosted production, update the deployment secret with the new production SIP
 pair and deploy. The API replaces the four stored carrier values together on
-startup. Place one production phone simulation before the administrator revokes
+startup. Run one production phone simulation before the administrator revokes
 the old credential.
 
 **The number must already be on your account.** Normal setup never searches the
@@ -572,10 +572,10 @@ verify ownership without account access, so the administrator must copy the
 source number from the shared trunk.
 
 **The account token is not a setup input.** What a running deployment keeps is
-one limited SIP credential. It can authenticate a call over the shared trunk;
-it cannot manage the Twilio account. It is sealed in the platform's own store
-with the same key a connection's credentials are sealed with, and it reaches a
-simulator only on the work order that simulator claims.
+one limited SIP credential. It can authenticate SIP requests over the shared
+trunk; it cannot manage the Twilio account. It is sealed in the platform's own
+store with the same key a connection's credentials are sealed with, and it
+reaches a simulator only on the work order that simulator claims.
 
 ### The whole thing, end to end
 

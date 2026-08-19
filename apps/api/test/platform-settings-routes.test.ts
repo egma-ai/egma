@@ -598,21 +598,35 @@ describe("a deployment that answers no questions", () => {
     });
   });
 
-  it("keeps a complete local carrier route when the environment contains a different one", async () => {
-    api = await createApi("platform_settings_local_carrier_is_seed_only", {
-      singleOrganization: true,
+  it("keeps a complete carrier route in the default and explicit platform modes", async () => {
+    api = await createApi("platform_settings_platform_carrier_is_seed_only", {
+      // Several organizations on purpose: tenancy must not select the source.
+      singleOrganization: false,
       platformSettings: { ...EVERYTHING_ELSE },
     });
-    const config = loadConfig({
+    const defaultConfig = loadConfig({
       ...A_CONTAINERS_ENVIRONMENT,
+      EGMA_SINGLE_ORGANIZATION: "false",
+      EGMA_PHONE_TRUNK_ADDRESS: REPLACEMENT_CARRIER.carrier_trunk_address,
+      EGMA_PHONE_SOURCE_NUMBER: REPLACEMENT_CARRIER.carrier_trunk_number,
+      EGMA_PHONE_TRUNK_USERNAME: REPLACEMENT_CARRIER.carrier_trunk_username,
+      EGMA_PHONE_TRUNK_PASSWORD: REPLACEMENT_CARRIER.carrier_trunk_password,
+    });
+    const explicitConfig = loadConfig({
+      ...A_CONTAINERS_ENVIRONMENT,
+      EGMA_SINGLE_ORGANIZATION: "false",
+      EGMA_CARRIER_SETTINGS_SOURCE: "platform",
       EGMA_PHONE_TRUNK_ADDRESS: REPLACEMENT_CARRIER.carrier_trunk_address,
       EGMA_PHONE_SOURCE_NUMBER: REPLACEMENT_CARRIER.carrier_trunk_number,
       EGMA_PHONE_TRUNK_USERNAME: REPLACEMENT_CARRIER.carrier_trunk_username,
       EGMA_PHONE_TRUNK_PASSWORD: REPLACEMENT_CARRIER.carrier_trunk_password,
     });
 
-    expect(config.singleOrganization).toBe(true);
-    expect(await seedPlatformSettings(config.platformSettings)).toEqual([]);
+    expect(defaultConfig.singleOrganization).toBe(false);
+    expect(defaultConfig.carrierSettingsSource).toBe("platform");
+    expect(explicitConfig.carrierSettingsSource).toBe("platform");
+    expect(await seedPlatformSettings(defaultConfig.platformSettings)).toEqual([]);
+    expect(await seedPlatformSettings(explicitConfig.platformSettings)).toEqual([]);
     expect(await platformFacts()).toMatchObject({
       carrier_trunk_address: EVERYTHING_ELSE.carrier_trunk_address,
       carrier_trunk_number: EVERYTHING_ELSE.carrier_trunk_number,
@@ -621,9 +635,10 @@ describe("a deployment that answers no questions", () => {
     });
   });
 
-  it("reconciles the hosted carrier route from its deployment environment", async () => {
-    api = await createApi("platform_settings_hosted_carrier_reconciles", {
-      singleOrganization: false,
+  it("reconciles the carrier route when the deployment environment owns it", async () => {
+    api = await createApi("platform_settings_environment_carrier_reconciles", {
+      // One organization on purpose: tenancy must not select the source.
+      singleOrganization: true,
       platformSettings: {
         ...EVERYTHING_ELSE,
         persona_model_provider: "anthropic",
@@ -631,7 +646,8 @@ describe("a deployment that answers no questions", () => {
     });
     const config = loadConfig({
       ...A_CONTAINERS_ENVIRONMENT,
-      EGMA_SINGLE_ORGANIZATION: "false",
+      EGMA_SINGLE_ORGANIZATION: "true",
+      EGMA_CARRIER_SETTINGS_SOURCE: "environment",
       EGMA_PERSONA_MODEL_PROVIDER: "openai",
       EGMA_PHONE_TRUNK_ADDRESS: REPLACEMENT_CARRIER.carrier_trunk_address,
       EGMA_PHONE_SOURCE_NUMBER: REPLACEMENT_CARRIER.carrier_trunk_number,
@@ -639,7 +655,8 @@ describe("a deployment that answers no questions", () => {
       EGMA_PHONE_TRUNK_PASSWORD: REPLACEMENT_CARRIER.carrier_trunk_password,
     });
 
-    expect(config.singleOrganization).toBe(false);
+    expect(config.singleOrganization).toBe(true);
+    expect(config.carrierSettingsSource).toBe("environment");
     expect(await seedPlatformSettings(config.platformSettings)).toEqual([]);
     expect(
       [...(await reconcileDeploymentCarrierSettings(config.platformSettings))].sort(),

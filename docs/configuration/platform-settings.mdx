@@ -4,7 +4,7 @@ sidebarTitle: "Platform Settings"
 description: "Configure the LLM persona, speech providers, VAD, phone trunk, and judge defaults for your self-hosted Egma instance using the CLI or the API."
 ---
 
-A started Egma instance is not yet a configured one. Before it can conduct simulations, it needs to know what the persona thinks with, how it speaks and hears, and — for phone simulations — how calls reach the telephone network. The platform reports `setup: setup_required` and names each missing setting until you supply it. Once you do, those settings live in the platform's own database, sealed with `EGMA_ENCRYPTION_KEY`, so they survive a restart, an upgrade, and a move to another machine. Every simulator is handed the current settings on the work order it claims — a second simulator on another host needs nothing copied to it.
+A started Egma instance is not yet a configured one. Before it can conduct simulations, it needs to know what the persona thinks with, how it speaks and hears, and — for phone simulations — how it reaches the telephone network. The platform reports `setup: setup_required` and names each missing setting until you supply it. Once you do, those settings live in the platform's own database, sealed with `EGMA_ENCRYPTION_KEY`, so they survive a restart, an upgrade, and a move to another machine. Every simulator is handed the current settings on the work order it claims — a second simulator on another host needs nothing copied to it.
 
 You can configure the platform in two ways: interactively with `egma self-host setup`, or programmatically via the `PATCH /api/platform/settings` endpoint.
 
@@ -65,9 +65,14 @@ The platform seals every API key and credential before storing it. Keys are neve
 
 ## Configuration keys
 
-The table below covers every setting the platform stores. The **env var** column shows the `.env.example` variable that seeds a setting on first boot. A self-hosted, single-organization deployment never overwrites a complete stored configuration from its environment. If an older database holds only part of a carrier route, startup replaces that invalid partial route with the complete two-value or four-value route from the environment.
+The table below covers every setting the platform stores. The **env var** column shows the `.env.example` variable that can supply a setting at startup. Most settings are always seed-only: startup writes a missing value and does not replace a stored value.
 
-Hosted Egma is the narrow exception. It serves more than one organization, so its carrier route is deployment-owned configuration. On every start, the hosted deployment reconciles the complete carrier route from its environment into the platform store. This can replace an older stored carrier route. Other platform settings remain seed-only.
+Carrier ownership is an explicit deployment choice set with `EGMA_CARRIER_SETTINGS_SOURCE`:
+
+- `platform` is the default. The phone variables seed a missing carrier route. Startup does not replace a complete route already in the platform store.
+- `environment` makes the deployment environment the source of truth. After seeding, every startup reconciles the exact carrier route from the phone variables. A complete two-value or four-value route replaces the stored route. If all phone variables are empty, startup removes the stored carrier route.
+
+This choice is independent of `EGMA_SINGLE_ORGANIZATION`. Tenancy does not decide who owns the carrier route. Other platform settings remain seed-only in both modes.
 
 ### Persona model
 
@@ -127,9 +132,9 @@ Required for phone simulations. A carrier administrator creates the trunk and it
 
 | Setting key | Env var | Description |
 |---|---|---|
-| `media_backend` | `EGMA_MEDIA_BACKEND` | The bridge that places calls — for example, `livekit`. |
+| `media_backend` | `EGMA_MEDIA_BACKEND` | The bridge that places phone simulations — for example, `livekit`. |
 | `carrier_trunk_address` | `EGMA_PHONE_TRUNK_ADDRESS` | SIP trunk address, as provided by your carrier. |
-| `carrier_trunk_number` | `EGMA_PHONE_SOURCE_NUMBER` | The phone number calls originate from, in E.164 format — for example, `+15551234567`. Must already exist on your carrier account. |
+| `carrier_trunk_number` | `EGMA_PHONE_SOURCE_NUMBER` | The number phone simulations originate from, in E.164 format — for example, `+15551234567`. Must already exist on your carrier account. |
 | `carrier_trunk_username` | `EGMA_PHONE_TRUNK_USERNAME` | SIP credential username for trunk authentication. |
 | `carrier_trunk_password` | `EGMA_PHONE_TRUNK_PASSWORD` | SIP credential password. Sealed at rest; only the last 4 characters are returned. |
 

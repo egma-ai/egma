@@ -41,18 +41,19 @@ const judged =
 
 // The settings this environment offers, written for anything the platform does
 // not already hold. This is how an automated deployment configures itself with
-// no interview. On a single-organization deployment that remains the whole
-// rule: a restart never replaces a setting somebody changed.
+// no interview. In the default `platform` carrier mode, this is the whole rule:
+// a restart never replaces a complete carrier route somebody changed.
 const seeded = await seedPlatformSettings(config.platformSettings);
 
-// Hosted egma is the one exception. Its phone route belongs to the deployment,
-// not to any organization, and its deployment environment is the source of
-// truth. Reconcile that complete carrier bundle on every start so a changed
-// production secret reaches the platform store. All other settings remain
-// seed-only, and a local single-organization deployment never takes this path.
-const reconciled = config.singleOrganization
-  ? []
-  : await reconcileDeploymentCarrierSettings(config.platformSettings);
+// An operator can instead say that the deployment environment owns the carrier
+// route. Reconcile it on every start in that mode, after seeding. A changed
+// route replaces the stored route, and an absent route removes it. This choice
+// is explicit and independent of how many organizations the platform serves.
+// All other settings remain seed-only.
+const reconciled =
+  config.carrierSettingsSource === "environment"
+    ? await reconcileDeploymentCarrierSettings(config.platformSettings)
+    : [];
 
 // egma's own graders, written onto the shelf from egma's own catalog. After the
 // migrations because it writes rows, and before the first request because a
@@ -91,7 +92,7 @@ if (reconciled.length > 0) {
   // deployment log, which is another credential store by accident.
   app.log.info(
     { settings: reconciled },
-    "the hosted deployment reconciled its carrier settings from the environment",
+    "the deployment reconciled its carrier settings from the environment",
   );
 }
 if (shelved.length > 0) {

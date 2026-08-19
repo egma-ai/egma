@@ -162,7 +162,7 @@ Use one Twilio account, trunk, source number, and attached credential list. A Tw
 
 `egma self-host setup` asks for the trunk address, source number, SIP username, and SIP password. It writes those four values to the platform's sealed store as one bundle. It never asks for the Twilio Account SID or Auth Token and never reads or changes Twilio. Keep the same four values in an ignored local `.env` or password manager so a fresh database can use them again.
 
-To replace one developer credential safely, a carrier administrator first adds the new credential beside the old one. Export the trunk address, source number, new SIP username, and new SIP password, then run `egma self-host setup --replace-carrier --yes`. Place a test call with the new bundle, then revoke the old credential. This recovery path changes only the platform store; it still does not contact Twilio.
+To replace one developer credential safely, a carrier administrator first adds the new credential beside the old one. Export the trunk address, source number, new SIP username, and new SIP password, then run `egma self-host setup --replace-carrier --yes`. Run one phone simulation with the new bundle, then revoke the old credential. This recovery path changes only the platform store; it still does not contact Twilio.
 
 <Note>
   Phone simulation requires the SIP gateway to be reachable from your carrier. On a server with a public IP or 1:1 NAT, set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to your public address and open UDP port 5060 plus the RTP range (default `10000–10020`) to your carrier's IP ranges. On a laptop behind a home router, try it — Twilio supports symmetric RTP latching and many home routers work fine.
@@ -233,7 +233,7 @@ These are written into each new project's sealed configuration on boot and never
 
 Run `egma self-host up` again from your platform workspace after pulling the latest code. The API applies database migrations on boot. No manual migration step is required.
 
-If you are upgrading from a release that used `egma self-host phone setup`, do not reuse its global SIP credential on every machine. Ask a Twilio administrator to create one credential per developer and one for production in the existing credential list. Save each four-value bundle outside the database, run `egma self-host setup`, and place a test call. After every machine has moved and passed, the administrator can revoke the old shared credential. The old `.egma-platform/platform.env` file stays because it also holds the LiveKit key and secret.
+If you are upgrading from a release that used `egma self-host phone setup`, do not reuse its global SIP credential on every machine. Ask a Twilio administrator to create one credential per developer in the existing credential list. Save each four-value bundle outside the database, run `egma self-host setup --replace-carrier --yes` on each existing local platform, and run one phone simulation. After every platform has moved and passed, the administrator can revoke the old shared credential. The old `.egma-platform/platform.env` file stays because it also holds the LiveKit key and secret.
 
 ## Troubleshooting
 

@@ -164,8 +164,8 @@ export async function writeSettings(
  * `asked` settings are typed or exported one at a time. `carrier` settings move
  * as one four-value bundle. The trunk address and number can be shared while
  * each developer or production uses its own SIP pair. They are not four
- * independent writes, because mixing two bundles would leave every call
- * failing authentication.
+ * independent writes, because mixing two bundles would leave every phone
+ * simulation failing authentication.
  *
  * **Each `variable` is the name the platform seeds that same setting from.**
  * One word means one thing whichever of the two ways in an operator uses, so a
