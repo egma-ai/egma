@@ -1,0 +1,93 @@
+.tests {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  list-style: none;
+}
+
+.filteredEmpty {
+  padding: var(--space-6);
+  color: var(--muted);
+}
+
+.test {
+  display: grid;
+  grid-template-columns: var(--control-lg) minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 64px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+}
+
+.test + .test {
+  border-block-start: 1px solid var(--border);
+}
+
+.testCopy {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  cursor: pointer;
+}
+
+.testName {
+  color: var(--foreground);
+}
+
+.testDescription {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.testLink {
+  margin-inline-start: var(--space-4);
+  color: var(--foreground);
+}
+
+.testLink:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.pager,
+.readProblem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-block-start: var(--space-4);
+}
+
+.pager > span {
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+.readProblem {
+  align-items: flex-start;
+}
+
+@media (max-width: 40rem) {
+  .test {
+    grid-template-columns: var(--control-lg) minmax(0, 1fr);
+  }
+
+  .testLink {
+    grid-column: 2;
+    margin-block-start: var(--space-2);
+    margin-inline-start: 0;
+  }
+
+  .pager,
+  .readProblem {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

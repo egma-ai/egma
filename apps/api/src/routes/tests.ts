@@ -86,7 +86,7 @@ import { given, projectNamed, text, textList } from "../http/reading.ts";
  *
  * The addresses follow the standing rule: nothing is rooted at a project, and
  * the organization is never in a path. Both are resolved from the credential. A
- * write may name a project in its body and a read may filter by one.
+ * write may name a project in its query or body and a read may filter by one.
  */
 
 export type TestRoutesOptions = {
@@ -788,6 +788,7 @@ export async function testRoutes(
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     if (auth.role === "viewer") {
       return refuseRole(reply, auth, "change which agents a test applies to");
@@ -796,7 +797,7 @@ export async function testRoutes(
     const agents = idEntries(body.agents, "agents", "agt_");
     if ("refusal" in agents) return unprocessable(reply, agents.refusal);
 
-    const acting = await namingAProject(auth, given(text(body.project)));
+    const acting = await namingAProject(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const changed = await setTestAgents(acting.auth, testId, {
@@ -827,10 +828,11 @@ export async function testRoutes(
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     if (auth.role === "viewer") return refuseRole(reply, auth, "clone tests");
 
-    const acting = await namingAProject(auth, given(text(body.project)));
+    const acting = await namingAProject(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const cloned = await cloneTest(acting.auth, testId);
@@ -843,10 +845,11 @@ export async function testRoutes(
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     if (auth.role === "viewer") return refuseRole(reply, auth, "archive tests");
 
-    const acting = await namingAProject(auth, given(text(body.project)));
+    const acting = await namingAProject(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const archived = await archiveTest(acting.auth, testId, {
@@ -863,6 +866,7 @@ export async function testRoutes(
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Body;
 
     if (auth.role === "viewer") return refuseRole(reply, auth, "restore tests");
 
@@ -872,7 +876,7 @@ export async function testRoutes(
         : { entries: [] };
     if ("refusal" in agents) return unprocessable(reply, agents.refusal);
 
-    const acting = await namingAProject(auth, given(text(body.project)));
+    const acting = await namingAProject(auth, projectNamed(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const restored = await restoreTest(acting.auth, testId, {

@@ -10,6 +10,8 @@
 
 .layout {
   display: grid;
+  height: 100%;
+  min-height: 0;
   grid-template-columns: minmax(176px, 220px) minmax(0, 1fr);
   align-items: start;
   gap: var(--space-8);
@@ -17,9 +19,16 @@
 
 .content {
   display: flex;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   gap: var(--space-7);
+  padding-right: var(--space-2);
+  padding-bottom: var(--space-8);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .content > section {
@@ -36,15 +45,68 @@
   margin-top: 0;
 }
 
+.content > [role="tabpanel"] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+}
+
+.content > [role="tabpanel"] > section {
+  margin-top: 0;
+}
+
 .nav {
-  position: sticky;
-  top: var(--space-6);
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: var(--space-5);
   padding-right: var(--space-5);
   border-right: 1px solid var(--border);
+}
+
+/* People and Invitations are two views of one settings page. */
+.tabs {
+  display: flex;
+  width: 100%;
+  align-items: flex-end;
+  gap: var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  position: relative;
+  display: inline-flex;
+  min-height: var(--control-lg);
+  align-items: center;
+  padding: 0 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.tab[aria-selected="true"]::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  content: "";
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tab:hover {
+    color: var(--foreground);
+  }
 }
 
 .group {
@@ -144,17 +206,19 @@
 
 @media (max-width: 900px) {
   .layout {
+    grid-template-rows: auto minmax(0, 1fr);
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-5);
   }
 
   .nav {
     position: static;
-    flex-direction: row;
-    align-items: flex-start;
-    gap: var(--space-6);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+    align-items: start;
+    gap: var(--space-5);
     padding: var(--space-3);
-    overflow-x: auto;
+    overflow: visible;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--surface);
@@ -172,17 +236,19 @@
   }
 
   .items {
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   }
 
   .item {
-    width: auto;
+    width: 100%;
+    white-space: normal;
   }
 }
 
 @media (max-width: 640px) {
   .nav {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-4);
     overflow-x: visible;
   }

@@ -1,4 +1,5 @@
 import { ping, pingClickHouse } from "@egma/db";
+import type { Fetch as RetellFetch } from "@egma/retell";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import {
@@ -97,6 +98,8 @@ export type ServerOptions = {
   readonly retellReach?: RetellReach;
   /** Test-only device-flow pace; a production server uses five seconds. */
   readonly deviceAuthorizationInterval?: IdentityOptions["deviceAuthorizationInterval"];
+  /** Test seam for Retell account reads. Production uses the global fetch. */
+  readonly retellFetch?: RetellFetch | undefined;
 };
 
 export type Api = {
@@ -271,6 +274,9 @@ export function buildApi(options: ServerOptions): Api {
   void app.register(agentRoutes, {
     provider: identity.provider,
     rateLimit,
+    ...(options.retellFetch === undefined
+      ? {}
+      : { retellFetch: options.retellFetch }),
     // Switching production watching on registers a webhook at this origin,
     // when it is one a provider could reach.
     baseUrl: config.baseUrl,
@@ -417,6 +423,9 @@ export function buildApi(options: ServerOptions): Api {
   // run can never eat a customer's request budget from the inside.
   void app.register(claimRoutes, {
     serviceToken: config.simulatorServiceToken,
+    ...(options.retellFetch === undefined
+      ? {}
+      : { retellFetch: options.retellFetch }),
   });
 
   // The heartbeat door, beside the claim door on the same terms — and all

@@ -5,37 +5,27 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
-import { asMoment } from "../../../../../lib/instants.ts";
 import { roleOf } from "../../../../../lib/me.ts";
-import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
-  planExplanation,
-  retryKeyFor,
   runCancelPath,
   runEventsPath,
   runPath,
-  runRetryPath,
-  RETRY_IS_NOT_A_REPLAY,
-  type FrozenPlanGroup,
-  type FrozenPlanItem,
   type RunDetail,
   type RunEventFeed,
   type RunSimulation,
   type SimulationStatusWord,
   type VerdictWord,
 } from "../../../../../lib/runs.ts";
+import { simulationRerunPath } from "../../../../../lib/simulations.ts";
 import {
   Actions,
-  Badge,
   Button,
-  ButtonLink,
-  Facts,
-  Help,
-  Problem,
+  Field,
   Refused,
   Section,
+  TextInput,
 } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
@@ -47,13 +37,14 @@ import {
 } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import {
+  RelativeInstant,
+  useMinuteClock,
+} from "../../../../../ui/relative-time.tsx";
+import {
   GradingState,
-  RunFacts,
-  RunProgress,
-  shownScore,
+  RunStatus,
   SimulationStatus,
   VerdictBadge,
-  VerdictTally,
 } from "../../../../../ui/run-status.tsx";
 import {
   AppShell,
@@ -76,11 +67,10 @@ import styles from "./run.module.css";
  * like this can do.
  *
  * **It follows the numbered feed rather than re-reading the run.** The run is
- * read once for its pins, its plan and its snapshots — the parts that never
- * change — and everything that moves afterwards arrives as numbered events, each
- * applied at most once. That is what makes a tab left open overnight correct
- * rather than merely refreshed: a follower that misses a poll asks again from the
- * last number it applied and misses nothing.
+ * read once for its fixed context, and everything that moves afterwards arrives
+ * as numbered events, each applied at most once. That is what makes a tab left
+ * open overnight correct rather than merely refreshed: a follower that misses a
+ * poll asks again from the last number it applied and misses nothing.
  */
 export default function RunDetailPage() {
   const { projectId, runId } = useParams<{
@@ -114,9 +104,10 @@ function RunDetailView({
   const router = useRouter();
   const { me } = useShellSession();
   // Null until the session read answers. A page that guessed would offer a
-  // viewer Cancel and Retry, which the server refuses, on every load.
+  // viewer Cancel, which the server refuses, on every load.
   const role = me === null ? null : roleOf(me);
   const mayControl = role !== null && canAuthor(role);
+  const now = useMinuteClock();
 
   const { answer, reload } = useProjectRead<RunDetail>(runPath(runId), projectId);
 
@@ -136,10 +127,15 @@ function RunDetailView({
   const applied = useRef(0);
   const [finishedByFeed, setFinishedByFeed] = useState(false);
 
-  const [canceling, setCanceling] = useState(false);
-  const [confirming, setConfirming] = useState<"cancel" | "retry" | null>(null);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [working, setWorking] = useState(false);
+  const [rerunSimulation, setRerunSimulation] =
+    useState<RunSimulation | null>(null);
+  const [rerunName, setRerunName] = useState("");
+  const [rerunKey, setRerunKey] = useState<string | null>(null);
+  const [rerunRefused, setRerunRefused] = useState<Refusal | null>(null);
+  const [rerunWorking, setRerunWorking] = useState(false);
 
   const run = answer?.status === "ready" ? answer.value : null;
 
@@ -163,14 +159,18 @@ function RunDetailView({
    * clear.
    *
    * Clearing the feed does not clear these, and each survives the other's fix.
-   * A refusal left behind sits under a different run's name — and worse, a
-   * `Cancel run` or `Retry` confirmation left open would be answered about the
-   * run now in the address, which is not the run somebody opened it for.
+   * A refusal left behind sits under a different run's name. An open cancel
+   * confirmation would be answered about the run now in the address, which is
+   * not the run somebody opened it for.
    */
   useEffect(() => {
     setRefused(null);
-    setConfirming(null);
-    setCanceling(false);
+    setConfirmingCancel(false);
+    setRerunSimulation(null);
+    setRerunName("");
+    setRerunKey(null);
+    setRerunRefused(null);
+    setRerunWorking(false);
   }, [runId, projectId]);
 
   useEffect(() => {
@@ -249,8 +249,8 @@ function RunDetailView({
    *
    * When the feed says the run has finished, the run is read once more. The
    * events carry each conversation's landing and its verdict, and the run's own
-   * final counts and folded verdict live on the header — so the last read is what
-   * turns "everything has landed" into the settled page.
+   * final state and folded verdict live in the compact header summary. The last
+   * read turns "everything has landed" into the settled page.
    */
   useEffect(() => {
     if (run === null || !stillMoving) return undefined;
@@ -291,7 +291,7 @@ function RunDetailView({
       project: projectId,
     });
     setWorking(false);
-    setConfirming(null);
+    setConfirmingCancel(false);
     if (answered.status === "signed-out") {
       window.location.replace("/sign-in");
       return;
@@ -300,31 +300,53 @@ function RunDetailView({
       setRefused(answered.refusal);
       return;
     }
-    setCanceling(true);
     reload();
   }
 
-  async function retry(): Promise<void> {
-    if (!mayControl || working) return;
-    setRefused(null);
-    setWorking(true);
-    const answered = await writeJson<RunDetail>(runRetryPath(runId), {
-      method: "POST",
-      project: projectId,
-      body: {
-        // **One key per run retried**, so a lost answer becomes the run that
-        // already exists rather than a second conversation with a real agent.
-        idempotency_key: retryKeyFor(runId),
+  function openRerun(simulation: RunSimulation): void {
+    setRerunSimulation(simulation);
+    setRerunName("");
+    setRerunKey(`run:${globalThis.crypto.randomUUID()}`);
+    setRerunRefused(null);
+  }
+
+  function closeRerun(): void {
+    if (rerunWorking) return;
+    setRerunSimulation(null);
+    setRerunName("");
+    setRerunKey(null);
+    setRerunRefused(null);
+  }
+
+  async function rerun(): Promise<void> {
+    const label = rerunName.trim();
+    if (
+      !mayControl ||
+      rerunSimulation === null ||
+      rerunKey === null ||
+      label === "" ||
+      rerunWorking
+    ) {
+      return;
+    }
+
+    setRerunRefused(null);
+    setRerunWorking(true);
+    const answered = await writeJson<{ readonly id: string }>(
+      simulationRerunPath(rerunSimulation.id),
+      {
+        method: "POST",
+        project: projectId,
+        body: { label, idempotency_key: rerunKey },
       },
-    });
-    setWorking(false);
-    setConfirming(null);
+    );
+    setRerunWorking(false);
     if (answered.status === "signed-out") {
       window.location.replace("/sign-in");
       return;
     }
     if (answered.status !== "ready") {
-      setRefused(answered.refusal);
+      setRerunRefused(answered.refusal);
       return;
     }
     router.push(projectPath(projectId, "runs", answered.value.id));
@@ -333,7 +355,14 @@ function RunDetailView({
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Simulation runs" title="Run" />
+        <PageHeader
+          eyebrow="Simulation runs"
+          title="Run"
+          breadcrumbs={[
+            { label: "Runs", href: projectPath(projectId, "runs") },
+            { label: "Run" },
+          ]}
+        />
         <PageBody>
           <Loading what="this run" />
         </PageBody>
@@ -344,16 +373,16 @@ function RunDetailView({
   if (answer.status === "missing") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Simulation runs" title="Run" />
+        <PageHeader
+          eyebrow="Simulation runs"
+          title="Run"
+          breadcrumbs={[
+            { label: "Runs", href: projectPath(projectId, "runs") },
+            { label: "Run" },
+          ]}
+        />
         <PageBody>
-          <NotFound
-            message={answer.refusal.message}
-            action={
-              <ButtonLink href={projectPath(projectId, "runs")}>
-                All runs
-              </ButtonLink>
-            }
-          />
+          <NotFound message={answer.refusal.message} />
         </PageBody>
       </ProductPage>
     );
@@ -362,7 +391,14 @@ function RunDetailView({
   if (answer.status === "failed") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Simulation runs" title="Run" />
+        <PageHeader
+          eyebrow="Simulation runs"
+          title="Run"
+          breadcrumbs={[
+            { label: "Runs", href: projectPath(projectId, "runs") },
+            { label: "Run" },
+          ]}
+        />
         <PageBody>
           <Failure message={answer.refusal.message} onRetry={reload} />
         </PageBody>
@@ -371,6 +407,7 @@ function RunDetailView({
   }
 
   const read = answer.value;
+  const displayTitle = read.label ?? read.agent?.name ?? "Run";
   // The run's machinery as the feed last said, falling back to what the read
   // answered. A cancel that has landed says `canceled` here before the next read.
   const status = (runStatus ?? read.status) as RunDetail["status"];
@@ -386,233 +423,150 @@ function RunDetailView({
         };
   });
 
-  const finished = simulations.filter((one) =>
-    ["completed", "failed", "canceled", "skipped"].includes(one.status),
-  ).length;
-
   const active = status === "pending" || status === "running";
-  const whyNoControl =
-    role === null
-      ? ""
-      : `Your ${String(role)} role cannot start or stop runs. Ask an organization admin to change your role.`;
 
   return (
     <ProductPage wide>
       <PageHeader
         eyebrow="Simulation runs"
-        title={read.label ?? "Run"}
-        lead={
-          <>
-            Started {asMoment(read.created_at)}
-            {read.retry_of_run_id === null ? null : (
-              <>
-                {" · retry of "}
-                <Link
-                  href={projectPath(projectId, "runs", read.retry_of_run_id)}
-                >
-                  the earlier run
-                </Link>
-              </>
-            )}
-          </>
-        }
+        title={displayTitle}
+        breadcrumbs={[
+          { label: "Runs", href: projectPath(projectId, "runs") },
+          { label: displayTitle },
+        ]}
         action={
-          <Actions>
-            <ButtonLink href={projectPath(projectId, "runs")}>
-              All runs
-            </ButtonLink>
-            {/*
-              **A viewer gets no Cancel and no Retry at all**, rather than
-              disabled ones. Everything on this page is theirs to read — the
-              progress, the pins, the archived references, and the sentence
-              below saying what a Retry would do — and neither of these two
-              controls is. A disabled control would be a permanent reminder of
-              something they cannot have on a page whose whole subject they can.
-            */}
-            {!mayControl ? null : (
-              <>
-                <Button
-                  disabled={!active || working}
-                  why={
-                    active
-                      ? undefined
-                      : "This run has already finished. Its counts are final."
-                  }
-                  onClick={() => setConfirming("cancel")}
-                >
-                  Cancel run
-                </Button>
-                <Button
-                  weight="strong"
-                  disabled={working}
-                  onClick={() => setConfirming("retry")}
-                >
-                  Retry
-                </Button>
-              </>
-            )}
-          </Actions>
+          !mayControl || !active ? undefined : (
+            <Actions>
+              <Button
+                disabled={working}
+                onClick={() => setConfirmingCancel(true)}
+              >
+                Cancel run
+              </Button>
+            </Actions>
+          )
         }
       />
       <PageBody>
-        {refused === null ? null : (
-          <Refused
-            message={refused.message}
-            action={
-              // A refused Retry names a resource and sends somebody to the
-              // builder, which is exactly where the choice is theirs to make.
-              refused.error === "retry_unavailable" ? (
-                <ButtonLink href={projectPath(projectId, "runs", "new")}>
-                  Open the run builder
-                </ButtonLink>
-              ) : undefined
-            }
-          />
-        )}
+        {refused === null ? null : <Refused message={refused.message} />}
 
-        {canceling && status === "canceled" ? (
-          <Problem>
-            This run was canceled. Simulations that were already with a
-            simulator finish honoring the cancellation, so the final counts land
-            when the last of them does. A later report cannot make this run
-            completed.
-          </Problem>
-        ) : null}
-
-        {role === null || mayControl ? null : (
-          <Problem>{whyNoControl}</Problem>
-        )}
-
-        <RunFacts
-          status={status}
-          finished={finished}
-          expected={read.expected_simulation_count}
-          graded={read.graded_count}
-          gradable={read.gradable_count}
-          verdict={read.verdict}
-        />
-        <RunProgress
-          finished={finished}
-          expected={read.expected_simulation_count}
-        />
-
-        {stillMoving ? (
-          <p className={styles.following}>
-            Updating as simulations finish and verdicts arrive.
-          </p>
-        ) : null}
-
-        <Section
-          title="Simulations"
-          lead="One per test per persona. Each row keeps its machinery, its grading state and its verdict apart."
+        <section
+          className={styles.overview}
+          role="group"
+          aria-label="Run summary"
         >
+          <dl className={styles.overviewFacts}>
+            <div className={styles.overviewFact}>
+              <dt>Started</dt>
+              <dd>
+                <RelativeInstant instant={read.created_at} now={now} />
+                {read.retry_of_run_id === null ? null : (
+                  <>
+                    {" · retry of "}
+                    <Link
+                      href={projectPath(projectId, "runs", read.retry_of_run_id)}
+                    >
+                      the earlier run
+                    </Link>
+                  </>
+                )}
+              </dd>
+            </div>
+            <div className={styles.overviewFact}>
+              <dt>Status</dt>
+              <dd>
+                <RunStatus status={status} compact />
+              </dd>
+            </div>
+            <div className={styles.overviewFact}>
+              <dt>Grading</dt>
+              <dd>
+                {read.graded_count} of {read.gradable_count} judged
+              </dd>
+            </div>
+            <div className={styles.overviewFact}>
+              <dt>Verdict</dt>
+              <dd>
+                <VerdictBadge verdict={read.verdict} compact />
+              </dd>
+            </div>
+            <div className={styles.overviewFact}>
+              <dt>Agent</dt>
+              <dd>
+                {read.agent === null ? (
+                  "Unavailable"
+                ) : (
+                  <span className={styles.identity}>
+                    <Link href={projectPath(projectId, "agents", read.agent.id)}>
+                      {read.agent.name}
+                    </Link>
+                    {read.agent.archived ? (
+                      <span className={styles.archivedNote}>Archived</span>
+                    ) : null}
+                  </span>
+                )}
+              </dd>
+            </div>
+            <div className={styles.overviewFact}>
+              <dt>Connection</dt>
+              <dd>
+                <span className={styles.identity}>
+                  {read.connection === null ? (
+                    "Unavailable"
+                  ) : (
+                    <Link
+                      href={projectPath(
+                        projectId,
+                        "agents",
+                        read.agent_id,
+                        "connections",
+                        read.connection.id,
+                      )}
+                    >
+                      {read.connection.name}
+                    </Link>
+                  )}
+                  {read.connection?.archived === true ? (
+                    <span className={styles.archivedNote}>Archived</span>
+                  ) : null}
+                </span>
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        <Section title="Simulations">
           {simulations.length === 0 ? (
             <Empty
               title="No simulation has been written yet"
               lead="This run's simulations appear here as Egma writes them."
             />
           ) : (
-            <DataTable
-              label="Simulations in this run"
-              columns={simulationColumns(projectId, runId)}
-              rows={simulations}
-              keyOf={(one) => one.id}
-              stretchPrimaryLink
-            />
+            <div className={styles.simulationsTable}>
+              <DataTable
+                label="Simulations in this run"
+                columns={simulationColumns(
+                  projectId,
+                  runId,
+                  mayControl ? openRerun : undefined,
+                )}
+                rows={simulations}
+                keyOf={(one) => one.id}
+                stretchPrimaryLink
+              />
+            </div>
           )}
-        </Section>
-
-        <Section
-          title="What this run was against"
-          lead="The agent and the connection as they now stand, and the connection exactly as this run went over it. Both stay readable after either is archived."
-        >
-          <Facts
-            facts={[
-              {
-                label: "Agent",
-                value:
-                  read.agent === null ? (
-                    <code>{read.agent_id}</code>
-                  ) : (
-                    <span className={styles.identity}>
-                      <Link
-                        href={projectPath(projectId, "agents", read.agent.id)}
-                      >
-                        {read.agent.name}
-                      </Link>
-                      {read.agent.archived ? <Badge tone="warn">Archived</Badge> : null}
-                    </span>
-                  ),
-              },
-              {
-                label: "Connection",
-                value:
-                  read.connection === null ? (
-                    <code>{read.connection_id}</code>
-                  ) : (
-                    <span className={styles.identity}>
-                      {read.connection.name}
-                      {read.connection.archived ? (
-                        <Badge tone="warn">Archived</Badge>
-                      ) : null}
-                    </span>
-                  ),
-              },
-              {
-                label: "Transport",
-                value: (
-                  <code>
-                    {read.connection_snapshot.type} ·{" "}
-                    {read.connection_snapshot.modality} ·{" "}
-                    {read.connection_snapshot.topology}
-                  </code>
-                ),
-              },
-              {
-                label: "Environment",
-                value: (
-                  <code>{read.connection_snapshot.environment ?? "none"}</code>
-                ),
-              },
-              {
-                label: "Mock Tools",
-                value: mockToolsLine(read),
-              },
-              { label: "Run identifier", value: <code>{read.id}</code> },
-              {
-                label: "Finished",
-                value: (
-                  <code>
-                    {read.finished_at === null
-                      ? "not finished"
-                      : asMoment(read.finished_at)}
-                  </code>
-                ),
-              },
-            ]}
-          />
-        </Section>
-
-        <GradingPlanSection projectId={projectId} run={read} />
-
-        <Section
-          title="Running this again"
-          lead="What Retry would do — readable whether or not this role may press it."
-        >
-          {/*
-            The same sentence the confirmation shows, on the page as well. A
-            viewer has to be able to read what a Retry means without being
-            offered one, and somebody deciding whether to press it should not
-            have to press it to find out.
-          */}
-          <Help>{RETRY_IS_NOT_A_REPLAY}</Help>
         </Section>
       </PageBody>
 
-      {confirming === "cancel" ? (
+      {confirmingCancel ? (
         <Dialog
-          title={`Cancel run “${read.label ?? read.id}”?`}
-          onClose={() => setConfirming(null)}
+          title={
+            read.label === null
+              ? "Cancel this run?"
+              : `Cancel run “${read.label}”?`
+          }
+          onClose={() => setConfirmingCancel(false)}
         >
           {(dismiss) => (
             <>
@@ -633,51 +587,71 @@ function RunDetailView({
         </Dialog>
       ) : null}
 
-      {confirming === "retry" ? (
-        <Dialog
-          title={`Retry run “${read.label ?? read.id}”?`}
-          onClose={() => setConfirming(null)}
-        >
+      {rerunSimulation === null ? null : (
+        <Dialog title="Run this simulation again?" onClose={closeRerun}>
           {(dismiss) => (
-            <>
-              <p>{RETRY_IS_NOT_A_REPLAY}</p>
+            <form
+              className={styles.rerunDialog}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void rerun();
+              }}
+            >
+              <p>
+                This starts one new run under current conditions for this
+                simulation. Egma uses the same agent, connection, test version,
+                and persona. It then resolves the current persona version,
+                graders, connection settings, and mock tools. The original
+                evidence stays unchanged.
+              </p>
+              <Field label="Run name" htmlFor="rerun-name">
+                <TextInput
+                  id="rerun-name"
+                  name="label"
+                  value={rerunName}
+                  required
+                  disabled={rerunWorking}
+                  onChange={setRerunName}
+                />
+              </Field>
+              {rerunRefused === null ? null : (
+                <Refused message={rerunRefused.message} />
+              )}
               <Actions>
-                <Button onClick={dismiss}>Not now</Button>
-                <Button weight="strong" disabled={working} onClick={() => void retry()}>
-                  {working ? "Starting…" : "Start the retry"}
+                <Button disabled={rerunWorking} onClick={() => dismiss()}>
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  weight="strong"
+                  busy={rerunWorking}
+                  disabled={rerunName.trim() === ""}
+                >
+                  {rerunWorking ? "Starting…" : "Run again"}
                 </Button>
               </Actions>
-            </>
+            </form>
           )}
         </Dialog>
-      ) : null}
+      )}
     </ProductPage>
   );
-}
-
-/** What the frozen mocked world comes to, said in one line. */
-function mockToolsLine(run: RunDetail): string {
-  const defaults = run.mock_tools.defaults.length;
-  const overridden = Object.values(run.mock_tools.overrides).reduce(
-    (total, entries) => total + entries.length,
-    0,
-  );
-  if (defaults === 0 && overridden === 0) return "Nothing was mocked";
-  return `${String(defaults)} project default${defaults === 1 ? "" : "s"}, ${String(overridden)} test override${overridden === 1 ? "" : "s"}`;
 }
 
 /**
  * The columns one conversation's row is drawn with, in this project.
  *
  * A function of the project rather than a constant, because the first cell is
- * now the way in to that conversation's evidence — and an address inside a
- * project has to name the project. Nothing else about a row moved.
+ * the way in to that conversation's evidence — and an address inside a project
+ * has to name the project. The other cells stay compact so the table never needs
+ * a horizontal scrollbar.
  */
 function simulationColumns(
   projectId: string,
   runId: string,
+  onRerun?: (simulation: RunSimulation) => void,
 ): readonly Column<RunSimulation>[] {
-  return [
+  const result: Column<RunSimulation>[] = [
     {
       key: "test",
       header: "Simulation",
@@ -700,187 +674,90 @@ function simulationColumns(
             >
               <strong>{one.test_name ?? "No stored test"}</strong>
             </Link>
-            <small>{one.persona_name}</small>
-            {/*
-              The exact frozen versions this conversation executed, beside the two
-              names. The names read as they stand today — a test renamed this
-              morning reads under its new name everywhere at once — and these do
-              not move, which is what makes the evidence still interpretable.
-            */}
-            <small className={styles.pins}>
-              {one.test_version_id ?? "no test pinned"} ·{" "}
-              {one.persona_version_id}
-            </small>
           </span>
         </span>
       ),
     },
     {
+      key: "persona",
+      header: "Persona",
+      width: "22%",
+      cell: (one) => one.persona_name,
+    },
+    {
       key: "status",
-      header: "Status",
-      width: "120px",
-      cell: (one) => <SimulationStatus status={one.status} />,
+      header: "Execution",
+      width: "18%",
+      cell: (one) => (
+        <span className={styles.simulationState}>
+          <SimulationStatus status={one.status} compact />
+          <SimulationReason simulation={one} />
+        </span>
+      ),
     },
     {
       key: "grading",
       header: "Grading",
-      hideOnMobile: true,
-      width: "110px",
-      cell: (one) => <GradingState grading={one.grading} />,
+      width: "14%",
+      cell: (one) => <GradingState grading={one.grading} compact />,
     },
     {
       key: "verdict",
       header: "Verdict",
-      width: "130px",
-      cell: (one) => <VerdictBadge verdict={one.verdict} />,
-    },
-    {
-      key: "checks",
-      header: "Checks",
-      hideOnMobile: true,
-      width: "160px",
-      cell: (one) => <VerdictTally counts={one.counts} />,
-    },
-    {
-      key: "score",
-      header: "Score",
-      hideOnMobile: true,
-      mono: true,
-      width: "70px",
-      cell: (one) => shownScore(one.score),
-    },
-    {
-      key: "why",
-      header: "Why",
-      width: "220px",
-      // The one place a page says why a conversation never happened or could not
-      // be conducted. It is deliberately its own column rather than being folded
-      // into the status: `skipped` says egma declined, and this says what it
-      // declined over.
-      cell: (one) =>
-        one.skip_reason !== null ? (
-          <span className={styles.why}>
-            {one.skip_reason === "required_capability_unsupported"
-              ? `This connection was measured and does not support ${(one.skipped_capabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`
-              : `Nobody has measured whether this connection supports ${(one.skipped_capabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`}
-          </span>
-        ) : one.status === "failed" ? (
-          <span className={styles.why}>
-            {one.reason ?? "Egma could not conduct this simulation."} This is an
-            execution problem, not a failed grader verdict.
-          </span>
-        ) : (
-          ""
-        ),
+      width: "14%",
+      cell: (one) => <VerdictBadge verdict={one.verdict} compact />,
     },
   ];
+
+  if (onRerun !== undefined) {
+    result.push({
+      key: "rerun",
+      header: "",
+      action: true,
+      width: "128px",
+      cell: (one) =>
+        !isTerminalSimulation(one.status) ? null : (
+          <Button onClick={() => onRerun(one)}>Run again</Button>
+        ),
+    });
+  }
+
+  return result;
 }
 
-/**
- * What this run froze to judge itself by.
- *
- * **The state comes first, because it decides how much of the rest can be
- * believed.** A plan captured during an upgrade was not decided when the run
- * began and this says so; a run that recorded none says that too, and nothing
- * here reconstructs one out of today's graders — a reconstructed plan would be a
- * claim about an old run that nobody can check.
- */
-function GradingPlanSection({
-  projectId,
-  run,
-}: {
-  readonly projectId: string;
-  readonly run: RunDetail;
-}) {
-  const plan = run.grading_plan;
+function isTerminalSimulation(status: SimulationStatusWord): boolean {
   return (
-    <Section
-      title="What judged this run"
-      lead={
-        plan === null
-          ? "This run has no recorded grading plan."
-          : planExplanation(plan.state)
-      }
-    >
-      {plan === null || plan.groups.length === 0 ? (
-        <Empty
-          title="No grading plan was recorded"
-          lead="Egma will not reconstruct one from today's graders, because that would be a claim about this run that nobody can check."
-        />
-      ) : (
-        <div className={styles.plan}>
-          {plan.groups.map((group) => (
-            <PlanGroup
-              key={group.tag === "version" ? group.test_version_id : "testless"}
-              group={group}
-              projectId={projectId}
-            />
-          ))}
-        </div>
-      )}
-    </Section>
+    status === "completed" ||
+    status === "failed" ||
+    status === "canceled" ||
+    status === "skipped"
   );
 }
 
-function PlanGroup({
-  group,
-  projectId,
+function SimulationReason({
+  simulation,
 }: {
-  readonly group: FrozenPlanGroup;
-  readonly projectId: string;
+  readonly simulation: RunSimulation;
 }) {
-  return (
-    <article className={styles.planGroup}>
-      <header className={styles.planHead}>
-        {group.tag === "version" ? (
-          <>
-            <Link href={projectPath(projectId, "tests", group.test_id)}>
-              {group.test_name}
-            </Link>
-            {/* The exact frozen version, which is what actually executed. */}
-            <code>{group.test_version_id}</code>
-          </>
-        ) : (
-          <strong>
-            Simulations that executed no stored test
-          </strong>
-        )}
-      </header>
-      <ul className={styles.planItems}>
-        {group.items.map((item) => (
-          <PlanItemLine key={itemKey(item)} item={item} />
-        ))}
-      </ul>
-    </article>
-  );
-}
-
-function itemKey(item: FrozenPlanItem): string {
-  return `${item.grader_id}:${item.grader_version_id}`;
-}
-
-function PlanItemLine({ item }: { readonly item: FrozenPlanItem }) {
-  const judge =
-    item.judge.tag === "configured"
-      ? `${item.judge.provider}/${item.judge.model} · ${item.judge.source === "platform" ? "platform key" : `credential ${item.judge.source}`}`
-      : item.judge.tag === "not_required"
-        ? "no judge needed"
-        : "no judge recorded at capture";
-
-  return (
-    <li className={styles.planItem}>
-      <span className={styles.planItemName}>
-        {graderDisplayName(item.name)}
+  if (simulation.skip_reason !== null) {
+    const capabilities = (simulation.skipped_capabilities ?? []).join(", ");
+    const decision =
+      simulation.skip_reason === "required_capability_unsupported"
+        ? `This connection does not support ${capabilities}.`
+        : `Support for ${capabilities} was not measured.`;
+    return (
+      <span className={styles.why}>
+        {decision} Egma did not conduct this simulation. This says nothing about
+        the agent.
       </span>
-      <span className={styles.planItemNote}>
-        {/*
-          What it is and how loudly it speaks. `required: false` is a
-          diagnostic — judged and shown, and never able to fail this run — and
-          saying so here is what keeps a red line on this list from being read
-          as the reason the run failed.
-        */}
-        {`${item.required ? "blocks" : "reports only"} · ${item.grader_version_id} · ${judge}`}
-      </span>
-    </li>
+    );
+  }
+  if (simulation.status !== "failed") return null;
+  return (
+    <span className={styles.why}>
+      {simulation.reason ?? "Egma could not conduct this simulation."} This is an
+      execution problem, not a failed grader verdict, and says nothing about the
+      agent.
+    </span>
   );
 }

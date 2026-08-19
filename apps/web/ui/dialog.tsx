@@ -38,11 +38,14 @@ export function Dialog({
   kind = "dialog",
   title,
   onClose,
+  returnFocusTo,
   children,
 }: {
-  readonly kind?: "dialog" | "drawer";
+  readonly kind?: "dialog" | "drawer" | "sheet";
   readonly title: string;
   readonly onClose: () => void;
+  /** A known trigger to restore when the surface closes. */
+  readonly returnFocusTo?: HTMLElement | null;
   readonly children: ReactNode | ((dismiss: DialogDismiss) => ReactNode);
 }) {
   const titleId = useId();
@@ -52,6 +55,16 @@ export function Dialog({
   const closeTimerRef = useRef<number | null>(null);
   const [closing, setClosing] = useState(false);
   closeRef.current = onClose;
+  const scrimClass = [
+    styles.scrim,
+    kind === "drawer" ? styles.scrimDrawer : "",
+    kind === "sheet" ? styles.scrimSheet : "",
+  ].filter(Boolean).join(" ");
+  const dialogClass = [
+    styles.dialog,
+    kind === "drawer" ? styles.dialogDrawer : "",
+    kind === "sheet" ? styles.dialogSheet : "",
+  ].filter(Boolean).join(" ");
 
   const finishClose = useCallback(() => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
@@ -90,9 +103,11 @@ export function Dialog({
     const dialog = dialogRef.current;
     if (dialog === null) return undefined;
 
-    const opener = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+    const opener = returnFocusTo ?? (
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+    );
     dialog.dataset.input = opener?.matches(":focus-visible") === true
       ? "keyboard"
       : "pointer";
@@ -121,14 +136,15 @@ export function Dialog({
       else dialog.removeAttribute("open");
       if (opener?.isConnected === true) opener.focus();
     };
-  }, [requestClose]);
+  }, [requestClose, returnFocusTo]);
 
   return (
     <dialog
-      className={`${styles.scrim} ${kind === "drawer" ? styles.scrimDrawer : ""}`}
+      className={scrimClass}
       ref={dialogRef}
       aria-labelledby={titleId}
       aria-modal="true"
+      data-kind={kind}
       data-closing={closing ? "true" : "false"}
       onCancel={(event) => {
         event.preventDefault();
@@ -140,7 +156,7 @@ export function Dialog({
       }}
     >
       <div
-        className={`${styles.dialog} ${kind === "drawer" ? styles.dialogDrawer : ""}`}
+        className={dialogClass}
         onTransitionEnd={(event) => {
           if (closing && event.target === event.currentTarget && event.propertyName === "opacity") {
             finishClose();

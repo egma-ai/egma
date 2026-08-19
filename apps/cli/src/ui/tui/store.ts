@@ -247,8 +247,8 @@ export class WizardStore {
     this.change({ agentChoices });
   }
 
-  setReachOffer(reachOffer: readonly Reach[] | null): void {
-    this.change({ reachOffer });
+  setReachOffer(reachOptions: readonly Reach[] | null): void {
+    this.change({ reachOptions });
   }
 
   setNumberChoices(numberChoices: readonly RetellNumber[] | null): void {

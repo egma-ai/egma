@@ -253,6 +253,13 @@
       "when": 1786990925129,
       "tag": "0035_drop_retired_audio_band",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786994156000,
+      "tag": "0036_transient_claim_release",
+      "breakpoints": true
     }
   ]
 }

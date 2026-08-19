@@ -1,13 +1,22 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AgentDetailPage from "../app/projects/[projectId]/agents/[agentId]/page.tsx";
 import ConnectionDetailPage from "../app/projects/[projectId]/agents/[agentId]/connections/[connectionId]/page.tsx";
 import NewConnectionPage from "../app/projects/[projectId]/agents/[agentId]/connections/new/page.tsx";
+import AgentOnboardingPage from "../app/projects/[projectId]/agents/[agentId]/onboarding/page.tsx";
 import RegisterAgentPage from "../app/projects/[projectId]/agents/new/page.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
+import type { ListedTest } from "../lib/tests.ts";
 // The one place the export setup's words live, so a form asserting them cannot
 // drift from the Monitoring page that teaches the same thing.
 import { QUIET } from "../lib/transcript-copy.ts";
@@ -28,6 +37,7 @@ const routed = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
   pathname: "/projects/prj_1/agents",
+  search: "",
   params: {
     projectId: "prj_1",
     agentId: "agt_1",
@@ -38,6 +48,7 @@ const routed = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
   useRouter: () => ({ push: routed.push, replace: routed.replace, back: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(routed.search),
   useParams: () => routed.params,
 }));
 
@@ -156,12 +167,38 @@ const CONNECTION = {
   updated_at: "2026-08-15T10:00:00.000Z",
 };
 
+function onboardingTest(
+  overrides: Partial<ListedTest> = {},
+): ListedTest {
+  return {
+    id: "tst_1",
+    project_id: "prj_1",
+    name: "Books an appointment",
+    description: "The caller asks for a booking.",
+    version: 2,
+    version_id: "tstv_2",
+    scenario: "Ask for an appointment.",
+    expected_behaviors: ["The agent offers a time."],
+    personas: [],
+    required_capabilities: [],
+    override_count: 0,
+    agents: [{ id: "agt_9", name: "Existing agent", archived_at: null }],
+    revision: "rev_test_1",
+    applicability_revision: "rev_app_1",
+    archived_at: null,
+    archive_reason: null,
+    created_at: "2026-08-15T10:00:00.000Z",
+    updated_at: "2026-08-15T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
 const TYPES = {
   items: [
     {
       type: "retell",
       label: "Retell",
-      modalities: ["chat", "voice"],
+      modalities: ["chat"],
       topology: "hosted-broker",
       simulator_adapter: true,
       capability_discovery: false,
@@ -194,6 +231,99 @@ const TYPES = {
       ],
     },
     {
+      type: "livekit",
+      label: "LiveKit",
+      modalities: ["voice"],
+      topology: "egma-dials-out",
+      simulator_adapter: true,
+      capability_discovery: false,
+      variants: [
+        {
+          id: "livekit.key_pair",
+          label: "API key and secret",
+          chosen_by: null,
+          fields: [
+            {
+              key: "url",
+              label: "LiveKit WebSocket URL",
+              kind: "url",
+              required: true,
+              help: "Your LiveKit project or self-hosted server.",
+              after_credentials: false,
+            },
+            {
+              key: "agentName",
+              label: "LiveKit agent name",
+              kind: "text",
+              required: false,
+              help: "The LiveKit worker dispatch name. Leave it empty for automatic dispatch.",
+              after_credentials: false,
+            },
+            {
+              key: "metadata",
+              label: "Room metadata",
+              kind: "json",
+              required: false,
+              help: "JSON handed to the agent.",
+              after_credentials: true,
+            },
+          ],
+          credential_rule: "required",
+          credential_help: "Used to create the room.",
+          credential_fields: [
+            {
+              field: "apiKey",
+              label: "LiveKit API key",
+              kind: "secret",
+              required: true,
+              help: "The key id.",
+            },
+            {
+              field: "apiSecret",
+              label: "LiveKit API secret",
+              kind: "secret",
+              required: true,
+              help: "The key secret.",
+            },
+          ],
+        },
+        {
+          id: "livekit.token_endpoint",
+          label: "Token endpoint",
+          chosen_by: "tokenEndpoint",
+          fields: [
+            {
+              key: "url",
+              label: "LiveKit WebSocket URL",
+              kind: "url",
+              required: true,
+              help: "Your LiveKit project or self-hosted server.",
+              after_credentials: false,
+            },
+            {
+              key: "tokenEndpoint",
+              label: "Token endpoint",
+              kind: "url",
+              required: true,
+              help: "The service that creates room tokens.",
+              after_credentials: false,
+            },
+          ],
+          credential_rule: "optional",
+          credential_help: "Optional auth headers for the endpoint.",
+          credential_fields: [
+            {
+              field: "headers",
+              label: "Auth headers",
+              kind: "json",
+              required: false,
+              help: "Header names and secret values sent to the endpoint.",
+            },
+          ],
+        },
+      ],
+    },
+    {
       type: "phone",
       label: "Phone number",
       modalities: ["voice"],
@@ -220,43 +350,6 @@ const TYPES = {
         },
       ],
     },
-    // The platform that pushes rather than answers, so its Monitoring section
-    // teaches an export instead of storing a setting.
-    {
-      type: "livekit",
-      label: "LiveKit",
-      modalities: ["voice"],
-      topology: "egma-joins-room",
-      simulator_adapter: true,
-      capability_discovery: false,
-      variants: [
-        {
-          id: "livekit.api_key",
-          label: "LiveKit room",
-          chosen_by: null,
-          fields: [
-            {
-              key: "url",
-              label: "LiveKit URL",
-              kind: "text",
-              required: true,
-              help: "Where your LiveKit server answers.",
-            },
-          ],
-          credential_rule: "forbidden",
-          credential_help: "This shape takes no credential.",
-          credential_fields: [],
-        },
-      ],
-    },
-  ],
-};
-
-const CAPABILITIES = {
-  items: [
-    { key: "dtmf", label: "DTMF entry", description: "The caller can press digits." },
-    { key: "barge_in", label: "Barge-in", description: "The caller can interrupt." },
-    { key: "raw_audio", label: "Raw audio", description: "The audio is available." },
   ],
 };
 
@@ -264,6 +357,7 @@ beforeEach(() => {
   routed.push.mockReset();
   routed.replace.mockReset();
   routed.pathname = "/projects/prj_1/agents";
+  routed.search = "";
   routed.params = {
     projectId: "prj_1",
     agentId: "agt_1",
@@ -310,24 +404,6 @@ describe("finding an agent in a long list", () => {
     });
   });
 
-  it("asks for the archived half when the filter is moved to it", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": { status: 200, body: { items: [AGENT], next_cursor: null } },
-    });
-    render(<AgentsPage />);
-    await screen.findAllByText("Front desk");
-
-    fireEvent.click(screen.getByRole("radio", { name: "Archived" }));
-
-    await waitFor(() => {
-      const asked = vi
-        .mocked(globalThis.fetch)
-        .mock.calls.map(([url]) => String(url));
-      expect(asked).toContain("/api/agents?archived=true&project=prj_1");
-    });
-  });
-
   it("says a search matched nothing without calling the project empty", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -346,7 +422,7 @@ describe("finding an agent in a long list", () => {
     // Two different absences: nothing matched, and there is nothing here. They
     // point somewhere different and must not share a sentence.
     expect(
-      await screen.findByText("No active agents match “zzz”"),
+      await screen.findByText("No agents match “zzz”"),
     ).toBeDefined();
     expect(screen.queryByText("No agents in this project yet")).toBeNull();
   });
@@ -400,6 +476,11 @@ describe("registering an agent", () => {
     for (const provider of ["prompt", "model", "tools"]) {
       expect(Object.keys(sent[0]?.body ?? {})).not.toContain(provider);
     }
+    await waitFor(() =>
+      expect(routed.push).toHaveBeenCalledWith(
+        "/projects/prj_1/agents/agt_1/connections/new?onboarding=connection",
+      ),
+    );
   });
 
   it("refuses an empty name here rather than making somebody wait for egma", async () => {
@@ -474,6 +555,170 @@ describe("registering an agent", () => {
 
 /* ------------------------------------------------------------------------ */
 
+describe("onboarding an agent", () => {
+  it("reuses the connection form, then carries the new agent into test setup", async () => {
+    routed.search = "?onboarding=connection";
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    const progress = await screen.findByRole("navigation", {
+      name: "Agent setup",
+    });
+    expect(within(progress).getByText("Connection").getAttribute("aria-current"))
+      .toBe("step");
+    expect(screen.queryByText(/Step 2 of 3/u)).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Skip connection for now" })
+        .getAttribute("href"),
+    ).toBe("/projects/prj_1/agents/agt_1/onboarding");
+    expect(
+      screen.getByText(/Without a connection, Egma cannot run a simulation/u),
+    ).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText("Platform"), {
+      target: { value: "phone" },
+    });
+    fireEvent.change(await screen.findByLabelText("Phone number"), {
+      target: { value: "+14155550100" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    await waitFor(() =>
+      expect(routed.push).toHaveBeenCalledWith(
+        "/projects/prj_1/agents/agt_1/onboarding",
+      ),
+    );
+  });
+
+  it("attaches selected existing tests through each test's applicability revision", async () => {
+    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
+    const test = onboardingTest();
+    const second = onboardingTest({
+      id: "tst_2",
+      name: "Handles a cancellation",
+      applicability_revision: "rev_app_2",
+    });
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [CONNECTION] },
+      },
+      "/api/tests": [
+        { status: 200, body: { items: [test], next_cursor: "cursor_2" } },
+        { status: 200, body: { items: [second], next_cursor: null } },
+      ],
+      "/api/tests/tst_1/agents": {
+        status: 200,
+        body: {
+          ...test,
+          agents: [...test.agents, { id: "agt_1", name: "Front desk" }],
+          applicability_revision: "rev_app_2",
+        },
+      },
+      "/api/tests/tst_2/agents": {
+        status: 200,
+        body: {
+          ...second,
+          agents: [...second.agents, { id: "agt_1", name: "Front desk" }],
+          applicability_revision: "rev_app_3",
+        },
+      },
+    });
+    render(<AgentOnboardingPage />);
+
+    const choice = await screen.findByRole("checkbox", {
+      name: /Books an appointment/u,
+    });
+    fireEvent.click(choice);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    const secondChoice = await screen.findByRole("checkbox", {
+      name: /Handles a cancellation/u,
+    });
+    expect((choice as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(secondChoice);
+    expect(screen.getByRole("button", { name: "Attach 2 tests and finish" }))
+      .toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Attach 2 tests and finish" }),
+    );
+
+    await waitFor(() => {
+      expect(sent.find((call) => call.url.startsWith("/api/tests/tst_1/agents")))
+        .toBeDefined();
+    });
+    const call = sent.find((item) => item.url.startsWith("/api/tests/tst_1/agents"));
+    expect(call?.body).toEqual({
+      agents: ["agt_9", "agt_1"],
+      expected_applicability_revision: "rev_app_1",
+    });
+    const secondCall = sent.find((item) =>
+      item.url.startsWith("/api/tests/tst_2/agents"),
+    );
+    expect(secondCall?.body).toEqual({
+      agents: ["agt_9", "agt_1"],
+      expected_applicability_revision: "rev_app_2",
+    });
+    await waitFor(() =>
+      expect(routed.push).toHaveBeenCalledWith(
+        "/projects/prj_1/agents/agt_1",
+      ),
+    );
+  });
+
+  it("keeps a selected test pinned while the server searches another page", async () => {
+    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
+    const test = onboardingTest();
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/api/tests": [
+        { status: 200, body: { items: [test], next_cursor: null } },
+        { status: 200, body: { items: [], next_cursor: null } },
+      ],
+    });
+    render(<AgentOnboardingPage />);
+
+    const choice = await screen.findByRole("checkbox", {
+      name: /Books an appointment/u,
+    });
+    fireEvent.click(choice);
+    fireEvent.change(screen.getByLabelText("Search tests by name"), {
+      target: { value: "weekend" },
+    });
+
+    await waitFor(() => {
+      const asked = vi
+        .mocked(globalThis.fetch)
+        .mock.calls.map(([url]) => String(url));
+      expect(asked).toContain("/api/tests?name=weekend&project=prj_1");
+    });
+    expect(
+      (screen.getByRole("checkbox", {
+        name: /Books an appointment/u,
+      }) as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(screen.getByRole("button", { name: "Attach 1 test and finish" }))
+      .toBeDefined();
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
 describe("one agent's page", () => {
   function answersWith(
     agent: Record<string, unknown>,
@@ -483,10 +728,18 @@ describe("one agent's page", () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
       "/api/agents/agt_1": { status: 200, body: { agent, connections } },
+      "/api/runs": {
+        status: 200,
+        body: { items: [], next_cursor: null },
+      },
+      "/api/tests": {
+        status: 200,
+        body: { items: [], next_cursor: null },
+      },
     });
   }
 
-  it("offers a member the controls, and a viewer the same ones disabled", async () => {
+  it("keeps the agent actions and moves runs, tests, and connections through one section navigation", async () => {
     answersWith(AGENT, [CONNECTION], "viewer");
     render(<AgentDetailPage />);
 
@@ -495,8 +748,27 @@ describe("one agent's page", () => {
     // is told plainly that this part is not theirs. The server refuses their
     // write either way, which is where the boundary actually is.
     expect((edit as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Archive" }) as HTMLButtonElement)
-      .disabled).toBe(true);
+
+    expect(screen.getByRole("link", { name: "Create a run" })).toBeDefined();
+    const sections = screen.getByRole("navigation", { name: "Agent sections" });
+    expect(
+      within(sections).getAllByRole("button").map((button) => button.textContent),
+    ).toEqual(["Recent runs", "Attached tests", "Configuration"]);
+    expect(
+      within(sections)
+        .getByRole("button", { name: "Recent runs" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+    expect(screen.getByRole("heading", { name: "Recent runs" })).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "Connections" })).toBeNull();
+
+    fireEvent.click(within(sections).getByRole("button", { name: "Attached tests" }));
+    expect(await screen.findByRole("heading", { name: "Attached tests" })).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "Recent runs" })).toBeNull();
+
+    fireEvent.click(within(sections).getByRole("button", { name: "Configuration" }));
+    expect(await screen.findByRole("heading", { name: "Connections" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "staging" })).toBeDefined();
     expect(
       screen.getByText(
         "Your viewer role cannot change agents. Ask an organization admin to change your role.",
@@ -562,147 +834,118 @@ describe("one agent's page", () => {
     ).toBe("Rewritten while somebody else was editing");
   });
 
-  it("says what archiving will stop before it happens", async () => {
-    answersWith(AGENT, [CONNECTION]);
-    render(<AgentDetailPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
-
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.textContent).toContain("archives every active connection");
-    expect(dialog.textContent).toContain("Queued simulations");
-  });
-
-  it("opens an archived agent, and offers Restore instead of Archive", async () => {
-    answersWith({ ...AGENT, archived: true, archived_at: "2026-08-15T11:00:00.000Z" }, []);
-    render(<AgentDetailPage />);
-
-    expect(await screen.findByText("This agent is archived")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Restore" })).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
-    // Editing an archived agent is not offered: it is out of new work, and the
-    // move is to restore it first.
-    expect(
-      (screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-  });
-
-  it("says a connection has been measured, or that nobody has looked", async () => {
-    answersWith(AGENT, [
-      CONNECTION,
-      {
-        ...CONNECTION,
-        id: "con_2",
-        name: "production",
-        capabilities: {
-          state: "known",
-          measured: ["dtmf"],
-          supported: ["dtmf"],
-          checked_at: "2026-08-15T09:00:00.000Z",
-          source: "retell adapter",
-          standing: {
-            dtmf: "supported",
-            barge_in: "not_measured",
-            raw_audio: "not_measured",
-          },
-        },
-      },
-    ]);
-    render(<AgentDetailPage />);
-
-    // Unknown is never drawn as "none": a target nobody has measured and one
-    // measured and found bare lead somewhere different.
-    expect(await screen.findAllByText("Unknown")).not.toHaveLength(0);
-    expect(screen.getAllByText("1 supported")).not.toHaveLength(0);
-  });
 });
 
 /* ------------------------------------------------------------------------ */
 
 describe("adding a connection", () => {
-  it("draws the fields the server said the shape holds, and nothing it invented", async () => {
+  it("keeps the connection hierarchy present while the parent agent loads", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-types": { status: 200, body: TYPES },
-      "/api/agents/agt_1/connections": {
-        status: 201,
-        body: { connection: CONNECTION },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
       },
+      "/api/connection-types": { status: 200, body: TYPES },
     });
     render(<NewConnectionPage />);
 
-    // Retell's own key, and its credential field, both described by the server.
-    expect(await screen.findByLabelText("Retell agent ID")).toBeDefined();
-    expect(screen.getByLabelText("Retell API key")).toBeDefined();
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(breadcrumb).getByRole("link", { name: "Agents" })).toBeTruthy();
+    expect(within(breadcrumb).getByRole("link", { name: "Agent" })).toBeTruthy();
+    expect(within(breadcrumb).getByText("New connection")).toBeTruthy();
     expect(
-      screen.getByText("The agent's own identifier in Retell."),
-    ).toBeDefined();
-    // Nothing belonging to the other type is on this form.
-    expect(screen.queryByLabelText("Phone number")).toBeNull();
+      await within(breadcrumb).findByRole("link", { name: "Front desk" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("The label shown for this connection in Egma."),
+    ).toBeTruthy();
   });
 
-  it("redraws the form when the type changes, and drops what belonged to the old one", async () => {
+  it("confirms a Retell phone route before it stores the provider-blind connection", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
       "/api/connection-types": { status: 200, body: TYPES },
-      "/api/agents/agt_1/connections": {
+      "/api/providers/retell/voice-agents": {
+        status: 200,
+        body: {
+          agents: [
+            {
+              id: "agent_voice_1",
+              name: "Appointment line",
+              numbers: [
+                { number: "+14155550100", label: "Main number" },
+              ],
+            },
+          ],
+        },
+      },
+      "/api/agents/agt_1/connections/retell-phone": {
         status: 201,
-        body: { connection: CONNECTION },
+        body: {
+          connection: {
+            ...CONNECTION,
+            type: "phone",
+            modality: "voice",
+            config: { phoneNumber: "+14155550100" },
+          },
+        },
       },
     });
     render(<NewConnectionPage />);
 
-    fireEvent.change(await screen.findByLabelText("Type"), {
-      target: { value: "phone" },
-    });
-
-    expect(await screen.findByLabelText("Phone number")).toBeDefined();
-    expect(screen.queryByLabelText("Retell agent ID")).toBeNull();
-    // A phone connection takes no credential, so there is no box for one and
-    // the form says why rather than leaving a gap.
-    expect(screen.queryByLabelText("Retell API key")).toBeNull();
-    expect(
-      screen.getByText("A phone connection takes no credential."),
-    ).toBeDefined();
-  });
-
-  it("sends only what was filled in, so an optional key left empty stays absent", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-types": { status: 200, body: TYPES },
-      "/api/agents/agt_1/connections": {
-        status: 201,
-        body: { connection: CONNECTION },
-      },
-    });
-    render(<NewConnectionPage />);
-
-    fireEvent.change(await screen.findByLabelText("Retell agent ID"), {
-      target: { value: "agent_abc" },
-    });
-    fireEvent.change(screen.getByLabelText("Retell API key"), {
+    const field = (await screen.findByLabelText(
+      "Retell API key",
+    )) as HTMLInputElement;
+    expect(field.type).toBe("password");
+    expect(field.autocomplete).toBe("off");
+    fireEvent.change(field, {
       target: { value: "retell-secret-A1B2C3D4WXYZ" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Load Retell agents" }));
+
+    expect(
+      (await screen.findByLabelText("Retell voice agent") as HTMLSelectElement)
+        .value,
+    ).toBe("agent_voice_1");
+    expect((screen.getByLabelText("Phone number") as HTMLSelectElement).value)
+      .toBe("+14155550100");
+    expect(field.value).toBe("retell-secret-A1B2C3D4WXYZ");
+
     const add = screen.getByRole("button", { name: "Add connection" });
     expectSharedFormLayout(add);
     fireEvent.click(add);
 
-    await waitFor(() => expect(sent).toHaveLength(1));
-    expect(sent[0]?.body).toEqual({
-      type: "retell",
-      modality: "chat",
-      config: { retellAgentId: "agent_abc" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[0]).toMatchObject({
+      url: "/api/providers/retell/voice-agents?project=prj_1",
+      body: { api_key: "retell-secret-A1B2C3D4WXYZ" },
     });
-    // The name and the environment were left empty, so they are absent rather
-    // than sent blank — absent means "egma names it" and blank means "no name".
-    expect(Object.keys(sent[0]?.body ?? {})).not.toContain("name");
-    expect(Object.keys(sent[0]?.body ?? {})).not.toContain("environment");
+    expect(sent[1]?.body).toEqual({
+      api_key: "retell-secret-A1B2C3D4WXYZ",
+      retell_agent_id: "agent_voice_1",
+      phone_number: "+14155550100",
+    });
+    expect(sent[1]?.url).toBe(
+      "/api/agents/agt_1/connections/retell-phone?project=prj_1",
+    );
+    await waitFor(() => expect(field.value).toBe(""));
+    expect(routed.push).toHaveBeenCalledWith(
+      "/projects/prj_1/agents/agt_1/connections/con_1",
+    );
   });
 
-  it("gives every type one Monitoring section, and says what it is for each", async () => {
+  it("uses either honest LiveKit access method and defaults its channel to voice", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
       "/api/connection-types": { status: 200, body: TYPES },
       "/api/agents/agt_1/connections": {
         status: 201,
@@ -711,33 +954,201 @@ describe("adding a connection", () => {
     });
     render(<NewConnectionPage />);
 
-    // The heading is on every form, so what a developer learns on one type is
-    // where they look on the next. Asked for as the group it is rather than by
-    // its words, because the sidebar's own navigation says Monitoring too.
+    fireEvent.change(await screen.findByLabelText("Platform"), {
+      target: { value: "livekit" },
+    });
+    fireEvent.change(screen.getByLabelText("Access"), {
+      target: { value: "livekit.token_endpoint" },
+    });
+    expect(screen.queryByText(/shape/i)).toBeNull();
+    expect(screen.queryByText(/credential/i)).toBeNull();
+    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
+      target: { value: "wss://rooms.example.test" },
+    });
+    fireEvent.change(screen.getByLabelText("Token endpoint"), {
+      target: { value: "https://tokens.example.test/livekit" },
+    });
+    fireEvent.change(screen.getByLabelText("Auth headers"), {
+      target: { value: '{"Authorization":"Bearer endpoint-secret"}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
+      type: "livekit",
+      modality: "voice",
+      config: {
+        url: "wss://rooms.example.test",
+        tokenEndpoint: "https://tokens.example.test/livekit",
+      },
+      credentials: {
+        headers: '{"Authorization":"Bearer endpoint-secret"}',
+      },
+    });
+
+    cleanup();
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    fireEvent.change(await screen.findByLabelText("Platform"), {
+      target: { value: "livekit" },
+    });
+    expect((screen.getByLabelText("Dispatch method") as HTMLSelectElement).value)
+      .toBe("named");
+    expect(
+      (screen.getByRole("button", { name: "Add connection" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
+      target: { value: "wss://rooms.example.test" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
+      target: { value: "front-desk" },
+    });
+    expect(
+      screen.getByText(
+        "Enter the exact agent name registered by the deployed LiveKit worker. A different name prevents the agent from joining the room.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("LiveKit agent name (optional)")).toBeNull();
+    const metadata = screen.getByLabelText("Room metadata (optional)");
+    fireEvent.change(metadata, {
+      target: { value: '{"tenant":"acme"}' },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API key"), {
+      target: { value: "livekit-key" },
+    });
+    const apiSecret = screen.getByLabelText("LiveKit API secret");
+    fireEvent.change(apiSecret, {
+      target: { value: "livekit-secret" },
+    });
+    expect(
+      apiSecret.compareDocumentPosition(metadata) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
+      type: "livekit",
+      modality: "voice",
+      config: {
+        url: "wss://rooms.example.test",
+        agentName: "front-desk",
+        metadata: '{"tenant":"acme"}',
+      },
+      credentials: {
+        apiKey: "livekit-key",
+        apiSecret: "livekit-secret",
+      },
+    });
+  });
+
+  it("makes automatic LiveKit dispatch an explicit choice that stores no agent name", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    fireEvent.change(await screen.findByLabelText("Platform"), {
+      target: { value: "livekit" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
+      target: { value: "must-not-be-sent" },
+    });
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "automatic" },
+    });
+    expect(screen.queryByLabelText("LiveKit agent name")).toBeNull();
+    expect(
+      screen.getByText(
+        "LiveKit sends the room to any available agent that accepts automatic dispatch. Egma stores no agent name.",
+      ),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
+      target: { value: "wss://rooms.example.test" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API key"), {
+      target: { value: "livekit-key" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API secret"), {
+      target: { value: "livekit-secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
+      type: "livekit",
+      modality: "voice",
+      config: { url: "wss://rooms.example.test" },
+      credentials: {
+        apiKey: "livekit-key",
+        apiSecret: "livekit-secret",
+      },
+    });
+  });
+
+  it("gives every platform one Monitoring section, and says what it is for each", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    // The heading is on every form, so what a developer learns on one platform
+    // is where they look on the next. Asked for as the group it is rather than
+    // by its words, because the sidebar's own navigation says Monitoring too.
     expect(
       await screen.findByRole("group", { name: "Monitoring" }),
     ).toBeDefined();
-    const watch = (await screen.findByLabelText(
-      "Enable monitoring",
-    )) as HTMLInputElement;
-    // Nobody has said Egma may store anything yet, so the box arrives empty.
-    expect(watch.checked).toBe(false);
+    // This form reaches a Retell agent by its phone number, and a phone route
+    // is not something Egma can ask for conversations — said plainly rather
+    // than as a box that would do nothing.
+    expect(screen.queryByLabelText("Enable monitoring")).toBeNull();
+    expect(
+      screen.getByText(/reaches the agent by its phone number/),
+    ).toBeDefined();
 
-    // LiveKit keeps the heading and the box; what changes is what ticking it
-    // means.
-    fireEvent.change(screen.getByLabelText("Type"), {
+    // LiveKit is the platform that pushes, so it gets the box.
+    fireEvent.change(screen.getByLabelText("Platform"), {
       target: { value: "livekit" },
     });
     await waitFor(() =>
-      expect(screen.getByRole("group", { name: "Monitoring" })).toBeDefined(),
+      expect(screen.getByLabelText("Enable monitoring")).toBeDefined(),
     );
     expect(
       (screen.getByLabelText("Enable monitoring") as HTMLInputElement).checked,
     ).toBe(false);
 
-    // A phone agent is one Egma cannot monitor yet, and the section says so
-    // rather than offering a box that would do nothing.
-    fireEvent.change(screen.getByLabelText("Type"), {
+    // A phone agent is one Egma cannot monitor yet, and the section says so.
+    fireEvent.change(screen.getByLabelText("Platform"), {
       target: { value: "phone" },
     });
     await waitFor(() =>
@@ -750,6 +1161,10 @@ describe("adding a connection", () => {
   it("teaches a LiveKit agent the export, and sends nothing about it", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
       "/api/connection-types": { status: 200, body: TYPES },
       "/api/agents/agt_1/connections": {
         status: 201,
@@ -758,7 +1173,7 @@ describe("adding a connection", () => {
     });
     render(<NewConnectionPage />);
 
-    fireEvent.change(await screen.findByLabelText("Type"), {
+    fireEvent.change(await screen.findByLabelText("Platform"), {
       target: { value: "livekit" },
     });
     // Closed until somebody asks: the setup is three things to do elsewhere,
@@ -781,8 +1196,18 @@ describe("adding a connection", () => {
     const mint = screen.getByRole("link", { name: QUIET.setUp.key });
     expect(mint.getAttribute("href")).toContain("keys");
 
-    fireEvent.change(screen.getByLabelText("LiveKit URL"), {
-      target: { value: "wss://acme.livekit.cloud" },
+    // Automatic dispatch, so the form needs no agent name and can be sent.
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "automatic" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
+      target: { value: "wss://rooms.example.test" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API key"), {
+      target: { value: "livekit-key" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API secret"), {
+      target: { value: "livekit-secret" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
 
@@ -791,16 +1216,15 @@ describe("adding a connection", () => {
     // Egma to store — the agent pushes — and the API refuses the field on any
     // type but Retell, correctly.
     expect(Object.keys(sent[0]?.body ?? {})).not.toContain("watch_production");
-    expect(sent[0]?.body).toEqual({
-      type: "livekit",
-      modality: "voice",
-      config: { url: "wss://acme.livekit.cloud" },
-    });
   });
 
-  it("closes the section again when the type changes under it", async () => {
+  it("closes the Monitoring section again when the platform changes under it", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
       "/api/connection-types": { status: 200, body: TYPES },
       "/api/agents/agt_1/connections": {
         status: 201,
@@ -809,15 +1233,21 @@ describe("adding a connection", () => {
     });
     render(<NewConnectionPage />);
 
+    fireEvent.change(await screen.findByLabelText("Platform"), {
+      target: { value: "livekit" },
+    });
     fireEvent.click(await screen.findByLabelText("Enable monitoring"));
-    expect(
-      (screen.getByLabelText("Enable monitoring") as HTMLInputElement).checked,
-    ).toBe(true);
+    expect(await screen.findByText(QUIET.setUp.endpoint)).toBeDefined();
 
-    // Consent ticked under Retell is never carried to another platform, and
-    // LiveKit's instructions are not left open for a form they do not belong
-    // to.
-    fireEvent.change(screen.getByLabelText("Type"), {
+    // Instructions are never left open for a platform they do not belong to.
+    fireEvent.change(screen.getByLabelText("Platform"), {
+      target: { value: "phone" },
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(QUIET.setUp.endpoint)).toBeNull(),
+    );
+
+    fireEvent.change(screen.getByLabelText("Platform"), {
       target: { value: "livekit" },
     });
     await waitFor(() =>
@@ -825,60 +1255,15 @@ describe("adding a connection", () => {
         (screen.getByLabelText("Enable monitoring") as HTMLInputElement).checked,
       ).toBe(false),
     );
-    expect(screen.queryByText(QUIET.setUp.endpoint)).toBeNull();
-  });
-
-  // The test above proves the other half: a form nobody ticked sends no
-  // `watch_production` at all, which is what leaves Egma storing nothing.
-  it("sends the switch when somebody ticked it", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-types": { status: 200, body: TYPES },
-      "/api/agents/agt_1/connections": {
-        status: 201,
-        body: { connection: CONNECTION },
-      },
-    });
-    render(<NewConnectionPage />);
-
-    fireEvent.change(await screen.findByLabelText("Retell agent ID"), {
-      target: { value: "agent_abc" },
-    });
-    fireEvent.change(screen.getByLabelText("Retell API key"), {
-      target: { value: "retell-secret-A1B2C3D4WXYZ" },
-    });
-    fireEvent.click(screen.getByLabelText("Enable monitoring"));
-    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
-
-    await waitFor(() => expect(sent).toHaveLength(1));
-    expect(sent[0]?.body).toEqual({
-      type: "retell",
-      modality: "chat",
-      config: { retellAgentId: "agent_abc" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
-      watch_production: true,
-    });
-  });
-
-  it("draws the credential as a field a shoulder cannot read", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-types": { status: 200, body: TYPES },
-      "/api/agents/agt_1/connections": {
-        status: 201,
-        body: { connection: CONNECTION },
-      },
-    });
-    render(<NewConnectionPage />);
-
-    const field = (await screen.findByLabelText("Retell API key")) as HTMLInputElement;
-    expect(field.type).toBe("password");
-    expect(field.autocomplete).toBe("new-password");
   });
 
   it("says so and offers a retry when egma could not describe the types", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
       "/api/connection-types": [
         {
           status: 500,
@@ -900,7 +1285,7 @@ describe("adding a connection", () => {
     ).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByLabelText("Retell agent ID")).toBeDefined();
+    expect(await screen.findByLabelText("Retell API key")).toBeDefined();
   });
 });
 
@@ -915,213 +1300,193 @@ describe("one connection's page", () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
       "/api/connection-types": { status: 200, body: TYPES },
-      "/api/capabilities": { status: 200, body: CAPABILITIES },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
       "/api/agents/agt_1/connections/con_1": { status: 200, body: { connection } },
       ...extra,
     });
   }
 
-  it("shows that a credential is stored and never anything that could be one", async () => {
+  it("keeps the connection hierarchy present while its reads load", () => {
     answersWith(CONNECTION);
     render(<ConnectionDetailPage />);
 
-    expect(await screen.findByText("Present")).toBeDefined();
-    expect(screen.getByText("WXYZ")).toBeDefined();
-    // Nowhere on this page is there a control that could show a stored secret.
-    expect(screen.queryByLabelText("Retell API key")).toBeNull();
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(breadcrumb).getByRole("link", { name: "Agents" })).toBeTruthy();
+    expect(within(breadcrumb).getByRole("link", { name: "Agent" })).toBeTruthy();
+    expect(within(breadcrumb).getByText("Connection")).toBeTruthy();
   });
 
-  it("replaces a credential whole, and asks for every field of the new one", async () => {
+  it("keeps provider secrets and lifecycle controls out of the page", async () => {
     answersWith(CONNECTION);
     render(<ConnectionDetailPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Rotate credential" }));
-    fireEvent.change(screen.getByLabelText("Retell API key"), {
-      target: { value: "retell-secret-Z9Y8X7W6MNOP" },
+    expect(await screen.findByText("Retell")).toBeDefined();
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(breadcrumb).getByRole("link", { name: "Front desk" }))
+      .toBeTruthy();
+    expect(screen.queryByLabelText("Retell API key")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rotate credential" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+    expect(screen.queryByText("Capabilities")).toBeNull();
+  });
+
+  it("keeps credential copy out of ordinary edits that take no credential", async () => {
+    for (const connection of [
+      {
+        ...CONNECTION,
+        type: "phone",
+        variant_id: "phone.number",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+      },
+      {
+        ...CONNECTION,
+        type: "livekit",
+        variant_id: "livekit.token_endpoint",
+        modality: "voice",
+        config: {
+          url: "wss://example.livekit.cloud",
+          tokenEndpoint: "https://example.test/livekit-token",
+        },
+      },
+    ]) {
+      answersWith(connection);
+      const view = render(<ConnectionDetailPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+      expect(screen.queryByText("A phone connection takes no credential.")).toBeNull();
+      expect(screen.queryByText("Optional auth headers for the endpoint.")).toBeNull();
+
+      view.unmount();
+      cleanup();
+    }
+  });
+
+  it("uses catalog field labels and keeps forward-compatible fields visible", async () => {
+    answersWith({
+      ...CONNECTION,
+      config: {
+        ...CONNECTION.config,
+        undocumentedKey: "kept visible",
+      },
     });
-    const replace = screen.getByRole("button", { name: "Replace credential" });
-    expectSharedFormLayout(replace);
-    fireEvent.click(replace);
+    render(<ConnectionDetailPage />);
+
+    const targetTitle = await screen.findByRole("heading", {
+      name: "Where it points",
+    });
+    const target = targetTitle.closest("section");
+    if (target === null) throw new Error("Where it points should be a section");
+
+    // Known keys use the product language from the connection catalog. A key
+    // from a newer server is still visible by its raw name, so the page loses
+    // no configuration while clients and servers roll forward separately.
+    expect(within(target).getByText("Retell agent ID")).toBeDefined();
+    expect(within(target).queryByText("retellAgentId")).toBeNull();
+    expect(within(target).getByText("undocumentedKey")).toBeDefined();
+  });
+
+  it("saves only the editable display name and target fields", async () => {
+    answersWith(CONNECTION);
+    render(<ConnectionDetailPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Primary Retell connection" },
+    });
+    fireEvent.change(screen.getByLabelText("Retell agent ID"), {
+      target: { value: "agent_moved" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(sent).toHaveLength(1));
-    // No merge and no "leave this as it was": both would mean reading the
-    // stored secret back out.
     expect(sent[0]?.body).toEqual({
-      credentials: { apiKey: "retell-secret-Z9Y8X7W6MNOP" },
+      name: "Primary Retell connection",
+      config: { retellAgentId: "agent_moved" },
       expected_revision: "rev_con_one",
     });
   });
 
-  it("says unknown capabilities are unknown, not unsupported", async () => {
-    answersWith(CONNECTION);
-    render(<ConnectionDetailPage />);
-
-    expect(
-      await screen.findByText("Nobody has measured this target"),
-    ).toBeDefined();
-    // And Refresh is inert for a type egma ships no adapter for, saying why
-    // rather than failing when it is pressed.
-    const refresh = screen.getByRole("button", { name: "Refresh capabilities" });
-    expect((refresh as HTMLButtonElement).disabled).toBe(true);
-    expect(refresh.getAttribute("title")).toContain("no capability adapter");
-  });
-
-  it("names what was measured, and when, and by what", async () => {
-    answersWith({
+  it("edits named and automatic LiveKit dispatch as two explicit modes", async () => {
+    const named = {
       ...CONNECTION,
-      capabilities: {
-        state: "known",
-        measured: ["dtmf"],
-        supported: ["dtmf"],
-        checked_at: "2026-08-15T09:00:00.000Z",
-        source: "retell adapter",
-        standing: {
-          dtmf: "supported",
-          barge_in: "not_measured",
-          raw_audio: "not_measured",
-        },
+      type: "livekit",
+      variant_id: "livekit.key_pair",
+      modality: "voice",
+      config: {
+        url: "wss://example.livekit.cloud",
+        agentName: "front-desk",
       },
-    });
-    render(<ConnectionDetailPage />);
-
-    // The catalog's label rather than the raw key, so a person reads what the
-    // capability is rather than what it is called in the schema.
-    expect(await screen.findByText("DTMF entry")).toBeDefined();
-    expect(screen.getAllByText("2026-08-15").length).toBeGreaterThan(0);
-    expect(screen.getByText("retell adapter")).toBeDefined();
-  });
-
-  it("draws a capability nobody measured apart from one the target lacks", async () => {
-    answersWith({
-      ...CONNECTION,
-      capabilities: {
-        state: "known",
-        measured: ["raw_audio", "dtmf"],
-        supported: ["raw_audio"],
-        checked_at: "2026-08-15T09:00:00.000Z",
-        source: "retell adapter",
-        standing: {
-          raw_audio: "supported",
-          dtmf: "unsupported",
-          barge_in: "not_measured",
-        },
-      },
-    });
-    render(<ConnectionDetailPage />);
-
-    // Three groups, and the third is the one a single list could not draw: the
-    // page must never put a capability nobody checked beside one that was
-    // checked and found missing.
-    await screen.findByText("Not measured");
-
-    const groupOf = (name: string) =>
-      screen.getByText(name).parentElement?.textContent ?? "";
-
-    expect(groupOf("Supported")).toContain("Raw audio");
-    expect(groupOf("Not supported")).toContain("DTMF entry");
-    expect(groupOf("Not measured")).toContain("Barge-in");
-
-    // And it says why the third group exists, in the target's favour.
-    expect(
-      screen.getByText(/does not know either way/),
-    ).toBeDefined();
-  });
-
-  it("warns that changing where a connection points forgets its measurements", async () => {
-    answersWith({
-      ...CONNECTION,
-      capabilities: {
-        state: "known",
-        measured: ["dtmf"],
-        supported: ["dtmf"],
-        checked_at: "2026-08-15T09:00:00.000Z",
-        source: "retell adapter",
-        standing: {
-          dtmf: "supported",
-          barge_in: "not_measured",
-          raw_audio: "not_measured",
-        },
-      },
-    });
+    };
+    answersWith(named);
     render(<ConnectionDetailPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    expectSharedFormLayout(screen.getByRole("button", { name: "Save" }));
-    fireEvent.change(screen.getByLabelText("Retell agent ID"), {
-      target: { value: "agent_moved" },
+    expect((screen.getByLabelText("Dispatch method") as HTMLSelectElement).value)
+      .toBe("named");
+    expect((screen.getByLabelText("LiveKit agent name") as HTMLInputElement).value)
+      .toBe("front-desk");
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "automatic" },
+    });
+    expect(screen.queryByLabelText("LiveKit agent name")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
+      name: "staging",
+      config: { url: "wss://example.livekit.cloud" },
+      expected_revision: "rev_con_one",
     });
 
+    cleanup();
+    const automatic = {
+      ...named,
+      config: { url: "wss://example.livekit.cloud" },
+    };
+    answersWith(automatic);
+    render(<ConnectionDetailPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect((screen.getByLabelText("Dispatch method") as HTMLSelectElement).value)
+      .toBe("automatic");
+    expect(screen.queryByLabelText("LiveKit agent name")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "named" },
+    });
+    const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(save.title).toContain("exact LiveKit agent name");
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "automatic" },
+    });
     expect(
-      await screen.findByText(
-        /Changing where this connection points makes its capabilities unknown/,
-      ),
-    ).toBeDefined();
-  });
-
-  it("asks a Restore for a new credential when the shape requires one", async () => {
-    answersWith({ ...CONNECTION, archived: true, credential_present: false }, "member", {
-      "/api/agents/agt_1/connections/con_1/restore": {
-        status: 200,
-        body: { connection: { ...CONNECTION, credentials_hint: "ABCD" } },
-      },
+      (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.change(screen.getByLabelText("Dispatch method"), {
+      target: { value: "named" },
     });
-    render(<ConnectionDetailPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
-    fireEvent.change(screen.getByLabelText("Retell API key"), {
-      target: { value: "retell-secret-NEW1NEW2ABCD" },
+    fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
+      target: { value: "customer-support" },
     });
-    const restore = screen.getByRole("button", { name: "Restore connection" });
-    expectSharedFormLayout(restore);
-    fireEvent.click(restore);
+    const enabledSave = screen.getByRole("button", {
+      name: "Save",
+    }) as HTMLButtonElement;
+    expect(enabledSave.disabled).toBe(false);
+    fireEvent.click(enabledSave);
 
     await waitFor(() => expect(sent).toHaveLength(1));
-    expect(sent[0]?.url).toBe(
-      "/api/agents/agt_1/connections/con_1/restore?project=prj_1",
-    );
-    // Replace, explicitly. Nothing about this path could reuse what was sealed.
-    expect(sent[0]?.body.credential).toEqual({
-      choice: "replace",
-      credentials: { apiKey: "retell-secret-NEW1NEW2ABCD" },
-    });
-  });
-
-  it("asks a Restore for nothing at all when the shape takes no credential", async () => {
-    routed.params = { ...routed.params, connectionId: "con_2" };
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-types": { status: 200, body: TYPES },
-      "/api/capabilities": { status: 200, body: CAPABILITIES },
-      "/api/agents/agt_1/connections/con_2/restore": {
-        status: 200,
-        body: { connection: { ...CONNECTION, id: "con_2" } },
+    expect(sent[0]?.body).toEqual({
+      name: "staging",
+      config: {
+        url: "wss://example.livekit.cloud",
+        agentName: "customer-support",
       },
-      "/api/agents/agt_1/connections/con_2": {
-        status: 200,
-        body: {
-          connection: {
-            ...CONNECTION,
-            id: "con_2",
-            name: "hotline",
-            type: "phone",
-            variant_id: "phone.number",
-            modality: "voice",
-            config: { phoneNumber: "+15551234567" },
-            credential_present: false,
-            credentials_hint: null,
-            archived: true,
-          },
-        },
-      },
+      expected_revision: "rev_con_one",
     });
-    render(<ConnectionDetailPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
-    expect(screen.queryByLabelText("Retell API key")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Restore connection" }));
-
-    await waitFor(() => expect(sent).toHaveLength(1));
-    expect(Object.keys(sent[0]?.body ?? {})).not.toContain("credential");
   });
 
   it("says so when it could not describe the type, and offers a retry", async () => {
@@ -1134,7 +1499,6 @@ describe("one connection's page", () => {
         },
         { status: 200, body: TYPES },
       ],
-      "/api/capabilities": { status: 200, body: CAPABILITIES },
       "/api/agents/agt_1/connections/con_1": {
         status: 200,
         body: { connection: CONNECTION },
@@ -1143,7 +1507,7 @@ describe("one connection's page", () => {
     render(<ConnectionDetailPage />);
 
     expect(
-      await screen.findByText("Egma could not describe this connection's type."),
+      await screen.findByText("Egma could not describe this connection."),
     ).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -1154,48 +1518,28 @@ describe("one connection's page", () => {
     );
   });
 
-  it("never leaves a control that opens nothing when the type is unknown", async () => {
+  it("does not open an editor when the type catalog is unavailable", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/api/connection-types": {
         status: 500,
         body: { error: "unreadable_answer", message: "Egma could not answer." },
       },
-      "/api/capabilities": { status: 200, body: CAPABILITIES },
       "/api/agents/agt_1/connections/con_1": {
         status: 200,
-        body: { connection: { ...CONNECTION, archived: true } },
+        body: { connection: CONNECTION },
       },
     });
     render(<ConnectionDetailPage />);
 
-    // Edit and Restore are drawn from the shape, so without it they cannot be
-    // opened. Enabled-but-inert is the state this must never be in: a control
-    // that answers a click with nothing tells somebody the product is broken
-    // and gives them nothing to do about it.
     const edit = (await screen.findByRole("button", {
       name: "Edit",
     })) as HTMLButtonElement;
-    const restore = screen.getByRole("button", {
-      name: "Restore",
-    }) as HTMLButtonElement;
-
     expect(edit.disabled).toBe(true);
-    expect(restore.disabled).toBe(true);
-    for (const control of [edit, restore]) {
-      expect(control.getAttribute("title")).toContain("could not describe");
-    }
+    expect(edit.getAttribute("title")).toContain("could not describe");
 
     fireEvent.click(edit);
-    fireEvent.click(restore);
     expect(screen.queryByRole("dialog")).toBeNull();
-
-    // Rotate says why as well, rather than being greyed out in silence.
-    expect(
-      screen
-        .getByRole("button", { name: "Rotate credential" })
-        .getAttribute("title"),
-    ).toContain("could not describe");
   });
 
   it("sends an expired session to sign-in rather than showing a broken page", async () => {
@@ -1204,7 +1548,6 @@ describe("one connection's page", () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/api/connection-types": { status: 401, body: {} },
-      "/api/capabilities": { status: 200, body: CAPABILITIES },
       "/api/agents/agt_1/connections/con_1": {
         status: 200,
         body: { connection: CONNECTION },
@@ -1215,38 +1558,4 @@ describe("one connection's page", () => {
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/sign-in"));
   });
 
-  it("shows egma's refusal when a Restore is turned away", async () => {
-    answersWith(
-      { ...CONNECTION, archived: true },
-      "member",
-      {
-        "/api/agents/agt_1/connections/con_1/restore": {
-          status: 409,
-          body: {
-            error: "parent_agent_archived",
-            message:
-              "Connection con_1 cannot be restored while agent agt_1 is archived. Restore the agent first, then restore this connection.",
-          },
-        },
-      },
-    );
-    render(<ConnectionDetailPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
-    fireEvent.change(screen.getByLabelText("Retell API key"), {
-      target: { value: "retell-secret-NEW1NEW2ABCD" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Restore connection" }));
-
-    // Never silent: the refusal's own sentence names the next move, and the
-    // dialog stays open with what was typed still in it.
-    expect(
-      await screen.findByText(
-        "Connection con_1 cannot be restored while agent agt_1 is archived. Restore the agent first, then restore this connection.",
-      ),
-    ).toBeDefined();
-    expect(
-      (screen.getByLabelText("Retell API key") as HTMLInputElement).value,
-    ).toBe("retell-secret-NEW1NEW2ABCD");
-  });
 });

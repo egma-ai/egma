@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useCallback,
   useEffect,
@@ -269,9 +270,9 @@ export function MenuItem({
 
   if (href !== undefined) {
     return (
-      <a {...shared} href={href} onClick={onClick}>
+      <Link {...shared} href={href} onClick={onClick}>
         {children}
-      </a>
+      </Link>
     );
   }
 

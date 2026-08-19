@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { writeJson, type Refusal } from "../../lib/api.ts";
@@ -25,6 +26,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../ui/shell.tsx";
+import { useUnsavedChanges } from "../../ui/settings-read.ts";
 
 /**
  * Where a project comes from.
@@ -63,7 +65,13 @@ export default function NewProjectPage() {
 }
 
 function NewProject() {
-  const { me, settled } = useShellSession();
+  const router = useRouter();
+  const {
+    me,
+    settled,
+    refresh: refreshSession,
+    includeProject,
+  } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const mayAdminister = role === "admin";
 
@@ -71,6 +79,8 @@ function NewProject() {
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
+
+  useUnsavedChanges((name !== "" || description !== "") && !creating, creating);
 
   const named = name.trim() !== "";
 
@@ -97,7 +107,9 @@ function NewProject() {
     // Straight into the new project, at the landing every project has. It is
     // usable from this moment: it has a default persona and, where the
     // deployment has one, a judge.
-    window.location.assign(projectLanding(written.value.id));
+    includeProject(written.value);
+    await refreshSession();
+    router.push(projectLanding(written.value.id));
   }
 
   return (

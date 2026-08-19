@@ -272,6 +272,15 @@ describe("the list", () => {
     const activeIds = (active.body.items as WirePersona[]).map((one) => one.id);
     expect(activeIds).not.toContain(second.id);
 
+    const searched = await browse(
+      "GET",
+      `/api/personas?project=${ada.projectId}&search=O`,
+      ada,
+    );
+    expect(
+      (searched.body.items as WirePersona[]).map((one) => one.name),
+    ).toEqual(["Four", "One"]);
+
     const archive = await browse(
       "GET",
       `/api/personas?project=${ada.projectId}&archived=true`,

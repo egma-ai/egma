@@ -30,7 +30,6 @@ import {
   recentWindow,
   transcriptPath,
   watchesProduction,
-  whenItWas,
   WINDOW_PARAMETER,
   windowChoiceOf,
   type Listed,
@@ -38,12 +37,16 @@ import {
   type Quiet,
 } from "../../../../../lib/transcripts.ts";
 import { ButtonLink, Select } from "../../../../../ui/controls.tsx";
+import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import {
   ExportSetUp,
   useDeploymentOrigin,
 } from "../../../../../ui/export-setup.tsx";
-import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
+import {
+  RelativeInstant,
+  useMinuteClock,
+} from "../../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { settingsPath } from "../../../../../ui/settings-nav.tsx";
 import { useOrganizationRead } from "../../../../../ui/settings-read.ts";
@@ -110,6 +113,7 @@ export default function MonitoringTranscriptsPage() {
 }
 
 function Transcripts({ projectId }: { readonly projectId: string }) {
+  const now = useMinuteClock();
   /**
    * Which window this page is on, read out of the address.
    *
@@ -420,7 +424,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
         {state.status === "loaded" && state.rows.length > 0 ? (
           <DataTable
             label={LIST.tableLabel}
-            columns={columnsFor(projectId)}
+            columns={columnsFor(projectId, now)}
             rows={state.rows}
             keyOf={(row) => row.trace_id}
             stretchPrimaryLink
@@ -492,13 +496,17 @@ function Nothing() {
  * endpoint under it requires both, and this row already knows the answers, so
  * nobody has to.
  */
-function columnsFor(projectId: string): readonly Column<Listed>[] {
+function columnsFor(projectId: string, now: number): readonly Column<Listed>[] {
   const order: readonly (readonly [string, (row: Listed) => ReactNode])[] = [
     [
       COLUMNS.started,
       (row) => (
         <Link href={transcriptPath(projectId, row)}>
-          {whenItWas(row.started_at)}
+          <RelativeInstant
+            instant={row.started_at}
+            now={now}
+            precision="second"
+          />
         </Link>
       ),
     ],

@@ -1,14 +1,14 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 import { projectsMatching, type Organization, type Project } from "../lib/me.ts";
 import { inProject } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
 import { TextInput } from "./controls.tsx";
+import { useDraftNavigation } from "./draft-navigation.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
-import { confirmUnsavedNavigation } from "./settings-read.ts";
 import styles from "./system.module.css";
 
 /**
@@ -47,7 +47,7 @@ export function ProjectSelector({
   /** The mobile top bar, where the control shares a row with everything else. */
   readonly compact?: boolean;
 }) {
-  const router = useRouter();
+  const draftNavigation = useDraftNavigation();
   const pathname = usePathname();
   const [query, setQuery] = useState("");
 
@@ -76,10 +76,15 @@ export function ProjectSelector({
       setQuery("");
       return;
     }
-    if (!confirmUnsavedNavigation()) return;
+    const active = document.activeElement;
+    const selectorTrigger = active instanceof HTMLElement
+      ? active
+        .closest<HTMLElement>(`.${styles.menu}`)
+        ?.querySelector<HTMLButtonElement>("button[aria-haspopup]") ?? null
+      : null;
     close();
     setQuery("");
-    router.push(inProject(pathname, project.id));
+    draftNavigation.push(inProject(pathname, project.id), selectorTrigger);
   }
 
   return (

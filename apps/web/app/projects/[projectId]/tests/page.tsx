@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from "react";
 
 import { readJson, type Refusal } from "../../../../lib/api.ts";
 import { agentsQuery, type AgentPage } from "../../../../lib/agents.ts";
-import { asDay } from "../../../../lib/instants.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
@@ -27,6 +26,10 @@ import {
 } from "../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
+import {
+  RelativeInstant,
+  useMinuteClock,
+} from "../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import {
   AppShell,
@@ -90,7 +93,10 @@ function Applies({ test }: { readonly test: ListedTest }) {
  * also gives pointer users the whole row because every row has one clear
  * destination and no competing action.
  */
-function columnsFor(projectId: string): readonly Column<ListedTest>[] {
+function columnsFor(
+  projectId: string,
+  now: number,
+): readonly Column<ListedTest>[] {
   return [
     {
       key: "name",
@@ -100,56 +106,59 @@ function columnsFor(projectId: string): readonly Column<ListedTest>[] {
         <Link href={projectPath(projectId, "tests", test.id)}>{test.name}</Link>
       ),
     },
-    ...REST,
+    ...restFor(now),
   ];
 }
 
-const REST: readonly Column<ListedTest>[] = [
-  {
-    key: "agents",
-    header: "Applies to",
-    width: "160px",
-    cell: (test) => <Applies test={test} />,
-  },
-  {
-    key: "behaviors",
-    header: "Expects",
-    hideOnMobile: true,
-    width: "100px",
-    cell: (test) =>
-      `${String(test.expected_behaviors.length)} ${
-        test.expected_behaviors.length === 1 ? "behavior" : "behaviors"
-      }`,
-  },
-  {
-    key: "personas",
-    header: "Personas",
-    hideOnMobile: true,
-    width: "110px",
-    cell: (test) => test.personas.map((one) => one.name).join(", "),
-  },
-  {
-    key: "version",
-    header: "Version",
-    hideOnMobile: true,
-    mono: true,
-    width: "90px",
-    cell: (test) => `v${test.version}`,
-  },
-  {
-    key: "changed",
-    header: "Changed",
-    mono: true,
-    width: "120px",
-    cell: (test) => asDay(test.updated_at),
-  },
-];
+function restFor(now: number): readonly Column<ListedTest>[] {
+  return [
+    {
+      key: "agents",
+      header: "Applies to",
+      width: "160px",
+      cell: (test) => <Applies test={test} />,
+    },
+    {
+      key: "behaviors",
+      header: "Expects",
+      hideOnMobile: true,
+      width: "100px",
+      cell: (test) =>
+        `${String(test.expected_behaviors.length)} ${
+          test.expected_behaviors.length === 1 ? "behavior" : "behaviors"
+        }`,
+    },
+    {
+      key: "personas",
+      header: "Personas",
+      hideOnMobile: true,
+      width: "110px",
+      cell: (test) => test.personas.map((one) => one.name).join(", "),
+    },
+    {
+      key: "version",
+      header: "Version",
+      hideOnMobile: true,
+      mono: true,
+      width: "90px",
+      cell: (test) => `v${test.version}`,
+    },
+    {
+      key: "changed",
+      header: "Changed",
+      mono: true,
+      width: "120px",
+      cell: (test) => <RelativeInstant instant={test.updated_at} now={now} />,
+    },
+  ];
+}
 
 function Tests({ projectId }: { readonly projectId: string }) {
   const { me } = useShellSession();
   // Null until the session read answers. A page that guessed would tell a
   // member their role cannot do something it can, on every load.
   const role = me === null ? null : roleOf(me);
+  const now = useMinuteClock();
 
   /** Which shelf is being looked at: what can run, or what was taken out. */
   const [archived, setArchived] = useState(false);
@@ -340,7 +349,7 @@ function Tests({ projectId }: { readonly projectId: string }) {
       <>
         <DataTable
           label={archived ? "Archived tests" : "Tests in this project"}
-          columns={columnsFor(projectId)}
+          columns={columnsFor(projectId, now)}
           rows={items}
           keyOf={(test) => test.id}
           stretchPrimaryLink

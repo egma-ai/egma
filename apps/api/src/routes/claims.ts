@@ -6,6 +6,8 @@ import {
   getPersonaVersion,
   getRun,
   getSimulationTestVersion,
+  markSimulationCanceled,
+  releaseSimulationClaim,
   resolveMockTools,
   resolvePlatformSettings,
   resolveSimulationConnection,
@@ -18,6 +20,10 @@ import type { FastifyInstance } from "fastify";
 
 import { acceptsServiceToken } from "../auth/service-token.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
+import {
+  verifyRetellDirectChatAgent,
+  type RetellDirectTargetCheck,
+} from "../providers/retell.ts";
 
 /**
  * The claim door: `POST /v1/claims`, where the simulator asks for work.
@@ -74,6 +80,8 @@ import { invalid, notTheService } from "../http/refusals.ts";
 export type ClaimRoutesOptions = {
   /** The deployment's service token, from configuration. */
   readonly serviceToken: string;
+  /** Test seam for Retell's read-only dispatch preflight. */
+  readonly retellFetch?: typeof fetch | undefined;
 };
 
 export const CLAIMS_PATH = "/v1/claims";
@@ -90,6 +98,9 @@ const DEFAULT_HOLD_SECONDS = 15;
 
 /** How often a held claim re-asks the queue. The "about a second" promise. */
 const RECHECK_MILLISECONDS = 1_000;
+
+/** Hard wall for queue wait, provider checks, assembly, and the response. */
+const CLAIM_RESPONSE_MILLISECONDS = 28_000;
 
 /**
  * The most simulations one claim may take, mirrored from the module's own
@@ -282,7 +293,14 @@ async function assembledSpec(
    * deployment — two claims naming one run are two conversations of it.
    */
   runs: Map<string, Run | undefined>,
-): Promise<Record<string, unknown> | { readonly unbuildable: string }> {
+  retellTargets: Map<string, Promise<RetellDirectTargetCheck>>,
+  retellFetch?: typeof fetch,
+  responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
+): Promise<
+  | Record<string, unknown>
+  | { readonly unbuildable: string }
+  | { readonly retryable: string }
+> {
   const personaVersion = await getPersonaVersion(
     claim.auth,
     claim.personaVersionId,
@@ -301,6 +319,28 @@ async function assembledSpec(
     return {
       unbuildable: "its connection is gone or its credentials would not unseal",
     };
+  }
+
+  if (connection.type === "retell") {
+    const apiKey = connection.credentials?.["apiKey"] ?? "";
+    const agentId = connection.config["retellAgentId"] ?? "";
+    let checked = retellTargets.get(connection.connectionId);
+    if (checked === undefined) {
+      checked = verifyRetellDirectChatAgent(
+        apiKey,
+        agentId,
+        retellFetch,
+        Math.max(1, responseDeadline - Date.now() - 500),
+      );
+      retellTargets.set(connection.connectionId, checked);
+    }
+    const target = await checked;
+    if (target.kind === "blocked") {
+      return { unbuildable: target.message };
+    }
+    if (target.kind === "retryable") {
+      return { retryable: target.message };
+    }
   }
 
   // Read for **each** simulation and never cached, which is the whole point
@@ -415,13 +455,16 @@ export async function claimRoutes(
     socket.once("close", clientLeft);
 
     try {
-      const deadline = Date.now() + ask.holdSeconds * 1_000;
+      const responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS;
+      const holdDeadline = Date.now() + ask.holdSeconds * 1_000;
       let claims = await claimSimulations({
         claimant: ask.claimant,
         capacity: ask.capacity,
       });
-      while (claims.length === 0 && !gone && Date.now() < deadline) {
-        await sleep(Math.min(RECHECK_MILLISECONDS, deadline - Date.now()));
+      while (claims.length === 0 && !gone && Date.now() < holdDeadline) {
+        await sleep(
+          Math.min(RECHECK_MILLISECONDS, holdDeadline - Date.now()),
+        );
         if (gone) break;
         claims = await claimSimulations({
           claimant: ask.claimant,
@@ -433,18 +476,76 @@ export async function claimRoutes(
       // One read of each run, however many of its conversations this batch
       // took. Lives exactly as long as this response.
       const runs = new Map<string, Run | undefined>();
-      for (const claim of claims) {
+      const retellTargets = new Map<
+        string,
+        Promise<RetellDirectTargetCheck>
+      >();
+      // Every spec, and every unique Retell check cached inside them, starts
+      // together. A batch of fifty must not spend one provider timeout fifty
+      // times or break the route's sub-30-second response promise.
+      const assembled = await Promise.all(
+        claims.map((claim) =>
+          assembledSpec(
+            claim,
+            runs,
+            retellTargets,
+            options.retellFetch,
+            responseDeadline,
+          ).catch(
+            (
+              fault: unknown,
+            ): { readonly unbuildable: string } => ({
+              unbuildable:
+                fault instanceof Error ? fault.message : String(fault),
+            }),
+          ),
+        ),
+      );
+      for (const [index, claim] of claims.entries()) {
         // A row whose stored shapes will not open — a sealed envelope that no
         // longer decrypts, a column holding something egma never writes —
         // throws from the reads rather than answering empty. Caught here,
         // because that too is one row's fault and never the batch's: an
         // escape would abort the whole response and withhold every valid
         // claim beside it from a simulator standing ready to conduct them.
-        const spec = await assembledSpec(claim, runs).catch(
-          (fault: unknown): { readonly unbuildable: string } => ({
-            unbuildable: fault instanceof Error ? fault.message : String(fault),
-          }),
-        );
+        const spec = assembled[index];
+        if (spec === undefined) continue;
+        if ("retryable" in spec) {
+          const retryable = String(spec.retryable);
+          // A provider outage says nothing about the customer or their agent.
+          // Give this lease back instead of minting a terminal error; a later
+          // claim repeats the bounded check.
+          request.log.warn(
+            { simulationId: claim.id, runId: claim.runId },
+            retryable,
+          );
+          const released = await releaseSimulationClaim(
+            claim.auth,
+            claim.id,
+            claim.claimedBy,
+          );
+          if (!released) {
+            // A cancel can land while the provider check is in flight. In
+            // that race the release correctly refuses to put canceled work
+            // back in the queue, but no simulator received the work and none
+            // will arrive later to honor the cancel. Land it here through the
+            // same guarded cancellation door the simulator uses. If the row
+            // moved for another reason, that door also refuses and the log is
+            // the orphan sweep's honest last-chance signal.
+            const canceled = await markSimulationCanceled(
+              claim.auth,
+              claim.id,
+              claim.claimedBy,
+            );
+            if (canceled === undefined) {
+              request.log.error(
+                { simulationId: claim.id, runId: claim.runId },
+                `simulation ${claim.id} could neither release nor land its canceled transient provider preflight`,
+              );
+            }
+          }
+          continue;
+        }
         if ("unbuildable" in spec) {
           // Fail loudly on this side and keep dispatching the rest: one
           // corrupt row must not hold up the batch, and the simulator is

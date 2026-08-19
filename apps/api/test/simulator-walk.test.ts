@@ -84,6 +84,33 @@ const COUNTERPART_KEY = "retell-secret-A1B2C3D4WXYZ";
 const REFUSED_KEY = "retell-secret-NOBODY0000000";
 
 /**
+ * Retell's dispatch preflight sees the target as a direct chat agent.
+ *
+ * The second exchange still proves an execution-time refusal: its credential
+ * passes this read, then the conversation endpoint refuses it, as can happen
+ * when a provider credential is revoked between preflight and dispatch.
+ */
+const RETELL_CHAT_PREFLIGHT: typeof fetch = async (input) => {
+  const url = String(input);
+  if (!url.includes("/v2/list-agents")) {
+    throw new Error(`unexpected Retell preflight read: ${url}`);
+  }
+  return new Response(
+    JSON.stringify({
+      items: [
+        {
+          agent_id: "agent_under_walk",
+          agent_name: "Front desk",
+          channel: "chat",
+        },
+      ],
+      has_more: false,
+    }),
+    { status: 200 },
+  );
+};
+
+/**
  * The Retell plug gives one platform request 60 seconds. Node otherwise closes
  * an idle pooled socket after 5 seconds, so a worker paused under suite load
  * can wake up holding a stale connection before its next POST. Keep the test
@@ -476,7 +503,11 @@ beforeAll(async () => {
   await counterpart.start();
   // The trace store gets its schema here, because this walk reads the
   // conversation back out of it rather than only off the row.
-  instance = await startInstance("simulator_walk", { web: false, traces: true });
+  instance = await startInstance("simulator_walk", {
+    web: false,
+    traces: true,
+    retellFetch: RETELL_CHAT_PREFLIGHT,
+  });
 }, 120_000);
 
 afterAll(async () => {

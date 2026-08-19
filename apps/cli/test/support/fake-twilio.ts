@@ -21,6 +21,7 @@ export type FakeTwilioOptions = {
   /** A trunk already on the account, as a previous setup would have left it. */
   readonly existingTrunk?: { readonly sid: string; readonly domain: string };
   readonly existingCredentialList?: { readonly sid: string };
+  readonly existingCredential?: { readonly sid: string; readonly username: string };
   /** Whether the existing trunk already has the credential list on it. */
   readonly credentialListAttached?: boolean;
   /** Whether the existing trunk already has the source number on it. */
@@ -75,6 +76,13 @@ export async function startFakeTwilio(options: FakeTwilioOptions): Promise<FakeT
       listsOnTrunk.push({
         trunkSid: options.existingTrunk.sid,
         sid: options.existingCredentialList.sid,
+      });
+    }
+    if (options.existingCredential !== undefined) {
+      credentials.push({
+        sid: options.existingCredential.sid,
+        username: options.existingCredential.username,
+        listSid: options.existingCredentialList.sid,
       });
     }
   }

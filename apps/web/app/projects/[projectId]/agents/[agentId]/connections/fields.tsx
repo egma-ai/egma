@@ -1,9 +1,10 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import {
   Field,
   Help,
-  Problem,
   TextArea,
   TextInput,
 } from "../../../../../../ui/controls.tsx";
@@ -112,6 +113,7 @@ export function ConnectionFields({
   draft,
   onChange,
   credentialsEditable,
+  beforeCredentialFields,
 }: {
   readonly variant: ConnectionVariant;
   readonly draft: Draft;
@@ -126,15 +128,23 @@ export function ConnectionFields({
    * connection has no credential", which for most shapes is false.
    */
   readonly credentialsEditable: boolean;
+  /** Provider-specific setup that belongs after target fields and before secrets. */
+  readonly beforeCredentialFields?: ReactNode;
 }) {
   const setConfig = (key: string, value: string) =>
     onChange({ ...draft, config: { ...draft.config, [key]: value } });
   const setCredential = (field: string, value: string) =>
     onChange({ ...draft, credentials: { ...draft.credentials, [field]: value } });
+  const targetFields = variant.fields.filter(
+    (field) => field.after_credentials !== true,
+  );
+  const afterCredentials = variant.fields.filter(
+    (field) => field.after_credentials === true,
+  );
 
   return (
     <>
-      {variant.fields.map((field) => (
+      {targetFields.map((field) => (
         <ConfigControl
           key={field.key}
           field={field}
@@ -143,9 +153,9 @@ export function ConnectionFields({
         />
       ))}
 
-      {variant.credential_rule === "forbidden" ? (
-        <Help>{variant.credential_help}</Help>
-      ) : credentialsEditable ? (
+      {beforeCredentialFields}
+
+      {credentialsEditable && variant.credential_rule !== "forbidden" ? (
         <>
           <Help>{variant.credential_help}</Help>
           {variant.credential_fields.map((field) => (
@@ -156,14 +166,17 @@ export function ConnectionFields({
               onChange={(value) => setCredential(field.field, value)}
             />
           ))}
-          {variant.credential_rule === "optional" ? (
-            <Problem>
-              This shape works with or without a credential. Leave the fields
-              empty to store none.
-            </Problem>
-          ) : null}
         </>
       ) : null}
+
+      {afterCredentials.map((field) => (
+        <ConfigControl
+          key={field.key}
+          field={field}
+          value={draft.config[field.key] ?? ""}
+          onChange={(value) => setConfig(field.key, value)}
+        />
+      ))}
     </>
   );
 }

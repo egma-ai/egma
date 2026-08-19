@@ -12,19 +12,26 @@ import {
   type SimulationFold,
 } from "../verdicts/read-fold.ts";
 import type { AuthContext } from "./context.ts";
-import { refuseRetry } from "./errors.ts";
+import {
+  refuseRetry,
+  SimulationRerunRefusedError,
+} from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { LARGEST_PAGE_SIZE, type PageRequest } from "./pages.ts";
 import { testsApplyingToAgent } from "./tests.ts";
 import {
   getRun,
+  getSimulation,
   listRuns,
   runAlreadyStartedFor,
+  runAlreadyStartedForSimulation,
   simulationStatusesOfRuns,
   startRun,
+  startRunForSimulation,
   type NewRun,
   type Run,
   type RunFilter,
+  type SingleSimulationSelection,
   type StartedRun,
 } from "./runs.ts";
 import { readVerdictsAcrossRuns } from "./verdicts.ts";
@@ -223,6 +230,144 @@ export type RetryRequest = {
    */
   readonly idempotencyKey: string;
 };
+
+export type SimulationRerunRequest = {
+  /** A new run is a new record and needs its own readable name. */
+  readonly label: string;
+  /** Prevents a repeated request from conducting the simulation twice. */
+  readonly idempotencyKey: string;
+};
+
+type PreparedSimulationRerun = {
+  readonly start: NewRun;
+  readonly selection: SingleSimulationSelection;
+};
+
+/**
+ * The immutable source facts shared by recall and the first write.
+ *
+ * Keeping this derivation in one place matters: idempotency compares a digest
+ * of this exact start and selection. If recall rebuilt either one differently,
+ * the same request could miss its first run and conduct a second conversation.
+ */
+async function prepareSimulationRerun(
+  auth: AuthContext,
+  simulationId: string,
+  request: SimulationRerunRequest,
+): Promise<PreparedSimulationRerun | undefined> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+
+  const source = await getSimulation(auth, simulationId);
+  if (source === undefined) return undefined;
+  const earlier = await getRun(auth, source.runId);
+  if (earlier === undefined) return undefined;
+  if (
+    source.status !== "completed" &&
+    source.status !== "failed" &&
+    source.status !== "canceled" &&
+    source.status !== "skipped"
+  ) {
+    throw new SimulationRerunRefusedError(
+      simulationId,
+      "not_terminal",
+      `This simulation is still ${source.status}, so it cannot run again yet. ` +
+        `Wait for it to finish or cancel its run; the source simulation was ` +
+        `not changed.`,
+    );
+  }
+  if (source.testId === null || source.testVersionId === null) {
+    throw new SimulationRerunRefusedError(
+      simulationId,
+      "legacy",
+      `This simulation does not record the test version it ran, so Egma ` +
+        `cannot build the same simulation again. Start a new run from the ` +
+        `test; the source simulation was not changed.`,
+    );
+  }
+
+  const label = request.label.trim();
+  if (label === "") {
+    throw new SimulationRerunRefusedError(
+      simulationId,
+      "name_required",
+      `A new run needs a name. Enter a run name and try again; the source ` +
+        `simulation was not changed.`,
+    );
+  }
+  const idempotencyKey = request.idempotencyKey.trim();
+  if (idempotencyKey === "") {
+    throw new SimulationRerunRefusedError(
+      simulationId,
+      "idempotency_key_required",
+      `Running this simulation again requires an idempotency key. Send one ` +
+        `stable key for this action; the source simulation was not changed.`,
+    );
+  }
+
+  return {
+    start: {
+      agentId: earlier.agentId,
+      connectionId: earlier.connectionId,
+      testVersionIds: [source.testVersionId],
+      label,
+      retryOfRunId: earlier.id,
+      idempotencyKey,
+    },
+    selection: {
+      sourceSimulationId: source.id,
+      testVersionId: source.testVersionId,
+      personaId: source.personaId,
+    },
+  };
+}
+
+/**
+ * Return the run this exact simulation-rerun request already created.
+ *
+ * This read exists for a product door that has mutable safety checks before a
+ * first write. A repeated key must answer the run that already passed those
+ * checks, even if deployment readiness changed afterwards. When nothing is
+ * remembered, this writes nothing and the caller must still perform every
+ * readiness check before calling `rerunSimulation`.
+ */
+export async function simulationRerunAlreadyStarted(
+  auth: AuthContext,
+  simulationId: string,
+  request: SimulationRerunRequest,
+): Promise<StartedRun | undefined> {
+  const prepared = await prepareSimulationRerun(auth, simulationId, request);
+  if (prepared === undefined) return undefined;
+  return runAlreadyStartedForSimulation(
+    auth,
+    prepared.start,
+    prepared.selection,
+  );
+}
+
+/**
+ * Run one stored simulation again as one new run under today's conditions.
+ *
+ * The client names only the source simulation, a new label, and an idempotency
+ * key. The agent, connection, exact test version, and persona identity all
+ * come from the stored source. `startRunForSimulation` then resolves the
+ * persona's current version, the connection's current configuration, today's
+ * graders, and today's mock tools while keeping the new run to exactly this
+ * one test-and-persona pair.
+ */
+export async function rerunSimulation(
+  auth: AuthContext,
+  simulationId: string,
+  request: SimulationRerunRequest,
+): Promise<StartedRun | undefined> {
+  const prepared = await prepareSimulationRerun(auth, simulationId, request);
+  if (prepared === undefined) return undefined;
+
+  return startRunForSimulation(
+    auth,
+    prepared.start,
+    prepared.selection,
+  );
+}
 
 /**
  * A new run derived from an earlier one, under today's conditions.

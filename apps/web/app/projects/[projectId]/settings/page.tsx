@@ -14,7 +14,6 @@ import {
   Field,
   Form,
   FormActions,
-  FormRow,
   Help,
   Problem,
   Refused,
@@ -37,8 +36,7 @@ import {
 } from "../../../../ui/shell.tsx";
 
 /**
- * What this project is called, what it is for, and the word it is known by in
- * an address.
+ * What this project is called and what it is for.
  *
  * **The three live fields of one project, and nothing about the organization.**
  * That separation is the whole shape of this Settings area: what is here
@@ -66,7 +64,7 @@ export default function ProjectSettingsPage() {
 }
 
 function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
-  const { me } = useShellSession();
+  const { me, refresh: refreshSession } = useShellSession();
   // Null until the session read answers. An unsettled session is neither an
   // admin nor a viewer, and claiming either would be a guess shown as a fact.
   const role = me === null ? null : roleOf(me);
@@ -94,7 +92,6 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   const mayAdminister = settled?.may_manage_projects ?? false;
 
   const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -130,7 +127,6 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
     }
 
     setName(settled.name);
-    setSlug(settled.slug);
     setDescription(settled.description ?? "");
   }, [projectId, settled]);
 
@@ -138,11 +134,10 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
   }, [answer]);
 
-  const named = name.trim() !== "" && slug.trim() !== "";
+  const named = name.trim() !== "";
   const changed =
     settled !== null &&
     (name.trim() !== settled.name ||
-      slug.trim() !== settled.slug ||
       description.trim() !== (settled.description ?? ""));
   const confirming = confirmingSave.current;
   const changedWhileConfirming =
@@ -164,7 +159,11 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
         method: "PATCH",
         body: {
           name: name.trim(),
-          slug: slug.trim(),
+          // The slug remains part of the server contract and existing links.
+          // It is not an authoring choice on this screen, so every save sends
+          // back the exact value that was read instead of inventing or clearing
+          // one from hidden form state.
+          slug: settled.slug,
           description: description.trim(),
           expected_revision: settled.revision,
         },
@@ -189,12 +188,13 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
     };
     setConfirmingRead(true);
     setSaved(editVersion.current === submittedEditVersion);
+    refreshSession();
     reload();
   }
 
   if (answer === null) {
     return (
-      <ProductPage>
+      <ProductPage viewport>
         <PageHeader eyebrow="Settings" title="Project" />
         <PageBody>
           <SettingsLayout projectId={projectId} current="project">
@@ -207,7 +207,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
 
   if (answer.status !== "ready") {
     return (
-      <ProductPage>
+      <ProductPage viewport>
         <PageHeader eyebrow="Settings" title="Project" />
         <PageBody>
           <SettingsLayout projectId={projectId} current="project">
@@ -230,7 +230,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   }
 
   return (
-    <ProductPage>
+    <ProductPage viewport>
       <PageHeader
         eyebrow="Settings"
         title="Project"
@@ -238,10 +238,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="project">
-          <Section
-            title="Details"
-            lead="Renaming this project or changing its slug does not break existing links."
-          >
+          <Section title="Details">
             {refused === null ? null : (
               <Refused
                 message={refused.message}
@@ -254,38 +251,19 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
             )}
 
             <Form onSubmit={() => void save()}>
-              <FormRow>
-                <Field label="Name" htmlFor="project-name">
-                  <TextInput
-                    id="project-name"
-                    value={name}
-                    disabled={!mayAdminister}
-                    invalid={name.trim() === ""}
-                    onChange={(next) => {
-                      editVersion.current += 1;
-                      setName(next);
-                      setSaved(false);
-                    }}
-                  />
-                </Field>
-                <Field
-                  label="Slug"
-                  htmlFor="project-slug"
-                  hint="The short word this project is known by. Changing it does not break existing links."
-                >
-                  <TextInput
-                    id="project-slug"
-                    value={slug}
-                    disabled={!mayAdminister}
-                    invalid={slug.trim() === ""}
-                    onChange={(next) => {
-                      editVersion.current += 1;
-                      setSlug(next);
-                      setSaved(false);
-                    }}
-                  />
-                </Field>
-              </FormRow>
+              <Field label="Name" htmlFor="project-name">
+                <TextInput
+                  id="project-name"
+                  value={name}
+                  disabled={!mayAdminister}
+                  invalid={name.trim() === ""}
+                  onChange={(next) => {
+                    editVersion.current += 1;
+                    setName(next);
+                    setSaved(false);
+                  }}
+                />
+              </Field>
 
               <Field
                 label="Description"
@@ -305,7 +283,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
               </Field>
 
               {named ? null : (
-                <Problem>A project needs a name and a slug.</Problem>
+                <Problem>A project needs a name.</Problem>
               )}
               {saved && refused === null ? (
                 <Help>Saved. Everybody in this organization sees the new name.</Help>

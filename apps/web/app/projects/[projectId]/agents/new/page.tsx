@@ -19,6 +19,7 @@ import {
   TextInput,
 } from "../../../../../ui/controls.tsx";
 import { NotFound } from "../../../../../ui/page-state.tsx";
+import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
   PageBody,
@@ -26,6 +27,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
+import { AgentOnboardingProgress } from "../onboarding-progress.tsx";
 
 /**
  * Registering an agent: its name in egma, and what it is for.
@@ -63,6 +65,8 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
   /** What egma said, or what this form worked out before asking egma. */
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [nameProblem, setNameProblem] = useState<string | null>(null);
+
+  useUnsavedChanges((name !== "" || description !== "") && !saving, saving);
 
   const back = projectPath(projectId, "agents");
 
@@ -135,7 +139,15 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
       return;
     }
 
-    router.push(projectPath(projectId, "agents", answer.value.agent.id));
+    router.push(
+      `${projectPath(
+        projectId,
+        "agents",
+        answer.value.agent.id,
+        "connections",
+        "new",
+      )}?onboarding=connection`,
+    );
   }
 
   if (role !== null && !canAuthor(role)) {
@@ -144,12 +156,15 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
         <PageHeader
           eyebrow="Agents"
           title="Register an agent"
+          breadcrumbs={[
+            { label: "Agents", href: back },
+            { label: "New agent" },
+          ]}
           lead="Give Egma the agent you want to test."
         />
         <PageBody>
           <NotFound
             message={`Your ${role} role cannot register agents. Ask an organization admin to change your role, then try again.`}
-            action={<ButtonLink href={back}>Back to agents</ButtonLink>}
           />
         </PageBody>
       </ProductPage>
@@ -161,9 +176,14 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
       <PageHeader
         eyebrow="Agents"
         title="Register an agent"
+        breadcrumbs={[
+          { label: "Agents", href: back },
+          { label: "New agent" },
+        ]}
         lead="Its name and description in Egma. Its prompt, model and tools stay where you configure them."
       />
       <PageBody>
+        <AgentOnboardingProgress current="agent" />
         <Form onSubmit={() => void register()}>
           <Field label="Name" htmlFor="agent-name">
             <TextInput

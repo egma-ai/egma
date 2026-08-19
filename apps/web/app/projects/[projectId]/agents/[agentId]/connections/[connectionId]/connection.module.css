@@ -1,0 +1,166 @@
+/*
+ * One technical object, grouped by the questions a reader brings to it.
+ * These surfaces stay local to the connection page: shared controls keep their
+ * behavior, while this route owns the information hierarchy around them.
+ */
+
+.surface {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.overview {
+  margin-bottom: var(--space-6);
+}
+
+.surfaceHeader {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.surfaceHeader > div:first-child {
+  min-width: 0;
+}
+
+.surfaceHeader h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-lead);
+  font-weight: 500;
+  letter-spacing: var(--tracking-lead);
+  line-height: var(--line-lead);
+}
+
+.surfaceHeader p {
+  max-width: 68ch;
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  letter-spacing: var(--tracking-caption);
+  line-height: var(--line-caption);
+}
+
+/* A disabled reason belongs under its control, not in the heading sentence. */
+.surfaceAction {
+  display: flex;
+  max-width: 36ch;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.detailColumns {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.mainColumn,
+.sideColumn {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.sideColumn > .surface {
+  position: sticky;
+  top: var(--space-6);
+}
+
+.detailFacts {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  margin: 0;
+}
+
+.overviewFacts {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.capabilityFacts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.sideFacts {
+  grid-template-columns: 1fr;
+}
+
+.detailFact {
+  min-width: 0;
+}
+
+.detailFact dt {
+  margin-bottom: var(--space-1);
+  color: var(--muted);
+  font-size: var(--text-caption);
+  letter-spacing: var(--tracking-caption);
+  line-height: var(--line-caption);
+}
+
+.detailFact dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-body);
+  letter-spacing: var(--tracking-body);
+  line-height: var(--line-body);
+  overflow-wrap: anywhere;
+}
+
+.dangerZone {
+  margin-top: var(--space-6);
+}
+
+@media (max-width: 68rem) {
+  .overviewFacts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .detailColumns {
+    grid-template-columns: 1fr;
+  }
+
+  .sideColumn > .surface {
+    position: static;
+  }
+}
+
+@media (max-width: 40rem) {
+  .surface {
+    gap: var(--space-4);
+    padding: var(--space-5);
+  }
+
+  .surfaceHeader {
+    flex-direction: column;
+  }
+
+  .detailFacts,
+  .overviewFacts,
+  .capabilityFacts {
+    grid-template-columns: 1fr;
+  }
+
+  .surfaceAction,
+  .surfaceAction > button {
+    width: 100%;
+    max-width: none;
+  }
+}

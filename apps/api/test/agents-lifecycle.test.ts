@@ -100,6 +100,17 @@ type ConnectionBody = {
 
 const RETELL_KEY = "retell-secret-A1B2C3D4WXYZ";
 
+/** A voice connection that needs no carrier configuration in this test API. */
+const LIVEKIT_VOICE = {
+  type: "livekit",
+  modality: "voice",
+  config: { url: "wss://acme.livekit.cloud" },
+  credentials: {
+    apiKey: "livekit-key-A1B2C3D4WXYZ",
+    apiSecret: "livekit-secret-E5F6G7H8QRST",
+  },
+} as const;
+
 async function anAgent(who: Customer, name: string): Promise<AgentBody> {
   const created = await browser("POST", "/api/agents", who, { name });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
@@ -981,7 +992,7 @@ describe("a connection's capability record", () => {
     const agent = await anAgent(ada, "Front desk");
     const spoken = await aConnection(ada, agent.id, {
       name: "by-voice",
-      modality: "voice",
+      ...LIVEKIT_VOICE,
     });
     const typed = await aConnection(ada, agent.id, {
       name: "by-chat",
@@ -1029,7 +1040,7 @@ describe("a connection's capability record", () => {
     const agent = await anAgent(ada, "Front desk");
     const spoken = await aConnection(ada, agent.id, {
       name: "by-voice",
-      modality: "voice",
+      ...LIVEKIT_VOICE,
     });
 
     // Before anything looks, every key is unmeasured — including the two the
@@ -1066,7 +1077,7 @@ describe("a connection's capability record", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const agent = await anAgent(ada, "Front desk");
-    const wiring = await aConnection(ada, agent.id, { modality: "voice" });
+    const wiring = await aConnection(ada, agent.id, LIVEKIT_VOICE);
 
     /**
      * The property, taken past the shipped adapter: whatever an adapter
@@ -1078,7 +1089,7 @@ describe("a connection's capability record", () => {
      * `required_capability_unsupported`, which says the target cannot and sends
      * somebody to rewrite a test that was fine.
      */
-    const before = registerCapabilityDiscovery("retell", async () => ({
+    const before = registerCapabilityDiscovery("livekit", async () => ({
       measured: ["raw_audio"],
       supported: ["raw_audio"],
     }));
@@ -1099,7 +1110,7 @@ describe("a connection's capability record", () => {
       expect(capabilities.standing.barge_in).toBe("not_measured");
       expect(Object.values(capabilities.standing)).not.toContain("unsupported");
     } finally {
-      registerCapabilityDiscovery("retell", before);
+      registerCapabilityDiscovery("livekit", before);
     }
   });
 

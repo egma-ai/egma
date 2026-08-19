@@ -1,32 +1,33 @@
 "use client";
 
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
-import { asDay } from "../../../../lib/instants.ts";
+import { agentsQuery } from "../../../../lib/agents.ts";
+import { readJson } from "../../../../lib/api.ts";
+import { personasQuery } from "../../../../lib/personas.ts";
 import {
-  type Capability,
   type ExpectedBehavior,
   type Named,
   type TestVersionRow,
 } from "../../../../lib/tests.ts";
-import { Badge, Button, Checkbox, TextArea } from "../../../../ui/controls.tsx";
+import {
+  Badge,
+  Button,
+  Problem,
+  TextArea,
+  TextInput,
+} from "../../../../ui/controls.tsx";
+import { Menu } from "../../../../ui/menu.tsx";
+import { RelativeInstant } from "../../../../ui/relative-time.tsx";
 import styles from "./editor.module.css";
 
 /**
- * The parts a test is authored and read through, and the three things they all
- * obey.
+ * The parts a test is authored and read through.
  *
- * **Order is content.** The personas a test names, the behaviors it expects and
- * the graders it adds are ordered lists, and a version that reorders one says
- * something the version before it did not. So the position is drawn, moving an
- * entry is a control rather than a drag nobody can reach from a keyboard, and
- * every list is edited the same way.
- *
- * **A choice comes from the server.** Which agents a test may apply to, which
- * personas may call about it and which capabilities it may require are all
- * lists the platform owns. A form holding its own copy would offer something
- * the platform refuses, and the refusal would arrive after somebody had written
- * a test around it.
+ * **A choice comes from the server.** Which agents a test may apply to and which
+ * personas may call about it are lists the platform owns. A form holding its
+ * own copy would offer something the platform refuses, and the refusal would
+ * arrive after somebody had written a test around it.
  *
  * **History is read and never rewound.** An older version can be opened and
  * looked at; nothing here offers to make it current, because that is an edit
@@ -38,82 +39,6 @@ import styles from "./editor.module.css";
  * Tests area's and nothing else uses them. The controls they are built from are
  * the shared ones.
  */
-
-/**
- * An ordered list of things, with the order editable.
- *
- * One component for the personas, the graders and the behaviors, because all
- * three are the same shape and three hand-written lists would be three places
- * for the move-up control to be forgotten. What each entry *is* is the caller's
- * business and arrives as a child.
- */
-export function Ordered({
-  label,
-  count,
-  disabled = false,
-  onMove,
-  onRemove,
-  onAdd,
-  addLabel,
-  children,
-}: {
-  /** What this is a list of, read out where there is no visible caption. */
-  readonly label: string;
-  readonly count: number;
-  readonly disabled?: boolean;
-  readonly onMove: (from: number, to: number) => void;
-  readonly onRemove: (at: number) => void;
-  readonly onAdd?: () => void;
-  readonly addLabel?: string;
-  /** One node per entry, in the order they are held. */
-  readonly children: readonly ReactNode[];
-}) {
-  return (
-    <div>
-      <ul className={styles.ordered} aria-label={label}>
-        {children.map((entry, at) => (
-          // The index is the key on purpose: these entries have no identity of
-          // their own, and a key derived from what somebody is typing would
-          // remount the field on every keystroke.
-          // eslint-disable-next-line react/no-array-index-key
-          <li className={styles.entry} key={at}>
-            <span className={styles.position} aria-hidden="true">
-              {at + 1}
-            </span>
-            <div>{entry}</div>
-            <div className={styles.entryActions}>
-              <Button
-                disabled={disabled || at === 0}
-                onClick={() => onMove(at, at - 1)}
-              >
-                <span aria-hidden="true">↑</span>
-                <span className={styles.named}>{`Move ${label} ${at + 1} up`}</span>
-              </Button>
-              <Button
-                disabled={disabled || at === count - 1}
-                onClick={() => onMove(at, at + 1)}
-              >
-                <span aria-hidden="true">↓</span>
-                <span className={styles.named}>{`Move ${label} ${at + 1} down`}</span>
-              </Button>
-              <Button disabled={disabled} onClick={() => onRemove(at)}>
-                <span aria-hidden="true">×</span>
-                <span className={styles.named}>{`Remove ${label} ${at + 1}`}</span>
-              </Button>
-            </div>
-          </li>
-        ))}
-      </ul>
-      {onAdd === undefined ? null : (
-        <p>
-          <Button disabled={disabled} onClick={onAdd}>
-            {addLabel ?? `Add ${label}`}
-          </Button>
-        </p>
-      )}
-    </div>
-  );
-}
 
 /**
  * The expected behaviors: one sentence each, and nothing beside them.
@@ -141,189 +66,394 @@ export function Behaviors({
     );
 
   return (
-    <Ordered
-      label="expected behavior"
-      count={behaviors.length}
-      disabled={disabled}
-      addLabel="Add an expected behavior"
-      onAdd={() => onChange([...behaviors, ""])}
-      onMove={(from, to) => onChange(moved(behaviors, from, to))}
-      onRemove={(index) =>
-        onChange(behaviors.filter((_one, position) => position !== index))
-      }
-    >
-      {behaviors.map((one, index) => (
-        <div className={styles.behavior} key={`${field}-${String(index)}`}>
-          {/*
-            One control per behavior, because a behavior is one sentence. The
-            P0/P1/P2 select that used to sit beside it went with the ladder
-            itself: every behavior has to hold, so there was nothing left for a
-            per-sentence priority to say. How loudly a grader speaks is the
-            running copy's own `required` flag now.
-          */}
-          <TextArea
-            id={`${field}-behavior-${String(index)}`}
-            value={one}
-            rows={2}
-            label={`Expected behavior ${String(index + 1)}`}
-            placeholder="verifies who it is speaking to before discussing the booking"
-            disabled={disabled}
-            onChange={(behavior) => at(index, behavior)}
-          />
-        </div>
-      ))}
-    </Ordered>
+    <div className={styles.behaviors}>
+      <ul className={styles.behaviorList} aria-label="Expected behaviors">
+        {behaviors.map((one, index) => (
+          // These statements have no public id. Their position is kept only so
+          // the frozen version and its grader assertions remain stable.
+          // eslint-disable-next-line react/no-array-index-key
+          <li className={styles.behavior} key={index}>
+            <TextArea
+              id={`${field}-behavior-${String(index)}`}
+              value={one}
+              rows={1}
+              label={`Expected behavior ${String(index + 1)}`}
+              placeholder="Verifies who it is speaking to before discussing the booking"
+              disabled={disabled}
+              onChange={(behavior) => at(index, behavior)}
+            />
+            <Button
+              disabled={disabled}
+              onClick={() =>
+                onChange(
+                  behaviors.filter((_held, position) => position !== index),
+                )
+              }
+            >
+              Remove
+            </Button>
+          </li>
+        ))}
+      </ul>
+      <div>
+        <Button
+          disabled={disabled}
+          onClick={() => onChange([...behaviors, ""])}
+        >
+          Add expected behavior
+        </Button>
+      </div>
+    </div>
   );
 }
 
-/** The same list with one entry moved, and the original untouched. */
-export function moved<Value>(
-  held: readonly Value[],
-  from: number,
-  to: number,
-): readonly Value[] {
-  if (to < 0 || to >= held.length || from === to) return held;
-  const next = [...held];
-  const [taken] = next.splice(from, 1);
-  if (taken === undefined) return held;
-  next.splice(to, 0, taken);
-  return next;
+type NamedPage = {
+  readonly items: readonly Named[];
+  readonly next_cursor: string | null;
+};
+
+type SelectorPage = {
+  readonly items: readonly Named[];
+  readonly nextCursor: string | null;
+};
+
+type NamedResource = "agents" | "personas";
+
+function namedPagePath(
+  resource: NamedResource,
+  search: string,
+  cursor?: string,
+): string {
+  const asking = {
+    ...(search === "" ? {} : { search }),
+    ...(cursor === undefined ? {} : { cursor }),
+  };
+  return resource === "agents"
+    ? agentsQuery(asking)
+    : personasQuery(asking);
 }
 
 /**
- * A set chosen from a list the platform owns.
+ * A searchable, paged selector for server-owned agents and personas.
  *
- * Checkboxes rather than a multi-select, because every option carries a
- * sentence saying what it is and a select cannot show one — and because a set
- * somebody is building out of four things should not need a modifier key.
- *
- * **An option that is no longer available stays on screen when it is already
- * chosen**, struck through and said plainly. Dropping it would make an archived
- * agent silently vanish from a test's coverage the moment somebody opened the
- * editor.
+ * The panel stays open while items are checked. This makes a long multi-select
+ * one short task instead of a cycle of open, search, choose, and reopen. An
+ * archived item that is already selected stays visible and can only be removed.
  */
-export function Choices({
-  legend,
-  options,
+export function NamedSelector({
+  label,
+  resource,
+  project,
   chosen,
+  selectedItems = [],
+  emptyMessage,
   disabled = false,
   onChange,
 }: {
-  readonly legend: string;
-  readonly options: readonly {
-    readonly value: string;
-    readonly label: string;
-    readonly note?: string;
-    /** Set when this option cannot be newly chosen — an archived agent. */
-    readonly unavailable?: boolean;
-  }[];
+  readonly label: string;
+  readonly resource: NamedResource;
+  readonly project: string;
   readonly chosen: readonly string[];
+  readonly selectedItems?: readonly Named[];
+  readonly emptyMessage?: string;
   readonly disabled?: boolean;
   readonly onChange: (chosen: readonly string[]) => void;
 }) {
-  const field = useId();
+  const searchId = useId();
+  const [typedSearch, setTypedSearch] = useState("");
+  const [search, setSearch] = useState("");
+  const [pages, setPages] = useState<readonly SelectorPage[]>([]);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const generation = useRef(0);
+  const named = useRef(new Map<string, Named>());
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(typedSearch.trim()), 200);
+    return () => window.clearTimeout(timer);
+  }, [typedSearch]);
+
+  useEffect(() => {
+    named.current.clear();
+  }, [project, resource]);
+
+  useEffect(() => {
+    for (const item of selectedItems) named.current.set(item.id, item);
+  }, [selectedItems]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const heldGeneration = generation.current + 1;
+    generation.current = heldGeneration;
+    setPages([]);
+    setPage(0);
+    setLoading(true);
+    setProblem(null);
+
+    void readJson<NamedPage>(namedPagePath(resource, search), {
+      project,
+      signal: controller.signal,
+    }).then((answer) => {
+      if (
+        controller.signal.aborted ||
+        generation.current !== heldGeneration
+      ) {
+        return;
+      }
+      setLoading(false);
+      if (answer.status === "signed-out") {
+        window.location.replace("/sign-in");
+        return;
+      }
+      if (answer.status !== "ready") {
+        setProblem(answer.refusal.message);
+        return;
+      }
+      for (const item of answer.value.items) named.current.set(item.id, item);
+      setPages([
+        {
+          items: answer.value.items,
+          nextCursor: answer.value.next_cursor,
+        },
+      ]);
+    });
+
+    return () => {
+      controller.abort();
+      if (generation.current === heldGeneration) generation.current += 1;
+    };
+  }, [project, resource, retry, search]);
+
+  const current = pages[page];
+  const pendingSearch = typedSearch.trim() !== search;
+  const busy = loading || pendingSearch;
+  const pageItems = busy ? [] : (current?.items ?? []);
+  const pinned = chosen
+    .map(
+      (id) =>
+        pageItems.find((item) => item.id === id) ??
+        selectedItems.find((item) => item.id === id) ??
+        named.current.get(id),
+    )
+    .filter((item): item is Named => item !== undefined)
+    .filter((item) => !pageItems.some((one) => one.id === item.id));
+  const shown = [...pinned, ...pageItems];
+  const names = chosen
+    .map(
+      (id) =>
+        selectedItems.find((one) => one.id === id)?.name ??
+        named.current.get(id)?.name,
+    )
+    .filter((one): one is string => one !== undefined);
+  const summary =
+    names.length === 0
+      ? `Select ${label.toLocaleLowerCase()}`
+      : names.length <= 2
+        ? names.join(", ")
+        : `${String(names.length)} selected`;
+
+  async function showNext(): Promise<void> {
+    if (current === undefined || current.nextCursor === null || loading) return;
+    const cached = pages[page + 1];
+    if (cached !== undefined) {
+      setPage(page + 1);
+      return;
+    }
+
+    const heldGeneration = generation.current;
+    setLoading(true);
+    setProblem(null);
+    const answer = await readJson<NamedPage>(
+      namedPagePath(resource, search, current.nextCursor),
+      { project },
+    );
+    if (generation.current !== heldGeneration) return;
+    setLoading(false);
+    if (answer.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (answer.status !== "ready") {
+      setProblem(answer.refusal.message);
+      return;
+    }
+    for (const item of answer.value.items) named.current.set(item.id, item);
+    setPages((held) => [
+      ...held,
+      {
+        items: answer.value.items,
+        nextCursor: answer.value.next_cursor,
+      },
+    ]);
+    setPage(page + 1);
+  }
 
   return (
-    <fieldset className={styles.choices}>
-      <legend className={styles.named}>{legend}</legend>
-      {options.map((option) => {
-        const on = chosen.includes(option.value);
-        return (
-          <div
-            className={`${styles.choice} ${on ? styles.choiceOn : ""}`}
-            key={option.value}
-          >
-            <Checkbox
-              id={`${field}-${option.value}`}
-              checked={on}
-              // An archived option can be taken off and never newly put on,
-              // which is the same rule the platform holds a link edit to.
-              disabled={disabled || (option.unavailable === true && !on)}
-              onChange={(checked) =>
-                onChange(
-                  checked
-                    ? [...chosen, option.value]
-                    : chosen.filter((held) => held !== option.value),
-                )
-              }
-            />
-            <label
-              className={styles.choiceLabel}
-              htmlFor={`${field}-${option.value}`}
-            >
-              <span className={option.unavailable === true ? styles.gone : ""}>
-                {option.label}
-              </span>
-              {option.unavailable === true ? (
-                <>
-                  {" "}
-                  <Badge tone="warn">Archived</Badge>
-                </>
-              ) : null}
-              {option.note === undefined ? null : (
-                <span className={styles.choiceNote}>{option.note}</span>
-              )}
-            </label>
-          </div>
-        );
-      })}
-    </fieldset>
+    <Menu
+      label={`Choose ${label.toLocaleLowerCase()}`}
+      panelRole="dialog"
+      triggerClassName={styles.namedSelector}
+      openClassName={styles.namedSelectorOpen}
+      panelClassName={styles.namedSelectorPanel}
+      trigger={
+        <>
+          <span className={names.length === 0 ? styles.selectorPlaceholder : ""}>
+            {summary}
+          </span>
+          <span className={styles.selectorChevron} aria-hidden="true">⌄</span>
+        </>
+      }
+    >
+      {(close) => (
+        <div className={styles.selectorBody}>
+          <TextInput
+            id={searchId}
+            label={`Search ${label.toLocaleLowerCase()}`}
+            placeholder={`Search ${label.toLocaleLowerCase()}`}
+            value={typedSearch}
+            disabled={disabled}
+            autoFocusFirst
+            onChange={setTypedSearch}
+          />
+          {problem === null ? (
+            <>
+              <div className={styles.selectorOptions}>
+                {shown.length === 0 ? (
+                  <p className={styles.selectorEmpty}>
+                    {busy
+                      ? `Searching ${label.toLocaleLowerCase()}…`
+                      : search === "" && emptyMessage !== undefined
+                        ? emptyMessage
+                        : `No ${label.toLocaleLowerCase()} match that search.`}
+                  </p>
+                ) : (
+                  shown.map((one) => {
+                    const selected = chosen.includes(one.id);
+                    const unavailable = (one.archived_at ?? null) !== null;
+                    return (
+                      <button
+                        className={styles.selectorOption}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={selected}
+                        aria-label={`${one.name}${unavailable ? ", archived" : ""}`}
+                        data-menu-item=""
+                        disabled={disabled || (unavailable && !selected)}
+                        key={one.id}
+                        onClick={() =>
+                          onChange(
+                            selected
+                              ? chosen.filter((held) => held !== one.id)
+                              : [...chosen, one.id],
+                          )
+                        }
+                      >
+                        <span className={styles.selectorMark} aria-hidden="true">
+                          {selected ? "✓" : ""}
+                        </span>
+                        <span className={unavailable ? styles.gone : ""}>
+                          {one.name}
+                        </span>
+                        {unavailable ? <Badge tone="warn">Archived</Badge> : null}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              <div className={styles.selectorFooter}>
+                <span className={styles.selectorPage}>
+                  {busy ? "Loading…" : `Page ${String(page + 1)}`}
+                </span>
+                <div className={styles.selectorPager}>
+                  <Button
+                    disabled={disabled || busy || page === 0}
+                    onClick={() => setPage(page - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    disabled={
+                      disabled || busy || (current?.nextCursor ?? null) === null
+                    }
+                    onClick={() => void showNext()}
+                  >
+                    Next
+                  </Button>
+                  <Button onClick={close}>Done</Button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div>
+              <Problem>{problem}</Problem>
+              <Button onClick={() => setRetry((held) => held + 1)}>
+                Try again
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </Menu>
   );
 }
 
-/** The capability catalog as choices, with each key's own sentence under it. */
-export function CapabilityChoices({
-  catalog,
-  chosen,
-  disabled = false,
-  onChange,
+/** One edit boundary, its truthful state, and the write that owns it. */
+export function SaveAction({
+  label,
+  changed,
+  state,
+  disabled,
+  why,
+  onSave,
 }: {
-  readonly catalog: readonly Capability[];
-  readonly chosen: readonly string[];
-  readonly disabled?: boolean;
-  readonly onChange: (chosen: readonly string[]) => void;
+  readonly label: string;
+  readonly changed: boolean;
+  readonly state: "unchanged" | "saving" | "saved" | "failed";
+  readonly disabled: boolean;
+  readonly why?: string;
+  readonly onSave: () => void;
 }) {
-  return (
-    <Choices
-      legend="Required capabilities"
-      chosen={chosen}
-      disabled={disabled}
-      onChange={onChange}
-      options={catalog.map((entry) => ({
-        value: entry.key,
-        label: entry.label,
-        note: entry.description,
-      }))}
-    />
-  );
-}
+  const busy = state === "saving";
+  const copy =
+    state === "saving"
+      ? "Saving…"
+      : state === "failed"
+        ? "Save failed"
+        : changed
+          ? "Unsaved changes"
+          : state === "saved"
+            ? "Saved"
+            : "Unchanged";
+  const mark =
+    state === "saving"
+      ? "·"
+      : state === "failed"
+        ? "×"
+        : changed
+          ? "○"
+          : "✓";
 
-/** A list of named things as choices, archived ones marked and kept. */
-export function NamedChoices({
-  legend,
-  available,
-  chosen,
-  disabled = false,
-  onChange,
-}: {
-  readonly legend: string;
-  readonly available: readonly Named[];
-  readonly chosen: readonly string[];
-  readonly disabled?: boolean;
-  readonly onChange: (chosen: readonly string[]) => void;
-}) {
   return (
-    <Choices
-      legend={legend}
-      chosen={chosen}
-      disabled={disabled}
-      onChange={onChange}
-      options={available.map((one) => ({
-        value: one.id,
-        label: one.name,
-        unavailable: (one.archived_at ?? null) !== null,
-      }))}
-    />
+    <div className={styles.saveAction}>
+      <p
+        className={`${styles.saveState} ${state === "failed" ? styles.saveStateFailed : changed ? styles.saveStateChanged : ""}`}
+        role="status"
+      >
+        <span aria-hidden="true">{mark}</span>
+        {copy}
+      </p>
+      <Button
+        weight="strong"
+        busy={busy}
+        disabled={disabled || !changed}
+        {...(why === undefined ? {} : { why })}
+        onClick={onSave}
+      >
+        {busy ? "Saving…" : label}
+      </Button>
+    </div>
   );
 }
 
@@ -337,11 +467,13 @@ export function NamedChoices({
 export function VersionHistory({
   versions,
   reading,
+  now,
   onRead,
 }: {
   readonly versions: readonly TestVersionRow[];
   /** The version currently opened, or nothing. */
   readonly reading: TestVersionRow | null;
+  readonly now: number;
   readonly onRead: (version: TestVersionRow | null) => void;
 }) {
   return (
@@ -354,7 +486,7 @@ export function VersionHistory({
           >
             <span className={styles.versionNumber}>v{version.version}</span>
             <span className={styles.versionWhen}>
-              {asDay(version.created_at)}
+              <RelativeInstant instant={version.created_at} now={now} />
             </span>
             {version.current ? <Badge tone="good">Current</Badge> : null}
             <span className={styles.versionSpacer} />
@@ -375,22 +507,16 @@ export function VersionHistory({
             Version {reading.version}, as it was written
           </h3>
           <p className={styles.readingBody}>{reading.scenario}</p>
-          <ol className={styles.readingList}>
+          <ul className={styles.readingList}>
             {reading.expected_behaviors.map((one, at) => (
               // No identity of their own, and this list is read-only.
               // eslint-disable-next-line react/no-array-index-key
               <li key={at}>{one}</li>
             ))}
-          </ol>
+          </ul>
           <p className={styles.readingBody}>
             Personas: {reading.personas.map((one) => one.name).join(", ") || "none"}
-            {". "}
-            Requires:{" "}
-            {reading.required_capabilities.join(", ") || "nothing in particular"}
             {"."}
-            {reading.override_count > 0
-              ? ` Overrides present: ${String(reading.override_count)}.`
-              : ""}
           </p>
           <p className={styles.versionWhen}>
             Reading an older version changes nothing. To go back to what it says,

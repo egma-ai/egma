@@ -16,18 +16,24 @@ import {
   createPersona,
   createTest,
   disconnectClickHouse,
+  editPersona,
   editTest,
   failSimulation,
   foldRun,
   foldSimulation,
   getRun,
   IdempotencyConflictError,
+  listSimulations,
   listRunHistory,
   markSimulationCanceled,
   readRunFold,
   restoreTest,
+  rerunSimulation,
+  simulationRerunAlreadyStarted,
   retryRun,
   RunRetryRefusedError,
+  RunWriteRefusedError,
+  SimulationRerunRefusedError,
   setTestAgents,
   startRun,
   startSimulation,
@@ -904,6 +910,266 @@ describe("retrying a run", () => {
    * agent, the connection, the tests, their applicability, the personas — is
    * still proved above and below.
    */
+});
+
+describe("running one simulation again", () => {
+  it("creates one new simulation from the exact test and persona without changing the source", async () => {
+    const earlier = await startRun(auth, {
+      agentId,
+      connectionId,
+      testVersionIds: [cancelsVersion],
+      label: "Original run",
+      idempotencyKey: newId("run"),
+    });
+    await cancelRun(auth, earlier.id);
+
+    const source = earlier.simulations[1];
+    if (source === undefined) {
+      throw new Error("the source run should contain two simulations");
+    }
+
+    const again = await rerunSimulation(auth, source.id, {
+      label: "Deliberate Sam again",
+      idempotencyKey: newId("run"),
+    });
+    if (again === undefined) throw new Error("the simulation should run again");
+
+    expect(again.id).not.toBe(earlier.id);
+    expect(again.retryOfRunId).toBe(earlier.id);
+    expect(again.label).toBe("Deliberate Sam again");
+    expect(again.pinnedTestVersionIds).toEqual([cancelsVersion]);
+    expect(again.simulations).toHaveLength(1);
+    expect(again.simulations[0]).toMatchObject({
+      testVersionId: cancelsVersion,
+      personaId: source.personaId,
+      personaName: source.personaName,
+      position: 1,
+      status: "queued",
+    });
+
+    expect((await getRun(auth, earlier.id))?.status).toBe("canceled");
+    expect(await listSimulations(auth, earlier.id)).toHaveLength(2);
+  });
+
+  it("refuses while the source simulation is still active", async () => {
+    const earlier = await startRun(auth, {
+      agentId,
+      connectionId,
+      testVersionIds: [reschedulesVersion],
+      idempotencyKey: newId("run"),
+    });
+    const source = earlier.simulations[0];
+    if (source === undefined) throw new Error("the source simulation is needed");
+
+    await expect(
+      rerunSimulation(auth, source.id, {
+        label: "Too early",
+        idempotencyKey: newId("run"),
+      }),
+    ).rejects.toBeInstanceOf(SimulationRerunRefusedError);
+  });
+
+  it("answers one new run twice under the same key and conflicts on another source", async () => {
+    const earlier = await startRun(auth, {
+      agentId,
+      connectionId,
+      testVersionIds: [cancelsVersion],
+      idempotencyKey: newId("run"),
+    });
+    await cancelRun(auth, earlier.id);
+    const [firstSource, secondSource] = earlier.simulations;
+    if (firstSource === undefined || secondSource === undefined) {
+      throw new Error("two source simulations are needed");
+    }
+
+    const key = newId("run");
+    const first = await rerunSimulation(auth, firstSource.id, {
+      label: "First source again",
+      idempotencyKey: key,
+    });
+    const repeated = await rerunSimulation(auth, firstSource.id, {
+      label: "First source again",
+      idempotencyKey: key,
+    });
+    expect(repeated?.id).toBe(first?.id);
+
+    await expect(
+      rerunSimulation(auth, secondSource.id, {
+        label: "Second source",
+        idempotencyKey: key,
+      }),
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+  });
+
+  it("recalls an already-created simulation rerun without starting another", async () => {
+    const earlier = await startRun(auth, {
+      agentId,
+      connectionId,
+      testVersionIds: [reschedulesVersion],
+      idempotencyKey: newId("run"),
+    });
+    await cancelRun(auth, earlier.id);
+    const source = earlier.simulations[0];
+    if (source === undefined) throw new Error("the source simulation is needed");
+
+    const request = {
+      label: "Recall this rerun",
+      idempotencyKey: newId("run"),
+    };
+    expect(
+      await simulationRerunAlreadyStarted(auth, source.id, request),
+    ).toBeUndefined();
+
+    const started = await rerunSimulation(auth, source.id, request);
+    const recalled = await simulationRerunAlreadyStarted(
+      auth,
+      source.id,
+      request,
+    );
+    expect(recalled?.id).toBe(started?.id);
+  });
+
+  it("uses the persona's current version while keeping the source persona identity", async () => {
+    const person = await createPersona(auth, {
+      name: `Moves after the source ${newId("prs")}`,
+      traits: neutralTraits,
+    });
+    const named = await createTest(auth, {
+      name: `Names the moving persona ${newId("tst")}`,
+      scenario: "Anything, so long as this persona calls about it.",
+      expectedBehaviors: ["answers"],
+      personaIds: [person.id],
+      agentIds: [agentId],
+    });
+    const earlier = await startRun(auth, {
+      agentId,
+      connectionId,
+      testVersionIds: [named.versionId],
+      idempotencyKey: newId("run"),
+    });
+    await cancelRun(auth, earlier.id);
+    const source = earlier.simulations[0];
+    if (source === undefined) throw new Error("the source simulation is needed");
+
+    const moved = await editPersona(auth, person.id, {
+      traits: {
+        ...neutralTraits,
+        voice: { ...neutralTraits.voice, speed: 0.9 },
+      },
+    });
+    if (moved === undefined) throw new Error("the persona edit should land");
+
+    const again = await rerunSimulation(auth, source.id, {
+      label: "Current persona version",
+      idempotencyKey: newId("run"),
+    });
+    expect(again?.simulations[0]).toMatchObject({
+      personaId: source.personaId,
+      personaVersionId: moved.versionId,
+    });
+    expect(again?.simulations[0]?.personaVersionId).not.toBe(
+      source.personaVersionId,
+    );
+  });
+
+  it("refuses legacy evidence that recorded no test version", async () => {
+    const earlier = await startRun(auth, {
+      agentId,
+      connectionId,
+      testVersionIds: [reschedulesVersion],
+      idempotencyKey: newId("run"),
+    });
+    const source = earlier.simulations[0];
+    if (source === undefined) throw new Error("the source simulation is needed");
+    await database.sql(
+      "update simulation set test_id = null, test_version_id = null where id = $1",
+      [source.id],
+    );
+    await cancelRun(auth, earlier.id);
+
+    await expect(
+      rerunSimulation(auth, source.id, {
+        label: "Cannot be reconstructed",
+        idempotencyKey: newId("run"),
+      }),
+    ).rejects.toMatchObject({ reason: "legacy" });
+  });
+
+  it("requires a new run name and the same permission as starting a run", async () => {
+    const earlier = await startRun(auth, {
+      agentId,
+      connectionId,
+      testVersionIds: [reschedulesVersion],
+      idempotencyKey: newId("run"),
+    });
+    await cancelRun(auth, earlier.id);
+    const source = earlier.simulations[0];
+    if (source === undefined) throw new Error("the source simulation is needed");
+
+    await expect(
+      rerunSimulation(auth, source.id, {
+        label: "   ",
+        idempotencyKey: newId("run"),
+      }),
+    ).rejects.toMatchObject({ reason: "name_required" });
+    await expect(
+      rerunSimulation(auth, source.id, {
+        label: "No key",
+        idempotencyKey: "   ",
+      }),
+    ).rejects.toMatchObject({ reason: "idempotency_key_required" });
+    await expect(
+      rerunSimulation(actingAsAcme("viewer"), source.id, {
+        label: "Viewer cannot run it",
+        idempotencyKey: newId("run"),
+      }),
+    ).rejects.toThrow(/viewer/u);
+    expect(
+      await rerunSimulation(actingAsGlobex(), source.id, {
+        label: "Not visible",
+        idempotencyKey: newId("run"),
+      }),
+    ).toBeUndefined();
+  });
+
+  it("refuses when the source test is archived or no longer applies", async () => {
+    const named = await createTest(auth, {
+      name: `Moves after its source ${newId("tst")}`,
+      scenario: "Anything, so long as the test remains available.",
+      expectedBehaviors: ["answers"],
+      personaIds: [rita],
+      agentIds: [agentId],
+    });
+    const earlier = await startRun(auth, {
+      agentId,
+      connectionId,
+      testVersionIds: [named.versionId],
+      idempotencyKey: newId("run"),
+    });
+    await cancelRun(auth, earlier.id);
+    const source = earlier.simulations[0];
+    if (source === undefined) throw new Error("the source simulation is needed");
+
+    await archiveTest(auth, named.id);
+    await expect(
+      rerunSimulation(auth, source.id, {
+        label: "Archived source",
+        idempotencyKey: newId("run"),
+      }),
+    ).rejects.toBeInstanceOf(RunWriteRefusedError);
+    await restoreTest(auth, named.id);
+
+    const elsewhere = await createAgent(auth, {
+      name: `Only target left ${newId("agt")}`,
+    });
+    await setTestAgents(auth, named.id, { agentIds: [elsewhere.id] });
+    await expect(
+      rerunSimulation(auth, source.id, {
+        label: "Unlinked source",
+        idempotencyKey: newId("run"),
+      }),
+    ).rejects.toMatchObject({ reason: "test_not_applicable" });
+  });
 });
 
 /* ------------------------------------------------------------------------ *

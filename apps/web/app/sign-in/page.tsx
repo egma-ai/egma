@@ -10,6 +10,16 @@ import {
 import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
 import { AuthShell, Notice, styles } from "../ui.tsx";
 
+function PasswordVisibilityIcon({ visible }: { readonly visible: boolean }) {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path d="M2.5 12s3.4-5.5 9.5-5.5 9.5 5.5 9.5 5.5-3.4 5.5-9.5 5.5S2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="2.75" />
+      {visible ? <path d="m4 4 16 16" /> : null}
+    </svg>
+  );
+}
+
 /**
  * Signing in, for the second machine and everybody who arrived by invitation.
  *
@@ -19,6 +29,7 @@ import { AuthShell, Notice, styles } from "../ui.tsx";
 export default function SignInPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   /** Somebody sent here by a terminal's approval page goes back to it. */
@@ -56,7 +67,7 @@ export default function SignInPage() {
     <AuthShell
       animated
       eyebrow="Welcome back"
-      title="Trust starts with what happened."
+      title="Sign in"
       lead="Sign in to continue to your organization."
     >
       <Form onSubmit={() => void submit()}>
@@ -75,15 +86,26 @@ export default function SignInPage() {
         </Field>
 
         <Field label="Password" htmlFor="password">
-          <TextInput
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={setPassword}
-          />
+          <div className={styles.passwordControl}>
+            <TextInput
+              id="password"
+              name="password"
+              type={passwordVisible ? "text" : "password"}
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={setPassword}
+            />
+            <button
+              className={styles.passwordToggle}
+              type="button"
+              aria-label={passwordVisible ? "Hide password" : "Show password"}
+              aria-controls="password"
+              onClick={() => setPasswordVisible((visible) => !visible)}
+            >
+              <PasswordVisibilityIcon visible={passwordVisible} />
+            </button>
+          </div>
         </Field>
 
         <Button weight="strong" type="submit" disabled={submitting}>
@@ -109,7 +131,7 @@ export default function SignInPage() {
       <p className={styles.linkLine}>
         No account yet?{" "}
         <a href={returnTo === null ? "/signup" : withReturnTo("/signup", returnTo)}>
-          Set up Egma
+          Sign up
         </a>
         .
       </p>

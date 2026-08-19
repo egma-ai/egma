@@ -1,150 +1,194 @@
-/*
- * The parts a test editor needs and no other page has: an ordered list whose
- * order is content, a row that carries a statement beside how much it matters,
- * a set of choices drawn from a server-owned list, and a reader for the
- * immutable history.
- *
- * They live beside the components rather than in the shared system module,
- * because they are this area's and nothing else uses them. Every value is a
- * token: density and colour are tuned once, in `tokens.css`, and nothing here
- * decides either for itself.
- */
+/* Test-authoring controls that do not belong outside the Tests area. */
 
-.ordered {
+.behaviors,
+.behaviorList {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/*
- * One entry, and the place it sits.
- *
- * The position is drawn rather than implied, because order is content here: two
- * versions naming the same behaviors in different orders are two different
- * versions, and somebody reordering a list has to be able to see what they have
- * done.
- */
-.entry {
-  display: grid;
-  grid-template-columns: var(--control-md) minmax(0, 1fr) auto;
-  align-items: start;
-  gap: var(--space-3);
-  padding-block: var(--space-3);
-  border-top: 1px solid var(--border);
-}
-
-.entry:first-child {
-  border-top: 0;
-}
-
-.position {
-  min-height: var(--control-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--mono);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  color: var(--foreground);
-  font-size: var(--text-caption);
-}
-
-/*
- * One statement, and nothing beside it.
- *
- * It was two columns — the sentence and a P0/P1/P2 select — and the ladder
- * retired: every expected behavior has to hold, so there is nothing left for a
- * per-sentence priority to say, and how loudly a grader speaks is a setting on
- * the running copy instead.
- */
 .behavior {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.behavior > button {
+  height: var(--control-lg);
+  min-height: var(--control-lg);
+}
+
+.behavior textarea {
+  min-height: var(--control-lg);
+  padding-block: var(--space-2);
+  field-sizing: content;
 }
 
 @media (max-width: 640px) {
-  .entry {
-    grid-template-columns: var(--control-md) 1fr;
-  }
-
-  .entryActions {
-    grid-column: 2;
-    justify-self: start;
+  .behavior {
+    grid-template-columns: 1fr;
   }
 }
 
-.entryActions {
-  display: flex;
-  gap: var(--space-1);
-}
-
-/* A set of choices drawn from a list the server owns. */
-.choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.choice {
-  display: flex;
-  min-height: var(--tap-target);
-  gap: var(--space-2);
+.namedSelector {
+  display: grid;
+  width: 100%;
+  min-height: var(--control-lg);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  padding: var(--space-2) var(--space-4);
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
   color: var(--foreground);
-  font-size: var(--text-caption);
-  line-height: var(--line-caption);
+  font-size: var(--text-sm);
+  text-align: left;
   cursor: pointer;
 }
 
-.choiceLabel {
-  min-width: 0;
-  cursor: pointer;
-}
-
-.choiceOn {
-  border-color: var(--foreground);
+.namedSelectorOpen {
+  border-color: var(--accent);
   background: var(--surface-active);
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.choiceNote {
-  display: block;
-  margin-top: var(--space-1);
+.selectorPlaceholder,
+.selectorPage,
+.selectorEmpty {
   color: var(--muted);
   font-size: var(--text-caption);
   line-height: var(--line-caption);
 }
 
+.selectorChevron {
+  color: var(--muted);
+  font-size: var(--text-body);
+}
+
+.namedSelectorPanel {
+  width: min(480px, calc(100vw - var(--space-8)));
+  max-width: min(480px, calc(100vw - var(--space-8)));
+}
+
+.selectorBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.selectorOptions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: min(420px, 55vh);
+  overflow-y: auto;
+}
+
+.selectorOption {
+  display: grid;
+  width: 100%;
+  min-height: var(--tap-target);
+  grid-template-columns: var(--space-5) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  text-align: left;
+  cursor: pointer;
+}
+
+.selectorOption[aria-checked="true"] {
+  background: var(--surface-active);
+}
+
+.selectorOption:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.selectorMark {
+  display: grid;
+  width: var(--space-5);
+  height: var(--space-5);
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+}
+
+.selectorFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.selectorPager {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.selectorEmpty {
+  margin: 0;
+  padding: var(--space-3);
+}
+
 @media (hover: hover) and (pointer: fine) {
-  .choice:hover {
+  .namedSelector:hover {
     border-color: var(--border-strong);
+  }
+
+  .selectorOption:hover:not(:disabled) {
     background: var(--surface-soft);
   }
 }
 
-/*
- * An archived thing a test still names, marked as one.
- *
- * It stays in the list rather than disappearing: a link removed on a reader's
- * behalf would rewrite somebody's coverage as a side effect of tidying up, and
- * a name quietly missing is worse than a name plainly unavailable.
- */
 .gone {
   color: var(--faint);
   text-decoration: line-through;
+}
+
+.saveAction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.saveState {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--good);
+  font-size: var(--text-caption);
+  line-height: var(--line-caption);
+}
+
+.saveStateChanged {
+  color: var(--warn);
+}
+
+.saveStateFailed {
+  color: var(--bad);
 }
 
 /* The immutable history, and the one version being read out of it. */
@@ -195,14 +239,6 @@
   flex: 1 1 auto;
 }
 
-/*
- * One older version, read without becoming current.
- *
- * It is deliberately a read and never a form: making an old version current is
- * an edit somebody makes deliberately by copying what it says forward, and a
- * control offering to do it in one press would rewrite what this test checks
- * from a page somebody opened to look at history.
- */
 .reading {
   display: flex;
   flex-direction: column;
@@ -239,28 +275,4 @@
   color: var(--foreground);
   font-size: var(--text-caption);
   line-height: var(--line-caption);
-}
-
-/*
- * A name only a screen reader gets.
- *
- * The move and remove controls are arrows and a cross, because a list of eight
- * behaviors each carrying three worded buttons is a list nobody can read. The
- * symbol is what a sighted reader sees and this is what everybody else gets;
- * `aria-hidden` on the symbol keeps the two from being announced together.
- *
- * It is here rather than in the shared module because nothing shared has needed
- * one yet, and a utility class is exactly the kind of thing that ends up
- * declared twice.
- */
-.named {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
 }

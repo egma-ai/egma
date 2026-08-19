@@ -76,8 +76,8 @@ export class InkUI implements WizardUI {
     this.store.setAgentChoices(agents);
   }
 
-  setReachOffer(reaches: readonly Reach[] | null): void {
-    this.store.setReachOffer(reaches);
+  setReachOffer(offered: readonly Reach[] | null): void {
+    this.store.setReachOffer(offered);
   }
 
   setNumberChoices(numbers: readonly RetellNumber[] | null): void {

@@ -14,7 +14,7 @@ vi.mock("next/image", () => ({
   default: ({ alt }: { readonly alt: string }) => <img alt={alt} />,
 }));
 
-// The canvas explains the sign-in brand surface. These tests concern the form
+// The canvas explains the sign-in and sign-up brand surfaces. These tests concern the form
 // controls, and jsdom does not draw or resize a canvas.
 vi.mock("../app/trust-gate.tsx", () => ({
   TrustGate: () => <canvas aria-hidden="true" />,
@@ -45,11 +45,33 @@ describe("the shared controls on access pages", () => {
     expect(password.getAttribute("type")).toBe("password");
     expect(password.getAttribute("autocomplete")).toBe("current-password");
 
+    const showPassword = screen.getByRole("button", { name: "Show password" });
+    expect(showPassword.getAttribute("type")).toBe("button");
+    expect(showPassword.getAttribute("aria-controls")).toBe("password");
+    expect(showPassword.textContent).toBe("");
+    expect(showPassword.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+
     fireEvent.change(email, { target: { value: "ada@example.com" } });
     fireEvent.change(password, { target: { value: "correct horse" } });
     expect((email as HTMLInputElement).value).toBe("ada@example.com");
     expect((password as HTMLInputElement).value).toBe("correct horse");
+
+    fireEvent.click(showPassword);
+    expect(password.getAttribute("type")).toBe("text");
+    expect((password as HTMLInputElement).value).toBe("correct horse");
+
+    const hidePassword = screen.getByRole("button", { name: "Hide password" });
+    expect(hidePassword.textContent).toBe("");
+    expect(hidePassword.querySelectorAll("path")).toHaveLength(2);
+    fireEvent.click(hidePassword);
+    expect(password.getAttribute("type")).toBe("password");
     expect(screen.getByRole("button", { name: "Sign in" }).getAttribute("type")).toBe("submit");
+    expect(screen.getByRole("link", { name: "Sign up" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Sign in" })).toBeTruthy();
+    expect(screen.queryByText("Trust starts with what happened.")).toBeNull();
+    expect(screen.getByText("Trust the voice agents you ship in production.")).toBeTruthy();
+    expect(screen.queryByText("Voice agent reliability")).toBeNull();
+    expect(document.querySelector("canvas")).toBeTruthy();
   });
 
   it("keeps first setup as one labelled form with a described organization default", async () => {
@@ -67,6 +89,35 @@ describe("the shared controls on access pages", () => {
     expect(
       screen.getByRole("button", { name: "Create my Egma instance" }),
     ).toBeTruthy();
+    expect(screen.getByText("Trust the voice agents you ship in production.")).toBeTruthy();
+    expect(document.querySelector("canvas")).toBeTruthy();
+  });
+
+  it("keeps a claimed instance invitation clear and does not repeat the heading", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        json(200, {
+          open: false,
+          message:
+            "this Egma instance has been claimed. Ask an admin for an invitation.",
+        }),
+      ),
+    );
+    render(<SignUpPage />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Ask an admin for an invitation to this Egma instance.",
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByText("This Egma instance has been claimed")).toBeNull();
+    expect(
+      screen.queryByText(
+        "this Egma instance has been claimed. Ask an admin for an invitation.",
+      ),
+    ).toBeNull();
+    expect(document.querySelector("canvas")).toBeTruthy();
   });
 
   it("keeps invitation identity fixed and the new password writable", async () => {
@@ -99,10 +150,26 @@ describe("the shared controls on access pages", () => {
   });
 
   it("keeps password recovery and completion native to the browser", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(200, {})));
     const forgot = render(<ForgotPasswordPage />);
     const email = screen.getByLabelText("Email");
     expect(email.getAttribute("type")).toBe("email");
-    expect(screen.getByRole("button", { name: "Send the link" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send reset link" })).toBeTruthy();
+    expect(
+      screen.queryByText(
+        "Name the address you signed up with, and Egma sends a link to set a new one.",
+      ),
+    ).toBeNull();
+
+    fireEvent.change(email, { target: { value: "ada@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send reset link" }));
+    expect(await screen.findByRole("heading", { name: "Check your email" })).toBeTruthy();
+    const emphasizedEmail = screen.getByText("ada@example.com");
+    expect(emphasizedEmail.tagName).toBe("SPAN");
+    expect(emphasizedEmail.parentElement?.textContent).toBe(
+      "If ada@example.com has an account, a link to reset password has been sent",
+    );
+    expect(screen.queryByText(/Nothing arrived\?/u)).toBeNull();
     forgot.unmount();
 
     window.history.replaceState({}, "", "/reset-password?token=reset_1");
