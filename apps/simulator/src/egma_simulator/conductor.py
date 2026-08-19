@@ -52,6 +52,7 @@ from .blob import BlobStore
 from .media import RemoteParticipantLeftFrame, VoiceMedia
 from .model import PersonaReply
 from .persona import Persona, Turn
+from .platform_logging import log_event
 from .plugs import PlugError, VoiceConnection
 from .recording import AudioFacts, dual_channel_wav
 from .speech import (
@@ -952,8 +953,15 @@ class VoiceConductor:
                     self._recording_rate,
                 ),
             )
-        except Exception:
-            logger.exception("the recording could not be written; reporting none")
+        except Exception as failure:
+            log_event(
+                logger,
+                logging.ERROR,
+                "egma.simulation.recording_failed",
+                "simulation recording upload failed",
+                attributes={"error.type": type(failure).__name__},
+                exc_info=True,
+            )
             return
         self.audio = AudioFacts(recording=reference)
 
