@@ -631,11 +631,14 @@ describe("starting a run", () => {
 
   it("says which half of the phone configuration is missing, so a partly-configured platform is not told to start again", async () => {
     api = await createApi("runs_phone_half_set", {
-      platformSettings: {
-        carrier_trunk_address: PHONE_IS_SET_UP.carrier_trunk_address,
-        text_to_speech_provider: PHONE_IS_SET_UP.text_to_speech_provider,
-      },
+      platformSettings: PHONE_IS_SET_UP,
     });
+    // Current writers refuse an incomplete route. Remove one row after a valid
+    // seed to model a database written by an older release, and prove the run
+    // door still gives that upgrade state an actionable refusal.
+    await api.database.sql(
+      "delete from platform_setting where name = 'carrier_trunk_number'",
+    );
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
     await createPersona(contextFor(ada, "member"), {
