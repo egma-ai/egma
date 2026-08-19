@@ -28,6 +28,6 @@ EXPOSE 3100
 #
 # `--import` loads the telemetry module before the entry module, because
 # instrumentation patches modules as they load and the entry module's first
-# imports are the ones worth seeing. With the telemetry switches unset — the
-# default — that module checks two variables and does nothing.
+# imports are the ones worth seeing. With the telemetry flag unset — the
+# default — that module checks the flag and does nothing.
 CMD ["node", "--import", "./apps/api/dist/telemetry.js", "apps/api/dist/index.js"]

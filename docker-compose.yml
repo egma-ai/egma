@@ -398,11 +398,11 @@ services:
       EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
       EGMA_PHONE_TRUNK_USERNAME: ${EGMA_PHONE_TRUNK_USERNAME:-}
       EGMA_PHONE_TRUNK_PASSWORD: ${EGMA_PHONE_TRUNK_PASSWORD:-}
-      # Telemetry about egma itself, behind one flag that defaults to off — see
+      # Egma platform telemetry, behind one flag that defaults to off — see
       # .env.example. Deliberately not the trace store: what customers send
-      # through the OTLP door is their data in ClickHouse, and what this flag
-      # turns on is egma reporting on its own process, to wherever the
-      # operator points it. The two never share a pipe.
+      # through the OTLP door is their data in ClickHouse. This process sends
+      # its own spans to the deployment telemetry collector configured below.
+      # The two never share a pipe.
       EGMA_TELEMETRY: ${EGMA_TELEMETRY:-}
       EGMA_TELEMETRY_OTLP_ENDPOINT: ${EGMA_TELEMETRY_OTLP_ENDPOINT:-}
       EGMA_POSTHOG_KEY: ${EGMA_POSTHOG_KEY:-}
@@ -441,6 +441,12 @@ services:
         # origin. Next resolves this into the build, so it is an argument rather
         # than an environment variable.
         EGMA_API_ORIGIN: ${EGMA_API_ORIGIN:-http://api:3100}
+        # Browser telemetry is also fixed at build time. It reads the same one
+        # flag as the server processes. The PostHog project token is mapped to
+        # its public browser name; it can submit events and cannot read them.
+        EGMA_TELEMETRY: ${EGMA_TELEMETRY:-}
+        NEXT_PUBLIC_POSTHOG_KEY: ${EGMA_POSTHOG_KEY:-}
+        NEXT_PUBLIC_POSTHOG_HOST: ${EGMA_POSTHOG_HOST:-}
     environment:
       HOSTNAME: 0.0.0.0
       PORT: "3101"
@@ -691,7 +697,7 @@ services:
       # exporter's conversations unjudged for an afternoon.
       EGMA_GRADER_TRACE_IDLE_SECONDS: ${EGMA_GRADER_TRACE_IDLE_SECONDS:-}
       EGMA_GRADER_LOG_LEVEL: ${EGMA_GRADER_LOG_LEVEL:-INFO}
-      # Telemetry about egma itself, behind one flag that defaults to off. One
+      # Egma platform telemetry, behind one flag that defaults to off. One
       # value in .env reaches this container and the api's alike — see the api
       # service.
       EGMA_TELEMETRY: ${EGMA_TELEMETRY:-}

@@ -29,6 +29,6 @@ ENV NODE_ENV=production
 # user and a compromise stays inside that user's reach.
 USER node
 # `--import` loads the telemetry module before the entry module — see the
-# API's Dockerfile; with the telemetry switches unset it checks two variables
-# and does nothing.
+# API's Dockerfile; with the telemetry flag unset it checks the flag and does
+# nothing.
 CMD ["node", "--import", "./apps/grader/dist/telemetry.js", "apps/grader/dist/index.js"]

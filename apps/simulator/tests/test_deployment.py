@@ -454,9 +454,9 @@ MAY_BE_ABSENT = {
     "EGMA_MAIL_FROM": "optional by design",
     # Telemetry about egma itself, where empty is not hollow but the promise:
     # one flag, off by default, and a deployment that sets nothing sends
-    # nothing anywhere. The moment the flag says on, the two addresses stop
-    # being optional — the api and grader refuse to boot without them, by
-    # name — so an empty one can never be a quietly-off feature, which is
+    # nothing anywhere. The moment the flag says on, the two required values
+    # stop being optional — the api and grader refuse to boot without them,
+    # by name — so an empty one can never be a quietly-off feature, which is
     # this guard's whole subject. See .env.example's telemetry section.
     "EGMA_TELEMETRY": "off is the default, and the public repo's promise",
     "EGMA_TELEMETRY_OTLP_ENDPOINT": "required by name at boot once the flag is on",

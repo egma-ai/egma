@@ -1,12 +1,16 @@
 /**
- * Telemetry about this process itself, behind one flag.
+ * Platform telemetry for this process, behind one flag.
  *
  * **This is not the trace store.** What customers' agents and simulations
  * send through the OTLP door is their data, in this deployment's ClickHouse.
  * What this file emits is telemetry about egma's own process — request
- * spans, crash reports — into whatever backend the deployment chose. The two
- * must never share a pipe, which is why nothing here reads `CLICKHOUSE_URL`
- * and nothing in the OTLP door reads anything here.
+ * spans, crash reports, and log correlation — through the deployment's
+ * telemetry pipeline. Trace spans go to the configured OTLP destination,
+ * normally a deployment telemetry collector. The collector's exporter
+ * chooses the span backend; PostHog is the current one. Crash reports use a
+ * separate, direct PostHog adapter. The two data flows must never share a
+ * pipe, which is why nothing here reads `CLICKHOUSE_URL` and nothing in the
+ * OTLP door reads anything here.
  *
  * It is loaded before the entry module — `node --import` in the Dockerfile —
  * because instrumentation works by patching modules as they load: registered
@@ -18,10 +22,11 @@
  * anything that is not `on` — means nothing below is imported and nothing is
  * sent anywhere, whatever else is set. On means all of it at once: the
  * OpenTelemetry SDK exporting spans to `EGMA_TELEMETRY_OTLP_ENDPOINT`, and
- * crash reporting to `EGMA_POSTHOG_KEY`. There are no smaller switches
- * inside it. A deployment that says `on` without both addresses is refused
- * at boot, by name — an absent setting must never be a quiet no, which is
- * the same deal every other setting in this deployment lives under.
+ * the current PostHog adapter reporting crashes with `EGMA_POSTHOG_KEY`.
+ * There are no smaller switches inside it. A deployment that says `on`
+ * without both required values is refused at boot, by name — an absent
+ * setting must never be a quiet no, which is the same deal every other
+ * setting in this deployment lives under.
  *
  * Past that check, a broken telemetry backend must never take the platform
  * down with it: an SDK that fails to start says so on standard error and
@@ -41,7 +46,7 @@ if (environment.EGMA_TELEMETRY?.trim().toLowerCase() === "on") {
     ];
     throw new Error(
       `EGMA_TELEMETRY is on, so ${missing.join(" and ")} must be set — ` +
-        "on means everything reports, and an absent address must never be a quiet no",
+        "on means everything reports, and an absent destination or key must never be a quiet no",
     );
   }
 
@@ -53,9 +58,9 @@ if (environment.EGMA_TELEMETRY?.trim().toLowerCase() === "on") {
     register("@opentelemetry/instrumentation/hook.mjs", import.meta.url);
 
     // The SDK reads the standard OTEL_* variables on its own. The egma-named
-    // variable is written through to the standard one rather than replacing
-    // it, so a deployment that already speaks OpenTelemetry's own names is
-    // believed as-is.
+    // collector address is written through to the standard one rather than
+    // replacing it, so a deployment that already speaks OpenTelemetry's own
+    // names is believed as-is.
     environment.OTEL_EXPORTER_OTLP_ENDPOINT ??= endpoint;
     environment.OTEL_SERVICE_NAME ??= "egma-api";
 
@@ -72,11 +77,14 @@ if (environment.EGMA_TELEMETRY?.trim().toLowerCase() === "on") {
       instrumentations: [
         // Inbound requests and outbound calls, the two stores' queries, and
         // trace ids written into each pino line so a log line and the span
-        // it happened inside can find each other.
+        // it happened inside can find each other. Pino still writes one JSON
+        // line to standard output, where the deployment's filelog collector
+        // reads it. It does not also send the same line through the
+        // OpenTelemetry Logs SDK.
         new http.HttpInstrumentation(),
         new undici.UndiciInstrumentation(),
         new pg.PgInstrumentation(),
-        new pino.PinoInstrumentation(),
+        new pino.PinoInstrumentation({ disableLogSending: true }),
       ],
     });
     sdk.start();
