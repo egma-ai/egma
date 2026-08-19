@@ -237,11 +237,11 @@ export function writePlatformConfig(
   ].join("\n");
   // **Written beside the file and renamed over it, never into it.**
   //
-  // This file holds the only copy of a SIP password Twilio has already
-  // accepted, and `writeFileSync` onto the live path truncates before it
-  // writes. A process that dies in that window leaves a half-written config —
-  // a deployment that reads as configured and authenticates nothing, which is
-  // harder to diagnose than one that is plainly absent.
+  // This file holds the media-server credential shared by three containers,
+  // and `writeFileSync` onto the live path truncates before it writes. A process
+  // that dies in that window leaves a half-written config — a deployment whose
+  // media components disagree about authentication, which is harder to
+  // diagnose than one that is plainly absent.
   //
   // A rename within a directory is atomic, so a reader sees the whole old file
   // or the whole new one and never a partial. `wx` makes the temporary this

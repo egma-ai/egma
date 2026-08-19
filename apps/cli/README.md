@@ -744,11 +744,25 @@ owner is who may set them. The platform seals them into its own store, so they
 survive a restart, an upgrade and a move to another machine, and each simulator
 is handed them on the work order it claims.
 
-For the phone half it asks for a Twilio account, a voice number that account
-**already owns**, and the account's Auth Token. It shows a plan before it writes
-anything to your carrier, and it never buys, ports or registers a number. The
-Auth Token is used once and kept nowhere: what runs afterwards holds a SIP
-credential for one trunk and nothing else on that account.
+For the phone half, a Twilio administrator creates one SIP credential per
+developer and one for production in the credential list already attached to the
+shared trunk. All of them use the same trunk address and source number. Each
+developer keeps their own pair outside the database.
+
+Setup asks for `EGMA_PHONE_TRUNK_ADDRESS`, `EGMA_PHONE_SOURCE_NUMBER`,
+`EGMA_PHONE_TRUNK_USERNAME`, and `EGMA_PHONE_TRUNK_PASSWORD`, then copies the
+complete bundle into the platform store. A fresh database gets the same values
+again from the developer's environment. Setup never asks for the Twilio Account
+SID or Auth Token, never contacts Twilio, and never creates or changes a SIP
+credential.
+
+Normal setup does not replace a held carrier bundle. To replace one developer
+credential safely, an administrator first adds the new credential beside the
+old one. Export the trunk address, source number, new SIP username and new SIP
+password, then run `egma self-host setup --replace-carrier --yes`. Run one phone
+simulation with the new bundle, then revoke the old credential. The command
+still does not contact Twilio. Hosted production uses its deployment secret
+instead of this self-hosted command.
 
 To run the command from this same checkout rather than from npm, build it:
 

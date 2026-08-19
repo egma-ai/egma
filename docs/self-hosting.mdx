@@ -138,7 +138,7 @@ The wizard asks the platform what it is missing and then prompts you for exactly
 1. **LLM provider** — who the simulator persona thinks with (e.g. OpenAI GPT-4o)
 2. **TTS provider** — what the persona speaks with (e.g. ElevenLabs)
 3. **STT provider** — what the persona hears with (e.g. Deepgram)
-4. **Phone carrier** — a Twilio account and number for phone simulations (optional — press Enter to skip)
+4. **Phone carrier** — a trunk address, source number, SIP username, and SIP password (optional — press Enter to skip)
 
 Every answer is written through the platform's own API and sealed with `EGMA_ENCRYPTION_KEY`. Settings survive restarts, upgrades, and moves to another machine. A setting the platform already holds is never asked for again — running setup a second time after adding one new credential asks exactly one question.
 
@@ -152,15 +152,17 @@ Every answer is written through the platform's own API and sealed with `EGMA_ENC
   For automated deployments where no human is watching, every answer can come from the environment variable named for it in `.env.example`:
 
   ```bash
-  npx @egma/cli self-host setup --apply --yes --json
+  npx @egma/cli self-host setup --json
   ```
 </Tip>
 
 ### Phone configuration (Twilio)
 
-For phone simulation, the setup wizard asks for your Twilio account SID, an Auth Token, and a voice number **already on your account** — Egma never buys, ports, or registers numbers.
+Use one Twilio account, trunk, source number, and attached credential list. A Twilio administrator creates one SIP username and password in that list for each developer, plus one for production. Twilio shows the username later but does not return the password, so save it when the credential is created.
 
-The wizard shows a plan of what it will create before writing anything to your Twilio account. On approval it creates the SIP trunk, attaches your number and a credential, and writes the trunk details into the platform's sealed store. The Auth Token is used once and kept nowhere afterward.
+`egma self-host setup` asks for the trunk address, source number, SIP username, and SIP password. It writes those four values to the platform's sealed store as one bundle. It never asks for the Twilio Account SID or Auth Token and never reads or changes Twilio. Keep the same four values in an ignored local `.env` or password manager so a fresh database can use them again.
+
+To replace one developer credential safely, a carrier administrator first adds the new credential beside the old one. Export the trunk address, source number, new SIP username, and new SIP password, then run `egma self-host setup --replace-carrier --yes`. Run one phone simulation with the new bundle, then revoke the old credential. This recovery path changes only the platform store; it still does not contact Twilio.
 
 <Note>
   Phone simulation requires the SIP gateway to be reachable from your carrier. On a server with a public IP or 1:1 NAT, set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to your public address and open UDP port 5060 plus the RTP range (default `10000–10020`) to your carrier's IP ranges. On a laptop behind a home router, try it — Twilio supports symmetric RTP latching and many home routers work fine.
@@ -231,7 +233,7 @@ These are written into each new project's sealed configuration on boot and never
 
 Run `egma self-host up` again from your platform workspace after pulling the latest code. The API applies database migrations on boot. No manual migration step is required.
 
-If you are upgrading from a release that used `egma self-host phone setup`, your old phone settings were stored in `.egma-platform/platform.env`. Nothing reads them there anymore — run `egma self-host setup` once to re-enter them. The file itself is kept because it also holds the LiveKit key and secret.
+If you are upgrading from a release that used `egma self-host phone setup`, do not reuse its global SIP credential on every machine. Ask a Twilio administrator to create one credential per developer in the existing credential list. Save each four-value bundle outside the database, run `egma self-host setup --replace-carrier --yes` on each existing local platform, and run one phone simulation. After every platform has moved and passed, the administrator can revoke the old shared credential. The old `.egma-platform/platform.env` file stays because it also holds the LiveKit key and secret.
 
 ## Troubleshooting
 

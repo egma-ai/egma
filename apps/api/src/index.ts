@@ -3,6 +3,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  reconcileDeploymentCarrierSettings,
   runClickHouseMigrations,
   runMigrations,
   seedDefaultJudge,
@@ -40,9 +41,19 @@ const judged =
 
 // The settings this environment offers, written for anything the platform does
 // not already hold. This is how an automated deployment configures itself with
-// no interview — and it never replaces a setting somebody has changed, so a
-// redeploy carrying a script's copy of an old key cannot undo a new one.
+// no interview. In the default `platform` carrier mode, this is the whole rule:
+// a restart never replaces a complete carrier route somebody changed.
 const seeded = await seedPlatformSettings(config.platformSettings);
+
+// An operator can instead say that the deployment environment owns the carrier
+// route. Reconcile it on every start in that mode, after seeding. A changed
+// route replaces the stored route, and an absent route removes it. This choice
+// is explicit and independent of how many organizations the platform serves.
+// All other settings remain seed-only.
+const reconciled =
+  config.carrierSettingsSource === "environment"
+    ? await reconcileDeploymentCarrierSettings(config.platformSettings)
+    : [];
 
 // egma's own graders, written onto the shelf from egma's own catalog. After the
 // migrations because it writes rows, and before the first request because a
@@ -74,6 +85,14 @@ if (seeded.length > 0) {
   app.log.info(
     { settings: seeded },
     "the environment supplied platform settings this deployment was missing",
+  );
+}
+if (reconciled.length > 0) {
+  // Names only. A value or hint here would put a production credential in the
+  // deployment log, which is another credential store by accident.
+  app.log.info(
+    { settings: reconciled },
+    "the deployment reconciled its carrier settings from the environment",
   );
 }
 if (shelved.length > 0) {

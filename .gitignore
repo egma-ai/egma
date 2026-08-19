@@ -16,10 +16,10 @@ coverage/
 # A local override of the compose file, copied from the checked-in example.
 docker-compose.override.yml
 
-# What `egma self-host phone setup` leaves in a platform workspace: the
-# platform's own configuration, which holds credentials, and the receipts
-# beside it. A receipt carries no secret by construction — it is swept before
-# it is written — but it is this deployment's history and not the product's.
+# What `egma self-host up` and `egma self-host setup` leave in a platform
+# workspace: the platform's own local configuration and the receipts beside
+# it. A receipt carries no secret by construction — it is swept before it is
+# written — but it is this deployment's history and not the product's.
 .egma-platform/
 
 .DS_Store

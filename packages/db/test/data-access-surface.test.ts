@@ -275,6 +275,10 @@ const CONTEXT_REQUIRING = [
   // an owner writes them, a read answers a hint and never a stored secret, and
   // the environment seeds what the platform does not already hold.
   "readPlatformSettings",
+  // Hosted egma has no organization owner who may configure its shared carrier
+  // route. Startup reconciles that deployment-owned route from a complete
+  // environment bundle and can name no organization or project.
+  "reconcileDeploymentCarrierSettings",
   // The other half of a key-only verdict row: what a page shows a person, read
   // from the versions the conversation was pinned to rather than from the live
   // test.

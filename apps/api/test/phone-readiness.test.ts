@@ -80,6 +80,24 @@ describe("phone readiness", () => {
     expect(readiness.speechProvider).toBe("openai");
   });
 
+  it.each([
+    ["carrier_trunk_username", "egma-legacy", "the carrier trunk password"],
+    ["carrier_trunk_password", null, "the carrier trunk username"],
+  ] as const)(
+    "keeps a legacy one-sided SIP credential out of ready when it holds only %s",
+    (name, value, absentLabel) => {
+      const readiness = phoneReadiness({
+        carrier_trunk_address: "egma-simulator-abc.pstn.twilio.com",
+        carrier_trunk_number: "+15550100100",
+        text_to_speech_provider: "openai",
+        [name]: value,
+      });
+
+      expect(readiness.state).toBe("setup_required");
+      expect(readiness.missing).toEqual([absentLabel]);
+    },
+  );
+
   it("answers from what a secret-free view of the store can say, and no more", () => {
     // `platformFacts` is the only thing this reads, and it answers `null` for
     // every setting the catalog marks secret. So a carrier that is fully
@@ -127,6 +145,59 @@ describe("phone readiness", () => {
       text_to_speech_provider: "openai",
     });
     expect(Object.keys(config)).not.toContain("phone");
+  });
+
+  it("uses an explicit carrier settings source and refuses every other value", () => {
+    expect(loadConfig({ ...BASE }).carrierSettingsSource).toBe("platform");
+    expect(
+      loadConfig({
+        ...BASE,
+        EGMA_CARRIER_SETTINGS_SOURCE: "platform",
+      }).carrierSettingsSource,
+    ).toBe("platform");
+    expect(
+      loadConfig({
+        ...BASE,
+        EGMA_CARRIER_SETTINGS_SOURCE: "environment",
+      }).carrierSettingsSource,
+    ).toBe("environment");
+    expect(() =>
+      loadConfig({
+        ...BASE,
+        EGMA_CARRIER_SETTINGS_SOURCE: "hosted",
+      }),
+    ).toThrow(
+      "EGMA_CARRIER_SETTINGS_SOURCE must be platform or environment, not hosted",
+    );
+  });
+
+  it("refuses a partial phone bundle before it can seed a mixed credential", () => {
+    const complete = {
+      EGMA_PHONE_TRUNK_ADDRESS: "egma-simulator-abc.pstn.twilio.com",
+      EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
+      EGMA_PHONE_TRUNK_USERNAME: "egma-trunk",
+      EGMA_PHONE_TRUNK_PASSWORD: "the-carrier-issued-this-one",
+    } as const;
+
+    for (const missing of Object.keys(complete) as (keyof typeof complete)[]) {
+      const partial: Record<string, string> = { ...complete };
+      delete partial[missing];
+
+      expect(() => loadConfig({ ...BASE, ...partial })).toThrow(missing);
+    }
+  });
+
+  it("keeps the valid two-value form for a carrier authenticated by source IP", () => {
+    expect(
+      loadConfig({
+        ...BASE,
+        EGMA_PHONE_TRUNK_ADDRESS: "carrier.example.com",
+        EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
+      }).platformSettings,
+    ).toEqual({
+      carrier_trunk_address: "carrier.example.com",
+      carrier_trunk_number: "+15550100100",
+    });
   });
 });
 

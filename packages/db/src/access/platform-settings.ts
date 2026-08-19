@@ -53,6 +53,17 @@ const SHORTEST_SECRET = 8;
 /** How much of a secret a hint may be. */
 const HINT_CHARACTERS = 4;
 
+/** E.164: a plus, then no more than fifteen digits and no leading zero. */
+const E164 = /^\+[1-9]\d{1,14}$/;
+
+/** The phone values supplied at boot, in the order their bundle is named. */
+const CARRIER_BUNDLE = [
+  "carrier_trunk_address",
+  "carrier_trunk_number",
+  "carrier_trunk_username",
+  "carrier_trunk_password",
+] as const satisfies readonly PlatformSettingName[];
+
 /** One setting as anybody but the deployment's own machinery sees it. */
 export type PlatformSetting = {
   readonly name: PlatformSettingName;
@@ -172,6 +183,34 @@ function validValue(
         "this one is shorter than any provider issues",
     );
   }
+  if (definition.name === "carrier_trunk_number" && !E164.test(trimmed)) {
+    throw new UnprocessableInputError(
+      "the source number must be an E.164 phone number such as +15551234567",
+    );
+  }
+  if (definition.name === "carrier_trunk_address") {
+    let address: URL;
+    try {
+      address = new URL(`sip://${trimmed}`);
+    } catch {
+      throw new UnprocessableInputError(
+        "the carrier trunk must be a SIP hostname such as trunk.example.com",
+      );
+    }
+    if (
+      address.hostname === "" ||
+      address.username !== "" ||
+      address.password !== "" ||
+      address.pathname !== "" ||
+      address.search !== "" ||
+      address.hash !== ""
+    ) {
+      throw new UnprocessableInputError(
+        "the carrier trunk must be a SIP hostname such as trunk.example.com, " +
+          "with no scheme, credentials or path",
+      );
+    }
+  }
   return trimmed;
 }
 
@@ -196,6 +235,37 @@ function rowFor(name: PlatformSettingName, value: unknown, now: Date) {
   };
 }
 
+/**
+ * Carrier values are one route, not four unrelated settings.
+ *
+ * Two values are a complete source-IP-authenticated route. Four values are a
+ * complete credential-authenticated route. Every other subset can only mix an
+ * old route with part of a new one, so both the API writer and boot seeder
+ * refuse it before either stores a row.
+ */
+function requireWholeCarrier(
+  values: PlatformSettingValues,
+  action: "write" | "seed" | "reconciliation",
+): void {
+  const named = CARRIER_BUNDLE.filter((name) => values[name] !== undefined);
+  if (named.length === 0) return;
+
+  const ipAuthenticated =
+    values.carrier_trunk_address !== undefined &&
+    values.carrier_trunk_number !== undefined &&
+    values.carrier_trunk_username === undefined &&
+    values.carrier_trunk_password === undefined;
+  const credentialAuthenticated = named.length === CARRIER_BUNDLE.length;
+  if (ipAuthenticated || credentialAuthenticated) return;
+
+  const missing = CARRIER_BUNDLE.filter((name) => values[name] === undefined);
+  throw new UnprocessableInputError(
+    `a carrier ${action} is either its trunk address and source number for IP ` +
+      "authentication, or all four trunk and SIP credential values for " +
+      `credential authentication; this ${action} is missing ${missing.join(" and ")}`,
+  );
+}
+
 /** Every setting named, validated and sealed, in the order they were named. */
 function rowsFor(values: PlatformSettingValues, now: Date) {
   const named = Object.keys(values) as PlatformSettingName[];
@@ -206,6 +276,7 @@ function rowsFor(values: PlatformSettingValues, now: Date) {
       ).join(", ")}`,
     );
   }
+  requireWholeCarrier(values, "write");
   return named.map((name) => rowFor(name, values[name], now));
 }
 
@@ -298,6 +369,23 @@ export async function writePlatformSettings(
           updatedAt: sql`excluded.updated_at`,
         },
       });
+
+    // Writing the two-value form chooses source-IP authentication. Remove a
+    // credential pair the previous route used in the same transaction, or the
+    // result would still be a four-value route with two old credential halves.
+    if (
+      values.carrier_trunk_address !== undefined &&
+      values.carrier_trunk_number !== undefined &&
+      values.carrier_trunk_username === undefined &&
+      values.carrier_trunk_password === undefined
+    ) {
+      await tx.delete(platformSetting).where(
+        inArray(platformSetting.name, [
+          "carrier_trunk_username",
+          "carrier_trunk_password",
+        ]),
+      );
+    }
 
     // In the same transaction as the change that stranded them, so there is
     // no moment where the new provider is stored beside the old provider's
@@ -472,11 +560,13 @@ export async function platformFacts(): Promise<PlatformFacts> {
  * questions, so it puts the settings in its environment and the platform reads
  * them on start.
  *
- * **It never overwrites.** A setting somebody has changed has been changed, and
- * a restart is not an occasion to put a script's copy of the old key back. So
- * this is safe to run on every boot, and running it on every boot is what makes
- * a setting added to the environment later arrive at the next start rather than
- * never.
+ * **It never overwrites a complete configuration.** A setting somebody has
+ * changed has been changed, and a restart is not an occasion to put a script's
+ * copy of the old key back. The one repair is a complete two-value IP route or
+ * four-value credential route offered to a platform that holds only an invalid
+ * part of one. The old part is removed and the new route is written together.
+ * Once either complete shape exists, every later boot leaves it alone like
+ * every other setting.
  *
  * Not authorized against an `AuthContext` on purpose, exactly as the default
  * judge's seeding is not: there is no user here. This is the deployment acting
@@ -488,12 +578,80 @@ export async function seedPlatformSettings(
 ): Promise<readonly PlatformSettingName[]> {
   const named = Object.keys(values) as PlatformSettingName[];
   if (named.length === 0) return [];
+  requireWholeCarrier(values, "seed");
 
   const now = new Date();
   const rows = named
     .filter((name) => values[name] !== undefined)
     .map((name) => rowFor(name, values[name], now));
   if (rows.length === 0) return [];
+
+  const offeredCarrier = CARRIER_BUNDLE.filter(
+    (name) => values[name] !== undefined,
+  );
+
+  if (offeredCarrier.length > 0) {
+    return db().transaction(async (tx) => {
+      // A carrier route has either two rows or four. Hold this small settings
+      // table while deciding whether the stored route is absent, valid or a
+      // legacy partial, so two API starts and a settings write cannot
+      // interleave the rows.
+      await tx.execute(
+        sql`lock table ${platformSetting} in share row exclusive mode`,
+      );
+
+      const heldCarrier = await tx
+        .select({ name: platformSetting.name })
+        .from(platformSetting)
+        .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+      const carrierNames = new Set<PlatformSettingName>(CARRIER_BUNDLE);
+      const otherRows = rows.filter(
+        (row) => !carrierNames.has(row.name as PlatformSettingName),
+      );
+      const written: { name: string }[] = [];
+
+      if (otherRows.length > 0) {
+        written.push(
+          ...(await tx
+            .insert(platformSetting)
+            .values(otherRows)
+            .onConflictDoNothing({ target: platformSetting.name })
+            .returning({ name: platformSetting.name })),
+        );
+      }
+
+      const heldCarrierNames = new Set(heldCarrier.map((row) => row.name));
+      const heldIpRoute =
+        heldCarrierNames.has("carrier_trunk_address") &&
+        heldCarrierNames.has("carrier_trunk_number") &&
+        !heldCarrierNames.has("carrier_trunk_username") &&
+        !heldCarrierNames.has("carrier_trunk_password");
+      const heldCredentialRoute = CARRIER_BUNDLE.every((name) =>
+        heldCarrierNames.has(name),
+      );
+
+      if (!heldIpRoute && !heldCredentialRoute) {
+        // An empty platform and an invalid legacy partial take the same path:
+        // remove every old member, then insert exactly the complete two- or
+        // four-value route this environment supplied. This also removes an
+        // orphan credential when the environment selects source-IP auth.
+        await tx
+          .delete(platformSetting)
+          .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+        const carrierRows = rows.filter((row) =>
+          carrierNames.has(row.name as PlatformSettingName),
+        );
+        written.push(
+          ...(await tx
+            .insert(platformSetting)
+            .values(carrierRows)
+            .returning({ name: platformSetting.name })),
+        );
+      }
+
+      return written.map((row) => row.name as PlatformSettingName);
+    });
+  }
 
   const written = await db()
     .insert(platformSetting)
@@ -506,4 +664,79 @@ export async function seedPlatformSettings(
     .returning({ name: platformSetting.name });
 
   return written.map((row) => row.name as PlatformSettingName);
+}
+
+/**
+ * Make the stored carrier route match this deployment's environment.
+ *
+ * **This is not ordinary boot seeding.** `seedPlatformSettings` preserves a
+ * complete route because a restart must not undo a choice an operator made.
+ * A deployment can choose a different, explicit contract: its environment is
+ * the source of truth, so a rollout must copy that complete route into the
+ * platform store when the two differ. No carrier values means the deployment
+ * has explicitly disabled its phone route, so a stored route is removed rather
+ * than kept as hidden configuration.
+ *
+ * The four carrier names are still one route. Validation finishes before the
+ * transaction starts. Inside the transaction, the small settings table is
+ * held while the stored plaintext is compared with the offered plaintext. A
+ * changed route is then removed and inserted as one unit. A validation error,
+ * an envelope that cannot be opened, or a failed insert therefore leaves the
+ * old complete route untouched.
+ *
+ * Non-carrier environment settings are ignored. Their existing seed and
+ * operator-write behavior stays exactly where it is.
+ */
+export async function reconcileDeploymentCarrierSettings(
+  values: PlatformSettingValues,
+): Promise<readonly PlatformSettingName[]> {
+  const offered: Partial<Record<PlatformSettingName, string>> = {};
+  for (const name of CARRIER_BUNDLE) {
+    const value = values[name];
+    if (value !== undefined) offered[name] = value;
+  }
+
+  const offeredNames = CARRIER_BUNDLE.filter(
+    (name) => offered[name] !== undefined,
+  );
+  requireWholeCarrier(offered, "reconciliation");
+
+  // Settle every value before a transaction can remove the working route.
+  // `rowsFor` repeats these cheap checks when it seals the insert rows; doing
+  // them here is what makes the no-write-on-validation-error rule visible.
+  const settled: Partial<Record<PlatformSettingName, string>> = {};
+  for (const name of offeredNames) {
+    settled[name] = validValue(definitionOf(name), offered[name]);
+  }
+  const rows =
+    offeredNames.length === 0 ? [] : rowsFor(settled, new Date());
+
+  return db().transaction(async (tx) => {
+    await tx.execute(
+      sql`lock table ${platformSetting} in share row exclusive mode`,
+    );
+
+    const held = await tx
+      .select({ name: platformSetting.name, value: platformSetting.value })
+      .from(platformSetting)
+      .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+    const heldInClear = new Map(
+      held.map((row) => [
+        row.name as PlatformSettingName,
+        openCredentials(row.value),
+      ]),
+    );
+    const changed = CARRIER_BUNDLE.filter(
+      (name) => heldInClear.get(name) !== settled[name],
+    );
+    const unchanged = changed.length === 0;
+    if (unchanged) return [];
+
+    await tx
+      .delete(platformSetting)
+      .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+    if (rows.length > 0) await tx.insert(platformSetting).values(rows);
+
+    return changed;
+  });
 }

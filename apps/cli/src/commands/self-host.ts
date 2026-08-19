@@ -21,10 +21,11 @@
  *   variables, so that no deployment runs on a pair anyone can read.
  * - **`setup`** configures that deployment. One command for the whole platform
  *   rather than two with different state: it asks the platform what it is
- *   missing, asks the operator for each of those in a fixed order, does the
- *   carrier paperwork where the phone half is among them, and **writes every
- *   answer through the platform's own API**. There is no second setup command
- *   and no file of settings beside the deployment.
+ *   missing, asks the operator for each of those in a fixed order, copies the
+ *   carrier bundle where the phone half is among them, and **writes every
+ *   answer through the platform's own API**. It never receives account-wide
+ *   Twilio credentials or changes Twilio. There is no second setup command and
+ *   no file of settings beside the deployment.
  *
  * **Nothing here seals anything, and nothing here keeps a setting.** The
  * platform owns its settings: they live sealed in its store, they survive a
@@ -63,7 +64,6 @@ import {
   askOptionally,
   askPlainly,
   askSecret,
-  asStop,
   keyHint,
   CARRIER_VARIABLES,
   NoAnswerError,
@@ -79,7 +79,6 @@ import {
   type Receipt,
 } from "../self-host/receipt.ts";
 import {
-  carrierAnswers,
   inputFor,
   NotSignedInError,
   PlatformRefusedError,
@@ -87,18 +86,6 @@ import {
   writeSettings,
   type PlatformSettingsAccess,
 } from "../self-host/settings.ts";
-import {
-  applyCarrier,
-  ARTIFACT_NAME,
-  CarrierError,
-  planCarrier,
-  TWILIO_API_ROOT,
-  TWILIO_TRUNKING_ROOT,
-  type CarrierPlan,
-  type CarrierResult,
-  type CarrierStep,
-  type TwilioAccess,
-} from "../self-host/twilio.ts";
 import {
   bootstrapVariables,
   findWorkspace,
@@ -126,10 +113,8 @@ export const SELF_HOST_EXIT = {
    * and that door opens for an organization owner and for nobody else.
    */
   notSignedIn: 3,
-  /** The carrier or the platform refused, and said why. */
+  /** The platform refused, or setup could not finish, and said why. */
   refused: 4,
-  /** A plan was shown and nothing was approved, so nothing was written. */
-  notApproved: 5,
   /** Stopped part way. */
   interrupted: 130,
 } as const;
@@ -219,14 +204,23 @@ export type SelfHostInvocation = {
   readonly verb: string;
   readonly cwd: string | null;
   readonly planOnly: boolean;
-  readonly approved: boolean;
+  /** Deliberate recovery: replace all four held carrier values together. */
+  readonly replaceCarrier: boolean;
+  /** Explicit confirmation for the recovery-only replacement above. */
+  readonly confirmed: boolean;
   readonly asJson: boolean;
   /** Options this command does not know, by name only — never their value. */
   readonly unknown: readonly string[];
 };
 
 const VALUED_OPTIONS = ["--cwd"] as const;
-const FLAGS = ["--plan", "--apply", "--yes", "--json"] as const;
+const FLAGS = [
+  "--plan",
+  "--apply",
+  "--yes",
+  "--json",
+  "--replace-carrier",
+] as const;
 
 export function parseSelfHostArgs(argv: readonly string[]): SelfHostInvocation {
   const words: string[] = [];
@@ -272,7 +266,8 @@ export function parseSelfHostArgs(argv: readonly string[]): SelfHostInvocation {
     verb: words.join(" "),
     cwd,
     planOnly: flags.has("--plan") && !flags.has("--apply"),
-    approved: flags.has("--yes"),
+    replaceCarrier: flags.has("--replace-carrier"),
+    confirmed: flags.has("--yes"),
     asJson: flags.has("--json"),
     unknown,
   };
@@ -346,11 +341,6 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
       options.fail(error.message);
       return SELF_HOST_EXIT.refused;
     }
-    if (error instanceof CarrierError) {
-      options.out(`status: refused\nreason: ${error.message}`);
-      options.fail(error.message);
-      return SELF_HOST_EXIT.refused;
-    }
     if (error instanceof SecretInReceiptError) {
       // The sweep fired. Nothing was written and nothing was printed, and
       // saying so in a sentence matters more here than anywhere: a stack trace
@@ -368,7 +358,7 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
       // somebody was being careful. Nothing was written, and this says so.
       options.out("status: stopped");
       options.out("changed: nothing");
-      options.fail("Stopped. Nothing was written, here or at your carrier.");
+      options.fail("Stopped. Nothing was written.");
       return SELF_HOST_EXIT.interrupted;
     }
     throw error;
@@ -683,6 +673,90 @@ async function waitForPlatform(
 
 // -- setup --------------------------------------------------------------------
 
+type CarrierBundleValues =
+  | Readonly<{
+      carrier_trunk_address: string;
+      carrier_trunk_number: string;
+      carrier_trunk_username?: never;
+      carrier_trunk_password?: never;
+    }>
+  | Readonly<{
+      carrier_trunk_address: string;
+      carrier_trunk_number: string;
+      carrier_trunk_username: string;
+      carrier_trunk_password: string;
+    }>;
+
+const CARRIER_SETTING_NAMES = [
+  "carrier_trunk_address",
+  "carrier_trunk_number",
+  "carrier_trunk_username",
+  "carrier_trunk_password",
+] as const satisfies readonly (keyof CarrierBundleValues)[];
+
+type ExportedCarrierBundle =
+  | { readonly kind: "absent" }
+  | { readonly kind: "incomplete"; readonly missing: readonly string[] }
+  | { readonly kind: "complete"; readonly values: CarrierBundleValues };
+
+/**
+ * This deployment's stable runtime carrier bundle.
+ *
+ * Every developer may use a different SIP username and password on the same
+ * account, trunk and credential list. The bundle lives outside the disposable
+ * database, so a reset copies it again. A source-IP carrier needs the address
+ * and source number. A credential carrier needs those two values plus both SIP
+ * credential values. Any other shape is incomplete: combining a trunk from one
+ * route with a credential from another would fail every phone simulation.
+ */
+function exportedCarrierBundleIn(
+  environment: NodeJS.ProcessEnv,
+): ExportedCarrierBundle {
+  const trunkAddress = environment[CARRIER_VARIABLES.trunkAddress]?.trim() ?? "";
+  const sourceNumber = environment[CARRIER_VARIABLES.sourceNumber]?.trim() ?? "";
+  const sipUsername = environment[CARRIER_VARIABLES.sipUsername]?.trim() ?? "";
+  const sipPassword = environment[CARRIER_VARIABLES.sipPassword]?.trim() ?? "";
+
+  if (
+    trunkAddress === "" &&
+    sourceNumber === "" &&
+    sipUsername === "" &&
+    sipPassword === ""
+  ) {
+    return { kind: "absent" };
+  }
+
+  const missing = [
+    [CARRIER_VARIABLES.trunkAddress, trunkAddress],
+    [CARRIER_VARIABLES.sourceNumber, sourceNumber],
+  ]
+    .filter((entry) => entry[1] === "")
+    .map((entry) => entry[0] as string);
+  const credentialSupplied = sipUsername !== "" || sipPassword !== "";
+  if (credentialSupplied && sipUsername === "") {
+    missing.push(CARRIER_VARIABLES.sipUsername);
+  }
+  if (credentialSupplied && sipPassword === "") {
+    missing.push(CARRIER_VARIABLES.sipPassword);
+  }
+  if (missing.length > 0) return { kind: "incomplete", missing };
+
+  return {
+    kind: "complete",
+    values: credentialSupplied
+      ? {
+          carrier_trunk_address: trunkAddress,
+          carrier_trunk_number: normalizeNumber(sourceNumber),
+          carrier_trunk_username: sipUsername,
+          carrier_trunk_password: sipPassword,
+        }
+      : {
+          carrier_trunk_address: trunkAddress,
+          carrier_trunk_number: normalizeNumber(sourceNumber),
+        },
+  };
+}
+
 /**
  * `egma self-host setup`: one command for the whole platform's configuration.
  *
@@ -705,11 +779,11 @@ async function waitForPlatform(
  * decline or a Ctrl-C part way through leaves both the platform and the carrier
  * exactly as they were.
  *
- * The carrier half is the part that is not typed: a trunk hostname and a SIP
- * credential are what the paperwork with Twilio *produces*, so this asks for
- * the account, a number that account already owns and the Auth Token, shows a
- * plan, and derives the four carrier settings from what came back. The Auth
- * Token opens the whole account and is kept nowhere.
+ * The carrier half is a complete route: trunk address and source number for
+ * source-IP authentication, plus SIP username and password for credential
+ * authentication. A developer can have their own credential on the same Twilio
+ * trunk as production. Setup copies the route into the platform and never
+ * receives account-wide Twilio authority or changes Twilio state.
  */
 async function runSetup(
   options: SelfHostOptions,
@@ -762,27 +836,36 @@ async function runSetup(
   const held = await readSettings(access);
   const missing = held.filter((setting) => !setting.held);
   const toAsk = missing.filter((setting) => inputFor(setting.name)?.supply === "asked");
-  // The carrier is wanted when either half the phone stands on is absent. Its
-  // username and password are not: a trunk a carrier authenticates by the
-  // address it came from is a real deployment, and demanding them would make
-  // the phone unreachable for the people whose carrier works that way.
-  const carrierWanted = missing.some(
-    (setting) =>
-      inputFor(setting.name)?.supply === "carrier" &&
-      inputFor(setting.name)?.required === true,
+  const exportedCarrier = exportedCarrierBundleIn(options.env);
+  const heldCarrierNames = new Set(
+    held
+      .filter((setting) => setting.held)
+      .map((setting) => setting.name),
   );
+  const heldIpRoute =
+    heldCarrierNames.has("carrier_trunk_address") &&
+    heldCarrierNames.has("carrier_trunk_number") &&
+    !heldCarrierNames.has("carrier_trunk_username") &&
+    !heldCarrierNames.has("carrier_trunk_password");
+  const heldCredentialRoute = CARRIER_SETTING_NAMES.every((name) =>
+    heldCarrierNames.has(name),
+  );
+  // A complete source-IP route needs no SIP pair. The guided Twilio flow asks
+  // for all four values only when no complete route exists, or when an
+  // operator explicitly replaces the route. An invalid partial route also
+  // comes through this path; setup cannot safely combine it with new values.
+  const carrierWanted =
+    mode.replaceCarrier ||
+    (!heldIpRoute && !heldCredentialRoute);
 
   /**
    * Whether there is anything left for setup to do at all.
    *
-   * **Decided on the settings readiness waits for, and on no others.** Four
-   * settings are ones an operator *may* supply rather than must: the
-   * text-to-speech model and voice, which the simulator has a working default
-   * for, and the carrier trunk's username and password, which a carrier that
-   * authenticates a trunk by the address it came from never issues. Counting
-   * those as work outstanding would ask two questions on every run of a
-   * platform that has been ready for a month, which is the opposite of
-   * "running setup on a configured platform changes nothing".
+   * **Decided on one complete carrier route and the required provider
+   * settings.** The model and voice names remain optional because each leg has
+   * a working default. A source-IP route is complete with address and number.
+   * The guided Twilio flow writes all four credential-authenticated values as
+   * one unit.
    *
    * They are still offered — while there is anything else to ask, the interview
    * walks every setting the platform does not hold, so somebody setting up gets
@@ -805,7 +888,9 @@ async function runSetup(
       asks: [
         ...toAsk.map((setting) => setting.label),
         ...(carrierWanted
-          ? ["your Twilio account, a voice number it already owns, and its Auth Token"]
+          ? [
+              "the SIP trunk address and source number, plus SIP username and password when the carrier requires them",
+            ]
           : []),
       ],
       holds: held.filter((setting) => setting.held).map((setting) => setting.name),
@@ -813,6 +898,19 @@ async function runSetup(
       changed: "nothing",
     });
     return SELF_HOST_EXIT.ok;
+  }
+
+  if (mode.replaceCarrier && !mode.confirmed) {
+    answer(options, mode, {
+      command: "self-host setup",
+      mode: "apply",
+      status: "not_confirmed",
+      changed: "nothing",
+      reason:
+        "--replace-carrier replaces the complete stored carrier route. Run the same command with --yes only after the replacement route is ready. For credential authentication, run it only after a carrier administrator has added the replacement credential beside the old one.",
+      platform_url: address,
+    });
+    return SELF_HOST_EXIT.refused;
   }
 
   if (configured) {
@@ -886,117 +984,86 @@ async function runSetup(
   }
 
   // -- the carrier ------------------------------------------------------------
-  let carrier: TwilioAccess | null = null;
-  let sourceNumber = "";
+  let carrierBundle: CarrierBundleValues | null = null;
   if (carrierWanted) {
-    // Declining is an ordinary answer. A platform with no carrier runs chat and
-    // text simulations perfectly well, and a run with nobody watching that was
-    // given no Twilio account has said the same thing — so neither is refused.
-    // The readiness answer at the end names the phone half as still missing.
-    const accountSid =
-      (await askOptionally(
-        CARRIER_VARIABLES.accountSid,
-        "Twilio Account SID (Enter to leave the phone half for later)",
+    if (exportedCarrier.kind === "complete") {
+      carrierBundle = exportedCarrier.values;
+    } else if (options.stdin.isTTY !== true) {
+      if (exportedCarrier.kind === "incomplete") {
+        throw new NoAnswerError(
+          "the complete SIP carrier bundle",
+          exportedCarrier.missing[0] as string,
+        );
+      }
+      if (mode.replaceCarrier) {
+        throw new NoAnswerError(
+          "the complete replacement SIP carrier bundle",
+          CARRIER_VARIABLES.trunkAddress,
+        );
+      }
+      // A platform without a carrier can still run text simulations. A
+      // headless setup with no carrier values configures the provider half and
+      // reports the four phone values as still missing.
+    } else {
+      const trunkAddress = await askOptionally(
+        CARRIER_VARIABLES.trunkAddress,
+        "SIP trunk address (Enter to leave the phone half for later)",
         ask,
         null,
-      )) ?? "";
-    if (accountSid !== "") {
-      sourceNumber = normalizeNumber(
-        await askPlainly(
-          CARRIER_VARIABLES.sourceNumber,
-          "A voice number this Twilio account already owns, in E.164 (Egma never buys one)",
+      );
+      if (trunkAddress !== null && trunkAddress !== "") {
+        const sourceNumber = normalizeNumber(
+          await askPlainly(
+            CARRIER_VARIABLES.sourceNumber,
+            "Source phone number, in E.164",
+            ask,
+          ),
+        );
+        const sipUsername = await askOptionally(
+          CARRIER_VARIABLES.sipUsername,
+          "SIP username (Enter for source-IP authentication)",
           ask,
-        ),
-      );
-      const authAnswer = await askSecret(
-        CARRIER_VARIABLES.authToken,
-        "Twilio Auth Token (used by this command only, never kept)",
-        ask,
-      );
-      secrets.push(authAnswer.value);
-      carrier = {
-        accountSid,
-        authToken: authAnswer.value,
-        apiRoot: options.env.EGMA_TWILIO_API_ROOT?.trim() || TWILIO_API_ROOT,
-        trunkingRoot: options.env.EGMA_TWILIO_TRUNKING_ROOT?.trim() || TWILIO_TRUNKING_ROOT,
-      };
-    }
-  }
-
-  let plan: CarrierPlan | null = null;
-  let applied: CarrierResult | null = null;
-  if (carrier !== null) {
-    // Planning reads the account and changes nothing, here or there.
-    plan = await planCarrier(carrier, { number: sourceNumber, name: ARTIFACT_NAME });
-    const planDocument = planLines(plan, workspace);
-    sweptOf(planDocument.join("\n"), secrets);
-    // In JSON mode the plan is not printed yet: standard output carries exactly
-    // one document, at the end, so that a coding agent parses the whole answer
-    // rather than picking one out of a stream of lines. In the plain mode a
-    // person is reading and is about to be asked to approve it.
-    if (!mode.asJson) for (const line of planDocument) options.out(line);
-
-    if (!mode.approved && !(await askApproval(options, ask))) {
-      answer(
-        options,
-        mode,
-        {
-          command: "self-host setup",
-          mode: "apply",
-          status: "not_approved",
-          // Nothing at all, and that is why every question came first: the
-          // settings already answered are not written either, so declining
-          // leaves the platform and the carrier exactly as they were.
-          changed: "nothing",
-          account_sid: plan.accountSid,
-          source_number: plan.sourceNumber,
-          steps: plan.steps,
-          platform_url: address,
-        },
-        secrets,
-      );
-      return SELF_HOST_EXIT.notApproved;
+          null,
+        );
+        if (sipUsername === null || sipUsername === "") {
+          carrierBundle = {
+            carrier_trunk_address: trunkAddress,
+            carrier_trunk_number: sourceNumber,
+          };
+        } else {
+          const sipPassword = await askSecret(
+            CARRIER_VARIABLES.sipPassword,
+            "SIP password (not shown as you type)",
+            ask,
+          );
+          carrierBundle = {
+            carrier_trunk_address: trunkAddress,
+            carrier_trunk_number: sourceNumber,
+            carrier_trunk_username: sipUsername,
+            carrier_trunk_password: sipPassword.value,
+          };
+        }
+      }
     }
 
-    applied = await applyCarrier(carrier, { number: sourceNumber, name: ARTIFACT_NAME });
-    secrets.push(applied.sipPassword);
-    // Everything the paperwork produced, under the names the platform stores it
-    // by — read off `FROM_THE_CARRIER` rather than typed out here, so a carrier
-    // setting cannot be declared and then never written. The SIP credential
-    // authenticates one trunk and can do nothing else on the account; that is
-    // the whole reason the Auth Token is a setup-time input rather than
-    // anybody's variable at all.
-    Object.assign(answers, carrierAnswers(applied));
+    if (carrierBundle !== null) {
+      // The complete route moves together. This is the whole database-reset
+      // path: copy this developer's stable route into the new platform store.
+      // No account-wide Twilio credential is read and Twilio is never contacted.
+      Object.assign(answers, carrierBundle);
+      if (carrierBundle.carrier_trunk_password !== undefined) {
+        secrets.push(carrierBundle.carrier_trunk_password);
+      }
+    }
   }
 
   // -- the write --------------------------------------------------------------
-  //
-  // **The one window this command cannot make atomic, made legible instead.**
-  //
-  // Twilio has already accepted a new SIP password by the time this runs, and it
-  // accepts only that one. If the platform will not take it, the carrier and
-  // this deployment disagree about the credential, and the symptom is every
-  // outbound call failing authentication with nothing on screen to explain it.
-  // There is no transaction across a carrier's API and a platform's store, and
-  // reordering does not help: writing first would store a password Twilio never
-  // accepted. So the failure is caught and named, and the recovery is stated.
   const names = Object.keys(answers);
-  if (names.length > 0) {
-    try {
-      await writeSettings(access, answers);
-    } catch (cause) {
-      if (applied === null) throw cause;
-      throw new CarrierError(
-        `Twilio accepted a new SIP password for ${applied.sipUsername}, and this platform would not take it: ${
-          (cause as Error).message
-        }. The carrier now accepts only a password Egma could not store, so calls would fail to authenticate. Run \`egma self-host setup\` again — it mints another password and writes both ends together. Nothing was charged and no call was placed.`,
-      );
-    }
-  }
+  if (names.length > 0) await writeSettings(access, answers);
 
-  // The workspace's own credential, seen to only now — after the last question
-  // and after the approval, so that a decline or a Ctrl-C really does leave
-  // this machine exactly as it was.
+  // The workspace's own credential, seen to only now — after the last question,
+  // so that pressing Ctrl-C part way through leaves this machine exactly as it
+  // was.
   //
   // A setting needs no restart at all any more: the platform reads its settings
   // from its own store for each simulation, so a key supplied here applies to
@@ -1007,29 +1074,43 @@ async function runSetup(
   // Read once rather than waited for. Readiness is built from the store on
   // every request, so the answer is already true the moment the write lands.
   const platform = await readPlatform(address);
+  // A held source-IP route makes carrierWanted false before the interview. If a
+  // route was absent or partial, setup must not call the result ready until a
+  // complete two-value or four-value route has been supplied.
+  const carrierBundleMissing = carrierWanted && carrierBundle === null;
+  const stillMissing = [
+    ...(platform?.setupMissing ?? []),
+    ...(carrierBundleMissing ? ["the complete SIP carrier bundle"] : []),
+  ];
 
   const configFile = path.join(PLATFORM_DIRECTORY, PLATFORM_CONFIG_FILE);
   const receipt: Receipt = {
     command: "self-host setup",
     at: new Date().toISOString(),
-    result: platform?.setupState === "ready" ? "applied" : "failed",
+    result:
+      platform?.setupState === "ready" && !carrierBundleMissing
+        ? "applied"
+        : "failed",
     facts: {
       settings_written: names.join(", "),
-      account_sid: plan?.accountSid ?? null,
-      source_number: applied?.sourceNumber ?? plan?.sourceNumber ?? null,
-      trunk_sid: applied?.trunkSid ?? null,
-      trunk_address: applied?.trunkAddress ?? null,
-      sip_username: applied?.sipUsername ?? null,
+      source_number: carrierBundle?.carrier_trunk_number ?? null,
+      trunk_address: carrierBundle?.carrier_trunk_address ?? null,
+      sip_username: carrierBundle?.carrier_trunk_username ?? null,
       // Said rather than shown, so that a receipt records that a credential
       // exists without being the second place it exists.
-      sip_password: applied === null ? null : "minted, not recorded",
+      sip_password:
+        carrierBundle?.carrier_trunk_password === undefined
+          ? null
+          : "supplied, not recorded",
       configuration_file: configFile,
       platform_url: address,
       setup: platform?.setupState ?? "unknown",
-      phone: platform?.phoneState ?? "unknown",
+      phone: carrierBundleMissing
+        ? "setup_required"
+        : (platform?.phoneState ?? "unknown"),
       media_credential: media.generated ? "generated" : "existing",
     },
-    steps: (applied?.steps ?? []).map((step) => `${step.action}: ${step.detail}`),
+    steps: [],
   };
   // The media secret joins the swept set even though nothing prints it. The
   // sweep is a guard rather than a review habit, and a guard that covers only
@@ -1044,16 +1125,19 @@ async function runSetup(
     // Names only, never values. What was written is the fact; what it was
     // written as is the platform's, sealed, and never comes back out here.
     settings_written: names,
-    still_missing: platform?.setupMissing ?? [],
-    account_sid: plan?.accountSid ?? null,
-    trunk_sid: applied?.trunkSid ?? null,
-    trunk_address: applied?.trunkAddress ?? null,
-    buys_a_number: false,
-    steps: applied?.steps ?? [],
+    still_missing: stillMissing,
+    carrier_bundle:
+      carrierBundle === null
+        ? "unchanged"
+        : mode.replaceCarrier
+          ? "replaced"
+          : "supplied",
     receipt: path.relative(workspace, receiptFile),
     platform_url: address,
     setup: platform?.setupState ?? "unknown",
-    phone: platform?.phoneState ?? "unknown",
+    phone: carrierBundleMissing
+      ? "setup_required"
+      : (platform?.phoneState ?? "unknown"),
     media_credential: media.generated ? "generated" : "existing",
   } as const;
 
@@ -1071,6 +1155,11 @@ async function runSetup(
   // refusal naming nothing about configuration.
   const wrong = [
     ...(media.settled ? [] : [MEDIA_DID_NOT_COME_BACK]),
+    ...(carrierBundleMissing
+      ? [
+          `the complete SIP carrier bundle was not supplied. Set ${CARRIER_VARIABLES.trunkAddress}, ${CARRIER_VARIABLES.sourceNumber}, ${CARRIER_VARIABLES.sipUsername}, and ${CARRIER_VARIABLES.sipPassword}, then run setup again`,
+        ]
+      : []),
     ...(platform === null
       ? [
           `the settings were written but ${address} stopped answering, so Egma cannot say whether this platform is configured`,
@@ -1100,9 +1189,9 @@ async function runSetup(
   options.fail(
     "Its settings live in the platform's own store, sealed, so they survive a restart, an upgrade and a move to another machine — and every simulator is handed them on the work order it claims.",
   );
-  if (applied !== null) {
+  if (carrierBundle !== null) {
     options.fail(
-      `The Twilio Auth Token was used once and kept nowhere. What is running holds a SIP credential for the trunk ${applied.trunkSid} and nothing else on that account.`,
+      "The SIP carrier values were copied into this platform. Twilio was not contacted or changed.",
     );
   }
   return SELF_HOST_EXIT.ok;
@@ -1188,35 +1277,6 @@ async function settleMediaCredential(
   return { ...media, settled: recreated.code === 0 };
 }
 
-async function askApproval(
-  options: SelfHostOptions,
-  ask: AskOptions,
-): Promise<boolean> {
-  if (options.stdin.isTTY !== true) {
-    // Nobody is watching and nothing said yes. A plan is still worth having,
-    // so this is not an error — it is a plan, and a refusal to write.
-    return false;
-  }
-  const { createInterface } = await import("node:readline/promises");
-  const asked = createInterface({ input: options.stdin, output: options.stdout });
-  try {
-    const answer = (
-      await asked.question("Apply this to your Twilio account? [y/N] ", {
-        signal: ask.signal,
-      })
-    )
-      .trim()
-      .toLowerCase();
-    return answer === "y" || answer === "yes";
-  } catch (stopped) {
-    // Ctrl-C over the approval question is the same stop as Ctrl-C over any
-    // other, and nothing has been written to the carrier at this point.
-    throw asStop(stopped);
-  } finally {
-    asked.close();
-  }
-}
-
 /**
  * The command's answer, in whichever shape was asked for.
  *
@@ -1252,12 +1312,6 @@ function answer(
     secrets,
   );
   for (const [name, value] of Object.entries(facts)) {
-    if (name === "steps") {
-      for (const step of value as readonly CarrierStep[]) {
-        options.out(`${mode.planOnly ? "plan" : "did"}: ${step.action} ${step.detail}`);
-      }
-      continue;
-    }
     if (name === "command" || name === "mode") continue;
     // A list stays a list in JSON and becomes one line per entry here, because
     // the entries are what a person reads down: the settings that were written,
@@ -1271,19 +1325,6 @@ function answer(
     }
     options.out(`${name}: ${String(value)}`);
   }
-}
-
-function planLines(plan: CarrierPlan, workspace: string): readonly string[] {
-  return [
-    `workspace: ${workspace}`,
-    `account: ${plan.accountSid}`,
-    `source_number: ${plan.sourceNumber} (${plan.sourceNumberSid})`,
-    `trunk_name: ${plan.trunkName}`,
-    `trunk: ${plan.trunkSid ?? "none yet"}`,
-    `trunk_address: ${plan.trunkAddress ?? "minted on apply"}`,
-    "buys_a_number: no",
-    ...plan.steps.map((step) => `plan: ${step.action} ${step.detail}`),
-  ];
 }
 
 /**

@@ -11,6 +11,9 @@ export type DefaultJudge = {
   readonly key: string;
 };
 
+/** Which source owns the carrier route after the platform has started. */
+export type CarrierSettingsSource = "platform" | "environment";
+
 export type Config = {
   readonly databaseUrl: string;
   /**
@@ -96,8 +99,23 @@ export type Config = {
    */
   readonly defaultJudge: DefaultJudge | undefined;
   /**
-   * The settings this environment offers the platform on start, for anything
-   * the platform does not already hold.
+   * Which source owns the carrier route.
+   *
+   * `platform` is the default. Environment values seed a missing route, and a
+   * complete route already in the platform store stays unchanged.
+   *
+   * `environment` makes the deployment environment the source of truth.
+   * Startup reconciles the carrier route after seeding on every start. A
+   * changed complete route replaces the stored route, and no carrier values
+   * removes it. Other platform settings remain seed-only in both modes.
+   *
+   * This decision is independent of whether the deployment serves one or
+   * several organizations. Tenancy does not say who owns a carrier route.
+   */
+  readonly carrierSettingsSource: CarrierSettingsSource;
+  /**
+   * The settings this environment offers the platform on start. Most values
+   * are written only where the platform does not already hold one.
    *
    * **This is the second of the two ways a setting gets in, and the operator
    * chooses which.** One is an interview — `egma self-host setup` asks for each
@@ -110,9 +128,9 @@ export type Config = {
    * one somebody supplies through the interface or the setup command, and the
    * platform says so in its readiness answer until they do.
    *
-   * Nothing here is ever *replaced* from the environment. See
-   * `seedPlatformSettings`: a redeploy carrying a script's copy of the old key
-   * must not undo a key the operator changed.
+   * See `carrierSettingsSource` for the one explicit choice that can make the
+   * environment replace or remove the carrier route. It never changes the
+   * seed-only rule for any other setting.
    */
   readonly platformSettings: PlatformSettingValues;
   /**
@@ -154,6 +172,17 @@ function flag(
   if (["1", "true", "yes", "on"].includes(raw)) return true;
   if (["0", "false", "no", "off"].includes(raw)) return false;
   throw new Error(`${name} is not a yes or a no: ${environment[name]}`);
+}
+
+function carrierSettingsSource(
+  environment: NodeJS.ProcessEnv,
+): CarrierSettingsSource {
+  const raw = environment.EGMA_CARRIER_SETTINGS_SOURCE?.trim();
+  if (raw === undefined || raw === "") return "platform";
+  if (raw === "platform" || raw === "environment") return raw;
+  throw new Error(
+    "EGMA_CARRIER_SETTINGS_SOURCE must be platform or environment, not " + raw,
+  );
 }
 
 /**
@@ -337,6 +366,7 @@ export function loadConfig(
     authSecret,
     encryptionKey,
     singleOrganization: flag(environment, "EGMA_SINGLE_ORGANIZATION", true),
+    carrierSettingsSource: carrierSettingsSource(environment),
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,
     simulatorServiceToken,
@@ -369,13 +399,14 @@ export function loadConfig(
  * and then reported `setup required` against a real carrier because the compose
  * entry never passed the variables through.
  *
- * **Unlike the judge's three, these are not all-or-nothing.** Half a judge is a
- * judge that errors every verdict it is given, so half is refused at startup.
- * Half of these is an ordinary platform mid-setup: a deployment that supplied
- * the provider and the model from a script and means to type the key into the
- * settings form is exactly the case the readiness answer is for, and refusing
- * to start on it would make seeding an all-or-nothing act rather than a
- * gap-filling one.
+ * **Most settings remain independent, but the four phone variables are one
+ * bundle.** A platform may be halfway through its model or speech setup and
+ * finish it through the settings form. A Twilio credential is different: a
+ * trunk from one bundle beside a username or password from another makes every
+ * phone simulation fail. A carrier authenticated by source IP supplies the
+ * trunk address and source number. A credential-authenticated carrier supplies
+ * all four.
+ * Every other subset is refused before it can become a mixed route.
  */
 function platformSettings(
   environment: NodeJS.ProcessEnv,
@@ -402,6 +433,42 @@ function platformSettings(
     carrier_trunk_username: environment.EGMA_PHONE_TRUNK_USERNAME?.trim(),
     carrier_trunk_password: environment.EGMA_PHONE_TRUNK_PASSWORD?.trim(),
   };
+
+  const carrierVariables = [
+    ["carrier_trunk_address", "EGMA_PHONE_TRUNK_ADDRESS"],
+    ["carrier_trunk_number", "EGMA_PHONE_SOURCE_NUMBER"],
+    ["carrier_trunk_username", "EGMA_PHONE_TRUNK_USERNAME"],
+    ["carrier_trunk_password", "EGMA_PHONE_TRUNK_PASSWORD"],
+  ] as const;
+  const carrierPresent = carrierVariables.filter(
+    ([name]) => (offered[name] ?? "") !== "",
+  );
+  const ipAuthenticatedCarrier =
+    offered.carrier_trunk_address !== undefined &&
+    offered.carrier_trunk_address !== "" &&
+    offered.carrier_trunk_number !== undefined &&
+    offered.carrier_trunk_number !== "" &&
+    (offered.carrier_trunk_username ?? "") === "" &&
+    (offered.carrier_trunk_password ?? "") === "";
+  const credentialAuthenticatedCarrier =
+    carrierPresent.length === carrierVariables.length;
+  if (
+    carrierPresent.length > 0 &&
+    !ipAuthenticatedCarrier &&
+    !credentialAuthenticatedCarrier
+  ) {
+    const missing = carrierVariables
+      .filter(([name]) => (offered[name] ?? "") === "")
+      .map(([, variable]) => variable);
+    throw new Error(
+      "the phone carrier environment is either a trunk address and source " +
+        "number for source-IP authentication, or those two plus a SIP " +
+        `username and password. This deployment is missing ${missing.join(" and ")}. ` +
+        "Set EGMA_PHONE_TRUNK_ADDRESS and EGMA_PHONE_SOURCE_NUMBER together, " +
+        "and if this carrier uses credentials, also set both " +
+        "EGMA_PHONE_TRUNK_USERNAME and EGMA_PHONE_TRUNK_PASSWORD.",
+    );
+  }
 
   // Compose passes an unset optional through as an empty string rather than
   // leaving it out, so "" and "never set" have to mean the same thing: a blank

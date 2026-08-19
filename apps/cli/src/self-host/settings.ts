@@ -24,7 +24,7 @@
  */
 
 import { PlatformUnreachableError, type Fetch } from "../platform/device-flow.ts";
-import type { CarrierResult } from "./twilio.ts";
+import { CARRIER_VARIABLES } from "./protected-input.ts";
 
 /** Where the settings of a whole deployment are read and written. */
 export const PLATFORM_SETTINGS_PATH = "/api/platform/settings";
@@ -161,11 +161,11 @@ export async function writeSettings(
  * interview never asks for, and a required one at that would leave an operator
  * who finished the whole documented setup still reading `setup required`.
  *
- * `asked` settings are typed or exported. `carrier` settings are not: they are
- * what the paperwork with a carrier produces — the trunk it created, the number
- * it attached, the SIP credential it minted — and asking somebody to type a
- * trunk hostname egma is about to be told by Twilio would be asking them to
- * copy a value out of a console for no reason.
+ * `asked` settings are typed or exported one at a time. `carrier` settings move
+ * as one four-value bundle. The trunk address and number can be shared while
+ * each developer or production uses its own SIP pair. They are not four
+ * independent writes, because mixing two bundles would leave every phone
+ * simulation failing authentication.
  *
  * **Each `variable` is the name the platform seeds that same setting from.**
  * One word means one thing whichever of the two ways in an operator uses, so a
@@ -190,6 +190,10 @@ export type SettingInput =
     }
   | {
       readonly supply: "carrier";
+      /** The environment variable this member of the carrier bundle uses. */
+      readonly variable: string;
+      /** Whether a terminal must read it without echo. */
+      readonly secret: boolean;
       readonly required: boolean;
     };
 
@@ -299,10 +303,30 @@ export const SETUP_INPUTS = {
     suggested: "livekit",
     required: true,
   },
-  carrier_trunk_address: { supply: "carrier", required: true },
-  carrier_trunk_number: { supply: "carrier", required: true },
-  carrier_trunk_username: { supply: "carrier", required: false },
-  carrier_trunk_password: { supply: "carrier", required: false },
+  carrier_trunk_address: {
+    supply: "carrier",
+    variable: CARRIER_VARIABLES.trunkAddress,
+    secret: false,
+    required: true,
+  },
+  carrier_trunk_number: {
+    supply: "carrier",
+    variable: CARRIER_VARIABLES.sourceNumber,
+    secret: false,
+    required: true,
+  },
+  carrier_trunk_username: {
+    supply: "carrier",
+    variable: CARRIER_VARIABLES.sipUsername,
+    secret: false,
+    required: false,
+  },
+  carrier_trunk_password: {
+    supply: "carrier",
+    variable: CARRIER_VARIABLES.sipPassword,
+    secret: true,
+    required: false,
+  },
 } as const satisfies Readonly<Record<string, SettingInput>>;
 
 /** The name of one setting this interview knows how to supply. */
@@ -313,40 +337,4 @@ export function inputFor(name: string): SettingInput | null {
   return Object.hasOwn(SETUP_INPUTS, name)
     ? (SETUP_INPUTS[name as SetupSettingName] as SettingInput)
     : null;
-}
-
-/** Which of a finished carrier's facts are single values a setting can hold. */
-type CarrierFact = {
-  [K in keyof CarrierResult]: CarrierResult[K] extends string ? K : never;
-}[keyof CarrierResult];
-
-/**
- * What the carrier paperwork produces, and which setting each result fills.
- *
- * **This exists so that a `carrier` setting cannot be declared and then never
- * written.** The four assignments used to be typed out inside the setup command,
- * which meant the catalog could grow a fifth carrier setting, the interview
- * could agree that the carrier supplies it, every check could pass — and the
- * platform would report `setup required` for ever, because nothing assigned it.
- * The list is here instead, the command loops over it, and the catalog check
- * holds the two lists against each other in both directions.
- *
- * The value is a field of the carrier's own result rather than a free string,
- * so a field renamed in the carrier module stops the build here rather than
- * writing `undefined` into somebody's platform.
- */
-export const FROM_THE_CARRIER = {
-  carrier_trunk_address: "trunkAddress",
-  carrier_trunk_number: "sourceNumber",
-  carrier_trunk_username: "sipUsername",
-  carrier_trunk_password: "sipPassword",
-} as const satisfies Readonly<Record<string, CarrierFact>>;
-
-/** Every setting the carrier step fills, with the fact that fills it. */
-export function carrierAnswers(
-  applied: CarrierResult,
-): Readonly<Record<string, string>> {
-  return Object.fromEntries(
-    Object.entries(FROM_THE_CARRIER).map(([name, fact]) => [name, applied[fact]]),
-  );
 }

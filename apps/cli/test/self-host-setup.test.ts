@@ -1,12 +1,12 @@
 /**
- * `egma self-host setup`, against a platform-shaped and a Twilio-shaped local
- * server.
+ * `egma self-host setup`, against a platform-shaped local server and a
+ * Twilio-shaped tripwire.
  *
  * The real CLI process, the real command modules and the real HTTP client. Only
- * the platform, the carrier and the container runtime stand in — a suite that
- * bought SIP trunks would cost money and a suite that started Docker would take
- * minutes. The provider-backed acceptance is a separate, deliberate act; this is
- * the regression net under it.
+ * the platform, Twilio and the container runtime stand in. Normal setup must
+ * never touch the Twilio stand-in: an administrator makes one trunk and
+ * credential list, then gives each developer a stable SIP username/password.
+ * Setup copies that developer's four runtime phone values into the platform.
  *
  * What is worth proving here, in order of how much it would cost to get wrong:
  *
@@ -46,11 +46,11 @@ import {
  * Values nothing else in this repository holds, so a sweep that finds one has
  * found this test's own input and not a coincidence.
  */
-const AUTH_TOKEN = "SENTINEL-twilio-auth-token-0f1c8a2e4b6d";
+const IGNORED_AUTH_TOKEN = "SENTINEL-twilio-auth-token-0f1c8a2e4b6d";
 const MODEL_KEY = "sk-SENTINEL-model-key-9a7c3e5f1b2d4680";
 const LISTENING_KEY = "sk-SENTINEL-listening-key-1122334455667788";
 const SPEAKING_KEY = "sk-SENTINEL-speaking-key-99887766554433221";
-const ACCOUNT_SID = "AC00000000000000000000000000000001";
+const IGNORED_ACCOUNT_SID = "AC00000000000000000000000000000001";
 const SOURCE_NUMBER = "+15550100100";
 const NUMBER_SID = "PN00000000000000000000000000000001";
 
@@ -59,6 +59,39 @@ const EXISTING_TRUNK = {
   domain: "egma-simulator-abc123.pstn.twilio.com",
 };
 const EXISTING_LIST = { sid: "CL00000000000000000000000000000001" };
+const SIP_USERNAME = "egma-nischal";
+const SIP_PASSWORD = "SENTINEL-shared-sip-password-1a2b3c4d";
+
+/** One carrier configuration intentionally shared by local and hosted platforms. */
+const SHARED_CARRIER: NodeJS.ProcessEnv = {
+  EGMA_PHONE_TRUNK_ADDRESS: EXISTING_TRUNK.domain,
+  EGMA_PHONE_SOURCE_NUMBER: SOURCE_NUMBER,
+  EGMA_PHONE_TRUNK_USERNAME: SIP_USERNAME,
+  EGMA_PHONE_TRUNK_PASSWORD: SIP_PASSWORD,
+};
+
+const REPLACEMENT_SIP_PASSWORD =
+  "SENTINEL-replacement-sip-password-5e6f7a8b";
+const REPLACEMENT_CARRIER: NodeJS.ProcessEnv = {
+  EGMA_PHONE_TRUNK_ADDRESS: "replacement.pstn.twilio.com",
+  EGMA_PHONE_SOURCE_NUMBER: "+15550100200",
+  EGMA_PHONE_TRUNK_USERNAME: "egma-nischal-replacement",
+  EGMA_PHONE_TRUNK_PASSWORD: REPLACEMENT_SIP_PASSWORD,
+};
+
+const SOURCE_IP_CARRIER: NodeJS.ProcessEnv = {
+  EGMA_PHONE_TRUNK_ADDRESS: "source-ip.example.com",
+  EGMA_PHONE_SOURCE_NUMBER: "+15550100300",
+  EGMA_PHONE_TRUNK_USERNAME: "",
+  EGMA_PHONE_TRUNK_PASSWORD: "",
+};
+
+const PHONE_VARIABLES = [
+  "EGMA_PHONE_TRUNK_ADDRESS",
+  "EGMA_PHONE_SOURCE_NUMBER",
+  "EGMA_PHONE_TRUNK_USERNAME",
+  "EGMA_PHONE_TRUNK_PASSWORD",
+] as const;
 
 const WORKSPACE_PREFIX = "egma-platform-setup-";
 
@@ -67,9 +100,7 @@ const EVERY_ANSWER: NodeJS.ProcessEnv = {
   EGMA_PERSONA_MODEL_API_KEY: MODEL_KEY,
   EGMA_PERSONA_STT_API_KEY: LISTENING_KEY,
   EGMA_PERSONA_TTS_API_KEY: SPEAKING_KEY,
-  TWILIO_ACCOUNT_SID: ACCOUNT_SID,
-  TWILIO_AUTH_TOKEN: AUTH_TOKEN,
-  EGMA_PHONE_SOURCE_NUMBER: SOURCE_NUMBER,
+  ...SHARED_CARRIER,
 };
 
 /** What a platform holds once setup has finished against a working carrier. */
@@ -89,8 +120,8 @@ const EVERYTHING_HELD = {
   media_backend: "livekit",
   carrier_trunk_address: EXISTING_TRUNK.domain,
   carrier_trunk_number: SOURCE_NUMBER,
-  carrier_trunk_username: "egma-simulator",
-  carrier_trunk_password: "whatever-the-carrier-issued",
+  carrier_trunk_username: SIP_USERNAME,
+  carrier_trunk_password: SIP_PASSWORD,
 } as const;
 
 let twilio: FakeTwilio;
@@ -118,11 +149,20 @@ async function runSetup(
     EGMA_PERSONA_TTS_VOICE: "",
     EGMA_PERSONA_VAD_PROVIDER: "",
     EGMA_MEDIA_BACKEND: "",
+    EGMA_PHONE_TRUNK_ADDRESS: "",
+    EGMA_PHONE_TRUNK_USERNAME: "",
+    EGMA_PHONE_TRUNK_PASSWORD: "",
     TWILIO_ACCOUNT_SID: "",
     TWILIO_AUTH_TOKEN: "",
     EGMA_PHONE_SOURCE_NUMBER: "",
     ...extraEnv,
   });
+}
+
+function expectNoTwilioAccess(): void {
+  expect(twilio.requests).toEqual([]);
+  expect(twilio.writes).toEqual([]);
+  expect(twilio.passwords).toEqual([]);
 }
 
 /** Everything the command left behind in the workspace, as one string. */
@@ -151,6 +191,10 @@ describe("egma self-host setup", () => {
       numbers: { [SOURCE_NUMBER]: NUMBER_SID },
       existingTrunk: EXISTING_TRUNK,
       existingCredentialList: EXISTING_LIST,
+      existingCredential: {
+        sid: "CR00000000000000000000000000000001",
+        username: "egma-production",
+      },
       credentialListAttached: true,
       numberAttached: true,
     });
@@ -178,13 +222,8 @@ describe("egma self-host setup", () => {
     // is written, which is what makes a decline or a Ctrl-C part way through
     // leave the platform exactly as it was.
     expect(platform.written).toHaveLength(1);
-    expect(platform.held()).toEqual({
-      ...EVERYTHING_HELD,
-      // Minted by the carrier rather than typed, so it is whatever the trunk
-      // handed back — asserted as present rather than as a value.
-      carrier_trunk_password: platform.held().carrier_trunk_password,
-    });
-    expect((platform.held().carrier_trunk_password ?? "").length).toBeGreaterThan(8);
+    expect(platform.held()).toEqual(EVERYTHING_HELD);
+    expectNoTwilioAccess();
 
     // The three the simulator has a working default for are not demanded of a
     // run with nobody watching, and readiness does not wait for them either.
@@ -204,9 +243,101 @@ describe("egma self-host setup", () => {
       "EGMA_LIVEKIT_API_SECRET",
     ]);
     const written = await everythingWritten(workspace.dir);
-    for (const secret of [MODEL_KEY, LISTENING_KEY, SPEAKING_KEY, AUTH_TOKEN]) {
+    for (const secret of [MODEL_KEY, LISTENING_KEY, SPEAKING_KEY, SIP_PASSWORD]) {
       expect(written).not.toContain(secret);
     }
+  });
+
+  it("copies exactly four runtime phone values into a fresh database", async () => {
+    platform = await startPlatform({
+      holds: Object.fromEntries(
+        Object.entries(EVERYTHING_HELD).filter(([name]) => !name.startsWith("carrier_")),
+      ),
+    });
+    await workspace.signIn(platform);
+
+    const run = await runSetup(["--apply", "--yes", "--json"], SHARED_CARRIER);
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(platform.written).toEqual([
+      {
+        carrier_trunk_address: EXISTING_TRUNK.domain,
+        carrier_trunk_number: SOURCE_NUMBER,
+        carrier_trunk_username: SIP_USERNAME,
+        carrier_trunk_password: SIP_PASSWORD,
+      },
+    ]);
+    expectNoTwilioAccess();
+  });
+
+  it.each(PHONE_VARIABLES)("requires %s and never falls back to Twilio", async (missing) => {
+    platform = await startPlatform();
+    await workspace.signIn(platform);
+    const answers = { ...EVERY_ANSWER, [missing]: "" };
+
+    const run = await runSetup(["--apply", "--yes", "--json"], answers);
+
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain(missing);
+    expect(platform.written).toEqual([]);
+    expectNoTwilioAccess();
+  });
+
+  it("accepts a complete source-IP route without asking for SIP credentials", async () => {
+    platform = await startPlatform({
+      holds: Object.fromEntries(
+        Object.entries(EVERYTHING_HELD).filter(
+          ([name]) =>
+            name !== "carrier_trunk_username" &&
+            name !== "carrier_trunk_password",
+        ),
+      ),
+    });
+    await workspace.signIn(platform);
+
+    const run = await runSetup(["--apply", "--yes", "--json"]);
+    const answered = JSON.parse(run.stdout) as Record<string, unknown>;
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(answered.status).toBe("ready");
+    expect(answered.settings_written).toEqual([]);
+    expect(platform.written).toEqual([]);
+    expectNoTwilioAccess();
+  });
+
+  it("copies a complete source-IP route into a fresh database", async () => {
+    platform = await startPlatform({
+      holds: Object.fromEntries(
+        Object.entries(EVERYTHING_HELD).filter(([name]) => !name.startsWith("carrier_")),
+      ),
+    });
+    await workspace.signIn(platform);
+
+    const run = await runSetup(["--apply", "--yes", "--json"], SOURCE_IP_CARRIER);
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(platform.written).toEqual([
+      {
+        carrier_trunk_address: "source-ip.example.com",
+        carrier_trunk_number: "+15550100300",
+      },
+    ]);
+    expectNoTwilioAccess();
+  });
+
+  it("ignores Twilio account authority even when the environment exports it", async () => {
+    platform = await startPlatform();
+    await workspace.signIn(platform);
+
+    const run = await runSetup(["--apply", "--yes", "--json"], {
+      ...EVERY_ANSWER,
+      TWILIO_ACCOUNT_SID: IGNORED_ACCOUNT_SID,
+      TWILIO_AUTH_TOKEN: IGNORED_AUTH_TOKEN,
+    });
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(`${run.stdout}\n${run.stderr}`).not.toContain(IGNORED_AUTH_TOKEN);
+    expectNoTwilioAccess();
   });
 
   it("asks for nothing the platform already holds", async () => {
@@ -254,6 +385,88 @@ describe("egma self-host setup", () => {
     expect(twilio.requests).toEqual([]);
   });
 
+  it("refuses an unconfirmed carrier replacement without writing", async () => {
+    platform = await startPlatform({ holds: EVERYTHING_HELD });
+    await workspace.signIn(platform);
+
+    const run = await runSetup(
+      ["--replace-carrier", "--json"],
+      REPLACEMENT_CARRIER,
+    );
+    const answered = JSON.parse(run.stdout) as Record<string, unknown>;
+
+    expect(run.code).toBe(4);
+    expect(answered.status).toBe("not_confirmed");
+    expect(answered.changed).toBe("nothing");
+    expect(answered.reason).toContain("added the replacement credential beside the old one");
+    expect(run.stdout).not.toContain(REPLACEMENT_SIP_PASSWORD);
+    expect(platform.written).toEqual([]);
+    expectNoTwilioAccess();
+  });
+
+  it("replaces all four held carrier values only when explicitly confirmed", async () => {
+    platform = await startPlatform({ holds: EVERYTHING_HELD });
+    await workspace.signIn(platform);
+
+    const run = await runSetup(
+      ["--replace-carrier", "--yes", "--json"],
+      REPLACEMENT_CARRIER,
+    );
+    const answered = JSON.parse(run.stdout) as Record<string, unknown>;
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(answered.carrier_bundle).toBe("replaced");
+    expect(platform.written).toEqual([
+      {
+        carrier_trunk_address: "replacement.pstn.twilio.com",
+        carrier_trunk_number: "+15550100200",
+        carrier_trunk_username: "egma-nischal-replacement",
+        carrier_trunk_password: REPLACEMENT_SIP_PASSWORD,
+      },
+    ]);
+    expect(run.stdout).not.toContain(REPLACEMENT_SIP_PASSWORD);
+    expect(await everythingWritten(workspace.dir)).not.toContain(
+      REPLACEMENT_SIP_PASSWORD,
+    );
+    expectNoTwilioAccess();
+  });
+
+  it("replaces a credential route with a complete source-IP route", async () => {
+    platform = await startPlatform({ holds: EVERYTHING_HELD });
+    await workspace.signIn(platform);
+
+    const run = await runSetup(
+      ["--replace-carrier", "--yes", "--json"],
+      SOURCE_IP_CARRIER,
+    );
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(platform.written).toEqual([
+      {
+        carrier_trunk_address: "source-ip.example.com",
+        carrier_trunk_number: "+15550100300",
+      },
+    ]);
+    expectNoTwilioAccess();
+  });
+
+  it("refuses a confirmed replacement unless all four new values are present", async () => {
+    platform = await startPlatform({ holds: EVERYTHING_HELD });
+    await workspace.signIn(platform);
+
+    const incomplete = { ...REPLACEMENT_CARRIER };
+    delete incomplete.EGMA_PHONE_TRUNK_PASSWORD;
+    const run = await runSetup(
+      ["--replace-carrier", "--yes", "--json"],
+      incomplete,
+    );
+
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain("EGMA_PHONE_TRUNK_PASSWORD");
+    expect(platform.written).toEqual([]);
+    expectNoTwilioAccess();
+  });
+
   it("lists what it would ask for, and writes nothing anywhere", async () => {
     platform = await startPlatform();
     await workspace.signIn(platform);
@@ -267,13 +480,18 @@ describe("egma self-host setup", () => {
     // start, rather than discovering a missing key one setting at a time.
     expect(run.stdout).toContain("asks: the persona's model key");
     expect(run.stdout).toContain("asks: the speech-to-text key");
-    expect(run.stdout).toContain("asks: your Twilio account");
+    expect(run.stdout).toContain(
+      "asks: the SIP trunk address and source number, plus SIP username and password when the carrier requires them",
+    );
+    expect(run.stdout).not.toContain("Twilio Account SID");
+    expect(run.stdout).not.toContain("Twilio Auth Token");
+    expect(run.stdout).not.toContain("your Twilio account");
 
     // Nothing was written to the platform, nothing was read at the carrier, and
     // no local state either — not the bootstrap file, not a receipt, not even
     // the directory those would live in.
     expect(platform.written).toEqual([]);
-    expect(twilio.requests).toEqual([]);
+    expectNoTwilioAccess();
     expect(existsSync(path.join(workspace.dir, ".egma-platform"))).toBe(false);
   });
 
@@ -334,36 +552,6 @@ describe("egma self-host setup", () => {
     expect(run.stdout).toContain("Run egma self-host up");
   });
 
-  it("says both when the settings are short and the media containers are wrong", async () => {
-    // Two things wrong at once, and either one chosen alone masks the other.
-    // Told only about missing settings, an operator runs setup again and never
-    // learns their media containers hold a credential nothing recorded; told
-    // only about the media, they never learn the platform is unconfigured.
-    platform = await startPlatform();
-    await workspace.signIn(platform);
-    await writeFile(workspace.dockerShim, "#!/bin/sh\nexit 1\n");
-    await chmod(workspace.dockerShim, 0o755);
-
-    const run = await runSetup(["--apply", "--yes", "--json"], {
-      EGMA_PERSONA_MODEL_API_KEY: MODEL_KEY,
-      EGMA_PERSONA_STT_API_KEY: LISTENING_KEY,
-      EGMA_PERSONA_TTS_API_KEY: SPEAKING_KEY,
-    });
-
-    const answered = JSON.parse(run.stdout) as Record<string, unknown>;
-    expect(answered.status).toBe("incomplete");
-    expect(run.code).toBe(4);
-
-    const reason = String(answered.reason);
-    // The silent one first: a missing setting is named by readiness on every
-    // request, and a media pair that disagrees is reported by nothing at all.
-    expect(reason.indexOf("did not come back")).toBeLessThan(
-      reason.indexOf("still reports setup required"),
-    );
-    expect(reason).toContain("Run egma self-host up");
-    expect(reason).toContain("the carrier trunk");
-  });
-
   it("refuses, naming the address, when the platform cannot be reached", async () => {
     platform = await startPlatform();
     await workspace.signIn(platform);
@@ -417,33 +605,15 @@ describe("egma self-host setup", () => {
     expect(platform.written).toEqual([]);
   });
 
-  it("leaves the phone half for later when no carrier account is given", async () => {
-    // A platform with no carrier runs chat and text simulations perfectly well,
-    // so a run that was given no Twilio account configures what it can and says
-    // what is still absent, rather than refusing everything.
-    platform = await startPlatform();
-    await workspace.signIn(platform);
-
-    const run = await runSetup(["--apply", "--yes", "--json"], {
-      EGMA_PERSONA_MODEL_API_KEY: MODEL_KEY,
-      EGMA_PERSONA_STT_API_KEY: LISTENING_KEY,
-      EGMA_PERSONA_TTS_API_KEY: SPEAKING_KEY,
-    });
-
-    const answered = JSON.parse(run.stdout) as Record<string, unknown>;
-    expect(answered.status).toBe("incomplete");
-    expect(answered.still_missing).toEqual(["the carrier trunk", "the source number"]);
-    expect(run.code).toBe(4);
-    expect(platform.held().persona_model_key).toBe(MODEL_KEY);
-    expect(platform.held().carrier_trunk_address).toBeUndefined();
-    expect(twilio.requests).toEqual([]);
-  });
-
   it("reveals no supplied secret in its output, its receipt or its bootstrap file", async () => {
     platform = await startPlatform();
     await workspace.signIn(platform);
 
-    const run = await runSetup(["--apply", "--yes", "--json"], EVERY_ANSWER);
+    const run = await runSetup(["--apply", "--yes", "--json"], {
+      ...EVERY_ANSWER,
+      TWILIO_ACCOUNT_SID: IGNORED_ACCOUNT_SID,
+      TWILIO_AUTH_TOKEN: IGNORED_AUTH_TOKEN,
+    });
     expect(run.code, run.stderr).toBe(0);
 
     const answered = JSON.parse(run.stdout) as Record<string, unknown>;
@@ -456,36 +626,51 @@ describe("egma self-host setup", () => {
     expect(answered.persona_model_key_hint).toBe(`…${MODEL_KEY.slice(-4)}`);
     // A hint names a key; it is not most of one.
     expect(String(answered.persona_model_key_hint).length).toBe(5);
-    expect(answered.buys_a_number).toBe(false);
-    expect(answered.trunk_sid).toBe(EXISTING_TRUNK.sid);
     expect(answered.receipt).toMatch(/^\.egma-platform\/receipts\//u);
+    expect(platform.held().carrier_trunk_password).toBe(SIP_PASSWORD);
+    expectNoTwilioAccess();
 
     const said = `${run.stdout}\n${run.stderr}`;
-    for (const secret of [AUTH_TOKEN, MODEL_KEY, LISTENING_KEY, SPEAKING_KEY]) {
+    for (const secret of [
+      IGNORED_AUTH_TOKEN,
+      MODEL_KEY,
+      LISTENING_KEY,
+      SPEAKING_KEY,
+      SIP_PASSWORD,
+    ]) {
       expect(said).not.toContain(secret);
     }
 
     // A receipt is a document people commit and paste into issues, so no secret
-    // reaches one — including the SIP password egma minted, which is named as
-    // existing and never written down.
+    // reaches one — including the developer's stable SIP password.
     const receipts = await readdir(path.join(workspace.dir, ".egma-platform", "receipts"));
     expect(receipts).toHaveLength(1);
     const receipt = await readFile(
       path.join(workspace.dir, ".egma-platform", "receipts", receipts[0] as string),
       "utf8",
     );
-    for (const secret of [AUTH_TOKEN, MODEL_KEY, LISTENING_KEY, SPEAKING_KEY]) {
+    for (const secret of [
+      IGNORED_AUTH_TOKEN,
+      MODEL_KEY,
+      LISTENING_KEY,
+      SPEAKING_KEY,
+      SIP_PASSWORD,
+    ]) {
       expect(receipt).not.toContain(secret);
     }
-    expect(receipt).toContain("minted, not recorded");
-    expect(receipt).toContain(EXISTING_TRUNK.sid);
-    for (const password of twilio.passwords) expect(receipt).not.toContain(password);
+    expect(receipt).not.toContain("minted, not recorded");
 
     // And the one file egma still writes here holds no provider key at all,
     // because no provider key is this command's to keep.
     const bootstrap = path.join(workspace.dir, ".egma-platform", "platform.env");
     const text = await readFile(bootstrap, "utf8");
-    for (const secret of [AUTH_TOKEN, MODEL_KEY, LISTENING_KEY, SPEAKING_KEY]) {
+    for (const secret of [
+      IGNORED_AUTH_TOKEN,
+      MODEL_KEY,
+      LISTENING_KEY,
+      SPEAKING_KEY,
+      SIP_PASSWORD,
+    ]) {
       expect(text).not.toContain(secret);
     }
     expect((await stat(bootstrap)).mode & 0o777).toBe(0o600);
@@ -494,38 +679,28 @@ describe("egma self-host setup", () => {
     );
   });
 
-  it("never buys a number, and says so when the account holds none", async () => {
-    await twilio.close();
-    twilio = await startFakeTwilio({ numbers: {} });
-    platform = await startPlatform();
-    await workspace.signIn(platform);
-
-    const run = await runSetup(["--apply", "--yes"], EVERY_ANSWER);
-
-    expect(run.code).toBe(4);
-    expect(run.stdout).toContain("holds no number");
-    expect(run.stdout).toContain("Egma never buys, ports or registers one");
-    // Nothing was created on the way to finding out — at the carrier or here.
-    expect(twilio.writes).toEqual([]);
-    expect(platform.written).toEqual([]);
-  });
-
   it("refuses a secret offered as a command argument, before it does anything", async () => {
     platform = await startPlatform();
     await workspace.signIn(platform);
 
-    const run = await runSetup(["--apply", "--yes", "--auth-token", AUTH_TOKEN]);
+    const run = await runSetup([
+      "--apply",
+      "--yes",
+      "--auth-token",
+      IGNORED_AUTH_TOKEN,
+    ]);
 
     expect(run.code).not.toBe(0);
     expect(run.stderr).toContain("will not take a secret in --auth-token");
     // Said back by name only. The value is never repeated.
-    expect(run.stderr).not.toContain(AUTH_TOKEN);
+    expect(run.stderr).not.toContain(IGNORED_AUTH_TOKEN);
     // And the advice is something a shell does not write to history, and names
     // this half of the CLI rather than the agent-repository half.
-    expect(run.stderr).toContain('export TWILIO_AUTH_TOKEN="$(cat');
+    expect(run.stderr).toContain('export EGMA_PHONE_TRUNK_PASSWORD="$(cat');
+    expect(run.stderr).not.toContain("TWILIO_AUTH_TOKEN");
     expect(run.stderr).toContain("egma self-host setup");
     expect(run.stderr).not.toContain("egma connect");
-    expect(twilio.requests).toEqual([]);
+    expectNoTwilioAccess();
   });
 
   it("says which command replaced the one somebody typed", async () => {

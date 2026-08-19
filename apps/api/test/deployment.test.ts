@@ -84,6 +84,28 @@ function serviceBlock(service: string): string {
 }
 
 describe("the API's deployment story", () => {
+  it("always seeds settings and reconciles only when the environment owns the carrier route", () => {
+    const entry = readFileSync(path.join(API, "src/index.ts"), "utf8");
+    const seed = entry.indexOf(
+      "await seedPlatformSettings(config.platformSettings)",
+    );
+    const reconcile = entry.indexOf(
+      "await reconcileDeploymentCarrierSettings(config.platformSettings)",
+    );
+
+    expect(seed, "API startup no longer seeds the platform settings").toBeGreaterThan(
+      -1,
+    );
+    expect(
+      reconcile,
+      "API startup no longer reconciles an environment-owned carrier route",
+    ).toBeGreaterThan(seed);
+    expect(entry.slice(seed, reconcile)).toContain(
+      'config.carrierSettingsSource === "environment"',
+    );
+    expect(entry.slice(seed, reconcile)).not.toContain("singleOrganization");
+  });
+
   it("passes every variable the API reads to the api container", () => {
     const block = serviceBlock("api");
     const missing = [...variablesReadByTheCode()]
@@ -263,8 +285,9 @@ describe("the API's deployment story", () => {
   it("never passes the Twilio Auth Token to any container", () => {
     // The one credential in this whole effort that no running container may
     // hold. It opens the entire account — every number, every recording, every
-    // log, the billing — and it is a setup-time input used once and kept
-    // nowhere. A compose entry for it would undo that silently.
+    // log and the billing. Setup receives only one limited SIP credential and
+    // never receives this account-wide token. A compose entry for it would undo
+    // that boundary silently.
     const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
     expect(compose).not.toContain("TWILIO_AUTH_TOKEN");
   });

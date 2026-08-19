@@ -1,15 +1,13 @@
 /**
- * A local server shaped like the two Twilio APIs the setup command drives.
+ * A local server shaped like the two Twilio APIs setup must never drive.
  *
  * Trunks and their attachments on one, credential lists, credentials and
- * numbers on the other. It exists so that proving setup makes the right things
- * in the right order — and, far more importantly, that a second run makes
- * *nothing* — needs no account, no network and no money.
+ * numbers on the other. It is a tripwire: tests point the CLI at it and require
+ * zero requests. Normal setup receives only the four limited runtime carrier
+ * values, so even exported account credentials cannot reach this server.
  *
- * It records every write it was asked for, so a test can assert on the count
- * rather than on a summary the command wrote about itself. A command that
- * claimed "reused" while quietly creating a second trunk would pass a test that
- * read its output and fail this one.
+ * It records every request and write so the test proves the boundary directly,
+ * rather than trusting a summary the command wrote about itself.
  */
 
 import { createServer, type Server } from "node:http";
