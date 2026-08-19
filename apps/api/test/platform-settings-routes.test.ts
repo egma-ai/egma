@@ -308,6 +308,19 @@ describe("a write that cannot be acted on", () => {
     expect(refused.statusCode).toBe(422);
     expect(refused.body.message).toContain("the persona's model needs a value");
   });
+
+  it("refuses one carrier field before it can mix two routes", async () => {
+    const ada = await owner("platform_settings_partial_carrier");
+    const password = "one-new-carrier-password";
+
+    const refused = await request("PATCH", ada.secret, {
+      carrier_trunk_password: password,
+    });
+
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body.message).toContain("a carrier write");
+    expect(JSON.stringify(refused.body)).not.toContain(password);
+  });
 });
 
 describe("what the platform says about its own setup", () => {

@@ -27,10 +27,10 @@ Use `--plan` to preview what it would ask without writing anything:
 npx @egma/cli self-host setup --plan
 ```
 
-Use `--apply --yes --json` for unattended configuration, with answers supplied via the environment variables listed in `.env.example`:
+Use `--json` for unattended configuration, with answers supplied via the environment variables listed in `.env.example`:
 
 ```bash
-npx @egma/cli self-host setup --apply --yes --json
+npx @egma/cli self-host setup --json
 ```
 
 <Note>
@@ -48,19 +48,24 @@ curl -sX PATCH http://localhost:3101/api/platform/settings \
   -H "Authorization: Bearer egma_sk_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "personaModelProvider": "openai",
-    "personaModel": "gpt-4o",
-    "personaModelApiKey": "sk-..."
+    "persona_model_provider": "openai",
+    "persona_model": "gpt-4o",
+    "persona_model_key": "sk-..."
   }'
 ```
 
-The platform seals every API key and credential before storing it. Keys are never returned in full — responses include only the last four characters of each secret, prefixed with `****`, so you can confirm which key is stored without exposing it.
+The carrier is the one grouped setting. Send the trunk address and source
+number together for source-IP authentication, or send all four phone fields
+together for credential authentication. Any other subset is refused. Writing
+the two-value form removes a previously stored SIP username and password.
+
+The platform seals every API key and credential before storing it. Keys are never returned in full. Responses include only the last four characters of each secret, so you can confirm which key is stored without exposing it.
 
 ---
 
 ## Configuration keys
 
-The table below covers every setting the platform stores. The **env var** column shows the `.env.example` variable that seeds a setting on first boot (the API writes it into the store on startup if the store does not already hold it, and never overwrites an existing value).
+The table below covers every setting the platform stores. The **env var** column shows the `.env.example` variable that seeds a setting on first boot. The API never overwrites a complete stored configuration. If an older database holds only part of a carrier route, startup replaces that invalid partial route with the complete two-value or four-value route from the environment.
 
 ### Persona model
 
@@ -68,9 +73,9 @@ The model the simulator's persona uses to generate responses during a simulation
 
 | Setting key | Env var | Description |
 |---|---|---|
-| `personaModelProvider` | `EGMA_PERSONA_MODEL_PROVIDER` | LLM provider — for example, `openai`. |
-| `personaModel` | `EGMA_PERSONA_MODEL` | Model name — for example, `gpt-4o`. |
-| `personaModelApiKey` | `EGMA_PERSONA_MODEL_API_KEY` | API key for the provider. Sealed at rest; only the last 4 characters are returned. |
+| `persona_model_provider` | `EGMA_PERSONA_MODEL_PROVIDER` | LLM provider — for example, `openai`. |
+| `persona_model` | `EGMA_PERSONA_MODEL` | Model name — for example, `gpt-4o`. |
+| `persona_model_key` | `EGMA_PERSONA_MODEL_API_KEY` | API key for the provider. Sealed at rest; only the last 4 characters are returned. |
 
 ### Speech-to-text (STT)
 
@@ -78,8 +83,8 @@ What the persona uses to transcribe the agent's audio during voice simulations.
 
 | Setting key | Env var | Description |
 |---|---|---|
-| `personaSttProvider` | `EGMA_PERSONA_STT_PROVIDER` | STT provider — for example, `deepgram`. |
-| `personaSttApiKey` | `EGMA_PERSONA_STT_API_KEY` | API key for the STT provider. Sealed at rest; only the last 4 characters are returned. |
+| `speech_to_text_provider` | `EGMA_PERSONA_STT_PROVIDER` | STT provider — for example, `deepgram`. |
+| `speech_to_text_key` | `EGMA_PERSONA_STT_API_KEY` | API key for the STT provider. Sealed at rest; only the last 4 characters are returned. |
 
 ### Text-to-speech (TTS)
 
@@ -87,10 +92,10 @@ What the persona uses to speak during voice simulations.
 
 | Setting key | Env var | Description |
 |---|---|---|
-| `personaTtsProvider` | `EGMA_PERSONA_TTS_PROVIDER` | TTS provider — for example, `elevenlabs`. |
-| `personaTtsApiKey` | `EGMA_PERSONA_TTS_API_KEY` | API key for the TTS provider. Sealed at rest; only the last 4 characters are returned. |
-| `personaTtsModel` | `EGMA_PERSONA_TTS_MODEL` | TTS model name, when the provider offers a choice. |
-| `personaTtsVoice` | `EGMA_PERSONA_TTS_VOICE` | Voice identifier for the TTS provider. |
+| `text_to_speech_provider` | `EGMA_PERSONA_TTS_PROVIDER` | TTS provider — for example, `elevenlabs`. |
+| `text_to_speech_key` | `EGMA_PERSONA_TTS_API_KEY` | API key for the TTS provider. Sealed at rest; only the last 4 characters are returned. |
+| `text_to_speech_model` | `EGMA_PERSONA_TTS_MODEL` | TTS model name, when the provider offers a choice. |
+| `text_to_speech_voice` | `EGMA_PERSONA_TTS_VOICE` | Voice identifier for the TTS provider. |
 
 ### Voice activity detection (VAD)
 
@@ -98,7 +103,7 @@ What tells the persona when the agent has started and stopped speaking.
 
 | Setting key | Env var | Description |
 |---|---|---|
-| `personaVadProvider` | `EGMA_PERSONA_VAD_PROVIDER` | VAD provider. `silero` is bundled and keyless — recommended for most deployments. |
+| `voice_activity_provider` | `EGMA_PERSONA_VAD_PROVIDER` | VAD provider. `silero` is bundled and keyless — recommended for most deployments. |
 
 ### Default judge
 
@@ -116,25 +121,25 @@ The judge that a new project receives when it has not configured one of its own.
 
 ### Media backend and phone trunk
 
-Required for phone simulations. `egma self-host setup` configures Twilio automatically, including creating the SIP trunk and credential list; use these variables for other carriers or to supply values without interactive prompts.
+Required for phone simulations. A carrier administrator creates the trunk and its authentication. `egma self-host setup` copies the runtime route into the platform; it does not create or change carrier resources.
 
 | Setting key | Env var | Description |
 |---|---|---|
-| `mediaBackend` | `EGMA_MEDIA_BACKEND` | The bridge that places calls — for example, `livekit`. |
-| `phoneTrunkAddress` | `EGMA_PHONE_TRUNK_ADDRESS` | SIP trunk address, as provided by your carrier. |
-| `phoneSourceNumber` | `EGMA_PHONE_SOURCE_NUMBER` | The phone number calls originate from, in E.164 format — for example, `+15551234567`. Must already exist on your carrier account. |
-| `phoneTrunkUsername` | `EGMA_PHONE_TRUNK_USERNAME` | SIP credential username for trunk authentication. |
-| `phoneTrunkPassword` | `EGMA_PHONE_TRUNK_PASSWORD` | SIP credential password. Sealed at rest; only the last 4 characters are returned. |
+| `media_backend` | `EGMA_MEDIA_BACKEND` | The bridge that places calls — for example, `livekit`. |
+| `carrier_trunk_address` | `EGMA_PHONE_TRUNK_ADDRESS` | SIP trunk address, as provided by your carrier. |
+| `carrier_trunk_number` | `EGMA_PHONE_SOURCE_NUMBER` | The phone number calls originate from, in E.164 format — for example, `+15551234567`. Must already exist on your carrier account. |
+| `carrier_trunk_username` | `EGMA_PHONE_TRUNK_USERNAME` | SIP credential username for trunk authentication. |
+| `carrier_trunk_password` | `EGMA_PHONE_TRUNK_PASSWORD` | SIP credential password. Sealed at rest; only the last 4 characters are returned. |
 
 <Tip>
-  For Twilio, run `egma self-host setup` and press Enter past the model and speech questions to reach the phone configuration. The command reads your Twilio account, shows a plan of what it will create, and writes the trunk address, source number, and SIP credential directly into the platform's store on approval. The Twilio Auth Token is used only during that command and is never stored.
+  For Twilio, keep one account, trunk, source number, and attached credential list. Create one SIP credential per developer and one for production. Supply all four phone variables together. Setup copies them into the platform and never receives the Twilio Account SID or Auth Token. A carrier authenticated by source IP uses only the trunk address and source number.
 </Tip>
 
 ---
 
 ## How secrets are stored
 
-Every API key, password, and credential you store through platform settings is sealed with the deployment's `EGMA_ENCRYPTION_KEY` before it is written to the database. Retrieval responses return only the last four characters of each secret — for example, `****a1b2` — so you can identify which key is stored without exposing it. The plaintext is never returned through the API after it is written.
+Every API key, password, and credential you store through platform settings is sealed with the deployment's `EGMA_ENCRYPTION_KEY` before it is written to the database. Retrieval responses return only the last four characters of each secret — for example, `a1b2` — so you can identify which key is stored without exposing it. The plaintext is never returned through the API after it is written.
 
 <Warning>
   Back up `EGMA_ENCRYPTION_KEY` alongside your database. The stored credentials and settings are unrecoverable without it — a database backup without the key is half a backup.
@@ -147,7 +152,7 @@ Every API key, password, and credential you store through platform settings is s
 Read the current setup status at any time:
 
 ```bash
-curl -s http://localhost:3101/api/health | jq .setup
+curl -s http://localhost:3101/api/platform | jq '{setup, phone}'
 ```
 
-The response names each missing setting individually. A fully configured platform reports `setup_complete`. A platform with no phone trunk configured reports phone readiness separately — text simulations work without a carrier.
+The response names each missing setting individually. A fully configured platform reports `setup.state: "ready"`. Phone readiness is separate. A platform with no phone route reports `phone.state: "setup_required"`, while text simulations still work.

@@ -383,7 +383,9 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 
     The command asks the platform what it is missing, then prompts you for exactly that — in a fixed order: the model provider (for persona reasoning), the speech provider (TTS and STT), and the telephony carrier (for phone simulations). A setting the platform already holds is never asked for again, so a second run only asks about what is still missing, and on a fully configured platform it changes nothing and says so.
 
-    For the phone setup, Egma asks for a Twilio account, an existing voice number on that account, and the account's Auth Token. It shows a plan before writing anything to your carrier, and it never buys, ports, or registers a number. The Auth Token is used once and stored nowhere — what runs afterward holds a SIP credential for one trunk.
+    For phone setup, Egma asks for a trunk address, source number, SIP username, and SIP password. A Twilio administrator creates that limited credential in the list already attached to the shared trunk. Setup copies the four values into the platform as one bundle. It never asks for the Twilio Account SID or Auth Token and never reads or changes Twilio.
+
+    Normal setup never replaces a held bundle. To rotate one safely, an administrator first adds a new developer or production credential beside the old one. Export the trunk address, source number, new SIP username, and new SIP password, then use `--replace-carrier --yes` to replace them together in the platform store. Place a test call with the new bundle, then revoke the old credential.
 
     **Usage**
 

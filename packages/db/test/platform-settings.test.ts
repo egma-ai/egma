@@ -376,6 +376,29 @@ describe("a write that cannot be acted on", () => {
       writePlatformSettings(owner(), ONE_TEAM, { persona_model_key: "sk-abc" }),
     ).rejects.toThrow(/shorter than any provider issues/u);
   });
+
+  it("refuses carrier values that cannot name a SIP route", async () => {
+    await expect(
+      writePlatformSettings(owner(), ONE_TEAM, {
+        carrier_trunk_address: "https://trunk.example.com/a/path",
+        carrier_trunk_number: "+15550100100",
+      }),
+    ).rejects.toThrow(/SIP hostname/u);
+    await expect(
+      writePlatformSettings(owner(), ONE_TEAM, {
+        carrier_trunk_address: "trunk.example.com",
+        carrier_trunk_number: "555-0100",
+      }),
+    ).rejects.toThrow(/E\.164/u);
+  });
+
+  it("refuses one carrier field before it can mix two routes", async () => {
+    await expect(
+      writePlatformSettings(owner(), ONE_TEAM, {
+        carrier_trunk_password: "one-new-password",
+      }),
+    ).rejects.toThrow(/carrier write.*missing/u);
+  });
 });
 
 describe("seeding from the environment", () => {
@@ -392,6 +415,15 @@ describe("seeding from the environment", () => {
     const held = await settingsByName();
     expect(held.persona_model?.hint).toBe("gpt-4.1-mini");
     expect(held.persona_model_key?.hint).toBe("QRST");
+  });
+
+  it("refuses a partial carrier before it can store one half", async () => {
+    await expect(
+      seedPlatformSettings({
+        carrier_trunk_address: "trunk.example.com",
+        carrier_trunk_username: "egma-ada",
+      }),
+    ).rejects.toThrow(/carrier seed.*missing/u);
   });
 });
 
@@ -460,6 +492,103 @@ describe("seeding a platform that holds nothing", () => {
   });
 });
 
+describe("seeding one complete carrier bundle", () => {
+  const FIRST_BUNDLE = {
+    carrier_trunk_address: "first.pstn.twilio.com",
+    carrier_trunk_number: "+15550100100",
+    carrier_trunk_username: "egma-ada",
+    carrier_trunk_password: "first-carrier-password",
+  } as const;
+  const SECOND_BUNDLE = {
+    carrier_trunk_address: "second.pstn.twilio.com",
+    carrier_trunk_number: "+15550100200",
+    carrier_trunk_username: "egma-bruno",
+    carrier_trunk_password: "second-carrier-password",
+  } as const;
+  const IP_AUTHENTICATED_ROUTE = {
+    carrier_trunk_address: "ip-auth.example.com",
+    carrier_trunk_number: "+15550100300",
+  } as const;
+
+  it("writes all four values into a fresh database", async () => {
+    await database.sql("delete from platform_setting");
+
+    expect([...(await seedPlatformSettings(FIRST_BUNDLE))].sort()).toEqual(
+      Object.keys(FIRST_BUNDLE).sort(),
+    );
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
+      FIRST_BUNDLE,
+    );
+  });
+
+  it("repairs an older partial carrier as one matching bundle", async () => {
+    await database.sql("delete from platform_setting");
+    await writePlatformSettings(owner(), ONE_TEAM, SECOND_BUNDLE);
+    await database.sql(
+      "delete from platform_setting where name <> 'carrier_trunk_username'",
+    );
+
+    expect([...(await seedPlatformSettings(FIRST_BUNDLE))].sort()).toEqual(
+      Object.keys(FIRST_BUNDLE).sort(),
+    );
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
+      FIRST_BUNDLE,
+    );
+  });
+
+  it("never replaces a complete bundle on an ordinary restart", async () => {
+    await database.sql("delete from platform_setting");
+    await seedPlatformSettings(FIRST_BUNDLE);
+
+    expect(
+      await seedPlatformSettings({
+        ...SECOND_BUNDLE,
+        persona_model_provider: "openai",
+      }),
+    ).toEqual(["persona_model_provider"]);
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual({
+      ...FIRST_BUNDLE,
+      persona_model_provider: "openai",
+    });
+  });
+
+  it("never replaces a complete IP-authenticated route", async () => {
+    await database.sql("delete from platform_setting");
+    await seedPlatformSettings(IP_AUTHENTICATED_ROUTE);
+
+    expect(await seedPlatformSettings(FIRST_BUNDLE)).toEqual([]);
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
+      IP_AUTHENTICATED_ROUTE,
+    );
+  });
+
+  it("removes an orphan credential while repairing to IP authentication", async () => {
+    await database.sql("delete from platform_setting");
+    await writePlatformSettings(owner(), ONE_TEAM, SECOND_BUNDLE);
+    await database.sql(
+      "delete from platform_setting where name <> 'carrier_trunk_password'",
+    );
+
+    expect([...(await seedPlatformSettings(IP_AUTHENTICATED_ROUTE))].sort()).toEqual(
+      Object.keys(IP_AUTHENTICATED_ROUTE).sort(),
+    );
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
+      IP_AUTHENTICATED_ROUTE,
+    );
+  });
+
+  it("switches a credential route to IP authentication as one write", async () => {
+    await database.sql("delete from platform_setting");
+    await writePlatformSettings(owner(), ONE_TEAM, FIRST_BUNDLE);
+
+    await writePlatformSettings(owner(), ONE_TEAM, IP_AUTHENTICATED_ROUTE);
+
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
+      IP_AUTHENTICATED_ROUTE,
+    );
+  });
+});
+
 describe("the one door to the plaintext", () => {
   /**
    * The context a simulation claim mints, and the only kind that may be here.
@@ -484,9 +613,12 @@ describe("the one door to the plaintext", () => {
 
   it("answers a claim with the values in the clear, and nothing it does not hold", async () => {
     await database.sql("delete from platform_setting");
-    await seedPlatformSettings({
+    await writePlatformSettings(owner(), ONE_TEAM, {
       persona_model_provider: "openai",
       persona_model_key: THEIR_OWN_KEY,
+      carrier_trunk_address: "claim.pstn.twilio.com",
+      carrier_trunk_number: "+15550100100",
+      carrier_trunk_username: "egma-claim",
       carrier_trunk_password: "the-carrier-issued-this-one",
     });
 
@@ -496,6 +628,9 @@ describe("the one door to the plaintext", () => {
     expect(await resolvePlatformSettings(claimed())).toEqual({
       persona_model_provider: "openai",
       persona_model_key: THEIR_OWN_KEY,
+      carrier_trunk_address: "claim.pstn.twilio.com",
+      carrier_trunk_number: "+15550100100",
+      carrier_trunk_username: "egma-claim",
       carrier_trunk_password: "the-carrier-issued-this-one",
     });
   });

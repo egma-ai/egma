@@ -240,19 +240,17 @@ give it a SIP trunk. The trunk is yours, from any carrier — either one
 already stored in LiveKit or the inline fields below — and the same three
 LiveKit variables serve a self-hosted server and LiveKit Cloud.
 
-If your carrier is Twilio, none of this is yours to build by hand.
-`egma self-host setup`, in the platform workspace, reads your account,
-shows a plan, and on approval creates the Elastic SIP Trunk, the
-credential list and its credential, attaches both and the number to the
-trunk, and writes what that produced into the **platform's own store**,
-sealed — from where every simulator is handed it on the work order it
-claims. It is safe to run again and safe to run again after a run that
-stopped half way. **The account token is used by that command and
-nothing else** — what a deployment keeps afterwards is a SIP credential
-that can do nothing but place calls over one trunk. See the root README.
+For Twilio, an administrator creates one shared trunk, source number, and
+attached credential list. Each developer and production gets one SIP
+username/password in that list. `egma self-host setup`, in the platform
+workspace, copies that deployment's trunk address, source number, and SIP
+pair into the **platform's own store**, sealed. It never receives the
+Twilio Account SID or Auth Token and never changes the Twilio account.
+Every simulator receives the stored runtime values on the work order it
+claims. See the root README.
 
-The variables below are what that produces, for a deployment that
-configures its own environment instead.
+The variables below are the same runtime values for a deployment that
+configures its own environment.
 
 Real speech providers belong with all this: a call spoken in the test
 tone reaches a real agent as noise.
@@ -504,9 +502,10 @@ one speaker to a channel. Every other suite here writes to a directory,
 which is what makes the rest of this app testable with no container at
 all.
 
-Carrier provisioning is no longer this app's: `egma self-host phone
-setup` owns it, and its tests live with the CLI, against a local server
-shaped like the two Twilio APIs it drives.
+Carrier provisioning is not this app's. A carrier administrator creates the
+trunk and SIP credential. `egma self-host setup` copies only the four runtime
+values into the platform store and never contacts Twilio. Its tests use a local
+server shaped like the Twilio APIs as a tripwire and require zero requests.
 
 `tests/test_deployment.py` compares the deployment story against the code
 that reads it: every variable the simulator looks up is in

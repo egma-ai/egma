@@ -36,7 +36,6 @@ import { describe, expect, it } from "vitest";
 
 import { CARRIER_VARIABLES } from "../src/self-host/protected-input.ts";
 import {
-  FROM_THE_CARRIER,
   inputFor,
   SETUP_INPUTS,
   type SettingInput,
@@ -44,6 +43,30 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const API_CONFIG = path.resolve(HERE, "../../api/src/config.ts");
+
+/** The complete runtime phone bundle, with no Twilio account authority in it. */
+const PHONE_INPUTS = {
+  carrier_trunk_address: {
+    variable: "EGMA_PHONE_TRUNK_ADDRESS",
+    secret: false,
+    required: true,
+  },
+  carrier_trunk_number: {
+    variable: "EGMA_PHONE_SOURCE_NUMBER",
+    secret: false,
+    required: true,
+  },
+  carrier_trunk_username: {
+    variable: "EGMA_PHONE_TRUNK_USERNAME",
+    secret: false,
+    required: false,
+  },
+  carrier_trunk_password: {
+    variable: "EGMA_PHONE_TRUNK_PASSWORD",
+    secret: true,
+    required: false,
+  },
+} as const;
 
 /**
  * The interview's own entry for a setting, or a failure naming the setting.
@@ -115,23 +138,21 @@ describe("what setup asks for", () => {
     }
   });
 
-  it("really writes every setting the carrier is said to supply", () => {
-    // **The check that a declaration is not a supply.** Saying a setting comes
-    // from the carrier costs nothing; what makes it true is an entry in
-    // `FROM_THE_CARRIER`, which is the list the setup command loops over when
-    // the paperwork comes back. Held in both directions, because a carrier
-    // setting with no entry is one the platform never receives, and an entry
-    // for a setting nobody declared is a write the platform refuses by name.
-    const declared = PLATFORM_SETTINGS.filter(
-      (setting) => inputOf(setting.name).supply === "carrier",
-    ).map((setting) => setting.name);
+  it("asks for exactly four runtime phone values and no Twilio account credential", () => {
+    // Normal setup copies a developer's limited SIP credential into a fresh
+    // database. It never has the account authority that can change Twilio.
+    expect(Object.keys(CARRIER_VARIABLES).sort()).toEqual(
+      ["sipPassword", "sipUsername", "sourceNumber", "trunkAddress"].sort(),
+    );
 
-    expect(
-      Object.keys(FROM_THE_CARRIER).sort(),
-      "the settings the interview says the carrier supplies are not the settings the " +
-        "carrier step writes. A declared one that is never written leaves the platform " +
-        "missing it for ever, because setup does not ask for it either",
-    ).toEqual([...declared].sort());
+    for (const [name, expected] of Object.entries(PHONE_INPUTS)) {
+      expect(inputOf(name)).toMatchObject({
+        supply: "carrier",
+        variable: expected.variable,
+        secret: expected.secret,
+        required: expected.required,
+      });
+    }
   });
 
   it("supplies every required setting through something that writes a value", () => {
@@ -140,12 +161,15 @@ describe("what setup asks for", () => {
       const input = inputOf(setting.name);
       if (input.supply === "carrier") {
         expect(
-          Object.hasOwn(FROM_THE_CARRIER, setting.name),
-          `${setting.name} is required and nothing writes it: the interview never asks ` +
-            "for it, and the carrier step does not produce it",
+          Object.hasOwn(PHONE_INPUTS, setting.name),
+          `${setting.name} is required but is not part of the grouped phone interview`,
         ).toBe(true);
         continue;
       }
+      expect(input.supply, `${setting.name} is required but setup does not ask for it`).toBe(
+        "asked",
+      );
+      if (input.supply !== "asked") continue;
       expect(
         input.variable,
         `${setting.name} is required and the interview has no variable to take it from`,
@@ -174,13 +198,11 @@ describe("what setup asks for", () => {
       ).toBe(seeded[setting.name]);
     }
 
-    // The one carrier setting a person supplies rather than the paperwork
-    // producing: the number a call appears to come from.
-    expect(
-      CARRIER_VARIABLES.sourceNumber,
-      "the carrier step asks for the source number in a different variable than the " +
-        "API seeds it from",
-    ).toBe(seeded.carrier_trunk_number);
+    // The same four variables also seed a fresh database at API startup. A
+    // developer can therefore rebuild locally without getting a new SIP user.
+    for (const [name, expected] of Object.entries(PHONE_INPUTS)) {
+      expect(expected.variable).toBe(seeded[name]);
+    }
   });
 
   it("never suggests a value for a secret", () => {

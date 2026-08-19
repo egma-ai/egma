@@ -12,28 +12,31 @@
  * reaches a scrollback buffer.
  *
  * **From the environment, for a run with nobody watching.** A coding agent
- * driving `--apply --yes --json` has no keystroke to give, so each input has one
+ * driving `--json` has no keystroke to give, so each input has one
  * environment variable it may arrive in. That is still not an argument.
  */
 
 import { createInterface } from "node:readline/promises";
 
 /**
- * The three inputs the carrier step takes, and where each may arrive from for a
- * run with nobody watching.
+ * The carrier inputs, and where each may arrive from for a run with nobody
+ * watching.
  *
- * Every *setting* has a variable of its own — the same name the platform seeds
- * that setting from, so one word means one thing whichever of the two ways in
- * an operator uses. Two of these are not settings at all: the Auth Token opens
- * a whole Twilio account and is kept nowhere, and the account identifier says
- * which account the paperwork is done in. The third is: `carrier_trunk_number`
- * is the number a call appears to come from, and it is the one carrier fact a
- * person supplies rather than the paperwork producing.
+ * Every runtime setting has a variable of its own — the same name the platform
+ * seeds that setting from. Those four variables are one carrier bundle for this
+ * deployment: a shared trunk address and source number, plus this developer's
+ * or production's SIP username and password. A fresh local database copies the
+ * bundle and never changes anything in Twilio.
+ *
+ * The Account SID and Auth Token are deliberately absent. Normal setup does
+ * not manage Twilio. An administrator creates a SIP credential in the attached
+ * credential list once; the developer supplies only its limited runtime pair.
  */
 export const CARRIER_VARIABLES = {
-  accountSid: "TWILIO_ACCOUNT_SID",
-  authToken: "TWILIO_AUTH_TOKEN",
+  trunkAddress: "EGMA_PHONE_TRUNK_ADDRESS",
   sourceNumber: "EGMA_PHONE_SOURCE_NUMBER",
+  sipUsername: "EGMA_PHONE_TRUNK_USERNAME",
+  sipPassword: "EGMA_PHONE_TRUNK_PASSWORD",
 } as const;
 
 /** Argument names that would put a secret in the process table. */
@@ -50,11 +53,10 @@ export const REFUSED_SECRET_ARGUMENTS = [
 /**
  * What a developer is told when they tried to pass a secret as an argument.
  *
- * The advice deliberately does not say `TWILIO_AUTH_TOKEN=… egma self-host …`.
- * An inline assignment is part of the command line, and both zsh and bash write
- * the whole command line to history — so recommending one, in a refusal whose
- * stated reason is that arguments are kept in shell history, would be telling
- * somebody to do the thing they were just refused for.
+ * The advice deliberately puts values in files first. An inline assignment is
+ * part of the command line, and both zsh and bash write the whole command line
+ * to history — so recommending one, in a refusal whose stated reason is that
+ * arguments are kept in shell history, would repeat the same mistake.
  */
 export function secretArgumentRefusal(argument: string): string {
   return [
@@ -65,9 +67,12 @@ export function secretArgumentRefusal(argument: string): string {
     "For a run with nobody watching, export it from a file first, so the value",
     "is never a word in any command:",
     "",
-    `  export ${CARRIER_VARIABLES.authToken}="$(cat twilio-token.txt)"`,
+    `  export ${CARRIER_VARIABLES.trunkAddress}="$(cat sip-trunk-address.txt)"`,
+    `  export ${CARRIER_VARIABLES.sourceNumber}="$(cat sip-source-number.txt)"`,
+    `  export ${CARRIER_VARIABLES.sipUsername}="$(cat sip-username.txt)"`,
+    `  export ${CARRIER_VARIABLES.sipPassword}="$(cat sip-password.txt)"`,
     '  export EGMA_PERSONA_MODEL_API_KEY="$(cat model-key.txt)"',
-    "  egma self-host setup --apply --yes",
+    "  egma self-host setup --json",
   ].join("\n");
 }
 
@@ -174,7 +179,7 @@ export async function askPlainly(
  *
  * **A run with nobody watching takes the suggestion rather than refusing.** The
  * command it replaced hard-coded the same values — `openai`, `livekit`,
- * `silero` — so a coding agent driving `--apply --yes` gets what it always got,
+ * `silero` — so a coding agent driving `--json` gets what it always got,
  * and the suggestion is offered to a person as a default they can overtype
  * rather than hidden in the code that used to hold it.
  *

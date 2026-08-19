@@ -5,16 +5,13 @@
  * file is about the half a headless run can never show: that the questions are
  * really asked, **in the order the platform lists its settings**, that a
  * suggestion is a default a person can see and take, that no key is echoed while
- * it is typed, that the carrier plan is shown before anything is written to
- * somebody's paid account, and that declining writes nothing at all.
+ * it is typed, and that setup asks for the four limited runtime phone values
+ * without ever asking for or contacting a Twilio account.
  *
  * Proving that needs a terminal, so this runs the real command in a real
  * pseudo-terminal and reads its real screen — the same arrangement the wizard's
  * scrollback promises are held to.
  */
-
-import { existsSync } from "node:fs";
-import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -28,16 +25,16 @@ import {
 import { runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
 import { CLI_ENTRY } from "./support/workspace.ts";
 
-const ACCOUNT_SID = "AC00000000000000000000000000000001";
 const SOURCE_NUMBER = "+15550100100";
 const NUMBER_SID = "PN00000000000000000000000000000001";
 const EXISTING_TRUNK = {
   sid: "TK00000000000000000000000000000001",
   domain: "egma-simulator-abc123.pstn.twilio.com",
 };
+const SIP_USERNAME = "egma-nischal";
+const SIP_PASSWORD = "SENTINELsipPassword1a2b3c4d";
 
 /** Values nothing else holds, so finding one on the screen means one leaked. */
-const AUTH_TOKEN = "SENTINELauthtoken0f1c8a2e4b6d";
 const MODEL_KEY = "skSENTINELmodelkey9a7c3e5f1b2d";
 const LISTENING_KEY = "skSENTINELlisteningkey5f1b2d4a";
 const SPEAKING_KEY = "skSENTINELspeakingkey7c3e5f1b2";
@@ -56,6 +53,10 @@ describe("egma self-host setup, with somebody watching", () => {
       numbers: { [SOURCE_NUMBER]: NUMBER_SID },
       existingTrunk: EXISTING_TRUNK,
       existingCredentialList: { sid: "CL00000000000000000000000000000001" },
+      existingCredential: {
+        sid: "CR00000000000000000000000000000001",
+        username: "egma-production",
+      },
       credentialListAttached: true,
       numberAttached: true,
     });
@@ -94,14 +95,18 @@ describe("egma self-host setup, with somebody watching", () => {
         EGMA_PERSONA_TTS_VOICE: "",
         EGMA_PERSONA_VAD_PROVIDER: "",
         EGMA_MEDIA_BACKEND: "",
+        EGMA_PHONE_TRUNK_ADDRESS: "",
+        EGMA_PHONE_SOURCE_NUMBER: "",
+        EGMA_PHONE_TRUNK_USERNAME: "",
+        EGMA_PHONE_TRUNK_PASSWORD: "",
+        // These are empty tripwires. Normal setup does not ask for them.
         TWILIO_ACCOUNT_SID: "",
         TWILIO_AUTH_TOKEN: "",
-        EGMA_PHONE_SOURCE_NUMBER: "",
       },
     });
   }
 
-  it("asks for every setting in turn, hides the keys, and writes nothing when declined", async () => {
+  it("asks for four runtime phone values, hides the secrets, and never contacts Twilio", async () => {
     terminal = start();
 
     // The order is the platform's own: who the persona thinks with, then what
@@ -149,58 +154,48 @@ describe("egma self-host setup, with somebody watching", () => {
     await showing(terminal, "the media backend [livekit]");
     terminal.write("\r");
 
-    // The carrier, which is the one half that is not typed into the platform:
-    // a trunk hostname and a SIP credential are what the paperwork produces.
-    await showing(terminal, "Twilio Account SID");
-    terminal.write(`${ACCOUNT_SID}\r`);
-    // The number question says the thing a person most needs to know about it
-    // before they answer, which is that egma will not go and buy one.
-    await showing(terminal, "already owns", "Egma never buys one");
+    // These are runtime values made once by the Twilio administrator. Each
+    // developer has their own SIP username/password on the shared trunk.
+    await showing(terminal, "SIP trunk address");
+    terminal.write(`${EXISTING_TRUNK.domain}\r`);
+    await showing(terminal, "Source phone number, in E.164");
     terminal.write(`${SOURCE_NUMBER}\r`);
-    await showing(terminal, "Twilio Auth Token", "never kept");
-    terminal.write(`${AUTH_TOKEN}\r`);
+    await showing(terminal, "SIP username");
+    terminal.write(`${SIP_USERNAME}\r`);
+    await showing(terminal, "SIP password", "not shown as you type");
+    terminal.write(`${SIP_PASSWORD}\r`);
 
-    // The plan, before a single write. Every artifact named with its own
-    // identifier, and the promise about buying restated where the decision is.
-    await showing(
-      terminal,
-      `reuse the existing trunk egma-simulator (${EXISTING_TRUNK.sid})`,
-      `${SOURCE_NUMBER} (${NUMBER_SID}) is already on the trunk`,
-      "buys_a_number: no",
-      "Apply this to your Twilio account?",
-    );
+    await showing(terminal, "status: ready");
 
-    // Nothing has been written yet — not at the carrier and not at the
-    // platform. Every question comes before any write, which is what makes
-    // declining leave both of them exactly as they were.
+    // The only write is to the platform. Even a populated Twilio account is
+    // never read, so ordinary setup cannot change somebody else's password.
+    expect(platform.held()).toMatchObject({
+      carrier_trunk_address: EXISTING_TRUNK.domain,
+      carrier_trunk_number: SOURCE_NUMBER,
+      carrier_trunk_username: SIP_USERNAME,
+      carrier_trunk_password: SIP_PASSWORD,
+    });
+    expect(twilio.requests).toEqual([]);
     expect(twilio.writes).toEqual([]);
-    expect(platform.written).toEqual([]);
-
-    terminal.write("n\r");
-    await showing(terminal, "status: not_approved", "changed: nothing");
-    expect(twilio.writes).toEqual([]);
-    expect(platform.written).toEqual([]);
-    expect(platform.held()).toEqual({});
-    // And nothing locally either — not a bootstrap file, not a receipt, not
-    // even the directory those would live in. "changed: nothing" is a claim
-    // about three places, so it is checked in all three.
-    expect(existsSync(path.join(workspace.dir, ".egma-platform"))).toBe(false);
+    expect(twilio.passwords).toEqual([]);
 
     // No key was ever on the screen or in scrollback: they were read with the
     // terminal's echo off, so no shoulder and no screen recording has them, and
     // neither does the buffer a person scrolls back through.
     const everything = `${terminal.screen()}\n${terminal.scrollback()}\n${terminal.raw()}`;
-    for (const secret of [AUTH_TOKEN, MODEL_KEY, LISTENING_KEY, SPEAKING_KEY]) {
+    for (const secret of [MODEL_KEY, LISTENING_KEY, SPEAKING_KEY, SIP_PASSWORD]) {
       expect(everything).not.toContain(secret);
     }
 
-    // The two that are not secrets were echoed, which is right: an account
-    // identifier is on Twilio's own dashboard and a source number is on every
-    // caller's handset, and a person has to be able to see a typo.
-    expect(everything).toContain(ACCOUNT_SID);
+    // The three non-secret runtime values are echoed so a typo is visible.
+    expect(everything).toContain(EXISTING_TRUNK.domain);
     expect(everything).toContain(SOURCE_NUMBER);
+    expect(everything).toContain(SIP_USERNAME);
+    expect(everything).not.toContain("Twilio Account SID");
+    expect(everything).not.toContain("Twilio Auth Token");
+    expect(everything).not.toContain("Apply this to your Twilio account?");
 
-    expect(await terminal.exited).toBe(5);
+    expect(await terminal.exited).toBe(0);
   });
 
   it.each([
@@ -245,7 +240,9 @@ describe("egma self-host setup, with somebody watching", () => {
       // 130 is what a shell means by "stopped part way", and every other verb in
       // this CLI already answers with it.
       expect(await terminal.exited).toBe(130);
+      expect(twilio.requests).toEqual([]);
       expect(twilio.writes).toEqual([]);
+      expect(twilio.passwords).toEqual([]);
       expect(platform.written).toEqual([]);
     },
   );

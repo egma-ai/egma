@@ -1,19 +1,17 @@
 /**
- * The receipt: what setup did to somebody's paid account, written down.
+ * The receipt: what setup changed in this platform, written down.
  *
- * A command that creates five things in a customer's Twilio account and prints
- * a tick is a command whose effects they have to go looking for. So every
- * `self-host` command that changes anything leaves a receipt in the platform
- * workspace: what ran, when, against which account, and every artifact's own
- * identifier — enough to find all of it in a console a year from now, or to
- * delete it.
+ * Every `self-host` command that changes anything leaves a receipt in the
+ * platform workspace: what ran, when, and which non-secret settings or local
+ * artifacts changed. Normal setup never reaches a carrier account, so a
+ * receipt records the carrier values it copied, not work done in Twilio.
  *
  * **A receipt is a public document.** It is written into a working directory
  * that people commit, paste into issues and attach to support threads, so
- * nothing in it may be a secret — not the Twilio Auth Token, not the OpenAI
- * key, not the SIP password egma minted. What it carries instead are
- * identifiers, hostnames and the number a call comes from, which are the things
- * a person actually needs and which open nothing.
+ * nothing in it may be a secret — not an OpenAI key and not the SIP password
+ * supplied by a developer. What it carries instead are setting names,
+ * hostnames and the number a call comes from, which are the things a person
+ * actually needs and which open nothing.
  *
  * The guard is not a review habit. `sweptOf` is applied to every receipt before
  * it is written, and it refuses to write one that contains any secret the

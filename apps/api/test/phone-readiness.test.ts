@@ -128,6 +128,35 @@ describe("phone readiness", () => {
     });
     expect(Object.keys(config)).not.toContain("phone");
   });
+
+  it("refuses a partial phone bundle before it can seed a mixed credential", () => {
+    const complete = {
+      EGMA_PHONE_TRUNK_ADDRESS: "egma-simulator-abc.pstn.twilio.com",
+      EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
+      EGMA_PHONE_TRUNK_USERNAME: "egma-trunk",
+      EGMA_PHONE_TRUNK_PASSWORD: "the-carrier-issued-this-one",
+    } as const;
+
+    for (const missing of Object.keys(complete) as (keyof typeof complete)[]) {
+      const partial: Record<string, string> = { ...complete };
+      delete partial[missing];
+
+      expect(() => loadConfig({ ...BASE, ...partial })).toThrow(missing);
+    }
+  });
+
+  it("keeps the valid two-value form for a carrier authenticated by source IP", () => {
+    expect(
+      loadConfig({
+        ...BASE,
+        EGMA_PHONE_TRUNK_ADDRESS: "carrier.example.com",
+        EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
+      }).platformSettings,
+    ).toEqual({
+      carrier_trunk_address: "carrier.example.com",
+      carrier_trunk_number: "+15550100100",
+    });
+  });
 });
 
 describe("the platform's default judge", () => {

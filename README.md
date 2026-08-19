@@ -119,13 +119,18 @@ after supplying one more key is a single question, and running it on a
 configured platform changes nothing and says so. `--plan` prints the list of
 what it would ask for and stops.
 
-For the phone half it asks for a Twilio account, a voice number that account
-**already owns**, and the account's Auth Token; shows you a plan before it
-writes anything to your carrier; and on approval does the paperwork. It never
-buys, ports or registers a number. Press Enter at the Twilio question to leave
-the phone for later. `--apply --yes --json` is the same work with nobody
-watching, for a coding agent driving it — every answer can arrive in the
-environment variable named for it in `.env.example`.
+For the phone half, keep one Twilio account, trunk, source number, and attached
+credential list. Create one SIP username/password in that list per developer,
+plus one for production. Each developer uses the shared trunk address and
+source number with their own credential.
+
+Setup asks for `EGMA_PHONE_TRUNK_ADDRESS`, `EGMA_PHONE_SOURCE_NUMBER`,
+`EGMA_PHONE_TRUNK_USERNAME`, and `EGMA_PHONE_TRUNK_PASSWORD`, then copies all
+four into the platform store. A fresh database copies the same values again
+from that developer's environment. Setup never asks for the Twilio Account SID
+or Auth Token and never contacts or changes Twilio. Press Enter at the trunk
+address question to leave the phone for later. `--json` is the same work with
+nobody watching; the older `--apply --yes` spelling remains accepted.
 
 **Every answer is written through the platform's own API, and the platform is
 the only thing that seals.** The settings live in Postgres, sealed with
@@ -138,17 +143,22 @@ CLI keeps none of them.
 honest rather than fussy.** A platform with no carrier runs text simulations
 perfectly well, so it is reported as its own fact beside the whole-platform one.
 
-**The Twilio Auth Token is used by that command and never kept.** What a running
-Egma holds is a SIP credential that can authenticate one trunk and do nothing
-else on the account.
+**Normal setup never receives the Twilio Auth Token.** A running Egma receives
+only one developer or production SIP credential. That credential can
+authenticate calls on the shared trunk; it cannot manage the Twilio account.
 
-*Upgrading from a release that used `egma self-host phone setup`:* your settings
-were in `.egma-platform/platform.env`, and **nothing reads them there any
-more** — there is no import path and no compatibility reader. Your platform will
-report `setup required` after the upgrade. Run `egma self-host setup` once and
-answer it again. The file itself stays, because it also holds the media server's
-key and secret, which a container reads when it is created; the settings lines
-left in it are inert, and you can delete them once setup has run.
+*Upgrading from a release that used `egma self-host phone setup`:* do not reuse
+its global `egma-simulator` SIP credential for every machine. Ask a Twilio
+administrator to add one named credential per developer and one for production
+to the existing credential list. Save each four-value bundle in that
+deployment's ignored `.env`, password manager, or secret store **before**
+running `egma self-host setup`. The command copies it into the platform store
+without contacting Twilio. Only remove the old carrier lines after the new
+credential has placed a test call and its durable recovery copy is confirmed.
+After every developer and production has moved and passed a test call, ask the
+Twilio administrator to revoke the old shared `egma-simulator` credential.
+The old file itself stays because it also holds the media server's key and
+secret, which a container reads when it is created.
 
 Two of those lines are **not** settings and want different treatment.
 `EGMA_BASE_URL` stays where it is and is still read from that file. The three
@@ -444,9 +454,10 @@ LiveKit, and it is already running: the LiveKit server, its SIP gateway and the
 Redis they find each other through are part of the default deployment. There is
 no overlay to ask for by name.
 
-`egma self-host setup` is what turns your carrier account into the trunk. The
-rest of this section is what is happening underneath it, and what to do when the
-machine you are on cannot host the gateway.
+An administrator creates the carrier trunk and its credential list. `egma
+self-host setup` connects this deployment to it with a limited SIP credential.
+The rest of this section explains that path and what to do when the machine you
+are on cannot host the gateway.
 
 **LiveKit Cloud is one variable.** Point `EGMA_SIMULATOR_LIVEKIT_URL` at it with
 its key and secret and stop reading — there is nothing to host and nothing to
@@ -498,40 +509,63 @@ use, and a range published to the internet is a range to justify. Widen both
 ends together if you raise capacity, and widen your firewall by the same
 amount.
 
-### Turning a carrier account into a trunk
+### Connecting Egma to a shared trunk
 
-You should not have to hand-build SIP paperwork in somebody's console, and you
-do not:
+An administrator creates the trunk, attaches the source number and credential
+list, and adds a credential when a developer joins. After that, each developer
+runs:
 
 ```bash
 npx @egma/cli self-host setup
 ```
 
-It reads your account first and shows you a plan — what it would create and what
-is already there — and writes nothing to your carrier until you approve it. Then
-it creates the trunk, its termination URI, a credential list and the credential,
-attaches the credential list and the number to the trunk, and writes the trunk,
-the number and the credential **into the platform's own store, sealed**. Nothing
-is restarted: the platform reads its settings from that store for each
-simulation, so the phone is ready on the next request. It names everything it
-made with that thing's own identifier, in the terminal and in a receipt filed in
-`.egma-platform/receipts/`, so a year from now you can find all of it in the
-Twilio console or delete it.
+The normal path does not read or write the Twilio account. Keep one trunk,
+source number, and credential list. In the Twilio console, create one SIP
+credential in that list for each developer and one for production. For example:
+`egma-nischal`, `egma-alice`, and `egma-production`.
 
-It is safe to run again, and safe to run again after a run that stopped half
-way: every step looks for what it would create before creating it, so a second
-run finds what the first made and adds only what is missing. The one thing it
-cannot reuse is the password — Twilio hands one out once and never again — so a
-re-run mints another and tells Twilio, which is what makes the configuration it
-writes always usable rather than usable only the first time.
+Twilio shows the username later, but it does not return the password after it
+is set. Save each password when the credential is created. A developer puts
+their own four values in the local environment:
 
-**The number must already be on your account.** Egma never searches the
-catalogue, buys, ports or registers one; if the number you name is not there, it
-says so and stops before creating anything at all.
+```bash
+export EGMA_PHONE_TRUNK_ADDRESS=example.pstn.twilio.com
+export EGMA_PHONE_SOURCE_NUMBER=+15551234567
+export EGMA_PHONE_TRUNK_USERNAME=egma-nischal
+export EGMA_PHONE_TRUNK_PASSWORD="$(cat my-sip-password.txt)"
+```
 
-**The account token is used by that command and by nothing else.** What a
-running deployment keeps is a SIP credential that can do exactly one thing:
-authenticate a call over one trunk. It is sealed in the platform's own store
+A fresh database copies the complete bundle into the platform's own store,
+sealed. All four values move together. A partial bundle is refused before any
+write. Keep a recovery copy in the developer's ignored local `.env` or password
+manager as well as the sealed database copy. A database reset reads that local
+copy; it needs no synchronization with another database.
+
+Production uses the same trunk address and source number with its own SIP pair
+in the deployment secret. Normal setup never asks for the Twilio Account SID or
+Auth Token. It does not create, inspect, or change Twilio resources.
+
+Normal setup also never replaces a bundle the platform already holds. To rotate
+one safely, a Twilio administrator first adds a new developer or production
+credential beside the old one. Export the trunk address, source number, new SIP
+username and new SIP password, then run:
+
+```bash
+npx @egma/cli self-host setup --replace-carrier --yes
+```
+
+That recovery command replaces all four stored values together. It still does
+not contact Twilio. Place a test call with the new bundle, then ask the
+administrator to revoke the old credential.
+
+**The number must already be on your account.** Normal setup never searches the
+Twilio catalogue and never buys, ports or registers a number. It also cannot
+verify ownership without account access, so the administrator must copy the
+source number from the shared trunk.
+
+**The account token is not a setup input.** What a running deployment keeps is
+one limited SIP credential. It can authenticate a call over the shared trunk;
+it cannot manage the Twilio account. It is sealed in the platform's own store
 with the same key a connection's credentials are sealed with, and it reaches a
 simulator only on the work order that simulator claims.
 
