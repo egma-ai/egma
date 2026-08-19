@@ -5,8 +5,8 @@
  * file is about the half a headless run can never show: that the questions are
  * really asked, **in the order the platform lists its settings**, that a
  * suggestion is a default a person can see and take, that no key is echoed while
- * it is typed, and that setup asks for the four limited runtime phone values
- * without ever asking for or contacting a Twilio account.
+ * it is typed, and that setup asks for one complete runtime phone route without
+ * ever asking for or contacting a Twilio account.
  *
  * Proving that needs a terminal, so this runs the real command in a real
  * pseudo-terminal and reads its real screen — the same arrangement the wizard's
@@ -195,6 +195,48 @@ describe("egma self-host setup, with somebody watching", () => {
     expect(everything).not.toContain("Twilio Auth Token");
     expect(everything).not.toContain("Apply this to your Twilio account?");
 
+    expect(await terminal.exited).toBe(0);
+  });
+
+  it("accepts a source-IP route without asking for a SIP password", async () => {
+    await platform.close();
+    platform = await startPlatform({
+      holds: {
+        persona_model_provider: "openai",
+        persona_model: "gpt-5.6-terra",
+        persona_model_key: MODEL_KEY,
+        persona_model_reasoning_effort: "none",
+        speech_to_text_provider: "openai_realtime",
+        speech_to_text_key: LISTENING_KEY,
+        speech_to_text_model: "gpt-4o-transcribe",
+        text_to_speech_provider: "cartesia",
+        text_to_speech_key: SPEAKING_KEY,
+        text_to_speech_model: "sonic-3",
+        text_to_speech_voice: "default",
+        voice_activity_provider: "silero",
+        media_backend: "livekit",
+      },
+    });
+    await workspace.signIn(platform);
+    terminal = start();
+
+    await showing(terminal, "SIP trunk address");
+    terminal.write("source-ip.example.com\r");
+    await showing(terminal, "Source phone number, in E.164");
+    terminal.write(`${SOURCE_NUMBER}\r`);
+    await showing(terminal, "SIP username", "Enter for source-IP authentication");
+    terminal.write("\r");
+    await showing(terminal, "status: ready");
+
+    const everything = `${terminal.screen()}\n${terminal.scrollback()}\n${terminal.raw()}`;
+    expect(everything).not.toContain("SIP password");
+    expect(platform.held()).toMatchObject({
+      carrier_trunk_address: "source-ip.example.com",
+      carrier_trunk_number: SOURCE_NUMBER,
+    });
+    expect(platform.held()).not.toHaveProperty("carrier_trunk_username");
+    expect(platform.held()).not.toHaveProperty("carrier_trunk_password");
+    expect(twilio.requests).toEqual([]);
     expect(await terminal.exited).toBe(0);
   });
 

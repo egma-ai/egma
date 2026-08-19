@@ -79,6 +79,13 @@ const REPLACEMENT_CARRIER: NodeJS.ProcessEnv = {
   EGMA_PHONE_TRUNK_PASSWORD: REPLACEMENT_SIP_PASSWORD,
 };
 
+const SOURCE_IP_CARRIER: NodeJS.ProcessEnv = {
+  EGMA_PHONE_TRUNK_ADDRESS: "source-ip.example.com",
+  EGMA_PHONE_SOURCE_NUMBER: "+15550100300",
+  EGMA_PHONE_TRUNK_USERNAME: "",
+  EGMA_PHONE_TRUNK_PASSWORD: "",
+};
+
 const PHONE_VARIABLES = [
   "EGMA_PHONE_TRUNK_ADDRESS",
   "EGMA_PHONE_SOURCE_NUMBER",
@@ -298,6 +305,26 @@ describe("egma self-host setup", () => {
     expectNoTwilioAccess();
   });
 
+  it("copies a complete source-IP route into a fresh database", async () => {
+    platform = await startPlatform({
+      holds: Object.fromEntries(
+        Object.entries(EVERYTHING_HELD).filter(([name]) => !name.startsWith("carrier_")),
+      ),
+    });
+    await workspace.signIn(platform);
+
+    const run = await runSetup(["--apply", "--yes", "--json"], SOURCE_IP_CARRIER);
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(platform.written).toEqual([
+      {
+        carrier_trunk_address: "source-ip.example.com",
+        carrier_trunk_number: "+15550100300",
+      },
+    ]);
+    expectNoTwilioAccess();
+  });
+
   it("ignores Twilio account authority even when the environment exports it", async () => {
     platform = await startPlatform();
     await workspace.signIn(platform);
@@ -404,6 +431,25 @@ describe("egma self-host setup", () => {
     expectNoTwilioAccess();
   });
 
+  it("replaces a credential route with a complete source-IP route", async () => {
+    platform = await startPlatform({ holds: EVERYTHING_HELD });
+    await workspace.signIn(platform);
+
+    const run = await runSetup(
+      ["--replace-carrier", "--yes", "--json"],
+      SOURCE_IP_CARRIER,
+    );
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(platform.written).toEqual([
+      {
+        carrier_trunk_address: "source-ip.example.com",
+        carrier_trunk_number: "+15550100300",
+      },
+    ]);
+    expectNoTwilioAccess();
+  });
+
   it("refuses a confirmed replacement unless all four new values are present", async () => {
     platform = await startPlatform({ holds: EVERYTHING_HELD });
     await workspace.signIn(platform);
@@ -435,7 +481,7 @@ describe("egma self-host setup", () => {
     expect(run.stdout).toContain("asks: the persona's model key");
     expect(run.stdout).toContain("asks: the speech-to-text key");
     expect(run.stdout).toContain(
-      "asks: the SIP trunk address, source number, SIP username and SIP password",
+      "asks: the SIP trunk address and source number, plus SIP username and password when the carrier requires them",
     );
     expect(run.stdout).not.toContain("Twilio Account SID");
     expect(run.stdout).not.toContain("Twilio Auth Token");

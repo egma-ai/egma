@@ -673,12 +673,19 @@ async function waitForPlatform(
 
 // -- setup --------------------------------------------------------------------
 
-type CarrierBundleValues = Readonly<{
-  carrier_trunk_address: string;
-  carrier_trunk_number: string;
-  carrier_trunk_username: string;
-  carrier_trunk_password: string;
-}>;
+type CarrierBundleValues =
+  | Readonly<{
+      carrier_trunk_address: string;
+      carrier_trunk_number: string;
+      carrier_trunk_username?: never;
+      carrier_trunk_password?: never;
+    }>
+  | Readonly<{
+      carrier_trunk_address: string;
+      carrier_trunk_number: string;
+      carrier_trunk_username: string;
+      carrier_trunk_password: string;
+    }>;
 
 const CARRIER_SETTING_NAMES = [
   "carrier_trunk_address",
@@ -697,9 +704,10 @@ type ExportedCarrierBundle =
  *
  * Every developer may use a different SIP username and password on the same
  * account, trunk and credential list. The bundle lives outside the disposable
- * database, so a reset copies it again. All four values are complete or none
- * are: combining a trunk from one bundle with a credential from another would
- * fail every phone simulation.
+ * database, so a reset copies it again. A source-IP carrier needs the address
+ * and source number. A credential carrier needs those two values plus both SIP
+ * credential values. Any other shape is incomplete: combining a trunk from one
+ * route with a credential from another would fail every phone simulation.
  */
 function exportedCarrierBundleIn(
   environment: NodeJS.ProcessEnv,
@@ -721,21 +729,31 @@ function exportedCarrierBundleIn(
   const missing = [
     [CARRIER_VARIABLES.trunkAddress, trunkAddress],
     [CARRIER_VARIABLES.sourceNumber, sourceNumber],
-    [CARRIER_VARIABLES.sipUsername, sipUsername],
-    [CARRIER_VARIABLES.sipPassword, sipPassword],
   ]
     .filter((entry) => entry[1] === "")
     .map((entry) => entry[0] as string);
+  const credentialSupplied = sipUsername !== "" || sipPassword !== "";
+  if (credentialSupplied && sipUsername === "") {
+    missing.push(CARRIER_VARIABLES.sipUsername);
+  }
+  if (credentialSupplied && sipPassword === "") {
+    missing.push(CARRIER_VARIABLES.sipPassword);
+  }
   if (missing.length > 0) return { kind: "incomplete", missing };
 
   return {
     kind: "complete",
-    values: {
-      carrier_trunk_address: trunkAddress,
-      carrier_trunk_number: normalizeNumber(sourceNumber),
-      carrier_trunk_username: sipUsername,
-      carrier_trunk_password: sipPassword,
-    },
+    values: credentialSupplied
+      ? {
+          carrier_trunk_address: trunkAddress,
+          carrier_trunk_number: normalizeNumber(sourceNumber),
+          carrier_trunk_username: sipUsername,
+          carrier_trunk_password: sipPassword,
+        }
+      : {
+          carrier_trunk_address: trunkAddress,
+          carrier_trunk_number: normalizeNumber(sourceNumber),
+        },
   };
 }
 
@@ -761,10 +779,11 @@ function exportedCarrierBundleIn(
  * decline or a Ctrl-C part way through leaves both the platform and the carrier
  * exactly as they were.
  *
- * The carrier half is four runtime values: trunk address, source number, SIP
- * username and SIP password. A developer can have their own credential on the
- * same Twilio trunk as production. Setup copies those values into the platform
- * and never receives account-wide Twilio authority or changes Twilio state.
+ * The carrier half is a complete route: trunk address and source number for
+ * source-IP authentication, plus SIP username and password for credential
+ * authentication. A developer can have their own credential on the same Twilio
+ * trunk as production. Setup copies the route into the platform and never
+ * receives account-wide Twilio authority or changes Twilio state.
  */
 async function runSetup(
   options: SelfHostOptions,
@@ -869,7 +888,9 @@ async function runSetup(
       asks: [
         ...toAsk.map((setting) => setting.label),
         ...(carrierWanted
-          ? ["the SIP trunk address, source number, SIP username and SIP password"]
+          ? [
+              "the SIP trunk address and source number, plus SIP username and password when the carrier requires them",
+            ]
           : []),
       ],
       holds: held.filter((setting) => setting.held).map((setting) => setting.name),
@@ -886,7 +907,7 @@ async function runSetup(
       status: "not_confirmed",
       changed: "nothing",
       reason:
-        "--replace-carrier changes all four stored carrier values. Run the same command with --yes only after a carrier administrator has added the replacement credential beside the old one.",
+        "--replace-carrier replaces the complete stored carrier route. Run the same command with --yes only after the replacement route is ready. For credential authentication, run it only after a carrier administrator has added the replacement credential beside the old one.",
       platform_url: address,
     });
     return SELF_HOST_EXIT.refused;
@@ -998,31 +1019,41 @@ async function runSetup(
             ask,
           ),
         );
-        const sipUsername = await askPlainly(
+        const sipUsername = await askOptionally(
           CARRIER_VARIABLES.sipUsername,
-          "SIP username",
+          "SIP username (Enter for source-IP authentication)",
           ask,
+          null,
         );
-        const sipPassword = await askSecret(
-          CARRIER_VARIABLES.sipPassword,
-          "SIP password (not shown as you type)",
-          ask,
-        );
-        carrierBundle = {
-          carrier_trunk_address: trunkAddress,
-          carrier_trunk_number: sourceNumber,
-          carrier_trunk_username: sipUsername,
-          carrier_trunk_password: sipPassword.value,
-        };
+        if (sipUsername === null || sipUsername === "") {
+          carrierBundle = {
+            carrier_trunk_address: trunkAddress,
+            carrier_trunk_number: sourceNumber,
+          };
+        } else {
+          const sipPassword = await askSecret(
+            CARRIER_VARIABLES.sipPassword,
+            "SIP password (not shown as you type)",
+            ask,
+          );
+          carrierBundle = {
+            carrier_trunk_address: trunkAddress,
+            carrier_trunk_number: sourceNumber,
+            carrier_trunk_username: sipUsername,
+            carrier_trunk_password: sipPassword.value,
+          };
+        }
       }
     }
 
     if (carrierBundle !== null) {
-      // The four values move together. This is the whole database-reset path:
-      // copy this developer's stable bundle into the new platform store. No
-      // account-wide Twilio credential is read and Twilio is never contacted.
+      // The complete route moves together. This is the whole database-reset
+      // path: copy this developer's stable route into the new platform store.
+      // No account-wide Twilio credential is read and Twilio is never contacted.
       Object.assign(answers, carrierBundle);
-      secrets.push(carrierBundle.carrier_trunk_password);
+      if (carrierBundle.carrier_trunk_password !== undefined) {
+        secrets.push(carrierBundle.carrier_trunk_password);
+      }
     }
   }
 
@@ -1043,9 +1074,9 @@ async function runSetup(
   // Read once rather than waited for. Readiness is built from the store on
   // every request, so the answer is already true the moment the write lands.
   const platform = await readPlatform(address);
-  // A complete source-IP route makes carrierWanted false before the interview.
-  // If a route was absent or partial, this guided Twilio flow must not call the
-  // result ready until the complete four-value bundle has been supplied.
+  // A held source-IP route makes carrierWanted false before the interview. If a
+  // route was absent or partial, setup must not call the result ready until a
+  // complete two-value or four-value route has been supplied.
   const carrierBundleMissing = carrierWanted && carrierBundle === null;
   const stillMissing = [
     ...(platform?.setupMissing ?? []),
@@ -1067,7 +1098,10 @@ async function runSetup(
       sip_username: carrierBundle?.carrier_trunk_username ?? null,
       // Said rather than shown, so that a receipt records that a credential
       // exists without being the second place it exists.
-      sip_password: carrierBundle === null ? null : "supplied, not recorded",
+      sip_password:
+        carrierBundle?.carrier_trunk_password === undefined
+          ? null
+          : "supplied, not recorded",
       configuration_file: configFile,
       platform_url: address,
       setup: platform?.setupState ?? "unknown",
