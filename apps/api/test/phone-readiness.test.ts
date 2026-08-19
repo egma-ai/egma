@@ -80,6 +80,24 @@ describe("phone readiness", () => {
     expect(readiness.speechProvider).toBe("openai");
   });
 
+  it.each([
+    ["carrier_trunk_username", "egma-legacy", "the carrier trunk password"],
+    ["carrier_trunk_password", null, "the carrier trunk username"],
+  ] as const)(
+    "keeps a legacy one-sided SIP credential out of ready when it holds only %s",
+    (name, value, absentLabel) => {
+      const readiness = phoneReadiness({
+        carrier_trunk_address: "egma-simulator-abc.pstn.twilio.com",
+        carrier_trunk_number: "+15550100100",
+        text_to_speech_provider: "openai",
+        [name]: value,
+      });
+
+      expect(readiness.state).toBe("setup_required");
+      expect(readiness.missing).toEqual([absentLabel]);
+    },
+  );
+
   it("answers from what a secret-free view of the store can say, and no more", () => {
     // `platformFacts` is the only thing this reads, and it answers `null` for
     // every setting the catalog marks secret. So a carrier that is fully

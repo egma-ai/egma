@@ -87,6 +87,20 @@ export function phoneReadiness(held: PlatformFacts): PhoneReadiness {
     .filter((which) => !holds(held, PHONE_SETUP_FACTS[which]))
     .map((which) => labelOf(PHONE_SETUP_FACTS[which]));
 
+  // Old releases allowed the SIP username and password to be written one at a
+  // time. Neither is required for a source-IP route, but one without the other
+  // is not a route the simulator can use. Keep that legacy row visible and
+  // name its missing half instead of reporting the phone path ready.
+  const hasUsername = holds(held, "carrier_trunk_username");
+  const hasPassword = holds(held, "carrier_trunk_password");
+  if (hasUsername !== hasPassword) {
+    missing.push(
+      labelOf(
+        hasUsername ? "carrier_trunk_password" : "carrier_trunk_username",
+      ),
+    );
+  }
+
   return {
     state: missing.length === 0 ? "ready" : "setup_required",
     missing,

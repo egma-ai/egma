@@ -400,7 +400,8 @@ services:
       EGMA_PHONE_TRUNK_PASSWORD: ${EGMA_PHONE_TRUNK_PASSWORD:-}
       # An explicit ownership choice, separate from tenancy. `platform` seeds
       # a missing carrier route and then leaves the stored route alone.
-      # `environment` makes the four values above authoritative on every start.
+      # `environment` makes the two-value source-IP route or four-value
+      # credential route above authoritative on every start.
       EGMA_CARRIER_SETTINGS_SOURCE: ${EGMA_CARRIER_SETTINGS_SOURCE:-platform}
       # Egma platform telemetry, behind one flag that defaults to off — see
       # .env.example. Deliberately not the trace store: what customers send

@@ -590,7 +590,7 @@ describe("seeding one complete carrier bundle", () => {
   });
 });
 
-describe("reconciling a hosted deployment's carrier route", () => {
+describe("reconciling an environment-owned carrier route", () => {
   const STORED_ROUTE = {
     carrier_trunk_address: "stored.pstn.twilio.com",
     carrier_trunk_number: "+15550100100",
