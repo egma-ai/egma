@@ -264,9 +264,9 @@ function isSlugCollision(thrown: unknown): boolean {
  * able to drift apart on who may.
  *
  * What it writes is `insertProject`'s business and deliberately not this
- * function's: the project, its starter persona, the pointer that makes them the
- * default, its copy of egma's `expected_behaviors` grader, and the deployment's
- * judge where there is one. A project created here is therefore
+ * function's: the project, its pointer to Egma's shared default persona, its
+ * copy of Egma's `expected_behaviors` grader, and the deployment's judge where
+ * there is one. A project created here is therefore
  * indistinguishable from the one signup makes, which is the point — anything
  * less is a project that refuses the first test written in it, or one whose
  * first run comes back green having judged nothing.

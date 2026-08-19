@@ -67,11 +67,10 @@ const SEEDING_RUNNING_GRADERS = "egma:seed-running-graders";
 /**
  * What one seeded copy is, as two rows.
  *
- * **Written by hand rather than by calling the Use door**, for the reason the
- * starter persona is: this happens inside somebody else's transaction — project
- * creation, or the backfill — and there is no `AuthContext` at either of those
- * moments. The two write shapes are held together by a test rather than by the
- * compiler.
+ * **Written by hand rather than by calling the Use door** because this happens
+ * inside somebody else's transaction — project creation, or the backfill — and
+ * there is no `AuthContext` at either of those moments. The two write shapes are
+ * held together by a test rather than by the compiler.
  *
  * The two inserts are the two Use makes, in the same order: the identity row
  * first, naming a version that does not exist yet, because that pointer's

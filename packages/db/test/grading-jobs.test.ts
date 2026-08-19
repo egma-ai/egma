@@ -161,15 +161,7 @@ beforeAll(async () => {
   personaId = (
     await createPersona(auth, {
       name: "Impatient Rita",
-      traits: {
-        personality: "Speaks plainly.",
-        language: "en-US",
-        voice: {
-          provider: "elevenlabs",
-          voiceId: "EXAVITQu4vr4xnSDxMaL",
-          speed: 1,
-        },
-      },
+      personality: "Speaks plainly.",
     })
   ).id;
 
@@ -613,15 +605,7 @@ describe("the claim", () => {
     });
     const grace = await createPersona(globexAuth, {
       name: "Careful Grace",
-      traits: {
-        personality: "Speaks slowly.",
-        language: "en-US",
-        voice: {
-          provider: "elevenlabs",
-          voiceId: "EXAVITQu4vr4xnSDxMaL",
-          speed: 1,
-        },
-      },
+      personality: "Speaks slowly.",
     });
     const globexTest = await createTest(globexAuth, {
       name: "Cancels a booking",

@@ -346,13 +346,13 @@ describe("the simulation's test pin", () => {
 });
 
 /**
- * The schema's one deliberate exception to hard-required tenancy.
+ * The schema's deliberate exceptions to hard-required tenancy.
  *
  * Every other table below the tenancy tables carries a `not null`
  * `organization_id`, because a row belonging to nobody is a row no permission
- * can describe. On the grader library, belonging to nobody is a real state:
- * **null tenancy means egma owns the entry**, which is what a predefined grader
- * is, and it is where the Owner label is derived from. It is asserted here
+ * can describe. On the grader library and persona shelf, belonging to nobody
+ * is a real state: **null tenancy means egma owns the definition**, which is
+ * where the Owner label is derived from. It is asserted here
  * rather than only in that table's own tests because it is a structural claim
  * about the whole schema — and because an exception nothing watches is an
  * exception that spreads.
@@ -375,16 +375,16 @@ describe("the grader library's nullable tenancy", () => {
   });
 
   /**
-   * Two tables leave the customer null, and they mean opposite things by it.
+   * Three tables leave the customer null, with two meanings.
    *
    * A device code's null is **not yet**: a terminal that has not been aimed at
    * anything, filled in the moment somebody approves it. The library's is
-   * **never**, and permanently — the entry belongs to egma, and that is the
-   * state the Owner column reads. A third table appearing in this list is
+   * **never**, and permanently — the grader or persona belongs to egma, and
+   * that is the state the Owner column reads. Another table appearing here is
    * somebody choosing one of those two meanings, which is a decision worth
    * making on purpose rather than by leaving a `notNull` off.
    */
-  it("joins the one pending-authorization table and no others", () => {
+  it("joins the persona shelf and the one pending-authorization table", () => {
     const nullable = columns.filter(
       (column) =>
         column.column_name === "organization_id" && !column.not_null,
@@ -392,6 +392,7 @@ describe("the grader library's nullable tenancy", () => {
     expect(nullable.map((column) => column.table_name).sort()).toEqual([
       "device_code",
       "grader_library",
+      "persona",
     ]);
   });
 
@@ -421,6 +422,34 @@ describe("the grader library's nullable tenancy", () => {
     expect(byName.get("grader_library_project_organization_fk")).toMatch(
       /FOREIGN KEY \(project_id, organization_id\) REFERENCES project\(id, organization_id\)/,
     );
+  });
+});
+
+describe("the persona library's nullable tenancy", () => {
+  it("keeps the owner pair whole and predefined rows active", async () => {
+    const { rows } = await database.sql<{ conname: string; definition: string }>(
+      `select conname, pg_get_constraintdef(oid) as definition
+         from pg_constraint
+        where conname in ('persona_tenancy_is_whole_or_egmas', 'persona_predefined_is_active')
+        order by conname`,
+    );
+    expect(rows.map((row) => row.conname)).toEqual([
+      "persona_predefined_is_active",
+      "persona_tenancy_is_whole_or_egmas",
+    ]);
+    expect(rows.map((row) => row.definition).join(" ")).toContain(
+      "organization_id IS NULL",
+    );
+  });
+
+  it("gives each predefined name one identity", async () => {
+    const { rows } = await database.sql<{ indexdef: string }>(
+      `select indexdef from pg_indexes
+        where indexname = 'persona_predefined_name_unique'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.indexdef).toContain("UNIQUE INDEX");
+    expect(rows[0]?.indexdef).toContain("WHERE (organization_id IS NULL)");
   });
 });
 

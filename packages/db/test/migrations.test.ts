@@ -2787,3 +2787,317 @@ describe("grading plans over installed runs (0033)", () => {
     expect(rows[0]?.skipped_count).toBe(0);
   });
 });
+
+describe("persona availability over installed references (0037)", () => {
+  type Fixture = {
+    readonly organizationId: string;
+    readonly firstProjectId: string;
+    readonly secondProjectId: string;
+    readonly firstPersonaId: string;
+    readonly secondPersonaId: string;
+    readonly firstTestId: string;
+    readonly secondTestId: string;
+    readonly firstTestVersionId: string;
+  };
+
+  async function beforePersonaLibrary(label: string): Promise<{
+    readonly database: EmptyDatabase;
+    readonly directory: string;
+    readonly client: pg.Client;
+    readonly upgrade: { readonly name: string; readonly sql: string };
+  }> {
+    const database = await createEmptyDatabase(label);
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), "egma-before-0037-"),
+    );
+    const migrations = await readMigrations();
+    for (const migration of migrations) {
+      if (migration.name < "0037") {
+        await writeFile(path.join(directory, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, directory);
+    const upgrade = migrations.find((migration) =>
+      migration.name.startsWith("0037_"),
+    );
+    if (upgrade === undefined) throw new Error("0037 is missing");
+    const client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    return { database, directory, client, upgrade };
+  }
+
+  async function installedTestLink(
+    client: pg.Client,
+    foreignPersona: boolean,
+  ): Promise<Fixture> {
+    const organizationId = newId("org");
+    const firstProjectId = newId("prj");
+    const secondProjectId = newId("prj");
+    const firstPersonaId = newId("prs");
+    const firstPersonaVersionId = newId("prsv");
+    const secondPersonaId = newId("prs");
+    const secondPersonaVersionId = newId("prsv");
+    const firstTestId = newId("tst");
+    const firstTestVersionId = newId("tstv");
+    const secondTestId = newId("tst");
+    const secondTestVersionId = newId("tstv");
+
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', $2)",
+      [organizationId, `acme-${organizationId}`],
+    );
+    await client.query(
+      `insert into project (id, organization_id, name, slug, revision)
+       values ($1, $3, 'First', 'first', $5),
+              ($2, $3, 'Second', 'second', $4)`,
+      [
+        firstProjectId,
+        secondProjectId,
+        organizationId,
+        newId("rev"),
+        newId("rev"),
+      ],
+    );
+
+    await client.query("begin");
+    await client.query(
+      `insert into persona
+         (id, organization_id, project_id, name, current_version_id, revision)
+       values ($1, $5, $3, 'First persona', $6, $8),
+              ($2, $5, $4, 'Second persona', $7, $9)`,
+      [
+        firstPersonaId,
+        secondPersonaId,
+        firstProjectId,
+        secondProjectId,
+        organizationId,
+        firstPersonaVersionId,
+        secondPersonaVersionId,
+        newId("rev"),
+        newId("rev"),
+      ],
+    );
+    await client.query(
+      `insert into persona_version (id, persona_id, version, traits)
+       values ($1, $3, 1, '{}'::jsonb), ($2, $4, 1, '{}'::jsonb)`,
+      [
+        firstPersonaVersionId,
+        secondPersonaVersionId,
+        firstPersonaId,
+        secondPersonaId,
+      ],
+    );
+    await client.query("commit");
+
+    await client.query("begin");
+    await client.query(
+      `insert into test
+         (id, organization_id, project_id, name, current_version_id,
+          revision, applicability_revision)
+       values ($1, $5, $3, 'First test', $6, $8, $10),
+              ($2, $5, $4, 'Second test', $7, $9, $11)`,
+      [
+        firstTestId,
+        secondTestId,
+        firstProjectId,
+        secondProjectId,
+        organizationId,
+        firstTestVersionId,
+        secondTestVersionId,
+        newId("rev"),
+        newId("rev"),
+        newId("rev"),
+        newId("rev"),
+      ],
+    );
+    await client.query(
+      `insert into test_version (id, test_id, version, content)
+       values ($1, $3, 1, '{}'::jsonb), ($2, $4, 1, '{}'::jsonb)`,
+      [
+        firstTestVersionId,
+        secondTestVersionId,
+        firstTestId,
+        secondTestId,
+      ],
+    );
+    await client.query(
+      `insert into test_persona (test_version_id, persona_id, position)
+       values ($1, $2, 1)`,
+      [
+        firstTestVersionId,
+        foreignPersona ? secondPersonaId : firstPersonaId,
+      ],
+    );
+    await client.query("commit");
+
+    return {
+      organizationId,
+      firstProjectId,
+      secondProjectId,
+      firstPersonaId,
+      secondPersonaId,
+      firstTestId,
+      secondTestId,
+      firstTestVersionId,
+    };
+  }
+
+  function postgresCause(error: unknown): {
+    readonly code?: unknown;
+    readonly constraint?: unknown;
+  } {
+    let current = error;
+    for (let depth = 0; depth < 8; depth += 1) {
+      if (typeof current !== "object" || current === null) return {};
+      if ("code" in current) {
+        return current as { readonly code?: unknown; readonly constraint?: unknown };
+      }
+      current = "cause" in current ? current.cause : undefined;
+    }
+    return {};
+  }
+
+  it("refuses an installed link to a persona outside the test project", async () => {
+    const prepared = await beforePersonaLibrary("persona_link_validation");
+    try {
+      await installedTestLink(prepared.client, true);
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+
+      let failure: unknown;
+      try {
+        await runMigrations(prepared.database.url, prepared.directory);
+      } catch (error) {
+        failure = error;
+      }
+      expect(postgresCause(failure)).toMatchObject({
+        code: "23503",
+        constraint: "test_persona_availability",
+      });
+    } finally {
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it("refuses an installed default persona owned by another project", async () => {
+    const prepared = await beforePersonaLibrary("persona_default_validation");
+    try {
+      const fixture = await installedTestLink(prepared.client, false);
+      await prepared.client.query(
+        "update project set default_persona_id = $1 where id = $2",
+        [fixture.secondPersonaId, fixture.firstProjectId],
+      );
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+
+      let failure: unknown;
+      try {
+        await runMigrations(prepared.database.url, prepared.directory);
+      } catch (error) {
+        failure = error;
+      }
+      expect(postgresCause(failure)).toMatchObject({
+        code: "23503",
+        constraint: "project_default_persona_availability",
+      });
+    } finally {
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it("accepts project-owned and Egma-owned default personas", async () => {
+    const prepared = await beforePersonaLibrary("persona_default_valid");
+    try {
+      const fixture = await installedTestLink(prepared.client, false);
+      await prepared.client.query(
+        "update project set default_persona_id = $1 where id = $2",
+        [fixture.firstPersonaId, fixture.firstProjectId],
+      );
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+
+      await runMigrations(prepared.database.url, prepared.directory);
+
+      const globalPersonaId = newId("prs");
+      const globalVersionId = newId("prsv");
+      await prepared.client.query("begin");
+      await prepared.client.query(
+        `insert into persona
+           (id, organization_id, project_id, name, current_version_id, revision)
+         values ($1, null, null, 'Egma persona', $2, $3)`,
+        [globalPersonaId, globalVersionId, newId("rev")],
+      );
+      await prepared.client.query(
+        `insert into persona_version (id, persona_id, version, traits)
+         values ($1, $2, 1, '{}'::jsonb)`,
+        [globalVersionId, globalPersonaId],
+      );
+      await prepared.client.query("commit");
+
+      await prepared.client.query(
+        "update project set default_persona_id = $1 where id = $2",
+        [globalPersonaId, fixture.firstProjectId],
+      );
+      await prepared.client.query(
+        "update project set default_persona_id = $1 where id = $2",
+        [fixture.firstPersonaId, fixture.firstProjectId],
+      );
+      const { rows } = await prepared.client.query<{
+        default_persona_id: string | null;
+      }>("select default_persona_id from project where id = $1", [
+        fixture.firstProjectId,
+      ]);
+      expect(rows[0]?.default_persona_id).toBe(fixture.firstPersonaId);
+    } finally {
+      await prepared.client.query("rollback").catch(() => undefined);
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it("does not let later ownership moves invalidate a valid link", async () => {
+    const prepared = await beforePersonaLibrary("persona_link_immutability");
+    try {
+      const fixture = await installedTestLink(prepared.client, false);
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+      await runMigrations(prepared.database.url, prepared.directory);
+
+      await expect(
+        prepared.client.query(
+          "update test_version set test_id = $1 where id = $2",
+          [fixture.secondTestId, fixture.firstTestVersionId],
+        ),
+      ).rejects.toThrow(/test version cannot move between tests/);
+      await expect(
+        prepared.client.query(
+          "update test set project_id = $1 where id = $2",
+          [fixture.secondProjectId, fixture.firstTestId],
+        ),
+      ).rejects.toThrow(/test ownership cannot change/);
+      await expect(
+        prepared.client.query(
+          "update test set organization_id = $1 where id = $2",
+          [newId("org"), fixture.firstTestId],
+        ),
+      ).rejects.toThrow(/test ownership cannot change/);
+    } finally {
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+});

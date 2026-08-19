@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   foreignKey,
   index,
   integer,
@@ -7,6 +8,7 @@ import {
   pgTable,
   text,
   unique,
+  uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
@@ -27,20 +29,24 @@ import { newRevision } from "../revisions.ts";
  * the simulation happened, so editing today never rewrites what an old result
  * meant. Renames touch the identity row only; behavior lives in the version.
  *
- * **A persona is archived, never deleted.** Archive takes them out of the
- * lists somebody authors from and leaves every row exactly where it was, so
- * Restore is an ordinary write rather than a recovery. Permanent removal is a
- * compliance workflow and is not this table's business.
+ * **A project-owned persona is archived, never deleted.** Archive takes it out
+ * of the lists somebody authors from and leaves every historical row exactly
+ * where it was. Egma's predefined personas have null tenancy, stay active and
+ * read-only, and can be forked into a project-owned persona for customization.
+ * Permanent removal is a compliance workflow and is not this table's business.
  */
 
 export const persona = pgTable(
   "persona",
   {
     id: idText("id").primaryKey(),
-    organizationId: idText("organization_id")
-      .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
-    projectId: idText("project_id").notNull(),
+    /** Null together with projectId when Egma owns this predefined persona. */
+    organizationId: idText("organization_id").references(
+      () => organization.id,
+      { onDelete: "cascade" },
+    ),
+    /** Null together with organizationId when Egma owns this persona. */
+    projectId: idText("project_id"),
     name: text("name").notNull(),
     description: text("description"),
     /**
@@ -53,8 +59,8 @@ export const persona = pgTable(
     /**
      * The opaque token an edit, an Archive or a Restore has to name to be
      * allowed to land — see `revisions.ts`. Defaulted here rather than at each
-     * call site so that provisioning's hand-written starter row and the
-     * factory's own insert cannot come to disagree about filling it.
+     * call site so that catalog seeding and the project-owned factory cannot
+     * come to disagree about filling it.
      */
     revision: text("revision").notNull().$defaultFn(newRevision),
     archivedAt: moment("archived_at"),
@@ -66,6 +72,14 @@ export const persona = pgTable(
   },
   (table) => [
     prefixCheck("persona_id_prefix", table.id, "prs"),
+    check(
+      "persona_tenancy_is_whole_or_egmas",
+      sql`(${table.organizationId} is null) = (${table.projectId} is null)`,
+    ),
+    check(
+      "persona_predefined_is_active",
+      sql`${table.organizationId} is not null or ${table.archivedAt} is null`,
+    ),
     // The pairing, not each column on its own: a persona cannot name
     // one organization and another organization's project.
     foreignKey({
@@ -73,10 +87,11 @@ export const persona = pgTable(
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
-    // Looks redundant next to the primary key; it is the composite-foreign-key
-    // target that lets a simulation prove the persona it pins is its own
-    // project's.
-    unique("persona_id_project_id_unique").on(table.id, table.projectId),
+    // A predefined name resolves to one catalog identity. Project-owned names
+    // may still repeat because callers can select them by stable id.
+    uniqueIndex("persona_predefined_name_unique")
+      .on(table.name)
+      .where(sql`${table.organizationId} is null`),
     index("persona_organization_id_project_id_idx")
       .on(table.organizationId, table.projectId)
       .where(sql`${table.archivedAt} is null`),

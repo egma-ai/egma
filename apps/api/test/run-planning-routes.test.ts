@@ -93,7 +93,7 @@ async function aCustomerReadyToPlan(
 
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
-    traits: NEUTRAL_TRAITS,
+    personality: NEUTRAL_TRAITS.personality,
   });
 
   const push = async (

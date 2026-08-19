@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { readJson, type Refusal } from "../../../../lib/api.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
+import { ownerDisplayName } from "../../../../lib/presentation.ts";
 import {
   personasAfter,
   personasPath,
@@ -34,11 +35,10 @@ import styles from "../../../../ui/system.module.css";
 /**
  * The personas of one project.
  *
- * **A persona is a first-class thing a project owns, not a field on a test.**
- * They are authored once and called on by many tests, which is what makes a
- * comparison between two prompt variants honest — the same person calls both.
- * A surface that only existed inside a test form would quietly turn a reusable
- * person into a field, which is exactly what this page exists to prevent.
+ * **A persona is a first-class thing, not a field on a test.** Egma supplies
+ * predefined personas to every project, and a project can author its own or
+ * fork one. They are called on by many tests, which is what makes a comparison
+ * between two prompt variants honest — the same person calls both.
  *
  * Two lists and never one. Active is what somebody authors from; Archived is
  * where the ones taken out of circulation are, and Restore is on their page. A
@@ -63,25 +63,28 @@ function columnsFor(projectId: string, now: number): readonly Column<Persona>[] 
       header: "Persona",
       primary: true,
       cell: (persona) => (
-        <span className={styles.rowName}>
-          <Link href={projectPath(projectId, "personas", persona.id)}>
-            {persona.name}
-          </Link>
-        </span>
+        <Link href={projectPath(projectId, "personas", persona.id)}>
+          {persona.name}
+        </Link>
       ),
+    },
+    {
+      key: "owner",
+      header: "Owner",
+      width: "120px",
+      cell: (persona) => ownerDisplayName(persona.owner),
+    },
+    {
+      key: "default",
+      header: "Default",
+      width: "90px",
+      cell: (persona) => (persona.is_default ? "Yes" : "—"),
     },
     {
       key: "description",
       header: "Description",
       hideOnMobile: true,
       cell: (persona) => persona.description ?? "—",
-    },
-    {
-      key: "language",
-      header: "Language",
-      mono: true,
-      width: "100px",
-      cell: (persona) => persona.traits.language,
     },
     {
       key: "version",

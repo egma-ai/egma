@@ -15,7 +15,6 @@ import {
   acme,
   actingAsAcme,
   actingAsGlobex,
-  neutralTraits,
   rescheduling,
   rowCounts,
   seedPersona,
@@ -439,7 +438,7 @@ describe("one frozen version", () => {
     });
 
     const moved = await editPersona(actingAsAcme(), nadia, {
-      traits: { ...neutralTraits, language: "en-GB" },
+      personality: "Now speaks with deliberate precision.",
     });
     expect(moved?.version).toBe(2);
 

@@ -179,7 +179,10 @@ async function aCustomerReadyToRun(
   // route ships for a persona. One test then names both, which is what makes
   // "one simulation per test per person" something this file can observe.
   for (const name of ["Impatient Rita", "Deliberate Sam"]) {
-    await createPersona(contextFor(ada, "member"), { name, traits: NEUTRAL_TRAITS });
+    await createPersona(contextFor(ada, "member"), {
+      name,
+      personality: NEUTRAL_TRAITS.personality,
+    });
   }
 
   const { versionId: oneCaller } = await pushTest(key, "Reschedules", [
@@ -477,7 +480,7 @@ describe("starting a run", () => {
         (
           await createPersona(auth, {
             name: `Caller ${String(index)}`,
-            traits: NEUTRAL_TRAITS,
+            personality: NEUTRAL_TRAITS.personality,
           })
         ).id,
       );
@@ -522,7 +525,7 @@ describe("starting a run", () => {
 
     const leaving = await createPersona(auth, {
       name: "Departing Dara",
-      traits: NEUTRAL_TRAITS,
+      personality: NEUTRAL_TRAITS.personality,
     });
     const pinned = await createTest(auth, {
       name: "Asks twice",
@@ -643,7 +646,7 @@ describe("starting a run", () => {
     const key = await projectKeyFor(api.app, ada);
     await createPersona(contextFor(ada, "member"), {
       name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
+      personality: NEUTRAL_TRAITS.personality,
     });
     const dialled = await registerAgentThrough(key, "Front desk line", PHONE);
     const { versionId } = await pushTest(key, "Reschedules", ["Impatient Rita"]);

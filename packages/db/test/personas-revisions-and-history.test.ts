@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   archivePersona,
   createPersona,
+  DEFAULT_PERSONA_SPEECH,
   editPersona,
   getPersona,
   getPersonaVersion,
@@ -29,10 +30,10 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  * **A revision and a version id answer different questions and are not
  * interchangeable.** The revision says *this persona has not moved* — a rename,
  * an Archive, a Restore. The version id says *this content has not moved* — a
- * trait write. An edit that touches both names both, and the two refusals are
- * separate because they are separately recoverable: a rename that lost a race
- * is retyped in a second, and traits somebody spent an afternoon on have to be
- * handed back rather than overwritten.
+ * personality write. An edit that touches both names both, and the two
+ * refusals are separate because they are separately recoverable: a rename that
+ * lost a race is retyped in a second, and a personality somebody spent an
+ * afternoon on has to be handed back rather than overwritten.
  *
  * Every assertion here goes through the factory functions. The one raw read is
  * not needed: what a revision *is* is deliberately nobody's business, so
@@ -55,10 +56,10 @@ function acting(role: "admin" | "member" | "viewer" = "member"): AuthContext {
   };
 }
 
+const PERSONALITY = "Calls about a bill, and wants it settled today.";
 const TRAITS: PersonaTraits = {
-  personality: "Calls about a bill, and wants it settled today.",
-  language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
+  personality: PERSONALITY,
+  ...DEFAULT_PERSONA_SPEECH,
 };
 
 beforeAll(async () => {
@@ -74,7 +75,7 @@ afterAll(async () => {
 });
 
 async function seed(name: string) {
-  return createPersona(acting(), { name, traits: TRAITS });
+  return createPersona(acting(), { name, personality: PERSONALITY });
 }
 
 describe("the revision an identity write names", () => {
@@ -145,22 +146,22 @@ describe("the revision an identity write names", () => {
   });
 });
 
-describe("the version a trait write names", () => {
+describe("the version a personality write names", () => {
   it("refuses a write against a version the persona has moved past", async () => {
     const made = await seed("Versioned Vera");
 
     const second = await editPersona(acting(), made.id, {
-      traits: { ...TRAITS, personality: "Vera, after a long wait." },
+      personality: "Vera, after a long wait.",
       expectedVersionId: made.versionId,
     });
     expect(second?.version).toBe(2);
 
     const refused = await editPersona(acting(), made.id, {
-      traits: { ...TRAITS, personality: "Vera, in a hurry." },
+      personality: "Vera, in a hurry.",
       expectedVersionId: made.versionId,
     }).then(
       () => {
-        throw new Error("the stale trait write was expected to be refused");
+        throw new Error("the stale personality write was expected to be refused");
       },
       (thrown: unknown) => thrown,
     );
@@ -176,19 +177,21 @@ describe("the version a trait write names", () => {
     expect(now?.traits.personality).toBe("Vera, after a long wait.");
   });
 
-  it("refuses a stale expectation even when the traits sent are identical", async () => {
+  it("refuses a stale expectation even when the personality sent is identical", async () => {
     const made = await seed("Nervous Nell");
+    const personality = "Nell, twice as brisk.";
     const second = await editPersona(acting(), made.id, {
-      traits: { ...TRAITS, personality: "Nell, twice as brisk." },
+      personality,
       expectedVersionId: made.versionId,
     });
 
-    // Nothing would have been minted — the traits below are what is already
-    // stored — but the caller is working from a read taken two versions ago,
-    // and letting that through would tell them their view is current.
+    // Nothing would have been minted — the personality below is what is
+    // already stored — but the caller is working from a read taken two
+    // versions ago, and letting that through would tell them their view is
+    // current.
     await expect(
       editPersona(acting(), made.id, {
-        traits: second?.traits ?? TRAITS,
+        personality: second?.traits.personality ?? personality,
         expectedVersionId: made.versionId,
       }),
     ).rejects.toBeInstanceOf(VersionConflictError);
@@ -198,7 +201,7 @@ describe("the version a trait write names", () => {
     const made = await seed("Steady Sam");
 
     const saved = await editPersona(acting(), made.id, {
-      traits: { ...TRAITS, voice: { ...TRAITS.voice } },
+      personality: PERSONALITY,
       expectedVersionId: made.versionId,
     });
 
@@ -210,58 +213,38 @@ describe("the version a trait write names", () => {
   });
 });
 
-describe("the described traits", () => {
-  const described: PersonaTraits = {
-    ...TRAITS,
-    manner: "Warm, and talks over the end of a sentence.",
-    patience: "Gives it about a minute before asking for somebody else.",
-    accent: "Glaswegian.",
-    backgroundNoise: "A busy kitchen.",
-    underFriction: "Repeats the question louder, then asks to escalate.",
-  };
+describe("historical described traits", () => {
+  it("reads them and preserves them without making them authorable", async () => {
+    const made = await seed("Historically Described Dee");
+    const historical: PersonaTraits = {
+      ...TRAITS,
+      manner: "Warm, and talks over the end of a sentence.",
+      patience: "Gives it about a minute before asking for somebody else.",
+      accent: "Glaswegian.",
+      backgroundNoise: "A busy kitchen.",
+      underFriction: "Repeats the question louder, then asks to escalate.",
+    };
 
-  it("round-trip through a create and version on any one of them", async () => {
-    const made = await createPersona(acting(), {
-      name: "Described Dee",
-      traits: described,
+    // Raw SQL is deliberate: current customer authoring cannot write these
+    // fields. Older versions can already hold them, so the read path and a
+    // later personality-only edit must keep the stored facts intact.
+    await database.sql(
+      "update persona_version set traits = $1::jsonb where id = $2",
+      [JSON.stringify(historical), made.versionId],
+    );
+
+    expect((await getPersona(acting(), made.id))?.traits).toEqual(historical);
+    expect((await getPersonaVersion(acting(), made.versionId))?.traits).toEqual(
+      historical,
+    );
+
+    const edited = await editPersona(acting(), made.id, {
+      personality: "Calls about a bill, but now waits for a full answer.",
     });
-    expect((await getPersona(acting(), made.id))?.traits).toEqual(described);
-
-    let version = 1;
-    for (const change of [
-      { manner: "Brisk, and does not talk over anybody." },
-      { patience: "Waits as long as it takes." },
-      { accent: "Received pronunciation." },
-      { backgroundNoise: "A quiet room." },
-      { underFriction: "Goes silent and waits." },
-    ]) {
-      const edited = await editPersona(acting(), made.id, {
-        traits: { ...described, ...change },
-      });
-      version += 1;
-      expect(edited?.version, JSON.stringify(change)).toBe(version);
-    }
-  });
-
-  it("treat cleared and never-written as the same fact, so neither mints a version", async () => {
-    const made = await createPersona(acting(), {
-      name: "Half-Described Hal",
-      traits: { ...TRAITS, manner: "Formal." },
+    expect(edited?.traits).toEqual({
+      ...historical,
+      personality: "Calls about a bill, but now waits for a full answer.",
     });
-
-    // Whitespace is not a statement about somebody, so clearing to blanks and
-    // never having written the field are one state and save as a no-op.
-    const cleared = await editPersona(acting(), made.id, {
-      traits: { ...TRAITS, manner: "   ", accent: "" },
-    });
-    expect(cleared?.version).toBe(2);
-    expect(cleared?.traits.manner).toBeUndefined();
-
-    const again = await editPersona(acting(), made.id, {
-      traits: { ...TRAITS },
-    });
-    expect(again?.version).toBe(2);
-    expect(again?.versionId).toBe(cleared?.versionId);
   });
 });
 
@@ -269,10 +252,10 @@ describe("what a detail page reads", () => {
   it("lists every version newest first, and each one stays readable on its own", async () => {
     const made = await seed("Historic Hana");
     const second = await editPersona(acting(), made.id, {
-      traits: { ...TRAITS, language: "en-GB" },
+      personality: "Hana after the first edit.",
     });
     const third = await editPersona(acting(), made.id, {
-      traits: { ...TRAITS, language: "en-AU" },
+      personality: "Hana after the second edit.",
     });
 
     const history = await listPersonaVersions(acting(), made.id);
@@ -291,7 +274,7 @@ describe("what a detail page reads", () => {
   it("keeps the history readable after the persona is archived", async () => {
     const made = await seed("Filed-Away Fay");
     await editPersona(acting(), made.id, {
-      traits: { ...TRAITS, language: "en-IE" },
+      personality: "Fay before being filed away.",
     });
     await archivePersona(acting(), made.id);
 

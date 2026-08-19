@@ -114,7 +114,12 @@ let twoCallers: string; // a test version naming both, so a run holds two
 let globexOwn: string; // a test version of Globex's, for the same refusals
 
 async function seedPersona(auth: AuthContext, name: string): Promise<string> {
-  return (await createPersona(auth, { name, traits: neutralTraits })).id;
+  return (
+    await createPersona(auth, {
+      name,
+      personality: neutralTraits.personality,
+    })
+  ).id;
 }
 
 /**
@@ -291,7 +296,7 @@ describe("starting a run", () => {
     const started = await startRun(actingAsAcme(), aRun());
 
     await editPersona(actingAsAcme(), rita, {
-      traits: { ...neutralTraits, personality: "Now in a tearing hurry." },
+      personality: "Now in a tearing hurry.",
     });
     const after = await getPersona(actingAsAcme(), rita);
     expect(after?.versionId).not.toBe(before?.versionId);

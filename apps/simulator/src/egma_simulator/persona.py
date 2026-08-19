@@ -1,6 +1,6 @@
 """The persona brain: one component, shared by every modality forever.
 
-It composes the spec's persona traits and scenario instructions into a
+It composes the persona's authored personality and the test's scenario into a
 system prompt, takes turns — the transcript's ``human`` side — and decides
 when the exchange is concluded. What it does not know is deliberate: it
 never sees a platform (that is the plug's business) and never produces its
@@ -14,7 +14,6 @@ the ``assistant`` the model plays, and the agent under test is the
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -32,9 +31,9 @@ _PROMPT_FRAME = """\
 You are playing a person in a live conversation with a customer service \
 agent. You are the person; the agent is who you are talking to.
 
-Who you are, exactly as authored:
+Your personality, exactly as authored:
 
-{traits}
+{personality}
 
 Why you are here today:
 
@@ -45,22 +44,29 @@ How to conduct yourself:
 being simulated, tested, or an AI.
 - Speak one conversational turn at a time, in plain spoken words — no \
 lists, no headings, no stage directions.
-- Pursue what you came for until it is concluded to your satisfaction, \
-and let your persona decide how patiently.
+- Pursue what you came for until it is concluded to your satisfaction. Let \
+your personality decide how you respond when progress is slow or the agent \
+gets something wrong.
 - When your goal is concluded and nothing further is needed, say a brief \
 goodbye and end your reply with {marker}.
 """
 
 
 def compose_system_prompt(traits: dict[str, Any], scenario_instructions: str) -> str:
-    """Traits and scenario, composed whole into the persona's instructions.
+    """Personality and scenario, composed into the persona's instructions.
 
-    The traits ride verbatim as authored — what a persona is made of is
-    authoring's business, so the composition renders the whole block rather
-    than picking keys it happens to know.
+    Personality is the one customer-authored behavior field. Speech settings
+    may still ride in the private traits document for the voice pipeline, but
+    they must not become model instructions by accident.
     """
+    personality = traits.get("personality")
+    authored = (
+        personality.strip()
+        if isinstance(personality, str) and personality.strip() != ""
+        else "No additional personality was specified."
+    )
     return _PROMPT_FRAME.format(
-        traits=json.dumps(traits, indent=2, sort_keys=True),
+        personality=authored,
         scenario=scenario_instructions,
         marker=CONCLUDE_MARKER,
     )

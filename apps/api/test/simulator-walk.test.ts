@@ -585,7 +585,7 @@ describe("the shipped simulator against the real API", () => {
       };
       await createPersona(auth, {
         name: "Impatient Rita",
-        traits: NEUTRAL_TRAITS,
+        personality: NEUTRAL_TRAITS.personality,
       });
       // No grader is authored here, and that is the point of the change this
       // walk now covers: the project was created with an active copy of egma's

@@ -144,11 +144,9 @@ without this wait the first turn of a real call would vanish."""
 
 @dataclass(frozen=True)
 class PersonaVoice:
-    """Which voice the persona speaks with, read from its authored traits.
+    """Which voice the persona speaks with, read from private version data.
 
-    Traits are otherwise opaque — the persona brain composes the whole
-    block into its prompt without picking favourites — and this is the one
-    key a leg reads out of them, defensively: a persona authored with no
+    The customer editor does not author this block. A persona version with no
     voice, or a voice of some shape this code has never seen, still speaks.
     """
 
@@ -158,7 +156,7 @@ class PersonaVoice:
 
 
 def voice_from_traits(traits: dict[str, Any]) -> PersonaVoice:
-    """The persona's voice, or the default one where authoring said nothing."""
+    """The persona's private voice, or the platform-compatible default."""
     block = traits.get("voice")
     if not isinstance(block, dict):
         return PersonaVoice(voice_id=DEFAULT_VOICE_ID, provider=None, speed=None)

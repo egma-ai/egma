@@ -53,6 +53,9 @@ export const CODES = {
   // the fix for each is somewhere else.
   persona_in_use: 409,
   default_persona_required: 409,
+  // Egma owns this shared persona definition. A project can use it as-is or
+  // fork it, but cannot change its definition or lifecycle for every customer.
+  predefined_persona: 422,
   // The store rolled a write back because another one got in its way. Its own
   // code because it is the one refusal that is about nothing the caller did:
   // the request was valid on the way in, nothing was written, and sending it

@@ -9,8 +9,6 @@ scripted client or a recording fake.
 
 from __future__ import annotations
 
-import json
-
 from egma_simulator.model import CONCLUDE_MARKER, PersonaReply, ScriptedModel
 from egma_simulator.persona import (
     OPENING_NUDGE,
@@ -29,15 +27,41 @@ TRAITS = {
 SCENARIO = "Move my cleaning to Thursday. Conclude once it is read back."
 
 
-def test_the_system_prompt_carries_traits_and_scenario_verbatim():
+def test_the_system_prompt_carries_only_personality_and_scenario():
     prompt = compose_system_prompt(TRAITS, SCENARIO)
 
-    # The traits ride whole — what a persona is made of is authoring's
-    # business, and the composition must not pick favourites among keys.
-    assert json.dumps(TRAITS, indent=2, sort_keys=True) in prompt
+    assert TRAITS["personality"] in prompt
     assert SCENARIO in prompt
     assert CONCLUDE_MARKER in prompt
     assert "stay in character" in prompt.lower()
+    assert TRAITS["language"] not in prompt
+    assert TRAITS["voice"]["voiceId"] not in prompt
+
+
+def test_legacy_described_traits_do_not_become_hidden_prompt_controls():
+    prompt = compose_system_prompt(
+        {
+            **TRAITS,
+            "manner": "This must not appear.",
+            "patience": "Nor this.",
+            "accent": "Nor this accent.",
+            "backgroundNoise": "Nor this noise.",
+            "underFriction": "Nor this reaction.",
+        },
+        SCENARIO,
+    )
+
+    assert "This must not appear." not in prompt
+    assert "Nor this." not in prompt
+    assert "Nor this accent." not in prompt
+    assert "Nor this noise." not in prompt
+    assert "Nor this reaction." not in prompt
+
+
+def test_missing_personality_has_an_explicit_neutral_fallback():
+    prompt = compose_system_prompt({}, SCENARIO)
+
+    assert "No additional personality was specified." in prompt
 
 
 def test_the_system_prompt_is_deterministic():

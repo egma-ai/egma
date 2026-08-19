@@ -5,17 +5,16 @@ import { eq } from "drizzle-orm";
 
 import { connect, disconnect, db } from "../client.ts";
 import {
-  clonePersona,
-  createPersona,
   archivePersona,
+  createPersona,
   editPersona,
+  forkPersona,
   getPersona,
   getPersonaVersion,
   listPersonas,
   restorePersona,
-  VOICE_PROVIDERS,
-  type VoiceProvider,
 } from "../access/personas.ts";
+import { seedPersonaLibrary } from "../persona-library/seed.ts";
 import type { AuthContext } from "../access/context.ts";
 import { projectsOf } from "../access/projects.ts";
 import { seedGraderLibrary } from "../access/grader-library.ts";
@@ -31,12 +30,11 @@ import { organization, user } from "../schema/index.ts";
  *
  *   node packages/db/dist/scripts/persona.js create \
  *     --name "Impatient Rita" \
- *     --personality "70, hard of hearing, gets louder when mishears." \
- *     --voice-id EXAVITQu4vr4xnSDxMaL
+ *     --personality "70, hard of hearing, gets louder when mishears."
  *
  *   node packages/db/dist/scripts/persona.js get prs_…
  *   node packages/db/dist/scripts/persona.js list [--limit 50] [--cursor prs_…]
- *   node packages/db/dist/scripts/persona.js clone prs_…
+ *   node packages/db/dist/scripts/persona.js fork prs_…
  *   node packages/db/dist/scripts/persona.js archive prs_… [--replacement prs_…]
  *   node packages/db/dist/scripts/persona.js restore prs_…
  */
@@ -94,15 +92,13 @@ function usage(): never {
     [
       "usage:",
       "  persona.js create --name <name> --personality <text>",
-      "    [--description <text>] [--language en-US]",
-      `    [--voice-provider ${VOICE_PROVIDERS.join("|")}] [--voice-id <id>] [--speed 1.0]`,
+      "    [--description <text>]",
       "  persona.js get <prs_id>",
       "  persona.js edit <prs_id> [--name <name>] [--description <text>]",
-      "    [--personality <text>] [--language <tag>]",
-      `    [--voice-provider ${VOICE_PROVIDERS.join("|")}] [--voice-id <id>] [--speed 1.0]`,
+      "    [--personality <text>]",
       "  persona.js get-version <prsv_id>",
       "  persona.js list [--limit <n>] [--cursor <prs_id>]",
-      "  persona.js clone <prs_id>",
+      "  persona.js fork <prs_id>",
       "  persona.js archive <prs_id> [--replacement <prs_id>]",
       "  persona.js restore <prs_id>",
     ].join("\n"),
@@ -131,6 +127,7 @@ async function main(): Promise<void> {
 
   await runMigrations(DATABASE_URL);
   connect({ databaseUrl: DATABASE_URL, maxConnections: 2 });
+  await seedPersonaLibrary();
   // egma's own graders, on the shelf before a project can be created — every
   // project is born holding a copy of one, and the pointer is a foreign key.
   await seedGraderLibrary();
@@ -144,10 +141,6 @@ async function main(): Promise<void> {
         name: { type: "string" },
         description: { type: "string" },
         personality: { type: "string" },
-        language: { type: "string", default: "en-US" },
-        "voice-provider": { type: "string", default: "elevenlabs" },
-        "voice-id": { type: "string", default: "EXAVITQu4vr4xnSDxMaL" },
-        speed: { type: "string", default: "1.0" },
       },
     });
     if (values.name === undefined || values.personality === undefined) usage();
@@ -155,15 +148,7 @@ async function main(): Promise<void> {
     const created = await createPersona(auth, {
       name: values.name,
       description: values.description,
-      traits: {
-        personality: values.personality,
-        language: values.language,
-        voice: {
-          provider: values["voice-provider"] as VoiceProvider,
-          voiceId: values["voice-id"],
-          speed: Number(values.speed),
-        },
-      },
+      personality: values.personality,
     });
     console.log(JSON.stringify(created, null, 2));
   } else if (command === "get") {
@@ -178,50 +163,17 @@ async function main(): Promise<void> {
         name: { type: "string" },
         description: { type: "string" },
         personality: { type: "string" },
-        language: { type: "string" },
-        "voice-provider": { type: "string" },
-        "voice-id": { type: "string" },
-        speed: { type: "string" },
       },
     });
-
-    // A trait flag edits one trait; the rest carry over from the current
-    // version, fetched here so the factory always receives whole traits.
-    const traitFlagPresent =
-      values.personality !== undefined ||
-      values.language !== undefined ||
-      values["voice-provider"] !== undefined ||
-      values["voice-id"] !== undefined ||
-      values.speed !== undefined;
-
-    let traits;
-    if (traitFlagPresent) {
-      const current = await getPersona(auth, id);
-      if (current === undefined) {
-        console.error(`no persona ${id} in the development project`);
-        process.exit(1);
-      }
-      traits = {
-        personality: values.personality ?? current.traits.personality,
-        language: values.language ?? current.traits.language,
-        voice: {
-          provider: (values["voice-provider"] ??
-            current.traits.voice.provider) as VoiceProvider,
-          voiceId: values["voice-id"] ?? current.traits.voice.voiceId,
-          speed:
-            values.speed === undefined
-              ? current.traits.voice.speed
-              : Number(values.speed),
-        },
-      };
-    }
 
     const edited = await editPersona(auth, id, {
       ...(values.name === undefined ? {} : { name: values.name }),
       ...(values.description === undefined
         ? {}
         : { description: values.description }),
-      ...(traits === undefined ? {} : { traits }),
+      ...(values.personality === undefined
+        ? {}
+        : { personality: values.personality }),
     });
     printPersona(id, edited);
   } else if (command === "get-version") {
@@ -245,9 +197,9 @@ async function main(): Promise<void> {
       cursor: values.cursor,
     });
     console.log(JSON.stringify(page, null, 2));
-  } else if (command === "clone") {
+  } else if (command === "fork" || command === "clone") {
     const id = requiredId(rest);
-    printPersona(id, await clonePersona(auth, id));
+    printPersona(id, await forkPersona(auth, id));
   } else if (command === "archive") {
     const [id, ...flags] = rest;
     if (id === undefined) usage();

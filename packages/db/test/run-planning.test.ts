@@ -190,7 +190,7 @@ beforeAll(async () => {
   rita = (
     await createPersona(actingAsAcme(), {
       name: "Rita",
-      traits: neutralTraits,
+      personality: neutralTraits.personality,
     })
   ).id;
 
@@ -700,7 +700,7 @@ describe("a project with no judge", () => {
     });
     const persona = await createPersona(auth, {
       name: "Sam",
-      traits: neutralTraits,
+      personality: neutralTraits.personality,
     });
     const test = await createTest(auth, {
       name: "Anything at all",

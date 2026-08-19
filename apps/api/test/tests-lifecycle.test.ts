@@ -395,7 +395,7 @@ describe("archiving and restoring a test", () => {
     const { ada, agentId } = await aProjectWithATest("tests_restore_blocked");
     const leaving = await createPersona(author(ada), {
       name: "Leaving Lena",
-      traits: NEUTRAL_TRAITS,
+      personality: NEUTRAL_TRAITS.personality,
     });
 
     const created = await browse("POST", "/api/tests", ada, {

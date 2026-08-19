@@ -8,6 +8,7 @@ import {
   disconnect,
   disconnectClickHouse,
   seedGraderLibrary,
+  seedPersonaLibrary,
   seedPlatformSettings,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
@@ -185,11 +186,10 @@ export async function startInstance(
   });
   connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
 
-  // egma's own graders, on the shelf before anything can point at one — what
-  // the real entry point writes in the same breath as applying its migrations.
-  // Every project created afterwards is seeded with a copy of one, so an
-  // instance that skipped this would refuse the first signup that reached it,
-  // for a reason no test here is about.
+  // The fixed-id persona and grader catalogs, on their shelves before anything
+  // can point at them — what the real entry point writes after migrations and
+  // before it serves a request.
+  await seedPersonaLibrary();
   await seedGraderLibrary();
   if (options.platformSettings !== undefined) {
     await seedPlatformSettings(options.platformSettings);

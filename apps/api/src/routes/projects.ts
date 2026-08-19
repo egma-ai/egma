@@ -40,8 +40,8 @@ import {
  * `listProjects` is already scoped by it.
  *
  * **Creating one is the whole factory or nothing.** The data-access module
- * writes the project, its starter persona, the pointer that makes them the
- * default, and this deployment's judge where it has one, in one transaction —
+ * writes the project, its shared default-persona pointer, and this deployment's
+ * judge where it has one, in one transaction —
  * exactly what signup writes. A route that created a bare row would hand
  * somebody a project that refuses the first test written in it.
  *

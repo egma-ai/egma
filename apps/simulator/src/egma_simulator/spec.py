@@ -232,11 +232,11 @@ class SimulationSpec:
     limits: Limits
 
     persona_traits: dict[str, Any]
-    """The persona's authored traits, passed through opaquely.
+    """The persona version's private behavior and speech document.
 
-    What a persona is made of is authoring's business: the persona brain
-    composes the whole block into its system prompt verbatim, and nothing
-    in the simulator picks favourites among the keys.
+    The persona brain reads only ``personality`` for model behavior. Voice
+    legs may read the private ``voice`` block. Unknown or legacy keys do not
+    become model instructions.
     """
 
     connection_type: str

@@ -630,14 +630,23 @@ export function Refused({
  */
 export function Facts({
   facts,
+  layout = "grid",
 }: {
   readonly facts: readonly {
     readonly label: string;
     readonly value: ReactNode;
   }[];
+  /** Keep the compact grid, or put identity facts in one contained panel. */
+  readonly layout?: "grid" | "panel";
 }) {
   return (
-    <dl className={styles.facts}>
+    <dl
+      className={
+        layout === "panel"
+          ? `${styles.facts} ${styles.factsPanel}`
+          : styles.facts
+      }
+    >
       {facts.map((fact) => (
         <div className={styles.fact} key={fact.label}>
           <dt>{fact.label}</dt>

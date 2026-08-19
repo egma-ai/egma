@@ -26,6 +26,7 @@ import {
   type RunWriteRefusal,
 } from "./errors.ts";
 import { PLATFORM_JUDGE } from "./judges.ts";
+import { personaAvailableToProject } from "./persona-availability.ts";
 import { archivedTests, testsApplyingToAgent } from "./tests.ts";
 import { within } from "./within.ts";
 
@@ -312,13 +313,10 @@ export async function resolvePersonaVersions(
         })
         .from(persona)
         .where(
-          within(
+          personaAvailableToProject(
             auth,
-            persona,
-            and(
-              inArray(persona.id, [...ids]),
-              eq(persona.projectId, projectId),
-            ),
+            projectId,
+            inArray(persona.id, [...ids]),
           ),
         )
         .for("share")

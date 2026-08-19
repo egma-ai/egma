@@ -1,20 +1,17 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
-  describedTraits,
   draftOf,
-  PERSONA_FORM_PATH,
   personaPath,
   personaVersionsPath,
   personasPath,
   traitsFrom,
   type Persona,
-  type PersonaForm,
   type PersonaPage,
   type PersonaVersion,
   type PersonaVersionPage,
@@ -29,6 +26,7 @@ import {
   Field,
   Form,
   FormActions,
+  FormRow,
   Refused,
   Select,
   TextInput,
@@ -54,7 +52,7 @@ import {
 } from "../../../../../ui/shell.tsx";
 import styles from "../../../../../ui/system.module.css";
 import personaStyles from "./persona.module.css";
-import { TraitFields } from "../traits-editor.tsx";
+import { PersonalityField } from "../traits-editor.tsx";
 
 /**
  * One persona: who they are now and who they have been.
@@ -62,11 +60,13 @@ import { TraitFields } from "../traits-editor.tsx";
  * **The page is arranged around the one distinction that decides everything
  * else.** Name and description are *live*: they are how a team finds this
  * person in a list, and rewriting them changes nothing about any simulation
- * that ever ran. Traits are *versioned*: a run pinned the exact traits it used,
- * so an edit mints a new version and leaves every old one where it is. The two
- * are separate forms with separate save controls, and each names its own
- * expectation, because a page that saved both at once could not tell somebody
- * which half of their work lost a race.
+ * that ever ran. Personality is *versioned*: a run pinned the exact personality
+ * it used, so an edit mints a new version and leaves every old one where it is.
+ * A project persona keeps the fields in one form and one partial write: identity
+ * changes stay live, while a Personality change also mints one version. An
+ * Egma-owned persona shows the same public fields as one read-only definition
+ * and offers Fork instead of an editor. Both read immutable history in the same
+ * right-side sheet, away from the current definition.
  *
  * Archive and Restore live here rather than on the list, because both are
  * decisions somebody makes about a persona they are looking at — and because
@@ -85,7 +85,7 @@ export default function PersonaPage() {
   );
 }
 
-/** What the two editors on this page are holding, between reads and writes. */
+/** What the editor on this page is holding, between reads and writes. */
 type Draft = {
   readonly personaId: string;
   readonly name: string;
@@ -118,21 +118,20 @@ type Submitted = {
  *
  * Both halves are load-bearing and each was learned the hard way.
  *
- * - *Only the submitted fields.* This page has two forms with two saves. A
+ * - *Only the submitted fields.* One save sends only fields that changed. A
  *   reply carries the whole persona, but for a field the request never
- *   mentioned that value is a **stale read, not an answer** — so adopting it
- *   would quietly undo an edit sitting unsaved in the other form.
+ *   mentioned that value is a **stale read, not an answer**.
  * - *Only where the draft still holds what was sent.* A save takes a moment,
  *   and somebody typing during that moment has written something the server
  *   has never seen. Its reply cannot speak for text it never saw.
  *
  * What is left is the case adoption exists for: a field this request sent,
- * untouched since, which egma stored in a form of its own — a trimmed trait,
- * a dropped blank — and which the author should be looking at rather than
- * their own draft of it.
+ * untouched since, which egma stored in a form of its own — such as trimmed
+ * text — and which the author should be looking at rather than their own
+ * draft of it.
  *
- * The traits are walked by key rather than listed, so a trait added later is
- * covered without anybody remembering to come back.
+ * The versioned fields are walked by key rather than listed, so the adoption
+ * rule stays local to this function if the contract grows later.
  */
 function adopted(
   current: Draft | null,
@@ -140,7 +139,7 @@ function adopted(
   fromServer: Persona,
 ): Draft | null {
   if (current === null) return current;
-  // A write that carried none of these fields — a clone, an Archive, a
+  // A write that carried none of these fields — a fork, an Archive, or a
   // Restore — has nothing to adopt, because it asked about none of them.
   if (submitted === undefined || submitted.personaId !== current.personaId) {
     return current;
@@ -187,6 +186,8 @@ function PersonaDetail({
   const role = me === null ? null : roleOf(me);
   const router = useRouter();
   const now = useMinuteClock();
+  const historyId = useId();
+  const historyButton = useRef<HTMLButtonElement>(null);
 
   const { answer, reload } = useProjectRead<Persona>(
     personaPath(personaId),
@@ -197,15 +198,9 @@ function PersonaDetail({
       personaVersionsPath(personaId),
       projectId,
     );
-  const { answer: form } = useProjectRead<PersonaForm>(
-    PERSONA_FORM_PATH,
-    projectId,
-  );
-  const voiceProviders =
-    form?.status === "ready" ? form.value.voice_providers : null;
 
   /**
-   * What the two forms are holding.
+   * What the editor is holding.
    *
    * **They are filled from the read once and never overwritten by a later
    * one.** A reload that reset the fields would throw away work somebody is
@@ -237,11 +232,12 @@ function PersonaDetail({
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
   }, [answer]);
 
-  const [saving, setSaving] = useState<"identity" | "traits" | "lifecycle" | null>(
-    null,
-  );
+  const [saving, setSaving] = useState<
+    "changes" | "lifecycle" | null
+  >(null);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [reading, setReading] = useState<PersonaVersion | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
   const persona = answer?.status === "ready" ? answer.value : null;
@@ -297,7 +293,7 @@ function PersonaDetail({
     path: string,
     method: "POST" | "PATCH",
     body: Record<string, unknown>,
-    what: "identity" | "traits" | "lifecycle",
+    what: "changes" | "lifecycle",
     submitted?: Submitted,
   ): Promise<Persona | null> {
     const asked = { projectId, personaId };
@@ -334,10 +330,9 @@ function PersonaDetail({
     /**
      * **What the server kept is what the editor shows — field by field.**
      *
-     * egma trims a described trait and drops one that is only whitespace, so
-     * `"  calm  "` is stored as `"calm"`, and a draft left as it was typed
-     * would put the author in front of text the system did not accept. So the
-     * reply is adopted.
+     * egma can normalize authored text, so a draft left as it was typed can
+     * put the author in front of text the system did not accept. The reply is
+     * therefore adopted.
      *
      * **But only where the draft still holds what was sent.** A save takes a
      * moment, and somebody typing in the next field during that moment has
@@ -368,13 +363,59 @@ function PersonaDetail({
       return <Failure message={answer.refusal.message} onRetry={reload} />;
     }
 
-    // The read has answered and the forms have not been filled from it yet,
+    // The read has answered and the editor has not been filled from it yet,
     // which is one render. Checked *after* the three refusals above, so a
     // persona that is not there says so rather than loading forever.
     if (held === null) return <Loading what="this persona" />;
 
     const one = answer.value;
-    const archived = one.archived_at !== null;
+    const predefined = one.owner === "egma";
+    const historyContent = (
+      <div className={personaStyles.historySheetBody} id={historyId}>
+        <p className={personaStyles.historyLead}>
+          Newest first. Past versions do not change and stay readable.
+        </p>
+        {history === null ? (
+          <Loading what="this persona's history" />
+        ) : history.status === "ready" ? (
+          <ol className={personaStyles.versionList}>
+            {history.value.items.map((version) => {
+              const current = version.id === one.version_id;
+              return (
+                <li
+                  className={`${personaStyles.versionRow} ${
+                    current ? personaStyles.versionRowCurrent : ""
+                  }`}
+                  key={version.id}
+                >
+                  <div className={personaStyles.versionIdentity}>
+                    <span className={personaStyles.versionNumber}>
+                      v{version.version}
+                    </span>
+                    {current ? (
+                      <span className={personaStyles.currentVersion}>
+                        Current
+                      </span>
+                    ) : null}
+                  </div>
+                  <span className={personaStyles.versionTime}>
+                    <RelativeInstant instant={version.created_at} now={now} />
+                  </span>
+                  <Button onClick={() => setReading(version)}>Read</Button>
+                </li>
+              );
+            })}
+          </ol>
+        ) : history.status === "signed-out" ? (
+          <Loading what="this persona's history" />
+        ) : (
+          <Failure
+            message={history.refusal.message}
+            onRetry={reloadHistory}
+          />
+        )}
+      </div>
+    );
 
     return (
       <>
@@ -390,192 +431,86 @@ function PersonaDetail({
           />
         )}
 
-        <div className={personaStyles.personaLayout}>
-          <div className={personaStyles.editorSurface}>
+        <div className={personaStyles.detailContent}>
+          {predefined ? (
             <section
-              className={personaStyles.editorSection}
-              aria-labelledby="persona-identity-title"
+              aria-label="Persona details"
             >
-              <header className={personaStyles.sectionHeader}>
-                <h2 id="persona-identity-title">Name and description</h2>
-                <p>
-                  These fields are live. Changing them does not change a past
-                  simulation.
-                </p>
-              </header>
-              {/*
-                **No editor at all until egma knows who is reading.** A
-                disabled field is a claim — *this is not yours to change* — and
-                while the session read is in flight there is nobody to make
-                that claim about.
-              */}
-              {settled ? (
-                <Form onSubmit={() => void saveIdentity()}>
-                  <Field label="Name" htmlFor="persona-name">
-                    <TextInput
-                      id="persona-name"
-                      value={held.name}
-                      disabled={!mayAuthor}
-                      onChange={(name) => setHeld({ ...held, name })}
-                    />
-                  </Field>
-                  <Field label="Description" htmlFor="persona-description">
-                    <TextInput
-                      id="persona-description"
-                      value={held.description}
-                      disabled={!mayAuthor}
-                      onChange={(description) =>
-                        setHeld({ ...held, description })
-                      }
-                    />
-                  </Field>
-                  <FormActions>
-                    <Button
-                      weight="strong"
-                      type="submit"
-                      disabled={!mayAuthor || saving !== null}
-                      {...(mayAuthor || whyNot === undefined
-                        ? {}
-                        : { why: whyNot })}
-                    >
-                      {saving === "identity" ? "Saving…" : "Save name"}
-                    </Button>
-                  </FormActions>
-                </Form>
-              ) : (
-                <>
-                  <Facts
-                    facts={[
-                      { label: "Name", value: one.name },
-                      {
-                        label: "Description",
-                        value: one.description ?? "—",
-                      },
-                    ]}
-                  />
-                  <Loading what="what your role may edit" />
-                </>
-              )}
+              <Facts
+                layout="panel"
+                facts={[
+                  { label: "Name", value: one.name },
+                  { label: "Description", value: one.description ?? "—" },
+                  { label: "Personality", value: one.traits.personality },
+                ]}
+              />
             </section>
-
-            <section
-              className={personaStyles.editorSection}
-              aria-labelledby="persona-behavior-title"
-            >
-              <header className={personaStyles.sectionHeader}>
-                <h2 id="persona-behavior-title">Behavior and voice</h2>
-                <p>
-                  Saving a change makes a new version. Past simulations keep
-                  the version they used.
-                </p>
-              </header>
-              {settled ? (
-                <Form onSubmit={() => void saveTraits()}>
-                  <TraitFields
-                    draft={held.traits}
-                    voiceProviders={voiceProviders}
+          ) : settled ? (
+            <Form onSubmit={() => void saveChanges()}>
+              <FormRow>
+                <Field label="Name" htmlFor="persona-name">
+                  <TextInput
+                    id="persona-name"
+                    value={held.name}
                     disabled={!mayAuthor}
-                    onChange={(traits) => setHeld({ ...held, traits })}
+                    onChange={(name) => setHeld({ ...held, name })}
                   />
-                  <FormActions>
-                    <Button
-                      weight="strong"
-                      type="submit"
-                      disabled={!mayAuthor || saving !== null}
-                      {...(mayAuthor || whyNot === undefined
-                        ? {}
-                        : { why: whyNot })}
-                    >
-                      {saving === "traits"
-                        ? "Saving…"
-                        : "Save behavior and voice"}
-                    </Button>
-                  </FormActions>
-                </Form>
-              ) : (
-                <>
-                  <Facts
-                    facts={[
-                      {
-                        label: "Personality",
-                        value: one.traits.personality,
-                      },
-                      { label: "Language", value: one.traits.language },
-                      {
-                        label: "Voice",
-                        value: `${one.traits.voice.provider} · ${one.traits.voice.voiceId}`,
-                      },
-                      {
-                        label: "Speech rate",
-                        value: `${one.traits.voice.speed}×`,
-                      },
-                      ...describedTraits(one.traits).map((trait) => ({
-                        label: trait.label,
-                        value: trait.value,
-                      })),
-                    ]}
+                </Field>
+                <Field label="Description" htmlFor="persona-description">
+                  <TextInput
+                    id="persona-description"
+                    value={held.description}
+                    disabled={!mayAuthor}
+                    onChange={(description) =>
+                      setHeld({ ...held, description })
+                    }
                   />
-                  <Loading what="what your role may edit" />
-                </>
-              )}
+                </Field>
+              </FormRow>
+              <PersonalityField
+                draft={held.traits}
+                disabled={!mayAuthor}
+                onChange={(traits) => setHeld({ ...held, traits })}
+              />
+              <FormActions>
+                <Button
+                  weight="strong"
+                  type="submit"
+                  busy={saving === "changes"}
+                  disabled={!mayAuthor || !changed || saving !== null}
+                  {...(mayAuthor || whyNot === undefined
+                    ? {}
+                    : { why: whyNot })}
+                >
+                  {saving === "changes" ? "Saving…" : "Save changes"}
+                </Button>
+              </FormActions>
+            </Form>
+          ) : (
+            <section aria-label="Persona details">
+              <Facts
+                layout="panel"
+                facts={[
+                  { label: "Name", value: one.name },
+                  { label: "Description", value: one.description ?? "—" },
+                  { label: "Personality", value: one.traits.personality },
+                ]}
+              />
+              <Loading what="what your role may edit" />
             </section>
-          </div>
-
-          <aside
-            className={personaStyles.historyRail}
-            aria-labelledby="persona-history-title"
-          >
-            <header className={personaStyles.historyHeader}>
-              <h2 id="persona-history-title">Version history</h2>
-              <p>Newest first. Every past version stays readable.</p>
-            </header>
-            {history === null ? (
-              <div className={personaStyles.historyState}>
-                <Loading what="this persona's history" />
-              </div>
-            ) : history.status === "ready" ? (
-              <ol className={personaStyles.versionList}>
-                {history.value.items.map((version) => {
-                  const current = version.id === one.version_id;
-                  return (
-                    <li
-                      className={`${personaStyles.versionRow} ${
-                        current ? personaStyles.versionRowCurrent : ""
-                      }`}
-                      key={version.id}
-                    >
-                      <div className={personaStyles.versionIdentity}>
-                        <span className={personaStyles.versionNumber}>
-                          v{version.version}
-                        </span>
-                        {current ? (
-                          <span className={personaStyles.currentVersion}>
-                            Current
-                          </span>
-                        ) : null}
-                      </div>
-                      <span className={personaStyles.versionTime}>
-                        <RelativeInstant instant={version.created_at} now={now} />
-                      </span>
-                      <Button onClick={() => setReading(version)}>Read</Button>
-                    </li>
-                  );
-                })}
-              </ol>
-            ) : history.status === "signed-out" ? (
-              <div className={personaStyles.historyState}>
-                <Loading what="this persona's history" />
-              </div>
-            ) : (
-              <div className={personaStyles.historyState}>
-                <Failure
-                  message={history.refusal.message}
-                  onRetry={reloadHistory}
-                />
-              </div>
-            )}
-          </aside>
+          )}
         </div>
+
+        {historyOpen ? (
+          <Dialog
+            kind="sheet"
+            title="Version history"
+            returnFocusTo={historyButton.current}
+            onClose={() => setHistoryOpen(false)}
+          >
+            {historyContent}
+          </Dialog>
+        ) : null}
 
         {reading === null ? null : (
           <Dialog
@@ -591,16 +526,6 @@ function PersonaDetail({
                   ),
                 },
                 { label: "Personality", value: reading.traits.personality },
-                { label: "Language", value: reading.traits.language },
-                {
-                  label: "Voice",
-                  value: `${reading.traits.voice.provider} · ${reading.traits.voice.voiceId}`,
-                },
-                { label: "Speech rate", value: `${reading.traits.voice.speed}×` },
-                ...describedTraits(reading.traits).map((trait) => ({
-                  label: trait.label,
-                  value: trait.value,
-                })),
               ]}
             />
           </Dialog>
@@ -620,41 +545,44 @@ function PersonaDetail({
       </>
     );
 
-    async function saveIdentity(): Promise<void> {
-      if (held === null || !mayAuthor || saving !== null) return;
+    async function saveChanges(): Promise<void> {
+      if (
+        held === null ||
+        !mayAuthor ||
+        one.owner !== "organization" ||
+        saving !== null
+      ) {
+        return;
+      }
+
+      const nameChanged = held.name !== one.name;
+      const descriptionChanged =
+        held.description !== (one.description ?? "");
+      const personalityChanged =
+        held.traits.personality !== one.traits.personality;
+      if (!nameChanged && !descriptionChanged && !personalityChanged) return;
+
       await write(
         personaPath(one.id),
         "PATCH",
         {
           expected_revision: one.revision,
-          name: held.name,
-          description: held.description,
+          ...(nameChanged ? { name: held.name } : {}),
+          ...(descriptionChanged ? { description: held.description } : {}),
+          ...(personalityChanged
+            ? {
+                expected_version_id: one.version_id,
+                traits: traitsFrom(held.traits),
+              }
+            : {}),
         },
-        "identity",
-        // The two fields this body carries, and no others: an unsaved trait
-        // sitting in the form below is not this request's to answer for.
+        "changes",
         {
           personaId: one.id,
-          name: held.name,
-          description: held.description,
+          ...(nameChanged ? { name: held.name } : {}),
+          ...(descriptionChanged ? { description: held.description } : {}),
+          ...(personalityChanged ? { traits: held.traits } : {}),
         },
-      );
-    }
-
-    async function saveTraits(): Promise<void> {
-      if (held === null || !mayAuthor || saving !== null) return;
-      await write(
-        personaPath(one.id),
-        "PATCH",
-        {
-          expected_revision: one.revision,
-          expected_version_id: one.version_id,
-          traits: traitsFrom(held.traits),
-        },
-        "traits",
-        // The traits and nothing else: a name half-retyped in the form above
-        // is not this request's to answer for either.
-        { personaId: one.id, traits: held.traits },
       );
     }
 
@@ -684,10 +612,10 @@ function PersonaDetail({
     );
   }
 
-  async function clone(): Promise<void> {
+  async function fork(): Promise<void> {
     if (persona === null) return;
     const made = await write(
-      `${personaPath(persona.id)}/clone`,
+      `${personaPath(persona.id)}/fork`,
       "POST",
       {},
       "lifecycle",
@@ -700,38 +628,56 @@ function PersonaDetail({
   const archived = persona?.archived_at != null;
 
   const actions =
-    persona === null || role === null ? undefined : (
+    persona === null ? undefined : (
       <>
         <Button
-          disabled={!mayAuthor || saving !== null}
-          {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
-          onClick={() => void clone()}
+          buttonRef={historyButton}
+          ariaExpanded={historyOpen}
+          ariaControls={historyId}
+          onClick={() => setHistoryOpen(true)}
         >
-          Clone
+          Version history
         </Button>
-        {archived ? (
-          <Button
-            weight="strong"
-            disabled={!mayAuthor || saving !== null}
-            {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
-            onClick={() => void restore()}
-          >
-            Restore
-          </Button>
-        ) : (
-          <Button
-            disabled={!mayAuthor || saving !== null}
-            {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
-            onClick={() => setArchiving(true)}
-          >
-            Archive
-          </Button>
+        {role === null ? null : (
+          <>
+            <Button
+              disabled={!mayAuthor || saving !== null}
+              {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+              onClick={() => void fork()}
+            >
+              Fork
+            </Button>
+            {persona.owner === "organization" ? (
+              archived ? (
+                <Button
+                  weight="strong"
+                  disabled={!mayAuthor || saving !== null}
+                  {...(mayAuthor || whyNot === undefined
+                    ? {}
+                    : { why: whyNot })}
+                  onClick={() => void restore()}
+                >
+                  Restore
+                </Button>
+              ) : (
+                <Button
+                  disabled={!mayAuthor || saving !== null}
+                  {...(mayAuthor || whyNot === undefined
+                    ? {}
+                    : { why: whyNot })}
+                  onClick={() => setArchiving(true)}
+                >
+                  Archive
+                </Button>
+              )
+            ) : null}
+          </>
         )}
       </>
     );
 
   return (
-    <ProductPage wide>
+    <ProductPage>
       <PageHeader
         title={persona?.name ?? "Persona"}
         breadcrumbs={[
@@ -739,12 +685,18 @@ function PersonaDetail({
           { label: persona?.name ?? "Persona" },
         ]}
         lead={
-          persona === null ? undefined : (
+          persona === null ? undefined : persona.owner === "egma" ? (
+            persona.is_default ? (
+              <span className={personaStyles.headerMeta}>Project default</span>
+            ) : undefined
+          ) : (
             <span className={personaStyles.headerSummary}>
               <span className={personaStyles.headerDescription}>
                 {persona.description ?? "Who they are and how they behave."}
               </span>
-              {persona.is_default ? <Badge>Project default</Badge> : null}
+              {persona.is_default ? (
+                <span className={personaStyles.headerMeta}>Project default</span>
+              ) : null}
               {archived ? <Badge tone="warn">Archived</Badge> : null}
               <span className={personaStyles.headerMeta}>
                 v{persona.version}

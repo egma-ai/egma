@@ -8,7 +8,6 @@ import {
   getPersona,
   WriteAbortedError,
   type AuthContext,
-  type PersonaTraits,
 } from "@egma/db";
 
 import {
@@ -57,11 +56,7 @@ const auth: AuthContext = {
   via: "session",
 };
 
-const TRAITS: PersonaTraits = {
-  personality: "Speaks plainly and asks one question at a time.",
-  language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
-};
+const PERSONALITY = "Speaks plainly and asks one question at a time.";
 
 /** How many times the pair is raced. Enough for an ordering bug to show. */
 const ROUNDS = 40;
@@ -121,11 +116,11 @@ describe("archiving the default while its replacement is archived", () => {
     for (let round = 0; round < ROUNDS; round += 1) {
       const leaving = await createPersona(auth, {
         name: `Leaving ${round}`,
-        traits: TRAITS,
+        personality: PERSONALITY,
       });
       const taking = await createPersona(auth, {
         name: `Taking ${round}`,
-        traits: TRAITS,
+        personality: PERSONALITY,
       });
       await pointProjectAt(leaving.id);
 
@@ -161,11 +156,11 @@ describe("archiving the default while its replacement is archived", () => {
     for (let round = 0; round < 8; round += 1) {
       const leaving = await createPersona(auth, {
         name: `Pointed ${round}`,
-        traits: TRAITS,
+        personality: PERSONALITY,
       });
       const taking = await createPersona(auth, {
         name: `Pointing ${round}`,
-        traits: TRAITS,
+        personality: PERSONALITY,
       });
       await pointProjectAt(leaving.id);
 
@@ -225,11 +220,11 @@ describe("a cycle egma's own order cannot prevent", () => {
   it("comes back as a refusal that says so, never as a driver error", async () => {
     const leaving = await createPersona(auth, {
       name: "Cornered Cora",
-      traits: TRAITS,
+      personality: PERSONALITY,
     });
     const taking = await createPersona(auth, {
       name: "Cornering Cyrus",
-      traits: TRAITS,
+      personality: PERSONALITY,
     });
     await pointProjectAt(leaving.id);
 

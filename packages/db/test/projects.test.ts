@@ -80,7 +80,7 @@ afterAll(async () => {
 });
 
 describe("creating a project", () => {
-  it("writes the project, its starter persona and the pointer at them together", async () => {
+  it("writes the project and its shared default-persona pointer together", async () => {
     const made = await createProject(acmeAdmin(), {
       name: "Outbound sales",
       defaultJudge: THE_PLATFORMS_JUDGE,
@@ -93,9 +93,9 @@ describe("creating a project", () => {
     const personas = await listPersonas(inside, {});
     expect(personas.items).toHaveLength(1);
 
-    // The pointer, read the way the persona factory reads it: the starter is
-    // the project's default, so the first test written here has somebody to
-    // give when it names nobody.
+    // The pointer, read the way the persona factory reads it: the shared
+    // persona is the project's default, so the first test written here has a
+    // persona when it names none.
     expect(personas.items[0]?.isDefault).toBe(true);
   });
 
@@ -129,9 +129,9 @@ describe("creating a project", () => {
    * The transaction, proven by breaking something inside it.
    *
    * A key too short to be any provider's is refused by the judge row's own
-   * validation — which happens after the project row and the starter persona
-   * have already been inserted. If the four writes were four transactions, the
-   * project and the persona would survive; because they are one, nothing does.
+   * validation — which happens after the project row and seeded grader have
+   * already been inserted. If those writes used separate transactions, the
+   * project and grader would survive; because they use one, nothing does.
    */
   it("writes nothing at all when any part of the create is refused", async () => {
     const before = await listProjects(acmeAdmin());

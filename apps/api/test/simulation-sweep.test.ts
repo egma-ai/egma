@@ -83,7 +83,7 @@ async function anOrphan(
 
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
-    traits: NEUTRAL_TRAITS,
+    personality: NEUTRAL_TRAITS.personality,
   });
   const pushed = await ask(api.app, "POST", "/api/tests", key, {
     name: "Reschedules a booked appointment",

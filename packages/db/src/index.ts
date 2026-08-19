@@ -74,6 +74,17 @@ export {
   behaviorAssertionAt,
   behaviorAssertionKey,
 } from "./grader-library/assertion-keys.ts";
+export {
+  DEFAULT_PERSONA_SPEECH,
+  PERSONA_LIBRARY_CATALOG,
+  PREDEFINED_PERSONAS,
+  type PredefinedPersona,
+  type PredefinedPersonaVersion,
+} from "./persona-library/catalog.ts";
+export {
+  seedPersonaLibrary,
+  type SeededPersona,
+} from "./persona-library/seed.ts";
 /**
  * The fold one grain up, where execution meets judgment — and where the two are
  * kept apart.

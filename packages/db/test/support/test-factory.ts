@@ -105,7 +105,10 @@ export async function seedPersona(
   auth: AuthContext,
   name: string,
 ): Promise<string> {
-  const created = await createPersona(auth, { name, traits: neutralTraits });
+  const created = await createPersona(auth, {
+    name,
+    personality: neutralTraits.personality,
+  });
   return created.id;
 }
 

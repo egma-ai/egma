@@ -470,10 +470,13 @@ export async function simulationRoutes(
         // version below is exactly who called.
         name: persona?.name ?? null,
         version_id: one.personaVersionId,
-        // Exactly who called, as they were on the day. The traits are the pin
-        // and are what makes a transcript re-readable after somebody edits the
-        // persona; the name is joined off the run's own read.
-        traits: personaVersion?.traits ?? null,
+        // The customer-authored part of exactly who called, as it was on the
+        // day. System speech facts stay on the internal claim/work-order path;
+        // this evidence response has no voice or language controls to expose.
+        traits:
+          personaVersion === undefined
+            ? null
+            : { personality: personaVersion.traits.personality },
       },
       agent:
         agent === undefined

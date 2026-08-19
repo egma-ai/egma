@@ -161,7 +161,7 @@ async function readyToRun(
 
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
-    traits: NEUTRAL_TRAITS,
+    personality: NEUTRAL_TRAITS.personality,
   });
 
   const versions: string[] = [];

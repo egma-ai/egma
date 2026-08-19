@@ -9,10 +9,11 @@ import {
   getPersonaVersion,
   listPersonas,
   NotPermittedError,
+  PREDEFINED_PERSONAS,
   restorePersona,
   type AuthContext,
-  type Persona,
   type NewPersona,
+  type Persona,
   type Role,
 } from "@egma/db";
 
@@ -71,15 +72,7 @@ function personaNamed(name: string): NewPersona {
   return {
     name,
     description: `${name}, of the list-clone-archive tests`,
-    traits: {
-      personality: `${name} books by phone, repeats the booking back twice, and hangs up satisfied.`,
-      language: "en-US",
-      voice: {
-        provider: "elevenlabs",
-        voiceId: "EXAVITQu4vr4xnSDxMaL",
-        speed: 0.9,
-      },
-    },
+    personality: `${name} books by phone, repeats the booking back twice, and hangs up satisfied.`,
   };
 }
 
@@ -131,7 +124,10 @@ describe("listing personas", () => {
     const page = await listPersonas(actingIn(acme.listing));
 
     expect(page.items.map((item) => item.id)).toEqual(
-      created.map((item) => item.id).reverse(),
+      [
+        ...created.map((item) => item.id).reverse(),
+        PREDEFINED_PERSONAS.defaultPersona,
+      ],
     );
     expect(page.items.map((item) => item.name)).toEqual([
       "Five",
@@ -139,6 +135,7 @@ describe("listing personas", () => {
       "Three",
       "Two",
       "One",
+      "Default Persona",
     ]);
     expect(page.nextCursor).toBeUndefined();
   });
@@ -166,12 +163,15 @@ describe("listing personas", () => {
       limit: 2,
       cursor: second.nextCursor,
     });
-    expect(third.items).toHaveLength(1);
+    expect(third.items).toHaveLength(2);
     expect(third.nextCursor).toBeUndefined();
 
     const walked = [...first.items, ...second.items, ...third.items];
     expect(walked.map((item) => item.id)).toEqual(
-      created.map((item) => item.id).reverse(),
+      [
+        ...created.map((item) => item.id).reverse(),
+        PREDEFINED_PERSONAS.defaultPersona,
+      ],
     );
   });
 
@@ -191,19 +191,26 @@ describe("listing personas", () => {
     const page = await listPersonas(actingIn(undefined));
 
     const ids = page.items.map((item) => item.id);
-    expect(ids).toHaveLength(6);
+    expect(ids).toHaveLength(7);
     expect(ids).toContain(neighbour.id);
+    expect(ids).toContain(PREDEFINED_PERSONAS.defaultPersona);
     expect(ids).not.toContain(stranger.id);
     expect(
-      page.items.every((item) =>
-        [acme.listing, acme.cloning].includes(item.projectId),
-      ),
+      page.items
+        .filter((item) => item.owner === "organization")
+        .every((item) =>
+          item.projectId !== null &&
+          [acme.listing, acme.cloning].includes(item.projectId),
+        ),
     ).toBe(true);
   });
 
   it("shows another customer none of them", async () => {
     const page = await listPersonas(actingAsGlobex());
-    expect(page.items.map((item) => item.id)).toEqual([stranger.id]);
+    expect(page.items.map((item) => item.id)).toEqual([
+      stranger.id,
+      PREDEFINED_PERSONAS.defaultPersona,
+    ]);
   });
 
   it("drops an archived persona from the active list immediately", async () => {
@@ -218,6 +225,7 @@ describe("listing personas", () => {
       "Four",
       "Two",
       "One",
+      "Default Persona",
     ]);
   });
 });
@@ -261,12 +269,17 @@ describe("cloning a persona", () => {
       await clonePersona(actingIn(acme.archiving), source.id),
     ).toBeUndefined();
 
-    // Neither refused clone created anything: globex still holds only the
-    // Stranger, and the project the second attempt acted in is still empty.
+    // Neither refused clone created anything. Both lists still contain only
+    // their earlier local rows plus the shared default persona.
     const globexPage = await listPersonas(actingAsGlobex());
-    expect(globexPage.items.map((item) => item.name)).toEqual(["Stranger"]);
+    expect(globexPage.items.map((item) => item.name)).toEqual([
+      "Stranger",
+      "Default Persona",
+    ]);
     const archivingPage = await listPersonas(actingIn(acme.archiving));
-    expect(archivingPage.items).toEqual([]);
+    expect(archivingPage.items.map((item) => item.name)).toEqual([
+      "Default Persona",
+    ]);
   });
 
   it("is refused to a viewer", async () => {

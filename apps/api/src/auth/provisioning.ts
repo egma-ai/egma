@@ -297,9 +297,8 @@ async function provision(
     } catch (cause) {
       const constraint = constraintViolated(cause);
       // One organization per person in v1. The membership is written last, so
-      // this refusal takes the organization, the project and its starter
-      // persona down with it and the retry below would only make a second
-      // orphan.
+      // this refusal takes the organization, the project and its seeded grader
+      // down with it and the retry below would only make a second orphan.
       if (constraint === "membership_user_id_unique") {
         throw new AlreadyInAnOrganizationError();
       }

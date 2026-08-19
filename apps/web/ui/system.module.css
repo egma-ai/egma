@@ -553,6 +553,35 @@
   overflow-wrap: anywhere;
 }
 
+/* One calm identity panel: two short facts, then one full-width prose fact. */
+.factsPanel {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-6);
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.factsPanel .fact:last-child {
+  grid-column: 1 / -1;
+}
+
+.factsPanel .fact dd {
+  white-space: pre-wrap;
+}
+
+@media (max-width: 40rem) {
+  .factsPanel {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--space-5);
+  }
+
+  .factsPanel .fact:last-child {
+    grid-column: auto;
+  }
+}
+
 /* A titled block of one page: traits, history, what uses this. */
 .section {
   display: flex;

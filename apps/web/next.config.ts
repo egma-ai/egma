@@ -100,9 +100,6 @@ const config: NextConfig = {
           source: "/api/personas/:path*",
           destination: `${api}/api/personas/:path*`,
         },
-        // The shape of the persona editor, which the server owns so a field can
-        // be added without shipping the browser again.
-        { source: "/api/persona-form", destination: `${api}/api/persona-form` },
         { source: "/api/keys", destination: `${api}/api/keys` },
         { source: "/api/keys/:path*", destination: `${api}/api/keys/:path*` },
         { source: "/api/members", destination: `${api}/api/members` },

@@ -123,16 +123,13 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): {
 const RITA: Persona = {
   id: "prs_1",
   project_id: "prj_1",
+  owner: "organization",
   name: "Impatient Rita",
   description: "Somebody in a hurry.",
   version: 1,
   version_id: "prsv_1",
   traits: {
     personality: "Seventy, hard of hearing, and gets louder when she mishears.",
-    language: "en-US",
-    voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
-    manner: "Brisk, and talks over the end of a sentence.",
-    backgroundNoise: "A busy kitchen.",
   },
   revision: "revision-one",
   archived_at: null,
@@ -141,12 +138,18 @@ const RITA: Persona = {
   updated_at: "2026-08-15T10:00:00.000Z",
 };
 
-const STARTER: Persona = {
+const DEFAULT_PERSONA: Persona = {
   ...RITA,
   id: "prs_0",
-  name: "Starter",
-  description: null,
-  revision: "revision-starter",
+  project_id: null,
+  owner: "egma",
+  name: "Default Persona",
+  description: "Regular conversationalist persona",
+  traits: {
+    personality:
+      "Speaks clear, natural english. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
+  },
+  revision: "revision-default-persona",
   is_default: true,
 };
 
@@ -166,12 +169,12 @@ afterEach(() => {
 /* ------------------------------------------------------------------------ */
 
 describe("the Personas list", () => {
-  it("names its project in the request and marks the one a test naming nobody gets", async () => {
+  it("names its project and says who owns each persona", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
       "GET /api/personas": {
         status: 200,
-        body: { items: [RITA, STARTER], next_cursor: null },
+        body: { items: [RITA, DEFAULT_PERSONA], next_cursor: null },
       },
     });
     render(<PersonasPage />);
@@ -180,9 +183,27 @@ describe("the Personas list", () => {
     expect(await screen.findAllByText("Impatient Rita")).toHaveLength(1);
     expect(asked.map((one) => one.path)).toContain("/api/personas?project=prj_1");
 
-    // Default behavior matters while editing or archiving. It does not need a
-    // tag beside the persona's name in the browsing table.
-    expect(screen.queryByTitle(/names nobody/)).toBeNull();
+    const table = screen.getByRole("table", {
+      name: "Active personas in this project",
+    });
+    expect(
+      within(table).getByRole("columnheader", { name: "Owner" }),
+    ).toBeDefined();
+    expect(
+      within(table).getByRole("columnheader", { name: "Default" }),
+    ).toBeDefined();
+
+    const customRow = screen.getByText("Impatient Rita").closest("tr");
+    const predefinedRow = screen.getByText("Default Persona").closest("tr");
+    expect(customRow).not.toBeNull();
+    expect(predefinedRow).not.toBeNull();
+    expect(within(customRow!).getByText("You")).toBeDefined();
+    expect(within(predefinedRow!).getByText("Egma")).toBeDefined();
+    expect(within(customRow!).getByText("—")).toBeDefined();
+    expect(within(predefinedRow!).getByText("Yes")).toBeDefined();
+
+    expect(within(table).queryByText("Project default")).toBeNull();
+    expect(screen.getAllByRole("table")).toHaveLength(1);
   });
 
   it("shows the archive as a separate list, asked for separately", async () => {
@@ -429,28 +450,38 @@ describe("the Personas list", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("authoring a persona", () => {
-  it("sends the traits somebody typed, and lands on the persona it made", async () => {
+  it("sends name, description, and personality, and lands on the persona it made", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
       "POST /api/personas": {
         status: 201,
         body: { ...RITA, id: "prs_new" },
       },
-      "GET /api/persona-form": {
-        status: 200,
-        body: { voice_providers: ["elevenlabs", "cartesia"] },
-      },
     });
     render(<NewPersonaPage />);
+
+    for (const removed of [
+      "Manner",
+      "Patience",
+      "Under friction",
+      "Accent",
+      "Background noise",
+      "Language",
+      "Voice provider",
+      "Voice",
+      "Speech rate",
+    ]) {
+      expect(screen.queryByLabelText(removed), removed).toBeNull();
+    }
 
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Impatient Rita" },
     });
-    fireEvent.change(screen.getByLabelText("Personality"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Personality" }), {
       target: { value: "Seventy, and gets louder when she mishears." },
     });
-    fireEvent.change(screen.getByLabelText("Under friction"), {
-      target: { value: "Asks to escalate." },
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "Somebody in a hurry." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create persona" }));
 
@@ -460,11 +491,17 @@ describe("authoring a persona", () => {
     expect(written?.body).toMatchObject({
       project: "prj_1",
       name: "Impatient Rita",
+      description: "Somebody in a hurry.",
       traits: {
         personality: "Seventy, and gets louder when she mishears.",
-        underFriction: "Asks to escalate.",
       },
     });
+    expect(Object.keys((written?.body as { traits: object }).traits)).toEqual([
+      "personality",
+    ]);
+    expect(asked.some((one) => one.path.startsWith("/api/persona-form"))).toBe(
+      false,
+    );
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/personas/prs_new");
   });
 
@@ -475,22 +512,25 @@ describe("authoring a persona", () => {
         status: 422,
         body: { error: "unprocessable", message: "a persona needs a name" },
       },
-      "GET /api/persona-form": {
-        status: 200,
-        body: { voice_providers: ["elevenlabs"] },
-      },
     });
     render(<NewPersonaPage />);
 
-    fireEvent.change(await screen.findByLabelText("Personality"), {
-      target: { value: "Somebody in a hurry." },
-    });
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Personality" }),
+      {
+        target: { value: "Somebody in a hurry." },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Create persona" }));
 
     const said = await screen.findByRole("alert");
     expect(said.textContent).toContain("a persona needs a name");
     expect(
-      (screen.getByLabelText("Personality") as HTMLTextAreaElement).value,
+      (
+        screen.getByRole("textbox", {
+          name: "Personality",
+        }) as HTMLTextAreaElement
+      ).value,
     ).toBe("Somebody in a hurry.");
     expect(routed.push).not.toHaveBeenCalled();
   });
@@ -498,10 +538,6 @@ describe("authoring a persona", () => {
   it("leaves a viewer the form to read and no way to submit it", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("viewer") },
-      "GET /api/persona-form": {
-        status: 200,
-        body: { voice_providers: ["elevenlabs"] },
-      },
     });
     render(<NewPersonaPage />);
 
@@ -534,13 +570,9 @@ describe("one persona's page", () => {
         next_cursor: null,
       },
     },
-    "GET /api/persona-form": {
-      status: 200,
-      body: { voice_providers: ["elevenlabs", "cartesia", "openai"] },
-    },
   });
 
-  it("saves the live fields with the revision, and no version expectation at all", async () => {
+  it("keeps one save disabled until a live field changes, then sends no version expectation", async () => {
     const { asked } = apiAnswers({
       ...reads(),
       "PATCH /api/personas/prs_1": {
@@ -550,12 +582,19 @@ describe("one persona's page", () => {
     });
     render(<PersonaPage />);
 
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    const name = await screen.findByLabelText("Name");
+    const save = screen.getByRole("button", { name: "Save changes" });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(name, {
       target: { value: "Rita" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    expect((save as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(save);
 
-    await screen.findByRole("button", { name: "Save name" });
+    await vi.waitFor(() => {
+      expect(asked.filter((one) => one.method === "PATCH")).toHaveLength(1);
+    });
     const written = asked.find((one) => one.method === "PATCH")?.body as
       | Record<string, unknown>
       | undefined;
@@ -568,9 +607,11 @@ describe("one persona's page", () => {
     // A rename is not a content change, so it names no version — sending one
     // would make a rename fail because somebody else edited the traits.
     expect(written).not.toHaveProperty("expected_version_id");
+    expect(written).not.toHaveProperty("traits");
+    expect(written).not.toHaveProperty("description");
   });
 
-  it("saves traits with both expectations, because a traits edit moves both", async () => {
+  it("saves personality with both expectations, because it mints a version", async () => {
     const { asked } = apiAnswers({
       ...reads(),
       "PATCH /api/personas/prs_1": {
@@ -580,14 +621,17 @@ describe("one persona's page", () => {
     });
     render(<PersonaPage />);
 
-    fireEvent.change(await screen.findByLabelText("Accent"), {
-      target: { value: "Glaswegian" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save behavior and voice" }),
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Personality" }),
+      {
+        target: { value: "Patient at first, then asks for a person." },
+      },
     );
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    await screen.findByRole("button", { name: "Save behavior and voice" });
+    await vi.waitFor(() => {
+      expect(asked.filter((one) => one.method === "PATCH")).toHaveLength(1);
+    });
     const written = asked.find((one) => one.method === "PATCH")?.body as
       | Record<string, unknown>
       | undefined;
@@ -595,7 +639,52 @@ describe("one persona's page", () => {
     expect(written).toMatchObject({
       expected_revision: "revision-one",
       expected_version_id: "prsv_1",
-      traits: { accent: "Glaswegian" },
+      traits: { personality: "Patient at first, then asks for a person." },
+    });
+    expect(written).not.toHaveProperty("name");
+    expect(written).not.toHaveProperty("description");
+  });
+
+  it("sends every changed field in one write and one version request", async () => {
+    const personality = "Patient at first, then asks for a person.";
+    const { asked } = apiAnswers({
+      ...reads(),
+      "PATCH /api/personas/prs_1": {
+        status: 200,
+        body: {
+          ...RITA,
+          name: "Rita",
+          description: "Wants a quick answer.",
+          traits: { personality },
+          version: 2,
+          version_id: "prsv_2",
+          revision: "revision-two",
+        },
+      },
+    });
+    render(<PersonaPage />);
+
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "Rita" },
+    });
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "Wants a quick answer." },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Personality" }), {
+      target: { value: personality },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await vi.waitFor(() => {
+      expect(asked.filter((one) => one.method === "PATCH")).toHaveLength(1);
+    });
+    expect(asked.find((one) => one.method === "PATCH")?.body).toMatchObject({
+      project: "prj_1",
+      expected_revision: "revision-one",
+      expected_version_id: "prsv_1",
+      name: "Rita",
+      description: "Wants a quick answer.",
+      traits: { personality },
     });
   });
 
@@ -618,34 +707,90 @@ describe("one persona's page", () => {
     });
     render(<PersonaPage />);
 
-    fireEvent.change(await screen.findByLabelText("Accent"), {
-      target: { value: "Glaswegian" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save behavior and voice" }),
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Personality" }),
+      {
+        target: { value: "Patient at first, then asks for a person." },
+      },
     );
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     const said = await screen.findByRole("alert");
     expect(said.textContent).toContain("has moved on to prsv_2");
     expect(within(said).getByRole("button", { name: /Read this persona again/ }))
       .toBeDefined();
-    expect((screen.getByLabelText("Accent") as HTMLInputElement).value).toBe(
-      "Glaswegian",
-    );
+    expect(
+      (
+        screen.getByRole("textbox", {
+          name: "Personality",
+        }) as HTMLTextAreaElement
+      ).value,
+    ).toBe("Patient at first, then asks for a person.");
   });
 
   it("shows an older version on its own, without leaving the page", async () => {
-    apiAnswers(reads());
+    const current = {
+      ...RITA,
+      version: 2,
+      version_id: "prsv_2",
+      traits: { personality: "Patient now, but still hard of hearing." },
+    };
+    apiAnswers({
+      ...reads(current),
+      "GET /api/personas/prs_1/versions": {
+        status: 200,
+        body: {
+          items: [
+            {
+              id: "prsv_2",
+              persona_id: "prs_1",
+              version: 2,
+              traits: current.traits,
+              created_at: "2026-08-16T10:00:00.000Z",
+            },
+            {
+              id: "prsv_1",
+              persona_id: "prs_1",
+              version: 1,
+              traits: RITA.traits,
+              created_at: "2026-08-15T10:00:00.000Z",
+            },
+          ],
+          next_cursor: null,
+        },
+      },
+    });
     render(<PersonaPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Read" }))[0]!);
+    const historyButton = await screen.findByRole("button", {
+      name: "Version history",
+    });
+    expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
+    fireEvent.click(historyButton);
 
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.textContent).toContain("Version 1");
-    expect(dialog.textContent).toContain("hard of hearing");
+    const history = await screen.findByRole("dialog", {
+      name: "Version history",
+    });
+    expect(history.getAttribute("data-kind")).toBe("sheet");
+    expect(history.textContent).toContain(
+      "Newest first. Past versions do not change and stay readable.",
+    );
+    const versions = within(history).getAllByRole("listitem");
+    expect(versions).toHaveLength(2);
+    expect(versions[0]?.textContent).toContain("v2");
+    expect(versions[0]?.textContent).toContain("Current");
+    expect(versions[1]?.textContent).toContain("v1");
 
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(within(versions[1]!).getByRole("button", { name: "Read" }));
+
+    const version = await screen.findByRole("dialog", { name: "Version 1" });
+    expect(version.textContent).toContain("hard of hearing");
+
+    fireEvent.click(within(version).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Version 1" })).toBeNull();
+    expect(
+      screen.getByRole("dialog", { name: "Version history" }),
+    ).toBeDefined();
   });
 
   it("asks who takes the pointer before archiving the project's default", async () => {
@@ -724,25 +869,118 @@ describe("one persona's page", () => {
     expect(screen.getAllByText("Archived").length).toBeGreaterThan(0);
   });
 
+  it("shows an Egma-owned persona as plain text with history in a sheet, then forks it", async () => {
+    const egmaProvided: Persona = {
+      ...DEFAULT_PERSONA,
+      id: "prs_1",
+    };
+    const { asked } = apiAnswers({
+      ...reads(egmaProvided),
+      "POST /api/personas/prs_1/fork": {
+        status: 201,
+        body: { ...RITA, id: "prs_fork" },
+      },
+    });
+    render(<PersonaPage />);
+
+    const title = await screen.findByRole("heading", {
+      level: 1,
+      name: "Default Persona",
+    });
+    const header = title.closest("header");
+    if (header === null) throw new Error("the persona title needs a page header");
+    expect(within(header).queryByText("Egma")).toBeNull();
+    expect(within(header).getByText("Project default")).toBeDefined();
+    expect(within(header).queryByText("v1")).toBeNull();
+    expect(within(header).queryByText(/Updated/)).toBeNull();
+    expect(
+      within(header).getAllByRole("button").map((button) => button.textContent),
+    ).toEqual(["Version history", "Fork"]);
+
+    const details = await screen.findByRole("region", {
+      name: "Persona details",
+    });
+    expect(
+      Array.from(details.querySelectorAll("dt"), (term) => term.textContent),
+    ).toEqual(["Name", "Description", "Personality"]);
+    expect(
+      Array.from(details.querySelectorAll("dd"), (definition) =>
+        definition.textContent
+      ),
+    ).toEqual([
+      "Default Persona",
+      "Regular conversationalist persona",
+      "Speaks clear, natural english. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
+    ]);
+    expect(
+      screen.getAllByText("Regular conversationalist persona"),
+    ).toHaveLength(1);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Personality" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
+
+    fireEvent.click(
+      within(header).getByRole("button", { name: "Version history" }),
+    );
+    const history = await screen.findByRole("dialog", {
+      name: "Version history",
+    });
+    expect(history.getAttribute("data-kind")).toBe("sheet");
+    const versions = within(history).getAllByRole("listitem");
+    expect(versions).toHaveLength(1);
+    expect(within(versions[0]!).getByText("v1")).toBeDefined();
+    expect(within(versions[0]!).getByText("Current")).toBeDefined();
+
+    fireEvent.click(
+      within(versions[0]!).getByRole("button", { name: "Read" }),
+    );
+    const version = await screen.findByRole("dialog", { name: "Version 1" });
+    expect(version.textContent).toContain("Version 1");
+    expect(version.textContent).toContain("Speaks clear, natural english.");
+    fireEvent.click(within(version).getByRole("button", { name: "Close" }));
+    fireEvent.click(
+      within(
+        screen.getByRole("dialog", { name: "Version history" }),
+      ).getByRole("button", { name: "Close" }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Fork" }));
+
+    await vi.waitFor(() => {
+      expect(asked.some((one) => one.path === "/api/personas/prs_1/fork")).toBe(
+        true,
+      );
+      expect(routed.push).toHaveBeenCalledWith(
+        "/projects/prj_1/personas/prs_fork",
+      );
+    });
+  });
+
   it("leaves a viewer every field genuinely inert, and every write control disabled", async () => {
     apiAnswers({ ...reads(), "GET /api/me": { status: 200, body: meWith("viewer") } });
     render(<PersonaPage />);
 
     const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
     expect(name.disabled).toBe(true);
-    expect((screen.getByLabelText("Personality") as HTMLTextAreaElement).disabled)
-      .toBe(true);
+    expect(
+      (
+        screen.getByRole("textbox", {
+          name: "Personality",
+        }) as HTMLTextAreaElement
+      ).disabled,
+    ).toBe(true);
 
-    for (const label of [
-      "Save name",
-      "Save behavior and voice",
-      "Clone",
-      "Archive",
-    ]) {
+    for (const label of ["Save changes", "Fork", "Archive"]) {
       const control = screen.getByRole("button", { name: label }) as HTMLButtonElement;
       expect(control.disabled, label).toBe(true);
       expect(control.getAttribute("title"), label).toContain("viewer role cannot");
     }
+    expect(
+      (screen.getByRole("button", {
+        name: "Version history",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   it("shows a persona this project has not got as an absence, in egma's words", async () => {
@@ -759,10 +997,6 @@ describe("one persona's page", () => {
       "GET /api/personas/prs_1/versions": {
         status: 404,
         body: { error: "not_found", message: "There is no persona prs_1." },
-      },
-      "GET /api/persona-form": {
-        status: 200,
-        body: { voice_providers: ["elevenlabs"] },
       },
     });
     render(<PersonaPage />);
@@ -837,7 +1071,7 @@ describe("driving the Personas area without a pointer", () => {
     expect(document.activeElement).toBe(now);
   });
 
-  it("puts focus inside an older-version read, and closes it with Escape", async () => {
+  it("traps focus in version history, closes it with Escape, and restores its trigger", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
       "GET /api/personas/prs_1": { status: 200, body: RITA },
@@ -856,20 +1090,22 @@ describe("driving the Personas area without a pointer", () => {
           next_cursor: null,
         },
       },
-      "GET /api/persona-form": {
-        status: 200,
-        body: { voice_providers: ["elevenlabs"] },
-      },
     });
     render(<PersonaPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Read" }))[0]!);
+    const trigger = await screen.findByRole("button", {
+      name: "Version history",
+    });
+    trigger.focus();
+    fireEvent.click(trigger);
 
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.contains(document.activeElement)).toBe(true);
+    const sheet = await screen.findByRole("dialog", { name: "Version history" });
+    expect(sheet.getAttribute("data-kind")).toBe("sheet");
+    expect(sheet.contains(document.activeElement)).toBe(true);
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });
 
@@ -889,10 +1125,6 @@ describe("what this page does when something goes wrong underneath it", () => {
     "GET /api/personas/prs_1/versions": {
       status: 200,
       body: { items: [], next_cursor: null },
-    },
-    "GET /api/persona-form": {
-      status: 200,
-      body: { voice_providers: ["elevenlabs"] },
     },
   } as const;
 
@@ -996,9 +1228,6 @@ describe("what this page does when something goes wrong underneath it", () => {
       vi.fn(async (input: string, init?: RequestInit) => {
         const at = new URL(String(input), "http://egma.test");
         if (at.pathname === "/api/me") return json(200, meWith("member"));
-        if (at.pathname === "/api/persona-form") {
-          return json(200, { voice_providers: ["elevenlabs"] });
-        }
         if ((init?.method ?? "GET") !== "GET") return pending;
         if (at.pathname.endsWith("/versions")) {
           return json(200, { items: [], next_cursor: null });
@@ -1011,7 +1240,7 @@ describe("what this page does when something goes wrong underneath it", () => {
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Rita" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     // Somebody opens another persona while that write is still in flight. The
     // page is not remounted — it is the same route with another id in it.
@@ -1052,12 +1281,12 @@ describe("what this page does when something goes wrong underneath it", () => {
 
     // And nothing claims anything about a role egma has not been told yet.
     expect(screen.queryByLabelText("Name")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Save name" })).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Save behavior and voice" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
     expect(screen.queryByText(/role cannot/)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Version history" }),
+    ).toBeDefined();
   });
 
   it("gives a viewer the reason without a pointer, not only in a tooltip", async () => {
@@ -1069,7 +1298,7 @@ describe("what this page does when something goes wrong underneath it", () => {
     render(<PersonaPage />);
 
     const save = (await screen.findByRole("button", {
-      name: "Save name",
+      name: "Save changes",
     })) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
 
@@ -1088,11 +1317,10 @@ describe("what this page does when something goes wrong underneath it", () => {
 /**
  * What the editor shows after a save.
  *
- * egma trims a described trait and drops one that is only whitespace, so what
- * a save stores is not always what was typed. Leaving the typed text in the
- * field would put the author in front of words the system did not accept —
- * disagreeing with the facts on the same page, and not what the next save
- * would be compared against.
+ * The API normalizes authored text. Leaving the typed text in the field would
+ * put the author in front of words the system did not accept — disagreeing
+ * with the facts on the same page, and not what the next save would be
+ * compared against.
  */
 describe("after a save lands", () => {
   it("shows what egma kept, not what was typed at it", async () => {
@@ -1103,10 +1331,6 @@ describe("after a save lands", () => {
         status: 200,
         body: { items: [], next_cursor: null },
       },
-      "GET /api/persona-form": {
-        status: 200,
-        body: { voice_providers: ["elevenlabs"] },
-      },
       "PATCH /api/personas/prs_1": {
         status: 200,
         body: {
@@ -1114,24 +1338,25 @@ describe("after a save lands", () => {
           version: 2,
           version_id: "prsv_2",
           revision: "revision-two",
-          traits: { ...RITA.traits, accent: "calm" },
+          traits: { personality: "calm" },
         },
       },
     });
     render(<PersonaPage />);
 
-    fireEvent.change(await screen.findByLabelText("Accent"), {
-      target: { value: "  calm  " },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save behavior and voice" }),
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Personality" }),
+      {
+        target: { value: "  calm  " },
+      },
     );
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     // Sent as typed, because what may be trimmed is the server's rule.
     const written = asked.find((one) => one.method === "PATCH")?.body as
       | { traits: Record<string, unknown> }
       | undefined;
-    expect(written?.traits.accent).toBe("  calm  ");
+    expect(written?.traits.personality).toBe("  calm  ");
 
     // Shown as kept, because that is what egma is holding now.
     //
@@ -1140,7 +1365,9 @@ describe("after a save lands", () => {
     // this test is about. The element is looked up again on each attempt
     // because the read that follows a save remounts the form.
     await vi.waitFor(() => {
-      const field = screen.getByLabelText("Accent") as HTMLInputElement;
+      const field = screen.getByRole("textbox", {
+        name: "Personality",
+      }) as HTMLTextAreaElement;
       expect(field.value).toBe("calm");
     });
   });
@@ -1170,9 +1397,6 @@ describe("a save answering while the author is still typing", () => {
       vi.fn(async (input: string, init?: RequestInit) => {
         const at = new URL(String(input), "http://egma.test");
         if (at.pathname === "/api/me") return json(200, meWith("member"));
-        if (at.pathname === "/api/persona-form") {
-          return json(200, { voice_providers: ["elevenlabs"] });
-        }
         if ((init?.method ?? "GET") !== "GET") return pending;
         if (at.pathname.endsWith("/versions")) {
           return json(200, { items: [], next_cursor: null });
@@ -1187,7 +1411,11 @@ describe("a save answering while the author is still typing", () => {
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "  A  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    const saving = screen.getByRole("button", { name: "Saving…" });
+    expect((saving as HTMLButtonElement).disabled).toBe(true);
+    expect(saving.getAttribute("aria-busy")).toBe("true");
 
     // And a description typed while that save is still in the air. The server
     // has never seen this text.
@@ -1214,70 +1442,5 @@ describe("a save answering while the author is still typing", () => {
     expect(
       (screen.getByLabelText("Description") as HTMLInputElement).value,
     ).toBe("Typed while saving");
-  });
-});
-
-/* ------------------------------------------------------------------------ */
-
-/**
- * The third property, and the one that states the whole rule.
- *
- * This page has two forms with two saves. A reply carries the whole persona,
- * but for a field the request never mentioned that value is a stale read
- * rather than an answer — so adopting it would quietly undo an edit sitting
- * unsaved in the other form.
- *
- * **Adoption may touch exactly the fields the request carried, and among
- * those, only where the draft still holds what was sent.** The three tests in
- * this file are that sentence: this one is the first clause, the two above are
- * the second, and none of them is safe without the others.
- */
-describe("a save from one form while the other holds an unsaved edit", () => {
-  it("adopts what it asked about, and leaves the other form alone", async () => {
-    let release: (answer: Response) => void = () => undefined;
-    const pending = new Promise<Response>((resolve) => {
-      release = resolve;
-    });
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string, init?: RequestInit) => {
-        const at = new URL(String(input), "http://egma.test");
-        if (at.pathname === "/api/me") return json(200, meWith("member"));
-        if (at.pathname === "/api/persona-form") {
-          return json(200, { voice_providers: ["elevenlabs"] });
-        }
-        if ((init?.method ?? "GET") !== "GET") return pending;
-        if (at.pathname.endsWith("/versions")) {
-          return json(200, { items: [], next_cursor: null });
-        }
-        return json(200, RITA);
-      }),
-    );
-
-    render(<PersonaPage />);
-
-    // An accent typed into the traits form and deliberately not saved.
-    fireEvent.change(await screen.findByLabelText("Accent"), {
-      target: { value: "Glaswegian" },
-    });
-
-    // Then a name saved from the form above it, carrying no traits at all.
-    fireEvent.change(screen.getByLabelText("Name"), {
-      target: { value: "  A  " },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
-
-    // The reply carries the whole persona, accent and all — as every read of a
-    // persona does. For the accent that value is a stale read, not an answer.
-    release(json(200, { ...RITA, name: "A", revision: "revision-two" }));
-
-    await vi.waitFor(() => {
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("A");
-    });
-
-    expect((screen.getByLabelText("Accent") as HTMLInputElement).value).toBe(
-      "Glaswegian",
-    );
   });
 });

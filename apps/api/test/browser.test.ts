@@ -2667,14 +2667,12 @@ describe("the complete product, walked in order in a second project", () => {
         "Somebody in a hurry, calling from a busy place.",
       );
       // Who they are, which is the whole of a persona — never what they want,
-      // which is the test's. The voice is what the simulator brings them to
-      // life with, and the form asks for both because egma refuses a caller
-      // with no personality and no voice rather than inventing one.
+      // which is the test's. Customer authoring asks for one complete
+      // personality and keeps the platform's speech settings internal.
       await walk.fill(
         "#persona-personality",
         "Speaks quickly, interrupts, and wants the answer before the greeting is over.",
       );
-      await walk.fill("#persona-voice-id", "EXAVITQu4vr4xnSDxMaL");
       await walk.getByRole("button", { name: "Create persona" }).click();
 
       await walk.waitForURL(
@@ -4112,8 +4110,6 @@ describe("the complete product, walked in order in a second project", () => {
         await walk.keyboard.type("Deliberate Sam");
         await walk.locator("#persona-personality").focus();
         await walk.keyboard.type("Takes their time and repeats things back.");
-        await walk.locator("#persona-voice-id").focus();
-        await walk.keyboard.type("EXAVITQu4vr4xnSDxMaL");
         await walk.locator("#persona-name").focus();
         await walk.keyboard.press("Enter");
 

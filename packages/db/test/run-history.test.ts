@@ -26,6 +26,7 @@ import {
   listSimulations,
   listRunHistory,
   markSimulationCanceled,
+  PREDEFINED_PERSONAS,
   readRunFold,
   restoreTest,
   rerunSimulation,
@@ -119,7 +120,12 @@ let cancelsVersion: string;
 let needsAudioVersion: string;
 
 async function seedPersona(name: string): Promise<string> {
-  return (await createPersona(auth, { name, traits: neutralTraits })).id;
+  return (
+    await createPersona(auth, {
+      name,
+      personality: neutralTraits.personality,
+    })
+  ).id;
 }
 
 async function seedTest(
@@ -647,6 +653,42 @@ describe("retrying a run", () => {
     expect(before?.retryOfRunId).toBeNull();
   });
 
+  it("retries a frozen test that received the predefined default persona", async () => {
+    await database.sql(
+      "update project set default_persona_id = $1 where id = $2",
+      [PREDEFINED_PERSONAS.defaultPersona, acme.project],
+    );
+    try {
+      const shared = await createTest(auth, {
+        name: `Uses the predefined default ${newId("tst")}`,
+        scenario: "The caller needs to move an appointment.",
+        expectedBehaviors: ["offers another time"],
+      });
+      expect(shared.personas.map((one) => one.id)).toEqual([
+        PREDEFINED_PERSONAS.defaultPersona,
+      ]);
+      const earlier = await startRun(auth, {
+        agentId,
+        connectionId,
+        testVersionIds: [shared.versionId],
+        idempotencyKey: newId("run"),
+      });
+
+      const again = await retryRun(auth, earlier.id, {
+        idempotencyKey: newId("run"),
+      });
+      expect(again?.retryOfRunId).toBe(earlier.id);
+      expect(again?.simulations.map((one) => one.personaId)).toEqual([
+        PREDEFINED_PERSONAS.defaultPersona,
+      ]);
+    } finally {
+      await database.sql(
+        "update project set default_persona_id = null where id = $1",
+        [acme.project],
+      );
+    }
+  });
+
   it("answers the same run twice under one key rather than dialing twice", async () => {
     const earlier = await anEarlierRun();
     const key = newId("run");
@@ -1032,7 +1074,7 @@ describe("running one simulation again", () => {
   it("uses the persona's current version while keeping the source persona identity", async () => {
     const person = await createPersona(auth, {
       name: `Moves after the source ${newId("prs")}`,
-      traits: neutralTraits,
+      personality: neutralTraits.personality,
     });
     const named = await createTest(auth, {
       name: `Names the moving persona ${newId("tst")}`,
@@ -1052,10 +1094,7 @@ describe("running one simulation again", () => {
     if (source === undefined) throw new Error("the source simulation is needed");
 
     const moved = await editPersona(auth, person.id, {
-      traits: {
-        ...neutralTraits,
-        voice: { ...neutralTraits.voice, speed: 0.9 },
-      },
+      personality: "Moves after the source edit.",
     });
     if (moved === undefined) throw new Error("the persona edit should land");
 

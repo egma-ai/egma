@@ -1,79 +1,67 @@
 import { newId } from "@egma/ids";
 import {
+  archivePersona,
   createAgent,
   createPersona,
   createTest,
   editPersona,
+  forkPersona,
   getPersona,
+  getPersonaVersion,
+  getTest,
+  getTestVersion,
+  listSimulations,
   listPersonas,
+  PERSONA_LIBRARY_CATALOG,
+  PREDEFINED_PERSONAS,
+  PredefinedPersonaError,
   provisionOrganization,
+  restorePersona,
+  seedPersonaLibrary,
+  startRun,
+  testsUsingPersona,
   type AuthContext,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createConnectedDatabase,
+  errorCodeOf,
+  POSTGRES_ERROR,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedUser } from "./support/tenancy.ts";
-
-/**
- * Signup provisions a customer, and the project it creates already holds a
- * persona for a test that names none.
- *
- * Everything here goes through the front door signup itself uses: one call to
- * `provisionOrganization`, and then the ordinary factory reads. Raw SQL appears
- * three times and never to set anything up — to read the pointer column, which
- * no exported call answers; to compare the seeded rows against ones the persona
- * factory wrote itself; and to count what a refused provisioning left behind,
- * absence being the one thing no seam can show.
- *
- * Who the starter is is deliberately not asserted. Their personality and their
- * voice are a placeholder waiting on a product decision, so a test spelling
- * either out would fail the day that decision is made, and would be checking a
- * wording rather than the guarantee. What is asserted is that a starter is
- * there, that they are a persona the factory itself would have accepted, and
- * that a first test naming nobody receives them.
- */
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 let database: MigratedDatabase;
 
 type Provisioned = {
   readonly auth: AuthContext;
-  readonly organizationId: string;
   readonly projectId: string;
-  readonly userId: string;
 };
 
-/** A customer arriving the way signup brings one in, and acting as its owner. */
-async function signUp(slug: string, email: string): Promise<Provisioned> {
+async function signUp(slug: string): Promise<Provisioned> {
   const userId = newId("usr");
-  await seedUser(database, userId, email);
-
-  const provisioned = await provisionOrganization({
+  await seedUser(database, userId, `${slug}@example.test`);
+  const made = await provisionOrganization({
     ownerUserId: userId,
     organizationName: slug,
     organizationSlug: slug,
     projectName: "Default",
     projectSlug: "default",
   });
-
   return {
-    userId,
-    organizationId: provisioned.organizationId,
-    projectId: provisioned.projectId,
+    projectId: made.projectId,
     auth: {
       userId,
-      organizationId: provisioned.organizationId,
-      projectId: provisioned.projectId,
-      role: provisioned.membership.role,
+      organizationId: made.organizationId,
+      projectId: made.projectId,
+      role: made.membership.role,
       via: "session",
     },
   };
 }
 
-/** The pointer column itself, which no exported read answers. */
-async function pointerOf(projectId: string): Promise<string | null> {
+async function defaultOf(projectId: string): Promise<string | null> {
   const { rows } = await database.sql<{ default_persona_id: string | null }>(
     "select default_persona_id from project where id = $1",
     [projectId],
@@ -81,239 +69,615 @@ async function pointerOf(projectId: string): Promise<string | null> {
   return rows[0]?.default_persona_id ?? null;
 }
 
-/** The same, where a test has already shown the pointer is set. */
-async function starterOf(projectId: string): Promise<string> {
-  const id = await pointerOf(projectId);
-  if (id === null) throw new Error(`project ${projectId} points at nobody`);
-  return id;
-}
-
-async function countOf(query: string): Promise<string | undefined> {
-  const { rows } = await database.sql<{ count: string }>(query);
-  return rows[0]?.count;
-}
-
-/** One whole row, `select *`, so a column added later arrives without being named. */
-async function rowOf(
-  table: string,
-  id: string,
-): Promise<Record<string, unknown>> {
-  const { rows } = await database.sql(`select * from ${table} where id = $1`, [
-    id,
-  ]);
-  const row = rows[0];
-  if (row === undefined) throw new Error(`no ${table} ${id}`);
-  return row;
-}
-
-/**
- * Two rows of one table, compared column by column.
- *
- * `ownWords` names the columns each row is entitled to differ on — its id, what
- * it points at, when it was written, and what it was called — and nothing else
- * is excused from the comparison of values.
- *
- * Which columns are *filled* is then compared over every column, `ownWords`
- * included, and that is the half that catches drift in both directions: a
- * column one write fills and the other leaves null fails here whichever of the
- * two started it.
- */
-async function expectSameWriteShape(
-  table: string,
-  starterId: string,
-  factoryId: string,
-  ownWords: readonly string[],
-): Promise<void> {
-  const starter = await rowOf(table, starterId);
-  const factory = await rowOf(table, factoryId);
-
-  const filled = (row: Record<string, unknown>): string[] =>
-    Object.keys(row)
-      .filter((column) => row[column] !== null)
-      .sort();
-  expect(filled(starter), `${table}: which columns are filled`).toEqual(
-    filled(factory),
-  );
-
-  const said = (row: Record<string, unknown>): Record<string, unknown> =>
-    Object.fromEntries(
-      Object.entries(row).filter(([column]) => !ownWords.includes(column)),
-    );
-  expect(said(starter), `${table}: what the two rows say`).toEqual(said(factory));
-}
-
 let acme: Provisioned;
+let globex: Provisioned;
+let firstPersonaSeed: Awaited<ReturnType<typeof seedPersonaLibrary>>;
+let legacyTestAdoption: {
+  readonly agentId: string;
+  readonly connectionId: string;
+  readonly testId: string;
+  readonly oldTestVersionId: string;
+  readonly oldTestRevision: string;
+  readonly customizedTestId: string;
+  readonly customizedTestVersionId: string;
+  readonly priorRunId: string;
+  readonly priorSimulationId: string;
+  readonly legacyPersonaVersionId: string;
+  readonly forkId: string;
+  readonly forkVersionId: string;
+};
+let legacy: {
+  readonly organizationId: string;
+  readonly userId: string;
+  readonly untouchedProject: string;
+  readonly customizedProject: string;
+  readonly untouchedPersonaId: string;
+  readonly customizedPersonaId: string;
+};
+
+function actInLegacy(projectId: string): AuthContext {
+  return {
+    userId: legacy.userId,
+    organizationId: legacy.organizationId,
+    projectId,
+    role: "admin",
+    via: "session",
+  };
+}
 
 beforeAll(async () => {
-  database = await createConnectedDatabase("provisioning_starter");
-  acme = await signUp("acme", "ada@acme.example");
-  // A second customer, seeded before anything is read, so that a read missing
-  // its tenancy predicate has another customer's starter to wrongly return.
-  await signUp("globex", "grace@globex.example");
+  database = await createConnectedDatabase("predefined_starter", {
+    seedPersonas: false,
+  });
+
+  const organizationId = newId("org");
+  const untouchedProject = newId("prj");
+  const customizedProject = newId("prj");
+  const userId = newId("usr");
+  await seedOrganization(database, organizationId, [
+    { id: untouchedProject, slug: "untouched" },
+    { id: customizedProject, slug: "customized" },
+  ]);
+  await seedUser(database, userId, "legacy-personas@example.test");
+  legacy = {
+    organizationId,
+    userId,
+    untouchedProject,
+    customizedProject,
+    untouchedPersonaId: "",
+    customizedPersonaId: "",
+  };
+  const legacyDescription =
+    "The persona a test gets when it names none. Rename them, rewrite them, or point the project at somebody else.";
+  const personality =
+    "Speaks plainly, stays patient, and asks one question at a time.";
+  const untouched = await createPersona(actInLegacy(untouchedProject), {
+    name: "Starter",
+    description: legacyDescription,
+    personality,
+  });
+  const customized = await createPersona(actInLegacy(customizedProject), {
+    name: "Starter",
+    description: legacyDescription,
+    personality,
+  });
+  await editPersona(actInLegacy(customizedProject), customized.id, {
+    personality: "Interrupts when the answer is vague.",
+  });
+  await database.sql(
+    "update project set default_persona_id = $1 where id = $2",
+    [untouched.id, untouchedProject],
+  );
+  await database.sql(
+    "update project set default_persona_id = $1 where id = $2",
+    [customized.id, customizedProject],
+  );
+  legacy = {
+    ...legacy,
+    untouchedPersonaId: untouched.id,
+    customizedPersonaId: customized.id,
+  };
+
+  const untouchedAgent = await createAgent(actInLegacy(untouchedProject), {
+    name: "Legacy front desk",
+    connection: {
+      type: "retell",
+      modality: "chat",
+      environment: "staging",
+      config: { retellAgentId: "legacy_starter_agent" },
+      credentials: { apiKey: "retell-secret-LEGACY-STARTER" },
+    },
+  });
+  const connectionId = untouchedAgent.connection?.id;
+  if (connectionId === undefined) {
+    throw new Error("the legacy agent connection was not written");
+  }
+  const untouchedTest = await createTest(actInLegacy(untouchedProject), {
+    name: "Legacy appointment change",
+    description: "Keeps every authored field through the adoption.",
+    scenario: "The caller needs to move an appointment to Friday.",
+    expectedBehaviors: ["offers an available time on Friday"],
+    mockOverrides: [
+      {
+        toolName: "find_slots",
+        answer: { answer: { available: ["10:00"] } },
+        delayMilliseconds: 25,
+      },
+    ],
+    requiredCapabilities: [],
+  });
+  const priorRun = await startRun(actInLegacy(untouchedProject), {
+    agentId: untouchedAgent.id,
+    connectionId,
+    testVersionIds: [untouchedTest.versionId],
+    idempotencyKey: newId("run"),
+  });
+  const priorSimulation = priorRun.simulations[0];
+  if (priorSimulation === undefined) {
+    throw new Error("the legacy run did not create its simulation");
+  }
+  const legacyFork = await forkPersona(
+    actInLegacy(untouchedProject),
+    untouched.id,
+  );
+  if (legacyFork === undefined) throw new Error("the legacy fork was not written");
+
+  await createAgent(actInLegacy(customizedProject), {
+    name: "Customized front desk",
+  });
+  const customizedTest = await createTest(actInLegacy(customizedProject), {
+    name: "Customized appointment change",
+    scenario: "The caller needs a different appointment.",
+    expectedBehaviors: ["offers another appointment"],
+  });
+  legacyTestAdoption = {
+    agentId: untouchedAgent.id,
+    connectionId,
+    testId: untouchedTest.id,
+    oldTestVersionId: untouchedTest.versionId,
+    oldTestRevision: untouchedTest.revision,
+    customizedTestId: customizedTest.id,
+    customizedTestVersionId: customizedTest.versionId,
+    priorRunId: priorRun.id,
+    priorSimulationId: priorSimulation.id,
+    legacyPersonaVersionId: untouched.versionId,
+    forkId: legacyFork.id,
+    forkVersionId: legacyFork.versionId,
+  };
+
+  firstPersonaSeed = await seedPersonaLibrary();
+  acme = await signUp("acme-persona-library");
+  globex = await signUp("globex-persona-library");
 });
 
 afterAll(async () => {
   await database.drop();
 });
 
-describe("the project provisioning creates", () => {
-  it("points at a persona seeded into it", async () => {
-    const pointer = await pointerOf(acme.projectId);
-    expect(pointer).not.toBeNull();
-
-    const starter = await getPersona(
-      acme.auth,
-      await starterOf(acme.projectId),
+describe("the predefined default persona", () => {
+  it("is one Egma-owned identity shared by every new project", async () => {
+    expect(await defaultOf(acme.projectId)).toBe(
+      PREDEFINED_PERSONAS.defaultPersona,
     );
-    expect(starter).toBeDefined();
-    expect(starter?.projectId).toBe(acme.projectId);
-    expect(starter?.version).toBe(1);
-  });
-
-  it("holds that persona and nobody else", async () => {
-    const page = await listPersonas(acme.auth);
-    expect(page.items.map((named) => named.id)).toEqual([
-      await starterOf(acme.projectId),
-    ]);
-  });
-
-  it("seeded one the factory itself would have accepted", async () => {
-    const pointer = await starterOf(acme.projectId);
-    const starter = await getPersona(acme.auth, pointer);
-    if (starter === undefined) throw new Error("the starter was not seeded");
-
-    // Handing the seeded traits straight back to the factory puts them through
-    // the validation a hand-authored persona passes, and through the no-op
-    // comparison beside it. Invalid traits are refused here; traits the module
-    // reads back differently from how they were written would mint a second
-    // version. Neither happens, so the seeded row is one the factory could have
-    // written itself.
-    const edited = await editPersona(acme.auth, pointer, {
-      traits: starter.traits,
-    });
-    expect(edited?.version).toBe(1);
-    expect(edited?.versionId).toBe(starter.versionId);
-  });
-
-  it("seeded rows the factory would have written the same way", async () => {
-    // Its own customer, because this test puts a second persona in the project
-    // it reads.
-    const initech = await signUp("initech", "hedy@initech.example");
-    const pointer = await starterOf(initech.projectId);
-    const starter = await getPersona(initech.auth, pointer);
-    if (starter === undefined) throw new Error("the starter was not seeded");
-
-    // Provisioning writes these rows itself, because `createPersona` cannot run
-    // inside its transaction, so nothing but this keeps the two writes saying
-    // the same thing.
-    //
-    // The name and the description are typed here rather than copied off the
-    // starter, deliberately. Copying them would let the starter stop writing a
-    // description and this test hand the same emptiness to the factory, and the
-    // two rows would agree all the way to the day nobody could explain why a
-    // new project's persona had none. What is asserted about them is that both
-    // writes fill them; what they say is each write's own business. The traits
-    // are the one thing copied, because comparing the stored jsonb is what
-    // shows provisioning writes traits the way the factory does.
-    const made = await createPersona(initech.auth, {
-      name: "Authored by hand",
-      description: "Whatever the developer typed",
-      traits: starter.traits,
-    });
-
-    // `created_by` is compared rather than excused: provisioning knows who it
-    // is provisioning for, and records them exactly as the factory records the
-    // credential that called it.
-    await expectSameWriteShape("persona", pointer, made.id, [
-      "id",
-      "current_version_id",
-      "name",
-      "description",
-      // Two rows are two identities, so their revisions are two opaque tokens
-      // and are never equal. That both are *filled* is the claim worth making,
-      // and the filled-columns half above makes it.
-      "revision",
-      "created_at",
-      "updated_at",
-    ]);
-    await expectSameWriteShape(
-      "persona_version",
-      starter.versionId,
-      made.versionId,
-      ["id", "persona_id", "created_at"],
+    expect(await defaultOf(globex.projectId)).toBe(
+      PREDEFINED_PERSONAS.defaultPersona,
     );
-  });
 
-  it("seeded an ordinary row, renamed and rewritten like any other", async () => {
-    const umbrella = await signUp("umbrella", "ada@umbrella.example");
-    const pointer = await starterOf(umbrella.projectId);
+    const { rows } = await database.sql<{
+      predefined: string;
+      copied_to_new_projects: string;
+    }>(
+      `select count(*) filter (where organization_id is null) as predefined,
+              count(*) filter (where project_id = any($1)) as copied_to_new_projects
+         from persona`,
+      [[acme.projectId, globex.projectId]],
+    );
+    expect(rows[0]).toEqual({ predefined: "1", copied_to_new_projects: "0" });
 
-    const renamed = await editPersona(umbrella.auth, pointer, {
-      name: "Impatient Rita",
-    });
-    expect(renamed?.name).toBe("Impatient Rita");
-    expect(renamed?.version).toBe(1);
-
-    const rewritten = await editPersona(umbrella.auth, pointer, {
+    expect(
+      await getPersona(acme.auth, PREDEFINED_PERSONAS.defaultPersona),
+    ).toMatchObject({
+      name: "Default Persona",
+      description: "Regular conversationalist persona",
+      owner: "egma",
+      projectId: null,
+      isDefault: true,
+      version: 1,
+      versionId: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C97",
       traits: {
-        personality: "Interrupts, and will not be put on hold.",
-        language: "en-GB",
-        voice: { provider: "cartesia", voiceId: "a-catalog-id", speed: 1.15 },
+        personality:
+          "Speaks clear, natural english. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
       },
     });
-    expect(rewritten?.version).toBe(2);
-
-    // Still the project's default: editing them is not replacing them.
-    expect(await pointerOf(umbrella.projectId)).toBe(pointer);
   });
-});
 
-describe("a first test in a freshly provisioned project", () => {
-  it("is created naming no persona, and receives the starter", async () => {
-    const wayne = await signUp("wayne", "lucius@wayne.example");
-    // A new project has a starter persona and no agent, so registering one is
-    // the step before authoring a test: a test always applies to a target.
-    await createAgent(wayne.auth, { name: "Front desk" });
-
-    const created = await createTest(wayne.auth, {
-      name: "Reschedules a booked appointment",
-      scenario:
-        "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-      expectedBehaviors: ["offers at least one afternoon slot next week"],
+  it("ships only the reset identity and its reset v1", () => {
+    expect(PERSONA_LIBRARY_CATALOG).toHaveLength(1);
+    const [defaultPersona] = PERSONA_LIBRARY_CATALOG;
+    expect(defaultPersona).toMatchObject({
+      id: "prs_01M0E4EVJ6ECGVJEA4NSBTC0CC",
+      versions: [
+        {
+          id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C97",
+          version: 1,
+          createdAt: new Date("2026-08-19T23:09:01.674Z"),
+        },
+      ],
     });
 
-    expect(created.personas.map((named) => named.id)).toEqual([
-      await starterOf(wayne.projectId),
+    const shippedIds = [
+      ...PERSONA_LIBRARY_CATALOG.map((entry) => entry.id),
+      ...PERSONA_LIBRARY_CATALOG.flatMap((entry) =>
+        entry.versions.map((version) => version.id),
+      ),
+    ];
+    for (const retiredId of [
+      "prs_01M01MH8KCE8ZB19B0YJ7Z7EYW",
+      "prsv_01M01MH8KDE8ZB19B0YJ7Z7EYW",
+      "prsv_01M01MH8KFE8ZB19B0YJ7Z7EYW",
+      "prsv_01M0E4EVJ6ECGVJEA4NSBTC0CD",
+    ]) {
+      expect(shippedIds).not.toContain(retiredId);
+    }
+  });
+
+  it("is seeded idempotently", async () => {
+    const adopted = await getTest(
+      actInLegacy(legacy.untouchedProject),
+      legacyTestAdoption.testId,
+    );
+    expect(firstPersonaSeed).toEqual([
+      {
+        id: PREDEFINED_PERSONAS.defaultPersona,
+        name: "Default Persona",
+        version: 1,
+        versionId: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C97",
+      },
     ]);
-    expect(created.personas[0]?.archivedAt).toBeNull();
+    expect(await seedPersonaLibrary()).toEqual([]);
+    expect(await seedPersonaLibrary()).toEqual([]);
+    expect(
+      await getTest(
+        actInLegacy(legacy.untouchedProject),
+        legacyTestAdoption.testId,
+      ),
+    ).toMatchObject({ version: adopted?.version, versionId: adopted?.versionId });
+  });
+
+  it("refuses an unknown top-level key in a fixed catalog version", async () => {
+    const versionId = PERSONA_LIBRARY_CATALOG[0]?.versions[0]?.id;
+    if (versionId === undefined) throw new Error("the fixed v1 is missing");
+    await database.sql(
+      `update persona_version
+          set traits = traits || '{"unexpected":true}'::jsonb
+        where id = $1`,
+      [versionId],
+    );
+    try {
+      await expect(seedPersonaLibrary()).rejects.toThrow(
+        `fixed predefined persona version ${versionId} already holds different content`,
+      );
+    } finally {
+      await database.sql(
+        "update persona_version set traits = traits - 'unexpected' where id = $1",
+        [versionId],
+      );
+    }
+  });
+
+  it("refuses an unknown voice key in a fixed catalog version", async () => {
+    const versionId = PERSONA_LIBRARY_CATALOG[0]?.versions[0]?.id;
+    if (versionId === undefined) throw new Error("the fixed v1 is missing");
+    await database.sql(
+      `update persona_version
+          set traits = jsonb_set(traits, '{voice,unexpected}', 'true'::jsonb)
+        where id = $1`,
+      [versionId],
+    );
+    try {
+      await expect(seedPersonaLibrary()).rejects.toThrow(
+        `fixed predefined persona version ${versionId} already holds different content`,
+      );
+    } finally {
+      await database.sql(
+        "update persona_version set traits = traits #- '{voice,unexpected}' where id = $1",
+        [versionId],
+      );
+    }
+  });
+
+  it("appears once on each project's list", async () => {
+    expect((await listPersonas(acme.auth)).items.map((one) => one.id)).toEqual([
+      PREDEFINED_PERSONAS.defaultPersona,
+    ]);
+  });
+
+  it("cannot be edited, archived, or restored", async () => {
+    await expect(
+      editPersona(acme.auth, PREDEFINED_PERSONAS.defaultPersona, {
+        personality: "Different",
+      }),
+    ).rejects.toBeInstanceOf(PredefinedPersonaError);
+    await expect(
+      archivePersona(acme.auth, PREDEFINED_PERSONAS.defaultPersona),
+    ).rejects.toBeInstanceOf(PredefinedPersonaError);
+    await expect(
+      restorePersona(acme.auth, PREDEFINED_PERSONAS.defaultPersona),
+    ).rejects.toBeInstanceOf(PredefinedPersonaError);
+  });
+
+  it("forks into an independent project-owned persona", async () => {
+    const fork = await forkPersona(
+      acme.auth,
+      PREDEFINED_PERSONAS.defaultPersona,
+    );
+    if (fork === undefined) throw new Error("the fork was not written");
+    expect(fork).toMatchObject({
+      owner: "organization",
+      projectId: acme.projectId,
+      version: 1,
+      isDefault: false,
+    });
+    const edited = await editPersona(acme.auth, fork.id, {
+      personality: "Pushes back once when the agent is wrong.",
+    });
+    expect(edited?.version).toBe(2);
+    expect(edited?.traits.voice).toEqual(fork.traits.voice);
+    expect(
+      (await getPersona(acme.auth, PREDEFINED_PERSONAS.defaultPersona))?.version,
+    ).toBe(1);
   });
 });
 
-describe("provisioning that cannot finish", () => {
-  it("leaves no starter behind either", async () => {
-    const before = await countOf("select count(*) as count from persona");
+describe("project availability", () => {
+  it("gives each project the shared default without mixing their usage", async () => {
+    await createAgent(acme.auth, { name: "Front desk" });
+    await createAgent(globex.auth, { name: "Front desk" });
+    const acmeTest = await createTest(acme.auth, {
+      name: "Reschedule",
+      scenario: "The appointment must move to next week.",
+      expectedBehaviors: ["offers a time next week"],
+    });
+    const globexTest = await createTest(globex.auth, {
+      name: "Cancel",
+      scenario: "The appointment must be canceled.",
+      expectedBehaviors: ["confirms the cancellation"],
+    });
+    expect(acmeTest.personas.map((one) => one.id)).toEqual([
+      PREDEFINED_PERSONAS.defaultPersona,
+    ]);
+    expect(globexTest.personas.map((one) => one.id)).toEqual([
+      PREDEFINED_PERSONAS.defaultPersona,
+    ]);
+    expect(
+      await testsUsingPersona(acme.auth, PREDEFINED_PERSONAS.defaultPersona),
+    ).toEqual([{ id: acmeTest.id, name: acmeTest.name }]);
+    expect(
+      await testsUsingPersona(globex.auth, PREDEFINED_PERSONAS.defaultPersona),
+    ).toEqual([{ id: globexTest.id, name: globexTest.name }]);
+  });
 
-    // A person already belongs to an organization, so the membership at the end
-    // of the transaction is refused, and the starter written before it goes
-    // down with the organization and the project.
+  it("refuses another project's persona as a default", async () => {
+    const foreign = await forkPersona(
+      globex.auth,
+      PREDEFINED_PERSONAS.defaultPersona,
+    );
+    if (foreign === undefined) throw new Error("the foreign fork was not written");
+    const write = database.sql(
+      "update project set default_persona_id = $1 where id = $2",
+      [foreign.id, acme.projectId],
+    );
+    await expect(write).rejects.toSatisfy(
+      (error: unknown) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("refuses another project's persona on a test version", async () => {
+    const foreign = await forkPersona(
+      globex.auth,
+      PREDEFINED_PERSONAS.defaultPersona,
+    );
+    if (foreign === undefined) throw new Error("the foreign fork was not written");
+    const { rows } = await database.sql<{ test_version_id: string }>(
+      `select tp.test_version_id
+         from test_persona tp
+         join test_version tv on tv.id = tp.test_version_id
+         join test t on t.id = tv.test_id
+        where t.project_id = $1 limit 1`,
+      [acme.projectId],
+    );
+    const versionId = rows[0]?.test_version_id;
+    if (versionId === undefined) throw new Error("the test version was not found");
+    const write = database.sql(
+      "update test_persona set persona_id = $1 where test_version_id = $2",
+      [foreign.id, versionId],
+    );
+    await expect(write).rejects.toSatisfy(
+      (error: unknown) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("installs guards for defaults, tests, simulations, and ownership", async () => {
+    const { rows } = await database.sql<{ tgname: string }>(
+      `select tgname from pg_trigger
+        where not tgisinternal and tgname like '%persona%guard'`,
+    );
+    expect(rows.map((row) => row.tgname)).toEqual(
+      expect.arrayContaining([
+        "persona_ownership_immutable_guard",
+        "project_default_persona_availability_insert_guard",
+        "simulation_persona_availability_insert_guard",
+        "test_persona_availability_insert_guard",
+      ]),
+    );
+  });
+
+  it("does not let a predefined identity become project-owned", async () => {
     await expect(
-      provisionOrganization({
-        ownerUserId: acme.userId,
-        organizationName: "Second",
-        organizationSlug: "second",
-        projectName: "Default",
-        projectSlug: "default",
-      }),
-    ).rejects.toThrow();
+      database.sql(
+        `update persona set organization_id = $1, project_id = $2
+          where id = $3`,
+        [
+          acme.auth.organizationId,
+          acme.projectId,
+          PREDEFINED_PERSONAS.defaultPersona,
+        ],
+      ),
+    ).rejects.toThrow(/ownership cannot change/);
+  });
+});
 
-    expect(await countOf("select count(*) as count from persona")).toBe(
-      before,
+describe("legacy project defaults", () => {
+  it("adopts an untouched Starter once and preserves a customized one", async () => {
+    expect(await defaultOf(legacy.untouchedProject)).toBe(
+      PREDEFINED_PERSONAS.defaultPersona,
+    );
+    expect(await defaultOf(legacy.customizedProject)).toBe(
+      legacy.customizedPersonaId,
     );
     expect(
-      await countOf(
-        `select count(*) as count from persona_version v
-          where not exists (select 1 from persona h where h.id = v.persona_id)`,
+      await getPersona(
+        actInLegacy(legacy.untouchedProject),
+        legacy.untouchedPersonaId,
       ),
-    ).toBe("0");
+    ).toMatchObject({ archivedAt: expect.any(Date) });
+    expect(
+      (
+        await listPersonas(actInLegacy(legacy.untouchedProject))
+      ).items.map((one) => one.id).sort(),
+    ).toEqual(
+      [PREDEFINED_PERSONAS.defaultPersona, legacyTestAdoption.forkId].sort(),
+    );
+
+    expect(await seedPersonaLibrary()).toEqual([]);
+    expect(await defaultOf(legacy.untouchedProject)).toBe(
+      PREDEFINED_PERSONAS.defaultPersona,
+    );
+  });
+
+  it("rewrites current prelaunch links and leaves simulation pins intact", async () => {
+    const auth = actInLegacy(legacy.untouchedProject);
+    const oldVersion = await getTestVersion(
+      auth,
+      legacyTestAdoption.oldTestVersionId,
+    );
+    expect(oldVersion).toMatchObject({
+      current: true,
+      version: 1,
+      scenario: "The caller needs to move an appointment to Friday.",
+      expectedBehaviors: ["offers an available time on Friday"],
+      mockOverrides: [
+        {
+          toolName: "find_slots",
+          answer: { answer: { available: ["10:00"] } },
+          delayMilliseconds: 25,
+        },
+      ],
+      requiredCapabilities: [],
+      personas: [{ id: PREDEFINED_PERSONAS.defaultPersona }],
+    });
+
+    const current = await getTest(auth, legacyTestAdoption.testId);
+    expect(current).toMatchObject({
+      version: 1,
+      versionId: legacyTestAdoption.oldTestVersionId,
+      revision: legacyTestAdoption.oldTestRevision,
+      scenario: oldVersion?.scenario,
+      expectedBehaviors: oldVersion?.expectedBehaviors,
+      mockOverrides: oldVersion?.mockOverrides,
+      requiredCapabilities: oldVersion?.requiredCapabilities,
+      personas: [{ id: PREDEFINED_PERSONAS.defaultPersona }],
+    });
+
+    expect(
+      await getTest(
+        actInLegacy(legacy.customizedProject),
+        legacyTestAdoption.customizedTestId,
+      ),
+    ).toMatchObject({
+      version: 1,
+      versionId: legacyTestAdoption.customizedTestVersionId,
+      personas: [{ id: legacy.customizedPersonaId }],
+    });
+
+    const [priorSimulation] =
+      (await listSimulations(auth, legacyTestAdoption.priorRunId)) ?? [];
+    expect(priorSimulation).toMatchObject({
+      id: legacyTestAdoption.priorSimulationId,
+      testVersionId: legacyTestAdoption.oldTestVersionId,
+      personaId: legacy.untouchedPersonaId,
+      personaVersionId: legacyTestAdoption.legacyPersonaVersionId,
+    });
+    expect(await getPersona(auth, legacyTestAdoption.forkId)).toMatchObject({
+      version: 1,
+      versionId: legacyTestAdoption.forkVersionId,
+    });
+  });
+});
+
+describe("catalog updates", () => {
+  it("moves the shared current version without rewriting v1 or an existing fork", async () => {
+    const [defaultPersona] = PERSONA_LIBRARY_CATALOG;
+    const v1 = defaultPersona?.versions[0];
+    if (defaultPersona === undefined || v1 === undefined) {
+      throw new Error("the default persona catalog entry is incomplete");
+    }
+    const fork = await forkPersona(
+      acme.auth,
+      PREDEFINED_PERSONAS.defaultPersona,
+    );
+    if (fork === undefined) throw new Error("the fork was not written");
+
+    const v2 = {
+      id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C98",
+      version: 2,
+      traits: {
+        ...v1.traits,
+        personality: "Stays calm, asks one clear question, and checks the answer.",
+      },
+      createdAt: new Date("2026-08-20T00:00:00.000Z"),
+    } as const;
+    const updatedCatalog = [
+      { ...defaultPersona, versions: [...defaultPersona.versions, v2] },
+    ] as const;
+
+    expect(await seedPersonaLibrary(updatedCatalog)).toEqual([
+      {
+        id: PREDEFINED_PERSONAS.defaultPersona,
+        name: "Default Persona",
+        version: 2,
+        versionId: v2.id,
+      },
+    ]);
+    expect(await seedPersonaLibrary(updatedCatalog)).toEqual([]);
+
+    expect(
+      await getPersona(acme.auth, PREDEFINED_PERSONAS.defaultPersona),
+    ).toMatchObject({
+      owner: "egma",
+      version: 2,
+      versionId: v2.id,
+      traits: { personality: v2.traits.personality },
+    });
+    expect(await getPersonaVersion(acme.auth, v1.id)).toMatchObject({
+      id: v1.id,
+      version: 1,
+      traits: v1.traits,
+    });
+    expect(await getPersona(acme.auth, fork.id)).toMatchObject({
+      owner: "organization",
+      version: 1,
+      versionId: fork.versionId,
+      traits: fork.traits,
+    });
+
+    const legacyAuth = actInLegacy(legacy.untouchedProject);
+    const adoptedTest = await getTest(legacyAuth, legacyTestAdoption.testId);
+    if (adoptedTest === undefined) throw new Error("the adopted test is missing");
+    const futureRun = await startRun(legacyAuth, {
+      agentId: legacyTestAdoption.agentId,
+      connectionId: legacyTestAdoption.connectionId,
+      testVersionIds: [adoptedTest.versionId],
+      idempotencyKey: newId("run"),
+    });
+    expect(futureRun.simulations).toEqual([
+      expect.objectContaining({
+        testVersionId: adoptedTest.versionId,
+        personaId: PREDEFINED_PERSONAS.defaultPersona,
+        personaVersionId: v2.id,
+      }),
+    ]);
+
+    const [priorSimulation] =
+      (await listSimulations(legacyAuth, legacyTestAdoption.priorRunId)) ?? [];
+    expect(priorSimulation).toMatchObject({
+      testVersionId: legacyTestAdoption.oldTestVersionId,
+      personaId: legacy.untouchedPersonaId,
+      personaVersionId: legacyTestAdoption.legacyPersonaVersionId,
+    });
+    expect(await getPersona(legacyAuth, legacyTestAdoption.forkId)).toMatchObject({
+      version: 1,
+      versionId: legacyTestAdoption.forkVersionId,
+    });
   });
 });

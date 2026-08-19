@@ -119,7 +119,7 @@ async function aCustomerWithRuns(
   for (const name of ["Impatient Rita", "Deliberate Sam"]) {
     await createPersona(contextFor(ada, "member"), {
       name,
-      traits: NEUTRAL_TRAITS,
+      personality: NEUTRAL_TRAITS.personality,
     });
   }
 

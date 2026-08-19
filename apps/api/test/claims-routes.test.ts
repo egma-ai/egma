@@ -127,7 +127,7 @@ async function aCustomerReadyToRun(
   // test then names her, which is what the claimed spec's traits come from.
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
-    traits: NEUTRAL_TRAITS,
+    personality: NEUTRAL_TRAITS.personality,
   });
   const pushed = await ask(api.app, "POST", "/api/tests", key, {
     ...RESCHEDULING,
@@ -320,7 +320,7 @@ describe("claiming work", () => {
     const connectionId = (registered.body.connection as { id: string }).id;
     await createPersona(contextFor(ada, "member"), {
       name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
+      personality: NEUTRAL_TRAITS.personality,
     });
 
     // The project's world: two tools answered for every test it runs.
@@ -391,7 +391,7 @@ describe("claiming work", () => {
     const connectionId = (registered.body.connection as { id: string }).id;
     await createPersona(contextFor(ada, "member"), {
       name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
+      personality: NEUTRAL_TRAITS.personality,
     });
     const authored = await ask(api.app, "POST", "/api/mock-tools", key, {
       tool: "check_availability",

@@ -162,7 +162,10 @@ beforeAll(async () => {
     role: "member",
     via: "session",
   };
-  await createPersona(author, { name: "Impatient Rita", traits: NEUTRAL_TRAITS });
+  await createPersona(author, {
+    name: "Impatient Rita",
+    personality: NEUTRAL_TRAITS.personality,
+  });
 
   const pushed = await api(
     "POST",

@@ -1,9 +1,9 @@
 import {
   archivePersona,
-  clonePersona,
   createPersona,
   DefaultPersonaReplacementError,
   editPersona,
+  forkPersona,
   getPersona,
   getPersonaVersion,
   IdentityConflictError,
@@ -12,16 +12,15 @@ import {
   NotPermittedError,
   permits,
   PersonaNamedByTestsError,
+  PredefinedPersonaError,
   ProjectOutsideOrganizationError,
   restorePersona,
   testsUsingPersona,
   UnprocessableInputError,
   VersionConflictError,
-  VOICE_PROVIDERS,
   WriteAbortedError,
   type AuthContext,
   type Persona,
-  type PersonaTraits,
   type PersonaVersion,
 } from "@egma/db";
 import { isId } from "@egma/ids";
@@ -35,14 +34,13 @@ import { given, text } from "../http/reading.ts";
 import { identityConflict, sendRefusal } from "../http/refusals.ts";
 
 /**
- * The personas of one project: the list, one of them, their history, what
- * uses them, and the six writes.
+ * The personas available to one project: the shared definitions Egma ships,
+ * the project-owned definitions a team authors, their history and their uses.
  *
- * A **persona** is the synthetic person who calls the agent — manner,
- * patience, accent, speech rate, background noise, and what they do when
- * things go wrong. They belong to the project rather than to an agent or to a
- * test, which is what lets one persona call about forty different situations
- * and lets two prompt variants be compared against the same caller.
+ * A **persona** is the synthetic person who calls the agent. Name and
+ * Description identify them. Personality is the one authored behavior and
+ * includes how they respond when a conversation becomes difficult. Speech is
+ * configured by the platform, not through a second set of persona controls.
  *
  * Three shapes here are contract rather than convenience.
  *
@@ -53,11 +51,10 @@ import { identityConflict, sendRefusal } from "../http/refusals.ts";
  * `expected_revision` for the identity and `expected_version_id` for the
  * content, refused separately because they are separately recoverable.
  *
- * **A persona is never deleted.** Archive takes them out of the lists somebody
- * authors from and leaves every row where it was; Restore is an ordinary write.
- * The two rules that can refuse an Archive — an active test naming them, and
- * the project's default pointer — each get their own sentence, because the fix
- * for each is somewhere else.
+ * **A project-owned persona is never deleted.** Archive takes them out of the
+ * authoring list and leaves every version in place. Egma's predefined personas
+ * have no project lifecycle and cannot be changed; Fork is how a team gets an
+ * editable version of one.
  *
  * **Names are not unique, so nothing here is addressed by one.** Every address
  * and every reference is a stable `prs_` identifier. Two personas called
@@ -74,11 +71,10 @@ export const PERSONAS_PATH = "/api/personas";
 export const PERSONA_PATH = "/api/personas/:personaId";
 export const PERSONA_VERSIONS_PATH = "/api/personas/:personaId/versions";
 export const PERSONA_USAGE_PATH = "/api/personas/:personaId/usage";
-export const PERSONA_CLONE_PATH = "/api/personas/:personaId/clone";
+export const PERSONA_FORK_PATH = "/api/personas/:personaId/fork";
 export const PERSONA_ARCHIVE_PATH = "/api/personas/:personaId/archive";
 export const PERSONA_RESTORE_PATH = "/api/personas/:personaId/restore";
 export const PERSONA_VERSION_PATH = "/api/persona-versions/:versionId";
-export const PERSONA_FORM_PATH = "/api/persona-form";
 
 type Body = Record<string, unknown>;
 
@@ -120,6 +116,10 @@ const REFUSALS = {
   defaultPersonaRequired: (personaId: string): string =>
     `Persona ${personaId} is this project's default. Select an active ` +
     `replacement persona in the Archive action and try again.`,
+
+  predefinedPersona: (personaId: string): string =>
+    `Persona ${personaId} is predefined by Egma and cannot be changed. ` +
+    `Fork it to make a project-owned persona you can edit.`,
 
   // The agent group answers this refusal too, so the sentence is written once
   // in `http/refusals.ts` and each group names its own resource word.
@@ -191,7 +191,11 @@ function describedPersona(one: Persona): Record<string, unknown> {
     description: one.description,
     version: one.version,
     version_id: one.versionId,
-    traits: one.traits,
+    // Personality is the one behavior a customer can author. Speech casting
+    // stays internal and comes from the platform, so the wire must not imply
+    // that language, voice or background-noise controls were accepted.
+    traits: { personality: one.traits.personality },
+    owner: one.owner,
     // The two expectations a write can name, always answered, so that reading
     // a persona is always enough to edit one.
     revision: one.revision,
@@ -208,68 +212,45 @@ function describedVersion(one: PersonaVersion): Record<string, unknown> {
     id: one.id,
     persona_id: one.personaId,
     version: one.version,
-    traits: one.traits,
+    traits: { personality: one.traits.personality },
     created_at: one.createdAt.toISOString(),
   };
 }
 
 /**
- * The traits a body carries, as the factory takes them.
+ * The one behavior a body carries, as the factory takes it.
  *
- * Almost nothing is judged here. Which voice providers exist, what a speaking
- * speed may be, and which fields a persona cannot be written without are the
- * factory's rules, and a second opinion at this door could come to disagree
- * with the one that decides. What this owns is the envelope: that traits are an
- * object with a voice in them, and that a body which is not that shape is
- * refused rather than quietly read as an empty persona.
+ * The `traits` envelope stays on the wire for compatibility. Its only accepted
+ * field is `personality`. Language and voice are platform speech settings;
+ * manner, patience and friction belong in the personality prose. Refusing any
+ * other key is important: silently dropping one would tell an API caller that
+ * a control worked when no simulator plumbing exists for it.
  */
-type WrittenTraits =
-  | { readonly traits: PersonaTraits }
+type WrittenPersonality =
+  | { readonly personality: string }
   | { readonly refusal: string };
 
-function traitsIn(value: unknown): WrittenTraits {
+function personalityIn(value: unknown): WrittenPersonality {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return {
       refusal:
-        "traits describe who the persona is. Send them as an object, with " +
-        "personality, language and a voice in it.",
+        "traits describe who the persona is. Send them as an object with a " +
+        "personality string.",
     };
   }
   const held = value as Body;
-  const voice = held.voice;
-  if (typeof voice !== "object" || voice === null || Array.isArray(voice)) {
+  const unsupported = Object.keys(held).filter(
+    (field) => field !== "personality",
+  );
+  if (unsupported.length > 0) {
     return {
       refusal:
-        "a persona's voice is an object naming its provider, that provider's " +
-        "voice id, and the speaking speed.",
+        "personality is the only persona behavior customers can author. " +
+        `Remove ${unsupported.join(", ")} and describe the behavior in personality.`,
     };
   }
-  const spoken = voice as Body;
 
-  const described = (key: string): Record<string, string> => {
-    const written = held[key];
-    return typeof written === "string" ? { [key]: written } : {};
-  };
-
-  return {
-    traits: {
-      personality: text(held.personality),
-      language: text(held.language),
-      voice: {
-        // Handed on as they arrived: the factory names a provider egma does
-        // not know and a speed outside the intelligible range in its own
-        // words, and those are the words worth relaying.
-        provider: spoken.provider as PersonaTraits["voice"]["provider"],
-        voiceId: text(spoken.voiceId),
-        speed: spoken.speed as number,
-      },
-      ...described("manner"),
-      ...described("patience"),
-      ...described("accent"),
-      ...described("backgroundNoise"),
-      ...described("underFriction"),
-    } as PersonaTraits,
-  };
+  return { personality: text(held.personality) };
 }
 
 /* ------------------------------------------------------------ the project */
@@ -340,30 +321,6 @@ export async function personaRoutes(
       // from "this answer is an older shape that never had one".
       next_cursor: page.nextCursor ?? null,
     });
-  });
-
-  /**
-   * The safe projection of what the persona form is allowed to offer.
-   *
-   * **The list of voices egma can ask for is the server's, and the browser
-   * gets it from here rather than keeping a copy.** A hand-written copy is
-   * wrong the day the list grows and wrong silently: the form goes on offering
-   * yesterday's providers, and the one that arrived is unreachable from the
-   * only place a persona is authored. It is the same rule the connection form
-   * follows, one resource earlier.
-   *
-   * It is a read like any other, so it names a project like any other — not
-   * because the answer differs per project, but because a surface with one
-   * request that skips the project check is a surface with one hole in it.
-   */
-  app.get(PERSONA_FORM_PATH, async (request, reply) => {
-    const { auth } = requesterOf(request);
-    const query = (request.query ?? {}) as Query;
-
-    const acting = await projectFor(auth, given(query.project));
-    if ("refusal" in acting) return refuseActing(reply, acting);
-
-    return reply.send({ voice_providers: VOICE_PROVIDERS });
   });
 
   /** One persona, active or archived — a detail page has to render both. */
@@ -469,7 +426,7 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "create personas");
     if (refused !== undefined) return refused;
 
-    const written = traitsIn(body.traits ?? {});
+    const written = personalityIn(body.traits ?? {});
     if ("refusal" in written) {
       return sendRefusal(reply, "unprocessable", written.refusal);
     }
@@ -482,7 +439,7 @@ export async function personaRoutes(
       ...(given(text(body.description)) === undefined
         ? {}
         : { description: text(body.description) }),
-      traits: written.traits,
+      personality: written.personality,
     });
 
     return reply.code(201).send(describedPersona(created));
@@ -520,7 +477,7 @@ export async function personaRoutes(
       );
     }
 
-    const written = "traits" in body ? traitsIn(body.traits) : undefined;
+    const written = "traits" in body ? personalityIn(body.traits) : undefined;
     if (written !== undefined && "refusal" in written) {
       return sendRefusal(reply, "unprocessable", written.refusal);
     }
@@ -546,7 +503,7 @@ export async function personaRoutes(
       ...("description" in body
         ? { description: given(text(body.description)) ?? null }
         : {}),
-      ...(written === undefined ? {} : { traits: written.traits }),
+      ...(written === undefined ? {} : { personality: written.personality }),
     });
 
     if (edited === undefined) return noSuchPersona(reply, personaId);
@@ -554,24 +511,25 @@ export async function personaRoutes(
   });
 
   /**
-   * A new persona carrying this one's current authoring fields and current
-   * traits — and none of its history, and no link back to it.
+   * A project-owned persona carrying this one's current Name, Description and
+   * Personality. A fork starts its own history and is editable even when the
+   * source is one of Egma's predefined personas.
    */
-  app.post(PERSONA_CLONE_PATH, async (request, reply) => {
+  app.post(PERSONA_FORK_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
     const body = (request.body ?? {}) as Body;
 
-    const refused = mayAuthor(reply, auth, "clone personas");
+    const refused = mayAuthor(reply, auth, "fork personas");
     if (refused !== undefined) return refused;
 
     const acting = await projectFor(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const clone = await clonePersona(acting.auth, personaId);
-    if (clone === undefined) return noSuchPersona(reply, personaId);
+    const fork = await forkPersona(acting.auth, personaId);
+    if (fork === undefined) return noSuchPersona(reply, personaId);
 
-    return reply.code(201).send(describedPersona(clone));
+    return reply.code(201).send(describedPersona(fork));
   });
 
   /**
@@ -673,6 +631,14 @@ export async function personaRoutes(
         reply,
         "default_persona_required",
         REFUSALS.defaultPersonaRequired(error.personaId),
+      );
+    }
+
+    if (error instanceof PredefinedPersonaError) {
+      return sendRefusal(
+        reply,
+        "predefined_persona",
+        REFUSALS.predefinedPersona(error.personaId),
       );
     }
 

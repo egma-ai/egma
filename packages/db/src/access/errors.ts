@@ -435,6 +435,21 @@ export class DefaultPersonaReplacementError extends Error {
   }
 }
 
+/** A customer tried to change a persona definition owned by Egma. */
+export class PredefinedPersonaError extends Error {
+  readonly personaId: string;
+  readonly personaName: string;
+
+  constructor(personaId: string, personaName: string) {
+    super(
+      `persona ${personaId} (${personaName}) is predefined by Egma and cannot be changed; fork it to make a project-owned persona you can edit`,
+    );
+    this.name = "PredefinedPersonaError";
+    this.personaId = personaId;
+    this.personaName = personaName;
+  }
+}
+
 /**
  * A persona's Archive was refused because active tests still name them.
  *

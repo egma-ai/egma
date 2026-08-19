@@ -196,6 +196,9 @@ describe("one conversation's evidence, in one read", () => {
     const persona = read.body.persona as Record<string, unknown>;
     expect(String(persona.version_id)).toMatch(/^prsv_/u);
     expect(persona.traits).not.toBeNull();
+    const personaTraits = persona.traits as Record<string, unknown>;
+    expect(Object.keys(personaTraits)).toEqual(["personality"]);
+    expect(personaTraits.personality).toEqual(expect.any(String));
 
     // Who it was against, and exactly how egma reached them.
     expect((read.body.agent as { name: string }).name).toMatch(

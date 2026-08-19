@@ -199,6 +199,7 @@ const CONTEXT_REQUIRING = [
   "editJudgeCredential",
   "editMockTool",
   "editPersona",
+  "forkPersona",
   "editTest",
   "failSimulation",
   // The claim path's own landing, for a claimed simulation the platform could
@@ -354,6 +355,7 @@ const CONTEXT_REQUIRING = [
   // user, no customer — a predefined entry belongs to none — and an upsert, so
   // running it on every boot writes only what a release changed.
   "seedGraderLibrary",
+  "seedPersonaLibrary",
   "seedPlatformSettings",
   // The other half of the library seeding, one table down: a shelf full of
   // definitions judges nothing until a project is running a copy of one, so
@@ -381,7 +383,7 @@ const CONTEXT_REQUIRING = [
   // A project's live name, slug and description, written against the revision
   // the edit was read at. Its counterpart `createProject` above is the one
   // factory signup uses too, so a project made from Settings is born with the
-  // same starter persona, default pointer and judge state.
+  // same shared default-persona pointer and judge state.
   "updateProject",
   // No `testsNamingGrader`, and it was here. It counted the live tests naming a
   // grader so an archive could be refused and the blocking tests named. A test
@@ -445,6 +447,12 @@ const THE_GRADER_LIBRARY = [
   "RESERVED_LIBRARY_TYPES",
 ];
 
+const THE_PERSONA_LIBRARY = [
+  "DEFAULT_PERSONA_SPEECH",
+  "PERSONA_LIBRARY_CATALOG",
+  "PREDEFINED_PERSONAS",
+];
+
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
   // The agent factory's own refusal, carrying which of its three rules turned
@@ -482,6 +490,7 @@ const VALUES = [
   // which is a different answer in kind.
   "MockToolTakenError",
   "NotPermittedError",
+  "PredefinedPersonaError",
   // The persona factory's other refusal: archiving the persona a project
   // points at, without saying who takes the pointer. A project always has a
   // default persona, and this is what keeps that true.
@@ -565,7 +574,6 @@ const VALUES = [
   // page token that was not issued here. Both are 400s, and neither is a fault.
   "UnreadableTraceQueryError",
   "VIA",
-  "VOICE_PROVIDERS",
   // The capability catalog, and the two readers that hold a key to it. Pure
   // values: they reach no store, take no context, and are the one list a test
   // requirement and a connection measurement are both written from.
@@ -747,6 +755,7 @@ describe("the data-access module's surface", () => {
         ...THE_MOCKED_WORLD,
         ...THE_PLATFORMS_SETTINGS,
         ...THE_GRADER_LIBRARY,
+        ...THE_PERSONA_LIBRARY,
       ].sort(),
     );
   });

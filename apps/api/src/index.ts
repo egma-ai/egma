@@ -8,6 +8,7 @@ import {
   runMigrations,
   seedDefaultJudge,
   seedGraderLibrary,
+  seedPersonaLibrary,
   seedPlatformSettings,
   seedRunningGraders,
 } from "@egma/db";
@@ -56,6 +57,16 @@ const reconciled =
     ? await reconcileDeploymentCarrierSettings(config.platformSettings)
     : [];
 
+// Egma's predefined personas, written from the fixed-id catalog before any
+// project can be created or read. A new project points its default directly at
+// one of these rows, so provisioning must fail at start-up rather than create a
+// project with a missing default if the catalog cannot be written.
+//
+// Catalog edits add immutable versions and move the shared current pointer.
+// Old simulations keep their pinned version. A no-op boot returns no rows and
+// writes no log entry.
+const personaShelf = await seedPersonaLibrary();
+
 // egma's own graders, written onto the shelf from egma's own catalog. After the
 // migrations because it writes rows, and before the first request because a
 // project reading its Library a second later has to find them there.
@@ -94,6 +105,14 @@ if (reconciled.length > 0) {
   app.log.info(
     { settings: reconciled },
     "the deployment reconciled its carrier settings from the environment",
+  );
+}
+if (personaShelf.length > 0) {
+  // Names, ids and immutable version ids are product catalog facts. Customer
+  // content and system-owned speech settings are not logged.
+  app.log.info(
+    { personas: personaShelf },
+    "Egma's predefined personas were written to the library",
   );
 }
 if (shelved.length > 0) {

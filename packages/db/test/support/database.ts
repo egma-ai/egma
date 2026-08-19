@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import pg from "pg";
 
 import { seedGraderLibrary } from "../../src/access/grader-library.ts";
+import { seedPersonaLibrary } from "../../src/persona-library/seed.ts";
 import { connect, disconnect } from "../../src/client.ts";
 import { runMigrations } from "../../src/migrate.ts";
 import {
@@ -194,11 +195,14 @@ export async function createConnectedDatabase(
      * deployment has.
      */
     readonly seedGraders?: boolean;
+    /** Off only for tests that need to watch the predefined persona seed. */
+    readonly seedPersonas?: boolean;
   } = {},
 ): Promise<MigratedDatabase> {
   const database = await createMigratedDatabase(label);
   connect({ databaseUrl: database.url, encryptionKey: TEST_ENCRYPTION_KEY });
   if (options.seedGraders !== false) await seedGraderLibrary();
+  if (options.seedPersonas !== false) await seedPersonaLibrary();
 
   return {
     ...database,

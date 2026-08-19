@@ -39,6 +39,7 @@ import {
   type MockToolAnswerInput,
 } from "./mock-tools.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
+import { personaAvailableToProject } from "./persona-availability.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { theProject, within } from "./within.ts";
@@ -942,13 +943,10 @@ async function validateNamedPersonas(
         .select({ id: persona.id, archivedAt: persona.archivedAt })
         .from(persona)
         .where(
-          within(
+          personaAvailableToProject(
             auth,
-            persona,
-            and(
-              inArray(persona.id, [...ids]),
-              eq(persona.projectId, projectId),
-            ),
+            projectId,
+            inArray(persona.id, [...ids]),
           ),
         )
         .for("share")
@@ -1017,14 +1015,7 @@ async function projectDefaultPersona(
     .select({ id: persona.id, archivedAt: persona.archivedAt })
     .from(persona)
     .where(
-      within(
-        auth,
-        persona,
-        and(
-          eq(persona.id, id),
-          eq(persona.projectId, projectId),
-        ),
-      ),
+      personaAvailableToProject(auth, projectId, eq(persona.id, id)),
     )
     .limit(1)
     .for("share");
@@ -2261,13 +2252,11 @@ export async function archivedTests(
  * The walk starts from the join table, where `persona_id` is indexed for
  * exactly this question, and keeps the rows a live test currently points at.
  *
- * No tenancy predicate, deliberately, and this is the one read in the file
- * without one. Whether the delete is refused is a fact about the persona rather
- * than about who is asking, and a refusal that depended on the asker would let
- * one credential delete what another credential's test needs. The persona's own
- * delete has checked its tenancy on that row before asking this, and a version
- * may only ever name a persona of its own project, so every row this can return
- * is a test of that same project.
+ * The project is required. A predefined persona can be named by tests in every
+ * customer, so the persona id alone is not a boundary. The customer predicate
+ * comes from the caller's context and the project is the one whose usage or
+ * Archive is being decided. A project-owned persona reaches the same set it did
+ * before; the explicit scope stops a shared id from joining unrelated tests.
  *
  * Exported to the module, not from the package: this answers a question the
  * persona factory has to ask before it deletes, and the test tables have one
@@ -2275,6 +2264,8 @@ export async function archivedTests(
  */
 export async function liveTestsNamingPersona(
   on: Queryable,
+  auth: AuthContext,
+  projectId: string,
   personaId: string,
 ): Promise<readonly TestNamingPersona[]> {
   return on
@@ -2285,9 +2276,14 @@ export async function liveTestsNamingPersona(
       eq(test.currentVersionId, testPersona.testVersionId),
     )
     .where(
-      and(
-        eq(testPersona.personaId, personaId),
-        notArchived,
+      within(
+        auth,
+        test,
+        and(
+          eq(test.projectId, projectId),
+          eq(testPersona.personaId, personaId),
+          notArchived,
+        ),
       ),
     )
     .orderBy(asc(test.id));

@@ -173,13 +173,13 @@ beforeAll(async () => {
   const rita = (
     await createPersona(actingAsAcme(), {
       name: "Impatient Rita",
-      traits: neutralTraits,
+      personality: neutralTraits.personality,
     })
   ).id;
   const sam = (
     await createPersona(actingAsAcme(), {
       name: "Deliberate Sam",
-      traits: neutralTraits,
+      personality: neutralTraits.personality,
     })
   ).id;
 

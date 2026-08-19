@@ -294,8 +294,14 @@ describe("a persona name two living personas answer to", () => {
 
     // Nothing stops this: a persona's name is not unique, which is the whole
     // reason a name cannot resolve one on its own.
-    await createPersona(author(ada), { name: "Impatient Rita", traits: NEUTRAL_TRAITS });
-    await createPersona(author(ada), { name: "Impatient Rita", traits: NEUTRAL_TRAITS });
+    await createPersona(author(ada), {
+      name: "Impatient Rita",
+      personality: NEUTRAL_TRAITS.personality,
+    });
+    await createPersona(author(ada), {
+      name: "Impatient Rita",
+      personality: NEUTRAL_TRAITS.personality,
+    });
 
     const refused = await browse("POST", "/api/tests", ada, {
       ...RESCHEDULING,
@@ -321,9 +327,12 @@ describe("a persona name two living personas answer to", () => {
 
     const first = await createPersona(author(ada), {
       name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
+      personality: NEUTRAL_TRAITS.personality,
     });
-    await createPersona(author(ada), { name: "Impatient Rita", traits: NEUTRAL_TRAITS });
+    await createPersona(author(ada), {
+      name: "Impatient Rita",
+      personality: NEUTRAL_TRAITS.personality,
+    });
 
     const created = await browse("POST", "/api/tests", ada, {
       ...RESCHEDULING,

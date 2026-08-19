@@ -3,12 +3,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createPersona,
+  DEFAULT_PERSONA_SPEECH,
   editPersona,
   getPersona,
   getPersonaVersion,
   NotPermittedError,
   ProjectOutsideOrganizationError,
   type AuthContext,
+  type NewPersona,
+  type PersonaChanges,
   type PersonaTraits,
   type Role,
 } from "@egma/db";
@@ -49,13 +52,14 @@ function actingAsAcme(role: Role = "member"): AuthContext {
 const rita = {
   name: "Impatient Rita",
   description: "Elderly regular, books by phone only",
-  traits: {
-    personality:
-      "Rita is 70, hard of hearing, answers questions with stories, and gets louder when the agent mishears her.",
-    language: "en-US",
-    voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 0.9 },
-  },
-} as const;
+  personality:
+    "Rita is 70, hard of hearing, answers questions with stories, and gets louder when the agent mishears her.",
+} as const satisfies NewPersona;
+
+const ritaTraits: PersonaTraits = {
+  personality: rita.personality,
+  ...DEFAULT_PERSONA_SPEECH,
+};
 
 beforeAll(async () => {
   database = await createConnectedDatabase("personas");
@@ -97,7 +101,7 @@ describe("creating a persona", () => {
     expect(fetched?.name).toBe(rita.name);
     expect(fetched?.description).toBe(rita.description);
     expect(fetched?.version).toBe(1);
-    expect(fetched?.traits).toEqual(rita.traits);
+    expect(fetched?.traits).toEqual(ritaTraits);
     expect(fetched?.projectId).toBe(acme.project);
   });
 
@@ -166,7 +170,7 @@ describe("a credential for the whole organization", () => {
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
     const edited = await editPersona(wholeCustomer, created.id, {
-      traits: { ...rita.traits, language: "en-CA" },
+      personality: "Rita calls from the whole customer context.",
     });
 
     expect(edited?.version).toBe(2);
@@ -177,18 +181,18 @@ describe("a credential for the whole organization", () => {
   });
 });
 
-describe("editing a persona's traits", () => {
+describe("editing a persona's personality", () => {
   it("creates version 2, moves the pointer, and leaves version 1 untouched", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
-    const calmer = { ...rita.traits, personality: "Rita, but rested." };
+    const calmer = "Rita, but rested.";
     const edited = await editPersona(actingAsAcme(), created.id, {
-      traits: calmer,
+      personality: calmer,
     });
 
     expect(edited?.version).toBe(2);
     expect(edited?.versionId).not.toBe(created.versionId);
-    expect(edited?.traits).toEqual(calmer);
+    expect(edited?.traits).toEqual({ ...ritaTraits, personality: calmer });
 
     const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(2);
@@ -197,39 +201,33 @@ describe("editing a persona's traits", () => {
     const frozen = await getPersonaVersion(actingAsAcme(), created.versionId);
     expect(frozen?.version).toBe(1);
     expect(frozen?.personaId).toBe(created.id);
-    expect(frozen?.traits).toEqual(rita.traits);
+    expect(frozen?.traits).toEqual(ritaTraits);
   });
 
-  it("versions on any single trait change", async () => {
+  it("versions each personality change", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
-    let traits: PersonaTraits = rita.traits;
-    const oneAtATime = [
-      { personality: "Rita after a good nap." },
-      { language: "en-GB" },
-      { voice: { ...rita.traits.voice, provider: "cartesia" } },
-      { voice: { ...rita.traits.voice, provider: "cartesia", voiceId: "sonic-rita" } },
-      {
-        voice: {
-          ...rita.traits.voice,
-          provider: "cartesia",
-          voiceId: "sonic-rita",
-          speed: 1.1,
-        },
-      },
+    const personalities = [
+      "Rita after a good nap.",
+      "Rita after a short wait.",
+      "Rita after the issue is resolved.",
     ] as const;
 
     let expected = 1;
-    for (const change of oneAtATime) {
-      traits = { ...traits, ...change };
-      const edited = await editPersona(actingAsAcme(), created.id, { traits });
+    for (const personality of personalities) {
+      const edited = await editPersona(actingAsAcme(), created.id, {
+        personality,
+      });
       expected += 1;
       expect(edited?.version).toBe(expected);
     }
 
     const fetched = await getPersona(actingAsAcme(), created.id);
-    expect(fetched?.version).toBe(6);
-    expect(fetched?.traits).toEqual(traits);
+    expect(fetched?.version).toBe(4);
+    expect(fetched?.traits).toEqual({
+      ...ritaTraits,
+      personality: personalities[2],
+    });
   });
 
   it("does nothing for a byte-identical save, and returns the current version", async () => {
@@ -237,7 +235,7 @@ describe("editing a persona's traits", () => {
     const before = await rowCounts();
 
     const saved = await editPersona(actingAsAcme(), created.id, {
-      traits: { ...rita.traits, voice: { ...rita.traits.voice } },
+      personality: rita.personality,
     });
 
     expect(saved?.version).toBe(1);
@@ -251,37 +249,37 @@ describe("editing a persona's traits", () => {
   it("keeps every old version fetchable by its prsv_ id after later edits", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     const second = await editPersona(actingAsAcme(), created.id, {
-      traits: { ...rita.traits, language: "en-AU" },
+      personality: "Rita after the first edit.",
     });
     await editPersona(actingAsAcme(), created.id, {
-      traits: { ...rita.traits, language: "en-NZ" },
+      personality: "Rita after the second edit.",
     });
 
     const first = await getPersonaVersion(actingAsAcme(), created.versionId);
     expect(first?.version).toBe(1);
-    expect(first?.traits).toEqual(rita.traits);
+    expect(first?.traits).toEqual(ritaTraits);
 
     if (second?.versionId === undefined) throw new Error("no second version");
     const middle = await getPersonaVersion(actingAsAcme(), second.versionId);
     expect(middle?.version).toBe(2);
-    expect(middle?.traits).toEqual({ ...rita.traits, language: "en-AU" });
+    expect(middle?.traits).toEqual({
+      ...ritaTraits,
+      personality: "Rita after the first edit.",
+    });
   });
 
-  it("validates edited traits exactly as created ones, and versions nothing", async () => {
+  it("refuses an empty edited personality and versions nothing", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
     await expect(
       editPersona(actingAsAcme(), created.id, {
-        traits: {
-          ...rita.traits,
-          voice: { ...rita.traits.voice, speed: 5 },
-        },
+        personality: "   ",
       }),
-    ).rejects.toThrow(/speed/);
+    ).rejects.toThrow(/personality/);
 
     const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(1);
-    expect(fetched?.traits).toEqual(rita.traits);
+    expect(fetched?.traits).toEqual(ritaTraits);
   });
 
   it("is refused to a viewer, per the permission table", async () => {
@@ -289,7 +287,7 @@ describe("editing a persona's traits", () => {
 
     await expect(
       editPersona(actingAsAcme("viewer"), created.id, {
-        traits: { ...rita.traits, language: "en-GB" },
+        personality: "Rita after a viewer's edit.",
       }),
     ).rejects.toThrow(NotPermittedError);
   });
@@ -314,7 +312,7 @@ describe("renaming a persona", () => {
     const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.name).toBe("Patient Rita");
     expect(fetched?.version).toBe(1);
-    expect(fetched?.traits).toEqual(rita.traits);
+    expect(fetched?.traits).toEqual(ritaTraits);
   });
 
   it("clears the description with null, still without versioning", async () => {
@@ -341,7 +339,7 @@ describe("renaming a persona", () => {
 
     const edited = await editPersona(actingAsAcme(), created.id, {
       name: "Louder Rita",
-      traits: { ...rita.traits, voice: { ...rita.traits.voice, speed: 1.2 } },
+      personality: "Rita gets louder when the agent mishears her.",
     });
 
     expect(edited?.name).toBe("Louder Rita");
@@ -366,48 +364,100 @@ describe("a persona that fails validation", () => {
     await expect(
       createPersona(actingAsAcme(), {
         ...rita,
-        traits: { ...rita.traits, personality: "" },
+        personality: "",
       }),
     ).rejects.toThrow(/personality/);
 
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("is refused for a voice provider egma does not know", async () => {
+  it("refuses non-object create input instead of leaking Object.keys errors", async () => {
     const before = await rowCounts();
+    for (const invalid of [null, "not an object"]) {
+      await expect(
+        createPersona(actingAsAcme(), invalid as unknown as NewPersona),
+      ).rejects.toThrow("persona create input must be an object");
+    }
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("refuses missing and non-string create fields without leaking trim errors", async () => {
+    const before = await rowCounts();
+    const invalid = [
+      [{ personality: "Ready" }, /name/],
+      [{ name: 42, personality: "Ready" }, /name/],
+      [{ name: "Rita" }, /personality/],
+      [{ name: "Rita", personality: 42 }, /personality/],
+    ] as const;
+
+    for (const [input, message] of invalid) {
+      await expect(
+        createPersona(actingAsAcme(), input as unknown as NewPersona),
+      ).rejects.toThrow(message);
+    }
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("refuses stale create fields clearly and writes nothing", async () => {
+    const before = await rowCounts();
+    const staleInput = {
+      ...rita,
+      traits: ritaTraits,
+      accent: "Glaswegian",
+    } as unknown as NewPersona;
 
     await expect(
-      createPersona(actingAsAcme(), {
-        ...rita,
-        traits: {
-          ...rita.traits,
-          voice: { ...rita.traits.voice, provider: "acme-voices" as never },
-        },
-      }),
-    ).rejects.toThrow(/provider/);
+      createPersona(actingAsAcme(), staleInput),
+    ).rejects.toThrow(
+      'persona create received unsupported fields "accent", "traits"; accepted fields are "name", "description", "personality"',
+    );
 
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("is refused for an empty language", async () => {
+  it("refuses stale edit fields clearly and versions nothing", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+    const before = await rowCounts();
+    const staleChanges = {
+      traits: ritaTraits,
+    } as unknown as PersonaChanges;
+
     await expect(
-      createPersona(actingAsAcme(), {
-        ...rita,
-        traits: { ...rita.traits, language: " " },
-      }),
-    ).rejects.toThrow(/language/);
+      editPersona(actingAsAcme(), created.id, staleChanges),
+    ).rejects.toThrow(
+      'persona edit received unsupported fields "traits"; accepted fields are "name", "description", "personality", "expectedRevision", "expectedVersionId"',
+    );
+
+    expect(await rowCounts()).toEqual(before);
+    expect((await getPersona(actingAsAcme(), created.id))?.version).toBe(1);
   });
 
-  it("is refused for a speaking speed outside the intelligible range", async () => {
+  it("refuses malformed edit input without leaking implementation errors", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+    const before = await rowCounts();
+
+    for (const invalid of [null, "not an object"]) {
+      await expect(
+        editPersona(
+          actingAsAcme(),
+          created.id,
+          invalid as unknown as PersonaChanges,
+        ),
+      ).rejects.toThrow("persona edit input must be an object");
+    }
     await expect(
-      createPersona(actingAsAcme(), {
-        ...rita,
-        traits: {
-          ...rita.traits,
-          voice: { ...rita.traits.voice, speed: 5 },
-        },
-      }),
-    ).rejects.toThrow(/speed/);
+      editPersona(actingAsAcme(), created.id, {
+        name: 42,
+      } as unknown as PersonaChanges),
+    ).rejects.toThrow(/name/);
+    await expect(
+      editPersona(actingAsAcme(), created.id, {
+        personality: 42,
+      } as unknown as PersonaChanges),
+    ).rejects.toThrow(/personality/);
+
+    expect(await rowCounts()).toEqual(before);
+    expect((await getPersona(actingAsAcme(), created.id))?.version).toBe(1);
   });
 });
 
@@ -473,7 +523,7 @@ describe("tenancy", () => {
     };
     const stolen = await editPersona(actingAsGlobex, created.id, {
       name: "Globex Rita",
-      traits: { ...rita.traits, language: "en-GB" },
+      personality: "Globex tries to change Rita.",
     });
     expect(stolen).toBeUndefined();
 

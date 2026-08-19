@@ -7,11 +7,9 @@ import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   BLANK_TRAITS,
-  PERSONA_FORM_PATH,
   PERSONAS_PATH,
   traitsFrom,
   type Persona,
-  type PersonaForm,
   type TraitsDraft,
 } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
@@ -24,7 +22,6 @@ import {
   Refused,
   TextInput,
 } from "../../../../../ui/controls.tsx";
-import { useProjectRead } from "../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
@@ -33,22 +30,19 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import { TraitFields } from "../traits-editor.tsx";
+import { PersonalityField } from "../traits-editor.tsx";
 
 /**
  * Authoring a persona.
  *
  * **The form is arranged around one sentence: who they are, never what they
  * want.** The identity fields name them for the people who will pick them off
- * a list; the traits describe the person the simulator brings to life. A
+ * a list; personality describes the person the simulator brings to life. A
  * scenario belongs to a test, and a persona carrying one would stop being
  * reusable the moment somebody wrote it down.
  *
- * Nothing here holds a second copy of what egma will accept. Which voice
- * providers exist and what a speaking speed may be are the server's rules, and
- * a validator here that disagreed would either refuse something egma would
- * have taken or take something egma will refuse. So a refusal is shown as it
- * arrived, above a form that still holds everything typed into it.
+ * A refusal is shown as it arrived, above a form that still holds everything
+ * typed into it.
  */
 export default function NewPersonaPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -68,12 +62,6 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [traits, setTraits] = useState<TraitsDraft>(BLANK_TRAITS);
-  const { answer: form } = useProjectRead<PersonaForm>(
-    PERSONA_FORM_PATH,
-    projectId,
-  );
-  const voiceProviders =
-    form?.status === "ready" ? form.value.voice_providers : null;
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
@@ -159,16 +147,12 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
             <TextInput
               id="persona-description"
               value={description}
-              placeholder="Somebody in a hurry, calling from a busy place"
+              placeholder="A recurring support persona"
               onChange={setDescription}
             />
           </Field>
 
-          <TraitFields
-            draft={traits}
-            voiceProviders={voiceProviders}
-            onChange={setTraits}
-          />
+          <PersonalityField draft={traits} onChange={setTraits} />
 
           <FormActions>
             <Button

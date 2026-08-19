@@ -100,7 +100,7 @@ async function oneQueuedSimulation(
   const personaId = (
     await createPersona(auth, {
       name: `Impatient Rita ${label}`,
-      traits: NEUTRAL_TRAITS,
+      personality: NEUTRAL_TRAITS.personality,
     })
   ).id;
 

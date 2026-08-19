@@ -114,7 +114,10 @@ async function seedCustomer(
   });
 
   const personaId = (
-    await createPersona(auth, { name: "Impatient Rita", traits: NEUTRAL_TRAITS })
+    await createPersona(auth, {
+      name: "Impatient Rita",
+      personality: NEUTRAL_TRAITS.personality,
+    })
   ).id;
 
   const authored = await createTest(auth, {
@@ -515,7 +518,7 @@ describe("the dispatch-failure landing", () => {
     // one the platform hands over and one it cannot.
     const rosa = await createPersona(actingAsAcme(), {
       name: "Retired Rosa",
-      traits: NEUTRAL_TRAITS,
+      personality: NEUTRAL_TRAITS.personality,
     });
     const twoCallers = (
       await createTest(actingAsAcme(), {
