@@ -15,9 +15,18 @@ RUN pnpm install --frozen-lockfile --filter "@egma/web..."
 COPY apps/web apps/web
 
 # Where this process proxies the API's paths to. Next resolves rewrites into
-# the build, so this is fixed here rather than at start-up.
+# the build, so this is fixed here rather than at start-up. The telemetry
+# values are also build inputs because Next writes NEXT_PUBLIC_* into the
+# browser bundle. The PostHog project token is intentionally public and cannot
+# read data back.
 ARG EGMA_API_ORIGIN=http://api:3100
+ARG EGMA_TELEMETRY=
+ARG NEXT_PUBLIC_POSTHOG_KEY=
+ARG NEXT_PUBLIC_POSTHOG_HOST=
 ENV EGMA_API_ORIGIN=${EGMA_API_ORIGIN}
+ENV EGMA_TELEMETRY=${EGMA_TELEMETRY}
+ENV NEXT_PUBLIC_POSTHOG_KEY=${NEXT_PUBLIC_POSTHOG_KEY}
+ENV NEXT_PUBLIC_POSTHOG_HOST=${NEXT_PUBLIC_POSTHOG_HOST}
 RUN pnpm --filter @egma/web build
 
 FROM node:24-alpine AS runtime

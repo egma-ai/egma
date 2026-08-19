@@ -112,6 +112,33 @@ describe("the API's deployment story", () => {
     ).toEqual([]);
   });
 
+  it("passes the one telemetry decision into the self-hosted web build", () => {
+    const web = serviceBlock("web");
+    const dockerfile = readFileSync(path.join(ROOT, "apps/web/Dockerfile"), "utf8");
+
+    for (const line of [
+      "EGMA_TELEMETRY: ${EGMA_TELEMETRY:-}",
+      "NEXT_PUBLIC_POSTHOG_KEY: ${EGMA_POSTHOG_KEY:-}",
+      "NEXT_PUBLIC_POSTHOG_HOST: ${EGMA_POSTHOG_HOST:-}",
+    ]) {
+      expect(
+        web,
+        `the web build is missing ${line}, so EGMA_TELEMETRY does not control every process`,
+      ).toContain(line);
+    }
+
+    for (const argument of [
+      "ARG EGMA_TELEMETRY=",
+      "ARG NEXT_PUBLIC_POSTHOG_KEY=",
+      "ARG NEXT_PUBLIC_POSTHOG_HOST=",
+    ]) {
+      expect(
+        dockerfile,
+        `the web Dockerfile is missing ${argument}, so compose cannot pass the telemetry decision`,
+      ).toContain(argument);
+    }
+  });
+
   it("keeps the judge's key off the grader, and every setting off the simulator", () => {
     // Three halves of one decision, held here because each is one line away
     // from being undone and none would fail anything else.
