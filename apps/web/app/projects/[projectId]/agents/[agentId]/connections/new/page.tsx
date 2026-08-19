@@ -185,7 +185,7 @@ function NewConnection({
    *   available" here would be false.
    * - `not-yet`: Egma cannot monitor this platform at all today.
    *
-   * There is deliberately no state here for a stored switch. The API accepts
+   * **There is deliberately no state here for a stored switch.** The API accepts
    * `watch_production` when a retell connection is attached, and this form no
    * longer attaches one: a box wired to a request this page never sends would
    * be a control that does nothing.
@@ -194,8 +194,8 @@ function NewConnection({
     described?.type === "livekit"
       ? "exported"
       : described?.type === "retell"
-        ? // Main's Retell setup writes the phone route, never a retell
-          // connection, so the switch has nothing here to switch.
+        ? // This form's Retell setup writes the phone route rather than a
+          // retell connection, so the switch has nothing here to switch.
           "dialled"
         : "not-yet";
 
