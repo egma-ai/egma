@@ -15,6 +15,7 @@ dependencies = [
     "opentelemetry-sdk==1.44.0",
     "pipecat-ai[deepgram,elevenlabs,livekit,tracing]==1.7.0",
     "rfc3339-validator>=0.1.4",
+    "structlog>=26.1.0",
 ]
 
 [project.scripts]

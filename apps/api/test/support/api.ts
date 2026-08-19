@@ -128,6 +128,8 @@ export type TestApiOptions = {
    * once per message, so a test can arm it after the messages it is not about.
    */
   readonly emailSendCompletesOn?: () => Promise<void> | undefined;
+  /** Use the server's no-SMTP sender instead of this helper's captured sender. */
+  readonly defaultEmailSender?: boolean;
   /** A budget small enough to reach, for the tests about reaching it. */
   readonly rateLimit?: RateLimit;
   /** A sweep cadence short enough to observe, for the tests about the sweep. */
@@ -223,7 +225,7 @@ export async function createApi(
 
   const { app, identity } = buildApi({
     config,
-    emailSender,
+    ...(options.defaultEmailSender === true ? {} : { emailSender }),
     ...(options.rateLimit === undefined ? {} : { rateLimit: options.rateLimit }),
     ...(options.logTo === undefined ? {} : { logTo: options.logTo }),
     ...(options.orphanSweepIntervalMilliseconds === undefined

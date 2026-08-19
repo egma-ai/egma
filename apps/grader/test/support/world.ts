@@ -1139,10 +1139,10 @@ export async function jobFor(
 export function capturedLog(): { readonly log: Log; readonly lines: string[] } {
   const lines: string[] = [];
   const at =
-    (level: string) =>
-    (message: string, fields: Record<string, unknown> = {}): void => {
-      lines.push(JSON.stringify({ level, message, ...fields }));
-    };
+    (level: string): Log["info"] =>
+      ((fields: Record<string, unknown>, body?: string): void => {
+        lines.push(JSON.stringify({ level, msg: body, ...fields }));
+      }) as Log["info"];
 
   return {
     lines,

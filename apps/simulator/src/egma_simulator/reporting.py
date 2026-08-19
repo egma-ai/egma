@@ -47,6 +47,7 @@ from pathlib import Path
 
 from .client import ControlPlaneClient, DocumentRejected, TransientDeliveryFailure
 from .contract import validate_report
+from .platform_logging import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -205,11 +206,16 @@ class Reporter:
                 # life of the process. Delivery is allowed to fail; the
                 # sender is not allowed to die.
                 self.abandoned = True
-                logger.exception(
-                    "the report sender for %s hit a fault; the events are "
-                    "in %s and nothing further will be sent",
-                    self.simulation_id,
-                    self._wal_path,
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.report_failed",
+                    "simulation report sender failed",
+                    attributes={
+                        "egma.report_abandoned": True,
+                        "error.type": "unexpected_exception",
+                    },
+                    exc_info=True,
                 )
             finally:
                 self._queue.task_done()
@@ -230,11 +236,15 @@ class Reporter:
             try:
                 await send(self.simulation_id, serialized)
                 if attempt > 1:
-                    logger.info(
-                        "a %s document for %s landed on attempt %d",
-                        destination.value,
-                        self.simulation_id,
-                        attempt,
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "egma.simulation.report_delivered",
+                        "simulation document landed after a retry",
+                        attributes={
+                            "egma.document_type": destination.value,
+                            "egma.attempt": attempt,
+                        },
                     )
                 return
             except DocumentRejected as refusal:
@@ -245,11 +255,17 @@ class Reporter:
                 # had already landed.
                 if destination is Destination.SPANS:
                     self.abandoned = True
-                logger.error(
-                    "control plane refused a %s document for %s: %s",
-                    destination.value,
-                    self.simulation_id,
-                    refusal,
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.report_failed",
+                    "control plane refused a simulation document",
+                    attributes={
+                        "egma.document_type": destination.value,
+                        "egma.attempt": attempt,
+                        "egma.report_abandoned": self.abandoned,
+                        "error.type": type(refusal).__name__,
+                    },
                 )
                 return
             except TransientDeliveryFailure as failure:
@@ -259,16 +275,20 @@ class Reporter:
                     # what comes next would report it out of order, and the
                     # control plane cannot be reached to receive it anyway.
                     self.abandoned = True
-                    logger.error(
-                        "gave up delivering for %s after %d attempt(s) "
-                        "over %.0fs (%s); everything it saw is in %s, and a "
-                        "simulator the control plane cannot hear is what its "
-                        "heartbeat sweep is for",
-                        self.simulation_id,
-                        attempt,
-                        self._delivery_deadline_seconds,
-                        failure,
-                        self._wal_path,
+                    log_event(
+                        logger,
+                        logging.ERROR,
+                        "egma.simulation.report_failed",
+                        "simulation document delivery deadline expired",
+                        attributes={
+                            "egma.document_type": destination.value,
+                            "egma.attempt": attempt,
+                            "egma.delivery_deadline_seconds": (
+                                self._delivery_deadline_seconds
+                            ),
+                            "egma.report_abandoned": True,
+                            "error.type": type(failure).__name__,
+                        },
                     )
                     return
                 await asyncio.sleep(min(backoff, remaining))

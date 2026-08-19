@@ -44,6 +44,7 @@ ALLOWED_DEPENDENCIES = {
     "pipecat-ai",
     "livekit",
     "loguru",  # what pipecat logs through, gathered under one filter
+    "structlog",  # JSON rendering, context binding, and exception processing
     "nltk",  # pipecat's tokenizer, held to no downloads (see __init__)
     # Pipecat creates the service spans; the SDK gives those and egma's domain
     # spans one trace, and the proto-common encoder turns finished SDK spans into
@@ -147,6 +148,7 @@ def test_no_module_imports_anything_from_outside_the_app():
         "jsonschema",
         "pipecat",
         "loguru",
+        "structlog",
         "nltk",
         "livekit",
         "boto3",

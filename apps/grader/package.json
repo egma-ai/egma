@@ -12,11 +12,14 @@
     "@egma/db": "workspace:*",
     "@egma/ids": "workspace:*",
     "@egma/simulation-contract": "workspace:*",
+    "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/instrumentation": "^0.221.0",
     "@opentelemetry/instrumentation-http": "^0.221.0",
+    "@opentelemetry/instrumentation-pino": "^0.67.0",
     "@opentelemetry/instrumentation-pg": "^0.73.0",
     "@opentelemetry/instrumentation-undici": "^0.31.0",
     "@opentelemetry/sdk-node": "^0.221.0",
+    "pino": "^10.3.1",
     "posthog-node": "^5.49.1"
   }
 }

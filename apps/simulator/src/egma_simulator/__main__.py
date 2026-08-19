@@ -18,18 +18,15 @@ import asyncio
 import logging
 import signal
 import sys
-import traceback
 
 from .config import SimulatorConfig
+from .platform_logging import json_log_formatter
 from .redaction import RedactingFilter, SecretRegistry
-from .service import SimulatorService
 
 
 def _configure_logging(level: str, registry: SecretRegistry) -> None:
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-    )
+    handler.setFormatter(json_log_formatter(registry))
     handler.addFilter(RedactingFilter(registry))
     root = logging.getLogger()
     root.setLevel(level.upper())
@@ -45,24 +42,25 @@ def _gather_loguru(level: str) -> None:
     filter with a way around it is not one. Every loguru record is handed
     to the standard library instead; the level numbers already agree.
 
-    A traceback is rendered into the message rather than handed along as
-    ``exc_info``, because the filter scrubs a record's message and nothing
-    else: passed the other way, a credential inside an exception would go
-    out unscrubbed. This way the diagnostic survives and is scrubbed.
+    Exceptions stay as exception information so the JSON formatter can emit
+    the class and safe frame locations. Runtime messages and source lines do
+    not leave the process. The shared filter also scrubs the retained fields.
     """
     from loguru import logger as loguru_logger
 
     def hand_over(message) -> None:
         record = message.record
-        text = record["message"]
         failure = record["exception"]
-        if failure is not None:
-            text += "\n" + "".join(
-                traceback.format_exception(
-                    failure.type, failure.value, failure.traceback
-                )
-            )
-        logging.getLogger(record["name"]).log(record["level"].no, text)
+        exc_info = (
+            (failure.type, failure.value, failure.traceback)
+            if failure is not None
+            else None
+        )
+        logging.getLogger(record["name"]).log(
+            record["level"].no,
+            record["message"],
+            exc_info=exc_info,
+        )
 
     loguru_logger.remove()
     loguru_logger.add(hand_over, level=level.upper())
@@ -99,6 +97,11 @@ def secrets_of(config: SimulatorConfig) -> SecretRegistry:
 async def _run(config: SimulatorConfig) -> None:
     registry = secrets_of(config)
     _configure_logging(config.log_level, registry)
+
+    # Pipecat writes a Loguru banner while the service module is imported.
+    # Import only after Loguru is gathered so that record uses the same JSON
+    # and redaction path as every later third-party record.
+    from .service import SimulatorService
 
     service = SimulatorService(config, secrets=registry)
     task = asyncio.ensure_future(service.run())

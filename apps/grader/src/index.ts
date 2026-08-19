@@ -6,7 +6,7 @@ import {
 } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
-import { makeLog } from "./log.ts";
+import { makeLog, platformEvent } from "./log.ts";
 import { startService } from "./service.ts";
 
 /**
@@ -47,7 +47,10 @@ const service = startService({ config, log });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    log.info("stopping", { signal });
+    log.info(
+      platformEvent("egma.service.stop_requested", { signal }),
+      "grader service stop requested",
+    );
     // Asked to stop rather than killed: the job in hand is finished and its
     // verdicts are written before anything closes. A copy that was killed
     // mid-judgment would cost one lease and no data — but there is no reason to
@@ -59,4 +62,4 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 await service.finished;
 await disconnect();
 await disconnectClickHouse();
-log.info("stopped");
+log.info(platformEvent("egma.service.stopped"), "grader service stopped");

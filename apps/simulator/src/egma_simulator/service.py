@@ -43,6 +43,7 @@ from .contract import ContractViolation
 from .model import build_model_client
 from .persona import Persona
 from .pipeline import Assembled, assemble
+from .platform_logging import log_event, simulation_log_context
 from .plugs import failed_ending, plug_for
 from .redaction import SecretRegistry
 from .reporting import Reporter
@@ -159,8 +160,20 @@ class AsyncioExecutor:
         self._running.discard(task)
         self._room.set()
         if not task.cancelled() and task.exception() is not None:
-            logger.error(
-                "a simulation task died unreported", exc_info=task.exception()
+            simulation_id = task.get_name().removeprefix("simulation:")
+            fault = task.exception()
+            assert fault is not None
+            log_event(
+                logger,
+                logging.ERROR,
+                "egma.simulation.finished",
+                "simulation task died before it could report",
+                attributes={
+                    "egma.simulation_id": simulation_id,
+                    "egma.outcome": "failed",
+                    "error.type": type(fault).__name__,
+                },
+                exc_info=fault,
             )
 
     async def wait_for_room(self) -> None:
@@ -250,6 +263,12 @@ class RunningSimulation:
         reporter = self._reporter
         reporter.running()
         self._spans.opened()
+        log_event(
+            logger,
+            logging.INFO,
+            "egma.simulation.started",
+            "simulation started",
+        )
         try:
             # The model first, because the pipeline below holds things that
             # have to be given back and only conducting gives them back.
@@ -339,14 +358,26 @@ class RunningSimulation:
             raise
         except Exception as fault:
             reason = self._secrets.redact(f"{type(fault).__name__}: {fault}")
-            logger.exception("conducting %s hit a fault", self.simulation_id)
             # Which failed ending this is belongs to whoever raised: a
             # phone that rang out is not the same record as a simulator
             # that broke, and only the plug knows the difference. See
             # `plugs.failed_ending`.
+            ending = failed_ending(fault)
+            log_event(
+                logger,
+                logging.ERROR,
+                "egma.simulation.finished",
+                "simulation failed",
+                attributes={
+                    "egma.outcome": "failed",
+                    "egma.ending": ending,
+                    "error.type": type(fault).__name__,
+                },
+                exc_info=True,
+            )
             self._spans.sealed()
             await reporter.drain()
-            reporter.failed(failed_ending(fault), reason)
+            reporter.failed(ending, reason)
             return
 
         await self._report_terminal(conducted)
@@ -362,8 +393,22 @@ class RunningSimulation:
         self._reporter.provider_reference = conducted.provider_reference
         if conducted.status == "canceled":
             self._reporter.canceled("cancel directive on heartbeat")
+            outcome = "canceled"
         else:
             self._reporter.completed(conducted.ending, conducted.reason)
+            outcome = "succeeded"
+        log_event(
+            logger,
+            logging.INFO,
+            "egma.simulation.finished",
+            "simulation finished",
+            attributes={
+                "egma.outcome": outcome,
+                "egma.ending": conducted.ending,
+                "egma.turn_count": self._reporter.turn_count,
+                "egma.report_abandoned": self._reporter.abandoned,
+            },
+        )
 
     async def _on_turn(self, speaker: str, text: str) -> None:
         # The turn itself goes one way only: into the spans. What the
@@ -469,8 +514,12 @@ class RunningSimulation:
             except HeartbeatFailure as failure:
                 # A missed beat is the control plane's signal to read, not
                 # ours to invent meaning for. Keep conducting, keep trying.
-                logger.warning(
-                    "heartbeat for %s did not land: %s", self.simulation_id, failure
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "egma.simulation.heartbeat_failed",
+                    "simulation heartbeat did not land",
+                    attributes={"error.type": type(failure).__name__},
                 )
             except asyncio.CancelledError:
                 raise
@@ -478,8 +527,13 @@ class RunningSimulation:
                 # Ending this loop would leave the simulation running with
                 # no way to ever hear a cancel directive. Nothing is worth
                 # that.
-                logger.exception(
-                    "heartbeat for %s hit an unexpected fault", self.simulation_id
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.heartbeat_failed",
+                    "simulation heartbeat failed unexpectedly",
+                    attributes={"error.type": "unexpected_exception"},
+                    exc_info=True,
                 )
             else:
                 await self._honor(directive)
@@ -552,11 +606,12 @@ class SimulatorService:
                 config.capacity,
                 start=lambda spec: self._conduct_one(spec, client),
             )
-            logger.info(
-                "simulator %s claiming from %s with capacity %d",
-                config.claimant,
-                config.control_plane_url,
-                config.capacity,
+            log_event(
+                logger,
+                logging.INFO,
+                "egma.service.started",
+                "simulator started",
+                attributes={"egma.capacity": config.capacity},
             )
             claiming = asyncio.ensure_future(
                 self._claim_forever(client, executor)
@@ -588,6 +643,12 @@ class SimulatorService:
                 claiming.cancel()
                 executor.cancel_all()
                 await executor.drain()
+        log_event(
+            logger,
+            logging.INFO,
+            "egma.service.stopped",
+            "simulator stopped",
+        )
 
     async def _claim_forever(
         self, client: ControlPlaneClient, executor: Executor
@@ -633,7 +694,16 @@ class SimulatorService:
             self._claim_failure_began = now
             self._claim_failure_said_at = now
             self._claim_failure_count = 1
-            logger.warning("claim did not land: %s", failure)
+            log_event(
+                logger,
+                logging.WARNING,
+                "egma.simulation.claim_failed",
+                "claim did not land",
+                attributes={
+                    "egma.attempt": self._claim_failure_count,
+                    "error.type": "claim_failure",
+                },
+            )
             return
 
         # The count is every attempt since this failure began, not since it
@@ -642,13 +712,28 @@ class SimulatorService:
         # so neither number has to be inferred from the other.
         self._claim_failure_count += 1
         if now - self._claim_failure_said_at < REPEATED_CLAIM_FAILURE_SECONDS:
-            logger.debug("claim did not land: %s", failure)
+            log_event(
+                logger,
+                logging.DEBUG,
+                "egma.simulation.claim_failed",
+                "claim did not land",
+                attributes={
+                    "egma.attempt": self._claim_failure_count,
+                    "error.type": "claim_failure",
+                },
+            )
             return
-        logger.warning(
-            "claim still not landing after %d attempts over %.0fs: %s",
+        log_event(
+            logger,
+            logging.WARNING,
+            "egma.simulation.claim_failed",
+            "claim still not landing after %d attempts over %.0fs",
             self._claim_failure_count,
             now - self._claim_failure_began,
-            failure,
+            attributes={
+                "egma.attempt": self._claim_failure_count,
+                "error.type": "claim_failure",
+            },
         )
         self._claim_failure_said_at = now
 
@@ -665,42 +750,56 @@ class SimulatorService:
         """
         for position, document in enumerate(documents):
             if executor.free_capacity < 1:
-                logger.error(
-                    "claim answer carried %d spec(s) past the %d declared; "
-                    "leaving %d unconducted",
-                    len(documents) - position,
-                    self._config.capacity,
-                    len(documents) - position,
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.claim_response_invalid",
+                    "claim response exceeded simulator capacity",
+                    attributes={
+                        "count": len(documents) - position,
+                        "egma.capacity": self._config.capacity,
+                        "error.type": "claim_capacity_exceeded",
+                    },
                 )
                 return
 
             try:
                 spec = SimulationSpec.from_document(document)
-            except ContractViolation as violation:
+            except ContractViolation:
                 # Refusing to conduct is not a simulation that went wrong,
                 # and reporting one would be a claim about a conversation
                 # that never started. Say nothing to the control plane and
                 # let its sweep account for the row it thinks is claimed.
-                logger.error(
-                    "refusing a claimed spec that does not speak the "
-                    "contract: %s",
-                    "; ".join(violation.complaints),
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.claim_response_invalid",
+                    "claimed simulation did not match the work contract",
+                    attributes={"error.type": "simulation_spec_invalid"},
                 )
                 continue
             except (KeyError, TypeError) as malformed:
-                logger.error("refusing an unreadable claimed spec: %r", malformed)
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.claim_response_invalid",
+                    "claimed simulation could not be read",
+                    attributes={"error.type": type(malformed).__name__},
+                )
                 continue
 
             try:
                 trace_id_for(spec.simulation_id)
-            except ValueError as invalid_identity:
+            except ValueError:
                 # OpenTelemetry reserves its all-zero trace id. Refuse before
                 # submission, so no `running` event can claim that an
                 # evidence-complete simulation started under no valid trace.
-                logger.error(
-                    "refusing claimed spec %s: %s",
-                    spec.simulation_id,
-                    invalid_identity,
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.claim_response_invalid",
+                    "claimed simulation had an invalid identifier",
+                    attributes={"error.type": "invalid_simulation_id"},
                 )
                 continue
 
@@ -708,11 +807,15 @@ class SimulatorService:
                 # Same shape as a contract refusal: conducting is not
                 # possible, so nothing is reported and the control plane's
                 # sweep accounts for the row it thinks is claimed.
-                logger.error(
-                    "refusing claimed spec %s: no platform plug for "
-                    "connection type %r",
-                    spec.simulation_id,
-                    spec.connection_type,
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.claim_response_invalid",
+                    "claimed simulation has no platform plug for its connection type",
+                    attributes={
+                        "egma.simulation_id": spec.simulation_id,
+                        "error.type": "unsupported_connection_type",
+                    },
                 )
                 continue
 
@@ -724,15 +827,23 @@ class SimulatorService:
             self._secrets.register(spec.credentials)
             self._secrets.register(list(spec.platform.secrets))
             executor.submit(spec)
+            log_event(
+                logger,
+                logging.INFO,
+                "egma.simulation.claimed",
+                "simulation claimed",
+                attributes={"egma.simulation_id": spec.simulation_id},
+            )
 
     async def _conduct_one(
         self, spec: SimulationSpec, client: ControlPlaneClient
     ) -> None:
-        simulation = RunningSimulation(
-            spec,
-            client=client,
-            config=self._config,
-            secrets=self._secrets,
-            blobs=self._blobs,
-        )
-        await simulation.run()
+        with simulation_log_context(spec.simulation_id):
+            simulation = RunningSimulation(
+                spec,
+                client=client,
+                config=self._config,
+                secrets=self._secrets,
+                blobs=self._blobs,
+            )
+            await simulation.run()

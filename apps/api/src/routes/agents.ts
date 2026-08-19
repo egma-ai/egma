@@ -43,6 +43,7 @@ import {
 } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
+import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import type { RetellReach } from "../retell/api.ts";
 import { reconcileRetellWebhook } from "../retell/registration.ts";
 import { given, projectNamed, text } from "../http/reading.ts";
@@ -1266,16 +1267,25 @@ export async function agentRoutes(
           options.retellReach ?? {},
         ).catch((cause: unknown) => {
           request.log.error(
-            { err: cause },
-            "could not reach Retell to bring the webhook into line; Egma polls this connection",
+            platformEvent(
+              "egma.retell.webhook.reconcile_failed",
+              "Retell webhook reconciliation failed; Egma will poll this connection",
+              {
+                "error.type": "retell_webhook_reconcile_failed",
+                "exception.type": safeExceptionType(cause),
+              },
+            ),
           );
           return undefined;
         });
 
         if (outcome?.kind === "not-taken") {
           request.log.info(
-            { connectionId, reason: outcome.reason },
-            "Retell did not take the webhook change; Egma polls this connection",
+            platformEvent(
+              "egma.retell.webhook.reconcile_deferred",
+              "Retell did not take the webhook change; Egma will poll this connection",
+              { "error.type": "retell_webhook_not_taken" },
+            ),
           );
         }
 

@@ -15,6 +15,8 @@ fixture in `conftest.py`.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from conftest import (
     OBJECT_STORAGE_ACCESS_KEY_ID,
@@ -267,15 +269,8 @@ async def test_a_refused_credential_leaves_nothing_behind_either(
     behaviour on purpose and it is not a good one — see the spec's Further
     Notes, where the gap is written down.
 
-    **What makes this pass is narrower than it looks, and the difference
-    is worth knowing.** The redacting filter rewrites a record's message
-    and not its traceback: an exception rendered from ``exc_info`` goes
-    out unscrubbed, which was measured rather than assumed. So what keeps
-    the credential out of the log here is partly the store's own
-    discretion — MinIO's ``SignatureDoesNotMatch`` names neither half —
-    and a store that quoted the key id back would land it in this
-    traceback. That hole is `redaction.py`'s and predates object storage;
-    this test is where it will be noticed if a store ever exercises it.
+    The log keeps a stable failure event and exception class, but it does
+    not copy the object store's runtime error text or request details.
     """
     spec = loopback_spec(
         "sim-object-storage-refused",
@@ -302,10 +297,17 @@ async def test_a_refused_credential_leaves_nothing_behind_either(
     )
 
     simulator.stop()
-    assert "SignatureDoesNotMatch" in simulator.output(), (
-        "expected the store's refusal in the log; without it this test is "
-        "scanning output that never held the credential at all"
+    output = simulator.output()
+    platform_logs = [json.loads(line) for line in output.splitlines()]
+    recording_failure = next(
+        record
+        for record in platform_logs
+        if record["otel.event.name"] == "egma.simulation.recording_failed"
     )
+    assert recording_failure["body"] == "simulation recording upload failed"
+    assert recording_failure["error.type"] == "ClientError"
+    assert recording_failure["exception.type"] == "botocore.exceptions.ClientError"
+    assert "SignatureDoesNotMatch" not in output
     for half in (
         OBJECT_STORAGE_ACCESS_KEY_ID,
         WRONG_OBJECT_STORAGE_SECRET_ACCESS_KEY,

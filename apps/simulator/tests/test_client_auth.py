@@ -99,10 +99,8 @@ async def quoting_control_plane() -> AsyncIterator[str]:
     """Refuses every claim by quoting the request back — a plain 400 shape.
 
     This is not a contrived leak. A control plane that says what it could
-    not parse is being helpful, and the claim loop logs the refusal's text
-    to say why work is not arriving. Between those two ordinary behaviors
-    the bearer ends up inside a log line, unless something put it in the
-    redacting filter first.
+    not parse is being helpful. The simulator must not copy that arbitrary
+    response into its platform log.
     """
 
     async def refuse(request: web.Request) -> web.Response:
@@ -126,13 +124,11 @@ async def quoting_control_plane() -> AsyncIterator[str]:
 async def test_a_configured_service_token_never_reaches_a_log_line(
     quoting_control_plane, start_simulator
 ):
-    """The token is registered at start-up, so no log line can carry it.
+    """A refusal body that quotes the token is not copied into a log line.
 
-    A spec's credentials are registered when the spec is claimed. A
-    service token arrives before any of that — it is configuration — so
-    only start-up can hand it over, and nothing else in the suite walks
-    that path. A real process, its real output, and a control plane doing
-    the one ordinary thing that would expose it.
+    The stable event is useful without storing arbitrary text returned by
+    the control plane. The registry is still the last defense for every
+    other log source.
     """
     simulator = start_simulator(
         SimpleNamespace(base_url=quoting_control_plane),
@@ -149,8 +145,7 @@ async def test_a_configured_service_token_never_reaches_a_log_line(
     simulator.stop()
     output = simulator.output()
 
-    # The line that would have carried it is there, and quotes the header
-    # it was sent with — so this is the leak happening, scrubbed.
-    assert "Authorization" in output, "the control plane's quote did not arrive"
+    assert "claim did not land" in output
+    assert "Authorization" not in output
     assert A_TOKEN not in output, "a log line carried the service token"
-    assert "Bearer [redacted]" in output
+    assert "Bearer" not in output

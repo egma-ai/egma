@@ -4,9 +4,9 @@
  * loads before the entry module, why `on` without both required values is
  * refused at boot by name, and why a backend that fails past that check says
  * so on standard error instead of stopping the service. This is that file one
- * app over, minus what a grader does not have: no fastify, and no pino —
- * `log.ts` writes its own JSON lines, which the deployment's filelog
- * collector reads from standard output like everything else's. Its trace
+ * app over, minus what a grader does not have: no fastify. Pino writes JSON
+ * lines, which the deployment's filelog collector reads from standard output
+ * like everything else's. Its trace
  * spans go to the same configured OTLP destination as the API. The collector
  * exporter chooses the span backend; PostHog is the current one. Crash
  * reports use a separate, direct PostHog adapter.
@@ -39,11 +39,12 @@ if (environment.EGMA_TELEMETRY?.trim().toLowerCase() === "on") {
     environment.OTEL_EXPORTER_OTLP_ENDPOINT ??= endpoint;
     environment.OTEL_SERVICE_NAME ??= "egma-grader";
 
-    const [{ NodeSDK }, http, undici, pg, { PostHog }] = await Promise.all([
+    const [{ NodeSDK }, http, undici, pg, pino, { PostHog }] = await Promise.all([
       import("@opentelemetry/sdk-node"),
       import("@opentelemetry/instrumentation-http"),
       import("@opentelemetry/instrumentation-undici"),
       import("@opentelemetry/instrumentation-pg"),
+      import("@opentelemetry/instrumentation-pino"),
       import("posthog-node"),
     ]);
 
@@ -55,6 +56,9 @@ if (environment.EGMA_TELEMETRY?.trim().toLowerCase() === "on") {
         new http.HttpInstrumentation(),
         new undici.UndiciInstrumentation(),
         new pg.PgInstrumentation(),
+        // Pino still writes the one JSON line the deployment collector reads.
+        // This bridge only adds the active trace and span identifiers.
+        new pino.PinoInstrumentation({ disableLogSending: true }),
       ],
     });
     sdk.start();

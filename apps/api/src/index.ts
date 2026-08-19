@@ -13,6 +13,7 @@ import {
 } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
+import { platformEvent } from "./platform-log.ts";
 import { buildApi } from "./server.ts";
 
 const config = loadConfig();
@@ -131,8 +132,14 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       await app.close();
       await disconnect();
       await disconnectClickHouse();
+      app.log.info(platformEvent("egma.service.stopped", "API service stopped"));
     })();
   });
 }
 
 await app.listen({ host: config.host, port: config.port });
+app.log.info(
+  platformEvent("egma.service.started", "API service started", {
+    "server.port": config.port,
+  }),
+);

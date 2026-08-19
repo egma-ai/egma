@@ -6,7 +6,8 @@ import { createTransport } from "nodemailer";
  * A bare self-host has no SMTP credentials and asking for them before anything
  * works is where the pleasant part of a local install ends. So there is one
  * interface and two transports, and **the one that delivers nothing is the
- * default**: it writes the message to the log and says so. Signup completes,
+ * default**: it records that delivery was skipped, but never logs the recipient
+ * or the signed link in the message. Signup completes,
  * verification is simply not required, and an invitation link is shown to the
  * person who created it rather than posted to somebody who will never see it.
  *
@@ -38,9 +39,10 @@ export type EmailSender = {
 };
 
 /**
- * The default, and today the only one. A self-hoster who has configured no
- * SMTP still sees every message egma would have sent, in the place they are
- * already reading when something goes wrong.
+ * The default. Its callback records that delivery was skipped; the server's
+ * callback deliberately ignores the email because it contains personal data
+ * and a signed link. Tests can use a capturing callback to inspect the email
+ * transport without putting that content in a production log.
  */
 export function loggingEmailSender(
   write: (email: Email) => void,
