@@ -75,7 +75,7 @@ beforeAll(async () => {
   // saying which variable.
   await eventually(
     "the service to say it is listening",
-    async () => (output.includes("listening for finished conversations") ? true : undefined),
+    async () => (output.includes("grader service started") ? true : undefined),
     30_000,
   );
 });
@@ -148,7 +148,7 @@ describe("the process the image runs", () => {
     // the store had the row.
     await eventually(
       "the service to say it judged a conversation",
-      async () => (output.includes("judged a conversation") ? true : undefined),
+      async () => (output.includes("grading job finished") ? true : undefined),
       10_000,
     );
 
@@ -159,13 +159,21 @@ describe("the process the image runs", () => {
 
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) {
-      expect(line["claimant"]).toBe("grader-from-the-image");
+      expect(line["service.instance.id"]).toBe("grader-from-the-image");
+      expect(line["egma.log_schema_version"]).toBe(1);
       // Nothing a customer wrote reaches the log — a job id and a count, never
       // a transcript and never a credential.
       expect(JSON.stringify(line)).not.toContain("Booked for Tuesday");
     }
-    expect(lines.some((line) => line["message"] === "judged a conversation")).toBe(
-      true,
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: 30,
+        "otel.event.name": "egma.grading_job.finished",
+        msg: "grading job finished",
+        "egma.simulation_id": expect.any(String),
+        "egma.grading_job_id": expect.any(String),
+        "egma.outcome": "succeeded",
+      }),
     );
   });
 

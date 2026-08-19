@@ -121,12 +121,18 @@ importers:
       '@egma/simulation-contract':
         specifier: workspace:*
         version: link:../../packages/simulation-contract
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.1
       '@opentelemetry/instrumentation':
         specifier: ^0.221.0
         version: 0.221.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/instrumentation-http':
         specifier: ^0.221.0
         version: 0.221.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/instrumentation-pino':
+        specifier: ^0.67.0
+        version: 0.67.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/instrumentation-pg':
         specifier: ^0.73.0
         version: 0.73.0(@opentelemetry/api@1.9.1)
@@ -136,6 +142,9 @@ importers:
       '@opentelemetry/sdk-node':
         specifier: ^0.221.0
         version: 0.221.0(@opentelemetry/api@1.9.1)
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
       posthog-node:
         specifier: ^5.49.1
         version: 5.49.1

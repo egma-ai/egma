@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 
+from .platform_logging import LOG_ATTRIBUTES
+
 REDACTED = "[redacted]"
 
 
@@ -57,7 +59,10 @@ class RedactingFilter(logging.Filter):
     Installed on handlers, not loggers, so records from every library that
     logs through the stdlib pass through it. The record's message is
     rendered early and its args dropped: a lazy ``%s`` argument holding a
-    secret would otherwise be formatted after filtering.
+    secret would otherwise be formatted after filtering. Structured string
+    attributes take the same path. The structlog processor applies this same
+    registry after it extracts the safe exception class and frame locations,
+    so those fields are also scrubbed before output.
     """
 
     def __init__(self, registry: SecretRegistry) -> None:
@@ -67,4 +72,11 @@ class RedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = self._registry.redact(record.getMessage())
         record.args = ()
+
+        attributes = dict(getattr(record, LOG_ATTRIBUTES, {}))
+        for key, value in attributes.items():
+            if isinstance(value, str):
+                attributes[key] = self._registry.redact(value)
+
+        setattr(record, LOG_ATTRIBUTES, attributes)
         return True

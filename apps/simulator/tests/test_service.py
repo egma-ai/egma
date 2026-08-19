@@ -79,7 +79,7 @@ def test_an_over_granting_answer_is_clamped_not_raised_on(tmp_path, caplog):
         "sim-over-0",
         "sim-over-1",
     ]
-    assert "past the 2 declared" in caplog.text
+    assert "exceeded simulator capacity" in caplog.text
 
 
 def test_a_spec_that_does_not_speak_the_contract_never_becomes_a_simulation(
@@ -99,7 +99,7 @@ def test_a_spec_that_does_not_speak_the_contract_never_becomes_a_simulation(
     # The good one still gets through: one bad document does not spoil the
     # rest of the answer.
     assert [spec.simulation_id for spec in executor.accepted] == ["sim-good"]
-    assert "does not speak the" in caplog.text
+    assert "did not match the work contract" in caplog.text
 
 
 def test_credentials_from_an_accepted_spec_are_registered_for_redaction(tmp_path):
@@ -140,7 +140,7 @@ def test_an_id_that_would_make_an_invalid_otel_trace_is_refused_before_running(
     assert [spec.simulation_id for spec in executor.accepted] == [
         "sim-valid-after-zero"
     ]
-    assert "all-zero OpenTelemetry trace id" in caplog.text
+    assert "invalid identifier" in caplog.text
 
 
 class RefusingClient:

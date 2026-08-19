@@ -1,56 +1,46 @@
+import pino, { type Logger } from "pino";
+
 import type { LogLevel } from "./config.ts";
 
+/** The small part of Pino the grader service writes through. */
+export type Log = Pick<Logger, "debug" | "info" | "warn" | "error">;
+
+type Attribute = string | number | boolean;
+
 /**
- * One line per thing that happened, as JSON on standard output.
- *
- * No dependency, because there is nothing here worth one: a container's log is
- * whatever the process writes to its output, and a service with no inbound
- * surface has no request to correlate. What it must never carry is a
- * credential — nothing here reads one, and nothing here is ever handed a
- * conversation's contents.
+ * Pino writes one JSON line to standard output. The deployment collector reads
+ * that line and exports it as OTLP. Pino's OpenTelemetry instrumentation adds
+ * active trace context without creating a second log export path.
  */
+export function makeLog(level: LogLevel, claimant: string): Logger {
+  return pino({
+    level: level.toLowerCase(),
+    base: { "service.instance.id": claimant },
+  });
+}
 
-const RANK: Readonly<Record<LogLevel, number>> = {
-  DEBUG: 10,
-  INFO: 20,
-  WARN: 30,
-  ERROR: 40,
-};
-
-export type Log = {
-  debug(message: string, about?: Record<string, unknown>): void;
-  info(message: string, about?: Record<string, unknown>): void;
-  warn(message: string, about?: Record<string, unknown>): void;
-  error(message: string, about?: Record<string, unknown>): void;
-};
-
-export function makeLog(level: LogLevel, claimant: string): Log {
-  const write = (
-    at: LogLevel,
-    message: string,
-    about?: Record<string, unknown>,
-  ): void => {
-    if (RANK[at] < RANK[level]) return;
-    process.stdout.write(
-      `${JSON.stringify({
-        at: new Date().toISOString(),
-        level: at,
-        claimant,
-        message,
-        ...about,
-      })}\n`,
-    );
-  };
-
+/** Stable fields common to every deliberate grader event. */
+export function platformEvent(
+  name: `egma.${string}`,
+  attributes: Readonly<Record<string, Attribute>> = {},
+): Record<string, Attribute> {
   return {
-    debug: (message, about) => write("DEBUG", message, about),
-    info: (message, about) => write("INFO", message, about),
-    warn: (message, about) => write("WARN", message, about),
-    error: (message, about) => write("ERROR", message, about),
+    "otel.event.name": name,
+    "egma.log_schema_version": 1,
+    ...attributes,
   };
 }
 
-/** What an error says, without a stack and without whatever it wrapped. */
+/** What an error says for the queue's own stored retry reason. */
 export function saying(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * A useful exception class without copying a message or stack into telemetry.
+ * Either may contain provider output, a prompt, or another customer value.
+ */
+export function safeExceptionType(error: unknown): string {
+  const type = error instanceof Error ? error.name : typeof error;
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(type) ? type : "Error";
 }

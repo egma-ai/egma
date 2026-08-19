@@ -1,6 +1,6 @@
 import { ping, pingClickHouse } from "@egma/db";
 import type { Fetch as RetellFetch } from "@egma/retell";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { LogController, type FastifyInstance } from "fastify";
 
 import {
   createIdentity,
@@ -50,6 +50,10 @@ import {
 import type { RetellReach } from "./retell/api.ts";
 import { startOrphanSweep, type OrphanSweep } from "./simulation-sweep.ts";
 import type { Config } from "./config.ts";
+import {
+  platformEvent,
+  PRIVATE_LOG_SERIALIZERS,
+} from "./platform-log.ts";
 
 /** Where the auth provider's own endpoints live, under the shared origin. */
 export const AUTH_BASE_PATH = "/api/auth";
@@ -114,12 +118,17 @@ export type Api = {
 
 export function buildApi(options: ServerOptions): Api {
   const { config } = options;
+  const logger = {
+    level: options.logTo === undefined ? (process.env.LOG_LEVEL ?? "info") : "info",
+    serializers: PRIVATE_LOG_SERIALIZERS,
+    ...(options.logTo === undefined ? {} : { stream: options.logTo }),
+  };
 
   const app = Fastify({
-    logger:
-      options.logTo === undefined
-        ? { level: process.env.LOG_LEVEL ?? "info" }
-        : { level: "info", stream: options.logTo },
+    logger,
+    // Fastify's built-in request lines include the raw URL and client address.
+    // One safe completion record is written below from the route template.
+    logController: new LogController({ disableRequestLogging: true }),
     // Forwarded headers are believed only when somebody said there is a proxy
     // in front. Everything that reads the request's origin — the provider's
     // cookie attributes among them — reads what this resolves.
@@ -132,10 +141,15 @@ export function buildApi(options: ServerOptions): Api {
   const emailSender =
     options.emailSender ??
     (config.smtp === undefined
-      ? loggingEmailSender((email) => {
+      ? loggingEmailSender(() => {
+          // The body contains a signed link and the recipient is personal
+          // data. Neither belongs in platform telemetry. The application flow
+          // already returns the link directly when this transport is active.
           app.log.info(
-            { to: email.to, subject: email.subject, body: email.body },
-            "no mail transport is configured, so this message was not sent",
+            platformEvent(
+              "egma.email.delivery.skipped",
+              "email was not sent because no mail transport is configured",
+            ),
           );
         })
       : smtpEmailSender(config.smtp));
@@ -148,17 +162,12 @@ export function buildApi(options: ServerOptions): Api {
     ...(options.deviceAuthorizationInterval === undefined
       ? {}
       : { deviceAuthorizationInterval: options.deviceAuthorizationInterval }),
-    // The provider says what happened in a sentence and hands the cause along
-    // beside it. Pino writes an `Error` as `{}` under any key but `err`, so
-    // putting a cause anywhere else leaves an operator reading "Failed to run
-    // background task:" with nothing under it. The cause goes where the
-    // serializer looks for it, and whatever else came with it stays beside it.
-    log: (level, message, details) => {
+    // Provider diagnostics are not a second path around the platform log's
+    // privacy boundary. The provider's message and arbitrary detail objects can
+    // contain customer values, so only a safe exception shape reaches Pino.
+    log: (level, _message, details) => {
       const cause = details.find((detail) => detail instanceof Error);
-      app.log[level](
-        { err: cause, details: details.filter((detail) => detail !== cause) },
-        message,
-      );
+      app.log[level]({ err: cause }, "identity provider reported a diagnostic");
     },
     hooks: {
       admitIdentity: admitIdentity(config.singleOrganization),
@@ -221,6 +230,28 @@ export function buildApi(options: ServerOptions): Api {
     return reply
       .code(healthy ? 200 : 503)
       .send({ status: healthy ? "ok" : "unavailable", postgres, clickhouse });
+  });
+
+  app.addHook("onResponse", (request, reply, done) => {
+    const route = request.routeOptions.url;
+    if (route === "/health" && reply.statusCode < 400) {
+      done();
+      return;
+    }
+
+    const event = platformEvent(
+      "egma.http.server.request.finished",
+      "HTTP request finished",
+      {
+        "http.request.method": request.method,
+        "http.route": route ?? "<unmatched>",
+        "http.response.status_code": reply.statusCode,
+        duration_ms: reply.elapsedTime,
+      },
+    );
+    if (reply.statusCode >= 500) request.log.error(event);
+    else request.log.info(event);
+    done();
   });
 
   // Read before login and before any repository identifier is sent. It is

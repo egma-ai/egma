@@ -241,8 +241,11 @@ describe("the token gate", () => {
 
 describe("claiming work", () => {
   it("answers a queued simulation as a schema-valid spec, credentials included", async () => {
+    const lines: string[] = [];
     const { ada, key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_spec");
+      await aCustomerReadyToRun("claims_spec", {
+        logTo: { write: (line) => lines.push(line) },
+      });
     const { runId, simulationId } = await aQueuedRun(key, connectionId, versionId);
 
     const answered = await claim(api.config.simulatorServiceToken, {
@@ -263,6 +266,17 @@ describe("claiming work", () => {
 
     expect(spec.contract_version).toBe(1);
     expect(spec.simulation_id).toBe(simulationId);
+    expect(
+      lines
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find(
+          (line) =>
+            line["otel.event.name"] === "egma.simulation.dispatched",
+        ),
+    ).toMatchObject({
+      "egma.run_id": runId,
+      "egma.simulation_id": simulationId,
+    });
     expect(spec.modality).toBe("chat");
     expect(spec.connection).toEqual({
       type: "retell",

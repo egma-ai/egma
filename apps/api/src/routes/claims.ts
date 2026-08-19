@@ -20,6 +20,7 @@ import type { FastifyInstance } from "fastify";
 
 import { acceptsServiceToken } from "../auth/service-token.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
+import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import {
   verifyRetellDirectChatAgent,
   type RetellDirectTargetCheck,
@@ -511,13 +512,19 @@ export async function claimRoutes(
         const spec = assembled[index];
         if (spec === undefined) continue;
         if ("retryable" in spec) {
-          const retryable = String(spec.retryable);
           // A provider outage says nothing about the customer or their agent.
           // Give this lease back instead of minting a terminal error; a later
           // claim repeats the bounded check.
           request.log.warn(
-            { simulationId: claim.id, runId: claim.runId },
-            retryable,
+            platformEvent(
+              "egma.simulation.dispatch.deferred",
+              "simulation dispatch was deferred after provider preflight",
+              {
+                "egma.simulation_id": claim.id,
+                "egma.run_id": claim.runId,
+                "error.type": "provider_preflight_failed",
+              },
+            ),
           );
           const released = await releaseSimulationClaim(
             claim.auth,
@@ -539,8 +546,15 @@ export async function claimRoutes(
             );
             if (canceled === undefined) {
               request.log.error(
-                { simulationId: claim.id, runId: claim.runId },
-                `simulation ${claim.id} could neither release nor land its canceled transient provider preflight`,
+                platformEvent(
+                  "egma.simulation.claim.release_failed",
+                  "simulation claim could not be released or canceled",
+                  {
+                    "egma.simulation_id": claim.id,
+                    "egma.run_id": claim.runId,
+                    "error.type": "simulation_claim_release_failed",
+                  },
+                ),
               );
             }
           }
@@ -558,8 +572,15 @@ export async function claimRoutes(
           // the judgement is minted beside it, and a run waiting only on
           // this row settles with truthful counts.
           request.log.error(
-            { simulationId: claim.id, runId: claim.runId },
-            `simulation ${claim.id} was claimed and could not be dispatched: ${spec.unbuildable}`,
+            platformEvent(
+              "egma.simulation.dispatch.failed",
+              "claimed simulation could not be dispatched",
+              {
+                "egma.simulation_id": claim.id,
+                "egma.run_id": claim.runId,
+                "error.type": "simulation_spec_unbuildable",
+              },
+            ),
           );
           await failSimulationDispatch(
             claim.auth,
@@ -571,15 +592,31 @@ export async function claimRoutes(
             // saying so costs one log line rather than aborting a batch a
             // simulator is standing ready to conduct.
             request.log.error(
-              { simulationId: claim.id, runId: claim.runId },
-              `simulation ${claim.id} could not even land dispatch_failed: ${
-                fault instanceof Error ? fault.message : String(fault)
-              }`,
+              platformEvent(
+                "egma.simulation.dispatch.failure_record_failed",
+                "simulation dispatch failure could not be recorded",
+                {
+                  "egma.simulation_id": claim.id,
+                  "egma.run_id": claim.runId,
+                  "error.type": "dispatch_failure_record_failed",
+                  "exception.type": safeExceptionType(fault),
+                },
+              ),
             );
           });
           continue;
         }
         specs.push(spec);
+        request.log.info(
+          platformEvent(
+            "egma.simulation.dispatched",
+            "simulation was placed in a claim response",
+            {
+              "egma.simulation_id": claim.id,
+              "egma.run_id": claim.runId,
+            },
+          ),
+        );
       }
 
       return await reply.send({ specs });

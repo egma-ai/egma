@@ -466,16 +466,11 @@ describe("asking for a link", () => {
   });
 
   /**
-   * And when a message that nothing waits for does not go, **an operator can
-   * read why**.
-   *
-   * The log is the only place such a failure can appear, and the provider hands
-   * the cause along beside its own sentence. Pino writes an `Error` as `{}`
-   * under any key but `err`, so a bridge that put the cause anywhere else left
-   * "Failed to run background task:" with an empty object under it: an operator
-   * learns that something broke and nothing about what.
+   * A mail failure keeps its exception class and source frames. Its message is
+   * removed before the log is written because an SMTP response can quote the
+   * recipient or message content.
    */
-  it("writes the cause of a message that did not go, where an operator reads it", async () => {
+  it("writes a safe exception shape when a message does not go", async () => {
     const lines: string[] = [];
     api = await createApi("reset_send_failed", {
       emailDelivers: true,
@@ -493,8 +488,12 @@ describe("asking for a link", () => {
         .find((line) => line.level >= 50 && line.err !== undefined),
     );
     const cause = failure.err as { type?: string; message?: string; stack?: string };
-    expect(cause.message).toBe("the smtp server refused the message");
-    expect(cause.stack).toContain("the smtp server refused the message");
+    expect(cause.type).toBe("Error");
+    expect(cause.message).toBe("[redacted]");
+    expect(cause.stack).toBe("");
+    expect(JSON.stringify(failure)).not.toContain(
+      "the smtp server refused the message",
+    );
   });
 
   /**

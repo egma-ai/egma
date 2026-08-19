@@ -7,11 +7,38 @@ import {
   type GradingClaim,
   type Listening,
 } from "@egma/db";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 import type { Config } from "./config.ts";
 import { gradeClaim } from "./grade.ts";
 import type { JudgeMakers } from "./judge/index.ts";
-import { saying, type Log } from "./log.ts";
+import {
+  platformEvent,
+  safeExceptionType,
+  saying,
+  type Log,
+} from "./log.ts";
+
+const tracer = trace.getTracer("@egma/grader");
+
+/** Opaque joins shared by every event about one grading job. */
+function claimAttributes(
+  claim: GradingClaim,
+): Readonly<Record<string, string | number>> {
+  return {
+    "egma.grading_job_id": claim.id,
+    "egma.organization_id": claim.organizationId,
+    "egma.project_id": claim.projectId,
+    "egma.source": claim.source,
+    "egma.attempt": claim.attempts,
+    ...(claim.simulationId === null
+      ? {}
+      : { "egma.simulation_id": claim.simulationId }),
+    ...(claim.traceId === null
+      ? {}
+      : { "egma.production_trace_id": claim.traceId }),
+  };
+}
 
 /**
  * The service: claim, judge, finish, and wait to be woken.
@@ -101,9 +128,10 @@ export function startService(options: ServiceOptions): Service {
 
   const finished = (async (): Promise<void> => {
     watching = await watchGradingWork(nudge);
-    log.info("listening for finished conversations", {
-      capacity: config.capacity,
-    });
+    log.info(
+      platformEvent("egma.service.started", { capacity: config.capacity }),
+      "grader service started",
+    );
 
     while (running) {
       let claimed: readonly GradingClaim[] = [];
@@ -117,11 +145,16 @@ export function startService(options: ServiceOptions): Service {
       } catch (error) {
         // The control plane is unreachable or refused. Say so once and wait;
         // there is nothing held, so there is nothing to lose by waiting.
-        log.error("could not claim grading work", { error: saying(error) });
+        log.error(
+          platformEvent("egma.grading_job.claim_failed", {
+            "error.type": "grading_job_claim_failed",
+            "exception.type": safeExceptionType(error),
+          }),
+          "grader could not claim work",
+        );
       }
 
       if (claimed.length > 0) {
-        log.debug("claimed", { jobs: claimed.length });
         await Promise.all(claimed.map((claim) => holdAndGrade(claim, options)));
         // A full claim means the queue may hold more, so ask again before
         // sleeping — otherwise a burst of two hundred conversations would be
@@ -161,15 +194,43 @@ async function holdAndGrade(
   claim: GradingClaim,
   options: ServiceOptions,
 ): Promise<void> {
+  await tracer.startActiveSpan(
+    "egma.grading_job.process",
+    { attributes: claimAttributes(claim) },
+    async (span) => {
+      try {
+        await gradeHeldClaim(claim, options);
+      } finally {
+        span.end();
+      }
+    },
+  );
+}
+
+/** One claimed job while its platform trace is active. */
+async function gradeHeldClaim(
+  claim: GradingClaim,
+  options: ServiceOptions,
+): Promise<void> {
   const { config, log } = options;
+  const about = claimAttributes(claim);
+
+  log.info(
+    platformEvent("egma.grading_job.claimed", about),
+    "grading job claimed",
+  );
 
   const beating = setInterval(() => {
     void recordGradingHeartbeat(claim.auth, claim.id, config.claimant).catch(
       (error: unknown) => {
-        log.warn("a heartbeat did not land", {
-          job: claim.id,
-          error: saying(error),
-        });
+        log.warn(
+          platformEvent("egma.grading_job.heartbeat_failed", {
+            ...about,
+            "error.type": "grading_job_heartbeat_failed",
+            "exception.type": safeExceptionType(error),
+          }),
+          "grading job heartbeat failed",
+        );
       },
     );
   }, config.heartbeatSeconds * 1000);
@@ -184,19 +245,28 @@ async function holdAndGrade(
     // version replaces rather than doubles. Finishing first would risk the
     // opposite: a job marked judged with nothing written under it.
     await finishGradingJob(claim.auth, claim.id, config.claimant);
-    log.info("judged a conversation", {
-      job: claim.id,
-      source: graded.source,
-      conversation: graded.traceId,
-      graders: graded.graders,
-      verdicts: graded.verdicts,
-    });
+    log.info(
+      platformEvent("egma.grading_job.finished", {
+        ...about,
+        "egma.outcome": "succeeded",
+        grader_count: graded.graders,
+        verdict_count: graded.verdicts,
+      }),
+      "grading job finished",
+    );
   } catch (error) {
-    log.error("could not judge a conversation", {
-      job: claim.id,
-      attempt: claim.attempts,
-      error: saying(error),
-    });
+    const span = trace.getActiveSpan();
+    span?.setAttribute("error.type", "grading_job_failed");
+    span?.setStatus({ code: SpanStatusCode.ERROR });
+    log.error(
+      platformEvent("egma.grading_job.finished", {
+        ...about,
+        "egma.outcome": "failed",
+        "error.type": "grading_job_failed",
+        "exception.type": safeExceptionType(error),
+      }),
+      "grading job failed",
+    );
     await releaseGradingJob(
       claim.auth,
       claim.id,
@@ -205,10 +275,14 @@ async function holdAndGrade(
     ).catch((releasing: unknown) => {
       // The lease is the backstop under this: a job nobody could release is
       // claimable again the moment the copy holding it stops answering.
-      log.warn("could not release the job either", {
-        job: claim.id,
-        error: saying(releasing),
-      });
+      log.warn(
+        platformEvent("egma.grading_job.release_failed", {
+          ...about,
+          "error.type": "grading_job_release_failed",
+          "exception.type": safeExceptionType(releasing),
+        }),
+        "failed grading job could not be released",
+      );
       return undefined;
     });
   } finally {
