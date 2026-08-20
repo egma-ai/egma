@@ -261,8 +261,8 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         from egma_simulator.speech import SCRIPTED_PAIR
         from egma_simulator.walk import WalkControls
 
-        def spec_for(connection):
-            return SimulationSpec.from_document({
+        def spec_for(connection, platform=None):
+            document = {
                 "contract_version": 2,
                 "simulation_id": "sim-unconfigured",
                 "modality": "voice",
@@ -294,21 +294,32 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
                         "key": "sentinel-tts-key",
                     },
                 },
-            })
+            }
+            if platform is not None:
+                document["platform"] = platform
+            return SimulationSpec.from_document(document)
 
         LOOPBACK = spec_for({
             "type": "loopback",
             "config": {"replies": ["Noted."]},
             "credentials": None,
         })
-        PHONE = spec_for({
-            "type": "phone",
-            "config": {
-                "phoneNumber": "+15551234567",
-                "scripted": {"replies": ["Noted."]},
+        PHONE = spec_for(
+            {
+                "type": "phone",
+                "config": {
+                    "phoneNumber": "+15551234567",
+                    "scripted": {"replies": ["Noted."]},
+                },
+                "credentials": None,
             },
-            "credentials": None,
-        })
+            {
+                "carrier": {
+                    "trunk_address": "egma-fixture.pstn.twilio.com",
+                    "trunk_number": "+15550000000",
+                }
+            },
+        )
 
         def persona_for(spec):
             return Persona(
