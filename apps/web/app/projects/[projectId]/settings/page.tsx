@@ -259,7 +259,13 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                 message={refused.message}
                 action={
                   refused.error === IDENTITY_CONFLICT ? (
-                    <Button onClick={reload}>Read this project again</Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={reload}
+                    >
+                      Read this project again
+                    </Button>
                   ) : undefined
                 }
               />
