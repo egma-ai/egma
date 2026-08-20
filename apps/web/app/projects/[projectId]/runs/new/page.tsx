@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
@@ -29,15 +30,15 @@ import {
   type ListedTest,
   type TestPage,
 } from "../../../../../lib/tests.ts";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import {
-  Button,
-  ButtonLink,
   Checkbox,
   Field,
   Problem,
   Refused,
   Select,
-  TextInput,
 } from "../../../../../ui/controls.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
@@ -50,7 +51,35 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import styles from "./builder.module.css";
+
+/*
+ * The run builder is one ordered, full-width path, and these are the parts of
+ * it that repeat. Each is this route's own layout: the shared components it
+ * composes bring their own.
+ */
+
+/** One panel: a step, or the start block under them. */
+const PANEL =
+  "flex min-w-0 flex-col rounded-card border border-border bg-surface p-5 max-[40rem]:p-4";
+
+/**
+ * A step's number and its heading on one visual row.
+ *
+ * The number column is the control size, so the heading lines up with the
+ * content indented under it below.
+ */
+const STEP_HEADER =
+  "grid min-w-0 grid-cols-[var(--control-lg)_minmax(0,1fr)] items-start gap-4";
+
+/**
+ * A panel heading. `DESIGN.md`: "Headings carry no size of their own. Every
+ * heading takes its size from a class." This is that class, and `text-lg` is
+ * the 24px lead step with its own line height and tracking.
+ */
+const PANEL_HEADING = "m-0 text-lg font-medium text-foreground";
+
+/** The final action, full width, with whatever has to be said under it. */
+const START_ACTION = "flex flex-col gap-2 [&>button]:w-full";
 
 /**
  * Planning a run, and starting it.
@@ -100,24 +129,45 @@ function Step({
   const headingId = `run-step-${String(number)}-title`;
 
   return (
-    <li className={styles.step}>
+    <li className="min-w-0">
       <section
-        className={styles.stepSection}
+        className={cn(PANEL, "gap-4")}
         aria-label={`Step ${String(number)} of 3: ${title}`}
       >
-        <header className={styles.stepHeader}>
+        <header className={STEP_HEADER}>
           <div
-            className={styles.stepNumber}
+            className={cn(
+              "flex w-(--control-lg) min-h-(--control-lg) items-center justify-center",
+              "rounded-button border border-border bg-surface-soft",
+              "text-sm text-foreground tabular-nums",
+            )}
             aria-hidden="true"
           >
             {number}
           </div>
-          <div className={styles.stepHeading}>
-            <h2 id={headingId}>{title}</h2>
-            {lead === undefined ? null : <p className={styles.stepLead}>{lead}</p>}
+          <div className="min-w-0">
+            <h2 className={PANEL_HEADING} id={headingId}>
+              {title}
+            </h2>
+            {lead === undefined ? null : (
+              <p className="mt-1 mb-0 text-sm text-muted-foreground">{lead}</p>
+            )}
           </div>
         </header>
-        <div className={styles.stepContent}>{children}</div>
+        {/*
+          The content lines up under the heading rather than under the number,
+          and gives that up entirely once the panel is narrow enough that the
+          indent costs more than it explains.
+        */}
+        <div
+          className={cn(
+            "min-w-0 ms-[calc(var(--control-lg)+var(--space-4))] max-[68rem]:ms-0",
+            "[&>p]:m-0 [&>p]:text-sm [&>p]:text-muted-foreground",
+            "[&>select]:max-w-[40rem]",
+          )}
+        >
+          {children}
+        </div>
       </section>
     </li>
   );
@@ -321,7 +371,9 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
           ]}
           lead="Choose one agent, one connection and the tests to run."
           action={
-            <ButtonLink href={projectPath(projectId, "runs")}>Cancel</ButtonLink>
+            <Button asChild variant="secondary">
+              <Link href={projectPath(projectId, "runs")}>Cancel</Link>
+            </Button>
           }
         />
         <PageBody>
@@ -332,8 +384,11 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
             </Problem>
           )}
 
-          <div className={styles.builderLayout}>
-            <ol className={styles.steps} aria-label="Run setup">
+          <div className="flex min-w-0 flex-col gap-6">
+            <ol
+              className="m-0 flex min-w-0 list-none flex-col gap-6 p-0"
+              aria-label="Run setup"
+            >
               <Step
                 number={1}
                 title="Agent"
@@ -446,23 +501,31 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
             </ol>
 
             <section
-              className={styles.startPanel}
+              className={cn(PANEL, "gap-4")}
               aria-labelledby="start-run-title"
             >
-              <header className={styles.startHeader}>
-                <h2 id="start-run-title">Start run</h2>
+              <header className="border-b border-border pb-4">
+                <h2 className={PANEL_HEADING} id="start-run-title">
+                  Start run
+                </h2>
               </header>
 
-              <div className={styles.runNameField}>
+              <div className="flex max-w-[40rem] flex-col gap-1">
                 <Field label="Run name" htmlFor="run-name">
-                  <TextInput
+                  <Input
                     id="run-name"
+                    type="text"
                     placeholder="Name this run"
                     value={runName}
                     required
-                    invalid={runNameError !== null}
-                    describedBy={runNameError === null ? undefined : "run-name-error"}
-                    onChange={(next) => {
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-invalid={runNameError !== null ? true : undefined}
+                    aria-describedby={
+                      runNameError === null ? undefined : "run-name-error"
+                    }
+                    onChange={(event) => {
+                      const next = event.target.value;
                       beginNewIntent();
                       setRunName(next);
                       if (next.trim() !== "") setRunNameError(null);
@@ -470,7 +533,11 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
                   />
                 </Field>
                 {runNameError === null ? null : (
-                  <p className={styles.fieldError} id="run-name-error" role="alert">
+                  <p
+                    className="m-0 text-sm text-failure"
+                    id="run-name-error"
+                    role="alert"
+                  >
                     {runNameError}
                   </p>
                 )}
@@ -513,16 +580,39 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
         <Dialog title="Start this run?" onClose={() => setConfirming(false)}>
           {(dismiss) => (
             <>
-              <p className={styles.confirmationCopy}>
+              {/*
+                No padding of its own any more. The shared dialog panel owns
+                the inset now, and this route was still adding the one its own
+                stylesheet gave it before that — which put the copy and the
+                actions eighteen pixels inside the title above them. One
+                inset, from the component that draws the panel.
+              */}
+              <p className="m-0 text-sm text-foreground">
                 {planned.runnable_simulation_count}{" "}
                 {planned.runnable_simulation_count === 1
                   ? "simulation"
                   : "simulations"}{" "}
                 will be conducted.
               </p>
-              <div className={styles.confirmationActions}>
-                <Button onClick={dismiss}>Cancel</Button>
-                <Button weight="strong" busy={starting} onClick={() => void start()}>
+              <div
+                className={cn(
+                  "mt-5 flex justify-end gap-2",
+                  "max-[40rem]:flex-col-reverse max-[40rem]:[&>button]:w-full",
+                )}
+              >
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => dismiss()}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={starting}
+                  aria-busy={starting ? "true" : undefined}
+                  onClick={() => void start()}
+                >
                   Start run
                 </Button>
               </div>
@@ -545,18 +635,34 @@ function TestChoices({
   readonly onChoose: (chosen: readonly string[]) => void;
 }) {
   return (
-    <div className={styles.selection}>
-      <div className={styles.testActions} aria-label="Test selection">
-        <Button onClick={() => onChoose(tests.map((test) => test.id))}>
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap gap-2" aria-label="Test selection">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => onChoose(tests.map((test) => test.id))}
+        >
           Select all
         </Button>
-        <Button onClick={() => onChoose([])}>Clear all</Button>
+        <Button type="button" variant="secondary" onClick={() => onChoose([])}>
+          Clear all
+        </Button>
       </div>
-      <ul className={styles.testList} aria-label="Tests that apply to this agent">
+      <ul
+        className="m-0 min-w-0 list-none rounded-input border border-border p-0"
+        aria-label="Tests that apply to this agent"
+      >
         {tests.map((test) => {
           const inputId = `include-test-${test.id}`;
           return (
-            <li className={styles.testChoice} key={test.id}>
+            <li
+              className={cn(
+                "grid min-w-0 grid-cols-[var(--control-lg)_minmax(0,1fr)] items-center",
+                "bg-surface px-3 py-2 max-[40rem]:px-2",
+                "not-first:border-t not-first:border-border",
+              )}
+              key={test.id}
+            >
               <Checkbox
                 id={inputId}
                 label={`Include ${test.name}`}
@@ -569,8 +675,13 @@ function TestChoices({
                   )
                 }
               />
-              <label className={styles.testChoiceCopy} htmlFor={inputId}>
-                <span className={styles.testChoiceName}>{test.name}</span>
+              <label
+                className="flex min-w-0 cursor-pointer flex-col gap-1 py-1"
+                htmlFor={inputId}
+              >
+                <span className="min-w-0 text-base text-foreground [overflow-wrap:anywhere]">
+                  {test.name}
+                </span>
               </label>
             </li>
           );
@@ -588,11 +699,29 @@ function StartWaiting({
   readonly reason: string;
   readonly busy?: boolean;
 }) {
+  const said = useId();
+
   return (
-    <div className={styles.startAction}>
-      <Button weight="strong" disabled busy={busy} why={reason}>
+    <div className={START_ACTION}>
+      {/*
+        Disabled rather than hidden, and the reason said where anybody can
+        reach it: the control set this replaces wrote `why` onto the page
+        beside the control and pointed at it with `aria-describedby`, so a
+        keyboard and a screen reader got the sentence and not only a pointer.
+        That is kept here rather than collapsed into a `title`.
+      */}
+      <Button
+        type="button"
+        disabled
+        aria-busy={busy ? "true" : undefined}
+        aria-describedby={said}
+        title={reason}
+      >
         Start run
       </Button>
+      <span className="max-w-[56ch] text-sm text-muted-foreground" id={said}>
+        {reason}
+      </span>
     </div>
   );
 }
@@ -613,6 +742,18 @@ function StartControls({
   readonly refused: Refusal | null;
   readonly onStart: () => void;
 }) {
+  const said = useId();
+  /*
+   * Why Start is not available, worked out once. The control set this
+   * replaces showed the sentence only while the control was inert, so it is
+   * computed from the same condition rather than from a second one.
+   */
+  const why = !mayStart
+    ? "Your role cannot start a run."
+    : blocked === null
+      ? undefined
+      : "Resolve the refusal above before starting this run.";
+
   return (
     <>
       {/*
@@ -627,8 +768,13 @@ function StartControls({
        * which on a results page looks very like everything having passed.
        */}
       {blocked === null && judgesNothing(plan) ? (
-        <div className={styles.attention}>
-          <p className={styles.attentionTitle}>Attention</p>
+        <div
+          className={cn(
+            "rounded-input border border-border bg-surface-soft p-4",
+            "[&_p]:m-0 [&_p]:text-sm [&_p]:text-foreground",
+          )}
+        >
+          <p className="mb-1 font-medium">Attention</p>
           <p>
             No grader is running in this project, so this run will conduct every
             simulation and come back with nothing judged. Press Use on a grader
@@ -642,22 +788,22 @@ function StartControls({
         <Refused message={refused.message} />
       )}
 
-      <div className={styles.startAction}>
+      <div className={START_ACTION}>
         <Button
-          weight="strong"
-          disabled={!mayStart || blocked !== null}
-          busy={starting}
-          why={
-            !mayStart
-              ? "Your role cannot start a run."
-              : blocked === null
-                ? undefined
-                : "Resolve the refusal above before starting this run."
-          }
+          type="button"
+          disabled={!mayStart || blocked !== null || starting}
+          aria-busy={starting ? "true" : undefined}
+          aria-describedby={why === undefined ? undefined : said}
+          title={why}
           onClick={onStart}
         >
           {starting ? "Starting…" : "Start run"}
         </Button>
+        {why === undefined ? null : (
+          <span className="max-w-[56ch] text-sm text-muted-foreground" id={said}>
+            {why}
+          </span>
+        )}
       </div>
     </>
   );
