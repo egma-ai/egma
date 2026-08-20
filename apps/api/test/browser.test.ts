@@ -3476,9 +3476,11 @@ describe("the complete product, walked in order in a second project", () => {
   /**
    * What a measurement is, read from a real browser.
    *
-   * A rule in a stylesheet is not a measurement — a browser decides whether it
-   * applied, which is the whole reason these two live here rather than in a
-   * regex over `system.module.css`.
+   * A rule is not a measurement — a browser decides whether it applied, which
+   * is the whole reason these two live here rather than in a regex over the
+   * source. That was already true when the rules sat in one stylesheet, and it
+   * is more true now that the classes live beside their components: a utility
+   * in a class list says even less about what was drawn than a rule did.
    */
   async function heightOf(which: Page, selector: string): Promise<number> {
     return which
@@ -3715,9 +3717,9 @@ describe("the complete product, walked in order in a second project", () => {
     /**
      * A change of visual direction, applied without touching a page.
      *
-     * The developer's hands-on pass is an edit to `tokens.css` and nothing
-     * else, and that promise is only worth making if a token really does reach
-     * every page. So one is moved here, at runtime, and two pages that share
+     * The developer's hands-on pass is an edit to
+     * `apps/web/ui/tailwind-theme.css` and nothing else, and that promise is
+     * only worth making if a value really does reach every page. So one is moved here, at runtime, and two pages that share
      * nothing but the components are held to following it — which they cannot
      * do if either of them drew its own.
      */
@@ -3788,7 +3790,8 @@ describe("the complete product, walked in order in a second project", () => {
     /**
      * Compact, and measurably so.
      *
-     * The direction is written down in `tokens.css` — a sidebar narrow enough
+     * The direction is written down in `apps/web/ui/tailwind-theme.css` — a
+     * sidebar narrow enough
      * to leave the screen to the data, a row that is one line of reading, a
      * control that sits in a toolbar rather than becoming it. What is held here
      * is the direction and not the numbers: the final art direction and the

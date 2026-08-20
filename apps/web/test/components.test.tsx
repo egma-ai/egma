@@ -493,6 +493,32 @@ describe("a binary choice", () => {
     expect((checkbox as HTMLInputElement).checked).toBe(true);
   });
 
+  /**
+   * A 44px target around an 18px box.
+   *
+   * `DESIGN.md` asks for a 44px pointer target on a coarse pointer; it does not
+   * ask for a 44px checkbox. The label is the target, because a label activates
+   * the control it wraps, so it is what grows — and only on a coarse pointer,
+   * so a mouse sees no change at all.
+   *
+   * A class assertion for the reason `design-system.test.tsx` writes down: jsdom
+   * loads no stylesheet, so what is guarded is the mapping. `pointer-coarse` is
+   * an egma variant, not a Tailwind one, and it is the whole of this fix — a
+   * later tidy that drops it takes the target back to 18px and nothing else on
+   * the page would look any different.
+   */
+  it("gives the checkbox a coarse-pointer target without growing its box", () => {
+    render(<Checkbox id="required-grader" checked onChange={() => undefined} />);
+
+    const box = screen.getByRole("checkbox");
+    expect(box.className).toContain("size-[18px]");
+
+    const target = box.parentElement;
+    expect(target?.tagName).toBe("LABEL");
+    expect(target?.className).toContain("size-[18px]");
+    expect(target?.className).toContain("pointer-coarse:size-(--tap-target)");
+  });
+
   it("connects the field hint to the native checkbox", () => {
     render(
       <Field

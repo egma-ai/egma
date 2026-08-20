@@ -36,7 +36,7 @@ Modules surface read one declaration instead of two copies of it.
 
 Where the pieces live:
 
-- `apps/web/ui/tailwind-theme.css` owns shared visual values, including the derived ones such as a status chip's edge and the dialog scrim, and hands them to Tailwind in the same file. Change a value here and nowhere else. The values are declared in an unlayered `:root`; the `@theme` keys below them are each a `var()` into one of those declarations and hold no value of their own. The unlayered part is load-bearing: it is what makes egma's `--radius-sm`, `--ease-out` and `--ease-in-out` win over Tailwind's defaults of the same name.
+- `apps/web/ui/tailwind-theme.css` owns shared visual values, including the derived ones such as a status chip's edge and the dialog scrim, and hands them to Tailwind in the same file. Change a value here and nowhere else. The values are declared in an unlayered `:root`; the `@theme` keys below them are each a `var()` into one of those declarations and hold no value of their own. The unlayered part is load-bearing: five names are declared twice — `--radius-sm`, `--radius-md`, `--radius-lg`, `--ease-out` and `--ease-in-out` — and being outside every layer is what makes egma's value win each one. Moving the declarations into `@theme` would hand all five back to Tailwind.
 - `apps/web/components/ui/` holds the shadcn primitives. Add one with the shadcn CLI; `components.json` points it at the right places.
 - `apps/web/ui/` holds the shared components built from those primitives — the table, the dialog, the menu, the form, the shell.
 - `apps/web/lib/utils.ts` holds `cn`, which every primitive merges a caller's classes with.

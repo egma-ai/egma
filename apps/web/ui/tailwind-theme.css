@@ -29,12 +29,23 @@
  *    rule itself.
  * 2. **Unlayered outranks `@layer theme`.** Tailwind's defaults are declared
  *    inside a cascade layer and the blocks below are `:root` outside every
- *    layer, so unlayered wins whatever the specificity. Where a Tailwind
- *    default and an egma value share a name — `--radius-sm`, `--ease-out`,
- *    `--ease-in-out` — the egma value is already the one that applies. This is
- *    load-bearing rather than incidental: moving these declarations into
- *    `@theme` would put them in that layer and hand those three names back to
- *    Tailwind.
+ *    layer, so unlayered wins whatever the specificity.
+ *
+ *    **Five names are declared twice, and egma wins all five.** The whole
+ *    list, because a partial one invites somebody to move the block into a
+ *    layer believing the rest are safe:
+ *
+ *    | Name | Tailwind's | egma's |
+ *    | --- | --- | --- |
+ *    | `--radius-sm` | `0.25rem` | `6px` |
+ *    | `--radius-md` | `0.375rem` | `8px` |
+ *    | `--radius-lg` | `0.5rem` | `12px` |
+ *    | `--ease-out` | `cubic-bezier(0, 0, 0.2, 1)` | `cubic-bezier(0.23, 1, 0.32, 1)` |
+ *    | `--ease-in-out` | `cubic-bezier(0.4, 0, 0.2, 1)` | `cubic-bezier(0.77, 0, 0.175, 1)` |
+ *
+ *    This is load-bearing rather than incidental: moving these declarations
+ *    into `@theme` would put them in that layer and hand all five names back
+ *    to Tailwind — every radius in the product and two of its easings.
  *
  * A key may not reference its own name. `@theme inline { --text-sm:
  * var(--text-sm) }` compiles, but it emits a circular declaration that only
