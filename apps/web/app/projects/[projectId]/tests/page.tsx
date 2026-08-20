@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { readJson, type Refusal } from "../../../../lib/api.ts";
 import { agentsQuery, type AgentPage } from "../../../../lib/agents.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
@@ -16,14 +20,7 @@ import {
   type ListedTest,
   type TestPage,
 } from "../../../../lib/tests.ts";
-import {
-  Badge,
-  ButtonLink,
-  Choice,
-  Select,
-  TextInput,
-  Toolbar,
-} from "../../../../ui/controls.tsx";
+import { Choice, Toolbar } from "../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import {
@@ -68,11 +65,11 @@ function Applies({ test }: { readonly test: ListedTest }) {
 
   if (test.agents.length === 0) {
     // Only an upgrade can produce this, and Restore takes an agent to fix it.
-    return <Badge tone="bad">No agent</Badge>;
+    return <Badge variant="failure">No agent</Badge>;
   }
   if (!runnable && test.archived_at === null) {
     return (
-      <Badge tone="warn" title="Every agent this test applies to is archived.">
+      <Badge variant="warning" title="Every agent this test applies to is archived.">
         {test.agents.length} archived
       </Badge>
     );
@@ -238,16 +235,25 @@ function Tests({ projectId }: { readonly projectId: string }) {
       ? "There is no project here to write a test in."
       : `Your ${String(role)} role cannot write tests. Ask an organization admin to change your role.`;
 
+  /**
+   * The way to write a test, and what it becomes when it is not this
+   * person's.
+   *
+   * **A disabled control is genuinely inert or it is a lie.** A link cannot be
+   * disabled: `aria-disabled` on an anchor greys it out and it still follows on
+   * click and still takes the keyboard. So when this is not available it stops
+   * being a link and becomes a disabled button, which carries the reason where
+   * a keyboard and a screen reader can reach it.
+   */
   const author = () =>
-    role === null ? undefined : (
-      <ButtonLink
-        href={projectPath(projectId, "tests", "new")}
-        weight="strong"
-        disabled={!mayAuthor}
-        why={mayAuthor ? undefined : whyNot}
-      >
+    role === null ? undefined : mayAuthor ? (
+      <Button asChild>
+        <Link href={projectPath(projectId, "tests", "new")}>Write a test</Link>
+      </Button>
+    ) : (
+      <Button type="button" disabled why={whyNot}>
         Write a test
-      </ButtonLink>
+      </Button>
     );
 
   function body() {
@@ -262,9 +268,11 @@ function Tests({ projectId }: { readonly projectId: string }) {
           message={answer.refusal.message}
           action={
             elsewhere === undefined ? undefined : (
-              <ButtonLink href={projectLanding(elsewhere.id)}>
-                Open {elsewhere.name}
-              </ButtonLink>
+              <Button asChild variant="secondary">
+                <Link href={projectLanding(elsewhere.id)}>
+                  Open {elsewhere.name}
+                </Link>
+              </Button>
             )
           }
         />
@@ -389,12 +397,14 @@ function Tests({ projectId }: { readonly projectId: string }) {
       />
       <PageBody>
         <Toolbar>
-          <TextInput
+          <Input
             id="tests-search"
             value={typed}
-            label="Search tests by name"
+            aria-label="Search tests by name"
             placeholder="Search by name"
-            onChange={setTyped}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => setTyped(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") setSearching(typed);
               if (event.key === "Escape") {
@@ -406,13 +416,16 @@ function Tests({ projectId }: { readonly projectId: string }) {
           <Select
             id="tests-agent"
             value={agent}
-            label="Show only tests that apply to one agent"
-            options={[
-              { value: "", label: "Any agent" },
-              ...choosable.map((one) => ({ value: one.id, label: one.name })),
-            ]}
-            onChange={setAgent}
-          />
+            aria-label="Show only tests that apply to one agent"
+            onChange={(event) => setAgent(event.target.value)}
+          >
+            <option value="">Any agent</option>
+            {choosable.map((one) => (
+              <option key={one.id} value={one.id}>
+                {one.name}
+              </option>
+            ))}
+          </Select>
           <Choice
             label="Which tests to show"
             value={archived ? "archived" : "active"}
