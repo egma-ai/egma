@@ -36,20 +36,20 @@ Modules surface read one declaration instead of two copies of it.
 
 Where the pieces live:
 
-- `apps/web/ui/tokens.css` owns shared visual values, including the derived ones such as a status chip's edge and the dialog scrim. Change a value here and nowhere else.
-- `apps/web/ui/tailwind-theme.css` hands those values to Tailwind. Every key in it is a `var()` into the token file and holds no value of its own.
-- The legacy CSS Modules files still carry their own copy of a few of those recipes. A copy goes when its component is migrated. Until then, changing the token means changing the copy beside it in the same edit.
+- `apps/web/ui/tailwind-theme.css` owns shared visual values, including the derived ones such as a status chip's edge and the dialog scrim, and hands them to Tailwind in the same file. Change a value here and nowhere else. The values are declared in an unlayered `:root`; the `@theme` keys below them are each a `var()` into one of those declarations and hold no value of their own. The unlayered part is load-bearing: it is what makes egma's `--radius-sm`, `--ease-out` and `--ease-in-out` win over Tailwind's defaults of the same name.
 - `apps/web/components/ui/` holds the shadcn primitives. Add one with the shadcn CLI; `components.json` points it at the right places.
+- `apps/web/ui/` holds the shared components built from those primitives — the table, the dialog, the menu, the form, the shell.
 - `apps/web/lib/utils.ts` holds `cn`, which every primitive merges a caller's classes with.
 - `apps/web/app/globals.css` is the one stylesheet the application loads.
+- `apps/web/app/ui.module.css` is the one CSS Module left in the application, and it is a survivor rather than an oversight. It dresses the transcript detail page and the two components that page composes, the recording player and the judgment card. That is a whole page's layout rather than a shared control set, so moving it is its own change with its own proof. It reads the same declarations as everything else.
 
 Rules:
 
-- Use semantic tokens such as `--action`, `--surface-active`, and `--border` outside the token file.
+- Use semantic tokens such as `--action`, `--surface-active`, and `--border` outside the theme file.
 - Do not put a color, a radius, a size, or a duration in a component. Read it from the theme.
 - Where shadcn has a default and this file has a rule, this file decides. The theme removes the scales this file has no value for, so no class exists for a weight above 500, a cool gray shadow, a radius belonging to no component, or a type step outside the scale below.
 - Tailwind's fixed utilities are not scale entries and cannot be removed that way. A few are still generated, because Tailwind finds class names by reading files as text and a comment that contains the word `table` mints `.table`. They are applied to nothing.
-- The CSS Modules components in `apps/web/ui/` are legacy. They stay correct and supported until they are migrated. Do not start a new component in CSS Modules.
+- Do not start a new component in CSS Modules.
 - Route pages compose shared components and add only route-specific layout.
 - Do not add a one-off component when a shared component already owns the behavior.
 
@@ -294,6 +294,7 @@ The rules below are the floor and do not move. (Developer decision, 2026-08-19.)
 | Toast | Show arrival and dismissal | Short translate plus opacity; interruptible transition |
 | Loading | Show progress | Fast, quiet indicator |
 | Table row | Support routine navigation | Color feedback only |
+| Navigation row | Support routine navigation | Color feedback only |
 | Progress | Explain completion | Transform-based fill, linear while active |
 
 ## Accessibility
