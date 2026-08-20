@@ -23,13 +23,15 @@ import {
   Button,
   ButtonLink,
   Checkbox,
+  Section,
+  TextInput,
+} from "../../../../../../ui/controls.tsx";
+import {
   Form,
   FormActions,
   Help,
   Problem,
-  Section,
-  TextInput,
-} from "../../../../../../ui/controls.tsx";
+} from "../../../../../../ui/form.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../../ui/settings-read.ts";

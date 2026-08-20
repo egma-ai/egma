@@ -22,12 +22,8 @@ import { simulationRerunPath } from "../../../../../lib/simulations.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import {
-  Actions,
-  Field,
-  Refused,
-  Section,
-} from "../../../../../ui/controls.tsx";
+import { Actions, Section } from "../../../../../ui/controls.tsx";
+import { Field, Refused } from "../../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import {

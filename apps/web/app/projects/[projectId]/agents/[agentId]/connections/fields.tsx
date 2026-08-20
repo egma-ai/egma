@@ -2,12 +2,8 @@
 
 import type { ReactNode } from "react";
 
-import {
-  Field,
-  Help,
-  TextArea,
-  TextInput,
-} from "../../../../../../ui/controls.tsx";
+import { TextArea, TextInput } from "../../../../../../ui/controls.tsx";
+import { Field, Help } from "../../../../../../ui/form.tsx";
 import type {
   ConnectionVariant,
   ConfigField,

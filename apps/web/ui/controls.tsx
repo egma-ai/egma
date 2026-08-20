@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useId, useRef, type Ref, type ReactNode } from "react";
 
-import { FieldHintContext, useFieldHint } from "./field-hint.ts";
+import { useFieldHint } from "./field-hint.ts";
 import styles from "./system.module.css";
 
 /**
@@ -166,73 +166,6 @@ export function ButtonLink({
 function describedByHint(): string | undefined {
   // eslint-disable-next-line react-hooks/rules-of-hooks -- called from components only
   return useFieldHint();
-}
-
-export function Field({
-  label,
-  htmlFor,
-  hint,
-  children,
-}: {
-  readonly label: string;
-  readonly htmlFor: string;
-  /** One line saying what belongs here, for a field whose name is not enough. */
-  readonly hint?: ReactNode;
-  readonly children: ReactNode;
-}) {
-  const said = useId();
-
-  return (
-    <div className={styles.field}>
-      <label className={styles.fieldLabel} htmlFor={htmlFor}>
-        {label}
-      </label>
-      <FieldHintContext.Provider value={hint === undefined ? undefined : said}>
-        {children}
-      </FieldHintContext.Provider>
-      {hint === undefined ? null : (
-        <p className={styles.fieldHint} id={said}>
-          {hint}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * A form, its rows, and the controls that finish it.
- *
- * The three exist so that no page decides for itself how far a form runs
- * across a wide screen or how two fields sit beside each other. A row is a
- * grid that collapses to one column on a narrow screen, which is the whole of
- * the responsive story for every editor in the product.
- */
-export function Form({
-  onSubmit,
-  children,
-}: {
-  readonly onSubmit?: () => void;
-  readonly children: ReactNode;
-}) {
-  return (
-    <form
-      className={styles.form}
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit?.();
-      }}
-    >
-      {children}
-    </form>
-  );
-}
-
-export function FormRow({ children }: { readonly children: ReactNode }) {
-  return <div className={styles.formRow}>{children}</div>;
-}
-
-export function FormActions({ children }: { readonly children: ReactNode }) {
-  return <div className={styles.formActions}>{children}</div>;
 }
 
 export function TextInput({
@@ -590,30 +523,6 @@ export function Badge({
 }
 
 /**
- * What a page says when a write was refused.
- *
- * **The refusal's own sentence, shown unchanged, above the form that was
- * refused — and the form keeps everything typed into it.** A refusal that
- * cleared the fields would make somebody retype an afternoon's work to find
- * out whether the second attempt fails the same way, which is how a person
- * learns to stop trying.
- */
-export function Refused({
-  message,
-  action,
-}: {
-  readonly message: string;
-  readonly action?: ReactNode;
-}) {
-  return (
-    <div className={styles.refused} role="alert">
-      <p className={styles.refusedText}>{message}</p>
-      {action}
-    </div>
-  );
-}
-
-/**
  * A labelled group of facts about one thing — what a detail page is mostly
  * made of. A definition list because that is what it is, so a screen reader
  * reads each fact with the name of the fact.
@@ -651,30 +560,6 @@ export function Toolbar({ children }: { readonly children: ReactNode }) {
   return <div className={styles.toolbar}>{children}</div>;
 }
 
-/**
- * What went wrong with one field, or with the whole form.
- *
- * It is announced rather than merely coloured, and it never replaces what
- * somebody typed. A refusal that cleared the form would make the person type
- * their work again to find out whether the second attempt fails the same way.
- *
- * `Refused` is the same news one level up: this one names a field, that one
- * heads the form it refused and can carry the way to ask again.
- */
-export function Problem({
-  id,
-  children,
-}: {
-  readonly id?: string;
-  readonly children: ReactNode;
-}) {
-  return (
-    <p className={styles.problem} id={id} role="alert">
-      {children}
-    </p>
-  );
-}
-
 /** A group of controls that act on the thing the page is about. */
 export function Actions({ children }: { readonly children: ReactNode }) {
   return <div className={styles.actions}>{children}</div>;
@@ -708,24 +593,3 @@ export function Section({
   );
 }
 
-/**
- * The sentence under a field that says what to write in it.
- *
- * It is the server's own words for a connection field, relayed unchanged: the
- * registry knows what a token endpoint is for and this application deliberately
- * does not, so paraphrasing here would put a second, quieter description beside
- * the one that is kept in step with the gate.
- */
-export function Help({
-  id,
-  children,
-}: {
-  readonly id?: string;
-  readonly children: ReactNode;
-}) {
-  return (
-    <p className={styles.help} id={id}>
-      {children}
-    </p>
-  );
-}

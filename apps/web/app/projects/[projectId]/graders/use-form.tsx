@@ -24,7 +24,7 @@ import {
   FormActions,
   Help,
   Refused,
-} from "../../../../ui/controls.tsx";
+} from "../../../../ui/form.tsx";
 
 /**
  * The **Use** form: a library entry, filled in, and a running copy of it on

@@ -11,13 +11,10 @@ import { canAuthor } from "../../../../../lib/roles.ts";
 import {
   Button,
   ButtonLink,
-  Field,
-  Form,
-  FormActions,
-  Problem,
   TextArea,
   TextInput,
 } from "../../../../../ui/controls.tsx";
+import { Field, Form, FormActions, Problem } from "../../../../../ui/form.tsx";
 import { NotFound } from "../../../../../ui/page-state.tsx";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {

@@ -21,14 +21,14 @@ import {
   type RunningGrader,
 } from "../../../../../lib/graders.ts";
 import { graderDisplayName } from "../../../../../lib/presentation.ts";
+import { Actions } from "../../../../../ui/controls.tsx";
 import {
-  Actions,
   Field,
   Form,
   FormActions,
   Help,
   Refused,
-} from "../../../../../ui/controls.tsx";
+} from "../../../../../ui/form.tsx";
 import { EntryFields } from "../use-form.tsx";
 
 /**

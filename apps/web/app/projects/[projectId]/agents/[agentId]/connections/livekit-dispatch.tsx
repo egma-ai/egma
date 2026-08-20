@@ -1,10 +1,7 @@
 "use client";
 
-import {
-  Field,
-  Select,
-  TextInput,
-} from "../../../../../../ui/controls.tsx";
+import { Select, TextInput } from "../../../../../../ui/controls.tsx";
+import { Field } from "../../../../../../ui/form.tsx";
 import type { ConnectionVariant } from "../../../../../../lib/connection-types.ts";
 
 export type LiveKitDispatch = "named" | "automatic";

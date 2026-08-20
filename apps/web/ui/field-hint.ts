@@ -11,14 +11,13 @@ import { createContext, useContext } from "react";
  * and the ones they forget are exactly the ones nobody notices, because the
  * page still looks right.
  *
- * It lives in its own file rather than inside `controls.tsx` because the two
- * halves of the product now sit on either side of it: `Field` provides it and
- * is still a CSS Modules component, while the controls that consume it —
- * `components/ui/input`, `textarea`, `select` and `checkbox` — are on the
- * shadcn base. A shadcn primitive reaching into the legacy control set for a
- * context would be a dependency pointing the wrong way and would break when
- * that file is retired. This module outlives it: when `Field` is migrated, it
- * goes on providing exactly this.
+ * It lives in its own file rather than inside the component that provides it,
+ * because the two halves of the product sat on either side of it while they
+ * were being migrated: a shadcn primitive reaching into the legacy control set
+ * for a context would have been a dependency pointing the wrong way, and would
+ * have broken when that file was retired. It was, and this module outlived it —
+ * `ui/form.tsx` provides the context and `components/ui/input`, `textarea`,
+ * `select` and `checkbox` read it, with neither importing the other.
  */
 export const FieldHintContext = createContext<string | undefined>(undefined);
 

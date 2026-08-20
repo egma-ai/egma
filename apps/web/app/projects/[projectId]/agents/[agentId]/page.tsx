@@ -20,14 +20,11 @@ import {
   Actions,
   Button,
   ButtonLink,
-  Field,
-  Form,
-  FormActions,
-  Problem,
   Section,
   TextArea,
   TextInput,
 } from "../../../../../ui/controls.tsx";
+import { Field, Form, FormActions, Problem } from "../../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";

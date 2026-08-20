@@ -19,6 +19,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+import { Section, Select } from "../../../../../ui/controls.tsx";
+import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
   Field,
   Form,
@@ -26,11 +29,7 @@ import {
   FormRow,
   Help,
   Refused,
-  Section,
-  Select,
-} from "../../../../../ui/controls.tsx";
-import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
-import { Dialog } from "../../../../../ui/dialog.tsx";
+} from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
   RelativeInstant,

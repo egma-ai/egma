@@ -7,7 +7,7 @@ import {
   providerOptions,
   type TraitsDraft,
 } from "../../../../lib/personas.ts";
-import { Field, FormRow } from "../../../../ui/controls.tsx";
+import { Field, FormRow } from "../../../../ui/form.tsx";
 
 /**
  * The fields that describe who a persona is, written once and used by both the

@@ -16,7 +16,7 @@ import {
 } from "../lib/simulations.ts";
 import { graderDisplayName } from "../lib/presentation.ts";
 import { howFarIn, howLong } from "../lib/transcripts.ts";
-import { Help } from "./controls.tsx";
+import { Help } from "./form.tsx";
 import { Empty } from "./page-state.tsx";
 import { VerdictBadge } from "./run-status.tsx";
 

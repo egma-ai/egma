@@ -48,11 +48,6 @@ import {
   Button,
   Checkbox,
   Choice,
-  Field,
-  Form,
-  FormActions,
-  FormRow,
-  Refused,
   Section,
   Select,
   TextArea,
@@ -63,6 +58,7 @@ import { DataTable, type Column } from "../../ui/data-table.tsx";
 import { Dialog } from "../../ui/dialog.tsx";
 import { Transcript } from "../../ui/evidence.tsx";
 import { Toast, Tooltip, type FeedbackInput } from "../../ui/feedback.tsx";
+import { Field, Form, FormActions, FormRow, Refused } from "../../ui/form.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "../../ui/menu.tsx";
 import { NumberField } from "../../ui/number-field.tsx";
 import { Empty, Failure, Loading } from "../../ui/page-state.tsx";

@@ -33,13 +33,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import {
-  Checkbox,
-  Field,
-  Problem,
-  Refused,
-  Select,
-} from "../../../../../ui/controls.tsx";
+import { Checkbox, Select } from "../../../../../ui/controls.tsx";
+import { Field, Problem, Refused } from "../../../../../ui/form.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";

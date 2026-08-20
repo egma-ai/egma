@@ -14,7 +14,7 @@ import {
   type Named,
   type TestVersionRow,
 } from "../../../../lib/tests.ts";
-import { Problem } from "../../../../ui/controls.tsx";
+import { Problem } from "../../../../ui/form.tsx";
 import { Menu } from "../../../../ui/menu.tsx";
 import { RelativeInstant } from "../../../../ui/relative-time.tsx";
 

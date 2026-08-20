@@ -23,13 +23,15 @@ import { canAuthor } from "../../../../../../../lib/roles.ts";
 import {
   Actions,
   Button,
+  TextInput,
+} from "../../../../../../../ui/controls.tsx";
+import {
   Field,
   Form,
   FormActions,
   Help,
   Problem,
-  TextInput,
-} from "../../../../../../../ui/controls.tsx";
+} from "../../../../../../../ui/form.tsx";
 import { Dialog } from "../../../../../../../ui/dialog.tsx";
 import { Failure, Loading, NotFound } from "../../../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../../../ui/resource.ts";
