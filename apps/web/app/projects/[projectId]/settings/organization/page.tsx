@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
@@ -17,8 +17,10 @@ import {
   ORGANIZATION_PATH,
   type OrganizationSettings,
 } from "../../../../../lib/settings.ts";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
 import {
-  Button,
   Field,
   Form,
   FormActions,
@@ -26,7 +28,6 @@ import {
   Problem,
   Refused,
   Section,
-  TextInput,
 } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
@@ -95,6 +96,11 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
    */
   const mayAdminister = settled?.may_manage_organization === true;
 
+  /* The hint, and the sentence saying why Save is not available. The base
+     input and the base button both read nothing they are not given, so this
+     page names both and cannot leave either unpointed-at. */
+  const nameHint = useId();
+  const whyNotSave = useId();
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -126,6 +132,11 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   }, [answer, credentials]);
 
   const named = name.trim() !== "";
+  /** Said only to somebody the server would refuse, and only once it has said so. */
+  const whyNot =
+    mayAdminister || role === null
+      ? undefined
+      : `Your ${role} role cannot change organization settings. Ask an organization admin.`;
   const changed = settled !== null && name.trim() !== settled.name;
   const confirming = confirmingSave.current;
   const changedWhileConfirming =
@@ -226,22 +237,25 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
             {refused === null ? null : <Refused message={refused.message} />}
 
             <Form onSubmit={() => void save()}>
-              <Field
-                label="Name"
-                htmlFor="organization-name"
-                hint="What Egma calls your organization. Changing it breaks no link and no invitation."
-              >
-                <TextInput
+              <Field label="Name" htmlFor="organization-name">
+                <Input
                   id="organization-name"
                   value={name}
+                  autoComplete="off"
+                  spellCheck={false}
                   disabled={!mayAdminister}
-                  invalid={!named}
-                  onChange={(next) => {
+                  aria-invalid={named ? undefined : true}
+                  aria-describedby={nameHint}
+                  onChange={(event) => {
                     editVersion.current += 1;
-                    setName(next);
+                    setName(event.target.value);
                     setSaved(false);
                   }}
                 />
+                <p className="m-0 text-sm text-faint" id={nameHint}>
+                  What Egma calls your organization. Changing it breaks no link
+                  and no invitation.
+                </p>
               </Field>
 
               {named ? null : <Problem>An organization needs a name.</Problem>}
@@ -249,17 +263,21 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
 
               <FormActions>
                 <Button
-                  weight="strong"
                   type="submit"
                   disabled={!mayAdminister || !named || !changed || saving}
-                  why={
-                    mayAdminister || role === null
-                      ? undefined
-                      : `Your ${role} role cannot change organization settings. Ask an organization admin.`
-                  }
+                  title={whyNot}
+                  aria-describedby={whyNot === undefined ? undefined : whyNotSave}
                 >
                   {saving ? "Saving…" : "Save organization"}
                 </Button>
+                {whyNot === undefined ? null : (
+                  <span
+                    className="max-w-[56ch] text-sm text-muted-foreground"
+                    id={whyNotSave}
+                  >
+                    {whyNot}
+                  </span>
+                )}
               </FormActions>
             </Form>
           </Section>
@@ -317,6 +335,7 @@ function Credentials({
   readonly mayAdminister: boolean;
   readonly onChanged: () => void;
 }) {
+  const replacementHint = useId();
   const [label, setLabel] = useState("");
   const [key, setKey] = useState("");
   const [rotating, setRotating] = useState<string | null>(null);
@@ -475,6 +494,8 @@ function Credentials({
       width: "110px",
       cell: (credential) => (
         <Button
+          type="button"
+          variant="secondary"
           disabled={!mayAdminister || busy}
           onClick={() => setConfirmingArchive(credential)}
         >
@@ -488,6 +509,8 @@ function Credentials({
       width: "150px",
       cell: (credential) => (
         <Button
+          type="button"
+          variant="secondary"
           disabled={!mayAdminister || busy}
           onClick={() => {
             // One form under the table means one `replacement` and one `failed`
@@ -562,22 +585,24 @@ function Credentials({
              */}
             {rotatingCredential === undefined ? null : (
               <Form onSubmit={() => void rotate(rotatingCredential)}>
-                <Field
-                  label="New key"
-                  htmlFor={`rotate-${rotatingCredential.id}`}
-                  hint="Replaces the stored key whole. You do not need the old one, and Egma will not show it to you."
-                >
-                  <TextInput
+                <Field label="New key" htmlFor={`rotate-${rotatingCredential.id}`}>
+                  <Input
                     id={`rotate-${rotatingCredential.id}`}
                     value={replacement}
-                    secret
+                    type="password"
+                    autoComplete="new-password"
+                    spellCheck={false}
                     disabled={!mayAdminister || busy}
-                    onChange={setReplacement}
+                    aria-describedby={replacementHint}
+                    onChange={(event) => setReplacement(event.target.value)}
                   />
+                  <p className="m-0 text-sm text-faint" id={replacementHint}>
+                    Replaces the stored key whole. You do not need the old one,
+                    and Egma will not show it to you.
+                  </p>
                 </Field>
                 <FormActions>
                   <Button
-                    weight="strong"
                     type="submit"
                     disabled={!mayAdminister || busy || replacement.trim() === ""}
                   >
@@ -596,25 +621,28 @@ function Credentials({
       >
         <Form onSubmit={() => void add()}>
           <Field label="Label" htmlFor="credential-label">
-            <TextInput
+            <Input
               id="credential-label"
               value={label}
+              autoComplete="off"
+              spellCheck={false}
               disabled={!mayAdminister || busy}
-              onChange={setLabel}
+              onChange={(event) => setLabel(event.target.value)}
             />
           </Field>
           <Field label="OpenAI key" htmlFor="credential-key">
-            <TextInput
+            <Input
               id="credential-key"
               value={key}
-              secret
+              type="password"
+              autoComplete="new-password"
+              spellCheck={false}
               disabled={!mayAdminister || busy}
-              onChange={setKey}
+              onChange={(event) => setKey(event.target.value)}
             />
           </Field>
           <FormActions>
             <Button
-              weight="strong"
               type="submit"
               disabled={!mayAdminister || busy || label.trim() === "" || key.trim() === ""}
             >
@@ -636,9 +664,12 @@ function Credentials({
                 Egma will refuse this action if a project or an active run still uses
                 it.
               </p>
-              <Button onClick={dismiss}>Cancel</Button>{" "}
+              <Button type="button" variant="secondary" onClick={dismiss}>
+                Cancel
+              </Button>{" "}
               <Button
-                tone="destructive"
+                type="button"
+                variant="destructive"
                 disabled={busy}
                 onClick={() => {
                   const credential = confirmingArchive;
