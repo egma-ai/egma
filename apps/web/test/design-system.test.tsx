@@ -59,6 +59,67 @@ describe("the development design proof", () => {
     expect(screen.queryByText("Agent saved")).toBeNull();
   });
 
+  it("draws the shadcn base wearing egma's theme", () => {
+    render(<DesignSystemProof />);
+
+    /*
+     * These are class assertions rather than colour assertions because jsdom
+     * loads no stylesheet. What they guard is the mapping: the primary action
+     * asks for the theme's `primary`, and `tailwind-theme.css` is what makes
+     * `primary` mean Deep Ember. The colours themselves are proved in a real
+     * browser, where the base button and the CSS Modules button were read back
+     * and agreed on every property.
+     */
+    const start = screen.getByRole("button", { name: "Start run" });
+    expect(start.getAttribute("data-slot")).toBe("button");
+    expect(start.className).toContain("bg-primary");
+    expect(start.className).toContain("rounded-button");
+
+    /* The secondary action is the outlined kind, never a filled grey one. */
+    const secondary = screen.getByRole("button", { name: "Add grader" });
+    expect(secondary.className).toContain("border-border-strong");
+    expect(secondary.className).toContain("bg-transparent");
+
+    /*
+     * A chip says a verdict in a word and wears the state colour. It must not
+     * wear the brand colour: "Brand orange does not mean passed, failed,
+     * skipped, or errored."
+     */
+    const chips = screen
+      .getAllByText("Passed")
+      .filter((node) => node.getAttribute("data-slot") === "badge");
+    expect(chips).toHaveLength(1);
+    expect(chips[0]!.className).toContain("border-success-border");
+    expect(chips[0]!.className).not.toContain("brand");
+    expect(chips[0]!.className).not.toContain("primary");
+  });
+
+  it("opens the base dialog on the slot its motion is keyed to", () => {
+    render(<DesignSystemProof />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete grader" }));
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Delete the Refund policy grader?",
+    });
+    /*
+     * Not decoration. `tailwind-theme.css` keys the dialog's entrance and exit
+     * on this attribute, so a rename here would take the motion with it and
+     * nothing else would say so.
+     */
+    expect(dialog.getAttribute("data-slot")).toBe("dialog-content");
+    expect(
+      within(dialog).getByText(/Runs that already used it keep their verdicts/),
+    ).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep it" }));
+    expect(
+      screen.queryByRole("dialog", {
+        name: "Delete the Refund policy grader?",
+      }),
+    ).toBeNull();
+  });
+
   it("keeps the real centered confirmation dialog through a pointer exit", () => {
     render(<DesignSystemProof />);
 
