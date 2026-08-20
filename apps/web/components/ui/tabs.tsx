@@ -1,16 +1,33 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
-import { Tabs as TabsPrimitive } from "radix-ui"
+import { cva, type VariantProps } from "class-variance-authority";
+import { Tabs as TabsPrimitive } from "radix-ui";
+import type { ComponentProps } from "react";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
+/**
+ * Switching between peer views of one page.
+ *
+ * **Radix is here for the keyboard, not for the look.** The tabs pattern is a
+ * roving tab stop — one Tab step into the group, then Left, Right, Home and
+ * End inside it — and a hand-written version of that is a listener per strip
+ * that each has to get `dir`, looping, and the disabled tab right on its own.
+ * Radix publishes it once, and it publishes `data-state` and `data-orientation`
+ * alongside, which is what every rule below reads.
+ *
+ * `DESIGN.md` calls a tab strip navigation: "Navigation row — support routine
+ * navigation — colour feedback only." So nothing here moves. The transition
+ * names colour properties and nothing else, the active mark appears rather than
+ * fading in, and the label does not change weight — a weight change reflows the
+ * strip, and a strip that shifts under the arrow keys is movement whatever it
+ * is called.
+ */
 function Tabs({
   className,
   orientation = "horizontal",
   ...props
-}: React.ComponentProps<typeof TabsPrimitive.Root>) {
+}: ComponentProps<typeof TabsPrimitive.Root>) {
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
@@ -18,33 +35,50 @@ function Tabs({
       orientation={orientation}
       className={cn(
         "group/tabs flex gap-2 data-[orientation=horizontal]:flex-col",
-        className
+        className,
       )}
       {...props}
     />
-  )
+  );
 }
 
+/**
+ * The two shapes a strip of tabs takes in this product.
+ *
+ * - `default` is the segmented control: a quiet track holding the choices, and
+ *   the current one raised out of it on Ember Wash. It is for a small closed
+ *   set that belongs inside a row of other controls.
+ * - `line` is the rail: the choices sit on a hairline and the current one is
+ *   marked on it. It is for the top of a page or a panel, where the strip is
+ *   what a whole region is switched by.
+ *
+ * The track's 8px input radius holds 6px button radii on 4px of padding, which
+ * is the nesting the eye reads as one control rather than two.
+ */
 const tabsListVariants = cva(
-  "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg p-[3px] text-muted-foreground group-data-[orientation=horizontal]/tabs:h-9 group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col data-[variant=line]:rounded-none",
+  [
+    "group/tabs-list inline-flex w-fit items-center gap-1",
+    "group-data-[orientation=vertical]/tabs:flex-col",
+    "group-data-[orientation=vertical]/tabs:items-stretch",
+  ],
   {
     variants: {
       variant: {
-        default: "bg-muted",
-        line: "gap-1 bg-transparent",
+        default: "justify-center rounded-input bg-surface-soft p-1",
+        line: "justify-start bg-transparent",
       },
     },
     defaultVariants: {
       variant: "default",
     },
-  }
-)
+  },
+);
 
 function TabsList({
   className,
   variant = "default",
   ...props
-}: React.ComponentProps<typeof TabsPrimitive.List> &
+}: ComponentProps<typeof TabsPrimitive.List> &
   VariantProps<typeof tabsListVariants>) {
   return (
     <TabsPrimitive.List
@@ -53,39 +87,145 @@ function TabsList({
       className={cn(tabsListVariants({ variant }), className)}
       {...props}
     />
-  )
+  );
 }
 
+/**
+ * One choice in the strip.
+ *
+ * The current one is Ember Wash **and** a mark that survives a greyscale
+ * screenshot: the rail's 2px Ember rule under the `line` tab, and the raised
+ * bordered plate around the `default` one. `DESIGN.md`: "State is not
+ * communicated by colour alone."
+ *
+ * There is no `focus-visible` rule here on purpose. `globals.css` draws the
+ * product's Ember focus ring for everything a keyboard reaches, `[role="tab"]`
+ * named among them, from an unlayered rule that no utility can undo. A ring
+ * written here would be a second answer to a question already settled.
+ */
 function TabsTrigger({
   className,
+  onClick,
   ...props
-}: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
+}: ComponentProps<typeof TabsPrimitive.Trigger>) {
   return (
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all group-data-[orientation=vertical]/tabs:w-full group-data-[orientation=vertical]/tabs:justify-start hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 group-data-[variant=default]/tabs-list:data-[state=active]:shadow-sm group-data-[variant=line]/tabs-list:data-[state=active]:shadow-none dark:text-muted-foreground dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-[state=active]:bg-transparent dark:group-data-[variant=line]/tabs-list:data-[state=active]:border-transparent dark:group-data-[variant=line]/tabs-list:data-[state=active]:bg-transparent",
-        "data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground",
-        "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-[orientation=horizontal]/tabs:after:inset-x-0 group-data-[orientation=horizontal]/tabs:after:bottom-[-5px] group-data-[orientation=horizontal]/tabs:after:h-0.5 group-data-[orientation=vertical]/tabs:after:inset-y-0 group-data-[orientation=vertical]/tabs:after:-right-1 group-data-[orientation=vertical]/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-[state=active]:after:opacity-100",
-        className
+        [
+          "relative inline-flex flex-1 cursor-pointer items-center justify-center gap-2",
+          "min-h-(--control-sm) rounded-button border border-transparent px-3",
+          "text-sm whitespace-nowrap text-muted-foreground",
+          "pointer-coarse:min-h-(--tap-target)",
+          /*
+           * Named properties, never `all`, and never `outline-color`: see
+           * `button.tsx`. A transition that includes the outline fades the
+           * focus ring in on every arrow-key step through the strip.
+           */
+          "transition-[color,background-color,border-color] duration-(--duration-hover) ease-out",
+          /*
+           * **Hover is for the tabs somebody might go to, not the one they are
+           * on.** The neutral plate and Ember Wash are both a background, and
+           * an unscoped hover wins: pointing at the current tab turned its wash
+           * grey and took the "current" half of the state with it. Found in a
+           * browser, because the two rules never meet until a pointer is on
+           * one. Scoping to `inactive` makes them mutually exclusive, so which
+           * of them Tailwind happens to emit first stops mattering.
+           */
+          "pointer-hover:data-[state=inactive]:bg-surface-soft",
+          "pointer-hover:text-foreground",
+          "disabled:cursor-not-allowed disabled:opacity-55",
+          "data-[state=active]:bg-selected data-[state=active]:text-foreground",
+          "[&_svg]:pointer-events-none [&_svg]:shrink-0",
+          "[&_svg:not([class*='size-'])]:size-4",
+        ],
+        [
+          /* The segmented plate: raised out of the track on a narrow Ember edge. */
+          "group-data-[variant=default]/tabs-list:data-[state=active]:border-brand",
+        ],
+        [
+          /*
+           * The rail tab: sized to its own label, sitting on the hairline
+           * rather than in a track, and squared off where it meets it.
+           */
+          "group-data-[variant=line]/tabs-list:flex-none",
+          "group-data-[variant=line]/tabs-list:min-h-(--control-lg)",
+          "group-data-[orientation=horizontal]/tabs:group-data-[variant=line]/tabs-list:rounded-b-none",
+          "group-data-[orientation=vertical]/tabs:group-data-[variant=line]/tabs-list:rounded-r-none",
+          /*
+           * The mark, drawn for the current tab and colourless for the rest.
+           *
+           * **The colour is the switch, and `content` cannot be.** Tailwind 4
+           * writes `content: var(--tw-content)` into *every* `after:` utility
+           * and declares `--tw-content` with an initial value of `""`, so the
+           * pseudo-element already exists the moment any `after:` class is on
+           * the element. Gating `content-['']` on the active state therefore
+           * turns nothing on or off — it was written that way first, and every
+           * tab in the strip drew a rule. The sidebar's active mark in
+           * `shell.tsx` had already settled this the other way round.
+           *
+           * The bar appears rather than fades: a transition on the trigger
+           * does not reach its own pseudo-element, and none is declared here.
+           * That is what `DESIGN.md` wants of a strip crossed by arrow key many
+           * times a day.
+           *
+           * One pixel of overhang is deliberate: the rule is 2px and the
+           * hairline it covers is 1px, so the mark reads as sitting *on* the
+           * rail rather than beside it.
+           */
+          "after:absolute after:rounded-chip after:bg-transparent",
+          "group-data-[variant=line]/tabs-list:data-[state=active]:after:bg-brand",
+          "group-data-[orientation=horizontal]/tabs:after:inset-x-0",
+          "group-data-[orientation=horizontal]/tabs:after:-bottom-px",
+          "group-data-[orientation=horizontal]/tabs:after:h-0.5",
+          "group-data-[orientation=vertical]/tabs:after:inset-y-0",
+          "group-data-[orientation=vertical]/tabs:after:-right-px",
+          "group-data-[orientation=vertical]/tabs:after:w-0.5",
+        ],
+        className,
       )}
       {...props}
+      onClick={(event) => {
+        onClick?.(event);
+        /*
+         * **A tab answers a press, so a click with no press behind it has to
+         * be given one.**
+         *
+         * Radix selects on `mousedown` rather than on `click`, which is right
+         * — `DESIGN.md`: "A control answers on press, not after an animation."
+         * A pointer press and a keyboard Enter both reach it, the first
+         * through `mousedown` and the second through `keydown`.
+         *
+         * What reaches neither is a bare `click` that nobody pressed: some
+         * assistive technology and automation activate a control by
+         * dispatching one directly, and `detail` is 0 because no pointer was
+         * involved. Against a strip listening only for a press, those people
+         * cannot change tab at all. So the press is re-issued rather than the
+         * selection being re-implemented here — Radix stays the one thing that
+         * decides what activating a tab means, and a duplicate reaches it as
+         * the same value it already holds, which its controlled state drops.
+         */
+        if (event.defaultPrevented || event.detail > 0) return;
+        event.currentTarget.dispatchEvent(
+          new MouseEvent("mousedown", { bubbles: true, button: 0 }),
+        );
+      }}
     />
-  )
+  );
 }
 
+/** The panel one tab reveals. Radix labels it by its trigger and hides the rest. */
 function TabsContent({
   className,
   ...props
-}: React.ComponentProps<typeof TabsPrimitive.Content>) {
+}: ComponentProps<typeof TabsPrimitive.Content>) {
   return (
     <TabsPrimitive.Content
       data-slot="tabs-content"
-      className={cn("flex-1 outline-none", className)}
+      className={cn("flex-1", className)}
       {...props}
     />
-  )
+  );
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants }
+export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants };
