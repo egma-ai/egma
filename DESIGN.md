@@ -36,8 +36,9 @@ Modules surface read one declaration instead of two copies of it.
 
 Where the pieces live:
 
-- `apps/web/ui/tokens.css` owns shared visual values, and is the only file that holds one.
-- `apps/web/ui/tailwind-theme.css` hands those values to Tailwind. Every key in it is a `var()` into the token file.
+- `apps/web/ui/tokens.css` owns shared visual values, including the derived ones such as a status chip's edge and the dialog scrim. Change a value here and nowhere else.
+- `apps/web/ui/tailwind-theme.css` hands those values to Tailwind. Every key in it is a `var()` into the token file and holds no value of its own.
+- The legacy CSS Modules files still carry their own copy of a few of those recipes. A copy goes when its component is migrated. Until then, changing the token means changing the copy beside it in the same edit.
 - `apps/web/components/ui/` holds the shadcn primitives. Add one with the shadcn CLI; `components.json` points it at the right places.
 - `apps/web/lib/utils.ts` holds `cn`, which every primitive merges a caller's classes with.
 - `apps/web/app/globals.css` is the one stylesheet the application loads.
@@ -46,7 +47,8 @@ Rules:
 
 - Use semantic tokens such as `--action`, `--surface-active`, and `--border` outside the token file.
 - Do not put a color, a radius, a size, or a duration in a component. Read it from the theme.
-- Where shadcn has a default and this file has a rule, this file decides. The theme deletes the utilities this file has no value for: weights above 500, cool gray shadows, radii that belong to no component, and type steps outside the scale below.
+- Where shadcn has a default and this file has a rule, this file decides. The theme removes the scales this file has no value for, so no class exists for a weight above 500, a cool gray shadow, a radius belonging to no component, or a type step outside the scale below.
+- Tailwind's fixed utilities are not scale entries and cannot be removed that way. A few are still generated, because Tailwind finds class names by reading files as text and a comment that contains the word `table` mints `.table`. They are applied to nothing.
 - The CSS Modules components in `apps/web/ui/` are legacy. They stay correct and supported until they are migrated. Do not start a new component in CSS Modules.
 - Route pages compose shared components and add only route-specific layout.
 - Do not add a one-off component when a shared component already owns the behavior.
@@ -136,6 +138,7 @@ Rules:
 - Hierarchy comes from size, space, and restrained use of weight 500.
 - Do not use weights 600 or 700.
 - Product tables, forms, and navigation use the 14px and 16px steps.
+- Headings carry no size of their own. Every heading takes its size from a class, because the browser's own heading sizes are not on this scale.
 - Large type is for auth, onboarding, empty introductions, and public pages.
 - Identifiers and code use the shared monospace stack.
 - Metrics, dates, durations, and scores use tabular numerals.
@@ -241,10 +244,10 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 Motion explains state, location, or feedback. It does not decorate routine work.
 
 Motion is fast, modern, and slick. Fast is the shortest duration that still
-explains the change. Modern is `transform` and `opacity`, composited, and
-interruptible. Slick is one movement that starts where the person is looking and
-ends where the content is. This raises the standard. The rules below are the
-floor and do not move. (Developer decision, 2026-08-19.)
+explains the change, and short enough that nothing waits for it. Modern is
+`transform` and `opacity`, composited. Slick is one movement that starts where
+the person is looking and ends where the content is. This raises the standard.
+The rules below are the floor and do not move. (Developer decision, 2026-08-19.)
 
 ### Rules
 
@@ -258,7 +261,7 @@ floor and do not move. (Developer decision, 2026-08-19.)
 - Every movement has a reduced-motion form with useful opacity or color feedback.
 - Interaction motion stays below 300ms.
 - Choose the shorter token when two would both explain the change.
-- Motion is interruptible. A surface closed while it is still opening reverses from where it is. It does not jump.
+- An exit runs to completion and is never cut off. A surface that is closed finishes leaving before it is removed.
 - No motion delays input. A control answers on press, not after an animation.
 
 ### Motion tokens
