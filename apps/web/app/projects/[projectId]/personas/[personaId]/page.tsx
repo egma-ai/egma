@@ -30,20 +30,20 @@ import {
 } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
-  Badge,
-  Button,
-  Facts,
   Field,
   Form,
   FormActions,
   FormRow,
   Help,
   Refused,
-  Select,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
-import { Dialog } from "../../../../../ui/dialog.tsx";
+} from "../../../../../ui/form.tsx";
 import { Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import {
@@ -58,10 +58,35 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import styles from "../../../../../ui/system.module.css";
-import personaStyles from "./persona.module.css";
+import { Facts } from "../../../../../ui/section.tsx";
 import { ModelFields } from "../models-editor.tsx";
 import { TraitFields } from "../traits-editor.tsx";
+
+/**
+ * The route's own layout, which is all this page adds to the shared parts.
+ *
+ * `DESIGN.md` asks a route page to compose shared components and add only
+ * route-specific layout, so these are the measurements that belong to this
+ * page and to no other: how wide one definition reads, and how one row of
+ * version history sits inside the sheet that holds it.
+ */
+const HEADER_SUMMARY =
+  "inline-flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2";
+const HEADER_DESCRIPTION = "max-w-[58ch] text-muted-foreground";
+const HEADER_META = "text-sm tabular-nums text-faint";
+/* The form inside gives up its own measure: this column is already the measure. */
+const DETAIL_CONTENT = "min-w-0 max-w-[80ch] [&>form]:max-w-none";
+/* A sheet's body scrolls under a head that does not. */
+const HISTORY_BODY = "min-h-0 flex-1 overflow-y-auto p-5 max-[40rem]:p-4";
+const HISTORY_LEAD =
+  "mt-0 mb-4 max-w-[64ch] text-sm leading-(--line-normal) text-muted-foreground";
+const VERSION_ROW =
+  "grid min-h-(--tap-target) min-w-0 grid-cols-[minmax(0,1fr)_auto] " +
+  "items-center gap-x-3 gap-y-1 border-t border-border py-3 last:border-b";
+const VERSION_NUMBER = "font-mono text-sm text-foreground";
+const VERSION_TIME = "min-w-0 text-sm tabular-nums text-muted-foreground";
+const STATE_LEAD = "m-0 max-w-[62ch] text-base text-muted-foreground";
+const FIELD_HINT = "m-0 text-sm text-faint";
 
 /**
  * One persona: who they are now and who they have been.
@@ -434,37 +459,42 @@ function PersonaDetail({
     const one = answer.value;
     const egmaProvided = one.owner === "egma";
     const historyContent = (
-      <div className={personaStyles.historySheetBody} id={historyId}>
-        <p className={personaStyles.historyLead}>
+      <div className={HISTORY_BODY} id={historyId}>
+        <p className={HISTORY_LEAD}>
           Newest first. Past versions do not change and stay readable.
         </p>
         {history === null ? (
           <Loading what="this persona's history" />
         ) : history.status === "ready" ? (
-          <ol className={personaStyles.versionList}>
+          <ol className="m-0 list-none p-0">
             {history.value.items.map((version) => {
               const current = version.id === one.version_id;
               return (
-                <li
-                  className={`${personaStyles.versionRow} ${
-                    current ? personaStyles.versionRowCurrent : ""
-                  }`}
-                  key={version.id}
-                >
-                  <div className={personaStyles.versionIdentity}>
-                    <span className={personaStyles.versionNumber}>
+                <li className={VERSION_ROW} key={version.id}>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span
+                      className={cn(VERSION_NUMBER, current && "font-medium")}
+                    >
                       v{version.version}
                     </span>
                     {current ? (
-                      <span className={personaStyles.currentVersion}>
+                      <span className="text-sm text-muted-foreground">
                         Current
                       </span>
                     ) : null}
                   </div>
-                  <span className={personaStyles.versionTime}>
+                  <span className={VERSION_TIME}>
                     <RelativeInstant instant={version.created_at} now={now} />
                   </span>
-                  <Button onClick={() => setReading(version)}>Read</Button>
+                  {/* The control spans both lines of the row it belongs to. */}
+                  <Button
+                    className="col-start-2 row-span-2 row-start-1"
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setReading(version)}
+                  >
+                    Read
+                  </Button>
                 </li>
               );
             })}
@@ -485,11 +515,15 @@ function PersonaDetail({
           // one screen is one sentence too many.
           <Refused
             message={refusal.message}
-            action={<Button onClick={reload}>Read this persona again</Button>}
+            action={
+              <Button type="button" variant="secondary" onClick={reload}>
+                Read this persona again
+              </Button>
+            }
           />
         )}
 
-        <div className={personaStyles.detailContent}>
+        <div className={DETAIL_CONTENT}>
           {egmaProvided ? (
             <section aria-label="Persona details">
               <Facts
@@ -505,20 +539,26 @@ function PersonaDetail({
             <Form onSubmit={() => void saveChanges()}>
               <FormRow>
                 <Field label="Name" htmlFor="persona-name">
-                  <TextInput
+                  <Input
                     id="persona-name"
                     value={held.name}
                     disabled={!mayAuthor}
-                    onChange={(name) => edit({ ...held, name })}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(event) =>
+                      edit({ ...held, name: event.target.value })
+                    }
                   />
                 </Field>
                 <Field label="Description" htmlFor="persona-description">
-                  <TextInput
+                  <Input
                     id="persona-description"
                     value={held.description}
                     disabled={!mayAuthor}
-                    onChange={(description) =>
-                      edit({ ...held, description })
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(event) =>
+                      edit({ ...held, description: event.target.value })
                     }
                   />
                 </Field>
@@ -537,7 +577,6 @@ function PersonaDetail({
               {saved && refusal === null ? <Help>Saved.</Help> : null}
               <FormActions>
                 <Button
-                  weight="strong"
                   type="submit"
                   busy={saving === "changes"}
                   disabled={!mayAuthor || !changed || saving !== null}
@@ -731,9 +770,11 @@ function PersonaDetail({
     persona === null ? undefined : (
       <>
         <Button
-          buttonRef={historyButton}
-          ariaExpanded={historyOpen}
-          ariaControls={historyId}
+          ref={historyButton}
+          type="button"
+          variant="secondary"
+          aria-expanded={historyOpen}
+          aria-controls={historyId}
           onClick={() => setHistoryOpen(true)}
         >
           Version history
@@ -742,7 +783,7 @@ function PersonaDetail({
           <>
             {!archived && !persona.is_default ? (
               <Button
-                weight="strong"
+                type="button"
                 disabled={!mayAuthor || saving !== null}
                 {...(mayAuthor || whyNot === undefined
                   ? {}
@@ -755,6 +796,8 @@ function PersonaDetail({
               </Button>
             ) : null}
             <Button
+              type="button"
+              variant="secondary"
               disabled={!mayAuthor || saving !== null}
               {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
               onClick={() => void fork()}
@@ -764,7 +807,7 @@ function PersonaDetail({
             {persona.owner === "organization" ? (
               archived ? (
                 <Button
-                  weight="strong"
+                  type="button"
                   disabled={!mayAuthor || saving !== null}
                   {...(mayAuthor || whyNot === undefined
                     ? {}
@@ -775,6 +818,8 @@ function PersonaDetail({
                 </Button>
               ) : (
                 <Button
+                  type="button"
+                  variant="secondary"
                   disabled={!mayAuthor || saving !== null}
                   {...(mayAuthor || whyNot === undefined
                     ? {}
@@ -800,25 +845,25 @@ function PersonaDetail({
         ]}
         lead={
           persona === null ? undefined : (
-            <span className={personaStyles.headerSummary}>
+            <span className={HEADER_SUMMARY}>
               {persona.owner === "organization" ? (
-                <span className={personaStyles.headerDescription}>
+                <span className={HEADER_DESCRIPTION}>
                   {persona.description ?? "Who they are and how they behave."}
                 </span>
               ) : null}
-              <span className={personaStyles.headerMeta}>
+              <span className={HEADER_META}>
                 Type: {persona.owner === "egma" ? "Egma-provided" : "Custom"}
               </span>
-              <span className={personaStyles.headerMeta}>
+              <span className={HEADER_META}>
                 Project default: {persona.is_default ? "Yes" : "No"}
               </span>
-              {archived ? <Badge tone="warn">Archived</Badge> : null}
+              {archived ? <Badge variant="warning">Archived</Badge> : null}
               {persona.owner === "organization" ? (
                 <>
-                  <span className={personaStyles.headerMeta}>
+                  <span className={HEADER_META}>
                     v{persona.version}
                   </span>
-                  <span className={personaStyles.headerMeta}>
+                  <span className={HEADER_META}>
                     Updated{" "}
                     <RelativeInstant instant={persona.updated_at} now={now} />
                   </span>
@@ -918,7 +963,7 @@ function ArchiveDialog({
     <Dialog title={`Archive ${persona.name}?`} onClose={onClose}>
       {(dismiss) => (
         <>
-          <p className={styles.stateLead}>
+          <p className={STATE_LEAD}>
             They leave the list your team authors from. Every version stays
             exactly where it is, every run that pinned one stays readable, and
             Restore is on this page.
@@ -934,17 +979,21 @@ function ArchiveDialog({
                 <Refused
                   message={unread.message}
                   action={
-                    <Button onClick={() => setAttempt((one) => one + 1)}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setAttempt((one) => one + 1)}
+                    >
                       Try again
                     </Button>
                   }
                 />
               ) : others === null ? (
-                <p className={styles.fieldHint}>
+                <p className={FIELD_HINT}>
                   Reading this project's personas…
                 </p>
               ) : nobodyToTakeIt ? (
-                <p className={styles.fieldHint}>
+                <p className={FIELD_HINT}>
                   There is no other active persona in this project to take it.
                   Create one first.
                 </p>
@@ -952,12 +1001,14 @@ function ArchiveDialog({
                 <Select
                   id="persona-replacement"
                   value={chosen}
-                  options={others.map((one) => ({
-                    value: one.id,
-                    label: one.name,
-                  }))}
-                  onChange={setChosen}
-                />
+                  onChange={(event) => setChosen(event.target.value)}
+                >
+                  {others.map((one) => (
+                    <option key={one.id} value={one.id}>
+                      {one.name}
+                    </option>
+                  ))}
+                </Select>
               )}
             </Field>
           ) : null}
@@ -966,7 +1017,8 @@ function ArchiveDialog({
 
           <FormActions>
             <Button
-              tone="destructive"
+              type="button"
+              variant="destructive"
               disabled={
                 busy || cannotChoose || (persona.is_default && chosen === "")
               }
@@ -979,7 +1031,12 @@ function ArchiveDialog({
             >
               {busy ? "Archiving…" : "Archive persona"}
             </Button>
-            <Button disabled={busy} onClick={dismiss}>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={dismiss}
+            >
               Cancel
             </Button>
           </FormActions>

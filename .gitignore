@@ -26,3 +26,7 @@ docker-compose.override.yml
 
 # Agent worktrees — full checkouts, never part of the repo
 .claude/worktrees/
+
+# Screenshots and throwaway scripts an agent leaves behind while proving a
+# visual change. They belong to the review, not to the repository.
+.proofs/

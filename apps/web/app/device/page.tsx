@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from "react";
 
-import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
-import { AuthShell, styles } from "../ui.tsx";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+import { Field } from "../../ui/form.tsx";
+import { AuthForm, AuthShell } from "../ui.tsx";
 
 /**
  * The code from your terminal.
@@ -46,26 +49,28 @@ export default function DeviceCodePage() {
           : "Type the code your terminal is showing."
       }
     >
-      <Form onSubmit={submit}>
+      <AuthForm onSubmit={submit}>
         <Field label="Code" htmlFor="user_code">
-          <div className={styles.codeInput}>
-            <TextInput
-              id="user_code"
-              name="user_code"
-              autoComplete="off"
-              autoCapitalize="characters"
-              spellCheck={false}
-              required
-              value={code}
-              onChange={setCode}
-            />
-          </div>
+          {/*
+           * Eight characters read off another screen, so the field is drawn the
+           * way the terminal draws them: monospaced, spaced out, and upper case
+           * whatever was typed.
+           */}
+          <Input
+            className="text-center font-mono text-lg tracking-[0.18em] uppercase"
+            id="user_code"
+            name="user_code"
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            required
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+          />
         </Field>
 
-        <Button weight="strong" type="submit">
-          Continue
-        </Button>
-      </Form>
+        <Button type="submit">Continue</Button>
+      </AuthForm>
     </AuthShell>
   );
 }

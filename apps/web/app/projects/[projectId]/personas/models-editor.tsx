@@ -1,17 +1,14 @@
 "use client";
 
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import {
   type ModelsDraft,
   type PersonaForm,
   type PersonaModelCatalogEntry,
 } from "../../../../lib/personas.ts";
-import {
-  Field,
-  FormRow,
-  Help,
-  Select,
-  TextInput,
-} from "../../../../ui/controls.tsx";
+import { Field, FormRow, Help } from "../../../../ui/form.tsx";
+import { NumberField } from "../../../../ui/number-field.tsx";
 
 /**
  * The complete model selection owned by a persona version.
@@ -35,6 +32,12 @@ export function ModelFields({
   const entries = (job: PersonaModelCatalogEntry["job"]) =>
     form.model_catalog.filter((entry) => entry.job === job);
 
+  /*
+   * **One option carries both halves of the choice, encoded together.** A
+   * select whose value was the model alone would let a provider from one
+   * adapter stand beside a model from another, which is the exact combination
+   * this version is meant to make impossible.
+   */
   const choice = (provider: string, model: string) =>
     JSON.stringify([provider, model]);
 
@@ -49,6 +52,14 @@ export function ModelFields({
     value: string,
   ): PersonaModelCatalogEntry | undefined =>
     entries(job).find((entry) => choice(entry.provider, entry.model) === value);
+
+  /** The options of one job, drawn as the browser's own. */
+  const optionsOf = (job: PersonaModelCatalogEntry["job"]) =>
+    options(job).map((option) => (
+      <option key={option.value} value={option.value}>
+        {option.label}
+      </option>
+    ));
 
   return (
     <>
@@ -67,9 +78,8 @@ export function ModelFields({
             id="persona-llm-model"
             value={choice(draft.llmProvider, draft.llmModel)}
             disabled={disabled}
-            options={options("llm")}
-            onChange={(value) => {
-              const entry = selected("llm", value);
+            onChange={(event) => {
+              const entry = selected("llm", event.target.value);
               if (entry === undefined) return;
               onChange({
                 ...draft,
@@ -77,7 +87,9 @@ export function ModelFields({
                 llmModel: entry.model,
               });
             }}
-          />
+          >
+            {optionsOf("llm")}
+          </Select>
         </Field>
 
         <Field
@@ -89,9 +101,8 @@ export function ModelFields({
             id="persona-stt-model"
             value={choice(draft.sttProvider, draft.sttModel)}
             disabled={disabled}
-            options={options("stt")}
-            onChange={(value) => {
-              const entry = selected("stt", value);
+            onChange={(event) => {
+              const entry = selected("stt", event.target.value);
               if (entry === undefined) return;
               onChange({
                 ...draft,
@@ -99,7 +110,9 @@ export function ModelFields({
                 sttModel: entry.model,
               });
             }}
-          />
+          >
+            {optionsOf("stt")}
+          </Select>
         </Field>
       </FormRow>
 
@@ -112,10 +125,15 @@ export function ModelFields({
           id="persona-tts-model"
           value={choice(draft.ttsProvider, draft.ttsModel)}
           disabled={disabled}
-          options={options("tts")}
-          onChange={(value) => {
-            const entry = selected("tts", value);
+          onChange={(event) => {
+            const entry = selected("tts", event.target.value);
             if (entry === undefined) return;
+            /*
+             * The voice travels with the model that speaks it. A voice id
+             * belongs to one TTS provider, so keeping the old one after the
+             * provider changed would leave a persona pointing at a voice its
+             * new provider has never heard of.
+             */
             onChange({
               ...draft,
               ttsProvider: entry.provider,
@@ -123,7 +141,9 @@ export function ModelFields({
               voiceId: entry.recommended_voice_id ?? "",
             });
           }}
-        />
+        >
+          {optionsOf("tts")}
+        </Select>
       </Field>
 
       <FormRow>
@@ -132,27 +152,33 @@ export function ModelFields({
           htmlFor="persona-tts-voice"
           hint="The TTS provider's voice id."
         >
-          <TextInput
+          <Input
             id="persona-tts-voice"
             value={draft.voiceId}
             disabled={disabled}
-            onChange={(voiceId) => onChange({ ...draft, voiceId })}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) =>
+              onChange({ ...draft, voiceId: event.target.value })
+            }
           />
         </Field>
 
-        <Field
+        {/*
+         * The rate carries no `min`, `max` or `step`, and that is deliberate.
+         * The accepted range is the server's rule, and a bound written here as
+         * well would either refuse a rate egma would have taken or take one
+         * egma will refuse. The range is said in the hint, in the server's own
+         * numbers, and the one authoritative refusal comes from the server.
+         */}
+        <NumberField
+          id="persona-tts-speed"
           label="Speech rate"
-          htmlFor="persona-tts-speed"
+          value={draft.speed}
+          disabled={disabled}
           hint={`A multiple of the natural pace, from ${form.speed_range.slowest} to ${form.speed_range.fastest}.`}
-        >
-          <TextInput
-            id="persona-tts-speed"
-            value={draft.speed}
-            numeric
-            disabled={disabled}
-            onChange={(speed) => onChange({ ...draft, speed })}
-          />
-        </Field>
+          onChange={(speed) => onChange({ ...draft, speed })}
+        />
       </FormRow>
     </>
   );

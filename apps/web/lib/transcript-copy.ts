@@ -375,13 +375,6 @@ export const RECORDING = {
 } as const;
 
 /**
- * The two speakers, exactly as the domain model labels them in a transcript.
- * `human` is the caller's side and `agent` is the agent under test, and neither
- * word is ever borrowed for the other.
- */
-export const SPEAKERS = { human: "human:", agent: "agent:" } as const;
-
-/**
  * What each stored `kind` is called where a person can read it.
  *
  * The keys are the store's vocabulary and the values are the product's, and the

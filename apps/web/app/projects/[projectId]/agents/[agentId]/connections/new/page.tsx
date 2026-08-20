@@ -1,8 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { readJson, writeJson, type Refusal } from "../../../../../../../lib/api.ts";
 import {
   agentDetailQuery,
@@ -24,16 +28,12 @@ import { roleOf } from "../../../../../../../lib/me.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
 import {
-  Button,
-  ButtonLink,
   Field,
   Form,
   FormActions,
   Help,
   Problem,
-  Select,
-  TextInput,
-} from "../../../../../../../ui/controls.tsx";
+} from "../../../../../../../ui/form.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../../../ui/settings-read.ts";
@@ -402,12 +402,14 @@ function NewConnection({
             <Select
               id="agent-platform"
               value={platformValue}
-              options={agentPlatformChoices(catalog).map((item) => ({
-                value: item.value,
-                label: item.label,
-              }))}
-              onChange={choosePlatform}
-            />
+              onChange={(event) => choosePlatform(event.target.value)}
+            >
+              {agentPlatformChoices(catalog).map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </Select>
           </Field>
 
           {platformOptions.length > 1 ? (
@@ -415,12 +417,14 @@ function NewConnection({
               <Select
                 id="access-variant"
                 value={option.access_variant}
-                options={platformOptions.map((item) => ({
-                  value: item.access_variant,
-                  label: item.access_variant_label,
-                }))}
-                onChange={chooseOption}
-              />
+                onChange={(event) => chooseOption(event.target.value)}
+              >
+                {platformOptions.map((item) => (
+                  <option key={item.access_variant} value={item.access_variant}>
+                    {item.access_variant_label}
+                  </option>
+                ))}
+              </Select>
               <Help>
                 {option.modality === "voice" ? "Voice" : "Chat"} connection
               </Help>
@@ -428,11 +432,13 @@ function NewConnection({
           ) : null}
 
           <Field label="Connection name (optional)" htmlFor="connection-name">
-            <TextInput
+            <Input
               id="connection-name"
               value={name}
               placeholder="A name for this connection"
-              onChange={setName}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setName(event.target.value)}
             />
             <Help>The label shown for this connection in Egma.</Help>
           </Field>
@@ -484,23 +490,20 @@ function NewConnection({
 
           {refused === null ? null : <Problem>{refused.message}</Problem>}
           <FormActions>
-            <Button
-              type="submit"
-              weight="strong"
-              disabled={saving || !canSubmit}
-              why={submitWhy}
-            >
+            <Button type="submit" disabled={saving || !canSubmit} why={submitWhy}>
               {saving ? "Adding…" : "Add connection"}
             </Button>
-            <ButtonLink
-              href={
-                onboarding
-                  ? projectPath(projectId, "agents", agentId, "onboarding")
-                  : back
-              }
-            >
-              {onboarding ? "Skip connection for now" : "Cancel"}
-            </ButtonLink>
+            <Button asChild variant="secondary">
+              <Link
+                href={
+                  onboarding
+                    ? projectPath(projectId, "agents", agentId, "onboarding")
+                    : back
+                }
+              >
+                {onboarding ? "Skip connection for now" : "Cancel"}
+              </Link>
+            </Button>
           </FormActions>
           {onboarding ? (
             <Help>
@@ -541,12 +544,13 @@ function RetellSetup({
   return (
     <>
       <Field label="Retell API key" htmlFor="retell-api-key">
-        <TextInput
+        <Input
           id="retell-api-key"
           value={apiKey}
-          secret
+          type="password"
           autoComplete="off"
-          onChange={onKeyChange}
+          spellCheck={false}
+          onChange={(event) => onKeyChange(event.target.value)}
         />
         <Help>
           Egma uses this key to load your Retell voice agents and their routed
@@ -554,6 +558,8 @@ function RetellSetup({
         </Help>
       </Field>
       <Button
+        type="button"
+        variant="secondary"
         disabled={apiKey.trim() === ""}
         busy={discovering}
         onClick={onDiscover}
@@ -573,12 +579,14 @@ function RetellSetup({
             <Select
               id="retell-agent"
               value={selectedAgent}
-              options={agents.map((item) => ({
-                value: item.id,
-                label: item.name === "" ? item.id : item.name,
-              }))}
-              onChange={onAgentChange}
-            />
+              onChange={(event) => onAgentChange(event.target.value)}
+            >
+              {agents.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name === "" ? item.id : item.name}
+                </option>
+              ))}
+            </Select>
           </Field>
           {agent === undefined || agent.numbers.length === 0 ? (
             <Problem>
@@ -590,15 +598,16 @@ function RetellSetup({
               <Select
                 id="retell-number"
                 value={selectedNumber}
-                options={agent.numbers.map((number) => ({
-                  value: number.number,
-                  label:
-                    number.label === ""
+                onChange={(event) => onNumberChange(event.target.value)}
+              >
+                {agent.numbers.map((number) => (
+                  <option key={number.number} value={number.number}>
+                    {number.label === ""
                       ? number.number
-                      : `${number.label} · ${number.number}`,
-                }))}
-                onChange={onNumberChange}
-              />
+                      : `${number.label} · ${number.number}`}
+                  </option>
+                ))}
+              </Select>
             </Field>
           )}
         </>

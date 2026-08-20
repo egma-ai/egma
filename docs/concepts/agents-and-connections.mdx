@@ -122,9 +122,11 @@ Attach a generic phone connection to an existing agent:
 }
 ```
 
-Use `POST /api/agents/:agentId/connections` for the second request. There is no
-root `/api/connections` route. A connection is always reached through its
-agent.
+Use `POST /api/agents/:agentId/connections` for this request.
+
+<Note>
+A connection is only ever reachable through its agent. There is no `/api/connections` root. To list the connections on one agent, use `GET /api/agents/:agentId`; to see them for every agent at once, `GET /api/agents` carries them on each listed agent.
+</Note>
 
 The response includes the five facts, plus `id`, topology,
 environment, safe configuration, capability evidence, and a credential hint
@@ -132,7 +134,8 @@ when that variant stores a credential. It never returns a stored secret.
 
 ## One agent can have several connections
 
-One agent can be tested through several paths while keeping one run history:
+One agent can be tested through several paths while keeping one run history.
+Add several connections only when they reach the same logical agent:
 
 ```text
 agent: order-line (agt_01K...)

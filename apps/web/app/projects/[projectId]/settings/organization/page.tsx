@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
@@ -9,18 +9,19 @@ import {
   ORGANIZATION_PATH,
   type OrganizationSettings,
 } from "../../../../../lib/settings.ts";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
 import {
-  Button,
   Field,
   Form,
   FormActions,
   Help,
   Problem,
   Refused,
-  Section,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
+} from "../../../../../ui/form.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import {
   SettingsLayout,
   settingsPath,
@@ -56,6 +57,8 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   const settled = answer?.status === "ready" ? answer.value : null;
   const mayAdminister = settled?.may_manage_organization === true;
 
+  /* The field's hint, named so the input can point at it. */
+  const nameHint = useId();
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -79,6 +82,11 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   }, [answer]);
 
   const named = name.trim() !== "";
+  /** Said only to somebody the server would refuse, and only once it has said so. */
+  const whyNot =
+    mayAdminister || role === null
+      ? undefined
+      : `Your ${role} role cannot change organization settings. Ask an organization admin.`;
   const changed = settled !== null && name.trim() !== settled.name;
   const confirming = confirmingSave.current;
   const changedWhileConfirming =
@@ -179,22 +187,25 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
             {refused === null ? null : <Refused message={refused.message} />}
 
             <Form onSubmit={() => void save()}>
-              <Field
-                label="Name"
-                htmlFor="organization-name"
-                hint="What Egma calls your organization. Changing it breaks no link and no invitation."
-              >
-                <TextInput
+              <Field label="Name" htmlFor="organization-name">
+                <Input
                   id="organization-name"
                   value={name}
+                  autoComplete="off"
+                  spellCheck={false}
                   disabled={!mayAdminister}
-                  invalid={!named}
-                  onChange={(next) => {
+                  aria-invalid={named ? undefined : true}
+                  aria-describedby={nameHint}
+                  onChange={(event) => {
                     editVersion.current += 1;
-                    setName(next);
+                    setName(event.target.value);
                     setSaved(false);
                   }}
                 />
+                <p className="m-0 text-sm leading-(--line-normal) text-faint" id={nameHint}>
+                  What Egma calls your organization. Changing it breaks no link
+                  and no invitation.
+                </p>
               </Field>
 
               {named ? null : <Problem>An organization needs a name.</Problem>}
@@ -202,14 +213,10 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
 
               <FormActions>
                 <Button
-                  weight="strong"
                   type="submit"
-                  disabled={!mayAdminister || !named || !changed || saving}
-                  why={
-                    mayAdminister || role === null
-                      ? undefined
-                      : `Your ${role} role cannot change organization settings. Ask an organization admin.`
-                  }
+                  disabled={!mayAdminister || !named || !changed}
+                  busy={saving}
+                  {...(whyNot === undefined ? {} : { why: whyNot })}
                 >
                   {saving ? "Saving…" : "Save organization"}
                 </Button>

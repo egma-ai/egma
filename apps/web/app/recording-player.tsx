@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { offersNothing } from "../lib/recording-refusals.ts";
-import { Notice, styles } from "./ui.tsx";
+import styles from "./ui.module.css";
+import { Notice } from "./ui.tsx";
 
 /**
  * The audio egma recorded of one voice conversation, wherever somebody is

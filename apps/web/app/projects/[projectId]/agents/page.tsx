@@ -4,22 +4,21 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { readJson, type Refusal } from "../../../../lib/api.ts";
 import {
   agentsQuery,
   type AgentPage,
-  type ListedAgent,
+  type ListedAgentWithConnections,
 } from "../../../../lib/agents.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import {
-  ButtonLink,
-  TextInput,
-  Toolbar,
-} from "../../../../ui/controls.tsx";
+import { Toolbar } from "../../../../ui/section.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
+import { useMinuteClock } from "../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import {
   AppShell,
@@ -28,6 +27,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../ui/shell.tsx";
+import { ConnectionsOnRow } from "./connection-facts.tsx";
 
 /**
  * The agents of one project: the landing page of the product.
@@ -40,6 +40,12 @@ import {
  * The project is in the address and in the request, every time. Reload, Back,
  * Forward, a copied link and a second tab on a second project all work for the
  * same reason: there is no chosen project anywhere except the address.
+ *
+ * **Every row says how egma reaches its agent.** That is the question somebody
+ * brings here, and the list read answers it: each row carries its agent's
+ * connections, so telling a staging chat connection from a production phone
+ * number costs no click, and an agent egma cannot reach at all says so where it
+ * is read rather than where a run refuses to start.
  *
  * **Search is asked of the server, never applied to what came back.** A filter
  * that only reached the page already fetched would
@@ -56,7 +62,10 @@ export default function AgentsPage() {
   );
 }
 
-function columnsFor(projectId: string): readonly Column<ListedAgent>[] {
+function columnsFor(
+  projectId: string,
+  now: number,
+): readonly Column<ListedAgentWithConnections>[] {
   return [
     {
       key: "name",
@@ -66,6 +75,23 @@ function columnsFor(projectId: string): readonly Column<ListedAgent>[] {
         <Link href={projectPath(projectId, "agents", agent.id)}>
           {agent.name}
         </Link>
+      ),
+    },
+    {
+      /*
+       * Second, because it is what somebody came to read. The width is claimed
+       * rather than left to the browser: this cell holds a line per connection
+       * and the description beside it would otherwise take the room those lines
+       * need. Half the table, because a line here is four facts — the
+       * environment, the platform, the channel and whether the target has been
+       * measured — and the platform is named in the registry's own words,
+       * which are words rather than tokens.
+       */
+      key: "connections",
+      header: "Connections",
+      width: "50%",
+      cell: (agent) => (
+        <ConnectionsOnRow connections={agent.connections} now={now} />
       ),
     },
     {
@@ -85,6 +111,8 @@ function Agents({ projectId }: { readonly projectId: string }) {
 
   const [typed, setTyped] = useState("");
   const [search, setSearch] = useState("");
+  /** One clock for every relative instant on the page, rather than one per row. */
+  const now = useMinuteClock();
 
   /**
    * The typed text is debounced into the text the request is made from, so
@@ -149,36 +177,42 @@ function Agents({ projectId }: { readonly projectId: string }) {
    * either way, which is where the boundary actually is.
    *
    * It is disabled for the same reason on a project this organization does not
-   * hold: there is nothing to register an agent in.
+   * hold: there is no project here to connect an agent to.
    *
    * **While the role is unknown there is no control at all.** A disabled one
    * would have to say why, and every sentence it could say would be a claim
    * about somebody egma has not identified yet.
    */
-  const mayRegister = role !== null && canAuthor(role) && answer?.status !== "missing";
+  const mayConnect = role !== null && canAuthor(role) && answer?.status !== "missing";
   const whyNot =
     role !== null && canAuthor(role)
-      ? "There is no project here to register an agent in."
-      : `Your ${String(role)} role cannot register agents. Ask an organization admin to change your role.`;
+      ? "There is no project here to connect an agent to."
+      : `Your ${String(role)} role cannot connect agents. Ask an organization admin to change your role.`;
 
-  const register = (weight: "strong" | "quiet") =>
-    role === null ? undefined : (
-      <ButtonLink
-        href={projectPath(projectId, "agents", "new")}
-        weight={weight}
-        disabled={!mayRegister}
-        why={mayRegister ? undefined : whyNot}
-      >
-        Register agent
-      </ButtonLink>
+  /**
+   * The one action this page is for, and the same control wherever it stands.
+   *
+   * It opens the onboarding flow at its first stage — the agent's details, then
+   * the first connection — because that is how an agent joins egma. The label
+   * names the outcome rather than the record: a person wants egma able to reach
+   * their agent, and registering one is the first half of that.
+   */
+  const connect = () =>
+    role === null ? undefined : mayConnect ? (
+      <Button asChild>
+        <Link href={projectPath(projectId, "agents", "new")}>Connect agent</Link>
+      </Button>
+    ) : (
+      <Button type="button" disabled why={whyNot}>
+        Connect agent
+      </Button>
     );
 
   const header = (
     <PageHeader
       eyebrow="Project"
       title="Agents"
-      lead="The voice agents Egma can test in this project."
-      action={register("strong")}
+      lead="The voice agents Egma can test in this project, and how Egma reaches each one."
     />
   );
 
@@ -194,9 +228,11 @@ function Agents({ projectId }: { readonly projectId: string }) {
           message={answer.refusal.message}
           action={
             elsewhere === undefined ? undefined : (
-              <ButtonLink href={projectLanding(elsewhere.id)}>
-                Open {elsewhere.name}
-              </ButtonLink>
+              <Button asChild variant="secondary">
+                <Link href={projectLanding(elsewhere.id)}>
+                  Open {elsewhere.name}
+                </Link>
+              </Button>
             )
           }
         />
@@ -223,8 +259,8 @@ function Agents({ projectId }: { readonly projectId: string }) {
       return (
         <Empty
           title="No agents in this project yet"
-          lead="Register the voice agent you want to test, then give Egma a way to reach it."
-          action={register("strong")}
+          lead="Connect the voice agent you want to test: Egma asks for its details, then for a way to reach it."
+          action={connect()}
         />
       );
     }
@@ -277,7 +313,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
       <>
         <DataTable
           label="Agents in this project"
-          columns={columnsFor(projectId)}
+          columns={columnsFor(projectId, now)}
           rows={items}
           keyOf={(agent) => agent.id}
           stretchPrimaryLink
@@ -302,19 +338,58 @@ function Agents({ projectId }: { readonly projectId: string }) {
     );
   }
 
+  /**
+   * A project with nothing in it is the whole screen, and it has one thing on
+   * it.
+   *
+   * So the toolbar is not drawn there: a search box for a project with nothing
+   * to search is a control that carries no meaning, and a second Connect agent
+   * above the one in the middle of the empty state would leave somebody
+   * choosing between two identical primary buttons. Everywhere else — while the
+   * read is in flight, over a list, over a search that matched nothing — the
+   * toolbar stays exactly where it was, because a search box that vanished
+   * under the keystroke that filled it would be unusable.
+   */
+  const nothingHereYet =
+    answer?.status === "ready" &&
+    answer.value.items.length === 0 &&
+    search.trim() === "";
+
   return (
     <ProductPage>
       {header}
       <PageBody>
-        <Toolbar>
-          <TextInput
-            id="agent-search"
-            value={typed}
-            label="Search agents by name"
-            placeholder="Search by name"
-            onChange={setTyped}
-          />
-        </Toolbar>
+        {nothingHereYet ? null : (
+          <Toolbar>
+            {/*
+             * The reason a disabled control gives is a sentence, and the
+             * toolbar is one line. Wrapping the pair lets the sentence fall
+             * under its own control rather than squeezing the search box
+             * across the row.
+             *
+             * No `min-w-0` here, and that is the difference between a gap and
+             * no gap. The search box is `width: 100%` and shrinks to fit, so
+             * everything beside it is under shrinking pressure; a flex item
+             * told its minimum is zero gives way past its own contents, and
+             * this one did — measured at 105.5px around a 119.9px button,
+             * which put the button 2.3px over the search box and swallowed the
+             * toolbar's 12px gap whole. Left at `auto`, the minimum is the
+             * button, the sentence wraps under it, and the gap survives.
+             */}
+            <div className="flex flex-wrap items-center gap-3">
+              {connect()}
+            </div>
+            <Input
+              id="agent-search"
+              value={typed}
+              aria-label="Search agents by name"
+              placeholder="Search by name"
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setTyped(event.target.value)}
+            />
+          </Toolbar>
+        )}
         {body()}
       </PageBody>
     </ProductPage>

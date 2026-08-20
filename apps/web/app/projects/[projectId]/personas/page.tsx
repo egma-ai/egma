@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { readJson, type Refusal } from "../../../../lib/api.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import {
@@ -17,7 +18,8 @@ import {
   projectPath,
 } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import { ButtonLink, Choice } from "../../../../ui/controls.tsx";
+import { Choice } from "../../../../ui/choice.tsx";
+import { Toolbar } from "../../../../ui/section.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import {
   Empty,
@@ -37,7 +39,6 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../ui/shell.tsx";
-import styles from "../../../../ui/system.module.css";
 
 /**
  * The personas of one project.
@@ -73,9 +74,14 @@ function columnsFor(
       header: "Persona",
       primary: true,
       cell: (persona) => (
-        <Link href={projectPath(projectId, "personas", persona.id)}>
-          {persona.name}
-        </Link>
+        <span className="inline-flex min-w-0 items-center gap-3">
+          <Link
+            className="no-underline"
+            href={projectPath(projectId, "personas", persona.id)}
+          >
+            {persona.name}
+          </Link>
+        </span>
       ),
     },
     {
@@ -192,16 +198,27 @@ function Personas({ projectId }: { readonly projectId: string }) {
       ? "There is no project here to author a persona in."
       : `Your ${String(role)} role cannot author personas. Ask an organization admin to change your role.`;
 
+  /**
+   * The way to author a persona, and what it becomes when it is not this
+   * person's.
+   *
+   * **A disabled control is genuinely inert or it is a lie.** A link cannot be
+   * disabled: `aria-disabled` on an anchor greys it out and it still follows on
+   * click and still takes the keyboard. So when this is not available it stops
+   * being a link and becomes a disabled button, which carries the reason where
+   * a keyboard and a screen reader can reach it.
+   */
   const author = () =>
-    role === null ? undefined : (
-      <ButtonLink
-        href={projectPath(projectId, "personas", "new")}
-        weight="strong"
-        disabled={!mayAuthor}
-        why={mayAuthor ? undefined : whyNot}
-      >
+    role === null ? undefined : mayAuthor ? (
+      <Button asChild>
+        <Link href={projectPath(projectId, "personas", "new")}>
+          New persona
+        </Link>
+      </Button>
+    ) : (
+      <Button type="button" disabled why={whyNot}>
         New persona
-      </ButtonLink>
+      </Button>
     );
 
   function body() {
@@ -216,9 +233,11 @@ function Personas({ projectId }: { readonly projectId: string }) {
           message={answer.refusal.message}
           action={
             elsewhere === undefined ? undefined : (
-              <ButtonLink href={projectLanding(elsewhere.id)}>
-                Open {elsewhere.name}
-              </ButtonLink>
+              <Button asChild variant="secondary">
+                <Link href={projectLanding(elsewhere.id)}>
+                  Open {elsewhere.name}
+                </Link>
+              </Button>
             )
           }
         />
@@ -348,7 +367,7 @@ function Personas({ projectId }: { readonly projectId: string }) {
       />
       <PageBody>
         {filterable ? (
-          <div className={styles.toolbar}>
+          <Toolbar>
             <Choice<Shown>
               label="Which personas to show"
               value={shown}
@@ -358,7 +377,7 @@ function Personas({ projectId }: { readonly projectId: string }) {
               ]}
               onChange={setShown}
             />
-          </div>
+          </Toolbar>
         ) : null}
         {body()}
       </PageBody>

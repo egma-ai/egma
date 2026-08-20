@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 import { readJson, type Answer } from "../../lib/api.ts";
 import { firstProjectOf, type Me } from "../../lib/me.ts";
 import { NEW_PROJECT_PATH } from "../../lib/settings.ts";
-import { Button } from "../../ui/controls.tsx";
+import { Button } from "@/components/ui/button";
+
 import { settingsPath } from "../../ui/settings-nav.tsx";
 import { ProductStatePage } from "../../ui/shell.tsx";
 
@@ -79,7 +80,13 @@ export default function MembersPage() {
           : answer.refusal.message
       }
     >
-      <Button onClick={() => setAttempt((one) => one + 1)}>Try again</Button>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => setAttempt((one) => one + 1)}
+      >
+        Try again
+      </Button>
     </ProductStatePage>
   );
 }

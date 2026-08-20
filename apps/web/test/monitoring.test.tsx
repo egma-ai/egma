@@ -253,13 +253,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * **The level is the wait, not decoration.** The sidebar's Monitoring group
+ * label is a heading reading the same word, and it is drawn before any read
+ * answers — so an unlevelled wait here would be satisfied by the shell and
+ * would assert the query against a page that had not asked for anything yet.
+ * `level: 1` is the page's own heading, which only the settled page draws.
+ */
 describe("what the Monitoring list asks egma for", () => {
   it("names the project in the address, never one resolved for it", async () => {
     routed.projectId = "prj_1";
     const { asked } = stub({ rows: [ONE_ROW] });
     render(<MonitoringTranscriptsPage />);
 
-    await screen.findByRole("heading", { name: LIST.title });
+    await screen.findByRole("heading", { level: 1, name: LIST.title });
     expect(listedAt(asked).get("project_id")).toBe("prj_1");
   });
 
@@ -272,7 +279,7 @@ describe("what the Monitoring list asks egma for", () => {
     const { asked } = stub({ rows: [ONE_ROW] });
     render(<MonitoringTranscriptsPage />);
 
-    await screen.findByRole("heading", { name: LIST.title });
+    await screen.findByRole("heading", { level: 1, name: LIST.title });
     const query = listedAt(asked);
     expect(query.get("source")).toBe("production");
     // And a window, because the store refuses a read that bounded nothing.

@@ -37,9 +37,13 @@ export type ListedAgent = {
  * stopped, and asking for more means handing it back. It is `null` rather than
  * absent when there is no next page, so "there is no more" and "this answer is
  * an older shape" are different answers.
+ *
+ * The items are the widened shape below: the list read carries every listed
+ * agent's connections, so a page of agents is a page of *reachability* rather
+ * than a page of names each hiding a second request.
  */
 export type AgentPage = {
-  readonly items: readonly ListedAgent[];
+  readonly items: readonly ListedAgentWithConnections[];
   readonly next_cursor: string | null;
 };
 
@@ -95,7 +99,7 @@ export type ListedConnection = {
   /** How Egma gets access to that connection. */
   readonly access_variant: string;
   readonly modality: string;
-  /** Human display text derived from the four technical axes. */
+  /** Customer-facing text derived by the server from the four axes above. */
   readonly product_label: string;
   readonly topology: string;
   readonly environment: string | null;
@@ -110,6 +114,22 @@ export type ListedConnection = {
   readonly archived_at: string | null;
   readonly created_at: string;
   readonly updated_at: string;
+};
+
+/**
+ * One agent as a *list* of them answers it: the identity above, and every
+ * living way egma can reach it.
+ *
+ * The connections are the same shape the agent's own read answers, because the
+ * API describes them with one function. So a row and a page never disagree
+ * about what a connection is, and code that reads one reads the other.
+ *
+ * Archived connections are not among them. "How egma reaches this agent" and
+ * "how it used to" are two questions, and the second is asked of the agent's
+ * own read.
+ */
+export type ListedAgentWithConnections = ListedAgent & {
+  readonly connections: readonly ListedConnection[];
 };
 
 export type AgentDetail = {

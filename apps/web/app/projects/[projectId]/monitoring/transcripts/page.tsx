@@ -38,7 +38,8 @@ import {
   type ListPage,
   type Quiet,
 } from "../../../../../lib/transcripts.ts";
-import { ButtonLink, Select } from "../../../../../ui/controls.tsx";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
@@ -54,7 +55,7 @@ import {
   PageHeader,
   ProductPage,
 } from "../../../../../ui/shell.tsx";
-import { Notice, styles } from "../../../../ui.tsx";
+import { Notice } from "../../../../ui.tsx";
 
 /**
  * **Monitoring**: what this project's agents did in production, newest first.
@@ -366,16 +367,21 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
         lead={LIST.lead}
         action={
           <>
-            <ButtonLink href={monitoringSetupPath(projectId)}>
-              Set up monitoring
-            </ButtonLink>
+            <Button asChild>
+              <Link href={monitoringSetupPath(projectId)}>Set up monitoring</Link>
+            </Button>
             <Select
               id="window"
               value={choice ?? DEFAULT_WINDOW}
-              label={LIST.window}
-              options={WINDOW_OPTIONS}
-              onChange={choose}
-            />
+              aria-label={LIST.window}
+              onChange={(event) => choose(event.target.value as WindowChoice)}
+            >
+              {WINDOWS.map((one) => (
+                <option key={one.id} value={one.id}>
+                  {one.label}
+                </option>
+              ))}
+            </Select>
           </>
         }
       />
@@ -417,9 +423,11 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
             title={QUIET.organizationKey.title}
             lead={QUIET.organizationKey.lead}
             action={
-              <ButtonLink weight="strong" href={settingsPath(projectId, "keys")}>
-                {QUIET.organizationKey.key}
-              </ButtonLink>
+              <Button asChild>
+                <Link href={settingsPath(projectId, "keys")}>
+                  {QUIET.organizationKey.key}
+                </Link>
+              </Button>
             }
           />
         ) : null}
@@ -447,21 +455,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
   );
 }
 
-/**
- * What a developer with nothing on this page needs: the address, the two
- * variables, and where the key comes from.
- *
- * **The address is this deployment's own**, read off the page rather than
- * written down anywhere, because a self-hoster's egma is wherever they put it
- * and a printed example would be somebody else's. The exporter appends the
- * signal's own path, so what is shown is the base and nothing after it.
- *
- * **Nothing is drawn until that address is known.** It only exists in a
- * browser, so it arrives one render after this component mounts — and the
- * render before it would print `OTEL_EXPORTER_OTLP_ENDPOINT=` with nothing after
- * the sign, which is a variable somebody could copy and an instruction that is
- * wrong for as long as it is on screen. Teaching arrives once and complete.
- */
+/** Provider-specific teaching lives once, on the Monitoring setup page. */
 function SetUp() {
   return (
     <Empty
@@ -473,7 +467,7 @@ function SetUp() {
 
 /** Nothing recorded for this column, which is a different thing from a zero. */
 function Nothing() {
-  return <span className={styles.muted}>{LIST.nothing}</span>;
+  return <span className="text-muted-foreground">{LIST.nothing}</span>;
 }
 
 /**
@@ -533,7 +527,7 @@ function columnsFor(projectId: string, now: number): readonly Column<Listed>[] {
         row.errored_span_count === 0 ? (
           <Nothing />
         ) : (
-          <strong className={styles.wrong}>{row.errored_span_count}</strong>
+          <strong className="text-failure">{row.errored_span_count}</strong>
         ),
     ],
     [COLUMNS.environment, (row) => row.environment],
@@ -585,8 +579,3 @@ const MEASURED_COLUMNS = new Set<string>([
   COLUMNS.tools,
   COLUMNS.errors,
 ]);
-
-const WINDOW_OPTIONS = WINDOWS.map((window) => ({
-  value: window.id,
-  label: window.label,
-}));

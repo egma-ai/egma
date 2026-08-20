@@ -7,12 +7,31 @@ import {
   returnPathIn,
   withReturnTo,
 } from "../../lib/return-to.ts";
-import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
-import { AuthShell, Notice, styles } from "../ui.tsx";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+
+import { Field } from "../../ui/form.tsx";
+import { AuthForm, AuthShell, LinkLine, Notice } from "../ui.tsx";
 
 function PasswordVisibilityIcon({ visible }: { readonly visible: boolean }) {
   return (
-    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+    /*
+     * `size-5` is on the icon rather than on the control. The base button sizes
+     * any icon that does not carry a size of its own, and this one is 20px
+     * inside a 36px target rather than the 16px a row action wears.
+     */
+    <svg
+      className="size-5"
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.5}
+    >
       <path d="M2.5 12s3.4-5.5 9.5-5.5 9.5 5.5 9.5 5.5-3.4 5.5-9.5 5.5S2.5 12 2.5 12Z" />
       <circle cx="12" cy="12" r="2.75" />
       {visible ? <path d="m4 4 16 16" /> : null}
@@ -70,53 +89,76 @@ export default function SignInPage() {
       title="Sign in"
       lead="Sign in to continue to your organization."
     >
-      <Form onSubmit={() => void submit()}>
+      <AuthForm onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
         <Field label="Email" htmlFor="email">
-          <TextInput
+          <Input
             id="email"
             name="email"
             type="email"
             autoComplete="email"
+            spellCheck={false}
             required
             value={email}
-            onChange={setEmail}
+            onChange={(event) => setEmail(event.target.value)}
           />
         </Field>
 
         <Field label="Password" htmlFor="password">
-          <div className={styles.passwordControl}>
-            <TextInput
+          <div className="relative min-w-0">
+            <Input
+              className="min-w-0 pr-[calc(var(--tap-target)+var(--space-2))]"
               id="password"
               name="password"
               type={passwordVisible ? "text" : "password"}
               autoComplete="current-password"
+              spellCheck={false}
               required
               value={password}
-              onChange={setPassword}
+              onChange={(event) => setPassword(event.target.value)}
             />
-            <button
-              className={styles.passwordToggle}
+            {/*
+             * The one control in this product that sits inside another one, so
+             * it is the base button resized rather than a second kind of
+             * button: a 36px target inside a 44px field for a fine pointer, and
+             * the full 44px where a finger has to find it.
+             */}
+            <Button
+              className={cn(
+                "absolute top-1/2 right-1 size-(--control-md) min-h-(--control-md)",
+                "-translate-y-1/2 p-0 text-muted-foreground",
+                /*
+                 * The icon brightens under a fine pointer. The base ghost
+                 * variant changes only the background, and the quiet colour
+                 * pinned above wins over its `text-foreground` at rest *and* on
+                 * hover — so the hover half has to be said here too, or the
+                 * only answer to pointing at the control is a faint wash.
+                 */
+                "pointer-hover:text-foreground",
+                "pointer-coarse:right-0 pointer-coarse:size-(--tap-target)",
+                "pointer-coarse:min-h-(--tap-target)",
+              )}
+              variant="ghost"
               type="button"
               aria-label={passwordVisible ? "Hide password" : "Show password"}
               aria-controls="password"
               onClick={() => setPasswordVisible((visible) => !visible)}
             >
               <PasswordVisibilityIcon visible={passwordVisible} />
-            </button>
+            </Button>
           </div>
         </Field>
 
-        <Button weight="strong" type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting}>
           {submitting ? "Signing in…" : "Sign in"}
         </Button>
-      </Form>
+      </AuthForm>
 
       {/* Carrying where they were headed, exactly as the signup link does.
           Somebody sent here by a terminal's approval page who turns out to have
           forgotten their password is still on their way to that page. */}
-      <p className={styles.linkLine}>
+      <LinkLine>
         <a
           href={
             returnTo === null
@@ -126,15 +168,15 @@ export default function SignInPage() {
         >
           Forgot your password?
         </a>
-      </p>
+      </LinkLine>
 
-      <p className={styles.linkLine}>
+      <LinkLine>
         No account yet?{" "}
         <a href={returnTo === null ? "/signup" : withReturnTo("/signup", returnTo)}>
           Sign up
         </a>
         .
-      </p>
+      </LinkLine>
     </AuthShell>
   );
 }

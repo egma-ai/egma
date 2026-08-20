@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import * as copy from "../lib/transcript-copy.ts";
+import { SPEAKERS } from "../ui/evidence.tsx";
 import * as gradingCopy from "../lib/grading-copy.ts";
 import {
   agentPlatformLabel,
@@ -619,9 +620,16 @@ describe("what a stored kind is called where somebody reads it", () => {
     expect(copy.stepLabel("")).toBe("Other");
   });
 
-  /** The two labels a transcript uses for its speakers, and no third one. */
+  /**
+   * The two labels a transcript uses for its speakers, and no third one.
+   *
+   * Read from the shared evidence surface rather than from this copy deck.
+   * Both used to declare the same two words, so the monitoring page and the
+   * simulation page could have come to label a speaker differently; one
+   * declaration is what stops that, and this is the assertion that follows it.
+   */
   it("labels the two speakers the way a transcript does", () => {
-    expect(copy.SPEAKERS).toEqual({ human: "human:", agent: "agent:" });
+    expect(SPEAKERS).toEqual({ human: "human:", agent: "agent:" });
   });
 
   it("makes a grader assertion key readable without changing its words", () => {

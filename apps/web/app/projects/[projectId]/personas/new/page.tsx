@@ -3,6 +3,8 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
@@ -20,14 +22,7 @@ import {
 } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
-import {
-  Button,
-  Field,
-  Form,
-  FormActions,
-  Refused,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
+import { Field, Form, FormActions, Refused } from "../../../../../ui/form.tsx";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import { Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
@@ -170,11 +165,13 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
             htmlFor="persona-name"
             hint="What your team will call them in a list. Names are not unique."
           >
-            <TextInput
+            <Input
               id="persona-name"
               value={name}
               placeholder="Impatient Rita"
-              onChange={setName}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setName(event.target.value)}
             />
           </Field>
 
@@ -183,11 +180,13 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
             htmlFor="persona-description"
             hint="Optional. One line for the people who select this persona."
           >
-            <TextInput
+            <Input
               id="persona-description"
               value={description}
               placeholder="A recurring support persona"
-              onChange={setDescription}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setDescription(event.target.value)}
             />
           </Field>
 
@@ -196,7 +195,6 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
 
           <FormActions>
             <Button
-              weight="strong"
               type="submit"
               disabled={!mayAuthor || saving}
               {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}

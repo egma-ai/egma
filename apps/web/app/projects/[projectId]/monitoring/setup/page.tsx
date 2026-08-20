@@ -1,7 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
 import {
   deleteJson,
@@ -26,20 +32,14 @@ import {
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import { settingsPath } from "../../../../../ui/settings-nav.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
-  Actions,
-  Button,
-  ButtonLink,
-  Checkbox,
   Field,
   Form,
   FormActions,
   Help,
   Problem,
-  Select,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
-import { Dialog } from "../../../../../ui/dialog.tsx";
+} from "../../../../../ui/form.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import {
@@ -54,7 +54,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import styles from "./setup.module.css";
+import { Actions } from "../../../../../ui/section.tsx";
 
 type PlatformChoice = "" | MonitoringPlatform;
 type RetellDraftState = { readonly unsaved: boolean; readonly busy: boolean };
@@ -160,8 +160,11 @@ function Setup({ projectId }: { readonly projectId: string }) {
       {header}
       <PageBody>
         {answer.value.setups.length === 0 ? null : (
-          <section className={styles.current} aria-labelledby="current-setups">
-            <h2 id="current-setups" className={styles.heading}>
+          <section
+            className="flex max-w-[72ch] flex-col gap-4"
+            aria-labelledby="current-setups"
+          >
+            <h2 id="current-setups" className="m-0 text-xl font-medium">
               Current setup
             </h2>
             {retell === undefined ? null : (
@@ -192,9 +195,16 @@ function Setup({ projectId }: { readonly projectId: string }) {
             <Select
               id="monitoring-platform"
               value={platform}
-              options={PLATFORM_OPTIONS}
-              onChange={choosePlatform}
-            />
+              onChange={(event) =>
+                choosePlatform(event.target.value as PlatformChoice)
+              }
+            >
+              {PLATFORM_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
           </Field>
         </Form>
 
@@ -224,14 +234,17 @@ function Setup({ projectId }: { readonly projectId: string }) {
         >
           {(dismiss) => (
             <>
-              <p>
+              <p className="m-0 leading-(--line-normal) text-muted-foreground">
                 The API key and voice-agent choices on this page have not been
                 saved.
               </p>
               <Actions>
-                <Button onClick={dismiss}>Keep editing</Button>
+                <Button type="button" variant="secondary" onClick={dismiss}>
+                  Keep editing
+                </Button>
                 <Button
-                  tone="destructive"
+                  type="button"
+                  variant="destructive"
                   onClick={() => {
                     const next = pendingPlatform;
                     setPendingPlatform(null);
@@ -398,109 +411,133 @@ function SetupStatus({
 
   return (
     <>
-    <div className={styles.status}>
-      <div>
-        <h3 className={styles.statusTitle}>{label}</h3>
-        <div className={styles.statusSummary}>
-          <StateMark kind={status.mark} moving={status.moving} />
-          <p className={styles.statusText}>{status.text}</p>
-        </div>
-        {setup.agent_platform === "retell" ? (
-          <>
-            <p className={styles.detail}>
-              {setup.agents.length === 1
-                ? setup.agents[0]?.platform_agent_name
-                : `${setup.agents.length} voice agents`}
-              {setup.credentials_hint === null
-                ? ""
-                : ` · key ending ${setup.credentials_hint}`}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border py-4">
+        <div>
+          <h3 className="m-0 text-base font-medium">{label}</h3>
+          <div className="mt-1 inline-flex items-center gap-2">
+            <StateMark kind={status.mark} moving={status.moving} />
+            <p className="m-0 leading-(--line-normal) text-muted-foreground">
+              {status.text}
             </p>
-            <ul className={styles.agentProgress}>
-              {setup.agents.map((agent) => {
-                const progress = agentProgress(agent);
-                return (
-                  <li key={agent.id}>
-                    <span>
-                      <strong>{agent.platform_agent_name}</strong>
-                      <code>{agent.platform_agent_id}</code>
-                    </span>
-                    <span className={styles.stateWord}>
-                      <StateMark kind={progress.mark} moving={progress.moving} />
-                      {progress.text}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-            {setup.agents.flatMap((agent) =>
-              agent.failures.map((failure) => (
-                <div className={styles.failedImport} key={failure.id}>
-                  <span className={styles.stateWord}>
-                    <StateMark kind="error" />
-                    <span>
-                      Retell conversation{" "}
-                      <code>{failure.provider_call_id}</code> could not be
-                      imported.
-                    </span>
-                  </span>
-                  <Button
-                    disabled={!mayConfigure}
-                    busy={retrying === failure.id}
-                    why={
-                      mayConfigure
-                        ? undefined
-                        : "Your role can read Monitoring and cannot retry an import."
-                    }
-                    onClick={() => void retry(failure.id)}
+          </div>
+          {setup.agent_platform === "retell" ? (
+            <>
+              <p className="mt-1 mb-0 text-sm text-faint">
+                {setup.agents.length === 1
+                  ? setup.agents[0]?.platform_agent_name
+                  : `${setup.agents.length} voice agents`}
+                {setup.credentials_hint === null
+                  ? ""
+                  : ` · key ending ${setup.credentials_hint}`}
+              </p>
+              <ul className="mt-3 mb-0 flex list-none flex-col gap-2 p-0">
+                {setup.agents.map((agent) => {
+                  const progress = agentProgress(agent);
+                  return (
+                    <li
+                      className="flex min-w-0 items-start justify-between gap-4 text-sm text-muted-foreground max-[40rem]:flex-col max-[40rem]:gap-1"
+                      key={agent.id}
+                    >
+                      <span className="flex min-w-0 flex-col">
+                        <strong className="font-medium text-foreground">
+                          {agent.platform_agent_name}
+                        </strong>
+                        <code className="overflow-hidden font-mono text-ellipsis whitespace-nowrap text-faint">
+                          {agent.platform_agent_id}
+                        </code>
+                      </span>
+                      <span className="inline-flex min-w-0 items-center gap-2">
+                        <StateMark
+                          kind={progress.mark}
+                          moving={progress.moving}
+                        />
+                        {progress.text}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {setup.agents.flatMap((agent) =>
+                agent.failures.map((failure) => (
+                  <div
+                    className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground"
+                    key={failure.id}
                   >
-                    {retrying === failure.id ? "Retrying…" : "Retry import"}
-                  </Button>
-                </div>
-              )),
-            )}
-          </>
-        ) : null}
+                    <span className="inline-flex min-w-0 items-center gap-2">
+                      <StateMark kind="error" />
+                      <span>
+                        Retell conversation{" "}
+                        <code className="font-mono wrap-anywhere">
+                          {failure.provider_call_id}
+                        </code>{" "}
+                        could not be imported.
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!mayConfigure}
+                      busy={retrying === failure.id}
+                      why={
+                        mayConfigure
+                          ? undefined
+                          : "Your role can read Monitoring and cannot retry an import."
+                      }
+                      onClick={() => void retry(failure.id)}
+                    >
+                      {retrying === failure.id ? "Retrying…" : "Retry import"}
+                    </Button>
+                  </div>
+                )),
+              )}
+            </>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!mayConfigure}
+          busy={removing}
+          why={
+            mayConfigure
+              ? undefined
+              : "Your role can read Monitoring and cannot change its setup."
+          }
+          onClick={() => setConfirmingRemove(true)}
+        >
+          Remove setup
+        </Button>
+        {refused === null ? null : <Problem>{refused.message}</Problem>}
       </div>
-      <Button
-        disabled={!mayConfigure}
-        busy={removing}
-        why={
-          mayConfigure
-            ? undefined
-            : "Your role can read Monitoring and cannot change its setup."
-        }
-        onClick={() => setConfirmingRemove(true)}
-      >
-        Remove setup
-      </Button>
-      {refused === null ? null : <Problem>{refused.message}</Problem>}
-    </div>
-    {confirmingRemove ? (
-      <Dialog
-        title={`Remove ${label} Monitoring setup?`}
-        onClose={() => setConfirmingRemove(false)}
-      >
-        {(dismiss) => (
-          <>
-            <p>
-              {setup.agent_platform === "retell"
-                ? "Egma will stop polling every selected Retell agent. Existing production conversations stay in Monitoring."
-                : "Egma will remove this setup status. Existing production conversations stay, and the LiveKit worker keeps exporting until you remove its Egma SDK configuration."}
-            </p>
-            <Actions>
-              <Button onClick={dismiss}>Keep setup</Button>
-              <Button
-                tone="destructive"
-                busy={removing}
-                onClick={() => void remove()}
-              >
-                {removing ? "Removing…" : "Remove setup"}
-              </Button>
-            </Actions>
-          </>
-        )}
-      </Dialog>
-    ) : null}
+      {confirmingRemove ? (
+        <Dialog
+          title={`Remove ${label} Monitoring setup?`}
+          onClose={() => setConfirmingRemove(false)}
+        >
+          {(dismiss) => (
+            <>
+              <p className="m-0 leading-(--line-normal) text-muted-foreground">
+                {setup.agent_platform === "retell"
+                  ? "Egma will stop polling every selected Retell agent. Existing production conversations stay in Monitoring."
+                  : "Egma will remove this setup status. Existing production conversations stay, and the LiveKit worker keeps exporting until you remove its Egma SDK configuration."}
+              </p>
+              <Actions>
+                <Button type="button" variant="secondary" onClick={dismiss}>
+                  Keep setup
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  busy={removing}
+                  onClick={() => void remove()}
+                >
+                  {removing ? "Removing…" : "Remove setup"}
+                </Button>
+              </Actions>
+            </>
+          )}
+        </Dialog>
+      ) : null}
     </>
   );
 }
@@ -599,11 +636,14 @@ function RetellSetup({
   }
 
   return (
-    <section className={styles.platform} aria-labelledby="retell-setup">
-      <h2 id="retell-setup" className={styles.heading}>
+    <section
+      className="flex max-w-[72ch] flex-col gap-4 border-t border-border pt-6"
+      aria-labelledby="retell-setup"
+    >
+      <h2 id="retell-setup" className="m-0 text-xl font-medium">
         Retell
       </h2>
-      <p className={styles.lead}>
+      <p className="m-0 leading-(--line-normal) text-muted-foreground">
         Enter one platform API key. Egma lists the voice agents it can read.
       </p>
       <Form onSubmit={() => void (agents === null ? discover() : save())}>
@@ -612,13 +652,15 @@ function RetellSetup({
           htmlFor="retell-api-key"
           hint="The key needs Agent Read and Monitor or History Read permission. Egma stores it sealed and never shows it again."
         >
-          <TextInput
+          <Input
             id="retell-api-key"
-            secret
+            type="password"
             value={apiKey}
             disabled={!mayConfigure || discovering || saving}
-            onChange={(value) => {
-              setApiKey(value);
+            autoComplete="new-password"
+            spellCheck={false}
+            onChange={(event) => {
+              setApiKey(event.target.value);
               setAgents(null);
               setSelected(new Set());
               setRefused(null);
@@ -629,24 +671,38 @@ function RetellSetup({
         {agents === null ? null : agents.length === 0 ? (
           <Help>This key has no Retell voice agents.</Help>
         ) : (
-          <fieldset className={styles.agentList}>
-            <legend className={styles.legend}>Voice agents to monitor</legend>
+          <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+            <legend className="mb-2 text-sm font-medium">
+              Voice agents to monitor
+            </legend>
             {agents.map((agent) => {
               const inputId = `retell-agent-${agent.id}`;
               return (
-              <div className={styles.agentChoice} key={agent.id}>
-                <Checkbox
-                  id={inputId}
-                  checked={selected.has(agent.id)}
-                  disabled={saving}
-                  label={agent.name}
-                  onChange={(checked) => choose(agent.id, checked)}
-                />
-                <label htmlFor={inputId}>
-                  <strong>{agent.name}</strong>
-                  <small>{agent.id}</small>
-                </label>
-              </div>
+                <div
+                  className="flex min-h-(--control-lg) items-center gap-3 rounded-button border border-border px-3 py-2"
+                  key={agent.id}
+                >
+                  <Checkbox
+                    id={inputId}
+                    checked={selected.has(agent.id)}
+                    disabled={saving}
+                    aria-label={agent.name}
+                    onChange={(event) =>
+                      choose(agent.id, event.target.checked)
+                    }
+                  />
+                  <label
+                    className="flex min-w-0 cursor-pointer flex-col"
+                    htmlFor={inputId}
+                  >
+                    <strong className="font-medium text-foreground">
+                      {agent.name}
+                    </strong>
+                    <small className="overflow-hidden text-sm text-ellipsis whitespace-nowrap text-faint">
+                      {agent.id}
+                    </small>
+                  </label>
+                </div>
               );
             })}
           </fieldset>
@@ -664,7 +720,6 @@ function RetellSetup({
           {agents === null ? (
             <Button
               type="submit"
-              weight="strong"
               busy={discovering}
               disabled={!mayConfigure || apiKey.trim() === ""}
               why={
@@ -678,7 +733,6 @@ function RetellSetup({
           ) : (
             <Button
               type="submit"
-              weight="strong"
               busy={saving}
               disabled={!mayConfigure || selected.size === 0}
               why={
@@ -687,12 +741,18 @@ function RetellSetup({
                   : "Your role can read Monitoring and cannot change its setup."
               }
             >
-              {saving ? "Saving…" : setup === undefined ? "Start monitoring" : "Update setup"}
+              {saving
+                ? "Saving…"
+                : setup === undefined
+                  ? "Start monitoring"
+                  : "Update setup"}
             </Button>
           )}
-          <ButtonLink href={projectPath(projectId, "monitoring", "transcripts")}>
-            Cancel
-          </ButtonLink>
+          <Button asChild variant="secondary">
+            <Link href={projectPath(projectId, "monitoring", "transcripts")}>
+              Cancel
+            </Link>
+          </Button>
         </FormActions>
       </Form>
     </section>
@@ -736,32 +796,39 @@ function LiveKitSetup({
   }
 
   return (
-    <section className={styles.platform} aria-labelledby="livekit-setup">
-      <h2 id="livekit-setup" className={styles.heading}>
+    <section
+      className="flex max-w-[72ch] flex-col gap-4 border-t border-border pt-6"
+      aria-labelledby="livekit-setup"
+    >
+      <h2 id="livekit-setup" className="m-0 text-xl font-medium">
         LiveKit Agents
       </h2>
-      <p className={styles.lead}>
+      <p className="m-0 leading-(--line-normal) text-muted-foreground">
         Add the Egma Python SDK to the LiveKit agent process. The same setup
         works for a customer-hosted worker and a LiveKit Cloud-hosted Python
         agent.
       </p>
-      <div className={styles.codeSteps}>
-        <p>1. Install the SDK in the agent image.</p>
-        <pre>pip install egma</pre>
-        <p>2. Add the project key and this Egma address to the worker secrets.</p>
-        <pre>{`EGMA_URL=${endpoint ?? "https://your-egma.example"}\nEGMA_API_KEY=egma_sk_…`}</pre>
-        <p>
+      <div className="flex flex-col gap-2">
+        <p className="m-0">1. Install the SDK in the agent image.</p>
+        <pre className="mt-0 mb-3 max-w-full overflow-x-auto rounded-card border border-border bg-surface p-3 font-mono text-sm text-foreground">
+          pip install egma
+        </pre>
+        <p className="m-0">
+          2. Add the project key and this Egma address to the worker secrets.
+        </p>
+        <pre className="mt-0 mb-3 max-w-full overflow-x-auto rounded-card border border-border bg-surface p-3 font-mono text-sm text-foreground">{`EGMA_URL=${endpoint ?? "https://your-egma.example"}\nEGMA_API_KEY=egma_sk_…`}</pre>
+        <p className="m-0">
           3. Call the helper before <code>AgentSession.start</code>.
         </p>
-        <pre>{`from egma import monitor_livekit\n\nmonitor_livekit(ctx)`}</pre>
+        <pre className="mt-0 mb-3 max-w-full overflow-x-auto rounded-card border border-border bg-surface p-3 font-mono text-sm text-foreground">{`from egma import monitor_livekit\n\nmonitor_livekit(ctx)`}</pre>
       </div>
-      <p className={styles.lead}>
+      <p className="m-0 leading-(--line-normal) text-muted-foreground">
         Use an existing project key. LiveKit Cloud agents receive their LiveKit
         values from Cloud; add the two Egma values as deployment secrets.
       </p>
       <FormActions>
         <Button
-          weight="strong"
+          type="button"
           busy={saving}
           disabled={!mayConfigure}
           why={
@@ -777,9 +844,9 @@ function LiveKitSetup({
               ? "Keep waiting for a conversation"
               : "I added this setup"}
         </Button>
-        <ButtonLink href={settingsPath(projectId, "keys")}>
-          Open project keys
-        </ButtonLink>
+        <Button asChild variant="secondary">
+          <Link href={settingsPath(projectId, "keys")}>Open project keys</Link>
+        </Button>
       </FormActions>
       {refused === null ? null : <Problem>{refused.message}</Problem>}
     </section>

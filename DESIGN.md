@@ -2,7 +2,9 @@
 
 This file defines Egma's current product interface. Read it before any visual or interaction change.
 
-The orange-red palette, the Egma logo, and native CSS Modules are locked. Change them only with explicit developer approval.
+The orange-red palette and the Egma logo are locked. Change them only with explicit developer approval.
+
+The styling architecture changed on 2026-08-19 with that approval. **Styling architecture** below is the current truth.
 
 ## Product context
 
@@ -18,16 +20,37 @@ The orange-red palette, the Egma logo, and native CSS Modules are locked. Change
 - Make every state truthful. Loading, empty, failed, disabled, saving, saved, skipped, and errored states must say what happened.
 - Use Egma's domain terms exactly: agent, test, test suite, run, simulation, grader, persona, transcript, outcome, and metric.
 - Build responsive, keyboard, touch, reduced-motion, light-theme, and dark-theme behavior as one system.
+- Every component is clean, modern, and slick. Clean is nothing on the surface that carries no meaning. Modern is the current shape of the web: exact alignment, one clear focus, honest depth, and no ornament that imitates another medium. Slick is a component that looks finished at every width and in every state, including empty, loading, failed, and disabled. This raises the standard. It unlocks nothing: the palette, the logo, and every rule in this file stay as written. (Developer decision, 2026-08-19.)
 
 ## Styling architecture
 
-Egma uses native CSS custom properties and CSS Modules.
+shadcn/ui on Tailwind is the component base. Build new components on it.
 
-- `apps/web/ui/tokens.css` owns shared visual values.
-- Shared components own behavior and component-level styling.
+The developer approved this on 2026-08-19, with the conflict on the table: this
+section said "Do not introduce Tailwind," and shadcn/ui ships on Tailwind. The
+architecture unlocked. The palette and the logo did not.
+
+**This file stays the single source of theme values.** Tailwind holds no value of
+its own. It is given egma's values by reference, so a Tailwind surface and a CSS
+Modules surface read one declaration instead of two copies of it.
+
+Where the pieces live:
+
+- `apps/web/ui/tailwind-theme.css` owns shared visual values, including the derived ones such as a status chip's edge and the dialog scrim, and hands them to Tailwind in the same file. Change a value here and nowhere else. The values are declared in an unlayered `:root`; the `@theme` keys below them are each a `var()` into one of those declarations and hold no value of their own. The unlayered part is load-bearing: five names are declared twice — `--radius-sm`, `--radius-md`, `--radius-lg`, `--ease-out` and `--ease-in-out` — and being outside every layer is what makes egma's value win each one. Moving the declarations into `@theme` would hand all five back to Tailwind.
+- `apps/web/components/ui/` holds the shadcn primitives. Add one with the shadcn CLI; `components.json` points it at the right places.
+- `apps/web/ui/` holds the shared components built from those primitives — the table, the dialog, the menu, the form, the shell.
+- `apps/web/lib/utils.ts` holds `cn`, which every primitive merges a caller's classes with.
+- `apps/web/app/globals.css` is the one stylesheet the application loads.
+- `apps/web/app/ui.module.css` is the one CSS Module left in the application, and it is a survivor rather than an oversight. It dresses the transcript detail page and the two components that page composes, the recording player and the judgment card. That is a whole page's layout rather than a shared control set, so moving it is its own change with its own proof. It reads the same declarations as everything else.
+
+Rules:
+
+- Use semantic tokens such as `--action`, `--surface-active`, and `--border` outside the theme file.
+- Do not put a color, a radius, a size, or a duration in a component. Read it from the theme.
+- Where shadcn has a default and this file has a rule, this file decides. The theme removes the scales this file has no value for, so no class exists for a weight above 500, a cool gray shadow, a radius belonging to no component, or a type step outside the scale below.
+- Tailwind's fixed utilities are not scale entries and cannot be removed that way. A few are still generated, because Tailwind finds class names by reading files as text and a comment that contains the word `table` mints `.table`. They are applied to nothing.
+- Do not start a new component in CSS Modules.
 - Route pages compose shared components and add only route-specific layout.
-- Use semantic tokens such as `--action`, `--surface-active`, and `--border` outside the token file.
-- Do not introduce Tailwind.
 - Do not add a one-off component when a shared component already owns the behavior.
 
 ## Brand
@@ -115,6 +138,7 @@ Rules:
 - Hierarchy comes from size, space, and restrained use of weight 500.
 - Do not use weights 600 or 700.
 - Product tables, forms, and navigation use the 14px and 16px steps.
+- Headings carry no size of their own. Every heading takes its size from a class, because the browser's own heading sizes are not on this scale.
 - Large type is for auth, onboarding, empty introductions, and public pages.
 - Identifiers and code use the shared monospace stack.
 - Metrics, dates, durations, and scores use tabular numerals.
@@ -219,6 +243,12 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 
 Motion explains state, location, or feedback. It does not decorate routine work.
 
+Motion is fast, modern, and slick. Fast is the shortest duration that still
+explains the change, and short enough that nothing waits for it. Modern is
+`transform` and `opacity`, composited. Slick is one movement that starts where
+the person is looking and ends where the content is. This raises the standard.
+The rules below are the floor and do not move. (Developer decision, 2026-08-19.)
+
 ### Rules
 
 - Do not animate actions used many times each day, especially keyboard navigation.
@@ -230,6 +260,9 @@ Motion explains state, location, or feedback. It does not decorate routine work.
 - Pointer hover motion runs only under `(hover: hover) and (pointer: fine)`.
 - Every movement has a reduced-motion form with useful opacity or color feedback.
 - Interaction motion stays below 300ms.
+- Choose the shorter token when two would both explain the change.
+- An exit runs to completion and is never cut off. A surface that is closed finishes leaving before it is removed.
+- No motion delays input. A control answers on press, not after an animation.
 
 ### Motion tokens
 
@@ -261,6 +294,7 @@ Motion explains state, location, or feedback. It does not decorate routine work.
 | Toast | Show arrival and dismissal | Short translate plus opacity; interruptible transition |
 | Loading | Show progress | Fast, quiet indicator |
 | Table row | Support routine navigation | Color feedback only |
+| Navigation row | Support routine navigation | Color feedback only |
 | Progress | Explain completion | Transform-based fill, linear while active |
 
 ## Accessibility

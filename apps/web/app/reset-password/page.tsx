@@ -3,8 +3,11 @@
 import { useEffect, useState } from "react";
 
 import { returnPathIn, withReturnTo } from "../../lib/return-to.ts";
-import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
-import { AuthShell, Notice, StatePage, styles } from "../ui.tsx";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+import { Field } from "../../ui/form.tsx";
+import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**
  * The page behind the link, and it asks for one thing.
@@ -100,9 +103,9 @@ export default function ResetPasswordPage() {
         title="That password is set"
         lead="Sign in with the new one. The old one no longer works."
       >
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href={signInHref}>Sign in</a>
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -117,9 +120,9 @@ export default function ResetPasswordPage() {
         title="That link is missing something"
         lead="A reset link carries a token. Check it was copied whole, or ask for another."
       >
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href={forgotHref}>Ask for another link</a>
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -132,10 +135,10 @@ export default function ResetPasswordPage() {
         title="That link has already been used"
         lead="The password behind it has been set. Sign in with it — or ask for another link if it was not you who used it."
       >
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href={signInHref}>Sign in</a> ·{" "}
           <a href={forgotHref}>Ask for another link</a>
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -150,10 +153,10 @@ export default function ResetPasswordPage() {
         title="That link no longer works"
         lead="It is too old now for Egma to say whether it was used before it ran out. If you set a password with it, sign in with that one. If nothing happened, ask for another link."
       >
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href={signInHref}>Sign in</a> ·{" "}
           <a href={forgotHref}>Ask for another link</a>
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -161,9 +164,9 @@ export default function ResetPasswordPage() {
   if (refused !== null) {
     return (
       <StatePage title="That link could not be used" lead={refused.message}>
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href={forgotHref}>Ask for another link</a>
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -174,26 +177,27 @@ export default function ResetPasswordPage() {
       title="Choose a new password."
       lead="This link names your account, so a password is all Egma needs."
     >
-      <Form onSubmit={() => void submit()}>
+      <AuthForm onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
         <Field label="New password" htmlFor="password">
-          <TextInput
+          <Input
             id="password"
             name="password"
             type="password"
             autoComplete="new-password"
+            spellCheck={false}
             required
             minLength={8}
             value={password}
-            onChange={setPassword}
+            onChange={(event) => setPassword(event.target.value)}
           />
         </Field>
 
-        <Button weight="strong" type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting}>
           {submitting ? "Setting…" : "Set the password"}
         </Button>
-      </Form>
+      </AuthForm>
     </AuthShell>
   );
 }

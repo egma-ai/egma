@@ -166,6 +166,55 @@ const CONNECTION = {
   updated_at: "2026-08-15T10:00:00.000Z",
 };
 
+/**
+ * A second way into the same agent: another platform, another channel, and a
+ * capability record somebody has actually measured. One connection of each kind
+ * is what makes "the facts on a row" a claim a test can falsify.
+ */
+const MEASURED_CONNECTION = {
+  ...CONNECTION,
+  id: "con_2",
+  // Named apart from its environment on purpose: a fixture where the two read
+  // the same would let a cell showing the wrong one pass.
+  name: "phone line",
+  agent_platform: null,
+  connection_kind: "phone_number",
+  access_variant: "phone_number.public_e164",
+  product_label: "Phone number",
+  modality: "voice",
+  environment: "production",
+  config: { phoneNumber: "+14155550100" },
+  credential_present: false,
+  credentials_hint: null,
+  capabilities: {
+    state: "known" as const,
+    measured: ["dtmf"],
+    supported: ["dtmf"],
+    checked_at: "2026-08-18T09:00:00.000Z",
+    source: "retell",
+    standing: {
+      dtmf: "supported" as const,
+      barge_in: "unsupported" as const,
+      raw_audio: "not_measured" as const,
+    },
+  },
+};
+
+/** An agent as the *list* answers it: the identity, and every way in. */
+const LISTED_AGENT = {
+  ...AGENT,
+  connections: [CONNECTION, MEASURED_CONNECTION],
+};
+
+/** And one nobody has given egma a way into at all. */
+const UNREACHED_AGENT = {
+  ...AGENT,
+  id: "agt_2",
+  name: "Night line",
+  description: null,
+  connections: [],
+};
+
 function onboardingTest(
   overrides: Partial<ListedTest> = {},
 ): ListedTest {
@@ -395,12 +444,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The agent editors use the same layout primitive as every other product form. */
+/**
+ * The agent editors use the same layout primitive as every other product form.
+ *
+ * It asks the elements what they are rather than what they are painted with.
+ * A class name used to be the fingerprint of a shared component, because a CSS
+ * Module hashes one and nothing else can produce it. On the Tailwind base a
+ * class list is copyable, so a hand-rolled `<div className="flex gap-3">` would
+ * pass a class check — and the migration itself failed one, which is the other
+ * half of the same problem. `data-slot` is what `Form` and `FormActions` put on
+ * the elements they draw, and a page that stopped using them fails this.
+ */
 function expectSharedFormLayout(action: HTMLElement): void {
   const form = action.closest("form");
   expect(form).not.toBeNull();
-  expect(form?.className).toContain("form");
-  expect(action.parentElement?.className).toContain("formActions");
+  expect(form?.dataset.slot).toBe("form");
+  expect(action.parentElement?.dataset.slot).toBe("form-actions");
 }
 
 /* ------------------------------------------------------------------------ */
@@ -409,7 +468,10 @@ describe("finding an agent in a long list", () => {
   it("asks egma for the match rather than filtering the page in hand", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": { status: 200, body: { items: [AGENT], next_cursor: null } },
+      "/api/agents": {
+        status: 200,
+        body: { items: [LISTED_AGENT], next_cursor: null },
+      },
     });
     render(<AgentsPage />);
     await screen.findAllByText("Front desk");
@@ -432,7 +494,7 @@ describe("finding an agent in a long list", () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
       "/api/agents": [
-        { status: 200, body: { items: [AGENT], next_cursor: null } },
+        { status: 200, body: { items: [LISTED_AGENT], next_cursor: null } },
         { status: 200, body: { items: [], next_cursor: null } },
       ],
     });
@@ -449,6 +511,112 @@ describe("finding an agent in a long list", () => {
       await screen.findByText("No agents match “zzz”"),
     ).toBeDefined();
     expect(screen.queryByText("No agents in this project yet")).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The question the list exists to answer: which agents egma can reach, and how.
+ */
+describe("reading an agent's reach from the list", () => {
+  function listOf(...items: readonly unknown[]): void {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents": { status: 200, body: { items, next_cursor: null } },
+    });
+  }
+
+  function asked(): readonly string[] {
+    return vi.mocked(globalThis.fetch).mock.calls.map(([url]) => String(url));
+  }
+
+  it("shows each connection's platform, channel, environment and capability state", async () => {
+    listOf(LISTED_AGENT);
+    render(<AgentsPage />);
+    await screen.findAllByText("Front desk");
+
+    // The staging one, which nobody has measured. "Not checked" and "measured
+    // and found wanting" are different sentences and must not share one.
+    expect(screen.getByText("staging")).toBeDefined();
+    // The registry's customer-facing product label, not a token a client
+    // branches on. The connection page and this row use the same words.
+    expect(screen.getByText("Retell chat · Chat")).toBeDefined();
+    expect(screen.getByText("Not checked")).toBeDefined();
+
+    // The production one, which somebody has.
+    expect(screen.getByText("production")).toBeDefined();
+    expect(screen.getByText("Phone number · Voice")).toBeDefined();
+    expect(screen.getByText("Checked")).toBeDefined();
+
+    // With its time, kept exactly rather than only as an age that drifts.
+    const when = document.querySelector("time");
+    expect(when?.getAttribute("datetime")).toBe("2026-08-18T09:00:00.000Z");
+
+    // And all of it out of the one read that painted the list. A page that
+    // fetched per row would still look right here, which is why the requests
+    // are what is asserted rather than the pixels.
+    expect(asked().filter((one) => one.startsWith("/api/agents"))).toHaveLength(1);
+    expect(asked().some((one) => one.includes("/api/agents/"))).toBe(false);
+  });
+
+  it("says plainly when egma has no way into an agent", async () => {
+    listOf(UNREACHED_AGENT);
+    render(<AgentsPage />);
+    await screen.findAllByText("Night line");
+
+    // In words, on the row. An agent egma cannot reach is found out here
+    // rather than when a run refuses to start.
+    expect(screen.getByText("No connections")).toBeDefined();
+  });
+
+  it("leads the toolbar with Connect agent when there is a list to lead", async () => {
+    listOf(LISTED_AGENT);
+    render(<AgentsPage />);
+    await screen.findAllByText("Front desk");
+
+    const connect = await screen.findByRole("link", { name: "Connect agent" });
+    expect(connect.getAttribute("href")).toBe("/projects/prj_1/agents/new");
+
+    // Leads: it is drawn before the search box rather than after it.
+    const search = screen.getByLabelText("Search agents by name");
+    expect(connect.compareDocumentPosition(search) & 4).toBe(4);
+  });
+
+  it("puts one Connect agent in the middle of a project with nothing in it", async () => {
+    listOf();
+    render(<AgentsPage />);
+
+    expect(await screen.findByText("No agents in this project yet")).toBeDefined();
+    // One, not two: the empty state is the whole screen, so the toolbar's copy
+    // of this control would leave somebody choosing between identical buttons.
+    expect(screen.getAllByRole("link", { name: "Connect agent" })).toHaveLength(1);
+    // And nothing to search, so nothing offering to.
+    expect(screen.queryByLabelText("Search agents by name")).toBeNull();
+  });
+
+  it("tells a viewer why the control is not theirs, where a keyboard can reach it", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("viewer") },
+      "/api/agents": {
+        status: 200,
+        body: { items: [LISTED_AGENT], next_cursor: null },
+      },
+    });
+    render(<AgentsPage />);
+
+    const refused = await screen.findByRole("button", { name: "Connect agent" });
+    expect((refused as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("link", { name: "Connect agent" })).toBeNull();
+
+    // **A disabled control cannot take focus, so a tooltip on one is a reason
+    // only a pointer can reach.** The sentence is on the page and the control
+    // names it, which is what makes disabling rather than hiding worth doing.
+    const said = refused.getAttribute("aria-describedby");
+    expect(said).not.toBeNull();
+    expect(document.getElementById(String(said))?.textContent).toBe(
+      "Your viewer role cannot connect agents. Ask an organization admin to change your role.",
+    );
   });
 });
 
@@ -749,55 +917,81 @@ describe("one agent's page", () => {
     connections: readonly unknown[],
     role = "member",
   ): void {
+    // Deliberately no runs and no tests: this page reads neither any more, so
+    // an answer standing by for one would quietly make a re-introduction work.
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
       "/api/agents/agt_1": { status: 200, body: { agent, connections } },
-      "/api/runs": {
-        status: 200,
-        body: { items: [], next_cursor: null },
-      },
-      "/api/tests": {
-        status: 200,
-        body: { items: [], next_cursor: null },
-      },
     });
   }
 
-  it("keeps the agent actions and moves runs, tests, and connections through one section navigation", async () => {
-    answersWith(AGENT, [CONNECTION], "viewer");
+  /**
+   * The page is the agent's identity and its connections, and nothing else.
+   *
+   * Runs and tests were here, each behind a section of its own, and each was a
+   * second rendering of a fact another area owns. What proves they have gone is
+   * not that the headings are absent — a tab nobody opened would satisfy that —
+   * but that the page no longer *asks* for them.
+   */
+  it("holds identity and connections, and reads neither runs nor tests", async () => {
+    answersWith(AGENT, [CONNECTION, MEASURED_CONNECTION], "viewer");
     render(<AgentDetailPage />);
 
-    const edit = await screen.findByRole("button", { name: "Edit" });
-    // Present and genuinely disabled: a viewer sees what egma can do here and
-    // is told plainly that this part is not theirs. The server refuses their
-    // write either way, which is where the boundary actually is.
-    expect((edit as HTMLButtonElement).disabled).toBe(true);
-
-    expect(screen.getByRole("link", { name: "Create a run" })).toBeDefined();
-    const sections = screen.getByRole("navigation", { name: "Agent sections" });
-    expect(
-      within(sections).getAllByRole("button").map((button) => button.textContent),
-    ).toEqual(["Recent runs", "Attached tests", "Configuration"]);
-    expect(
-      within(sections)
-        .getByRole("button", { name: "Recent runs" })
-        .getAttribute("aria-current"),
-    ).toBe("page");
-    expect(screen.getByRole("heading", { name: "Recent runs" })).toBeDefined();
-    expect(screen.queryByRole("heading", { name: "Connections" })).toBeNull();
-
-    fireEvent.click(within(sections).getByRole("button", { name: "Attached tests" }));
-    expect(await screen.findByRole("heading", { name: "Attached tests" })).toBeDefined();
-    expect(screen.queryByRole("heading", { name: "Recent runs" })).toBeNull();
-
-    fireEvent.click(within(sections).getByRole("button", { name: "Configuration" }));
+    // Connections are the page, reached without opening anything.
     expect(await screen.findByRole("heading", { name: "Connections" })).toBeDefined();
     expect(screen.getByRole("link", { name: "staging" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "phone line" })).toBeDefined();
+
+    // Wearing the same facts the list row wears, said the same way.
+    expect(screen.getAllByText("Not checked").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Checked").length).toBeGreaterThan(0);
+    // The environment label, which is this connection's own and not its name:
+    // the phone line is named apart from the environment it points at.
+    expect(screen.getByText("production")).toBeDefined();
+    // And the same product labels and modalities as the row shows.
+    expect(screen.getByText("Phone number")).toBeDefined();
+    expect(screen.getByText("Retell chat")).toBeDefined();
+    expect(screen.getByText("Voice")).toBeDefined();
+    expect(screen.getByText("Chat")).toBeDefined();
+
+    // What left.
+    expect(screen.queryByRole("navigation", { name: "Agent sections" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Recent runs" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Attached tests" })).toBeNull();
+    const asked = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.map(([url]) => String(url));
+    expect(asked.some((one) => one.startsWith("/api/runs"))).toBe(false);
+    expect(asked.some((one) => one.startsWith("/api/tests"))).toBe(false);
+
+    // Identity is still the page's own, and still edited from here. Present and
+    // genuinely disabled: a viewer sees what egma can do here and is told
+    // plainly that this part is not theirs. The server refuses their write
+    // either way, which is where the boundary actually is.
+    const edit = screen.getByRole("button", { name: "Edit" });
+    expect((edit as HTMLButtonElement).disabled).toBe(true);
     expect(
       screen.getByText(
         "Your viewer role cannot change agents. Ask an organization admin to change your role.",
       ),
     ).toBeDefined();
+
+    // Starting work is an action rather than a second copy of a record, so it
+    // stays.
+    expect(screen.getByRole("link", { name: "Create a run" })).toBeDefined();
+  });
+
+  it("says egma cannot reach an agent that has no connection", async () => {
+    answersWith(AGENT, [], "member");
+    render(<AgentDetailPage />);
+
+    expect(await screen.findByText("No connections")).toBeDefined();
+    expect(
+      screen.getByText(
+        "Egma cannot reach this agent yet. Add a connection to give it a way in.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByRole("link", { name: "Add connection" })).toBeDefined();
   });
 
   it("claims nothing about a role while the session read is still in flight", async () => {

@@ -16,25 +16,26 @@ import {
   type ListedApiKey,
   type MintedApiKey,
 } from "../../../../../lib/settings.ts";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+
+import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
-  Button,
   Field,
   Form,
   FormActions,
   FormRow,
   Help,
   Refused,
-  Section,
-  Select,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
-import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
-import { Dialog } from "../../../../../ui/dialog.tsx";
+} from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
   RelativeInstant,
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import {
   SettingsLayout,
   settingsPath,
@@ -118,10 +119,12 @@ function ApiKeyReceipt({
         <strong>Here is your key. Copy it now.</strong> Egma will not show it
         again, and cannot: only its hash was kept. <code>{keyValue.secret}</code>
       </p>
-      <Button weight="strong" onClick={() => void copy()}>
+      <Button type="button" onClick={() => void copy()}>
         Copy key
       </Button>{" "}
-      <Button onClick={onDismiss}>Dismiss</Button>
+      <Button type="button" variant="secondary" onClick={onDismiss}>
+        Dismiss
+      </Button>
       {copyState === "copied" ? <Help>Copied.</Help> : null}
       {copyState === "failed" ? (
         <Refused message="Egma could not copy the key. Select it above and copy it before you dismiss this message." />
@@ -230,8 +233,25 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
       {
         key: "actions",
         header: "Actions",
+        /*
+         * A row control, said to the table rather than only drawn like one.
+         *
+         * The shared table keeps an `action` cell at the trailing edge and lets
+         * it out of the one-line ellipsis every other cell gets. That second
+         * half is why this is here: the ellipsis comes from `overflow: hidden`
+         * on the cell, and an outline is clipped by an ancestor's overflow, so a
+         * control in an unmarked cell had the Ember focus ring cut off on every
+         * side. The run list's *Stop* and the run page's *Run again* were
+         * already marked; these were the same concept drawn two ways.
+         */
+        action: true,
         cell: (key) => (
-          <Button disabled={busy} onClick={() => setConfirmingRevoke(key)}>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => setConfirmingRevoke(key)}
+          >
             Revoke
           </Button>
         ),
@@ -249,6 +269,15 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
     activeKeys,
     me?.user.id,
   );
+
+  /*
+   * Why creating another key is not available: there is a secret on screen
+   * that exists nowhere else, and a second create would draw over it.
+   */
+  const whyNot =
+    minted === null
+      ? undefined
+      : "Copy and dismiss the key above before you create another one.";
 
   return (
     <ProductPage viewport>
@@ -289,11 +318,13 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
                 <Form onSubmit={() => void mint()}>
                   <FormRow>
                     <Field label="Name" htmlFor="key-name">
-                      <TextInput
+                      <Input
                         id="key-name"
                         value={name}
+                        autoComplete="off"
+                        spellCheck={false}
                         disabled={busy}
-                        onChange={setName}
+                        onChange={(event) => setName(event.target.value)}
                       />
                     </Field>
                     <Field label="Scope" htmlFor="key-scope">
@@ -301,30 +332,25 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
                         id="key-scope"
                         value={scope}
                         disabled={busy}
-                        options={[
-                          ...projects.map((project) => ({
-                            value: project.id,
-                            label: `Project · ${project.name}`,
-                          })),
-                          {
-                            value: WHOLE_ORGANIZATION,
-                            label: "Whole organization",
-                          },
-                        ]}
-                        onChange={setScope}
-                      />
+                        onChange={(event) => setScope(event.target.value)}
+                      >
+                        {projects.map((project) => (
+                          <option key={project.id} value={project.id}>
+                            {`Project · ${project.name}`}
+                          </option>
+                        ))}
+                        <option value={WHOLE_ORGANIZATION}>
+                          Whole organization
+                        </option>
+                      </Select>
                     </Field>
                   </FormRow>
                   <FormActions>
                     <Button
-                      weight="strong"
                       type="submit"
-                      disabled={busy || minted !== null}
-                      why={
-                        minted === null
-                          ? undefined
-                          : "Copy and dismiss the key above before you create another one."
-                      }
+                      disabled={minted !== null}
+                      busy={busy}
+                      {...(whyNot === undefined ? {} : { why: whyNot })}
                     >
                       {busy ? "Creating…" : "Create key"}
                     </Button>
@@ -392,9 +418,12 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
                 {confirmingRevoke.name ?? "This key"} will stop working on its next
                 request. This action cannot be undone.
               </p>
-              <Button onClick={dismiss}>Cancel</Button>{" "}
+              <Button type="button" variant="secondary" onClick={dismiss}>
+                Cancel
+              </Button>{" "}
               <Button
-                tone="destructive"
+                type="button"
+                variant="destructive"
                 disabled={busy}
                 onClick={() => {
                   const key = confirmingRevoke;

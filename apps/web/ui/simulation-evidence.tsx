@@ -8,6 +8,9 @@ import {
   type RefObject,
 } from "react";
 
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
 import { graderDisplayName } from "../lib/presentation.ts";
 import type { VerdictWord } from "../lib/runs.ts";
 import {
@@ -18,10 +21,8 @@ import {
   type SimulationEvidence,
 } from "../lib/simulations.ts";
 import { humanizeIdentifier, milliseconds } from "../lib/transcripts.ts";
-import { Button } from "./controls.tsx";
 import { Dialog } from "./dialog.tsx";
 import { VerdictBadge } from "./run-status.tsx";
-import styles from "./simulation-evidence.module.css";
 
 type RecordingStatus = "absent" | "loading" | "ready" | "failed";
 
@@ -51,6 +52,50 @@ function turnsOf(evidence: SimulationEvidence): number | null {
   return counts === undefined ? null : counts.human + counts.agent;
 }
 
+/**
+ * The shape the review wears twice: once around the whole evidence surface, and
+ * once around the grader column inside it.
+ */
+const REVIEW = "flex min-w-0 flex-col gap-8";
+
+/*
+ * The shape of a sentence that says why there is nothing here.
+ *
+ * Four places on this surface have one: nothing was said, there was nothing to
+ * judge, nobody has judged this yet, and no transcript was filed. They are four
+ * different facts and none of them is a failure, so they all read the same
+ * quiet way rather than each inventing an appearance.
+ */
+const EMPTY_STATE = "p-5 max-[40rem]:px-4";
+const EMPTY_STATE_TITLE = "text-base font-normal text-foreground";
+const EMPTY_STATE_LEAD = "m-0 mt-1 max-w-[62ch] text-sm text-muted-foreground";
+
+/** One of the three facts: its name at the leading edge, its value at the other. */
+const SUMMARY_CELL = "flex min-w-0 items-center justify-between gap-3 px-5 py-3";
+
+/*
+ * The line between two facts. It runs beside them while the three sit in a row,
+ * and above them once a narrow screen stacks the row into a column.
+ */
+const SUMMARY_CELL_NEXT =
+  "border-border border-s max-[40rem]:border-s-0 max-[40rem]:border-t";
+
+/** Metrics and counts read straight in the mono face. */
+const SUMMARY_VALUE = "font-mono text-base font-normal text-foreground";
+
+/**
+ * The name of one fact, quiet, beside its value.
+ *
+ * It is on each label rather than on the strip as `span`, and that is the whole
+ * of a small correction. The rule it replaces reached every `span` inside the
+ * strip, and one of them is not a label — it is the overall verdict's chip. So
+ * the chip was drawn in the muted grey meant for the three names, whatever the
+ * verdict was, while every other verdict chip on the page carried its colour.
+ *
+ * Naming the labels removes the reach. The chip is left to be what it is.
+ */
+const SUMMARY_LABEL = "text-sm text-muted-foreground";
+
 /** The only three simulation-level facts required before reading evidence. */
 export function SimulationEvidenceSummary({
   evidence,
@@ -59,18 +104,28 @@ export function SimulationEvidenceSummary({
 }) {
   const turns = turnsOf(evidence);
   return (
-    <section className={styles.summary} aria-label="Simulation summary">
-      <div>
-        <span>Overall verdict</span>
+    <section
+      className={cn(
+        "grid min-w-0 grid-cols-3 overflow-hidden rounded-card border border-border",
+        "bg-surface max-[40rem]:grid-cols-1",
+      )}
+      aria-label="Simulation summary"
+    >
+      <div className={SUMMARY_CELL}>
+        <span className={SUMMARY_LABEL}>Overall verdict</span>
         <VerdictBadge verdict={evidence.verdict} />
       </div>
-      <div>
-        <span>Duration</span>
-        <strong>{shownDuration(durationOf(evidence))}</strong>
+      <div className={cn(SUMMARY_CELL, SUMMARY_CELL_NEXT)}>
+        <span className={SUMMARY_LABEL}>Duration</span>
+        <strong className={SUMMARY_VALUE}>
+          {shownDuration(durationOf(evidence))}
+        </strong>
       </div>
-      <div>
-        <span>Total turns</span>
-        <strong>{turns === null ? "Not recorded" : String(turns)}</strong>
+      <div className={cn(SUMMARY_CELL, SUMMARY_CELL_NEXT)}>
+        <span className={SUMMARY_LABEL}>Total turns</span>
+        <strong className={SUMMARY_VALUE}>
+          {turns === null ? "Not recorded" : String(turns)}
+        </strong>
       </div>
     </section>
   );
@@ -563,14 +618,48 @@ function WaveformLane({
   readonly progress: number;
 }) {
   return (
-    <div className={styles.waveLane}>
-      <span>{label}</span>
-      <div className={styles.waveTrack}>
-        <svg aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 1000 64">
-          <path d={waveformPath(peaks)} />
+    <div
+      className={cn(
+        "grid min-w-0 grid-cols-[56px_minmax(0,1fr)] items-center gap-3",
+        "max-[40rem]:grid-cols-[48px_minmax(0,1fr)] max-[40rem]:gap-2",
+      )}
+    >
+      <span className="text-sm text-foreground">{label}</span>
+      {/* The hairline down the middle is the silence line the peaks grow from. */}
+      <div
+        className={cn(
+          /*
+           * 52px is the track's own height and it is off the 4px spacing list
+           * in `DESIGN.md`. It is carried over rather than chosen — the
+           * stylesheet this replaces said `height: 52px` — so it is written as
+           * a measurement instead of `h-13`, which would read as a scale step
+           * that does not exist. Worth settling in the tuning pass: 48px is on
+           * the list and is one pixel of waveform away.
+           */
+          "relative h-[52px] overflow-hidden rounded-input border border-border bg-background",
+          "bg-[linear-gradient(to_bottom,transparent_49.5%,var(--border)_49.5%,var(--border)_50.5%,transparent_50.5%)]",
+        )}
+      >
+        <svg
+          className="block h-full w-full"
+          aria-hidden="true"
+          preserveAspectRatio="none"
+          viewBox="0 0 1000 64"
+        >
+          {/*
+           * The ink is the page's own text colour held back to 72%, written
+           * here as a value rather than as a token. The theme names the
+           * derived colours this product reuses — the status chip edges and the
+           * dialog scrim — and none of them is this mix; pointing at one of
+           * those would mean something else and would follow it when it moved.
+           */}
+          <path
+            className="fill-[color-mix(in_srgb,var(--foreground)_72%,transparent)]"
+            d={waveformPath(peaks)}
+          />
         </svg>
         <span
-          className={styles.playhead}
+          className="pointer-events-none absolute top-0 bottom-0 left-(--playhead) z-1 w-0.5 bg-brand"
           style={{ "--playhead": `${String(progress)}%` } as CSSProperties}
           aria-hidden="true"
         />
@@ -578,6 +667,22 @@ function WaveformLane({
     </div>
   );
 }
+
+/*
+ * A quiet sentence in its own box: there is no recording, egma is opening one,
+ * or it could not be opened. Three separate facts, and none of them says
+ * anything about the agent.
+ */
+const RECORDING_STATE =
+  "m-0 rounded-input border border-border bg-surface p-4 text-sm text-muted-foreground";
+
+/*
+ * The same sentence under a player that is already drawn. It keeps the box and
+ * gives up its side and bottom padding, so the line sits against the control it
+ * is about rather than being inset from it.
+ */
+const RECORDING_STATE_UNDER_PLAYER =
+  "m-0 rounded-input border border-border bg-surface px-0 pt-3 pb-0 text-sm text-muted-foreground";
 
 function RecordingEvidence({
   recording,
@@ -588,7 +693,7 @@ function RecordingEvidence({
 }) {
   if (recording.status === "absent") {
     return (
-      <p className={styles.recordingState} role={active ? "status" : undefined}>
+      <p className={RECORDING_STATE} role={active ? "status" : undefined}>
         {active
           ? "Recording will be available after the call ends."
           : "No audio was recorded."}
@@ -597,14 +702,17 @@ function RecordingEvidence({
   }
   if (recording.status === "loading") {
     return (
-      <p className={styles.recordingState} role="status">
+      <p className={RECORDING_STATE} role="status">
         Opening the recording…
       </p>
     );
   }
   if (recording.status === "failed" || recording.url === null) {
     return (
-      <p className={styles.recordingProblem} role="alert">
+      <p
+        className="m-0 rounded-input border border-border bg-surface p-4 text-sm text-failure"
+        role="alert"
+      >
         {recording.message ?? "The recording could not be opened."}
       </p>
     );
@@ -619,11 +727,11 @@ function RecordingEvidence({
   const total = clockText(recording.duration);
 
   return (
-    <div className={styles.recording}>
+    <div className="min-w-0 max-[40rem]:px-4">
       <audio
         ref={recording.audioRef}
         aria-label="Simulation recording"
-        className={styles.audio}
+        className="block h-10 w-full"
         controls
         preload="metadata"
         src={recording.url}
@@ -636,15 +744,25 @@ function RecordingEvidence({
         Your browser cannot play this recording.
       </audio>
       {recording.waveformLoading ? (
-        <p className={styles.recordingState} role="status">
+        <p className={RECORDING_STATE_UNDER_PLAYER} role="status">
           Drawing both audio channels…
         </p>
       ) : recording.waveform === null ? (
-        <p className={styles.recordingState}>
+        <p className={RECORDING_STATE_UNDER_PLAYER}>
           The recording is playable, but its stereo channel map is unavailable.
         </p>
       ) : (
-        <div className={styles.waveform}>
+        <div
+          className={cn(
+            "relative mt-3 flex flex-col gap-2 outline-2 outline-offset-2 outline-transparent",
+            /*
+             * The seek control below is deliberately invisible, so the two
+             * lanes wear its focus. Without this the keyboard could move the
+             * playhead with nothing on screen saying where the focus was.
+             */
+            "has-[input:focus-visible]:outline-brand",
+          )}
+        >
           <WaveformLane
             label="Human"
             peaks={recording.waveform.human}
@@ -656,7 +774,25 @@ function RecordingEvidence({
             progress={progress}
           />
           <input
-            className={styles.waveSeek}
+            className={cn(
+              "absolute inset-y-0 right-0 left-[68px] z-2 m-0 h-full w-[calc(100%-68px)]",
+              "cursor-ew-resize appearance-none opacity-[0.001] disabled:cursor-default",
+              "max-[40rem]:left-[56px] max-[40rem]:w-[calc(100%-56px)]",
+              /*
+               * The native track and thumb are drawn away rather than dressed.
+               * The control somebody sees is the pair of lanes underneath; this
+               * range input is only what a pointer drags and a keyboard steps,
+               * and it is a real range input so that both still work.
+               */
+              "[&::-webkit-slider-runnable-track]:h-full",
+              "[&::-webkit-slider-runnable-track]:bg-transparent",
+              "[&::-webkit-slider-thumb]:h-full [&::-webkit-slider-thumb]:w-6",
+              "[&::-webkit-slider-thumb]:appearance-none",
+              "[&::-webkit-slider-thumb]:bg-transparent",
+              "[&::-moz-range-track]:h-full [&::-moz-range-track]:bg-transparent",
+              "[&::-moz-range-thumb]:h-full [&::-moz-range-thumb]:w-6",
+              "[&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-transparent",
+            )}
             type="range"
             min="0"
             max={limit}
@@ -667,7 +803,14 @@ function RecordingEvidence({
             disabled={recording.duration <= 0}
             onChange={(event) => recording.seek(Number(event.currentTarget.value))}
           />
-          <output className={styles.waveTime}>{elapsed} / {total}</output>
+          <output
+            className={cn(
+              "pointer-events-none absolute right-2 bottom-1 z-1 bg-background px-1",
+              "font-mono text-sm tabular-nums text-foreground",
+            )}
+          >
+            {elapsed} / {total}
+          </output>
         </div>
       )}
     </div>
@@ -691,32 +834,58 @@ function ChatTranscript({
 }) {
   if (transcript.turns.length === 0) {
     return (
-      <div className={styles.emptyState}>
-        <strong>Nothing was said</strong>
-        <p>Egma filed no spoken turns for this simulation.</p>
+      <div className={EMPTY_STATE}>
+        <strong className={EMPTY_STATE_TITLE}>Nothing was said</strong>
+        <p className={EMPTY_STATE_LEAD}>
+          Egma filed no spoken turns for this simulation.
+        </p>
       </div>
     );
   }
 
   return (
-    <ol className={styles.chatTranscript} aria-label="Transcript messages">
+    <ol
+      className="m-0 flex min-w-0 list-none flex-col gap-3 p-0"
+      aria-label="Transcript messages"
+    >
       {transcript.turns.map((turn, at) => {
         const human = turn.kind === "turn:human";
         const speaker = human ? "Human" : "Agent";
         return (
           <li
-            className={`${styles.chatTurn} ${
-              human ? styles.chatHuman : styles.chatAgent
-            }`}
+            className={cn(
+              /* `group`, so the message inside can answer when this turn is the cited one. */
+              "group flex w-full min-w-0 scroll-my-8",
+              /*
+               * Alignment makes the turn-taking visible. It carries none of the
+               * meaning on its own — the written Human and Agent labels do that
+               * — so the reading still works at any zoom and in any theme.
+               */
+              human
+                ? "justify-start pe-[14%] max-[40rem]:pe-5"
+                : "justify-end ps-[14%] max-[40rem]:ps-5",
+            )}
             id={`transcript-turn-${String(at + 1)}`}
             key={turn.span_id}
             aria-label={`Turn ${String(at + 1)}, ${speaker}`}
           >
-            <div className={styles.chatMessage}>
-              <p className={styles.chatSpeaker}>{speaker}</p>
-              <p className={styles.chatText}>
+            <div
+              className={cn(
+                "min-w-0 max-w-full rounded-card border border-border bg-surface px-4 py-3",
+                /* The corner nearest its own side is squarer, which is the whole of the shape. */
+                human
+                  ? "rounded-es-button"
+                  : "rounded-ee-button bg-surface-soft",
+                /* Arrived at from a judge finding, the cited turn marks itself. */
+                "group-target:border-brand group-target:bg-selected",
+              )}
+            >
+              <p className="m-0 mb-1 text-sm font-medium text-muted-foreground">
+                {speaker}
+              </p>
+              <p className="m-0 text-sm wrap-anywhere whitespace-pre-wrap text-foreground">
                 {turn.text === "" ? (
-                  <span className={styles.chatEmpty}>Nothing was said.</span>
+                  <span className="text-faint italic">Nothing was said.</span>
                 ) : (
                   turn.text
                 )}
@@ -766,6 +935,17 @@ function graderSummary(
   return parts.join(" · ");
 }
 
+/** The quiet mono kicker over a title: what kind of thing this block is. */
+const PANE_KIND =
+  "mb-1 block font-mono text-sm tracking-(--tracking-label) text-muted-foreground uppercase";
+
+/** The name over each half of the expected-against-found comparison. */
+const COMPARISON_LABEL =
+  "m-0 mb-2 font-mono text-sm font-normal tracking-(--tracking-label) text-muted-foreground uppercase";
+
+/** Sentences inside a check. Judge findings run long, so they break anywhere. */
+const ASSERTION_TEXT = "m-0 min-w-0 text-sm wrap-anywhere text-foreground";
+
 function GraderGroup({
   grader,
   stillJudging,
@@ -776,48 +956,83 @@ function GraderGroup({
   readonly onReadTurn: (turn: number) => void;
 }) {
   return (
-    <section className={styles.graderGroup} aria-label={grader.name}>
-      <header className={styles.graderHead}>
-        <div>
-          <span className={styles.graderKind}>Grader</span>
-          <h3>{grader.name}</h3>
-          <p>{graderSummary(grader, stillJudging)}</p>
+    <section
+      className="min-w-0 not-first:border-t not-first:border-border"
+      aria-label={grader.name}
+    >
+      <header className="flex min-w-0 items-start justify-between gap-3 bg-surface-soft p-5 max-[40rem]:px-4">
+        <div className="min-w-0">
+          <span className={PANE_KIND}>Grader</span>
+          {/* A grader name comes from a project and can be one long word. */}
+          <h3 className="m-0 text-lg font-normal wrap-anywhere text-foreground">
+            {grader.name}
+          </h3>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">
+            {graderSummary(grader, stillJudging)}
+          </p>
         </div>
         <VerdictBadge verdict={grader.verdict} compact />
       </header>
       {grader.assertions.length === 0 ? (
-        <p className={styles.emptyGroup}>
+        <p className="m-0 px-5 py-4 text-sm text-muted-foreground max-[40rem]:px-4">
           {stillJudging
             ? "Waiting for this grader to return its assertions."
             : "This grader returned no assertions."}
         </p>
       ) : (
-        <div className={styles.assertions}>
+        <div className="flex min-w-0 flex-col gap-4 bg-background p-5 max-[40rem]:p-4">
           {grader.assertions.map((assertion, at) => (
-            <article className={styles.assertion} key={assertion.key}>
-              <header className={styles.assertionHead}>
+            <article
+              className="min-w-0 overflow-hidden rounded-input border border-border bg-surface"
+              key={assertion.key}
+            >
+              <header
+                className={cn(
+                  "flex min-w-0 items-center justify-between gap-3",
+                  "border-b border-border bg-surface-soft px-4 py-3",
+                  /*
+                   * A child selector, because the compact `VerdictBadge` beside
+                   * the check number is not an element this component wrote and
+                   * the two have to read as one line.
+                   */
+                  "[&>span]:font-mono [&>span]:text-sm",
+                  "[&>span]:text-muted-foreground [&>span]:uppercase",
+                )}
+              >
                 <span>Check {String(at + 1).padStart(2, "0")}</span>
                 <VerdictBadge verdict={assertion.verdict} compact />
               </header>
-              <div className={styles.comparison}>
-                <section className={styles.expectedCell}>
-                  <h4>Expected behavior</h4>
-                  <p>{assertion.expected}</p>
+              <div className="grid min-w-0 grid-cols-2 max-[40rem]:grid-cols-1">
+                <section className="min-w-0 p-4">
+                  <h4 className={COMPARISON_LABEL}>Expected behavior</h4>
+                  <p className={ASSERTION_TEXT}>{assertion.expected}</p>
                 </section>
-                <section className={styles.findingCell}>
-                  <h4>Judge finding</h4>
-                  <p>
+                {/*
+                 * The two halves are divided by a line: beside them while they
+                 * sit side by side, and above the second once they stack.
+                 */}
+                <section className="min-w-0 border-border border-s bg-surface-soft p-4 max-[40rem]:border-s-0 max-[40rem]:border-t">
+                  <h4 className={COMPARISON_LABEL}>Judge finding</h4>
+                  <p className={ASSERTION_TEXT}>
                     {assertion.finding ??
                       (stillJudging
                         ? "Waiting for this grader."
                         : "No judge finding was filed.")}
                   </p>
                   {assertion.citedTurns.length === 0 ? null : (
-                    <p className={styles.citations}>
+                    <p className={cn(ASSERTION_TEXT, "mt-2 font-mono text-muted-foreground")}>
                       {assertion.citedTurns.map((turn, turnAt) => (
                         <span key={turn}>
                           {turnAt === 0 ? "" : ", "}
-                          <button type="button" onClick={() => onReadTurn(turn)}>
+                          <button
+                            className={cn(
+                              "m-0 cursor-pointer border-0 bg-transparent p-0 text-foreground",
+                              /* An Ember underline, because this goes to the words it cites. */
+                              "underline decoration-brand underline-offset-[3px]",
+                            )}
+                            type="button"
+                            onClick={() => onReadTurn(turn)}
+                          >
                             Read turn {turn}
                           </button>
                         </span>
@@ -825,13 +1040,16 @@ function GraderGroup({
                     </p>
                   )}
                   {assertion.superseded.length === 0 ? null : (
-                    <details className={styles.earlier}>
-                      <summary>
+                    <details className="mt-3 text-sm text-muted-foreground">
+                      <summary className="w-fit cursor-pointer text-foreground">
                         {assertion.superseded.length} earlier finding
                         {assertion.superseded.length === 1 ? "" : "s"}
                       </summary>
                       {assertion.superseded.map((row) => (
-                        <p key={row.judged_at}>
+                        <p
+                          className={cn(ASSERTION_TEXT, "mt-2 text-muted-foreground")}
+                          key={row.judged_at}
+                        >
                           {verdictWord(row.verdict)} — {row.rationale}
                         </p>
                       ))}
@@ -846,6 +1064,19 @@ function GraderGroup({
     </section>
   );
 }
+
+/*
+ * A narrow Ember edge over a quiet wash: grading is still running, or the
+ * transcript on screen is the first part of a longer one. Both are facts about
+ * the work in hand and neither is a failure, so they wear attention rather than
+ * a state colour.
+ */
+const NOTICE_LINE =
+  "m-0 border-b border-border border-s-[3px] border-s-brand bg-selected px-5 py-3 text-sm text-foreground";
+
+/** Recording and Transcript, the two blocks the sheet stacks. */
+const SHEET_BLOCK = "flex min-w-0 flex-col gap-3";
+const SHEET_BLOCK_TITLE = "m-0 text-base font-medium text-foreground";
 
 /**
  * The one evidence review used while grading and after grading completes.
@@ -895,42 +1126,66 @@ function SimulationEvidencePanel({
   }
 
   return (
-    <section className={styles.review} aria-label="Simulation evidence">
-      <section className={`${styles.pane} ${styles.graderPane}`} aria-labelledby="evidence-graders">
-        <header className={styles.paneHead}>
-          <div>
-            <span className={styles.paneKind}>Review</span>
-            <h2 id="evidence-graders">Grader results</h2>
+    <section className={REVIEW} aria-label="Simulation evidence">
+      <section
+        className={cn(
+          "flex min-h-full min-w-0 flex-col overflow-hidden",
+          "rounded-card border border-border bg-surface",
+        )}
+        aria-labelledby="evidence-graders"
+      >
+        <header className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4 max-[40rem]:px-4">
+          <div className="min-w-0">
+            <span className={PANE_KIND}>Review</span>
+            <h2
+              className="m-0 text-lg font-normal text-foreground"
+              id="evidence-graders"
+            >
+              Grader results
+            </h2>
           </div>
+          {/*
+            The quiet kind, said out loud. shadcn's `default` is the Deep Ember
+            primary, and this opens a reading surface beside a page that already
+            has its own main action.
+          */}
           <Button
-            ariaControls="transcript-audio-evidence"
-            ariaExpanded={evidenceOpen}
+            type="button"
+            variant="secondary"
+            aria-controls="transcript-audio-evidence"
+            aria-expanded={evidenceOpen}
             onClick={() => onEvidenceChange(true)}
           >
             Open transcript and audio
           </Button>
         </header>
         {stillJudging ? (
-          <p className={styles.pending} role="status">
+          <p className={NOTICE_LINE} role="status">
             Grading is still running. Findings appear here as they land.
           </p>
         ) : null}
         {evidence.grading === "not_required" ? (
-          <div className={styles.emptyState}>
-            <strong>There was nothing to judge</strong>
-            <p>Egma did not conduct this simulation, so it filed no grading work.</p>
+          <div className={EMPTY_STATE}>
+            <strong className={EMPTY_STATE_TITLE}>
+              There was nothing to judge
+            </strong>
+            <p className={EMPTY_STATE_LEAD}>
+              Egma did not conduct this simulation, so it filed no grading work.
+            </p>
           </div>
         ) : graders.length === 0 ? (
-          <div className={styles.emptyState}>
-            <strong>{stillJudging ? "Graders are preparing" : "Nobody has judged this yet"}</strong>
-            <p>
+          <div className={EMPTY_STATE}>
+            <strong className={EMPTY_STATE_TITLE}>
+              {stillJudging ? "Graders are preparing" : "Nobody has judged this yet"}
+            </strong>
+            <p className={EMPTY_STATE_LEAD}>
               {stillJudging
                 ? "No grader has returned an assertion yet."
                 : "No grader has written a verdict for this simulation."}
             </p>
           </div>
         ) : (
-          <div className={styles.graderGroups}>
+          <div className="flex min-w-0 flex-auto flex-col">
             {graders.map((grader) => (
               <GraderGroup
                 grader={grader}
@@ -950,22 +1205,31 @@ function SimulationEvidencePanel({
           onClose={() => onEvidenceChange(false)}
         >
           <div
-            className={styles.evidenceSheetBody}
+            className="flex min-h-0 flex-auto flex-col gap-6 overflow-y-auto bg-background p-5 max-[40rem]:p-4"
             id="transcript-audio-evidence"
           >
-            <section className={styles.recordingBlock} aria-labelledby="evidence-recording">
-              <h3 id="evidence-recording">Recording</h3>
+            <section className={SHEET_BLOCK} aria-labelledby="evidence-recording">
+              <h3 className={SHEET_BLOCK_TITLE} id="evidence-recording">
+                Recording
+              </h3>
               <RecordingEvidence
                 active={simulationActive}
                 recording={recording}
               />
             </section>
-            <section className={styles.transcriptBlock} aria-labelledby="evidence-transcript">
-              <h3 id="evidence-transcript">Transcript</h3>
+            <section
+              className={cn(SHEET_BLOCK, "flex-auto")}
+              aria-labelledby="evidence-transcript"
+            >
+              <h3 className={SHEET_BLOCK_TITLE} id="evidence-transcript">
+                Transcript
+              </h3>
               {evidence.transcript === null ? (
-                <div className={styles.emptyState}>
-                  <strong>No transcript was filed</strong>
-                  <p>
+                <div className={EMPTY_STATE}>
+                  <strong className={EMPTY_STATE_TITLE}>
+                    No transcript was filed
+                  </strong>
+                  <p className={EMPTY_STATE_LEAD}>
                     Egma has no speech for this simulation. It may not have started,
                     or it may have stopped before the first turn.
                   </p>
@@ -973,7 +1237,7 @@ function SimulationEvidencePanel({
               ) : (
                 <>
                   {evidence.transcript.spans_truncated ? (
-                    <p className={styles.transcriptNotice}>
+                    <p className={NOTICE_LINE}>
                       {`This simulation filed ${String(evidence.transcript.span_count)} steps. This view shows the first steps in order.`}
                     </p>
                   ) : null}
@@ -1003,7 +1267,7 @@ export function SimulationEvidenceReview({
   useEffect(() => setEvidenceOpen(true), [evidence.id]);
 
   return (
-    <div className={styles.review}>
+    <div className={REVIEW}>
       <SimulationEvidenceSummary evidence={evidence} />
       <SimulationEvidencePanel
         evidence={evidence}

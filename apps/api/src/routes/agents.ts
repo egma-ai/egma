@@ -26,6 +26,7 @@ import {
   type Agent,
   type AccessVariant,
   type AgentPlatform,
+  type AgentWithConnections,
   type AuthContext,
   type Connection,
   type ConnectionKind,
@@ -499,6 +500,8 @@ function describedConnection(one: Connection): Record<string, unknown> {
     connection_kind: one.connectionKind,
     access_variant: one.accessVariant,
     modality: one.modality,
+    // The registry derives this from the four technical facts above. It is the
+    // one customer-facing name that agent lists and connection pages share.
     product_label: one.productLabel,
     topology: one.topology,
     environment: one.environment,
@@ -513,6 +516,29 @@ function describedConnection(one: Connection): Record<string, unknown> {
     archived_at: one.archivedAt?.toISOString() ?? null,
     created_at: one.createdAt.toISOString(),
     updated_at: one.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * An agent as a *list* of them describes it: the identity above, and every
+ * living way egma can reach it.
+ *
+ * **One shape, not a second dialect.** The connections are the same objects
+ * `GET /api/agents/{agentId}` answers, described by the same function, so a
+ * client that can read a connection from one read can read it from the other.
+ * The alternative — a smaller connection here, a fuller one there — is how a
+ * client comes to work on one path and fail on the other.
+ *
+ * They are the living ones. An archived connection is how egma *used* to reach
+ * an agent, and that question is asked of the agent's own read with
+ * `?archived=true`, exactly as it always was.
+ */
+function describedListedAgent(
+  one: AgentWithConnections,
+): Record<string, unknown> {
+  return {
+    ...describedAgent(one),
+    connections: one.connections.map(describedConnection),
   };
 }
 
@@ -963,6 +989,12 @@ export async function agentRoutes(
    * There is no page-size parameter. A page is a page, and the cursor is what
    * carries a reader through the rest — nothing in this API exists because a
    * surface would look incomplete without it.
+   *
+   * **Each agent carries its living connections.** Which agents egma can reach,
+   * and how, is the question a list of agents is opened to answer, and one
+   * request answers it for the whole page. There is no flag for it: a read that
+   * sometimes carried them and sometimes did not would be two shapes behind one
+   * address, and a client would work against one of them by accident.
    */
   app.get("/api/agents", async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1004,7 +1036,7 @@ export async function agentRoutes(
     });
 
     return reply.send({
-      items: page.items.map(describedAgent),
+      items: page.items.map(describedListedAgent),
       // Null rather than absent, so a client can tell "there is no next page"
       // from "this answer is an older shape that never had one".
       next_cursor: page.nextCursor ?? null,
