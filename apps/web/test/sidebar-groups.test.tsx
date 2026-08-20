@@ -37,10 +37,19 @@ const ADA: Me = {
   ],
 };
 
-/** The six addresses the bar offered before the groups existed. */
+/**
+ * The six addresses the bar offers, sorted.
+ *
+ * Five are the ones it offered before the groups existed. Graders is the one
+ * that moved, and it moved for the same reason Monitoring's did: its section
+ * holds two screens behind one strip, the strip now leads with Running, and a
+ * first tab nobody lands on is not a first tab. `/projects/prj_2/graders` is
+ * still the library and still opens it — this is where the *bar* points, not
+ * which addresses exist.
+ */
 const EVERY_ADDRESS = [
   "/projects/prj_2/agents",
-  "/projects/prj_2/graders",
+  "/projects/prj_2/graders/running",
   "/projects/prj_2/monitoring/transcripts",
   "/projects/prj_2/personas",
   "/projects/prj_2/runs",
@@ -188,7 +197,7 @@ describe("the grouped sidebar", () => {
    * addresses after, whatever group each is drawn under now — so a copied URL
    * keeps meaning what it meant.
    */
-  it("offers the same six addresses the flat bar offered", () => {
+  it("offers six addresses, one of them a step deeper than the flat bar\u2019s", () => {
     drawShell();
 
     const hrefs = within(sidebarNavigation())

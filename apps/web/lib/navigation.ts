@@ -83,11 +83,18 @@ export type NavigationItem = {
    * The page inside the area the item opens, where that is not the area's own
    * address.
    *
-   * Monitoring is the one that has it. `/projects/{projectId}/monitoring` is a
+   * Monitoring and Graders both have it. `/projects/{projectId}/monitoring` is a
    * real address and lands on the transcript list, but the item points straight
    * at the list rather than at a page whose whole job is to forward — a
    * navigation click should not cost a redirect, and a reserved neighbour under
    * the same area should never be able to become the landing by accident.
+   *
+   * Graders has it for a different reason: its section holds two screens behind
+   * one strip, and the strip now reads Running first. The shelf is read once
+   * and switched on; what is judging this project right now is the question a
+   * person comes back with. A first tab nobody lands on is not a first tab, so
+   * the bar opens the one the strip leads with. `/projects/{projectId}/graders`
+   * is still the library and still opens it — a copied link is unmoved.
    */
   readonly opens?: readonly string[];
 };
@@ -120,7 +127,7 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
     label: null,
     items: [
       { id: "agents", label: "Agents" },
-      { id: "graders", label: "Graders" },
+      { id: "graders", label: "Graders", opens: ["running"] },
     ],
   },
   {
