@@ -15,10 +15,10 @@
  * They used to be two files — `tokens.css` beside this one — because a CSS
  * Modules surface read the first and a Tailwind surface read the second, and
  * the split was what stopped the two halves of the product drifting apart.
- * There is no CSS Modules surface left to serve except the one named survivor,
- * `app/ui.module.css`, which reads these declarations exactly as it always
- * did: they are still `:root`, still unlayered, still loaded by `globals.css`
- * before anything else. Two files for one idea outlived the reason for it.
+ * There is no CSS Modules surface left to serve — the last one,
+ * `app/ui.module.css`, retired with the transcript detail migration. The
+ * declarations stay as they are: still `:root`, still unlayered, still loaded
+ * by `globals.css` first. Two files for one idea outlived the reason for it.
  *
  * Two mechanisms carry the handoff, and both are worth knowing:
  *
@@ -583,6 +583,19 @@
 }
 
 /*
+ * The skeleton's breath: one dip and back, so a bar never leaves the page.
+ *
+ * It is written here rather than borrowed from Tailwind's own pulse, which is
+ * the same shape. Tailwind's arrives welded to two seconds and an easing curve
+ * of its own, and it is only emitted at all while some class list still asks
+ * for that utility — so reading it from a rule here would mean a keyframe that
+ * exists as a side effect of a class nothing wears.
+ */
+@keyframes egma-skeleton-pulse {
+  50% { opacity: 0.5; }
+}
+
+/*
  * The dialog scales on the `scale` property rather than inside `transform`,
  * and that is load-bearing rather than a style preference.
  *
@@ -610,6 +623,32 @@
 @keyframes egma-dialog-out {
   from { opacity: 1; scale: 1; }
   to { opacity: 0; scale: 0.98; }
+}
+
+/*
+ * The drawer, which travels and does not fade.
+ *
+ * `DESIGN.md` gives a mobile drawer its own line: "translate from its attached
+ * edge", and its own pair of tokens. Fading or scaling it as well reads as two
+ * events rather than one movement, so these keyframes write `translate` and
+ * nothing else. `translate` is a property of its own, so the panel's resting
+ * position is still whatever its class list says and this only moves it.
+ *
+ * **The length of the exit is load-bearing rather than decoration.** Radix
+ * removes the panel on `animationend`, so whatever animation is running is
+ * what holds the drawer on screen while it leaves. Writing the travel as a
+ * transition instead left it racing the centred dialog's 180ms `scale`, which
+ * is why the drawer used to be cut off at its own edge; an animation of its
+ * own means the drawer waits for the drawer.
+ */
+@keyframes egma-drawer-in {
+  from { translate: -100% 0; }
+  to { translate: 0 0; }
+}
+
+@keyframes egma-drawer-out {
+  from { translate: 0 0; }
+  to { translate: -100% 0; }
 }
 
 @layer components {
@@ -648,6 +687,82 @@
 
   @media (prefers-reduced-motion: reduce) {
     [data-slot="state-mark"][data-motion="active"] {
+      animation: none;
+    }
+  }
+
+  /*
+   * The same rule's other half: a page, or a whole route, that is still
+   * waiting.
+   *
+   * **One appearance assembled out of three elements.** A route fallback wraps
+   * a whole page composition, that composition holds a state card, and the
+   * card holds the bars. Only a rule that can see all three can say "one
+   * entrance, not three", which is why this is here rather than in three class
+   * lists that cannot see each other.
+   *
+   * **The entrance waits before it draws anything.** `--duration-popover-in`
+   * of nothing, held there by `both`, and then a `--duration-hover` fade. A
+   * route that answers inside that wait — a prefetched one, a warm cache, a
+   * second visit — is drawn without this ever having been on screen, and a box
+   * that appears and vanishes inside a fifth of a second reads as a fault
+   * rather than as speed.
+   *
+   * **A fallback owns the entrance; the card inside it does not.** Otherwise
+   * the header would fade as one thing and the card as another, and the two
+   * opacities would multiply for as long as they overlapped.
+   *
+   * **Reduced motion is deliberately not given a rule of its own here.** This
+   * is already opacity and nothing else, and `globals.css` caps every
+   * animation at a single frame under that query while leaving
+   * `animation-delay` alone — so what survives is the wait, and what goes is
+   * the fade. Writing `animation: none` here would throw away the half worth
+   * keeping.
+   */
+  [data-slot="route-loading"],
+  [data-slot="page-state"]:has([data-slot="loading-indicator"]) {
+    animation: egma-fade-in var(--duration-hover) var(--ease-out)
+      var(--duration-popover-in) both;
+  }
+
+  [data-slot="route-loading"]
+    [data-slot="page-state"]:has([data-slot="loading-indicator"]) {
+    animation: none;
+  }
+
+  /*
+   * The bars themselves.
+   *
+   * One full breath is `--duration-drawer-in` twice over — 560ms, so each half
+   * of it is one drawer-enter — against the 2s a stock shadcn skeleton
+   * carries. Quicker, and still slow enough to read as waiting rather than as
+   * alarm.
+   *
+   * The stagger is `--duration-hover` per bar and **negative**, so all three
+   * are already moving on the first frame and merely out of phase. A positive
+   * delay would hold the second and third still while the first breathed,
+   * which reads as two bars that failed to start. It is a separate
+   * `animation-delay` and it is safe to be one: both declarations are in this
+   * file, in this order, and the offsets are the more specific of the two.
+   *
+   * The word above them carries the meaning, so reduced motion stops the
+   * breath and leaves the bar — the same trade the state mark makes.
+   */
+  [data-slot="skeleton"] {
+    animation: egma-skeleton-pulse calc(var(--duration-drawer-in) * 2)
+      var(--ease-in-out) infinite;
+  }
+
+  [data-slot="loading-indicator"] [data-slot="skeleton"]:nth-child(2) {
+    animation-delay: calc(var(--duration-hover) * -1);
+  }
+
+  [data-slot="loading-indicator"] [data-slot="skeleton"]:nth-child(3) {
+    animation-delay: calc(var(--duration-hover) * -2);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="skeleton"] {
       animation: none;
     }
   }
@@ -692,32 +807,57 @@
   }
 
   /*
-   * The tooltip and the toast.
+   * A drawer is the one kind that is not centred, so it is the one kind that
+   * moves. It is named after the centred rules above and carries `data-kind`
+   * as well, so it outranks them and replaces the fade and the scale rather
+   * than running beside them.
+   */
+  [data-slot="dialog-content"][data-kind="drawer"][data-state="open"] {
+    animation: egma-drawer-in var(--duration-drawer-in) var(--ease-drawer);
+  }
+
+  [data-slot="dialog-content"][data-kind="drawer"][data-state="closed"] {
+    animation: egma-drawer-out var(--duration-drawer-out) var(--ease-drawer);
+  }
+
+  /*
+   * The tooltip.
+   *
+   * Radix says how it was opened and the two answers want different things.
+   * `delayed-open` is a pointer that waited, so it arrives about its trigger
+   * on opacity and `transform`. `instant-open` is keyboard focus, or a pointer
+   * inside the grouping window, and neither of those gets a rule at all: "do
+   * not animate actions used many times each day, especially keyboard
+   * navigation", and a delay repeated across a row of controls is the tooltip
+   * behaviour everybody complains about.
+   *
+   * The exit is scoped by `data-input`, which the shared `Tooltip` sets on the
+   * way in, because Radix reports "closed" the same way whichever opened it.
+   * An animation is what Radix waits for before unmounting, so the pointer
+   * exit runs to completion and the keyboard one is not made to wait for
+   * anything.
+   */
+  [data-slot="tooltip-content"][data-state="delayed-open"] {
+    animation: egma-anchored-in var(--duration-popover-in) var(--ease-out);
+  }
+
+  [data-slot="tooltip-content"][data-input="pointer"][data-state="closed"] {
+    animation: egma-anchored-out var(--duration-popover-out) var(--ease-out);
+  }
+
+  /*
+   * The toast.
    *
    * Position and motion are on separate properties on purpose, which is the
-   * same rule the dialog above follows and for the same reason. A tooltip is
-   * centred on its trigger by `translate`, so its arrival is written on
-   * `scale`; a toast arrives by moving, so its motion is on `translate` and
-   * nothing else writes that property. Neither can cancel the other however
-   * the class lists are later edited.
+   * same rule the dialog above follows and for the same reason: a toast
+   * arrives by moving, so its motion is on `translate` and nothing else writes
+   * that property.
    *
-   * A *warm* tooltip has no transition at all. Once one has been shown the
-   * next opens at once, because a delay repeated across a row of controls is
-   * the tooltip behaviour everybody complains about.
-   *
-   * These rules leave with the hand-written feedback surfaces.
+   * These stay transitions rather than animations, unlike everything else in
+   * this section. `DESIGN.md` asks this one surface for an *interruptible*
+   * exit, and the component keeps itself mounted until the `transitionend`
+   * rather than handing the decision to Radix.
    */
-  [data-slot="tooltip"][data-input="pointer"]:not([data-instant="true"]) {
-    transition:
-      opacity var(--duration-hover) var(--ease-out),
-      scale var(--duration-hover) var(--ease-out);
-  }
-
-  [data-slot="tooltip"][data-input="pointer"][data-closing="true"] {
-    opacity: 0;
-    scale: 0.97;
-  }
-
   [data-slot="toast"][data-input="pointer"] {
     transition:
       opacity var(--duration-popover-in) var(--ease-out),
@@ -731,11 +871,6 @@
   }
 
   @starting-style {
-    [data-slot="tooltip"][data-input="pointer"]:not([data-instant="true"]) {
-      opacity: 0;
-      scale: 0.97;
-    }
-
     [data-slot="toast"][data-input="pointer"] {
       opacity: 0;
       translate: 0 100%;
@@ -746,22 +881,23 @@
    * The development proof can show the same contract without changing the OS.
    * Deliberately outside the media query below: this is how the reduced-motion
    * form is inspected, not a second definition of it.
+   *
+   * **This is why `components/ui/tooltip.tsx` does not portal its panel.** A
+   * portalled tooltip is a child of `body`, and no descendant selector written
+   * here can reach it from the frame it belongs to — the panel would go on
+   * demonstrating full motion while the words above it said the opposite,
+   * which is worse than not demonstrating it. Radix positions the panel
+   * `fixed` either way, so staying in place costs none of the collision
+   * handling; `tooltip.tsx` records the whole trade.
    */
-  [data-preview="reduced-motion"] [data-slot="tooltip"][data-input="pointer"] {
-    scale: 1;
-    transition: opacity var(--duration-hover) linear;
+  [data-preview="reduced-motion"]
+    [data-slot="tooltip-content"][data-state="delayed-open"] {
+    animation: egma-fade-in var(--duration-hover) linear;
   }
 
   [data-preview="reduced-motion"]
-    [data-slot="tooltip"][data-input="pointer"][data-closing="true"] {
-    scale: 1;
-  }
-
-  @starting-style {
-    [data-preview="reduced-motion"] [data-slot="tooltip"][data-input="pointer"] {
-      opacity: 0;
-      scale: 1;
-    }
+    [data-slot="tooltip-content"][data-input="pointer"][data-state="closed"] {
+    animation: egma-fade-out var(--duration-hover) linear;
   }
 
   /*
@@ -826,197 +962,6 @@
   }
 
   /*
-   * Where an anchored panel sits, keyed on the placement it was given.
-   *
-   * This is in the theme rather than in a class list because the attribute has
-   * to be the mechanism. A lookup in the component that turned `below-end` into
-   * a string of utilities left `data-placement` as a label nothing read: a test
-   * asserting it was asserting the prop it had just passed in, and deleting the
-   * lookup broke the product without failing anything. Now the attribute *is*
-   * the placement, and a test that reads it is reading what positions the panel.
-   *
-   * The max-height is here too, and not as a utility, for the same reason it
-   * bit the dialog's backdrop: a utility outranks `@layer components`, so a
-   * `max-h-*` class on the panel would beat the tighter limit the two downward
-   * placements need.
-   */
-  [data-slot="menu-panel"] {
-    max-height: calc(100svh - var(--space-8));
-  }
-
-  [data-slot="menu-panel"][data-placement="below-start"] {
-    top: calc(100% + var(--space-2));
-    left: 0;
-    transform-origin: top left;
-  }
-
-  [data-slot="menu-panel"][data-placement="below-end"] {
-    top: calc(100% + var(--space-2));
-    right: 0;
-    transform-origin: top right;
-  }
-
-  /*
-   * A panel hanging below its trigger keeps a touch target's worth of room off
-   * the bottom of the screen. That is the one direction a panel can be opened
-   * into and then not be scrolled to.
-   */
-  [data-slot="menu-panel"][data-placement="below-start"],
-  [data-slot="menu-panel"][data-placement="below-end"] {
-    max-height: calc(100svh - var(--tap-target) - var(--space-8));
-  }
-
-  [data-slot="menu-panel"][data-placement="above-start"] {
-    bottom: calc(100% + var(--space-2));
-    left: 0;
-    transform-origin: bottom left;
-  }
-
-  [data-slot="menu-panel"][data-placement="above-end"] {
-    right: 0;
-    bottom: calc(100% + var(--space-2));
-    transform-origin: bottom right;
-  }
-
-  [data-slot="menu-panel"][data-placement="right-start"] {
-    top: 0;
-    left: calc(100% + var(--space-2));
-    transform-origin: top left;
-  }
-
-  [data-slot="menu-panel"][data-placement="right-end"] {
-    bottom: 0;
-    left: calc(100% + var(--space-2));
-    transform-origin: bottom left;
-  }
-
-  /*
-   * The product's own anchored panel, beside the Radix one and for the same
-   * reasons: `@starting-style` for the entrance, `data-closing` for an exit
-   * that finishes before React removes the panel, and a pointer-only rule
-   * because a keyboard dismissal is immediate.
-   *
-   * The corner it grows from is `transform-origin` on the panel, set by the
-   * placement it was given. Radix measures that from the trigger; this one
-   * knows it, because a caller has said which edge anchors the panel.
-   *
-   * These rules leave with the hand-written menu when it is retired.
-   */
-  [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
-    transition:
-      opacity var(--duration-popover-in) var(--ease-out),
-      transform var(--duration-popover-in) var(--ease-out);
-  }
-
-  [data-slot="menu"][data-input="pointer"][data-closing="true"]
-    [data-slot="menu-panel"] {
-    opacity: 0;
-    transform: scale(0.97);
-    transition-duration: var(--duration-popover-out);
-  }
-
-  @starting-style {
-    [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
-      opacity: 0;
-      transform: scale(0.97);
-    }
-  }
-
-  /*
-   * The product's own dialog, which is a native `<dialog>` rather than Radix.
-   *
-   * It is here for the same reason the Radix motion above is here: an entrance
-   * written with `@starting-style`, an exit that has to finish before React
-   * removes the element, three kinds that leave in three directions, a
-   * pointer-only rule, and a reduced-motion form of all of it. A class list
-   * can say each of those and cannot say them together without becoming the
-   * longest thing in the component.
-   *
-   * Only a *pointer* dismissal animates. A keyboard dismissal is immediate,
-   * because "no motion delays input" and somebody driving by keyboard has
-   * already moved on. That is why every selector below asks for
-   * `data-input="pointer"` — the component writes it, and rewrites it if the
-   * way out differs from the way in.
-   *
-   * These rules leave with the native dialog when it is retired.
-   */
-  [data-slot="dialog-scrim"][data-input="pointer"]::backdrop {
-    transition: opacity var(--duration-dialog-in) var(--ease-out);
-  }
-
-  [data-slot="dialog-scrim"][data-input="pointer"][data-closing="true"]::backdrop {
-    opacity: 0;
-    transition-duration: var(--duration-dialog-out);
-  }
-
-  [data-slot="dialog-scrim"][data-input="pointer"] [data-slot="dialog-panel"] {
-    transition:
-      opacity var(--duration-dialog-in) var(--ease-out),
-      transform var(--duration-dialog-in) var(--ease-out);
-  }
-
-  [data-slot="dialog-scrim"][data-input="pointer"][data-closing="true"]
-    [data-slot="dialog-panel"] {
-    opacity: 0;
-    transform: scale(0.98);
-    transition-duration: var(--duration-dialog-out);
-  }
-
-  /* A drawer and a sheet travel from the edge they are attached to. */
-  [data-slot="dialog-scrim"]:is([data-kind="drawer"], [data-kind="sheet"])[data-input="pointer"]
-    [data-slot="dialog-panel"] {
-    transition:
-      opacity var(--duration-drawer-in) var(--ease-drawer),
-      transform var(--duration-drawer-in) var(--ease-drawer);
-  }
-
-  [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"]::backdrop {
-    transition-duration: var(--duration-drawer-in);
-    transition-timing-function: var(--ease-drawer);
-  }
-
-  [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][data-closing="true"]::backdrop {
-    transition-duration: var(--duration-drawer-out);
-  }
-
-  [data-slot="dialog-scrim"][data-kind="drawer"][data-input="pointer"][data-closing="true"]
-    [data-slot="dialog-panel"] {
-    transform: translateX(-100%);
-    transition-duration: var(--duration-drawer-out);
-  }
-
-  [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][data-closing="true"]
-    [data-slot="dialog-panel"] {
-    transform: translateX(100%);
-    transition-duration: var(--duration-drawer-out);
-  }
-
-  @starting-style {
-    [data-slot="dialog-scrim"][data-input="pointer"][open]
-      [data-slot="dialog-panel"] {
-      opacity: 0;
-      transform: scale(0.98);
-    }
-
-    /* The drawer arrives by moving. Fading it as well reads as two events. */
-    [data-slot="dialog-scrim"][data-kind="drawer"][data-input="pointer"][open]
-      [data-slot="dialog-panel"] {
-      opacity: 1;
-      transform: translateX(-100%);
-    }
-
-    [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][open]
-      [data-slot="dialog-panel"] {
-      opacity: 0;
-      transform: translateX(100%);
-    }
-
-    [data-slot="dialog-scrim"][data-input="pointer"][open]::backdrop {
-      opacity: 0;
-    }
-  }
-
-  /*
    * "Every movement has a reduced-motion form." Nothing scales and nothing
    * travels: what is left is opacity, which still says a surface arrived or
    * left. `globals.css` already caps every animation at a single frame under
@@ -1025,10 +970,11 @@
    * what Radix waits for before unmounting.
    */
   @media (prefers-reduced-motion: reduce) {
-    [data-slot="button"] {
-      transition: none;
-    }
-
+    /*
+     * A press answers in colour under reduced motion where a variant carries
+     * press colours (the filled ones do): the transform above is the movement
+     * and is what dies, and no rule turns the colour transitions off.
+     */
     [data-slot="button"]:active:not(:focus-visible):not(:disabled) {
       transform: none;
     }
@@ -1037,6 +983,7 @@
     [data-slot="dropdown-menu-content"][data-state="open"],
     [data-slot="dropdown-menu-sub-content"][data-state="open"],
     [data-slot="dialog-content"][data-state="open"],
+    [data-slot="dialog-content"][data-kind="drawer"][data-state="open"],
     [data-slot="dialog-overlay"][data-state="open"] {
       animation: egma-fade-in var(--duration-hover) linear;
     }
@@ -1045,22 +992,23 @@
     [data-slot="dropdown-menu-content"][data-state="closed"],
     [data-slot="dropdown-menu-sub-content"][data-state="closed"],
     [data-slot="dialog-content"][data-state="closed"],
+    [data-slot="dialog-content"][data-kind="drawer"][data-state="closed"],
     [data-slot="dialog-overlay"][data-state="closed"] {
       animation: egma-fade-out var(--duration-hover) linear;
     }
 
-    [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
-      transform: none;
-      transition: opacity var(--duration-popover-out) linear;
+    /*
+     * The tooltip keeps both ends and drops the movement, so the panel still
+     * says it came and it went. It is named apart from the popovers above
+     * because it is keyed on `data-state="delayed-open"` rather than "open",
+     * and because its exit is the one scoped by `data-input`.
+     */
+    [data-slot="tooltip-content"][data-state="delayed-open"] {
+      animation: egma-fade-in var(--duration-hover) linear;
     }
 
-    [data-slot="tooltip"][data-input="pointer"],
-    [data-slot="tooltip"][data-input="pointer"][data-closing="true"] {
-      scale: 1;
-    }
-
-    [data-slot="tooltip"][data-input="pointer"] {
-      transition: opacity var(--duration-hover) linear;
+    [data-slot="tooltip-content"][data-input="pointer"][data-state="closed"] {
+      animation: egma-fade-out var(--duration-hover) linear;
     }
 
     [data-slot="toast"][data-input="pointer"],
@@ -1073,50 +1021,11 @@
     }
 
     @starting-style {
-      [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
-        opacity: 0;
-        transform: none;
-      }
-
-      [data-slot="tooltip"][data-input="pointer"] {
-        opacity: 0;
-        scale: 1;
-      }
-
       [data-slot="toast"][data-input="pointer"] {
         opacity: 0;
         translate: none;
       }
     }
 
-    /*
-     * The native dialog again. Nothing travels and nothing scales; opacity
-     * alone still says the layer arrived or left, and the exit still ends in a
-     * `transitionend` on opacity, which is what the component waits for before
-     * it lets React remove the element.
-     */
-    [data-slot="dialog-scrim"][data-input="pointer"] [data-slot="dialog-panel"] {
-      transform: none;
-      transition: opacity var(--duration-popover-out) linear;
-    }
-
-    [data-slot="dialog-scrim"][data-input="pointer"][data-closing="true"]
-      [data-slot="dialog-panel"] {
-      transform: none;
-    }
-
-    [data-slot="dialog-scrim"][data-input="pointer"]::backdrop,
-    [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"]::backdrop,
-    [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][data-closing="true"]::backdrop {
-      transition: opacity var(--duration-popover-out) linear;
-    }
-
-    @starting-style {
-      [data-slot="dialog-scrim"][data-input="pointer"][open]
-        [data-slot="dialog-panel"] {
-        opacity: 0;
-        transform: none;
-      }
-    }
   }
 }

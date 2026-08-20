@@ -294,7 +294,15 @@ describe("the grouped sidebar", () => {
     expect(agents.className).toContain("transition-[color,background-color]");
     expect(agents.className).not.toContain("transition-colors");
     expect(agents.className).not.toContain("transition-all");
-    expect(agents.className).toContain("motion-reduce:transition-none");
+    // The colour fade IS the reduced-motion form — DESIGN.md asks every
+    // movement for useful colour feedback, and a colour fade moves nothing —
+    // so no rule turns the transition off. And hovering must not erase the
+    // current row's Ember Wash: the hover colours are scoped off the active
+    // row rather than fighting it on specificity.
+    expect(agents.className).not.toContain("motion-reduce:transition-none");
+    expect(agents.className).toContain(
+      "pointer-hover:data-[active=false]:bg-surface-soft",
+    );
   });
 
   /**

@@ -5,13 +5,19 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { Suspense, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import RunResultsAddress from "../app/runs/[runId]/page.tsx";
+import AgentsLoading from "../app/projects/[projectId]/agents/loading.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
+import TestLoading from "../app/projects/[projectId]/tests/[testId]/loading.tsx";
 import type { Me } from "../lib/me.ts";
 import { EVERY_NAVIGATION_ITEM } from "../lib/navigation.ts";
 import { Button } from "@/components/ui/button";
@@ -20,7 +26,7 @@ import { Choice } from "../ui/choice.tsx";
 import { Field } from "../ui/form.tsx";
 import { DataTable, type Column } from "../ui/data-table.tsx";
 import { Dialog } from "../ui/dialog.tsx";
-import { Failure, NotFound } from "../ui/page-state.tsx";
+import { Failure, Loading, NotFound } from "../ui/page-state.tsx";
 import { PageNavigation } from "../ui/page-navigation.tsx";
 import { ProjectSelector } from "../ui/project-selector.tsx";
 import { RunProgress } from "../ui/run-status.tsx";
@@ -169,6 +175,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * Let the work a control deliberately defers actually happen.
+ *
+ * Radix's roving focus moves focus in a task after the key rather than during
+ * it, so React has committed the new state before anything is focused. A test
+ * that reads the DOM in the same tick is reading it before the control has
+ * finished, which is a race rather than a failure.
+ */
+const settle = () =>
+  act(async () => {
+    await new Promise((done) => setTimeout(done, 0));
+  });
+
 /* ------------------------------------------------------------------------ */
 
 describe("the organization and project selector", () => {
@@ -314,7 +333,29 @@ describe("the organization and project selector", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("keeps a pointer-dismissed panel present through its short exit", () => {
+  /**
+   * The panel leaves under its own motion, and the theme is what times it.
+   *
+   * The exit is a CSS animation keyed on `data-state="closed"`, and the kit
+   * removes the panel on `animationend` rather than on the press — so "an exit
+   * runs to completion" is a property of the surface rather than a timer this
+   * page keeps. What is read here is the state the animation is keyed on.
+   */
+  it("marks the panel closed and leaves on the animation, not on the press", () => {
+    const trigger = open();
+    const panel = screen.getByRole("dialog");
+    expect(panel.dataset.slot).toBe("popover-content");
+    expect(panel.dataset.state).toBe("open");
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search projects" }), {
+      key: "Escape",
+    });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger.getAttribute("data-state")).toBe("closed");
+  });
+
+  it("closes when the pointer lands somewhere else on the page", async () => {
     render(
       <ProjectSelector
         organization={ACME}
@@ -325,26 +366,24 @@ describe("the organization and project selector", () => {
     const trigger = screen.getByRole("button", { name: /^Organization Acme/ });
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
-    const panel = screen.getByRole("dialog");
+    expect(screen.getByRole("dialog")).toBeDefined();
 
+    // Two things about a press outside, and both are the panel's own rule.
+    // It starts listening on the task after it opened, so the press that
+    // opened it is not also the press that closes it. And it leaves on the
+    // *finished* press rather than on the way down, so a selection that starts
+    // in the panel and ends outside it does not close what it was reading.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     fireEvent.pointerDown(document.body);
+    expect(screen.getByRole("dialog")).toBeDefined();
+    fireEvent.click(document.body);
 
-    expect(screen.getByRole("dialog")).toBe(panel);
-    expect(trigger.parentElement?.getAttribute("data-closing")).toBe("true");
-    fireEvent.transitionEnd(panel, { propertyName: "opacity" });
     expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("uses the pointer exit when a keyboard-opened panel is clicked away", () => {
-    const trigger = open();
-    const panel = screen.getByRole("dialog");
-
-    fireEvent.pointerDown(document.body);
-
-    expect(trigger.parentElement?.getAttribute("data-input")).toBe("pointer");
-    expect(trigger.parentElement?.getAttribute("data-closing")).toBe("true");
-    fireEvent.transitionEnd(panel, { propertyName: "opacity" });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    // A press elsewhere is a way of leaving, so the keyboard is not dragged
+    // back to the control somebody has just moved away from.
+    expect(document.activeElement).not.toBe(trigger);
   });
 
   /**
@@ -562,10 +601,10 @@ describe("a binary choice", () => {
  * than to whichever page happened to mount it, and the proof now survives the
  * next page that adopts or drops it.
  *
- * Nothing here is free. It is a `div` of `button`s wearing radio semantics, so
- * every part of the radio group contract below is hand-written in
- * `ui/choice.tsx` and every part of it can be lost in a refactor without one
- * visible pixel changing.
+ * It is the kit's radio group now, which is Radix's, so the contract below is
+ * no longer hand-written. It is still asked for here: what a person gets from
+ * this control is the same list of promises whoever keeps them, and a later
+ * change that swaps the primitive back out has to keep them too.
  */
 describe("a choice between two lists", () => {
   const OPTIONS = [
@@ -612,18 +651,38 @@ describe("a choice between two lists", () => {
    * agreeing: a group that moved the highlight without moving focus would
    * leave a screen reader saying one thing and the next keypress landing on
    * another.
+   *
+   * Radix moves focus in a task after the key rather than during it, so React
+   * has committed the new selection before anything is focused. That is why
+   * each key here is followed by a flush: the order a caller sees is `onChange`
+   * and then the focus move, and asking for both in the same tick would be
+   * asking for an order this control does not promise.
    */
-  it("chooses the other list from the keyboard, and says which is chosen", () => {
+  it("chooses the other list from the keyboard, and says which is chosen", async () => {
     const chose = vi.fn();
     render(<Example onChange={chose} />);
 
-    const active = screen.getByRole("radio", { name: "Active" });
-    const archived = screen.getByRole("radio", { name: "Archived" });
-    expect(active.getAttribute("tabindex")).toBe("0");
-    expect(archived.getAttribute("tabindex")).toBe("-1");
+    /*
+     * The group is the Tab stop and the options are not, which is the same
+     * promise the old hand-written `tabindex` made and a stricter way to keep
+     * it: entering forwards focus to whichever option is chosen.
+     */
+    const group = screen.getByRole("radiogroup", {
+      name: "Which personas to show",
+    });
+    expect(group.getAttribute("tabindex")).toBe("0");
+    for (const option of within(group).getAllByRole("radio")) {
+      expect(option.getAttribute("tabindex")).toBe("-1");
+    }
 
-    active.focus();
+    const active = screen.getByRole("radio", { name: "Active" });
+    act(() => active.focus());
+    expect(active.getAttribute("tabindex")).toBe("0");
+    expect(screen.getByRole("radio", { name: "Archived" }).getAttribute("tabindex"))
+      .toBe("-1");
+
     fireEvent.keyDown(active, { key: "ArrowRight" });
+    await settle();
 
     expect(chose).toHaveBeenCalledWith("archived");
     const now = screen.getByRole("radio", { name: "Archived" });
@@ -637,6 +696,7 @@ describe("a choice between two lists", () => {
     // The same key again comes back round rather than stopping at the end: a
     // closed set of two has no far edge to be stuck against.
     fireEvent.keyDown(now, { key: "ArrowRight" });
+    await settle();
     expect(chose).toHaveBeenLastCalledWith("active");
     expect(document.activeElement).toBe(
       screen.getByRole("radio", { name: "Active" }),
@@ -756,29 +816,73 @@ describe("a page of rows", () => {
 
 /* ------------------------------------------------------------------------ */
 
+/**
+ * A closing animation, said out loud, because jsdom runs no stylesheet.
+ *
+ * The kit removes a dialog on `animationend`, and it decides whether there is
+ * an animation to wait for by reading the computed style. jsdom loads no CSS,
+ * so every surface there claims `animationName: ""` and leaves the instant it
+ * is closed — which would make "an exit runs to completion" untestable in this
+ * lane. This answers the way the real theme answers: the entrance while the
+ * surface is open, the exit once it is closed. Nothing else is changed, so the
+ * test still drives the kit's own presence machine rather than a stand-in.
+ */
+function finishExit(surface: HTMLElement, animationName: string): void {
+  // jsdom has no `AnimationEvent`, so the one property the kit reads is put on
+  // an ordinary event rather than left undefined by a constructor that ignores
+  // it. The kit's own listener is on the element, so this reaches it.
+  const ended = new Event("animationend", { bubbles: false });
+  Object.defineProperty(ended, "animationName", { value: animationName });
+  fireEvent(surface, ended);
+}
+
+function withClosingAnimation(): void {
+  const real = window.getComputedStyle.bind(window);
+  vi.stubGlobal(
+    "getComputedStyle",
+    (element: Element, pseudo?: string | null) => {
+      const styles = real(element, pseudo);
+      const slot =
+        element instanceof HTMLElement ? (element.dataset.slot ?? "") : "";
+      if (!slot.startsWith("dialog-")) return styles;
+      return new Proxy(styles, {
+        get(target, key, receiver) {
+          if (key !== "animationName") return Reflect.get(target, key, receiver);
+          return (element as HTMLElement).dataset.state === "closed"
+            ? "egma-dialog-out"
+            : "egma-dialog-in";
+        },
+      });
+    },
+  );
+}
+
 describe("a dialog", () => {
-  it("uses the browser's modal lifecycle and turns Escape into a cancel request", () => {
+  it("puts the page behind it out of reach, and closes on Escape", () => {
     const onClose = vi.fn();
     render(
-      <Dialog title="Navigation" onClose={onClose}>
-        <a href="/projects/prj_1/tests">Tests</a>
-      </Dialog>,
+      <>
+        <button type="button">Elsewhere</button>
+        <Dialog title="Navigation" onClose={onClose}>
+          <a href="/projects/prj_1/tests">Tests</a>
+        </Dialog>
+      </>,
     );
 
     const panel = screen.getByRole("dialog", { name: "Navigation" });
-    expect(panel.tagName).toBe("DIALOG");
-    expect(panel.getAttribute("aria-modal")).toBe("true");
+
+    // Inert is not a class on the page behind: the kit hides it from the
+    // accessibility tree, so a control out there is no longer reachable at all.
+    expect(screen.queryByRole("button", { name: "Elsewhere" })).toBeNull();
 
     // Focus is inside, so the keyboard is no longer driving the page beneath.
     expect(panel.contains(document.activeElement)).toBe(true);
 
-    const cancel = new Event("cancel", { cancelable: true });
-    fireEvent(panel, cancel);
-    expect(cancel.defaultPrevented).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("restores the exact control that opened it", () => {
+  it("restores the exact control that opened it", async () => {
     function Example() {
       const [open, setOpen] = useState(false);
       return (
@@ -795,20 +899,17 @@ describe("a dialog", () => {
 
     render(<Example />);
     const opener = screen.getByRole("button", { name: "Open navigation" });
-    const matches = vi.spyOn(opener, "matches").mockImplementation(
-      (selector) => selector === ":focus-visible",
-    );
     opener.focus();
     fireEvent.click(opener);
-    const dialog = screen.getByRole("dialog", { name: "Navigation" });
-    expect(dialog.getAttribute("data-input")).toBe("keyboard");
+    expect(screen.getByRole("dialog", { name: "Navigation" })).toBeDefined();
+
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
+    expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
     expect(document.activeElement).toBe(opener);
-    matches.mockRestore();
   });
 
-  it("uses the same modal lifecycle for a right-side sheet", () => {
+  it("uses the same modal layer for a right-side sheet", () => {
     function Example() {
       const [open, setOpen] = useState(false);
       return (
@@ -838,18 +939,58 @@ describe("a dialog", () => {
       name: "Transcript and audio",
     });
     expect(sheet.getAttribute("data-kind")).toBe("sheet");
-    expect(sheet.getAttribute("aria-modal")).toBe("true");
     expect(sheet.contains(document.activeElement)).toBe(true);
     expect(within(sheet).getByRole("button", { name: "Close" })).toBeTruthy();
 
-    const cancel = new Event("cancel", { cancelable: true });
-    fireEvent(sheet, cancel);
-    expect(cancel.defaultPrevented).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Transcript and audio" })).toBeNull();
     expect(document.activeElement).toBe(opener);
   });
 
-  it("keeps a pointer-dismissed dialog present through its short exit", () => {
+  /**
+   * The sheet is the one kind that does not take the screen, and this is the
+   * whole reason it is allowed to be different: the simulation page opens one
+   * by default and is built to be read with the transcript beside the grader
+   * results. A sheet that hid the page or closed on a press into it would take
+   * that page away.
+   */
+  it("leaves the page beside a sheet readable and usable", async () => {
+    const pressed = vi.fn();
+    render(
+      <>
+        <button type="button" onClick={pressed}>Judge again</button>
+        <Dialog kind="sheet" title="Transcript and audio" onClose={vi.fn()}>
+          <audio aria-label="Simulation recording" />
+        </Dialog>
+      </>,
+    );
+
+    const behind = screen.getByRole("button", { name: "Judge again" });
+    expect(behind.closest("[aria-hidden='true']")).toBeNull();
+
+    // The panel starts listening for a press outside on the task after it
+    // opened, so the press that opened it is not the one that closes it.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    fireEvent.pointerDown(behind);
+    fireEvent.click(behind);
+
+    expect(pressed).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog", { name: "Transcript and audio" }))
+      .toBeTruthy();
+  });
+
+  /**
+   * "An exit runs to completion and is never cut off. A surface that is closed
+   * finishes leaving before it is removed."
+   *
+   * So `onClose` — the owner's instruction to take the dialog away — is not the
+   * press. It is the end of the closing animation, and the dialog is still on
+   * screen for the whole of it.
+   */
+  it("keeps a dismissed dialog present until its exit has finished", () => {
+    withClosingAnimation();
     const onClose = vi.fn();
     render(
       <Dialog title="Archive agent?" onClose={onClose}>
@@ -857,26 +998,47 @@ describe("a dialog", () => {
       </Dialog>,
     );
 
-    const dialog = screen.getByRole("dialog", { name: "Archive agent?" });
-    fireEvent.pointerDown(dialog);
+    const panel = screen.getByRole("dialog", { name: "Archive agent?" });
+    expect(panel.dataset.slot).toBe("dialog-content");
+    expect(panel.dataset.state).toBe("open");
 
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(screen.getByRole("dialog", { name: "Archive agent?" })).toBe(panel);
+    expect(panel.dataset.state).toBe("closed");
     expect(onClose).not.toHaveBeenCalled();
-    expect(dialog.getAttribute("data-closing")).toBe("true");
-    fireEvent.transitionEnd(dialog.firstElementChild as HTMLElement, {
-      propertyName: "opacity",
-    });
+
+    finishExit(panel, "egma-dialog-out");
+
+    expect(screen.queryByRole("dialog", { name: "Archive agent?" })).toBeNull();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the pointer exit after a dialog was opened with the keyboard", () => {
+  /**
+   * "No motion delays input. A control answers on press, not after an
+   * animation."
+   *
+   * So this is about *when*, and the animation has to be real for the question
+   * to exist: with no stylesheet the panel leaves in the same tick and every
+   * naive assertion here passes without proving anything. With one in flight,
+   * the panel is still on screen, `onClose` has not been called, and the
+   * keyboard is nevertheless already back on the control that opened it.
+   */
+  it("hands the keyboard back on the press, not at the end of the exit", () => {
+    withClosingAnimation();
+    const onClose = vi.fn();
     function Example() {
       const [open, setOpen] = useState(false);
       return (
         <>
-          <button type="button" onClick={() => setOpen(true)}>Open archive</button>
+          <button type="button" onClick={() => setOpen(true)}>Archive</button>
           {open ? (
-            <Dialog title="Archive agent?" onClose={() => setOpen(false)}>
-              <p>Archive it.</p>
+            <Dialog title="Archive agent?" onClose={onClose}>
+              {(dismiss) => (
+                <Button type="button" variant="secondary" onClick={dismiss}>
+                  Cancel
+                </Button>
+              )}
             </Dialog>
           ) : null}
         </>
@@ -884,55 +1046,27 @@ describe("a dialog", () => {
     }
 
     render(<Example />);
-    const opener = screen.getByRole("button", { name: "Open archive" });
-    const matches = vi.spyOn(opener, "matches").mockImplementation(
-      (selector) => selector === ":focus-visible",
-    );
+    const opener = screen.getByRole("button", { name: "Archive" });
     opener.focus();
     fireEvent.click(opener);
+    const panel = screen.getByRole("dialog", { name: "Archive agent?" });
+    expect(panel.contains(document.activeElement)).toBe(true);
 
-    const dialog = screen.getByRole("dialog", { name: "Archive agent?" });
-    expect(dialog.getAttribute("data-input")).toBe("keyboard");
-    const close = screen.getByRole("button", { name: "Close" });
-    fireEvent.pointerDown(close);
-    fireEvent.click(close, { detail: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(dialog.getAttribute("data-input")).toBe("pointer");
-    expect(dialog.getAttribute("data-closing")).toBe("true");
-    fireEvent.transitionEnd(dialog.firstElementChild as HTMLElement, {
-      propertyName: "opacity",
-    });
-    expect(screen.queryByRole("dialog", { name: "Archive agent?" })).toBeNull();
-    matches.mockRestore();
-  });
-
-  it("gives pointer Cancel actions the same short exit as the close button", () => {
-    const onClose = vi.fn();
-    render(
-      <Dialog title="Archive agent?" onClose={onClose}>
-        {(dismiss) => (
-          <Button type="button" variant="secondary" onClick={dismiss}>
-            Cancel
-          </Button>
-        )}
-      </Dialog>,
-    );
-
-    const dialog = screen.getByRole("dialog", { name: "Archive agent?" });
-    const cancel = screen.getByRole("button", { name: "Cancel" });
-    fireEvent.pointerDown(cancel);
-    fireEvent.click(cancel, { detail: 1 });
-
+    // Still leaving: the panel is on screen and the owner has not been told.
+    expect(panel.dataset.state).toBe("closed");
+    expect(screen.getByRole("dialog", { name: "Archive agent?" })).toBe(panel);
     expect(onClose).not.toHaveBeenCalled();
-    expect(dialog.getAttribute("data-input")).toBe("pointer");
-    expect(dialog.getAttribute("data-closing")).toBe("true");
-    fireEvent.transitionEnd(dialog.firstElementChild as HTMLElement, {
-      propertyName: "opacity",
-    });
+    // And the keyboard is already back, mid-exit.
+    expect(document.activeElement).toBe(opener);
+
+    finishExit(panel, "egma-dialog-out");
     expect(onClose).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(opener);
   });
 
-  it("keeps keyboard Cancel actions immediate", () => {
+  it("gives a Cancel action written by the caller the same way out", () => {
     const onClose = vi.fn();
     render(
       <Dialog title="Archive agent?" onClose={onClose}>
@@ -946,7 +1080,30 @@ describe("a dialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
+    expect(screen.queryByRole("dialog", { name: "Archive agent?" })).toBeNull();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * A successful write may take the dialog away itself, and the owner has
+   * already been told. Reporting the exit as a second close would ask the page
+   * to answer twice for one action.
+   */
+  it("stays quiet when the owner removes the dialog itself", () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <>
+        <Dialog title="Archive agent?" onClose={onClose}>
+          <button type="button">Confirm archive</button>
+        </Dialog>
+      </>,
+    );
+    expect(screen.getByRole("dialog", { name: "Archive agent?" })).toBeDefined();
+
+    rerender(<></>);
+
+    expect(screen.queryByRole("dialog", { name: "Archive agent?" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("does not restore focus to an opener removed while the dialog closes", () => {
@@ -1028,6 +1185,258 @@ describe("a page that is not showing its data", () => {
 
 /* ------------------------------------------------------------------------ */
 
+/**
+ * The loading state, which used to be a sentence and nothing else.
+ *
+ * `DESIGN.md` asks it for a "fast, quiet indicator", and none of what that
+ * costs is written in these components: the wait before anything appears, the
+ * breath in the bars, the phase between them and the reduced-motion form all
+ * live in `tailwind-theme.css`, keyed on the slots the components publish.
+ *
+ * So the tests come in two halves. The first reads the DOM and proves the
+ * components emit the hooks and say the true sentence. The second reads the
+ * theme and proves the rules keyed on those hooks are made of egma's tokens.
+ * Neither half watches anything move — jsdom computes no animation — and the
+ * movement itself is proven in a browser.
+ */
+describe("the state a page shows while it is still waiting", () => {
+  function loadingState(): HTMLElement {
+    render(<Loading what="agents" />);
+    return screen.getByRole("status");
+  }
+
+  function bars(inside: HTMLElement): readonly HTMLElement[] {
+    return [...inside.querySelectorAll<HTMLElement>('[data-slot="skeleton"]')];
+  }
+
+  it("still says what it is waiting for, in the quiet tone it always had", () => {
+    const said = loadingState();
+
+    expect(said.dataset.tone).toBe("quiet");
+    expect(screen.getByText("Loading agents…")).toBeTruthy();
+  });
+
+  it("shows the wait is alive without saying it twice to a screen reader", () => {
+    const said = loadingState();
+    const indicator = said.querySelector('[data-slot="loading-indicator"]');
+
+    expect(indicator?.getAttribute("aria-hidden")).toBe("true");
+    expect(bars(said)).toHaveLength(3);
+    // The sentence is announced once, by the heading above the bars.
+    expect(said.textContent).toBe("Loading agents…");
+  });
+
+  /**
+   * The hooks are the contract between the two halves. A rename here is a rule
+   * in the theme that silently stops matching anything, which is the one
+   * failure this arrangement can have and the one nothing else would catch.
+   */
+  it("publishes the slots the theme's motion is keyed on", () => {
+    const said = loadingState();
+
+    expect(said.dataset.slot).toBe("page-state");
+    expect(said.querySelector('[data-slot="loading-indicator"]')).toBeTruthy();
+    expect(bars(said)).toHaveLength(3);
+  });
+
+  it("writes no motion of its own, in either file", async () => {
+    const said = loadingState();
+    for (const element of [said, ...bars(said)]) {
+      expect(element.className).not.toContain("animate");
+      expect(element.className).not.toContain("animation");
+    }
+
+    // `import.meta.dirname`, not a URL: this file runs under jsdom, where
+    // `import.meta.url` is an http address rather than a path on disk.
+    const here = import.meta.dirname;
+    for (const file of ["../ui/page-state.tsx", "../components/ui/skeleton.tsx"]) {
+      const source = await readFile(path.join(here, file), "utf8");
+      expect(source, `${file} writes motion`).not.toContain("animation:");
+      expect(source, `${file} writes motion`).not.toContain("animate-");
+    }
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The other half: the rules those slots are keyed on.
+ *
+ * `DESIGN.md` puts loading motion in the theme beside the run state mark's
+ * turn, so this reads the theme rather than a class list. What it checks is
+ * not the exact declarations but the rules that would be broken silently — a
+ * duration that stopped being a token, an entrance short enough to flash, a
+ * reduced-motion form that went missing.
+ */
+describe("the motion the theme gives a state that is waiting", () => {
+  async function theme(): Promise<string> {
+    return readFile(
+      path.join(import.meta.dirname, "../ui/tailwind-theme.css"),
+      "utf8",
+    );
+  }
+
+  function ruleFor(css: string, selector: string): string {
+    const at = css.indexOf(selector);
+    expect(at, `no rule for ${selector}`).toBeGreaterThan(-1);
+    const opened = css.indexOf("{", at);
+    return css.slice(opened, css.indexOf("}", opened));
+  }
+
+  it("breathes on a keyframe of its own rather than one Tailwind might drop", async () => {
+    const css = await theme();
+
+    // Tailwind's `pulse` is only emitted while some class list still says
+    // `animate-pulse`. Reading it from a rule here would be a keyframe that
+    // exists as a side effect of a utility nothing uses.
+    expect(css).toContain("@keyframes egma-skeleton-pulse");
+  });
+
+  it("times the breath with tokens, never with the numbers shadcn shipped", async () => {
+    const css = await theme();
+    const rule = ruleFor(css, '[data-slot="skeleton"] {');
+
+    expect(rule).toContain("var(--duration-drawer-in)");
+    expect(rule).toContain("var(--ease-in-out)");
+    expect(rule).not.toContain("cubic-bezier");
+    expect(rule).not.toMatch(/\d+m?s/);
+  });
+
+  /**
+   * The rule this proves is a number: a route that answers before the wait is
+   * up is drawn without the indicator ever having been on screen. The token is
+   * read out of the same file and checked against the threshold, rather than
+   * the test agreeing with whatever the theme happens to say today.
+   */
+  it("waits longer than a fast answer takes, so nothing flashes", async () => {
+    const css = await theme();
+    const rule = ruleFor(css, '[data-slot="route-loading"],');
+
+    expect(rule).toContain("egma-fade-in");
+    expect(rule).toContain("var(--duration-popover-in)");
+    // `both` is what holds it at nothing for the length of the wait.
+    expect(rule).toContain("both");
+
+    const waited = /--duration-popover-in:\s*(\d+)ms/.exec(css)?.[1];
+    expect(Number(waited)).toBeGreaterThanOrEqual(150);
+  });
+
+  it("gives a route fallback one entrance rather than one for each layer", async () => {
+    const css = await theme();
+    const rule = ruleFor(
+      css,
+      '[data-slot="route-loading"]\n    [data-slot="page-state"]',
+    );
+
+    expect(rule).toContain("animation: none");
+  });
+
+  it("staggers the bars by a token, and by a negative one", async () => {
+    const css = await theme();
+    const second = ruleFor(css, ':nth-child(2) {');
+    const third = ruleFor(css, ':nth-child(3) {');
+
+    expect(second).toContain("calc(var(--duration-hover) * -1)");
+    expect(third).toContain("calc(var(--duration-hover) * -2)");
+  });
+
+  /**
+   * The breath stops and the bar stays. The entrance deliberately has no rule
+   * of its own here: it is already opacity and nothing else, and `globals.css`
+   * caps every animation at one frame under this query while leaving
+   * `animation-delay` alone — so the wait survives and only the fade goes.
+   */
+  it("stops the breath under reduced motion and leaves the bar", async () => {
+    const css = await theme();
+    const from = css.indexOf('[data-slot="skeleton"] {');
+    const reduced = css.slice(from, css.indexOf('[data-slot="popover-content"]', from));
+
+    expect(reduced).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(reduced.slice(reduced.indexOf("prefers-reduced-motion"))).toContain(
+      "animation: none",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The route boundary, which is the half of this a person actually meets.
+ *
+ * A press on a navigation item used to hold the previous page on screen with
+ * nothing said until the next one was ready. The fallback answers the press
+ * instead: the shell never moves, the destination is named in the page's own
+ * words **and the page's own header shape**, and the whole composition arrives
+ * as one thing.
+ */
+describe("what the router draws while a page is still coming", () => {
+  it("keeps the frame, names where the press landed, and shows the one indicator", async () => {
+    apiAnswers({ "/api/me": { status: 200, body: meWith("admin") } });
+    render(
+      <ProductShellBoundary>
+        <AgentsLoading />
+      </ProductShellBoundary>,
+    );
+
+    // The shell is the root layout's, so the fallback must not draw a second
+    // one: one navigation, one account control, one session read.
+    expect(await screen.findAllByText("ada@acme.example")).toHaveLength(1);
+    expect(
+      screen.getAllByRole("navigation", { name: "Product navigation" }),
+    ).toHaveLength(1);
+
+    expect(screen.getByRole("heading", { name: "Agents" })).toBeTruthy();
+    const said = screen.getByRole("status");
+    expect(said.textContent).toBe("Loading agents…");
+    expect(said.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3);
+  });
+
+  /**
+   * One appearance, so there is one element for the theme to fade. Without it
+   * the header would paint at once and the card 180ms later, which is a
+   * sub-second navigation showing a title above a tall empty gap.
+   */
+  it("wraps the whole composition, header included, in one arrival", async () => {
+    apiAnswers({ "/api/me": { status: 200, body: meWith("admin") } });
+    const { container } = render(
+      <ProductShellBoundary>
+        <AgentsLoading />
+      </ProductShellBoundary>,
+    );
+    await screen.findAllByText("ada@acme.example");
+
+    const arrival = container.querySelector('[data-slot="route-loading"]');
+    expect(arrival).toBeTruthy();
+    expect(arrival?.querySelector("h1")?.textContent).toBe("Agents");
+    expect(arrival?.querySelector('[data-slot="loading-indicator"]')).toBeTruthy();
+  });
+
+  /**
+   * The header a fallback draws has to be the *shape* the page draws, not only
+   * the same words. `shell.tsx` hides the eyebrow whenever breadcrumbs are
+   * given, so a fallback with an eyebrow standing in for a page with crumbs
+   * swaps one line for another of a different height on arrival.
+   */
+  it("draws the page's own breadcrumbs, into this project, rather than an eyebrow", async () => {
+    apiAnswers({ "/api/me": { status: 200, body: meWith("admin") } });
+    render(
+      <ProductShellBoundary>
+        <TestLoading />
+      </ProductShellBoundary>,
+    );
+    await screen.findAllByText("ada@acme.example");
+
+    const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumbs).getByRole("link", { name: "Tests" }).getAttribute("href")).toBe(
+      "/projects/prj_1/tests",
+    );
+    expect(within(crumbs).getByText("Test")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Loading this test…");
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
 describe("the shared draft navigation guard", () => {
   function DraftPage({ busy = false }: { readonly busy?: boolean }) {
     const [changed, setChanged] = useState(false);
@@ -1042,7 +1451,7 @@ describe("the shared draft navigation guard", () => {
     );
   }
 
-  it("keeps a draft on the page until the discard action is explicit", () => {
+  it("keeps a draft on the page until the discard action is explicit", async () => {
     render(<DraftPage />);
     fireEvent.click(screen.getByRole("button", { name: "Change name" }));
     expect(screen.getByLabelText("Draft state").textContent).toBe("unsaved");

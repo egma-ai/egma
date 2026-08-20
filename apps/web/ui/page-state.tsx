@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,11 +29,20 @@ function PageState({
   title,
   lead,
   action,
+  children,
 }: {
   readonly tone?: StateTone;
   readonly title: string;
   readonly lead?: ReactNode;
   readonly action?: ReactNode;
+  /**
+   * What a state draws under its sentence, and internal on purpose: only
+   * `Loading` has anything to put there. There is deliberately no way to pass
+   * classes in — the four states below are the whole vocabulary, and a page
+   * that could restyle one could invent a fifth appearance, which is the one
+   * thing this component exists to stop.
+   */
+  readonly children?: ReactNode;
 }) {
   return (
     <section
@@ -55,14 +65,49 @@ function PageState({
       {lead === undefined ? null : (
         <p className="m-0 max-w-[62ch] text-base text-muted-foreground">{lead}</p>
       )}
+      {children}
       {action}
     </section>
   );
 }
 
-/** Waiting on egma. It says what it is waiting for, not just that it is waiting. */
+/**
+ * Waiting on egma. It says what it is waiting for, not just that it is waiting.
+ *
+ * **The sentence is the state; the bars are the proof it is still running.**
+ * `DESIGN.md` asks a loading state for a "fast, quiet indicator", and a page
+ * that only wrote "Loading agents…" and then held perfectly still could not be
+ * told from one that had given up. Three neutral bars breathing under the
+ * sentence say the wait is alive. They are `aria-hidden`, because the sentence
+ * above them is already announced by this section's `role="status"` and a
+ * screen reader gains nothing from three rectangles.
+ *
+ * **No motion is written here, and the slot names are why.** The wait before
+ * this appears, the breath in the bars and the phase between them are all in
+ * `tailwind-theme.css`, under the same `DESIGN.md` rule as the run state
+ * mark's turn and keyed on the two names this component publishes:
+ * `page-state` on the section and `loading-indicator` on the group below. That
+ * is what lets one rule treat a route fallback, the card inside it and the
+ * bars inside that as a single arrival rather than three overlapping ones —
+ * something three separate class lists could never agree on.
+ *
+ * Nothing here flashes on a fast read, and reduced motion keeps the meaning:
+ * both are properties of those rules, and both are argued where they live.
+ */
 export function Loading({ what }: { readonly what: string }) {
-  return <PageState tone="quiet" title={`Loading ${what}…`} />;
+  return (
+    <PageState tone="quiet" title={`Loading ${what}…`}>
+      <div
+        data-slot="loading-indicator"
+        className="flex w-full flex-col gap-2"
+        aria-hidden="true"
+      >
+        <Skeleton className="h-3 w-64 max-w-full" />
+        <Skeleton className="h-3 w-48 max-w-full" />
+        <Skeleton className="h-3 w-32 max-w-full" />
+      </div>
+    </PageState>
+  );
 }
 
 /** There is nothing here, and that is a fact about the project, not a fault. */

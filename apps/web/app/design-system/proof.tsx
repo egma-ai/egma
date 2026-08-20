@@ -3,6 +3,12 @@
 import { useRef, useState } from "react";
 
 import { EllipsisIcon } from "lucide-react";
+/*
+ * Aliased for the same reason the primitives below are: this component already
+ * holds a `toast` of its own — the open state of the shared product toast — and
+ * the two would silently shadow one another.
+ */
+import { toast as baseToast } from "sonner";
 
 import { Badge as BaseBadge } from "@/components/ui/badge";
 import { Button as BaseButton } from "@/components/ui/button";
@@ -35,13 +41,31 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Progress } from "@/components/ui/progress";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Toaster } from "@/components/ui/sonner";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip as BaseTooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 import type { Me } from "../../lib/me.ts";
@@ -91,7 +115,32 @@ const PANEL_WIDE = [...PANEL, "col-span-full max-[760px]:col-auto"];
 const KICKER =
   "m-0 mb-3 text-sm uppercase tracking-(--tracking-label) text-muted-foreground";
 
-/** One of the two component previews, and the line that titles it. */
+/**
+ * The heading that names one component inside a panel.
+ *
+ * It is weight 500, because it is a heading and `DESIGN.md` reserves 500 for
+ * "section, state, or dialog titles that need stronger hierarchy" — the same
+ * rule that separates it from `KICKER` above.
+ *
+ * Every `<h3>` on the page reads it, including the six on the older panels that
+ * wrote the same three utilities out by hand. Naming it once is the rule this
+ * file states at the top — "named once rather than written nine times because
+ * nine copies drift" — and a constant that only the newest sections obeyed
+ * would have been a seventh copy with extra steps.
+ */
+const SUBHEAD =
+  "m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground";
+
+/**
+ * One inset demonstration: a component shown on the canvas colour inside a
+ * panel, so the panel around it reads as a list of them.
+ *
+ * Both users of it are here rather than in two constants. It started as the
+ * frame for the two responsive and reduced-motion previews, and each primitive
+ * specimen wants the same frame — and two identical strings are the drift this
+ * file names at the top. `PREVIEW_HEAD` stays separate because only the two
+ * previews carry a titled header.
+ */
 const PREVIEW = "min-w-0 rounded-input border border-border bg-background p-4";
 const PREVIEW_HEAD = [
   "mb-4 flex items-baseline justify-between gap-3 text-sm text-foreground",
@@ -234,6 +283,8 @@ export function DesignSystemProof() {
   const [sampleRate, setSampleRate] = useState("20");
   const [answerWithin, setAnswerWithin] = useState("2.5");
   const [turnBudget, setTurnBudget] = useState("12");
+  const [reuse, setReuse] = useState<"same" | "fresh">("same");
+  const [finished, setFinished] = useState(7);
   const nextFeedbackInput = useRef<FeedbackInput>("keyboard");
 
   return (
@@ -275,7 +326,7 @@ export function DesignSystemProof() {
             </p>
 
             <div className="flex flex-col gap-4">
-              <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+              <h3 className={SUBHEAD}>
                 Buttons
               </h3>
               <div className="flex flex-wrap items-center gap-3">
@@ -305,7 +356,7 @@ export function DesignSystemProof() {
 
             <div className="grid gap-6 md:grid-cols-2">
               <div className="flex flex-col gap-4">
-                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                <h3 className={SUBHEAD}>
                   Fields
                 </h3>
                 <label className="flex flex-col gap-2" htmlFor="base-suite">
@@ -327,7 +378,7 @@ export function DesignSystemProof() {
               </div>
 
               <div className="flex flex-col gap-4">
-                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                <h3 className={SUBHEAD}>
                   Chips
                 </h3>
                 <div className="flex flex-wrap items-center gap-3">
@@ -340,7 +391,7 @@ export function DesignSystemProof() {
                   Brand orange is absent on purpose. It never means passed,
                   failed, skipped, or errored.
                 </p>
-                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                <h3 className={SUBHEAD}>
                   Theme, straight from the tokens
                 </h3>
                 <div className="grid grid-cols-3 gap-2">
@@ -366,7 +417,7 @@ export function DesignSystemProof() {
               * the grader threshold uses.
               */}
             <div className="flex flex-col gap-4">
-              <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+              <h3 className={SUBHEAD}>
                 Numeric fields
               </h3>
               <p className="m-0 max-w-[68ch] text-base text-muted-foreground">
@@ -436,7 +487,7 @@ export function DesignSystemProof() {
               </Card>
 
               <div className="flex flex-col gap-4">
-                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                <h3 className={SUBHEAD}>
                   Menus and layers
                 </h3>
                 <div className="flex flex-wrap items-center gap-3">
@@ -512,6 +563,367 @@ export function DesignSystemProof() {
                   them; the dialog stays centred. Every duration is a DESIGN.md
                   motion token and every one is under 300ms.
                 </p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        {/*
+          * The primitives the kit gained for the wrapper migration.
+          *
+          * They are on this page because nothing else draws some of them yet: a
+          * primitive with no caller is a primitive whose light theme, dark
+          * theme, keyboard model, and reduced-motion form nobody has looked at.
+          * Each one is shown in the states a reviewer actually has to check
+          * rather than in a single happy example.
+          */}
+        <article className={cn(PANEL_WIDE)}>
+          <p className={KICKER}>Component base — tabs, choice, progress, and feedback</p>
+          <div className="flex flex-col gap-8">
+            <p className="m-0 max-w-[68ch] text-base text-muted-foreground">
+              Each of these is the raw primitive, before any shared component
+              wraps it. That is deliberate: a change to a primitive shows up on
+              this page before it reaches a screen, and a primitive that only
+              ever appeared inside a wrapper would hide which of the two owns
+              the behaviour.
+            </p>
+
+            <div className="flex flex-col gap-4">
+              <h3 className={SUBHEAD}>Tabs</h3>
+              <p className="m-0 max-w-[68ch] text-sm text-muted-foreground">
+                One set, one panel visible, and the keyboard model that goes
+                with it: a single Tab step reaches the set rather than every tab
+                in it, and the arrow keys move along the set and change the
+                panel.
+              </p>
+              {/*
+                * Said out loud on the proof surface, because it is the decision
+                * a reviewer is most likely to want to argue with.
+                *
+                * The two grader views are separate addresses. A tab set claims
+                * `role="tab"`, a panel that updates in place, and a roving tab
+                * order — none of which is true of a link that loads a new page
+                * — and it costs the link its middle-click, its copy-link, and
+                * its place in the tab order. So the grader strip stays a
+                * navigation of links marked with `aria-current="page"`, and
+                * this is where a real tab set is proven instead.
+                */}
+              <p className="m-0 max-w-[68ch] text-sm text-muted-foreground">
+                The two grader views are not a tab set. They are separate
+                addresses, so they stay a navigation of links.
+              </p>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className={PREVIEW}>
+                  <Tabs defaultValue="simulations">
+                    <TabsList>
+                      <TabsTrigger value="simulations">Simulations</TabsTrigger>
+                      <TabsTrigger value="graders">Graders</TabsTrigger>
+                      <TabsTrigger value="persona">Persona</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="simulations">
+                      <p className="m-0 text-sm text-muted-foreground">
+                        Ten simulations ran. Seven passed, two failed, one was
+                        skipped because the connection refused the call.
+                      </p>
+                    </TabsContent>
+                    <TabsContent value="graders">
+                      <p className="m-0 text-sm text-muted-foreground">
+                        Two graders judged this run. Both were frozen when it
+                        started, so a later edit cannot change these verdicts.
+                      </p>
+                    </TabsContent>
+                    <TabsContent value="persona">
+                      <p className="m-0 text-sm text-muted-foreground">
+                        A caller who has already been transferred twice and asks
+                        for a refund outside the stated window.
+                      </p>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+                <div className={PREVIEW}>
+                  <Tabs defaultValue="transcript">
+                    <TabsList variant="line">
+                      <TabsTrigger value="transcript">Transcript</TabsTrigger>
+                      <TabsTrigger value="outcome">Outcome</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="transcript">
+                      <p className="m-0 text-sm text-muted-foreground">
+                        Every turn of the simulation, in the order it happened.
+                      </p>
+                    </TabsContent>
+                    <TabsContent value="outcome">
+                      <p className="m-0 text-sm text-muted-foreground">
+                        What each grader decided, and the turn it cited.
+                      </p>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+                {/*
+                  * The third shape the component draws, and the one nothing in
+                  * the product uses yet.
+                  *
+                  * A vertical rail marks the current tab down its trailing edge
+                  * instead of under it, which is a separate set of rules from
+                  * the two above — and rules no page would have caught. It is
+                  * here so the shape is proven rather than dead: a strip of
+                  * evidence views is the layout it is waiting for.
+                  *
+                  * The disabled tab is the other half. "Disable rather than
+                  * hide" is this product's decision, so a set that can hold an
+                  * unavailable choice has to show what one looks like: still
+                  * read, still named, and not reachable by the arrow keys.
+                  */}
+                <div className={PREVIEW}>
+                  <Tabs defaultValue="turns" orientation="vertical">
+                    <TabsList variant="line">
+                      <TabsTrigger value="turns">Turns</TabsTrigger>
+                      <TabsTrigger value="metrics">Metrics</TabsTrigger>
+                      <TabsTrigger value="recording" disabled>
+                        Recording
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="turns">
+                      <p className="m-0 text-sm text-muted-foreground">
+                        What the caller and the agent each said.
+                      </p>
+                    </TabsContent>
+                    <TabsContent value="metrics">
+                      <p className="m-0 text-sm text-muted-foreground">
+                        How long each turn took the agent to answer.
+                      </p>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="flex flex-col gap-4">
+              <h3 className={SUBHEAD}>Single choice</h3>
+              <p className="m-0 max-w-[68ch] text-sm text-muted-foreground">
+                One answer out of a small set, with every option left in view. A
+                menu hides the options that were not taken; this is for a choice
+                a reader is meant to compare before making it.
+              </p>
+              <div className={PREVIEW}>
+                {/*
+                  * The question is on the page rather than only in an
+                  * `aria-label`. `DESIGN.md` says labels stay visible, and a
+                  * group of options whose question only a screen reader is told
+                  * leaves everybody else reading two answers to nothing. The
+                  * same element is what names the group, so the two cannot
+                  * drift apart.
+                  */}
+                <p
+                  className="m-0 mb-3 text-sm font-medium text-foreground"
+                  id="proof-reuse-question"
+                >
+                  What a repeated run reuses
+                </p>
+                <RadioGroup
+                  value={reuse}
+                  onValueChange={(next) => setReuse(next as "same" | "fresh")}
+                  aria-labelledby="proof-reuse-question"
+                >
+                  <div className="flex min-h-(--tap-target) items-center gap-3">
+                    <RadioGroupItem id="proof-reuse-same" value="same" />
+                    <Label htmlFor="proof-reuse-same">
+                      The same persona for every simulation
+                    </Label>
+                  </div>
+                  <div className="flex min-h-(--tap-target) items-center gap-3">
+                    <RadioGroupItem id="proof-reuse-fresh" value="fresh" />
+                    <Label htmlFor="proof-reuse-fresh">
+                      A new persona for each simulation
+                    </Label>
+                  </div>
+                </RadioGroup>
+                <p className="mt-3 mb-0 text-sm text-muted-foreground">
+                  Chosen: {reuse === "same" ? "the same persona" : "a new persona"}
+                </p>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="flex flex-col gap-4">
+              <h3 className={SUBHEAD}>Progress</h3>
+              <p className="m-0 max-w-[68ch] text-sm text-muted-foreground">
+                Completion, filled on a transform and timed linear while the
+                work is still moving. A fill that slowed down at the end would
+                be saying the run was slowing down. Under reduced motion the bar
+                is simply at its new length, and the count beside it is what
+                says it changed.
+              </p>
+              {/*
+                * Three bars rather than one, because the three are the states
+                * the component has: a value on its way up, a value that has
+                * arrived, and no value at all. The last one is the one a happy
+                * example always skips — an indeterminate bar must stay empty
+                * rather than sit at zero, because "amount unknown" and "nothing
+                * done" are different claims.
+                */}
+              <div className={PREVIEW}>
+                <div className="grid gap-5">
+                  {/*
+                    * "Judged" rather than "finished", and that is not a word
+                    * chosen for variety. `RunProgress` is drawn further down
+                    * this page and is already labelled "Simulations finished";
+                    * a second bar wearing the same name would leave a reader
+                    * moving between the two with no way to tell which one they
+                    * had landed on.
+                    */}
+                  <div className="grid gap-2">
+                    <Progress
+                      value={finished}
+                      max={10}
+                      aria-label="Simulations judged"
+                      getValueLabel={(value, max) =>
+                        `${String(value)} of ${String(max)} simulations judged`
+                      }
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <span className="text-sm tabular-nums text-muted-foreground">
+                        {finished} of 10 simulations judged
+                      </span>
+                      <BaseButton
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={finished >= 10}
+                        onClick={() => setFinished((count) => Math.min(10, count + 1))}
+                      >
+                        Judge one more simulation
+                      </BaseButton>
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Progress
+                      value={10}
+                      max={10}
+                      aria-label="Transcripts collected"
+                      getValueLabel={(value, max) =>
+                        `${String(value)} of ${String(max)} transcripts collected`
+                      }
+                    />
+                    <span className="text-sm tabular-nums text-muted-foreground">
+                      Complete: 10 of 10 transcripts collected
+                    </span>
+                  </div>
+                  <div className="grid gap-2">
+                    <Progress aria-label="Recording being prepared" />
+                    <span className="text-sm text-muted-foreground">
+                      Indeterminate: the recording is being prepared and the
+                      share of it is not known
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="flex flex-col gap-4">
+                <h3 className={SUBHEAD}>Tooltip</h3>
+                <p className="m-0 max-w-[68ch] text-sm text-muted-foreground">
+                  A short explanation attached to one control, and never an
+                  action: help a person has to click belongs in a menu or a
+                  dialog. The tooltips in the panels above are the shared
+                  product one; this is the primitive underneath it.
+                </p>
+                <div className={PREVIEW}>
+                  <TooltipProvider>
+                    <BaseTooltip>
+                      <TooltipTrigger asChild>
+                        <BaseButton type="button" variant="secondary">
+                          What a frozen grader means
+                        </BaseButton>
+                      </TooltipTrigger>
+                      <TooltipContent sideOffset={8}>
+                        A run keeps the grader it started with, so editing the
+                        grader never changes a verdict already given.
+                      </TooltipContent>
+                    </BaseTooltip>
+                  </TooltipProvider>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-4">
+                <h3 className={SUBHEAD}>Toast</h3>
+                <p className="m-0 max-w-[68ch] text-sm text-muted-foreground">
+                  Arrival and dismissal, said once and out of the way of the
+                  work. The word and the symbol carry the state together, so the
+                  notification never rests on colour alone.
+                </p>
+                <div className={cn(PREVIEW, "flex flex-wrap items-center gap-3")}>
+                  <BaseButton
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      baseToast.success("Grader saved", {
+                        description:
+                          "The next run will be judged by this version.",
+                      })
+                    }
+                  >
+                    Show a saved notification
+                  </BaseButton>
+                  <BaseButton
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      baseToast.error("Run could not start", {
+                        description:
+                          "The connection refused the call. Nothing was charged.",
+                      })
+                    }
+                  >
+                    Show a failed notification
+                  </BaseButton>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="flex flex-col gap-4">
+              <h3 className={SUBHEAD}>Skeleton</h3>
+              <p className="m-0 max-w-[68ch] text-sm text-muted-foreground">
+                The shape of what is coming, for the moment before it arrives. A
+                skeleton is a shape and nothing else, so the word stays beside
+                it: <code className="font-mono text-sm">DESIGN.md</code> asks a
+                loading state to say what is happening, and a grey rectangle
+                does not say it.
+              </p>
+              {/*
+                * The pulse is the theme's own skeleton keyframes, keyed on the
+                * kit slot at 560ms with egma's easing, and its reduced-motion
+                * form lives beside it in the theme — nothing here needs to
+                * write motion or take it away.
+                */}
+              <div className={PREVIEW} role="status" aria-busy="true">
+                <p className="m-0 mb-4 text-sm text-muted-foreground">
+                  Loading graders…
+                </p>
+                <div className="grid gap-3" aria-hidden="true">
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="size-8 rounded-chip" />
+                    <Skeleton className="h-4 w-[min(220px,60%)]" />
+                    <Skeleton className="ml-auto h-4 w-16" />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="size-8 rounded-chip" />
+                    <Skeleton className="h-4 w-[min(180px,50%)]" />
+                    <Skeleton className="ml-auto h-4 w-16" />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="size-8 rounded-chip" />
+                    <Skeleton className="h-4 w-[min(260px,70%)]" />
+                    <Skeleton className="ml-auto h-4 w-16" />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -853,6 +1265,15 @@ export function DesignSystemProof() {
       >
         Support agent is ready for the next run.
       </Toast>
+
+      {/*
+        * The kit toaster, parked at the top so it never lands on the shared
+        * toast above. Both live on this page on purpose: the shared one is the
+        * product notification a screen reaches for today, and this is the
+        * primitive a later ticket has the option of moving it onto. Two
+        * notifications stacked in the same corner would have proved neither.
+        */}
+      <Toaster position="top-right" />
       </div>
       </ProductPage>
     </AppShell>

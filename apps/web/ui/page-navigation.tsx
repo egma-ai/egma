@@ -33,6 +33,17 @@ export type PageNavigationItems = readonly [
  * Operational controls never belong here. Cancel, Retry, Edit, Archive and
  * Save remain page actions because they change the current record rather than
  * move through its hierarchy.
+ *
+ * **This one is not built on a kit primitive, and that is the finding rather
+ * than an omission.** The structure-and-navigation migration rebuilt its two
+ * neighbours — a tab strip became the kit's tabs, a hand-drawn rule became the
+ * kit's separator — and looked for the same here. There is nothing to move to:
+ * the kit holds no breadcrumb, the trail is an ordered list because that is
+ * what a trail is, and the separator between two crumbs is a `/` a reader
+ * understands and not a rule. The rest of the file was already on the shared
+ * vocabulary — semantic tokens, the fine-pointer hover variant, a coarse-
+ * pointer target — and carries no motion, which is what `DESIGN.md` asks of a
+ * navigation row. Rewriting it would have been churn with a diff attached.
  */
 export function PageNavigation({
   items,
@@ -40,7 +51,11 @@ export function PageNavigation({
   readonly items: PageNavigationItems;
 }) {
   return (
-    <nav className="mb-3 min-w-0" aria-label="Breadcrumb">
+    <nav
+      className="mb-3 min-w-0"
+      data-slot="page-navigation"
+      aria-label="Breadcrumb"
+    >
       <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-2 p-0">
         {items.map((item, index) => (
           <li

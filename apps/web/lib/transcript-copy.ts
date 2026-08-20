@@ -144,7 +144,6 @@ export const DEFAULT_WINDOW: WindowChoice = "24h";
 /** The detail page. */
 export const DETAIL = {
   title: "Transcript",
-  loading: "Loading…",
   back: "All transcripts",
   recorded: "Recorded",
   errors: (howMany: number) => howMany === 1 ? "1 error" : `${howMany} errors`,

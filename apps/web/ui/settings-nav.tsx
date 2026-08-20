@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useRef, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
+import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 import { projectPath } from "../lib/project-context.ts";
@@ -75,14 +77,41 @@ export function settingsPath(
 const NAV_ITEM = [
   "relative flex w-full min-h-(--control-lg) items-center px-3",
   "rounded-button text-base whitespace-nowrap text-muted-foreground no-underline",
-  "transition-transform duration-(--duration-press) ease-out",
+  /*
+   * **Colour, and nothing that moves.** `DESIGN.md`: "Navigation row — support
+   * routine navigation — colour feedback only." These rows used to answer a
+   * press with `scale(0.97)`, borrowed from the button, and a button is the one
+   * component that rule is written *against*: a person crosses this list many
+   * times a day and never once needs it confirmed that a row was pressed —
+   * the page changing says that. The transition names its two properties for
+   * the reason `button.tsx` gives.
+   *
+   * **`motion-reduce:transition-none` went with the movement, on purpose.**
+   * `DESIGN.md` asks every movement for "a reduced-motion form with useful
+   * opacity or colour feedback" — a colour fade *is* that form. Switching it
+   * off under reduced motion removes the fallback instead of the motion, and
+   * leaves somebody who asked for less movement with less feedback than
+   * everybody else. `sidebar.tsx` came to the same form in the closing sweep.
+   */
+  "transition-[color,background-color] duration-(--duration-hover) ease-out",
   "pointer-coarse:h-(--tap-target) pointer-coarse:min-h-(--tap-target)",
-  "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
-  "[&:active:not(:focus-visible)]:scale-97",
-  "motion-reduce:transition-none",
-  "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
   /* One row on a wide screen; a cell in a grid once the navigation wraps. */
   "max-[900px]:w-full max-[900px]:whitespace-normal",
+];
+
+/**
+ * The rows somebody might go to.
+ *
+ * **Hover belongs here rather than on every row, and a browser is what said
+ * so.** The neutral hover plate and Ember Wash are both a background, and with
+ * the hover written for all four rows it won: pointing at the row you are
+ * already on turned its wash grey, which is the "current" half of the state
+ * disappearing under the pointer. Naming the two sets apart is the fix that
+ * needs no rule to outrank another — a row is either current or it is not, and
+ * only one of these two lists ever reaches it.
+ */
+const NAV_ITEM_QUIET = [
+  "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
 ];
 
 const NAV_ITEM_CURRENT = [
@@ -147,7 +176,10 @@ export function SettingsNav({
           {items.map((item) => (
             <Link
               key={item.id}
-              className={cn(NAV_ITEM, item.id === current && NAV_ITEM_CURRENT)}
+              className={cn(
+                NAV_ITEM,
+                item.id === current ? NAV_ITEM_CURRENT : NAV_ITEM_QUIET,
+              )}
               href={settingsPath(projectId, item.id)}
               aria-current={item.id === current ? "page" : undefined}
             >
@@ -186,9 +218,24 @@ export function SettingsNav({
 /**
  * Switch between peer views inside one Settings page.
  *
- * This is a tab list, not a form choice: changing it changes the visible
- * panel and does not submit a value. Roving focus gives the group one Tab stop,
- * while arrow, Home and End keys follow the tabs pattern.
+ * This is a tab list, not a form choice: changing it changes the visible panel
+ * and does not submit a value. Roving focus gives the group one Tab stop, while
+ * arrow, Home and End keys follow the tabs pattern.
+ *
+ * **All of that now comes from the kit rather than from a listener here.** The
+ * hand-written version read every key itself, wrapped the index by hand, kept
+ * an array of refs so it could move focus, and mapped Up and Down onto a
+ * horizontal strip — which the tabs pattern does not do, because Up and Down in
+ * a horizontal tablist belong to whatever is around it. Radix publishes the
+ * roving tab stop once and gets `dir`, looping, and a disabled tab right in
+ * one place. Fifty lines of keyboard code left this file and no behaviour a
+ * person relies on left with them.
+ *
+ * **The panel is not ours.** A caller draws its own `role="tabpanel"` and names
+ * it `{id}-{value}-panel`, so the trigger's `id` and `aria-controls` are stated
+ * here rather than left to Radix's generated pair. Radix writes both before it
+ * spreads a caller's props, so saying them is enough to keep the promise every
+ * Settings page was already written against.
  */
 export function SettingsTabs<Value extends string>({
   id,
@@ -203,65 +250,31 @@ export function SettingsTabs<Value extends string>({
   readonly options: readonly { readonly value: Value; readonly label: string }[];
   readonly onChange: (value: Value) => void;
 }) {
-  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
-  const move = (to: number) => {
-    const option = options[to];
-    if (option === undefined) return;
-    onChange(option.value);
-    tabs.current[to]?.focus();
-  };
-
   return (
-    <div
-      className="flex w-full items-end gap-5 border-b border-border"
-      role="tablist"
-      aria-label={label}
+    <Tabs
+      className="w-full items-start gap-0"
+      value={value}
+      onValueChange={(next) => onChange(next as Value)}
     >
-      {options.map((option, at) => (
-        <button
-          key={option.value}
-          ref={(held) => {
-            tabs.current[at] = held;
-          }}
-          className={cn(
-            "relative inline-flex min-h-(--control-lg) items-center px-0 pb-2",
-            "cursor-pointer border-0 bg-transparent text-sm text-muted-foreground",
-            "pointer-hover:text-foreground",
-            "aria-selected:font-medium aria-selected:text-foreground",
-            /* The chosen tab sits on the group's own line, not above it. */
-            "aria-selected:after:absolute aria-selected:after:-bottom-px",
-            "aria-selected:after:right-0 aria-selected:after:left-0",
-            "aria-selected:after:h-0.5 aria-selected:after:rounded-chip",
-            "aria-selected:after:bg-brand aria-selected:after:content-['']",
-          )}
-          id={`${id}-${option.value}-tab`}
-          type="button"
-          role="tab"
-          aria-selected={value === option.value}
-          aria-controls={`${id}-${option.value}-panel`}
-          tabIndex={value === option.value ? 0 : -1}
-          onClick={() => onChange(option.value)}
-          onKeyDown={(event) => {
-            const last = options.length - 1;
-            const next =
-              event.key === "ArrowRight" || event.key === "ArrowDown"
-                ? (at + 1) % options.length
-                : event.key === "ArrowLeft" || event.key === "ArrowUp"
-                  ? (at - 1 + options.length) % options.length
-                  : event.key === "Home"
-                    ? 0
-                    : event.key === "End"
-                      ? last
-                      : null;
-            if (next === null) return;
-            event.preventDefault();
-            move(next);
-          }}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
+      <TabsList variant="line" aria-label={label}>
+        {options.map((option) => (
+          <TabsTrigger
+            key={option.value}
+            id={`${id}-${option.value}-tab`}
+            value={option.value}
+            aria-controls={`${id}-${option.value}-panel`}
+          >
+            {option.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      {/*
+       * The rail the current tab is marked on, as the element it is rather
+       * than as a border belonging to the strip above it. The mark is 2px and
+       * overhangs by one, so it reads as sitting on this line.
+       */}
+      <Separator />
+    </Tabs>
   );
 }
 

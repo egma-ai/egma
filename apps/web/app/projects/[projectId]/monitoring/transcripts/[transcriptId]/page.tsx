@@ -2,6 +2,10 @@
 
 import { Fragment, use, useEffect, useState, type CSSProperties } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
 import { readJson } from "../../../../../../lib/api.ts";
 import { GRADING } from "../../../../../../lib/grading-copy.ts";
 import { asSecond } from "../../../../../../lib/instants.ts";
@@ -49,18 +53,150 @@ import { shownScore } from "../../../../../../ui/run-status.tsx";
 import { JudgmentCard } from "../../../../../judgment-card.tsx";
 import { RecordingPlayer } from "../../../../../recording-player.tsx";
 import { PageNavigation } from "../../../../../../ui/page-navigation.tsx";
+import { Loading } from "../../../../../../ui/page-state.tsx";
 import {
   RelativeInstant,
   useMinuteClock,
 } from "../../../../../../ui/relative-time.tsx";
-import styles from "../../../../../ui.module.css";
 import {
   AppShell,
+  LinkLine,
   Notice,
+  PageHeader,
   ProductPage,
   ProductStatePage,
   StatePage,
 } from "../../../../../ui.tsx";
+
+/* ------------------------------------------------------------------------ *
+ * The page's own layout, which is the only thing it styles for itself.
+ *
+ * These were 54 class names in `app/ui.module.css`, the last CSS Module in the
+ * application. Everything a shared component owns is now composed rather than
+ * dressed — the header, the chips, the arrows, the notice — and what is left
+ * here is the arrangement of one wide evidence page: strips of facts, a
+ * transcript beside an inspector, and three readings of the same steps.
+ *
+ * They are constants rather than repeated class lists because each one is
+ * applied in three or more places and a strip that agreed with its neighbour in
+ * four rules out of five would look right.
+ * ------------------------------------------------------------------------ */
+
+/** The word above one fact: the compact uppercase caption, in the mono face. */
+const FACT_LABEL =
+  "font-mono text-sm tracking-(--tracking-label) text-muted-foreground uppercase";
+
+/** The figure under it, which is a value rather than a heading. */
+const FACT_VALUE = "text-sm font-normal [overflow-wrap:anywhere]";
+
+/**
+ * One fact inside a strip: a label over a figure, with the hairline that
+ * separates it from the fact beside it.
+ */
+const FACT = "flex min-w-0 flex-col gap-1 border-e border-border p-4 last:border-e-0";
+
+/**
+ * The five facts above the exchange, and the measures beside them.
+ *
+ * Below 620px it is two columns, and the hairlines turn from a row of uprights
+ * into a grid: every fact grows a top edge, the two on the first row give
+ * theirs back, and the second of each pair drops the upright it no longer has a
+ * neighbour for. An odd count leaves one fact alone on the last row, and it
+ * takes the whole row rather than half of it.
+ *
+ * Every width is written out rather than composed, because Tailwind finds class
+ * names by reading this file as text: a class built from a template literal is
+ * a class that is never generated.
+ */
+const SUMMARY_STRIP = cn(
+  "mt-6 grid grid-cols-5 overflow-clip rounded-card border border-border bg-surface",
+  "max-[620px]:grid-cols-2",
+);
+
+const SUMMARY_FACT = cn(
+  FACT,
+  "max-[620px]:border-t",
+  "max-[620px]:nth-[2n]:border-e-0",
+  "max-[620px]:nth-[-n+2]:border-t-0",
+  "max-[620px]:last:col-span-full max-[620px]:last:border-e-0",
+);
+
+/**
+ * What egma made of the exchange, on the quieter surface a result sits on.
+ *
+ * It stacks earlier than the strip above it — 900px rather than 620px — because
+ * a tally reads as a sentence and needs the width a duration does not.
+ */
+const OUTCOME_STRIP = cn(
+  "mt-6 grid grid-cols-3 overflow-clip rounded-card border border-border bg-surface-soft",
+  "max-[900px]:grid-cols-2",
+);
+
+const OUTCOME_FACT = cn(
+  FACT,
+  /*
+   * The diagnostic lane is a fourth fact in three columns, so it wraps onto a
+   * row of its own — and a wrapped row with no rule above it reads as part of
+   * the fact it sits under, which for a lane that must never colour the verdict
+   * beside it is exactly the wrong reading.
+   */
+  "nth-[n+4]:border-t",
+  "max-[900px]:border-t",
+  "max-[900px]:nth-[2n]:border-e-0",
+  "max-[900px]:nth-[-n+2]:border-t-0",
+);
+
+/**
+ * The colour a verdict paints the figure it is the verdict of.
+ *
+ * Read off `data-verdict` on the fact above it, so the attribute is what does
+ * the painting rather than a label nothing reads. A verdict word nobody has a
+ * colour for leaves the figure in the ordinary text colour, which is the safe
+ * direction: a new word is legible before anyone has decided what it means.
+ */
+const VERDICT_COLOUR = cn(
+  "[[data-verdict=passed]_&]:text-success",
+  "[[data-verdict=failed]_&]:text-failure",
+  "[[data-verdict=errored]_&]:text-failure",
+);
+
+/** A disclosure's own marker is replaced by one this page draws. */
+const DISCLOSURE = "cursor-pointer list-none [&::-webkit-details-marker]:hidden";
+
+/** Steps under a turn, or under a step: a column with one gap between them. */
+const STEP_STACK = "flex min-w-0 flex-col gap-2";
+
+/** The bordered surface a list of turns, steps or timings is read on. */
+const LIST_SURFACE =
+  "min-w-0 overflow-clip rounded-card border border-border bg-surface";
+
+/**
+ * A row that is one press: a whole-width button that reads as a line.
+ *
+ * The transition names the one property that moves. Tailwind's `transition-colors`
+ * includes `outline-color`, which fades the focus ring in over 140ms on every
+ * Tab step — motion on keyboard navigation, which `DESIGN.md` forbids outright.
+ */
+const ROW = cn(
+  "flex w-full min-w-0 cursor-pointer items-center border-0 border-t border-border",
+  "min-h-14 bg-transparent py-2 pe-3 text-left text-foreground",
+  "transition-[background-color] duration-(--duration-hover) ease-out",
+  "pointer-hover:bg-surface-soft",
+  "motion-reduce:transition-none",
+);
+
+/**
+ * The mark on a selected row, turn or step.
+ *
+ * Ember Wash behind it and a narrow Ember edge along its leading side, which is
+ * what `DESIGN.md` asks for: "Selected or active rows use Ember Wash plus a
+ * non-color state mark." The edge is an inset shadow rather than a border so
+ * that lighting a row does not move the words in it sideways by three pixels.
+ */
+const SELECTED = "bg-selected shadow-[inset_3px_0_var(--accent)]";
+
+/** A name that has to end somewhere: one line, cut with an ellipsis. */
+const ONE_LINE = "overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground";
 
 type State =
   | { status: "loading" }
@@ -147,25 +283,28 @@ export default function TranscriptPage({
   }, [projectId, transcriptId]);
 
   if (state.status === "loading") {
+    // The same frame the route boundary draws, so the wait for the API reads
+    // as one continued state rather than a second, static loading language.
     return (
       <ProductStatePage
         title={DETAIL.title}
-        lead={DETAIL.loading}
         breadcrumbs={[
           { label: LIST.title, href: transcriptsPath(projectId) },
           { label: DETAIL.title },
         ]}
-      />
+      >
+        <Loading what="this transcript" />
+      </ProductStatePage>
     );
   }
 
   if (state.status === "signed-out") {
     return (
       <StatePage title={LIST.signedOut} lead={LIST.signedOutLead}>
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href="/sign-in">{LIST.signIn}</a> ·{" "}
           <a href="/signup">{LIST.setUp}</a>
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -234,6 +373,8 @@ export default function TranscriptPage({
     setView("execution");
   }
 
+  const errored = detail.trace.errored_span_count;
+
   return (
     <AppShell>
       <ProductPage wide>
@@ -243,20 +384,40 @@ export default function TranscriptPage({
             { label: DETAIL.title },
           ]}
         />
-        <header className={styles.detailHeader}>
-          <div>
-            <p className={styles.eyebrow}>{detail.trace.source} / {detail.trace.environment}</p>
-            <h1>{DETAIL.title}</h1>
-            <p className={styles.detailLead}>
+        {/*
+          The product's own page header, rather than one this page drew for
+          itself. It used to carry a heading that grew to 56px — type
+          `DESIGN.md` reserves for auth, onboarding and public pages — so the
+          settled transcript did not even match its own loading state, which
+          has always been drawn by the shared header underneath
+          `ProductStatePage`.
+        */}
+        <PageHeader
+          eyebrow={`${detail.trace.source} / ${detail.trace.environment}`}
+          title={DETAIL.title}
+          lead={
+            <>
               <RelativeInstant instant={openedAt} now={now} precision="second" />
               {" · "}
               {howLong(detail.trace.duration_ns)}
-            </p>
-          </div>
-          <span className={`${styles.status} ${detail.trace.errored_span_count > 0 ? styles.statusBad : ""}`}>
-            {detail.trace.errored_span_count === 0 ? DETAIL.recorded : DETAIL.errors(detail.trace.errored_span_count)}
-          </span>
-        </header>
+            </>
+          }
+          action={
+            <Badge variant={errored > 0 ? "failure" : "success"}>
+              {/*
+                The dot the hand-drawn chip carried as `::before`, kept. It is
+                `bg-current` and the same circle either way, so it separates
+                nothing on its own — `Recorded` and `1 error` are what say which
+                state this is. It is the chip's mark, not its meaning.
+              */}
+              <span
+                aria-hidden="true"
+                className="size-1.5 shrink-0 rounded-chip bg-current"
+              />
+              {errored === 0 ? DETAIL.recorded : DETAIL.errors(errored)}
+            </Badge>
+          }
+        />
 
         <Summary facts={detail.trace} />
         <Measures measured={detail.measures ?? []} />
@@ -294,12 +455,51 @@ export default function TranscriptPage({
           />
         ) : null}
 
-        <div className={styles.traceToolbar}>
-          <div className={styles.traceViewTabs} role="tablist" aria-label={DETAIL.viewLabel}>
+        {/*
+          The views, and the way through the problems.
+
+          On a phone the two do not fit on one line — three tab labels and a
+          pair of 44px targets is wider than the screen, and the toolbar was
+          pushing the whole document sideways whenever an exchange had
+          something wrong in it. So the strip becomes a reversed column: the
+          tabs keep the rule they sit on, and the navigator takes the line
+          above them rather than being squeezed into the same one.
+        */}
+        <div
+          className={cn(
+            "mt-8 flex items-center justify-between gap-5 border-b border-border",
+            "max-[620px]:flex-col-reverse max-[620px]:items-stretch max-[620px]:gap-3",
+          )}
+        >
+          <div
+            className="flex gap-6 max-[620px]:gap-5"
+            role="tablist"
+            aria-label={DETAIL.viewLabel}
+          >
             {VIEWS.map((item) => (
               <button
                 key={item.id}
-                className={view === item.id ? styles.traceViewTabActive : undefined}
+                className={cn(
+                  /*
+                   * The rule under the current tab sits *on* the toolbar's own
+                   * hairline rather than above it, which is what the negative
+                   * margin buys. Two lines a pixel apart read as a mistake.
+                   */
+                  "-mb-px min-h-(--tap-target) cursor-pointer px-1",
+                  "border-0 border-b-2 border-b-transparent bg-transparent",
+                  "text-sm text-muted-foreground",
+                  /*
+                   * One duration for the colour and the press, and it is the
+                   * shorter of the two: "Choose the shorter token when two
+                   * would both explain the change."
+                   */
+                  "transition-[color,border-color,transform] duration-(--duration-press) ease-out",
+                  "pointer-hover:text-foreground",
+                  "[&:active:not(:focus-visible)]:scale-97",
+                  /* The movement goes; the colour feedback stays. */
+                  "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+                  view === item.id && "border-b-brand text-foreground",
+                )}
                 type="button"
                 role="tab"
                 aria-selected={view === item.id}
@@ -310,18 +510,52 @@ export default function TranscriptPage({
             ))}
           </div>
           {failures.length === 0 ? null : (
-            <div className={styles.issueNavigator}>
+            <div className="flex items-center gap-2 text-sm text-foreground max-[620px]:self-end">
               <span>{DETAIL.problems(failures.length)}</span>
-              <button type="button" aria-label={DETAIL.previousProblem} onClick={() => moveBetweenFailures(-1)}>←</button>
-              <button type="button" aria-label={DETAIL.nextProblem} onClick={() => moveBetweenFailures(1)}>→</button>
+              {/*
+                The product's button, held at the quieter edge this strip wants.
+                It brings the 44px target, the focus ring and the press
+                feedback with it, which is three decisions this page no longer
+                keeps its own copy of.
+              */}
+              <Button
+                className="border-border pointer-hover:border-border-strong"
+                variant="secondary"
+                size="icon"
+                type="button"
+                aria-label={DETAIL.previousProblem}
+                onClick={() => moveBetweenFailures(-1)}
+              >
+                ←
+              </Button>
+              <Button
+                className="border-border pointer-hover:border-border-strong"
+                variant="secondary"
+                size="icon"
+                type="button"
+                aria-label={DETAIL.nextProblem}
+                onClick={() => moveBetweenFailures(1)}
+              >
+                →
+              </Button>
             </div>
           )}
         </div>
 
-        {detail.spans_truncated ? <Notice tone="error">{DETAIL.truncated}</Notice> : null}
+        {detail.spans_truncated ? (
+          <div className="mt-5">
+            <Notice tone="error">{DETAIL.truncated}</Notice>
+          </div>
+        ) : null}
 
-        <div className={styles.traceLayout}>
-          <section className={styles.traceViews}>
+        <div
+          className={cn(
+            "mt-8 grid min-w-0 items-start gap-8",
+            "grid-cols-[minmax(0,1fr)_360px]",
+            "max-[1100px]:grid-cols-[minmax(0,1fr)]",
+          )}
+        >
+          <section className="min-w-0">
             <div role="tabpanel" hidden={view !== "transcript"}>
               <TranscriptView detail={detail} selectedId={selected?.span_id ?? null} onSelect={select} />
             </div>
@@ -339,6 +573,29 @@ export default function TranscriptPage({
   );
 }
 
+/** One label over one figure, wherever a strip of facts is drawn. */
+function Fact({
+  label,
+  value,
+  className,
+  valueClassName,
+  ...rest
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly className: string;
+  readonly valueClassName?: string;
+  readonly "data-verdict"?: string;
+  readonly title?: string;
+}) {
+  return (
+    <div className={className} {...rest}>
+      <span className={FACT_LABEL}>{label}</span>
+      <strong className={cn(FACT_VALUE, valueClassName)}>{value}</strong>
+    </div>
+  );
+}
+
 function Summary({ facts }: { facts: TraceFacts }) {
   const primary: readonly (readonly [string, string, boolean])[] = [
     [FACTS.duration, howLong(facts.duration_ns), false],
@@ -349,12 +606,15 @@ function Summary({ facts }: { facts: TraceFacts }) {
   ];
 
   return (
-    <section className={styles.detailFacts} aria-label={DETAIL.summary}>
+    <section className={SUMMARY_STRIP} aria-label={DETAIL.summary}>
       {primary.map(([label, value, wrong]) => (
-        <div className={styles.contextFact} key={label}>
-          <span>{label}</span>
-          <strong className={wrong ? "text-failure" : undefined}>{value}</strong>
-        </div>
+        <Fact
+          className={SUMMARY_FACT}
+          key={label}
+          label={label}
+          value={value}
+          valueClassName={wrong ? "text-failure" : undefined}
+        />
       ))}
     </section>
   );
@@ -385,24 +645,30 @@ function Summary({ facts }: { facts: TraceFacts }) {
  */
 function Measures({ measured }: { measured: readonly Measured[] }) {
   return (
-    <section className={styles.detailFacts} aria-label={MEASURES.label}>
+    <section className={SUMMARY_STRIP} aria-label={MEASURES.label}>
       {measured.length === 0 ? (
-        <div className={styles.contextFact}>
-          <span>{MEASURES.label}</span>
-          <strong className="text-muted-foreground">{MEASURES.none}</strong>
-        </div>
+        <Fact
+          className={SUMMARY_FACT}
+          label={MEASURES.label}
+          value={MEASURES.none}
+          valueClassName="text-muted-foreground"
+        />
       ) : (
         measured.map((one) => (
-          <div className={styles.contextFact} key={one.measure}>
-            <span>{humanizeIdentifier(one.measure)}</span>
-            <strong>{measurement(one)}</strong>
-          </div>
+          <Fact
+            className={SUMMARY_FACT}
+            key={one.measure}
+            label={humanizeIdentifier(one.measure)}
+            value={measurement(one)}
+          />
         ))
       )}
       {measured.some(workedOut) ? (
-        <div className={styles.contextFact}>
-          <span />
-          <strong className="text-muted-foreground">{MEASURES.derived}</strong>
+        <div className={SUMMARY_FACT}>
+          <span className={FACT_LABEL} />
+          <strong className={cn(FACT_VALUE, "text-muted-foreground")}>
+            {MEASURES.derived}
+          </strong>
         </div>
       ) : null}
     </section>
@@ -498,19 +764,16 @@ function OutcomeSummary({
   diagnostics: Outcome | null;
 }) {
   return (
-    <section className={`${styles.runFacts} ${styles.traceOutcome}`} aria-label="Grading outcome">
-      <div className={styles.contextFact} data-verdict={outcome.verdict}>
-        <span>Verdict</span>
-        <strong>{outcome.verdict}</strong>
-      </div>
-      <div className={styles.contextFact}>
-        <span>Score</span>
-        <strong>{shownScore(outcome.score)}</strong>
-      </div>
-      <div className={styles.contextFact}>
-        <span>Checks</span>
-        <strong>{tallyOf(outcome.counts)}</strong>
-      </div>
+    <section className={OUTCOME_STRIP} aria-label="Grading outcome">
+      <Fact
+        className={OUTCOME_FACT}
+        data-verdict={outcome.verdict}
+        label="Verdict"
+        value={outcome.verdict}
+        valueClassName={VERDICT_COLOUR}
+      />
+      <Fact className={OUTCOME_FACT} label="Score" value={shownScore(outcome.score)} />
+      <Fact className={OUTCOME_FACT} label="Checks" value={tallyOf(outcome.counts)} />
       {/*
         **The fraction is the point of this lane, so it is on the line.** A
         diagnostic is switched on to be read rather than to decide, and passed ÷
@@ -523,15 +786,45 @@ function OutcomeSummary({
         to its left is red — which is the one thing it can never be.
       */}
       {diagnostics === null ? null : (
-        <div className={styles.contextFact} title={GRADING.diagnosticAside}>
-          <span>{GRADING.diagnosticLane}</span>
-          <strong>
-            {diagnostics.verdict} · {GRADING.diagnosticScore}{" "}
-            {shownScore(diagnostics.score)} · {tallyOf(diagnostics.counts)}
-          </strong>
-        </div>
+        <Fact
+          className={OUTCOME_FACT}
+          title={GRADING.diagnosticAside}
+          label={GRADING.diagnosticLane}
+          value={
+            `${diagnostics.verdict} · ${GRADING.diagnosticScore} ` +
+            `${shownScore(diagnostics.score)} · ${tallyOf(diagnostics.counts)}`
+          }
+        />
       )}
     </section>
+  );
+}
+
+/** The name of a view, and the sentence saying what it is a reading of. */
+function ViewHeading({
+  title,
+  lead,
+}: {
+  readonly title: string;
+  readonly lead: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "mb-4 flex items-baseline justify-between gap-6",
+        "max-[620px]:flex-col max-[620px]:items-start max-[620px]:gap-2",
+      )}
+    >
+      <h2 className="m-0 flex-none text-lg font-normal">{title}</h2>
+      <p
+        className={cn(
+          "m-0 max-w-[470px] text-right text-sm text-muted-foreground",
+          "max-[620px]:text-left",
+        )}
+      >
+        {lead}
+      </p>
+    </div>
   );
 }
 
@@ -547,38 +840,50 @@ function TranscriptView({
   const openedAt = detail.trace.started_at;
 
   return (
-    <div className={styles.transcript}>
-      <div className={styles.traceViewHeading}>
-        <h2>{DETAIL.transcript}</h2>
-        <p>{DETAIL.transcriptLead}</p>
-      </div>
+    <div>
+      {/*
+        The heading is above the card rather than inside it, which is where the
+        timeline's and the execution view's have always been. Inside, with the
+        card's own zero padding, the words sat hard against the border on both
+        sides — and so did the disclosure at the foot of it.
+      */}
+      <ViewHeading title={DETAIL.transcript} lead={DETAIL.transcriptLead} />
       {detail.turns.length === 0 ? (
         <Notice>{DETAIL.noTurns}</Notice>
       ) : (
-        detail.turns.map((turn, position) => (
-          <Fragment key={turn.span_id}>
-            <Turn
-              turn={turn}
-              openedAt={openedAt}
-              selectedId={selectedId}
-              onSelect={onSelect}
-            />
-            {(detail.verdicts ?? [])
-              .filter((judgment) => turnsCited(judgment).includes(position + 1))
-              .map((judgment) => (
-                <JudgmentCard
-                  key={`${judgment.grader_id}:${judgment.assertion}:${judgment.judged_at}`}
-                  judgment={judgment}
-                />
-              ))}
-          </Fragment>
-        ))
+        <div className={LIST_SURFACE}>
+          {detail.turns.map((turn, position) => (
+            <Fragment key={turn.span_id}>
+              <Turn
+                turn={turn}
+                openedAt={openedAt}
+                selectedId={selectedId}
+                onSelect={onSelect}
+              />
+              {(detail.verdicts ?? [])
+                .filter((judgment) => turnsCited(judgment).includes(position + 1))
+                .map((judgment) => (
+                  <JudgmentCard
+                    key={`${judgment.grader_id}:${judgment.assertion}:${judgment.judged_at}`}
+                    judgment={judgment}
+                  />
+                ))}
+            </Fragment>
+          ))}
+        </div>
       )}
       {detail.spans.length === 0 ? null : (
-        <details className={styles.otherSteps}>
-          <summary>{DETAIL.otherSteps}</summary>
-          <p className="text-muted-foreground">{DETAIL.otherStepsLead}</p>
-          <div className={styles.stepStack}>
+        <details className="mt-6 border-t border-border py-4">
+          <summary
+            className={cn(
+              "cursor-pointer font-normal",
+              "pointer-coarse:min-h-(--tap-target) pointer-coarse:py-3",
+            )}
+          >
+            {DETAIL.otherSteps}
+          </summary>
+          <p className="mt-2 mb-4 text-sm text-muted-foreground">{DETAIL.otherStepsLead}</p>
+          <div className={STEP_STACK}>
             {detail.spans.map((step) => (
               <Timed key={step.span_id} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
             ))}
@@ -607,34 +912,99 @@ function Turn({
 
   return (
     <details
-      className={`${styles.turn} ${human ? styles.turnHuman : styles.turnAgent} ${selected ? styles.turnSelected : ""}`}
+      className={cn(
+        "group m-0 overflow-clip border-0 border-t border-border bg-surface first:border-t-0",
+        selected && SELECTED,
+      )}
       data-turn="true"
       onToggle={(event) => {
         if (event.currentTarget.open) onSelect(turn);
       }}
     >
-      <summary>
-        <span className={styles.turnRail}>
-          <span>{howFarIn(turn.started_at, openedAt)}</span>
-          <span aria-hidden="true" />
-        </span>
-        <span className={styles.turnText}>
-          <span className={styles.turnHeading}>
-            <strong>{human ? SPEAKERS.human : SPEAKERS.agent}</strong>
-            <small>{howLong(turn.duration_ns)} · {DETAIL.steps(inside)}</small>
+      <summary
+        className={cn(
+          DISCLOSURE,
+          "grid items-stretch gap-4 p-4",
+          "grid-cols-[80px_minmax(0,1fr)_32px]",
+          "active:bg-surface-soft",
+          "max-[620px]:grid-cols-[52px_minmax(0,1fr)_28px] max-[620px]:gap-3 max-[620px]:p-3",
+        )}
+      >
+        {/*
+          The rail: when this turn began, and the line down to the next one, so
+          a conversation reads as a column of moments rather than a stack of
+          cards. The dot is drawn rather than typed, because a character would
+          arrive at whatever size and colour the face decided.
+        */}
+        <span className="relative flex min-w-0 flex-col gap-2 font-mono text-sm text-muted-foreground">
+          <span className="[overflow-wrap:anywhere]">
+            {howFarIn(turn.started_at, openedAt)}
           </span>
-          <span className={styles.turnWords}>
+          <span
+            aria-hidden="true"
+            className={cn(
+              "relative ms-[3px] w-px min-h-5 flex-1 bg-border",
+              "before:absolute before:top-0 before:-left-[3px] before:size-[7px]",
+              "before:rounded-chip before:bg-foreground before:content-['']",
+            )}
+          />
+        </span>
+        <span className="min-w-0">
+          <span
+            className={cn(
+              "flex items-center justify-between gap-4",
+              "max-[620px]:flex-col max-[620px]:items-start max-[620px]:gap-1",
+            )}
+          >
+            <strong className="text-sm font-normal tracking-(--tracking-label)">
+              {human ? SPEAKERS.human : SPEAKERS.agent}
+            </strong>
+            <small className="font-mono text-sm text-muted-foreground">
+              {howLong(turn.duration_ns)} · {DETAIL.steps(inside)}
+            </small>
+          </span>
+          <span className="mt-2 block max-w-[720px] text-base leading-(--line-body) [overflow-wrap:anywhere]">
             {turn.text === "" ? <span className="text-muted-foreground">{DETAIL.nothingSaid}</span> : turn.text}
           </span>
-          {failed ? <small className={styles.turnProblem}>{DETAIL.failedInside}</small> : null}
+          {failed ? (
+            <small className="mt-2 block text-sm text-failure">{DETAIL.failedInside}</small>
+          ) : null}
         </span>
-        <span className={styles.turnMarker} aria-hidden="true">+</span>
+        {/*
+          The plus that becomes a cross. `transform` and nothing else, at a
+          motion token, and immediate for a keyboard: "no motion delays input",
+          and somebody who pressed Enter has already moved on.
+        */}
+        <span
+          aria-hidden="true"
+          className={cn(
+            "grid size-(--control-sm) place-items-center",
+            "rounded-chip border border-border bg-surface",
+            "transition-transform duration-(--duration-hover) ease-in-out",
+            "group-open:rotate-45",
+            "[summary:focus-visible_&]:transition-none",
+            "motion-reduce:transition-none",
+          )}
+        >
+          +
+        </span>
       </summary>
-      <div className={styles.turnBody}>
+      {/*
+        The body lines up under what was said rather than under the rail, so a
+        turn's steps sit in the same column as its words. The number is the
+        summary's own arithmetic — padding, plus the rail, plus the gap — at
+        each of the two widths.
+      */}
+      <div
+        className={cn(
+          "pt-0 pe-4 pb-4 ps-28 text-muted-foreground",
+          "max-[620px]:pe-3 max-[620px]:pb-3 max-[620px]:ps-19",
+        )}
+      >
         {turn.spans.length === 0 ? (
-          <p className="text-muted-foreground">{DETAIL.noSteps}</p>
+          <p className="m-0 text-sm text-muted-foreground">{DETAIL.noSteps}</p>
         ) : (
-          <div className={styles.stepStack}>
+          <div className={STEP_STACK}>
             {turn.spans.map((step) => (
               <Timed key={step.span_id} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
             ))}
@@ -661,25 +1031,40 @@ function Timed({
 
   return (
     <details
-      className={`${styles.step} ${marked ? styles.stepFailed : ""} ${selectedId === step.span_id ? styles.stepSelected : ""}`}
+      className={cn(
+        "min-w-0 overflow-clip rounded-input border border-border bg-surface",
+        marked && "border-failure-border",
+        selectedId === step.span_id && SELECTED,
+      )}
       onToggle={(event) => {
         if (event.currentTarget.open) onSelect(step);
       }}
     >
-      <summary>
-        <span className={styles.stepIdentity}>
-          <strong>{presentedStepLabel(step)}</strong>
-          <span className={styles.mono}>{step.name}</span>
+      <summary
+        className={cn(
+          DISCLOSURE,
+          "grid min-w-0 items-center gap-4 p-3",
+          "grid-cols-[minmax(0,1fr)_auto]",
+          "active:bg-surface-soft",
+          "pointer-coarse:min-h-(--tap-target)",
+          "max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:items-start max-[620px]:gap-2",
+        )}
+      >
+        <span className="flex min-w-0 items-baseline gap-2">
+          <strong className="flex-none font-mono text-sm font-medium text-foreground">
+            {presentedStepLabel(step)}
+          </strong>
+          <span className={cn(ONE_LINE, "font-mono")}>{step.name}</span>
         </span>
-        <span className={styles.stepTiming}>
+        <span className="font-mono text-sm whitespace-nowrap text-muted-foreground max-[620px]:whitespace-normal">
           {howFarIn(step.started_at, openedAt)} · {howLong(step.duration_ns)}
           {failed ? <span className="text-failure"> · {DETAIL.failed}</span> : null}
         </span>
       </summary>
-      <div className={styles.stepBody}>
+      <div className="min-w-0 border-t border-border px-3 pt-0 pb-3">
         <Recorded step={step} openedAt={openedAt} />
         {step.spans.length === 0 ? null : (
-          <div className={styles.stepStack}>
+          <div className={cn(STEP_STACK, "mt-2")}>
             {step.spans.map((child) => (
               <Timed key={child.span_id} step={child} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
             ))}
@@ -706,12 +1091,9 @@ function TimelineView({
 
   return (
     <div>
-      <div className={styles.traceViewHeading}>
-        <h2>{DETAIL.views.timeline}</h2>
-        <p>{DETAIL.timelineLead}</p>
-      </div>
+      <ViewHeading title={DETAIL.views.timeline} lead={DETAIL.timelineLead} />
       {steps.length === 0 ? <Notice>{DETAIL.noStepsAtAll}</Notice> : (
-        <div className={styles.timelineList}>
+        <div className={LIST_SURFACE}>
           {steps.map(({ step, depth }) => {
             const offset = Math.max(Date.parse(step.started_at) - openedAt, 0);
             const duration = Math.max(milliseconds(step.duration_ns), 0);
@@ -726,19 +1108,52 @@ function TimelineView({
             return (
               <button
                 key={step.span_id}
-                className={`${styles.timelineRow} ${selectedId === step.span_id ? styles.timelineRowSelected : ""}`}
+                className={cn(
+                  ROW,
+                  /*
+                   * A grid rather than the row's own flex, because the bar in
+                   * the middle has to start at the same place on every line
+                   * whatever the name to its left is called.
+                   */
+                  "grid grid-cols-[minmax(150px,30%)_minmax(120px,1fr)_72px] gap-3",
+                  "ps-[calc(var(--space-3)+var(--timeline-indent))]",
+                  "first:border-t-0",
+                  "max-[620px]:grid-cols-[minmax(0,1fr)_56px]",
+                  selectedId === step.span_id && SELECTED,
+                )}
                 type="button"
                 style={style}
                 onClick={() => onSelect(step)}
               >
-                <span className={styles.timelineName}>
-                  <strong>{presentedStepLabel(step)}</strong>
-                  <span>{step.name}</span>
+                <span className="flex min-w-0 flex-col gap-1">
+                  <strong className="font-mono text-sm font-medium">
+                    {presentedStepLabel(step)}
+                  </strong>
+                  <span className={ONE_LINE}>{step.name}</span>
                 </span>
-                <span className={styles.timelineTrack} aria-hidden="true">
-                  <span className={step.status === "error" ? styles.timelineBarBad : undefined} />
+                <span
+                  className={cn(
+                    "relative block h-5 overflow-hidden rounded-button bg-background",
+                    "max-[620px]:col-span-full max-[620px]:row-start-2",
+                  )}
+                  aria-hidden="true"
+                >
+                  <span
+                    className={cn(
+                      "absolute inset-y-[5px] left-(--timeline-left) w-(--timeline-width)",
+                      "min-w-[2px] rounded-chip",
+                      step.status === "error" ? "bg-failure" : "bg-foreground",
+                    )}
+                  />
                 </span>
-                <span className={styles.timelineDuration}>{howLong(step.duration_ns)}</span>
+                <span
+                  className={cn(
+                    "font-mono text-sm text-right text-muted-foreground",
+                    "max-[620px]:col-start-2 max-[620px]:row-start-1",
+                  )}
+                >
+                  {howLong(step.duration_ns)}
+                </span>
               </button>
             );
           })}
@@ -768,28 +1183,44 @@ function ExecutionView({
 
   return (
     <div>
-      <div className={styles.traceViewHeading}>
-        <h2>{DETAIL.views.execution}</h2>
-        <p>{DETAIL.executionLead}</p>
-      </div>
+      <ViewHeading title={DETAIL.views.execution} lead={DETAIL.executionLead} />
       {groups.length === 0 ? <Notice>{DETAIL.noStepsAtAll}</Notice> : (
-        <div className={styles.executionGroups}>
+        <div className="flex flex-col gap-4">
           {groups.map((group) => (
-            <section className={styles.executionGroup} key={group.id}>
-              <h3>{group.label}</h3>
+            <section className={LIST_SURFACE} key={group.id}>
+              <h3
+                className={cn(
+                  "m-0 border-b border-border bg-background px-4 py-3",
+                  "text-sm font-normal uppercase",
+                )}
+              >
+                {group.label}
+              </h3>
               {group.steps.map(({ step, depth }) => (
                 <button
                   key={step.span_id}
-                  className={`${styles.executionRow} ${selectedId === step.span_id ? styles.executionRowSelected : ""}`}
+                  className={cn(
+                    ROW,
+                    "justify-between gap-5",
+                    "ps-[calc(var(--space-3)+var(--execution-indent))]",
+                    /* The first row sits under the group's own rule, not a second one. */
+                    "[h3+&]:border-t-0",
+                    selectedId === step.span_id && SELECTED,
+                  )}
                   type="button"
                   style={{ "--execution-indent": `${Math.min(depth, 6) * 14}px` } as CSSProperties}
                   onClick={() => onSelect(step)}
                 >
-                  <span>
-                    <strong>{presentedStepLabel(step)}</strong>
-                    <small className={styles.mono}>{step.name}</small>
+                  <span className="flex min-w-0 flex-col gap-1">
+                    <strong className="text-sm font-normal">{presentedStepLabel(step)}</strong>
+                    <small className={cn(ONE_LINE, "font-mono")}>{step.name}</small>
                   </span>
-                  <span className={step.status === "error" ? "text-failure" : "text-muted-foreground"}>
+                  <span
+                    className={cn(
+                      "flex-none font-mono text-sm",
+                      step.status === "error" ? "text-failure" : "text-muted-foreground",
+                    )}
+                  >
                     {step.status === "error" ? DETAIL.failed : howLong(step.duration_ns)}
                   </span>
                 </button>
@@ -802,6 +1233,12 @@ function ExecutionView({
   );
 }
 
+/** A disclosure inside the inspector, where the detail is one press away. */
+const INSPECTOR_SUMMARY = cn(
+  "cursor-pointer text-sm",
+  "pointer-coarse:min-h-(--tap-target) pointer-coarse:py-3",
+);
+
 function Inspector({
   selected,
   facts,
@@ -812,45 +1249,86 @@ function Inspector({
   openedAt: string;
 }) {
   return (
-    <aside className={styles.traceInspector} aria-label={DETAIL.inspector}>
+    <aside
+      className={cn(
+        /*
+         * It follows the reader down a long transcript and keeps a screen's
+         * worth of room, because a panel taller than the window is a panel
+         * whose foot nobody can reach. Below 1100px there is one column and
+         * nothing to follow, so it stops being sticky rather than pinning a
+         * full-width panel over the turns.
+         */
+        "sticky top-6 max-h-[calc(100svh-var(--space-9))] overflow-auto",
+        "min-w-0 rounded-card border border-border bg-surface p-5",
+        "max-[1100px]:static max-[1100px]:max-h-none",
+      )}
+      aria-label={DETAIL.inspector}
+    >
       {selected === null ? (
-        <p className="text-muted-foreground">{DETAIL.nothingSelected}</p>
+        <p className="m-0 text-sm text-muted-foreground">{DETAIL.nothingSelected}</p>
       ) : (
         <>
-          <div className={styles.inspectorHeader}>
-            <p className={styles.eyebrow}>{presentedStepLabel(selected)}</p>
-            <h2>{selected.text || selected.tool_name || selected.name}</h2>
-            <p>{howFarIn(selected.started_at, openedAt)} · {howLong(selected.duration_ns)}</p>
+          <div className="min-w-0 border-b border-border pb-4">
+            <p className={cn(FACT_LABEL, "mt-0 mb-3")}>{presentedStepLabel(selected)}</p>
+            <h2 className="m-0 text-lg font-normal [overflow-wrap:anywhere]">
+              {selected.text || selected.tool_name || selected.name}
+            </h2>
+            <p className="mt-2 mb-0 text-sm text-muted-foreground">
+              {howFarIn(selected.started_at, openedAt)} · {howLong(selected.duration_ns)}
+            </p>
           </div>
 
-          <dl className={styles.inspectorFacts}>
+          <dl
+            className={cn(
+              "m-0",
+              "[&>div]:flex [&>div]:items-baseline [&>div]:justify-between [&>div]:gap-4",
+              "[&>div]:border-b [&>div]:border-border [&>div]:py-3",
+              "[&_dt]:text-sm [&_dt]:text-muted-foreground",
+              "[&_dd]:m-0 [&_dd]:min-w-0 [&_dd]:text-right [&_dd]:text-sm",
+              "[&_dd]:[overflow-wrap:anywhere]",
+            )}
+          >
             <div><dt>{FACTS.status}</dt><dd className={selected.status === "error" ? "text-failure" : undefined}>{readableStatus(selected.status)}</dd></div>
             <div><dt>{FACTS.started}</dt><dd>{asSecond(selected.started_at)}</dd></div>
             <div><dt>{FACTS.duration}</dt><dd>{howLong(selected.duration_ns)}</dd></div>
           </dl>
 
           {selected.tool_name === "" ? null : (
-            <section className={styles.inspectorSection}>
-              <h3>{DETAIL.toolWork}</h3>
-              <p className={styles.mono}>{selected.tool_name}</p>
+            <section className="border-b border-border py-4">
+              <h3 className="mt-0 mb-2 text-base font-normal">{DETAIL.toolWork}</h3>
+              <p className="m-0 font-mono text-sm [overflow-wrap:anywhere]">{selected.tool_name}</p>
               {selected.tool_arguments === "" ? null : <Payload label={FACTS.toolArguments} value={selected.tool_arguments} />}
               {selected.tool_result === "" ? null : <Payload label={FACTS.toolResult} value={selected.tool_result} />}
             </section>
           )}
 
           {selected.audio_url === "" ? null : (
-            <p className={styles.inspectorLink}><a href={selected.audio_url}>{DETAIL.openAudio}</a></p>
+            <p className="mt-4 mb-0 text-sm">
+              <a
+                className={cn(
+                  "inline-block text-foreground",
+                  "transition-transform duration-(--duration-press) ease-out",
+                  "[&:active:not(:focus-visible)]:scale-97",
+                  "pointer-coarse:inline-flex pointer-coarse:items-center",
+                  "pointer-coarse:min-h-(--tap-target)",
+                  "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+                )}
+                href={selected.audio_url}
+              >
+                {DETAIL.openAudio}
+              </a>
+            </p>
           )}
 
-          <details className={styles.inspectorDetails}>
-            <summary>{DETAIL.technicalDetails}</summary>
+          <details className="mt-4 border-t border-border pt-4">
+            <summary className={INSPECTOR_SUMMARY}>{DETAIL.technicalDetails}</summary>
             <Recorded step={selected} openedAt={openedAt} />
           </details>
         </>
       )}
 
-      <details className={styles.inspectorDetails}>
-        <summary>{DETAIL.whereItCameFrom}</summary>
+      <details className="mt-4 border-t border-border pt-4">
+        <summary className={INSPECTOR_SUMMARY}>{DETAIL.whereItCameFrom}</summary>
         <WhereItCameFrom facts={facts} />
       </details>
     </aside>
@@ -859,12 +1337,29 @@ function Inspector({
 
 function Payload({ label, value }: { label: string; value: string }) {
   return (
-    <div className={styles.payload}>
-      <span>{label}</span>
-      <pre>{value}</pre>
+    <div className="mt-3">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <pre
+        className={cn(
+          "mt-2 mb-0 max-h-50 overflow-auto p-3",
+          "rounded-input border border-border bg-background",
+          "font-mono text-sm whitespace-pre-wrap [overflow-wrap:anywhere]",
+        )}
+      >
+        {value}
+      </pre>
     </div>
   );
 }
+
+/** A list of recorded facts: a mono label, and the value it was filed under. */
+const RECORDED_LIST = cn(
+  "mt-3 mb-0 text-sm",
+  "[&>div]:grid [&>div]:min-w-0 [&>div]:gap-2 [&>div]:py-1",
+  "[&>div]:grid-cols-[minmax(80px,max-content)_minmax(0,1fr)]",
+  "[&_dt]:font-mono [&_dt]:text-muted-foreground",
+  "[&_dd]:m-0 [&_dd]:min-w-0 [&_dd]:font-mono [&_dd]:[overflow-wrap:anywhere]",
+);
 
 /**
  * Where this exchange came from and when — the disclosure whose label stopped
@@ -886,11 +1381,11 @@ function WhereItCameFrom({ facts }: { facts: TraceFacts }) {
   ];
 
   return (
-    <dl className={styles.recorded}>
+    <dl className={RECORDED_LIST}>
       {shown.filter(([, value]) => value !== "").map(([label, value]) => (
         <div key={label}>
-          <dt className="text-muted-foreground">{label}</dt>
-          <dd className={styles.mono}>{value}</dd>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
         </div>
       ))}
     </dl>
@@ -914,11 +1409,11 @@ function Recorded({ step, openedAt }: { step: Step; openedAt: string }) {
   ];
 
   return (
-    <dl className={styles.recorded}>
+    <dl className={RECORDED_LIST}>
       {shown.filter(([, value]) => value !== "").map(([label, value]) => (
         <div key={label}>
-          <dt className="text-muted-foreground">{label}</dt>
-          <dd className={styles.mono}>{value}</dd>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
         </div>
       ))}
     </dl>

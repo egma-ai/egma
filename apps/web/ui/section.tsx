@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 /**
@@ -152,12 +153,12 @@ export function Facts({
 }) {
   const panel = layout === "panel";
 
-  return (
+  const list = (
     <dl
       className={cn(
         "m-0 grid",
         panel
-          ? "grid-cols-2 gap-6 rounded-card border border-border bg-surface p-6 max-[40rem]:grid-cols-1 max-[40rem]:p-5"
+          ? "grid-cols-2 gap-6 max-[40rem]:grid-cols-1"
           : "grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4",
       )}
     >
@@ -184,4 +185,22 @@ export function Facts({
       ))}
     </dl>
   );
+
+  if (!panel) return list;
+
+  /*
+   * **The panel is the shared card, not a second one written here.**
+   *
+   * It used to draw `rounded-card border border-border bg-surface p-6` itself,
+   * which is the kit `Card`'s declaration copied out — and `DESIGN.md` is
+   * explicit that no page or component adds a one-off where a shared component
+   * already owns the behaviour. Two copies is how a product ends up with two
+   * card looks: the next change to a card reaches one of them.
+   *
+   * `Card` is a `<div>` and cannot become the `<dl>`, so the list goes inside
+   * it rather than wearing it. That is the honest arrangement anyway — the card
+   * is the surface, the definition list is the content, and a screen reader
+   * still reads each fact with the name of the fact.
+   */
+  return <Card className="max-[40rem]:p-5">{list}</Card>;
 }
