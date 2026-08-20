@@ -29,12 +29,17 @@ import { RelativeInstant } from "@/ui/relative-time.tsx";
  *
  * Two values, and the words are the product's rather than the API's: a
  * connection's modality is `voice` or `chat`, and a person reading a list is
- * shown Voice or Text. The connection page has drawn them that way since it
- * shipped, and these surfaces say the same words rather than inventing a third
- * pair. When that page migrates, its copy of this comes here.
+ * shown Voice or Chat. The connection page draws them that way, and these
+ * surfaces say the same words rather than inventing a third pair.
+ *
+ * **It said Text until #158**, which made Retell a Chat connection and renamed
+ * the word on the connection page and in the new-connection form. The rename
+ * arrives here because saying "the same words" is the whole reason this
+ * function exists: leaving it behind would have produced exactly the third
+ * pair the paragraph above refuses.
  */
 export function modalityLabel(modality: string): string {
-  return modality === "voice" ? "Voice" : "Text";
+  return modality === "voice" ? "Voice" : "Chat";
 }
 
 /**
