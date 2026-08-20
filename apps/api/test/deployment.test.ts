@@ -4,7 +4,7 @@
  * **This file exists because the gap it closes really happened.** Phone
  * readiness was written, documented in `.env.example`, and covered by tests —
  * and then a real carrier setup against a real Twilio account
- * finished every carrier step correctly and reported `setup required` anyway,
+ * finished every carrier step correctly and reported phone setup required anyway,
  * because the compose entry for the API never passed the three variables
  * through. A variable absent from a service's `environment:` is not merely
  * undocumented: it does not reach the container at all, whatever the operator
@@ -161,46 +161,52 @@ describe("the API's deployment story", () => {
     }
   });
 
-  it("keeps the judge's key off the grader, and every setting off the simulator", () => {
-    // Three halves of one decision, held here because each is one line away
-    // from being undone and none would fail anything else.
-    //
-    // A judge configured per container is a judge no project chose, spent on
-    // conversations belonging to customers who agreed to neither — so the key
-    // reaches the API, which writes it into each project's own sealed row, and
-    // never the grader, which opens that row.
-    expect(serviceBlock("grader")).not.toContain("EGMA_JUDGE_API_KEY");
-
-    // The API *does* hold the carrier's secrets now, and that is the effort's
-    // whole point: it seals them into the platform's own store, exactly as it
-    // already seals a judge's key and a connection's credentials, and it
-    // neither dials nor speaks with any of them. What it must still never
-    // hold is the one credential that opens the whole Twilio account.
+  it("gives workers direct provider keys and keeps the carrier route on the API", () => {
+    // The API resolves simulation work orders and the grader executes judge
+    // models, so both read the same deployment-owned provider credentials.
+    // The simulator receives only the keys selected for one claimed work order.
     const api = serviceBlock("api");
+    const grader = serviceBlock("grader");
+    const providerVariables = [
+      "EGMA_OPENAI_API_KEY",
+      "EGMA_DEEPGRAM_API_KEY",
+      "EGMA_CARTESIA_API_KEY",
+      "EGMA_PROVIDER_CREDENTIALS_SECRET_ID",
+      "EGMA_PROVIDER_CREDENTIALS_REGION",
+    ];
+    for (const variable of providerVariables) {
+      expect(api).toContain(variable);
+      expect(grader).toContain(variable);
+    }
+
+    // The API seeds and seals the deployment carrier route. Neither worker gets
+    // that route as a deployment credential.
     expect(api).not.toContain("TWILIO_AUTH_TOKEN");
     expect(api).toContain("EGMA_PHONE_TRUNK_PASSWORD");
-
-    // And the variables the platform's settings are *seeded from* reach the
-    // API and no simulator. They are what the API seals into the store, and
-    // every simulator is then handed the values on the work order it claims;
-    // a compose entry for one of them on the simulator would be a second
-    // place the same setting is written down, and the two would disagree the
-    // first time somebody changed one. Which is this effort's own failure,
-    // arriving by a new route.
-    //
-    // The simulator's own `EGMA_SIMULATOR_*` provider variables are a
-    // different thing and stay: they are what a bare simulator falls back to
-    // when the platform holds nothing — the workbench story and every
-    // contributor's checkout — and a work-order value replaces each of them.
     const simulator = serviceBlock("simulator");
-    for (const owned of [
-      "EGMA_PERSONA_MODEL_API_KEY",
-      "EGMA_PERSONA_STT_API_KEY",
-      "EGMA_PERSONA_TTS_API_KEY",
-      "EGMA_PHONE_TRUNK_PASSWORD",
-      "EGMA_MEDIA_BACKEND:",
-    ]) {
-      expect(simulator, `the simulator is handed ${owned}`).not.toContain(owned);
+    for (const variable of [...providerVariables, "EGMA_PHONE_TRUNK_PASSWORD"]) {
+      expect(simulator, `the simulator is handed ${variable}`).not.toContain(variable);
+    }
+
+    const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
+    expect(compose).not.toContain("EGMA_JUDGE_");
+    expect(compose).not.toContain("EGMA_PERSONA_");
+  });
+
+  it("builds the provider credential boundary into both worker images", () => {
+    for (const dockerfile of ["apps/api/Dockerfile", "apps/grader/Dockerfile"]) {
+      const image = readFileSync(path.join(ROOT, dockerfile), "utf8");
+      expect(
+        image,
+        `${dockerfile} does not copy @egma/provider-credentials, so its local ` +
+          "TypeScript build can pass while the production image cannot resolve it",
+      ).toContain(
+        "COPY packages/provider-credentials/package.json packages/provider-credentials/",
+      );
+      expect(image).toContain(
+        "COPY packages/provider-credentials packages/provider-credentials",
+      );
+      expect(image).toContain("packages/provider-credentials");
     }
   });
 

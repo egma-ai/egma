@@ -9,6 +9,7 @@ import {
 import {
   graderDisplayName,
   nextTheme,
+  ownerDisplayName,
   themeFromStored,
 } from "../lib/presentation.ts";
 
@@ -65,6 +66,14 @@ describe("predefined grader names", () => {
     expect(graderDisplayName("Never promises a price")).toBe(
       "Never promises a price",
     );
+  });
+});
+
+describe("definition owners", () => {
+  it("uses the same owner words for every reusable definition", () => {
+    expect(ownerDisplayName("egma")).toBe("Egma");
+    expect(ownerDisplayName("organization")).toBe("You");
+    expect(ownerDisplayName("new-owner")).toBe("new-owner");
   });
 });
 

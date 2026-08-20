@@ -37,10 +37,10 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  * **Two properties carry the whole mechanism, and both are here.** Run the
  * seeding twice and the second run writes nothing at all — not a row, not a
  * version, not an `updated_at` — which is what makes running it on every boot
- * free rather than merely harmless. Change an entry's words and ship the
- * release, and that row refreshes and its version moves — which is what makes
- * an improved judge prompt reach every project with nobody migrating anything,
- * and what keeps "which words judged this verdict" answerable afterwards.
+ * free rather than merely harmless. Change executable words and ship the
+ * release, and one shared immutable definition revision is added. Every active
+ * copy gets a new grader version that points at it. Old run plans keep their
+ * older exact reference, so both old and new verdicts remain answerable.
  *
  * The third property is the one the schema holds rather than the module:
  * **null tenancy means egma owns the entry**, the one deliberate exception in
@@ -89,7 +89,15 @@ type StoredEntry = {
 
 async function shelf(): Promise<readonly StoredEntry[]> {
   const { rows } = await database.sql<StoredEntry>(
-    "select * from grader_library order by id",
+    `select gl.id, gl.organization_id, gl.project_id, gl.name,
+            gl.description, gl.type, gl.version,
+            glv.prompt, glv.params, glv.output_definition,
+            glv.source_code, glv.source_code_language,
+            gl.created_at, gl.updated_at
+       from grader_library gl
+       join grader_library_version glv
+         on glv.library_id = gl.id and glv.version = gl.version
+      order by gl.id`,
   );
   return rows;
 }
@@ -106,9 +114,15 @@ async function insertTeamEntry(tenant: {
 }): Promise<string> {
   const id = newId("grl");
   await database.sql(
-    `insert into grader_library
-       (id, organization_id, project_id, name, description, type, params)
-     values ($1, $2, $3, $4, $5, 'llm_as_judge', '[]'::jsonb)`,
+    `with inserted as (
+       insert into grader_library
+         (id, organization_id, project_id, name, description, type, version)
+       values ($1, $2, $3, $4, $5, 'llm_as_judge', 1)
+       returning id
+     )
+     insert into grader_library_version
+       (library_id, version, prompt, params, output_definition)
+     select id, 1, 'Judge this.', '[]'::jsonb, null from inserted`,
     [id, tenant.organization, tenant.project, `team_${id.slice(-6)}`, "theirs"],
   );
   return id;
@@ -265,7 +279,7 @@ describe("seeding egma's own graders", () => {
 });
 
 describe("a catalog entry whose words changed", () => {
-  it("refreshes its row and bumps its version, leaving its birthday alone", async () => {
+  it("updates display text without minting an executable definition", async () => {
     const [first, ...rest] = GRADER_LIBRARY_CATALOG;
     if (first === undefined) throw new Error("the catalog ships no entries");
 
@@ -277,14 +291,15 @@ describe("a catalog entry whose words changed", () => {
 
     const written = await seedGraderLibrary([improved, ...rest]);
 
-    // Only the entry that moved, and it moved by exactly one.
+    // Only the display identity moved. The executable definition pointer did
+    // not, because description is not an input to judgment.
     expect(written).toEqual([
-      { id: first.id, name: first.name, version: 2 },
+      { id: first.id, name: first.name, version: 1 },
     ]);
 
     const after = (await shelf()).find((row) => row.id === first.id);
     expect(after?.description).toBe(improved.description);
-    expect(after?.version).toBe(2);
+    expect(after?.version).toBe(1);
     // Its birthday is the day egma shipped it and does not move; the moment it
     // last changed does.
     expect(after?.created_at.toISOString()).toBe(
@@ -305,10 +320,10 @@ describe("a catalog entry whose words changed", () => {
 
   it("puts the shipped words back when the improvement is reverted", async () => {
     // The catalog is the source of truth in both directions: rolling a release
-    // back is a change like any other, so the row follows and the version
-    // moves again rather than the row being stuck at whatever shipped last.
+    // back is a display change like any other, so the identity row follows but
+    // the executable definition version stays still.
     const written = await seedGraderLibrary();
-    expect(written.map((entry) => entry.version)).toEqual([3]);
+    expect(written.map((entry) => entry.version)).toEqual([1]);
 
     const [first] = GRADER_LIBRARY_CATALOG;
     const row = (await shelf()).find((candidate) => candidate.id === first?.id);
@@ -409,8 +424,8 @@ describe("a type no engine executes", () => {
       // check somebody believes in that can never fire.
       await expect(
         database.sql(
-          `insert into grader_library (id, name, type, params)
-           values ($1, $2, $3, '[]'::jsonb)`,
+          `insert into grader_library (id, name, type, version)
+           values ($1, $2, $3, 1)`,
           [newId("grl"), `reserved_${reserved}`, reserved],
         ),
       ).rejects.toSatisfy(
@@ -422,8 +437,8 @@ describe("a type no engine executes", () => {
   it("is refused for a word egma has never heard of either", async () => {
     await expect(
       database.sql(
-        `insert into grader_library (id, name, type, params)
-         values ($1, 'invented', 'vibes', '[]'::jsonb)`,
+        `insert into grader_library (id, name, type, version)
+         values ($1, 'invented', 'vibes', 1)`,
         [newId("grl")],
       ),
     ).rejects.toSatisfy(
@@ -439,8 +454,8 @@ describe("half a tenancy", () => {
     // be a definition nothing could scope.
     await expect(
       database.sql(
-        `insert into grader_library (id, organization_id, name, type, params)
-         values ($1, $2, 'half', 'code', '[]'::jsonb)`,
+        `insert into grader_library (id, organization_id, name, type, version)
+         values ($1, $2, 'half', 'code', 1)`,
         [newId("grl"), acme.organization],
       ),
     ).rejects.toSatisfy(
@@ -575,16 +590,14 @@ describe("deleting from the shelf", () => {
 /**
  * **An entry a project is judging with cannot leave the shelf.**
  *
- * A running copy reads its definition through `library_id` every time it
- * judges — the words are never written down onto the copy, precisely so that
- * the screen and the judge cannot drift — so an entry taken away underneath one
- * would leave a grader that resolves to nothing and judges nothing while still
- * appearing on the Running graders screen. That is a check somebody believes in
- * that can never fire, which is the false trust this product exists to kill.
+ * A running copy owns immutable grader versions, and each version points at one
+ * immutable definition revision under its `library_id`. The words are not
+ * copied into project config. Taking the entry away would break that history
+ * and leave verdicts without the definition that gave them meaning.
  *
- * **Refusal, never `set null` and never a cascade.** The first would leave the
- * grader with no definition to read; the second would delete judging somebody
- * set up without them asking.
+ * **Refusal, never `set null` and never a cascade.** The first would break the
+ * immutable identity chain; the second would delete judging somebody set up
+ * without them asking.
  */
 describe("deleting an entry that copies still point at", () => {
   it("is refused, naming the copies standing in the way", async () => {

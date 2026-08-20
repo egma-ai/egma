@@ -1,6 +1,6 @@
 """The persona brain: one component, shared by every modality forever.
 
-It composes the spec's persona traits and scenario instructions into a
+It composes the persona's authored human traits and the test's scenario into a
 system prompt, takes turns — the transcript's ``human`` side — and decides
 when the exchange is concluded. What it does not know is deliberate: it
 never sees a platform (that is the plug's business) and never produces its
@@ -22,8 +22,7 @@ from typing import Any
 from .model import CONCLUDE_MARKER, ModelClient, PersonaReply
 
 OPENING_NUDGE = (
-    "(The conversation is open and the agent is listening. "
-    "Speak your first turn.)"
+    "(The conversation is open and the agent is listening. Speak your first turn.)"
 )
 """Stands in for the silence when the persona goes first: chat-shaped
 models answer a user message, and an empty history has none to answer."""
@@ -53,11 +52,11 @@ goodbye and end your reply with {marker}.
 
 
 def compose_system_prompt(traits: dict[str, Any], scenario_instructions: str) -> str:
-    """Traits and scenario, composed whole into the persona's instructions.
+    """Human traits and scenario, composed into the persona's instructions.
 
-    The traits ride verbatim as authored — what a persona is made of is
-    authoring's business, so the composition renders the whole block rather
-    than picking keys it happens to know.
+    Contract v2 admits the complete human-traits value and excludes technical
+    voice. Render that complete value so every authored human fact reaches the
+    model, without a model or deployment fallback.
     """
     return _PROMPT_FRAME.format(
         traits=json.dumps(traits, indent=2, sort_keys=True),

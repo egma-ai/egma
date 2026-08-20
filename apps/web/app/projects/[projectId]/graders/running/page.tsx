@@ -61,10 +61,10 @@ import { EditForm, SwitchOffPanel } from "./edit-form.tsx";
  *
  * **The sibling of the library screen, and the difference between them is the
  * whole redesign.** The shelf holds definitions nobody is judging with; this
- * holds the copies that are. Every row here points back at an entry over there,
- * and the definition — the judge prompt, the words a model is sent — is read
- * through that pointer at judging time rather than shown here, because it lives
- * in exactly one place and this screen is not it.
+ * holds the copies that are. Every row here points back at an entry over there.
+ * Its grader version pins one immutable shared definition revision — the exact
+ * prompt or code that a run executes. This screen does not repeat that
+ * definition; the library screen shows the current revision.
  *
  * **Two acts, and they are the ones the shelf cannot do.** Pressing Use over
  * there makes a copy; changing what that copy judges by and switching it off

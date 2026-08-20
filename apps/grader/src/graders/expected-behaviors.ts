@@ -1,12 +1,11 @@
 import {
   behaviorAssertionKey,
   getSimulationTestVersion,
-  type LibraryEntry,
+  type GraderDefinitionSnapshot,
 } from "@egma/db";
 
 import {
   judgeInputOf,
-  NoJudge,
   type JudgeQuestion,
 } from "../judge/index.ts";
 import type { Execution, Judgment } from "./contract.ts";
@@ -29,11 +28,10 @@ import { judgmentOf } from "./judged.ts";
  * grader checks is whatever the test in front of it says should happen, read at
  * judging time off the version the conversation was executed against.
  *
- * **The judge prompt comes off the library entry, through the copy's pointer.**
- * It is never written down onto the copy, so the words the Library screen shows
- * a developer and the words a model is sent are one string. A release that
- * improves the prompt improves it everywhere at once, because there is only one
- * place it lives.
+ * **The judge prompt comes from the grader version's immutable Library
+ * revision.** A catalog update creates one new shared definition revision and
+ * promotes each active copy with a new grader version. New runs use the new
+ * prompt; an existing run and every re-grade of it keep the prompt it pinned.
  *
  * ## One call per behavior, and why it is not one call per conversation
  *
@@ -77,9 +75,9 @@ import { judgmentOf } from "./judged.ts";
  *   asked. The list is still read, because a page must show the same behaviors
  *   whether the conversation happened or not — a test that could not run should
  *   look like a test that could not run, not like a test with nothing in it.
- * - **The project configured no judge**, or its key will not open. One
- *   `errored` row per behavior saying which, because a check egma could not
- *   make is never a check that passed.
+ * - **The deployment has no selected provider key.** The job stops before this
+ *   executor runs and writes no verdicts. A deployment fault is not filed as a
+ *   judgment about the agent.
  * - **One judge call failed after its retries.** `errored` for that behavior
  *   and that behavior only. Its siblings were separate calls and their answers
  *   land untouched, which is the whole reason they are separate calls.
@@ -112,28 +110,23 @@ export async function executeExpectedBehaviors(
     return behaviors.map((_, at) => couldNotJudge(at, nothingToJudge));
   }
 
-  // The words a model is told it is working under, read through the copy's
-  // pointer. An entry carrying none is a definition this executor cannot ask
-  // anything with, and saying so is better than sending an empty instruction.
+  // The words a model is told it is working under, from the version the run
+  // pinned. A definition carrying none cannot be asked with, and saying so is
+  // better than sending an empty instruction.
   const prompt = judgePromptOf(execution.definition);
   if (prompt === null) {
     return behaviors.map((_, at) =>
       couldNotJudge(
         at,
-        `the ${execution.definition.name} grader in Egma's library carries no judge prompt, so there was nothing to ask with.`,
+        "this pinned grader definition carries no judge prompt, so there was nothing to ask with.",
       ),
     );
   }
 
-  // Only now, with behaviors to judge, a conversation that happened and words
-  // to ask with, is the project's key worth unsealing.
-  const configured = await execution.judging.judge();
-  if (configured instanceof NoJudge) {
-    const why = configured.message;
-    return behaviors.map((_, at) => couldNotJudge(at, why));
+  const judge = execution.judging.judge;
+  if (judge === null) {
+    throw new Error("a model-judged grader reached execution without its judge");
   }
-
-  const judge = configured.judging(execution.judging.model, execution.judging.makers);
 
   // Assembled once and shared by every call, which is what makes N judgments of
   // one conversation one read rather than N.
@@ -205,7 +198,7 @@ export async function expectedBehaviorAssertions(
 }
 
 /** The definition's own words, or nothing where the entry carries none. */
-function judgePromptOf(definition: LibraryEntry): string | null {
+function judgePromptOf(definition: GraderDefinitionSnapshot): string | null {
   const prompt = definition.prompt;
   return prompt === null || prompt.trim() === "" ? null : prompt;
 }

@@ -1,5 +1,3 @@
-import type { JudgeProvider } from "@egma/db";
-
 import type { JudgeInput } from "./input.ts";
 
 /**
@@ -15,23 +13,21 @@ import type { JudgeInput } from "./input.ts";
  * One judge call: one criterion, decided against one conversation's evidence.
  *
  * **One criterion, singular, and the type is the guarantee.** Per-assertion
- * isolation is the whole shape of the built-in grader — each expected behavior
- * gets its own independent call — and a request that could carry two criteria
- * is a request somebody would eventually put two in. The evidence is assembled
- * once per conversation and shared; the criterion is what makes each call
- * different, and it is the only thing that does.
+ * isolation is the whole shape of the expected-behaviors grader — each expected
+ * behavior gets its own independent call — and a request that could carry two
+ * criteria is a request somebody would eventually put two in. The evidence is
+ * assembled once per conversation and shared; the criterion is what makes each
+ * call different, and it is the only thing that does.
  */
 export type JudgeQuestion = {
   /**
-   * The words the judge is told it is working under — **the library entry's
-   * own**, read through the running copy's `library_id` at judging time.
+   * The words the judge is told it is working under — **the exact immutable
+   * Library definition revision the grader version pins**.
    *
    * It rides the question rather than being held in this package because there
-   * is exactly one place a judge prompt lives, and it is not here. The engine
-   * used to hold a copy beside the entry's, and two copies of one text is a
-   * drift waiting to happen — silent in the worst way, because the Library
-   * screen would go on showing words that had stopped being the words a judge
-   * was sent. Now the screen and the request read one row.
+   * is exactly one executable copy of a revision, and it is not here. A catalog
+   * update inserts the next shared revision; it never rewrites the prompt used
+   * by a run that already started.
    */
   readonly prompt: string;
   /** The one thing this call decides, in the words it was written in. */
@@ -81,7 +77,7 @@ export type JudgeAnswer = {
 export type Judge = (question: JudgeQuestion) => Promise<JudgeAnswer>;
 
 /**
- * A judge as the project configured it, with the key resolved.
+ * One grader version's exact judge, with its deployment key resolved.
  *
  * The key is here because a provider cannot speak to an account without one,
  * and it is here **and nowhere else**: it is held for the length of one
@@ -90,7 +86,7 @@ export type Judge = (question: JudgeQuestion) => Promise<JudgeAnswer>;
  * this directory is ever handed one of these.
  */
 export type ResolvedJudge = {
-  readonly provider: JudgeProvider;
+  readonly provider: "openai";
   readonly model: string;
   readonly key: string;
 };

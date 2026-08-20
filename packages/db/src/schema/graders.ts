@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   unique,
   uniqueIndex,
@@ -29,8 +30,8 @@ import {
  * the thing a verdict row names. A metric measures and a grader judges — nobody
  * decided that a call took four minutes, but somebody had to decide that
  * verifying identity before disclosing a balance matters and write the criteria
- * down. The criteria live on the shelf below; these tables hold the decision to
- * run them here.
+ * down. The executable criteria live in immutable shared library revisions
+ * below; these tables hold the decision to run one exact revision here.
  *
  * Graders belong to a project and apply to every one of its tests inside their
  * scope, and to production conversations when their scope says so. There is no
@@ -61,9 +62,10 @@ export const GRADER_SCOPES = ["simulations", "production", "both"] as const;
 export type GraderScope = (typeof GRADER_SCOPES)[number];
 
 /**
- * What a **library entry** is, and what the running copy that was made from it
- * is too — one word, copied down at Use time and frozen there, deciding what
- * the entry's definition holds and which engine executes it.
+ * What a **library identity** is: one stable word deciding what every immutable
+ * definition revision may hold and which engine executes it. It is not copied
+ * onto running copies. A database guard makes changing it in place impossible;
+ * a different execution kind needs a new Library identity.
  *
  * Two words in v0. `llm_as_judge` carries a `prompt` and an `output_definition`
  * and is executed by asking a model; `code` carries parameters a person fills
@@ -104,8 +106,59 @@ export type ReservedLibraryType = (typeof RESERVED_LIBRARY_TYPES)[number];
 export const LARGEST_GRADER_SOURCE_CODE_BYTES = 256 * 1024;
 
 /**
- * The shelf: every grader definition, egma's own and — when custom authoring
- * arrives — a team's, in one table.
+ * One immutable executable revision of a Library entry.
+ *
+ * The stable `grader_library` row below owns identity, tenancy and the current
+ * revision pointer. The Library UI joins that pointer to this table. Each time
+ * executable catalog content changes, seeding inserts one row here and moves
+ * active copies by minting grader versions that reference it. A run keeps the
+ * older reference it already pinned.
+ *
+ * The entry id and revision number are the identity. There is no second opaque
+ * id because every caller already has both values, and a second id would add no
+ * fact. The circular foreign key back from the Library row is deferred in the
+ * migration so a new entry and its first immutable revision land together.
+ */
+export const graderLibraryVersion = pgTable(
+  "grader_library_version",
+  {
+    libraryId: idText("library_id")
+      .notNull()
+      .references((): AnyPgColumn => graderLibrary.id, {
+        onDelete: "cascade",
+      }),
+    version: integer("version").notNull(),
+    prompt: text("prompt"),
+    params: jsonb("params").notNull(),
+    outputDefinition: jsonb("output_definition"),
+    sourceCode: text("source_code"),
+    sourceCodeLanguage: text("source_code_language"),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.libraryId, table.version] }),
+    prefixCheck(
+      "grader_library_version_library_id_prefix",
+      table.libraryId,
+      "grl",
+    ),
+    check(
+      "grader_library_version_source_code_within_budget",
+      sql`${table.sourceCode} is null or octet_length(${table.sourceCode}) <= ${sql.raw(
+        String(LARGEST_GRADER_SOURCE_CODE_BYTES),
+      )}`,
+    ),
+    check(
+      "grader_library_version_source_code_columns_agree",
+      sql`(${table.sourceCode} is null) = (${table.sourceCodeLanguage} is null)`,
+    ),
+  ],
+);
+
+/**
+ * The shelf: every grader identity, egma's own and — when custom authoring
+ * arrives — a team's, in one table. Executable revisions live in the immutable
+ * version table above.
  *
  * **This is the one table whose tenancy is nullable and *means* it, and the
  * exception is the whole point.** Everywhere a customer's data lives, an
@@ -130,23 +183,19 @@ export const LARGEST_GRADER_SOURCE_CODE_BYTES = 256 * 1024;
  * graders belong to a project, as tests and personas do.
  *
  * **Predefined entries are seeded by a deterministic upsert from a catalog in
- * egma's code** (`grader-library/catalog.ts`), so an egma release that improves
- * a judge prompt upgrades every project. That places predefined definitions
- * deliberately outside run pinning: they are product behaviour, release-tracked
- * exactly as the engine code executing beside them, and which definition judged
- * a given verdict is reconstructable from the catalog's git history plus this
- * row's `version`. Run pinning protects customer-authored meaning — test
- * versions and the running copy's filled-in config, both pinned — and custom
- * entries version and pin when authoring arrives.
+ * egma's code** (`grader-library/catalog.ts`). The identity row points at one
+ * shared current immutable definition. When executable content changes,
+ * seeding inserts one definition revision, then mints and promotes one grader
+ * version per active copy. New runs get it; older runs keep the exact revision
+ * they pinned.
  *
  * **The table name is plural-ish on purpose and is a recorded exception** to
  * the schema's singular naming: it names the shelf rather than one thing on it,
  * exactly as the reference implementation's `eval_templates` does.
  *
- * The definition is never copied down onto a running copy. A copy points here
- * by `library_id` and the definition is read through that pointer at judging
- * time — a copied definition drifts from the one on screen, which is the
- * documented failure this two-level shape exists to make unreachable.
+ * A running copy points here by `library_id`, but a worker executes only the
+ * immutable definition referenced by its grader version. The shelf identity is
+ * the factory and UI anchor; the version is the record a run can safely pin.
  */
 export const graderLibrary = pgTable(
   "grader_library",
@@ -169,57 +218,14 @@ export const graderLibrary = pgTable(
     /** `llm_as_judge` or `code`; the reserved three are refused below. */
     type: text("type").notNull(),
     /**
-     * How many times this definition has been written.
+     * The immutable definition revision the Library currently presents.
      *
      * **Bumped by the catalog upsert, and only when something actually
-     * changed.** It is what makes "which prompt judged this verdict" answerable
-     * against the catalog's history: the release that changed the words is the
-     * release that moved this number. A run does not pin it, deliberately — see
-     * the table's note.
+     * changed.** A new grader version stores this number beside `library_id`,
+     * so execution can resolve the exact immutable definition without following
+     * this current pointer later.
      */
-    version: integer("version").notNull().default(1),
-    /**
-     * The judge prompt, with its variable slots, for an `llm_as_judge` entry.
-     * Null for a `code` entry, which is executed rather than asked.
-     *
-     * It lives on the row rather than only in the engine so that the Library
-     * screen can show a developer the words their conversations are judged by.
-     */
-    prompt: text("prompt"),
-    /**
-     * The schema of what **Use** asks for, as an ordered list of parameter
-     * declarations — latency declares a measure from the catalog and a bound;
-     * expected_behaviors declares nothing, because its assertions are the
-     * test's own sentences and wire themselves at judging time.
-     *
-     * jsonb rather than columns for the reason a persona's traits are: two
-     * entries shape it two ways today and a third will shape it a third way,
-     * and a field promoted to a column later is a cheap migration.
-     */
-    params: jsonb("params").notNull(),
-    /**
-     * The shape an `llm_as_judge` entry's judge must **reply** in — the
-     * decision, its one-sentence reason, and the turns it rests on — so that
-     * what the prompt above commands, what the engine parses, and what the
-     * Library screen promises are one statement. Null for a `code` entry.
-     *
-     * It describes the *judge's answer*, not the verdict row written from it:
-     * a row carries a verdict and a score, exists for assertions no judge was
-     * ever asked about, and turns `cannot_determine` into `skipped`. Two
-     * documents, and this column is the first one.
-     */
-    outputDefinition: jsonb("output_definition"),
-    /**
-     * A custom `code` entry's own source, and the language it is written in.
-     *
-     * **Both null in v0**, and reserved rather than speculative: `code` today
-     * means egma's own engine executing a parameterised definition with no
-     * stored source, and customer code arrives with a dispatcher seam to run it
-     * safely. The columns are here so that arriving is an insert rather than a
-     * migration, and the cap beside them is the reference implementation's.
-     */
-    sourceCode: text("source_code"),
-    sourceCodeLanguage: text("source_code_language"),
+    currentDefinitionVersion: integer("version").notNull().default(1),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -236,20 +242,6 @@ export const graderLibrary = pgTable(
       "grader_library_tenancy_is_whole_or_egmas",
       sql`(${table.organizationId} is null) = (${table.projectId} is null)`,
     ),
-    // The cap on a custom entry's source, held where a hand-written insert
-    // meets it too.
-    check(
-      "grader_library_source_code_within_budget",
-      sql`${table.sourceCode} is null or octet_length(${table.sourceCode}) <= ${sql.raw(
-        String(LARGEST_GRADER_SOURCE_CODE_BYTES),
-      )}`,
-    ),
-    // A language names source, and source names a language: a row carrying one
-    // without the other is half a definition.
-    check(
-      "grader_library_source_code_columns_agree",
-      sql`(${table.sourceCode} is null) = (${table.sourceCodeLanguage} is null)`,
-    ),
     // The pairing, not each column on its own: an entry cannot name one
     // organization and another organization's project. Both null skips it,
     // which is exactly the egma-owned row.
@@ -258,6 +250,17 @@ export const graderLibrary = pgTable(
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
+    // The current Library template always names one immutable definition row.
+    // This is deferred in migration 0037 so the entry and its first version can
+    // be inserted in one transaction.
+    foreignKey({
+      name: "grader_library_current_version_fk",
+      columns: [table.id, table.currentDefinitionVersion],
+      foreignColumns: [
+        graderLibraryVersion.libraryId,
+        graderLibraryVersion.version,
+      ],
+    }),
     // One predefined entry per name, held by the database rather than by the
     // catalog's author: two egma-owned entries called `latency` would be two
     // shelves' worth of one thing, and the second would be seeded by an id
@@ -273,25 +276,14 @@ export const graderLibrary = pgTable(
 );
 
 /**
- * The judges egma can ask. It grows one provider at a time, behind one seam,
- * and the list is here beside the other closed vocabularies because two tables
- * hold it: the project's default judge below, and the per-grader override on a
- * version row.
- */
-export const JUDGE_PROVIDERS = ["openai"] as const;
-export type JudgeProvider = (typeof JUDGE_PROVIDERS)[number];
-
-/**
  * The running copies: one row per grader a project actually judges with.
  *
  * A copy is made by pressing **Use** on a library entry, or seeded at project
  * creation. It carries the *deployment* — where it applies, how loudly, how
- * often — and its **filled-in values** in immutable versions. It does not carry
- * the definition, and that is the shape's whole reason for existing: the judge
- * prompt and the code are read through `library_id` at judging time, so what
- * the Library screen shows and what a judge is sent can never be two different
- * strings. A definition copied down drifts from the one on screen, which is the
- * documented failure this arrangement makes unreachable.
+ * often — and its **filled-in values** in immutable versions. The identity row
+ * carries no executable definition. Its current grader version references one,
+ * so catalog reconciliation moves the copy to a new grader version while an
+ * older run stays on the version it pinned.
  *
  * **Dormant is no row at all.** There is no enable switch and no `none` scope:
  * pressing Use is the enabling, and deleting the copy is the switching off.
@@ -307,11 +299,10 @@ export const grader = pgTable(
     /**
      * The entry this is a copy of — **the connecting tissue, and never null**.
      *
-     * A grader with no entry would be a row with no definition to read at
-     * judging time, which is not a grader at all. `restrict` rather than
-     * `set null` for the same reason: an entry somebody deleted while a project
-     * was judging with it must be refused, not quietly orphaned, because the
-     * copy would go on being resolved and would find nothing to judge by. The
+     * A grader with no entry would be an identity with no definition history,
+     * which is not a grader at all. `restrict` rather than `set null` for the
+     * same reason: deleting the entry would remove the immutable definitions
+     * its grader versions and old verdicts name. The
      * refusal is written in the access layer too, where it can name the copies
      * standing in the way; this is the backstop that makes the rule true of the
      * database rather than only of the code above it.
@@ -321,13 +312,6 @@ export const grader = pgTable(
       .references(() => graderLibrary.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     description: text("description"),
-    /**
-     * Copied from the entry at Use time and never edited. The config in every
-     * version is shaped by this word, so changing it would leave the versions
-     * behind it holding parameters for a kind of judgment this grader no longer
-     * makes — which is a different grader wearing the old one's history.
-     */
-    type: text("type").notNull(),
     /**
      * Whether a test can pass while this copy does not.
      *
@@ -390,10 +374,6 @@ export const grader = pgTable(
   },
   (table) => [
     prefixCheck("grader_id_prefix", table.id, "grd"),
-    // The entry's own two words, and the reserved three refused by name here
-    // exactly as they are on the shelf: a copy is only ever made by copying a
-    // type down, so the two lists are one list and the database says so.
-    oneOf("grader_type_allowed", table.type, [...LIBRARY_TYPES]),
     oneOf("grader_scope_allowed", table.scope, [...GRADER_SCOPES]),
     // A sampling rate is a percentage of the traffic that arrives, so the two
     // ends are "none of it" and "all of it" and there is nothing outside them.
@@ -421,127 +401,9 @@ export const grader = pgTable(
     // that entry off the shelf, and asked again by the backfill that gives a
     // project the one copy it must have.
     index("grader_library_id_idx").on(table.libraryId),
-  ],
-);
-
-/**
- * Where a project's judge gets its key from. Two words, and the difference is
- * whose account is spent.
- *
- * - `credential` — an organization judge credential the customer created and
- *   can rotate. The row stores its `jcr_` id and no secret at all.
- * - `platform` — the deployment's own judge, given to a project that had
- *   configured none. It is **not customer-readable and has no rotating UI**:
- *   the operator who configured the deployment owns it, and a project that
- *   holds it holds a pointer at the deployment rather than at a key of its own.
- *
- * The deployment's sealed key stays on the row for a `platform` setting because
- * that is where seeding has always put it, and seeding is the one path that
- * must not be disturbed — it writes inside the transaction that creates a
- * project and again in the boot backfill, both `onConflictDoNothing`, which is
- * the whole of the promise that a project's chosen judge is never replaced.
- * Nothing customer-facing reads it: the browser is told the source is the
- * platform and is offered no hint and no rotation.
- *
- * A project with **no row at all** is `needs_setup`, which is a state rather
- * than a fault: it says LLM grading is unavailable until an admin finishes
- * setup, and the run door refuses to start work that would need a judge.
- */
-export const JUDGE_SOURCES = ["credential", "platform"] as const;
-export type JudgeSource = (typeof JUDGE_SOURCES)[number];
-
-/**
- * The judge a project's judged graders run on, and the one key they speak with.
- *
- * **One row per project**, because "which model judges here" is one answer for
- * a whole product area rather than a decision anybody makes per check. The
- * `judge_model` on a version row is the exception, written down: it overrides
- * the provider and the model and never the key, so bringing your own judge
- * costs one secret rather than one per grader.
- *
- * **A table of its own rather than four columns on `project`, and the secret is
- * the reason.** The project row is read whenever a session is resolved and
- * whenever a list of projects is drawn; a sealed key sitting on it would be one
- * careless `select *` away from a log line. The tenancy tables hold no secret
- * today and this keeps it that way. `organization_settings` is this same shape
- * one level up and for the same kind of reason: something a tenant may or may
- * not have configured, keyed by the row it belongs to and read only by what
- * needs it.
- *
- * The sealed envelope is the connection's, verbatim — the same `v1.<iv>.<
- * ciphertext>.<tag>` under the same master key, opened in one place. A judge key
- * cannot be hashed for the reason a provider credential cannot: egma has to
- * replay it to OpenAI every time it judges.
- */
-export const judgeConfiguration = pgTable(
-  "judge_configuration",
-  {
-    /**
-     * The project this is the judge for, and the row's whole identity — there
-     * is one judge configuration per project or none, so there is no second
-     * identifier to mint and none to name wrongly.
-     */
-    projectId: idText("project_id").primaryKey(),
-    organizationId: idText("organization_id")
-      .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
-    provider: text("provider").notNull(),
-    /** The judge model's own name, as the provider spells it. */
-    model: text("model").notNull(),
-    /** Where the key comes from. See `JUDGE_SOURCES`. */
-    source: text("source").notNull(),
-    /**
-     * The organization credential this project spends from, for a `credential`
-     * setting — a reference and never a second copy of the secret. Null for the
-     * deployment's own `platform` judge.
-     */
-    credentialId: idText("credential_id").references(
-      (): AnyPgColumn => judgeCredential.id,
-    ),
-    /**
-     * The deployment's own sealed key, for a `platform` setting alone, written
-     * only by egma's seeding. Null for a `credential` setting, where the
-     * envelope lives on the credential and this row holds no secret at all.
-     */
-    credentials: text("credentials"),
-    /**
-     * The last characters of the deployment's key. Null for a `credential`
-     * setting: its hint belongs to the credential, and nothing customer-facing
-     * hints at the platform's key at all.
-     */
-    credentialsHint: text("credentials_hint"),
-    createdBy: idText("created_by").references(() => user.id, {
-      onDelete: "set null",
-    }),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    prefixCheck("judge_configuration_project_id_prefix", table.projectId, "prj"),
-    oneOf("judge_configuration_provider_allowed", table.provider, [
-      ...JUDGE_PROVIDERS,
-    ]),
-    oneOf("judge_configuration_source_allowed", table.source, [
-      ...JUDGE_SOURCES,
-    ]),
-    /**
-     * Exactly one place a key can come from, held by the database rather than
-     * by whoever writes the row. A `credential` setting that also carried an
-     * envelope would be two secrets with no rule saying which is spent, and a
-     * `platform` setting with no envelope would be a project that reads as
-     * judged and cannot judge.
-     */
-    check(
-      "judge_configuration_has_one_key_source",
-      sql`(${table.source} = 'credential' and ${table.credentialId} is not null and ${table.credentials} is null and ${table.credentialsHint} is null) or (${table.source} = 'platform' and ${table.credentialId} is null and ${table.credentials} is not null)`,
-    ),
-    // The pairing, not each column on its own: a judge configuration cannot
-    // name one organization and another organization's project.
-    foreignKey({
-      name: "judge_configuration_project_organization_fk",
-      columns: [table.projectId, table.organizationId],
-      foreignColumns: [project.id, project.organizationId],
-    }).onDelete("cascade"),
+    // A grader version names both the copy and its stable Library identity.
+    // This pair lets one composite foreign key prove the two agree.
+    unique("grader_id_library_id_unique").on(table.id, table.libraryId),
   ],
 );
 
@@ -549,20 +411,21 @@ export const graderVersion = pgTable(
   "grader_version",
   {
     id: idText("id").primaryKey(),
-    graderId: idText("grader_id")
-      .notNull()
-      .references(() => grader.id, { onDelete: "cascade" }),
+    graderId: idText("grader_id").notNull(),
     version: integer("version").notNull(),
+    /** The one immutable Library definition this grader version executes. */
+    libraryId: idText("library_id").notNull(),
+    libraryVersion: integer("library_version").notNull(),
     /**
      * The copy's **filled-in values** — one set per assertion, each answering
      * the parameters its library entry declares. Latency's are a measure and a
      * bound; expected_behaviors' are empty, because its assertions are the
      * test's own sentences and arrive at judging time.
      *
-     * **The definition is never in here.** No prompt, no code, no criteria: the
-     * entry holds those and is read through `library_id` when a conversation is
-     * judged. What a version freezes is what somebody typed, which is exactly
-     * what a run pins and what a verdict has to stay readable against.
+     * The executable definition is not copied into every project row. The
+     * `library_id` and `library_version` reference beside this config point at
+     * one shared immutable definition. Together these three facts are the
+     * complete judgment a run pins.
      *
      * Deliberately jsonb, for the reason a persona's traits and a test's
      * content are: what an entry asks for is the entry's own decision and grows
@@ -571,10 +434,10 @@ export const graderVersion = pgTable(
      */
     config: jsonb("config").notNull(),
     /**
-     * The judge this grader insists on, overriding the project's default —
-     * provider and model, never a key. Null means the project's choice, which is
-     * what nearly every grader wants: a cheap judge for the routine checks, and
-     * a stronger one named here on the subtle rubric that needs it.
+     * The exact provider/model pair an `llm_as_judge` version executes.
+     * Required by the write module for model-judged graders and null for `code`
+     * graders, which make no provider call. A key never belongs here: workers
+     * resolve the deployment's current provider bundle when they claim work.
      */
     judgeModel: jsonb("judge_model"),
     createdBy: idText("created_by").references(() => user.id, {
@@ -584,80 +447,29 @@ export const graderVersion = pgTable(
   },
   (table) => [
     prefixCheck("grader_version_id_prefix", table.id, "grv"),
+    // The model may be null only because code graders do not call a model.
+    // The write module and the database trigger in 0037 enforce that pairing;
+    // this check keeps every non-null value on the shared executable catalog.
+    check(
+      "grader_version_judge_model_allowed",
+      sql`${table.judgeModel} is null or ${table.judgeModel} = jsonb_build_object('provider', 'openai', 'model', 'gpt-4o-mini')`,
+    ),
+    foreignKey({
+      name: "grader_version_library_version_fk",
+      columns: [table.libraryId, table.libraryVersion],
+      foreignColumns: [
+        graderLibraryVersion.libraryId,
+        graderLibraryVersion.version,
+      ],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "grader_version_grader_library_fk",
+      columns: [table.graderId, table.libraryId],
+      foreignColumns: [grader.id, grader.libraryId],
+    }).onDelete("cascade"),
     unique("grader_version_grader_id_version_unique").on(
       table.graderId,
       table.version,
     ),
-  ],
-);
-
-/**
- * An organization's judge credential: a label, a provider, and the sealed key
- * egma replays to that provider every time it judges.
- *
- * **It belongs to the organization and not to a project**, which is the whole
- * change this table makes. A key is a billing relationship with a model
- * provider, and billing attaches to the customer — so one key can serve every
- * project, and an organization that genuinely has two accounts holds two
- * credentials and points each project at the one it should spend from. The
- * project stores a *reference*; it never holds a second copy of the secret.
- *
- * **The secret is write-only and there is no read that returns it.** `COLUMNS`
- * in the access module names every column an answer may carry and the envelope
- * is not among them, so the field is absent from the read shape rather than
- * blanked — leaking one through a serializer is not a thing anybody can forget.
- * Rotation replaces the whole envelope: it is sealed over the whole value, so
- * there is no shape in which one could be edited in place, and an admin
- * replacing a key never has to read the one they are replacing.
- *
- * **What a person may see is the hint**, the last few characters, which exists
- * for exactly one job: telling two keys apart when deciding which project
- * should spend from which. It is not enough of the secret to be one.
- *
- * `archived_at` is here and is deliberately **not exposed by any route yet**.
- * Archiving a credential has to be refused while an active project points at
- * it, while a nonterminal simulation's frozen plan names it, and while a
- * claimed grading job still needs it — and frozen grading plans arrive with the
- * run-planning effort. A column with no safe door is honest; a door with no
- * protection behind it would strand work mid-flight.
- */
-export const judgeCredential = pgTable(
-  "judge_credential",
-  {
-    id: idText("id").primaryKey(),
-    organizationId: idText("organization_id")
-      .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
-    /** What a person calls it — "Acme production key". Never unique. */
-    label: text("label").notNull(),
-    /**
-     * Immutable. The key belongs to one provider's account, so changing this
-     * would be a different credential wearing the old one's identity — and
-     * every project pointing at it would silently start spending somewhere
-     * else.
-     */
-    provider: text("provider").notNull(),
-    /** The sealed envelope, never the key. Named by no read. */
-    credentials: text("credentials").notNull(),
-    /** The last characters of the key, so two keys can be told apart. */
-    credentialsHint: text("credentials_hint").notNull(),
-    revision: idText("revision").notNull(),
-    /** Set by nothing yet; see this table's note. */
-    archivedAt: moment("archived_at"),
-    createdBy: idText("created_by").references(() => user.id, {
-      onDelete: "set null",
-    }),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    prefixCheck("judge_credential_id_prefix", table.id, "jcr"),
-    prefixCheck("judge_credential_revision_prefix", table.revision, "rev"),
-    oneOf("judge_credential_provider_allowed", table.provider, [
-      ...JUDGE_PROVIDERS,
-    ]),
-    index("judge_credential_organization_id_idx")
-      .on(table.organizationId)
-      .where(sql`${table.archivedAt} is null`),
   ],
 );

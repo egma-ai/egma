@@ -233,11 +233,11 @@ function AgentDetailView({
                * Straight into the builder with this agent already chosen.
                *
                * **It preselects and bypasses nothing.** The connection still
-               * has to be this agent's, every test still has to apply to it,
-               * and the project still has to have a judge — all of it checked
-               * on the server, exactly as it is for somebody who chose the
-               * agent from the list. Hidden while the agent is archived,
-               * because an archived agent cannot enter new work at all.
+               * has to be this agent's and every test still has to apply to it.
+               * The server also freezes the project's current running grader
+               * copies, if any. Nothing here bypasses those checks. Hidden while
+               * the agent is archived, because an archived agent cannot enter
+               * new work at all.
                */}
               <Button asChild variant="secondary">
                 <Link

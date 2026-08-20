@@ -2,20 +2,13 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  archiveJudgeCredential,
-  claimSimulations,
-  completeSimulation,
   createAgent,
-  createJudgeCredential,
   createPersona,
   createTest,
   deleteGrader,
   getGradingPlan,
   IdempotencyConflictError,
-  listGradingJobsForSimulation,
   listGraders,
-  JudgeCredentialInUseError,
-  JudgeNotConfiguredError,
   listSimulations,
   NotPermittedError,
   planRun,
@@ -23,9 +16,7 @@ import {
   seedGraderLibrary,
   useLibraryEntry,
   refreshConnectionCapabilities,
-  setProjectJudge,
   startRun,
-  startSimulation,
   type AuthContext,
   type PlanItem,
   type Role,
@@ -37,7 +28,6 @@ import {
 } from "./support/database.ts";
 import {
   seedGraderCopies,
-  seedJudge,
   seedOrganization,
   seedUser,
 } from "./support/tenancy.ts";
@@ -58,8 +48,8 @@ import {
  * **What will judge a run is written down at the moment it starts.** One group
  * per pinned test version, holding every live running copy of the project whose
  * scope reaches simulations — the seeded expected-behaviors copy among them —
- * with a judge choice on each that carries a credential *reference* and never a
- * key.
+ * with one immutable grader version id as the execution pin. No copied model,
+ * credential reference, or key enters the plan.
  *
  * **Starting is idempotent under a key the client chose.** The same key and the
  * same selection answers the run that already exists; the same key and a
@@ -85,7 +75,6 @@ function actingAsAcme(role: Role = "member"): AuthContext {
 const neutralTraits = {
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
 } as const;
 
 let agentId: string;
@@ -133,8 +122,8 @@ function itemsFor(
  * rather than by a name somebody could rename.
  *
  * It is an ordinary item now — one kind of item is all there is — and finding
- * it through `library_id` is the same pointer the engine resolves a definition
- * through, so a renamed copy is still this one.
+ * it through `library_id` uses the same stable identity as its pinned immutable
+ * definition revision, so a renamed copy is still this one.
  */
 function behaviorsItem(items: readonly PlanItem[]): PlanItem | undefined {
   return items.find(
@@ -149,7 +138,6 @@ beforeAll(async () => {
     { id: acme.project, slug: "default" },
   ]);
   await seedUser(database, ada, "ada@acme.example");
-  await seedJudge(actingAsAcme("admin"));
   // And the copy of the predefined expected-behaviors grader that a real
   // project is born with. Every claim in this file about what a run freezes is
   // a claim about that copy being in the plan, so a fixture without one would
@@ -388,7 +376,7 @@ describe("the review, before anybody starts anything", () => {
 });
 
 describe("the grading plan a run freezes", () => {
-  it("holds one group per pinned version, each carrying the built-in", async () => {
+  it("holds one group per pinned version, each carrying the seeded grader", async () => {
     const started = await startRun(actingAsAcme(), {
       agentId,
       connectionId: measured,
@@ -416,8 +404,9 @@ describe("the grading plan a run freezes", () => {
       expect(item?.graderId).toMatch(/^grd_/u);
       expect(item?.graderVersionId).toMatch(/^grv_/u);
       expect(item?.required).toBe(true);
-      // It asks a model, so the plan names the project's judge for it.
-      expect(item?.judge.tag).toBe("configured");
+      // The immutable version owns its model. Copying it into the plan would
+      // leave two durable answers that could disagree.
+      expect("judge" in (item ?? {})).toBe(false);
     }
   });
 
@@ -456,9 +445,7 @@ describe("the grading plan a run freezes", () => {
     expect(item?.graderVersionId).toBe(copy.versionId);
     expect(item?.libraryId).toBe(PREDEFINED_GRADERS.latency);
     expect(item?.required).toBe(true);
-    // A copy of the entry egma's own engine executes asks no model, so naming
-    // one would be a bill nobody incurs.
-    expect(item?.judge).toEqual({ tag: "not_required" });
+    expect("judge" in (item ?? {})).toBe(false);
   });
 
   /**
@@ -566,27 +553,7 @@ describe("the grading plan a run freezes", () => {
     expect(started.status).toBe("pending");
   });
 
-  /**
-   * The other judge source, and the one nobody could point at: the deployment's
-   * own key, named by the `platform` sentinel rather than by a `jcr_` row.
-   *
-   * A plan that stored an id for it would name a row no customer can reach, and
-   * a plan that stored the key would be the one thing this whole shape exists to
-   * prevent. So the frozen item carries the word, and the run builder draws it
-   * as "this deployment's own key".
-   */
-  it("names the deployment's own judge by its sentinel, and never a key", async () => {
-    await setProjectJudge(actingAsAcme("admin"), {
-      provider: "openai",
-      model: "gpt-4o",
-      source: "platform",
-      platformJudge: {
-        provider: "openai",
-        model: "gpt-4o",
-        key: "sk-the-deployments-own-key-0002",
-      },
-    });
-
+  it("pins the grader version without copying its model or a credential", async () => {
     const started = await startRun(actingAsAcme(), {
       agentId,
       connectionId: measured,
@@ -596,76 +563,34 @@ describe("the grading plan a run freezes", () => {
     const plan = await getGradingPlan(actingAsAcme(), started.id);
     const item = behaviorsItem(itemsFor(plan?.groups ?? [], 0));
 
-    expect(item?.judge).toEqual({
-      tag: "configured",
-      provider: "openai",
-      model: "gpt-4o",
-      source: "platform",
-    });
+    expect(item?.graderVersionId).toMatch(/^grv_/u);
+    expect("judge" in (item ?? {})).toBe(false);
 
-    // The whole plan, as bytes, with the deployment's key nowhere in it — and
-    // no credential id invented to stand in for a row that does not exist.
     const { rows } = await database.sql<{ groups: string }>(
       "select groups::text as groups from grading_plan where run_id = $1",
       [started.id],
     );
-    expect(rows[0]?.groups).not.toContain("sk-the-deployments-own-key-0002");
-    expect(rows[0]?.groups).not.toContain("jcr_");
-  });
-
-  it("names the credential a judged grader spends from, and never a key", async () => {
-    const credential = await createJudgeCredential(actingAsAcme("admin"), {
-      label: "The team's key",
-      provider: "openai",
-      key: "sk-a-real-looking-openai-key-0001",
-    });
-    await setProjectJudge(actingAsAcme("admin"), {
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: credential.id,
-    });
-
-    const started = await startRun(actingAsAcme(), {
-      agentId,
-      connectionId: measured,
-      testVersionIds: [plain],
-      idempotencyKey: newId("run"),
-    });
-    const plan = await getGradingPlan(actingAsAcme(), started.id);
-    const item = behaviorsItem(itemsFor(plan?.groups ?? [], 0));
-
-    expect(item?.judge).toEqual({
-      tag: "configured",
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: credential.id,
-    });
-
-    // The whole plan, as bytes, with the key it was written under nowhere in it.
-    const { rows } = await database.sql<{ groups: string }>(
-      "select groups::text as groups from grading_plan where run_id = $1",
-      [started.id],
-    );
-    expect(rows[0]?.groups).not.toContain("sk-a-real-looking-openai-key-0001");
+    expect(rows[0]?.groups).not.toContain("provider");
+    expect(rows[0]?.groups).not.toContain("model");
+    expect(rows[0]?.groups).not.toContain("source");
+    expect(rows[0]?.groups).not.toContain("credential");
   });
 });
 
 /**
- * A project with no judge, and the three different runs it can ask for.
+ * A project and the three grader plans it can ask for.
  *
- * **The rule used to be "no judge, no run", and it stopped being true.** It
- * rested on the expected-behaviors grader being a built-in that was never a row
- * — every run carried it, it asks a model, so every run needed a judge. ADR-0009
- * made it an ordinary seeded copy, and deleting a copy is how a grader is
- * switched off. So the honest rule is about the plan rather than the project:
- * a run is refused when something in it would ask a model this project has not
- * configured, and nothing else about a missing judge refuses anything.
+ * The expected-behaviors grader used to be an implicit built-in. ADR-0009 made
+ * it an ordinary seeded copy, and deleting a copy is how a grader is switched
+ * off. A run now pins only the grader versions selected by its plan. A model-
+ * judged version carries its own model selection; a computed version carries
+ * no model at all.
  *
  * The three cases below are that rule, and the second and third are the ones
  * the old rule got wrong — it refused runs for a key they would never have
  * spent.
  */
-describe("a project with no judge", () => {
+describe("a run pins only the grader versions its plan selects", () => {
   /** A judge-less project with an agent, a persona and a test, and nothing else. */
   async function judgelessProject(slug: string): Promise<{
     readonly auth: AuthContext;
@@ -718,7 +643,7 @@ describe("a project with no judge", () => {
     };
   }
 
-  it("cannot start a run whose plan holds a grader that asks a model", async () => {
+  it("starts with the immutable version of its seeded grader", async () => {
     const made = await judgelessProject("asks-a-model");
     // The copy a real project is created with. These fixtures build tenants by
     // raw SQL and skip the transaction that writes it, so the claim below —
@@ -726,40 +651,27 @@ describe("a project with no judge", () => {
     // proved against a project that actually holds one.
     await seedGraderCopies();
 
-    await expect(
-      startRun(made.auth, {
-        agentId: made.agentId,
-        connectionId: made.connectionId,
-        testVersionIds: [made.versionId],
-        idempotencyKey: newId("run"),
-      }),
-    ).rejects.toBeInstanceOf(JudgeNotConfiguredError);
+    const started = await startRun(made.auth, {
+      agentId: made.agentId,
+      connectionId: made.connectionId,
+      testVersionIds: [made.versionId],
+      idempotencyKey: newId("run"),
+    });
+    expect(started.status).toBe("pending");
 
-    // Nothing was written: not the run, and not a simulation to explain.
-    const { rows } = await database.sql<{ count: string }>(
-      "select count(*) as count from run where project_id = $1",
-      [made.projectId],
-    );
-    expect(Number(rows[0]?.count)).toBe(0);
-
-    // And the review answers it as a state, so a page can draw it rather than
-    // meeting a refusal it cannot render.
     const plan = await planRun(made.auth, {
       agentId: made.agentId,
       connectionId: made.connectionId,
       testVersionIds: [made.versionId],
     });
-    expect(plan.judge).toEqual({ state: "needs_setup" });
-    expect(behaviorsItem(itemsFor(plan.groups, 0))?.judge).toEqual({
-      tag: "unavailable_at_capture",
-    });
+    const item = behaviorsItem(itemsFor(plan.groups, 0));
+    expect(item?.graderVersionId).toMatch(/^grv_/u);
+    expect("judge" in (item ?? {})).toBe(false);
   });
 
   /**
-   * A project judging only by computation never asks a model, so a missing
-   * judge is nothing to it. The old rule refused this run, which is the shape
-   * of the whole reconciliation: a sentence that was true about a built-in
-   * nobody could remove, left standing over a row anybody can delete.
+   * A project judging only by computation never asks a model. Removing the
+   * seeded model grader therefore leaves one complete, executable plan.
    */
   it("starts a run whose graders are all computed rather than judged", async () => {
     const made = await judgelessProject("computed-only");
@@ -784,8 +696,7 @@ describe("a project with no judge", () => {
     const plan = await getGradingPlan(made.auth, started.id);
     const items = itemsFor(plan?.groups ?? [], 0);
     expect(items.map((one) => one.graderId)).toEqual([latency.id]);
-    // Nothing here asks a model, so nothing here needed a key.
-    expect(items[0]?.judge).toEqual({ tag: "not_required" });
+    expect("judge" in (items[0] ?? {})).toBe(false);
   });
 
   /**
@@ -915,189 +826,6 @@ describe("who may plan and start", () => {
         testVersionIds: [plain],
         idempotencyKey: newId("run"),
       }),
-    ).rejects.toBeInstanceOf(NotPermittedError);
-  });
-});
-
-describe("archiving a judge credential", () => {
-  it("is refused while a project points at it, and names the project", async () => {
-    const credential = await createJudgeCredential(actingAsAcme("admin"), {
-      label: "Pointed at",
-      provider: "openai",
-      key: "sk-a-real-looking-openai-key-0002",
-    });
-    await setProjectJudge(actingAsAcme("admin"), {
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: credential.id,
-    });
-
-    const refused = await archiveJudgeCredential(
-      actingAsAcme("admin"),
-      credential.id,
-    ).catch((cause: unknown) => cause);
-
-    expect(refused).toBeInstanceOf(JudgeCredentialInUseError);
-    expect((refused as JudgeCredentialInUseError).uses).toContainEqual({
-      kind: "project",
-      id: acme.project,
-    });
-  });
-
-  it("is refused while a run's frozen plan still names it, and names the run", async () => {
-    const credential = await createJudgeCredential(actingAsAcme("admin"), {
-      label: "Frozen into a plan",
-      provider: "openai",
-      key: "sk-a-real-looking-openai-key-0003",
-    });
-    await setProjectJudge(actingAsAcme("admin"), {
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: credential.id,
-    });
-
-    const started = await startRun(actingAsAcme(), {
-      agentId,
-      connectionId: measured,
-      testVersionIds: [plain],
-      idempotencyKey: newId("run"),
-    });
-
-    // Point the project somewhere else, so the only thing left holding this
-    // credential is the frozen plan of a run still conducting.
-    await setProjectJudge(actingAsAcme("admin"), {
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: (
-        await createJudgeCredential(actingAsAcme("admin"), {
-          label: "Somewhere else",
-          provider: "openai",
-          key: "sk-a-real-looking-openai-key-0004",
-        })
-      ).id,
-    });
-
-    const refused = await archiveJudgeCredential(
-      actingAsAcme("admin"),
-      credential.id,
-    ).catch((cause: unknown) => cause);
-
-    expect(refused).toBeInstanceOf(JudgeCredentialInUseError);
-    expect((refused as JudgeCredentialInUseError).uses).toContainEqual({
-      kind: "run",
-      id: started.id,
-    });
-  });
-
-  /**
-   * The third blocker, and the one a run's own state cannot stand in for.
-   *
-   * A run whose conversations have all landed no longer blocks on the plan — the
-   * second rule above asks about nonterminal simulations, and there are none.
-   * But the grading queue is a separate thing that settles later, and a job
-   * still `pending` or `claimed` is about to resolve this credential's secret.
-   * Archiving here would strand judging that has already been promised, so the
-   * refusal has to name the job rather than the run.
-   */
-  it("is refused while a pending grading job still needs it, and names the job", async () => {
-    const credential = await createJudgeCredential(actingAsAcme("admin"), {
-      label: "Needed by a job that has not run",
-      provider: "openai",
-      key: "sk-a-real-looking-openai-key-0007",
-    });
-    await setProjectJudge(actingAsAcme("admin"), {
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: credential.id,
-    });
-
-    const started = await startRun(actingAsAcme(), {
-      agentId,
-      connectionId: measured,
-      testVersionIds: [plain],
-      idempotencyKey: newId("run"),
-    });
-
-    // Every conversation lands, so the run itself is terminal and the
-    // nonterminal-simulation rule is satisfied. The grading job it left behind
-    // is not, and that is the whole subject.
-    const claimed = (
-      await claimSimulations({ claimant: "simulator-blue-1", capacity: 50 })
-    ).filter((claim) => claim.runId === started.id);
-    expect(claimed.length).toBeGreaterThan(0);
-    for (const claim of claimed) {
-      await startSimulation(actingAsAcme(), claim.id, claim.claimedBy);
-      await completeSimulation(actingAsAcme(), claim.id, claim.claimedBy, {
-        endingReason: "persona_concluded",
-      });
-    }
-
-    const [job] = await listGradingJobsForSimulation(
-      actingAsAcme(),
-      claimed[0]?.id ?? "",
-    );
-    expect(job?.status).toBe("pending");
-
-    // Point the project somewhere else, so nothing but the job is holding it.
-    await setProjectJudge(actingAsAcme("admin"), {
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: (
-        await createJudgeCredential(actingAsAcme("admin"), {
-          label: "Somewhere else again",
-          provider: "openai",
-          key: "sk-a-real-looking-openai-key-0008",
-        })
-      ).id,
-    });
-
-    const refused = await archiveJudgeCredential(
-      actingAsAcme("admin"),
-      credential.id,
-    ).catch((cause: unknown) => cause);
-
-    expect(refused).toBeInstanceOf(JudgeCredentialInUseError);
-    expect((refused as JudgeCredentialInUseError).uses).toContainEqual({
-      kind: "grading_job",
-      id: job?.id,
-    });
-    // And the run is emphatically not what is blocking it: its conversations
-    // have all landed, so the second rule has nothing to say here.
-    for (const use of (refused as JudgeCredentialInUseError).uses) {
-      expect(use.kind).not.toBe("run");
-    }
-  });
-
-  it("succeeds once nothing needs it, and the plans that named it stay readable", async () => {
-    const credential = await createJudgeCredential(actingAsAcme("admin"), {
-      label: "Nothing needs it",
-      provider: "openai",
-      key: "sk-a-real-looking-openai-key-0005",
-    });
-
-    const archived = await archiveJudgeCredential(
-      actingAsAcme("admin"),
-      credential.id,
-    );
-    expect(archived?.id).toBe(credential.id);
-    // The row stays: a plan frozen under it has to keep naming something
-    // readable, which is the difference between archiving and deleting.
-    const { rows } = await database.sql<{ count: string }>(
-      "select count(*) as count from judge_credential where id = $1",
-      [credential.id],
-    );
-    expect(Number(rows[0]?.count)).toBe(1);
-  });
-
-  it("is refused to anybody but an admin", async () => {
-    const credential = await createJudgeCredential(actingAsAcme("admin"), {
-      label: "Not a member's to remove",
-      provider: "openai",
-      key: "sk-a-real-looking-openai-key-0006",
-    });
-
-    await expect(
-      archiveJudgeCredential(actingAsAcme("member"), credential.id),
     ).rejects.toBeInstanceOf(NotPermittedError);
   });
 });

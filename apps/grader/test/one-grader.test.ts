@@ -3,7 +3,7 @@ import {
   PREDEFINED_GRADERS,
   type AuthContext,
   type Grader,
-  type LibraryEntry,
+  type GraderDefinitionSnapshot,
 } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
@@ -71,6 +71,7 @@ function grader(overrides: Partial<Grader> = {}): Grader {
     versionId: "grv_01JQZ0000000000000000000AA",
     config: { assertions: [{ metric: "turn_response_latency", bound: 2_000 }] },
     judgeModel: null,
+    definition: definition(PREDEFINED_GRADERS.latency),
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -78,26 +79,20 @@ function grader(overrides: Partial<Grader> = {}): Grader {
 }
 
 /**
- * The definition, as it is read through the copy's pointer at judging time —
- * off the catalog itself, so what this file hands the seam is the row a
- * deployment would actually have on its shelf.
+ * The immutable definition revision one grader version points at.
  */
-function definition(id: string): LibraryEntry {
+function definition(id: string): GraderDefinitionSnapshot {
   const entry = GRADER_LIBRARY_CATALOG.find((candidate) => candidate.id === id);
   if (entry === undefined) throw new Error(`no catalog entry ${id}`);
   return {
-    id: entry.id,
-    name: entry.name,
-    description: entry.description,
+    libraryId: entry.id,
+    libraryVersion: 1,
     type: entry.type,
-    owner: "egma",
-    projectId: null,
-    version: 1,
     prompt: entry.prompt,
     params: entry.params,
     outputDefinition: entry.outputDefinition,
-    createdAt: entry.createdAt,
-    updatedAt: entry.createdAt,
+    sourceCode: null,
+    sourceCodeLanguage: null,
   };
 }
 
@@ -128,13 +123,11 @@ describe("a copy of an entry egma cannot execute yet", () => {
   it("says so out loud rather than passing", async () => {
     const unbuilt = {
       ...definition(PREDEFINED_GRADERS.latency),
-      id: "grl_01M01MH8KCE00NOTHINGBUILTYET",
-      name: "interruptions",
+      libraryId: "grl_01M01MH8KCE00NOTHINGBUILTYET",
     };
 
     const [only] = await judgmentsOf(
-      grader({ libraryId: unbuilt.id }),
-      unbuilt,
+      grader({ libraryId: unbuilt.libraryId, definition: unbuilt }),
       judging(),
     );
 
@@ -143,13 +136,13 @@ describe("a copy of an entry egma cannot execute yet", () => {
       // identifier for life while its name is text a release may improve, and a
       // key that moved with the name would split every row written before a
       // rename from every row written after.
-      assertion: unbuilt.id,
+      assertion: unbuilt.libraryId,
       verdict: "errored",
       score: 0,
       citedSpanIds: [],
     });
     expect(only?.rationale).toContain(
-      "does not execute the interruptions grader yet",
+      `does not execute Library grader ${unbuilt.libraryId} yet`,
     );
   });
 });
@@ -164,7 +157,6 @@ describe("a simulation that never ran", () => {
   it("is errored for the grader, in the conversation's own words", async () => {
     const [only] = await judgmentsOf(
       grader(),
-      definition(PREDEFINED_GRADERS.latency),
       judging({
         nothingToJudgeBecause:
           "this simulation ended agent_never_joined, so there was no conversation to judge.",
@@ -187,27 +179,6 @@ describe("a simulation that never ran", () => {
     expect(only?.rationale).toBe(
       "this simulation ended agent_never_joined, so there was no conversation to judge.",
     );
-  });
-});
-
-describe("a copy whose entry cannot be read", () => {
-  /**
-   * The pointer is a foreign key, so this cannot happen — and it is answered
-   * rather than asserted, because a grading service is not the place to throw
-   * over a row that came out of its own database. The row names the grader,
-   * because that is what somebody looking at the page has in front of them.
-   */
-  it("is one errored row naming the grader, not a conversation with none", async () => {
-    const [only] = await judgmentsOf(grader(), undefined, judging());
-
-    expect(only).toMatchObject({
-      // The pointer, not the copy's name, for the same reason: a name is
-      // something a person wrote and may rewrite.
-      assertion: PREDEFINED_GRADERS.latency,
-      verdict: "errored",
-      score: 0,
-    });
-    expect(only?.rationale).toContain("library entry Egma cannot read");
   });
 });
 
@@ -238,50 +209,39 @@ describe("a grader whose execution falls over", () => {
       libraryId: PREDEFINED_GRADERS.expectedBehaviors,
       type: "llm_as_judge",
       config: { assertions: [] },
+      definition: definition(PREDEFINED_GRADERS.expectedBehaviors),
     });
 
-    await expect(
-      judgmentsOf(
-        judged,
-        definition(PREDEFINED_GRADERS.expectedBehaviors),
-        judging(),
-      ),
-    ).rejects.toThrow(/not connected/);
+    await expect(judgmentsOf(judged, judging())).rejects.toThrow(/not connected/);
   });
 
   it("never says failed, because nothing is being said about the agent", async () => {
-    // The two a conversation can reach without a store behind it: an entry egma
-    // does not execute yet, and a copy whose entry could not be read at all.
+    // A definition revision whose executor has not shipped is a platform fault,
+    // never evidence that the agent failed its check.
     const unbuilt = {
       ...definition(PREDEFINED_GRADERS.latency),
-      id: "grl_01M01MH8KCE00NOTHINGBUILTYET",
-      name: "interruptions",
+      libraryId: "grl_01M01MH8KCE00NOTHINGBUILTYET",
     };
 
-    for (const [copy, entry] of [
-      [grader({ libraryId: unbuilt.id }), unbuilt] as const,
-      [grader(), undefined] as const,
-    ]) {
-      const judgments = await judgmentsOf(copy, entry, judging());
-      expect(judgments.length).toBeGreaterThan(0);
-      for (const judgment of judgments) {
-        expect(judgment.verdict).toBe("errored");
-      }
+    const judgments = await judgmentsOf(
+      grader({ libraryId: unbuilt.libraryId, definition: unbuilt }),
+      judging(),
+    );
+    expect(judgments.length).toBeGreaterThan(0);
+    for (const judgment of judgments) {
+      expect(judgment.verdict).toBe("errored");
     }
   });
 
   /**
    * **A computed grader never reaches for a judge**, and that is asserted rather
-   * than assumed: `noJudgeWanted` throws if anything on this path opens the
-   * envelope. A project whose only running graders are computed must never
-   * unseal its judge key, and the way that is guaranteed is that resolving one
-   * is something an executor asks for rather than something the engine does in
-   * front of it.
+   * than assumed: `noJudgeWanted` throws if anything on this path asks a model.
+   * A job whose only running graders are computed must never use a deployment
+   * provider key.
    */
   it("computes latency without asking anybody, and passes what holds", async () => {
     const judgments = await judgmentsOf(
       grader(),
-      definition(PREDEFINED_GRADERS.latency),
       judging(),
     );
 

@@ -18,13 +18,11 @@ import { getSimulationTestVersion } from "./runs.ts";
  *
  * **Each grader picks the key its own list can keep, and they differ.** An
  * expected-behaviors key is a behavior's **position** in the pinned test
- * version, which is stable because a simulation is pinned to that version and
- * the list cannot change beneath it. A latency key is the **measure** the check
- * bounds, because a copy's config is pinned by nothing: removing one entry makes
- * the next one first, so a position there would name a different check after an
- * edit. That difference is why this resolves per grader rather than per key
- * shape — and why a latency key needs no resolution at all, being already the
- * name of the thing it is about.
+ * version, which is stable because the list cannot change beneath it. A latency
+ * key is the **measure** the check bounds: a production re-grade may use a newer
+ * grader version, so a position could then name a different check. That
+ * difference is why this resolves per grader rather than per key shape — and
+ * why a latency key needs no resolution, being the thing's name already.
  *
  * **From the pinned version, never from the live test.** The whole point of a
  * key is that within one frozen version position 3 is the same sentence forever.
@@ -91,9 +89,10 @@ export async function readAssertionShelf(
   const facts = await graderFacts(auth, graderIds);
   if (facts.size === 0) return NOTHING_FOR_ANYBODY;
 
-  // The entries behind those copies, by their own ids — the same read the engine
-  // makes through the same pointer, so what a page calls a grader and what
-  // judged the conversation are one row.
+  // The display names behind those copies, by stable Library identity. Runtime
+  // judgment does not use this read: it executes the immutable definition
+  // revision pinned by the grader version. This shelf only turns a key into the
+  // current human-facing label.
   const named = new Map(
     await Promise.all(
       [...new Set([...facts.values()].map((its) => its.libraryId))].map(

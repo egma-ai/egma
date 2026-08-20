@@ -71,7 +71,6 @@ export function secretArgumentRefusal(argument: string): string {
     `  export ${CARRIER_VARIABLES.sourceNumber}="$(cat sip-source-number.txt)"`,
     `  export ${CARRIER_VARIABLES.sipUsername}="$(cat sip-username.txt)"`,
     `  export ${CARRIER_VARIABLES.sipPassword}="$(cat sip-password.txt)"`,
-    '  export EGMA_PERSONA_MODEL_API_KEY="$(cat model-key.txt)"',
     "  egma self-host setup --json",
   ].join("\n");
 }
@@ -90,19 +89,6 @@ export class StoppedError extends Error {
     super("stopped at a question");
     this.name = "StoppedError";
   }
-}
-
-/**
- * The last characters of a key, so two keys can be told apart without either
- * being shown.
- *
- * The same hint the platform already keeps beside a project's judge, for the
- * same reason: a key taken silently from an exported variable is the one a
- * developer has forgotten they still have, and it surfaces much later as a
- * provider refusing every turn. Four characters name it and open nothing.
- */
-export function keyHint(key: string): string {
-  return key.length <= 4 ? "…" : `…${key.slice(-4)}`;
 }
 
 export class NoAnswerError extends Error {
@@ -133,12 +119,7 @@ export type Answered = {
  * One secret, from the environment if it is there and from the keyboard if it
  * is not. Returned and never printed, never logged, never put in an argument.
  *
- * **It says where it took the answer from.** `OPENAI_API_KEY` is a variable
- * most developers already export, so a run that reads it asks nothing and looks
- * exactly like a run that was told — and a stale exported key configures the
- * whole platform silently, surfacing an hour later as a provider refusing every
- * turn. Naming the source and the key's last four characters costs one line and
- * makes that visible at the moment it happens.
+ * It says whether it came from the named environment variable or was typed.
  */
 export async function askSecret(
   variable: string,
@@ -173,15 +154,8 @@ export async function askPlainly(
 /**
  * One ordinary answer that egma can carry on without.
  *
- * Three sources, in order, and the order is the whole of it: the environment,
- * because an operator who exported the variable meant it; then a person, if
- * there is one to ask; then the suggestion, where the product has one.
- *
- * **A run with nobody watching takes the suggestion rather than refusing.** The
- * command it replaced hard-coded the same values — `openai`, `livekit`,
- * `silero` — so a coding agent driving `--json` gets what it always got,
- * and the suggestion is offered to a person as a default they can overtype
- * rather than hidden in the code that used to hold it.
+ * Three sources, in order: the environment, a person when a terminal exists,
+ * and the supplied suggestion when the caller has one.
  *
  * `null` means nobody answered and there was nothing to fall back on, which is
  * an ordinary state for a setting egma can do without.

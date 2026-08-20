@@ -346,7 +346,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       options.out(`tools: ${config.tools.length}`);
       options.out(`reach: ${outcome.reach}`);
       // The number, or the word that there is none. Absent would read as an
-      // older egma that never printed it; `none` says a text connection dials
+      // older egma that never printed it; `none` says a Chat connection dials
       // nothing, which is a fact about the connection rather than a gap.
       options.out(`phone_number: ${outcome.number ?? "none"}`);
       options.out(`agent_id: ${registered.agent.id}`);

@@ -1,17 +1,15 @@
 """The model-client seam: where the persona's words come from.
 
 The persona brain decides *when* to speak and what it knows; a model client
-is what turns the composed messages into the persona's next words. It has
-exactly two implementations on purpose:
+turns the composed messages into the persona's next words.
 
-- ``ScriptedModel`` — what CI runs on. Deterministic: the persona's turns
+- ``ScriptedModel`` is the deterministic test implementation. The persona's turns
   are the spec's scenario instructions, sentence by sentence, and a fixed
   goodbye that concludes the exchange when the script runs dry. The same
   messages always produce the same reply, so nothing in the suite can flake
   on a model.
-- ``OpenAICompatibleModel`` — the real thing, selected by configuration:
-  any provider speaking the OpenAI chat-completions shape, reached over
-  outbound HTTPS with the key from the environment.
+- ``OpenAICompatibleModel`` is the shipped adapter. The pinned persona version
+  selects it, and the claim carries the direct provider key.
 
 Both answer one question — "given this conversation so far, what does the
 persona say next, and are they done?" — expressed as ``PersonaReply``.
@@ -28,11 +26,9 @@ from typing import TYPE_CHECKING, Protocol
 import aiohttp
 
 from .client import UNREACHABLE
-from .config import MODEL_PROVIDERS
 from .redaction import REDACTED
 
 if TYPE_CHECKING:
-    from .config import SimulatorConfig
     from .spec import SimulationSpec
 
 CONCLUDE_MARKER = "[CONCLUDED]"
@@ -47,6 +43,9 @@ GOODBYE = "That covers everything I needed. Thank you, goodbye."
 
 MODEL_TIMEOUT_SECONDS = 60.0
 """How long one model call may take before it is a failure, not a wait."""
+
+OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+"""The shipped OpenAI route. It is code, not deployment configuration."""
 
 _SHORT_SECRET_CHARS = r"A-Za-z0-9_-"
 """Characters that make a short API key part of a larger ordinary token."""
@@ -117,10 +116,11 @@ class ScriptedModel:
 
 
 class OpenAICompatibleModel:
-    """A real provider behind the same seam, speaking the OpenAI
-    chat-completions shape — which is also what most self-hosted gateways
-    answer. Configuration decides the base URL, model name, and key; CI
-    never selects this client."""
+    """The direct OpenAI adapter behind the model-client seam.
+
+    The pinned persona version supplies the model and the claim supplies the
+    current key. CI never selects this client.
+    """
 
     def __init__(
         self,
@@ -128,13 +128,11 @@ class OpenAICompatibleModel:
         base_url: str,
         api_key: str,
         model_name: str,
-        reasoning_effort: str | None = None,
         timeout_seconds: float = MODEL_TIMEOUT_SECONDS,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model_name = model_name
-        self._reasoning_effort = reasoning_effort
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self._session: aiohttp.ClientSession | None = None
 
@@ -179,15 +177,7 @@ class OpenAICompatibleModel:
         )
 
     async def reply(self, messages: list[dict[str, str]]) -> PersonaReply:
-        # **The field is absent unless somebody asked for it**, rather than
-        # sent with a default this file chose. Providers speaking one
-        # chat-completions shape do not agree on the accepted values, and
-        # some models refuse the field outright — so a request that always
-        # carried it would be egma narrowing which models a deployment can
-        # run to the ones egma happened to know about.
         asked = {"model": self._model_name, "messages": messages}
-        if self._reasoning_effort is not None:
-            asked["reasoning_effort"] = self._reasoning_effort
         try:
             async with self._live_session().post(
                 f"{self._base_url}/chat/completions",
@@ -232,55 +222,26 @@ class OpenAICompatibleModel:
 
 
 def build_model_client(
-    config: SimulatorConfig, spec: SimulationSpec
+    spec: SimulationSpec,
+    *,
+    _base_url: str = OPENAI_API_BASE_URL,
 ) -> ModelClient:
-    """The configured client, built fresh for one simulation.
+    """Build the pinned persona version's direct LLM adapter.
 
-    The scripted client derives its script from the spec, which is what
-    makes two different specs conduct two different exchanges with no code
-    change; the OpenAI-compatible client is configuration alone.
-
-    **The platform's own settings win over this container's.** They arrive
-    on the work order, they are read afresh for every simulation, and each
-    of the four replaces this container's answer on its own — so a
-    deployment that has configured the persona's model centrally needs no
-    model variables on any simulator, and a replaced key applies to the
-    next simulation with no restart. A setting the platform does not hold
-    leaves this container's own value standing, which is what makes a
-    deployment that has configured nothing behave exactly as it did.
+    Provider, model, and key come from one required selection. The adapter's
+    provider endpoint is fixed here. ``_base_url`` is only the local protocol
+    test seam; no deployment input reaches it.
     """
-    said = spec.platform.model
-    provider = said.provider or config.model_provider
-    if provider not in MODEL_PROVIDERS:
-        # **Refused rather than quietly downgraded to the stand-in.** This
-        # container's own provider name is checked when it starts, so a
-        # name that gets here is one the platform holds — and a typo on a
-        # settings page must not produce a completed, green simulation
-        # conducted by a canned robot. That is worse than a failure,
-        # because a failure tells the truth about what happened.
+    selected = spec.models.llm
+    if selected.provider != "openai" or selected.model != "gpt-4o-mini":
         raise ModelFailure(
-            f"the platform's persona_model_provider is {provider!r}, which is "
-            "not a model client this simulator has; it thinks with "
-            f"{', '.join(MODEL_PROVIDERS)}"
+            "the claimed persona selected an LLM this simulator does not ship: "
+            f"{selected.provider}/{selected.model}"
         )
-    if provider != "openai":
-        return ScriptedModel(spec.scenario_instructions)
-
-    model_name = said.model or config.model_name
-    api_key = said.key or config.model_api_key
-    if model_name is None or api_key is None:
-        raise ModelFailure(
-            "the openai model provider needs both a model name and a key"
-        )
+    if selected.key is None:
+        raise ModelFailure("the claimed persona's LLM selection has no direct key")
     return OpenAICompatibleModel(
-        # The base URL stays this container's. It is not one of the
-        # platform's settings: it says which address this simulator reaches
-        # a provider at, which is a property of the network it is on rather
-        # than of the deployment's account.
-        base_url=config.model_base_url,
-        api_key=api_key,
-        model_name=model_name,
-        reasoning_effort=(
-            said.reasoning_effort or config.model_reasoning_effort
-        ),
+        base_url=_base_url,
+        api_key=selected.key,
+        model_name=selected.model,
     )

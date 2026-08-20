@@ -464,11 +464,11 @@ describe("changing a running copy", () => {
 
   /**
    * **The same sentence, because there is one check and not two.** An edit's
-   * values go through the code Use's values go through, against the entry this
-   * copy points at, read live — so a bound the entry never asked for is refused
-   * in the same words whichever door it arrived at. Two doors holding two
-   * opinions about what a bound is would be the drift the whole two-level shape
-   * exists to prevent.
+   * values go through the code Use's values go through, against the current
+   * immutable definition revision of the entry this copy points at — so a bound
+   * it never asked for is refused in the same words from either door. Two doors
+   * holding two opinions about what a bound is would be the drift the whole
+   * two-level shape exists to prevent.
    */
   it("refuses values the entry never asked for, in the words Use refuses them in", async () => {
     api = await createApi("graders_edit_same_refusal");

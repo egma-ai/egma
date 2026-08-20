@@ -2,12 +2,9 @@
  * The platform's own settings, as `egma self-host setup` reads and writes them.
  *
  * **The API is the only thing that seals, and this module is why that stays
- * true.** Every answer the interview collects leaves here as an ordinary
- * request to `/api/platform/settings`; nothing in this CLI encrypts anything,
- * holds an encryption key, or knows the shape of a sealed value. The platform
- * seals what it is sent, keeps a hint of it for display, and hands the plain
- * value to a simulator on the work order it claims — and none of those three
- * facts is this command's business.
+ * true.** The carrier route leaves here as an ordinary request to
+ * `/api/platform/settings`; nothing in this CLI encrypts anything, holds an
+ * encryption key, or knows the shape of a sealed value.
  *
  * **What the platform holds is read from the platform**, rather than from any
  * file beside the deployment. That is the whole reversal this effort is: the
@@ -16,11 +13,10 @@
  * platform what it is missing and asks the operator for exactly that.
  *
  * **The words come from the platform and the manner of asking does not.** A
- * label — "the persona's model key" — is the platform's, so a setting renamed
- * there is renamed in the interview with nothing to keep in step. Whether a
- * value is read with the terminal's echo off is decided here, by the table
- * below, because how a secret is taken off a keyboard is this command's own
- * safety and must not depend on what a server said about it.
+ * label is the platform's, so a setting renamed there is renamed in the
+ * interview with nothing to keep in step. Whether a value is read with the
+ * terminal's echo off is decided here, because how a password is taken off a
+ * keyboard is this command's own safety.
  */
 
 import { PlatformUnreachableError, type Fetch } from "../platform/device-flow.ts";
@@ -150,7 +146,7 @@ export async function writeSettings(
 }
 
 /**
- * How one setting is supplied, for every setting the platform holds.
+ * How one carrier-route member is supplied.
  *
  * **The interview's whole vocabulary, and the one thing in this CLI that has to
  * agree with the platform's catalog.** The catalog lives in the database
@@ -159,150 +155,28 @@ export async function writeSettings(
  * is held by a check rather than by an import. `self-host-setup-catalog.test.ts`
  * fails when the two drift: a setting added there and not here would be one the
  * interview never asks for, and a required one at that would leave an operator
- * who finished the whole documented setup still reading `setup required`.
+ * who finished the whole documented setup still reading `phone setup required`.
  *
- * `asked` settings are typed or exported one at a time. `carrier` settings move
- * as one four-value bundle. The trunk address and number can be shared while
- * each developer or production uses its own SIP pair. They are not four
- * independent writes, because mixing two bundles would leave every phone
- * simulation failing authentication.
+ * The route moves as one two-value or four-value bundle. The trunk address and
+ * number can be shared while each developer or production uses its own SIP
+ * pair. They are not independent writes, because mixing two bundles would
+ * leave every phone simulation failing authentication.
  *
  * **Each `variable` is the name the platform seeds that same setting from.**
  * One word means one thing whichever of the two ways in an operator uses, so a
  * script that already exports these needs nothing new to drive the interview.
  *
- * **`suggested` is where the values this command used to hard-code now live.**
- * The command it replaced wrote `openai`, `livekit` and `silero` into a file
- * without ever saying so; here they are a default a person can see and
- * overtype, and what a run with nobody watching takes.
  */
-export type SettingInput =
-  | {
-      readonly supply: "asked";
-      /** The environment variable this answer may arrive in. */
-      readonly variable: string;
-      /** Read with the terminal's echo off, and never printed anywhere. */
-      readonly secret: boolean;
-      /** What the interview offers, or `null` where egma should not guess. */
-      readonly suggested: string | null;
-      /** Whether the platform is unconfigured without it. */
-      readonly required: boolean;
-    }
-  | {
-      readonly supply: "carrier";
-      /** The environment variable this member of the carrier bundle uses. */
-      readonly variable: string;
-      /** Whether a terminal must read it without echo. */
-      readonly secret: boolean;
-      readonly required: boolean;
-    };
+export type SettingInput = {
+  readonly supply: "carrier";
+  /** The environment variable this member of the carrier bundle uses. */
+  readonly variable: string;
+  /** Whether a terminal must read it without echo. */
+  readonly secret: boolean;
+  readonly required: boolean;
+};
 
 export const SETUP_INPUTS = {
-  persona_model_provider: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_MODEL_PROVIDER",
-    secret: false,
-    suggested: "openai",
-    required: true,
-  },
-  persona_model: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_MODEL",
-    secret: false,
-    suggested: "gpt-5.6-terra",
-    required: true,
-  },
-  persona_model_key: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_MODEL_API_KEY",
-    secret: true,
-    suggested: null,
-    required: true,
-  },
-  // The one model setting egma does suggest a value for, and it is not a
-  // model name: it is how hard the persona thinks before it speaks. A
-  // caller on a live line does not pause to reason — the reasoning under
-  // test is the agent's — so the suggestion turns it off. The word is the
-  // provider's own, and leaving the answer blank sends nothing at all,
-  // which is what a model that has never heard of the field needs.
-  persona_model_reasoning_effort: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_MODEL_REASONING_EFFORT",
-    secret: false,
-    suggested: "none",
-    required: false,
-  },
-  speech_to_text_provider: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_STT_PROVIDER",
-    secret: false,
-    suggested: "openai_realtime",
-    required: true,
-  },
-  speech_to_text_key: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_STT_API_KEY",
-    secret: true,
-    suggested: null,
-    required: true,
-  },
-  speech_to_text_model: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_STT_MODEL",
-    secret: false,
-    suggested: null,
-    required: false,
-  },
-  text_to_speech_provider: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_TTS_PROVIDER",
-    secret: false,
-    suggested: "cartesia",
-    required: true,
-  },
-  text_to_speech_key: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_TTS_API_KEY",
-    secret: true,
-    suggested: null,
-    required: true,
-  },
-  // No suggestion for any of the three model-and-voice settings — the two
-  // below and the speech-to-text model above — deliberately. The simulator
-  // has a working default for each, chosen per provider, so a platform that
-  // never names one still speaks and still hears. A default egma invented
-  // here would be a second opinion about the provider's own model names,
-  // stored, and wrong the week one is retired — and stored is the worse half:
-  // the simulator's default moves with a release, and a value written into
-  // the platform on setup day stays until somebody edits it.
-  text_to_speech_model: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_TTS_MODEL",
-    secret: false,
-    suggested: null,
-    required: false,
-  },
-  text_to_speech_voice: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_TTS_VOICE",
-    secret: false,
-    suggested: null,
-    required: false,
-  },
-  voice_activity_provider: {
-    supply: "asked",
-    variable: "EGMA_PERSONA_VAD_PROVIDER",
-    secret: false,
-    suggested: "silero",
-    required: true,
-  },
-  media_backend: {
-    supply: "asked",
-    variable: "EGMA_MEDIA_BACKEND",
-    secret: false,
-    suggested: "livekit",
-    required: true,
-  },
   carrier_trunk_address: {
     supply: "carrier",
     variable: CARRIER_VARIABLES.trunkAddress,

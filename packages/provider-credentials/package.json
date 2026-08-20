@@ -1,0 +1,19 @@
+{
+  "name": "@egma/provider-credentials",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.887.0"
+  }
+}

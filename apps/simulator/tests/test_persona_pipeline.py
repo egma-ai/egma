@@ -38,11 +38,11 @@ from egma_simulator.model import ModelFailure, OpenAICompatibleModel, PersonaRep
 from egma_simulator.persona import OPENING_NUDGE, Persona, Turn
 from egma_simulator.spans import SpanEmitter, trace_id_for
 from egma_simulator.speech import (
+    PersonaVoice,
     SpeechProviders,
     build_legs,
     decode_speech,
     encode_speech,
-    voice_from_traits,
 )
 
 SECRET = "egma-secret-must-not-enter-telemetry"
@@ -264,28 +264,22 @@ async def test_the_final_persona_pipeline_uses_pipecats_native_service_spans(
     brain = _PersonaBrain(persona=persona, conductor=conductor, replies=gate)
     legs = build_legs(
         SpeechProviders(
-            stt="openai",
+            stt="scripted",
             tts="openai",
-            stt_key=SECRET,
             tts_key=SECRET,
+            tts_model="gpt-4o-mini-tts",
         ),
-        voice=voice_from_traits({}),
+        voice=PersonaVoice(voice_id="alloy", provider="openai", speed=1.0),
     )
     stt = legs.stt
     tts = legs.tts
-    assert type(stt).__name__ == "OpenAISTTService"
+    assert type(stt).__name__ == "ScriptedSTT"
     assert type(tts).__name__ == "OpenAITTSService"
 
     # The production builder made the real Pipecat services. Replace only
     # their provider I/O so this proof stays deterministic and network-free;
     # their StartFrame, audio-context, decorator, and frame paths remain stock.
-    await stt._client.close()  # type: ignore[attr-defined]
     await tts._client.close()  # type: ignore[attr-defined]
-
-    async def transcribe(_audio: bytes):
-        return type("Transcription", (), {"text": "Anything else?"})()
-
-    monkeypatch.setattr(stt, "_transcribe", transcribe)
     monkeypatch.setattr(tts, "_client", StockTTSClient())
     output = OutputProbe()
 

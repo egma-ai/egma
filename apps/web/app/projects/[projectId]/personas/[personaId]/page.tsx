@@ -1,24 +1,28 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   describedTraits,
   draftOf,
+  modelsDraftOf,
+  modelsFrom,
   PERSONA_FORM_PATH,
+  personaDefaultPath,
   personaPath,
   personaVersionsPath,
   personasPath,
+  sameModelsDraft,
+  sameTraitsDraft,
   traitsFrom,
+  type ModelsDraft,
   type Persona,
   type PersonaForm,
+  type PersonaModels,
+  type PersonaTraits,
   type PersonaPage,
   type PersonaVersion,
   type PersonaVersionPage,
@@ -26,14 +30,21 @@ import {
 } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
-import { Facts } from "../../../../../ui/section.tsx";
-import { Field, Form, FormActions, Refused } from "../../../../../ui/form.tsx";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
-  Failure,
-  Loading,
-  NotFound,
-} from "../../../../../ui/page-state.tsx";
+  Field,
+  Form,
+  FormActions,
+  FormRow,
+  Help,
+  Refused,
+} from "../../../../../ui/form.tsx";
+import { Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import {
   RelativeInstant,
@@ -47,37 +58,35 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
+import { Facts } from "../../../../../ui/section.tsx";
+import { ModelFields } from "../models-editor.tsx";
 import { TraitFields } from "../traits-editor.tsx";
 
 /**
- * The two surfaces this page is made of, and the parts of one.
+ * The route's own layout, which is all this page adds to the shared parts.
  *
- * They are named here rather than repeated, because each is one decision about
- * how the page reads — the card, the hairline between its sections, the heading
- * step — and a decision written out three times is three decisions the next
- * person has to keep in step.
- *
- * `[&>form]:…!` is the one thing here that is not ordinary layout, and it is
- * the cascade rather than a shortcut. The shared `Form` draws itself as a card:
- * a border, a radius, a paper background, 24px of padding and a 72ch cap. This
- * page already *is* the card, so a form inside one has to be a plain column —
- * which the route stylesheet used to say, and could, because CSS Modules are
- * unlayered and beat every utility. An ordinary utility would now lose to it,
- * so important is what reaches across that boundary. All four go when `Form` is
- * migrated and can be told directly.
+ * `DESIGN.md` asks a route page to compose shared components and add only
+ * route-specific layout, so these are the measurements that belong to this
+ * page and to no other: how wide one definition reads, and how one row of
+ * version history sits inside the sheet that holds it.
  */
-const SURFACE = "min-w-0 overflow-hidden rounded-card border border-border bg-surface";
-
-const EDITOR_SECTION =
-  "p-6 max-[40rem]:p-5 border-t border-border first:border-t-0 " +
-  "[&>form]:max-w-none! [&>form]:border-0! [&>form]:bg-transparent! [&>form]:p-0!";
-
-const BLOCK_TITLE = "m-0 text-lg font-medium text-foreground";
-
-const BLOCK_LEAD = "mt-1 mb-0 max-w-[64ch] text-sm text-muted-foreground";
-
-/** A number beside the name: a version, a day. Quiet, and read in figures. */
+const HEADER_SUMMARY =
+  "inline-flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2";
+const HEADER_DESCRIPTION = "max-w-[58ch] text-muted-foreground";
 const HEADER_META = "text-sm tabular-nums text-faint";
+/* The form inside gives up its own measure: this column is already the measure. */
+const DETAIL_CONTENT = "min-w-0 max-w-[80ch] [&>form]:max-w-none";
+/* A sheet's body scrolls under a head that does not. */
+const HISTORY_BODY = "min-h-0 flex-1 overflow-y-auto p-5 max-[40rem]:p-4";
+const HISTORY_LEAD =
+  "mt-0 mb-4 max-w-[64ch] text-sm leading-(--line-normal) text-muted-foreground";
+const VERSION_ROW =
+  "grid min-h-(--tap-target) min-w-0 grid-cols-[minmax(0,1fr)_auto] " +
+  "items-center gap-x-3 gap-y-1 border-t border-border py-3 last:border-b";
+const VERSION_NUMBER = "font-mono text-sm text-foreground";
+const VERSION_TIME = "min-w-0 text-sm tabular-nums text-muted-foreground";
+const STATE_LEAD = "m-0 max-w-[62ch] text-base text-muted-foreground";
+const FIELD_HINT = "m-0 text-sm text-faint";
 
 /**
  * One persona: who they are now and who they have been.
@@ -85,11 +94,14 @@ const HEADER_META = "text-sm tabular-nums text-faint";
  * **The page is arranged around the one distinction that decides everything
  * else.** Name and description are *live*: they are how a team finds this
  * person in a list, and rewriting them changes nothing about any simulation
- * that ever ran. Traits are *versioned*: a run pinned the exact traits it used,
- * so an edit mints a new version and leaves every old one where it is. The two
- * are separate forms with separate save controls, and each names its own
- * expectation, because a page that saved both at once could not tell somebody
- * which half of their work lost a race.
+ * that ever ran. Personality is *versioned*: a run pinned the exact personality
+ * and models it used, so either edit mints a new version and leaves every old
+ * one where it is.
+ * A project persona keeps the fields in one form and one partial write: identity
+ * changes stay live, while a human-traits change also mints one version. An
+ * Egma-provided persona shows the same public fields as one read-only definition
+ * and offers Fork instead of an editor. Both read immutable history in the same
+ * right-side sheet, away from the current definition.
  *
  * Archive and Restore live here rather than on the list, because both are
  * decisions somebody makes about a persona they are looking at — and because
@@ -108,12 +120,13 @@ export default function PersonaPage() {
   );
 }
 
-/** What the two editors on this page are holding, between reads and writes. */
+/** What the editor on this page is holding, between reads and writes. */
 type Draft = {
   readonly personaId: string;
   readonly name: string;
   readonly description: string;
   readonly traits: TraitsDraft;
+  readonly models: ModelsDraft;
 };
 
 /**
@@ -130,6 +143,7 @@ type Submitted = {
   readonly name?: string;
   readonly description?: string;
   readonly traits?: TraitsDraft;
+  readonly models?: ModelsDraft;
 };
 
 /**
@@ -141,21 +155,20 @@ type Submitted = {
  *
  * Both halves are load-bearing and each was learned the hard way.
  *
- * - *Only the submitted fields.* This page has two forms with two saves. A
+ * - *Only the submitted fields.* One save sends only fields that changed. A
  *   reply carries the whole persona, but for a field the request never
- *   mentioned that value is a **stale read, not an answer** — so adopting it
- *   would quietly undo an edit sitting unsaved in the other form.
+ *   mentioned that value is a **stale read, not an answer**.
  * - *Only where the draft still holds what was sent.* A save takes a moment,
  *   and somebody typing during that moment has written something the server
  *   has never seen. Its reply cannot speak for text it never saw.
  *
  * What is left is the case adoption exists for: a field this request sent,
- * untouched since, which egma stored in a form of its own — a trimmed trait,
- * a dropped blank — and which the author should be looking at rather than
- * their own draft of it.
+ * untouched since, which egma stored in a form of its own — such as trimmed
+ * text — and which the author should be looking at rather than their own
+ * draft of it.
  *
- * The traits are walked by key rather than listed, so a trait added later is
- * covered without anybody remembering to come back.
+ * The versioned fields are walked by key rather than listed, so the adoption
+ * rule stays local to this function if the contract grows later.
  */
 function adopted(
   current: Draft | null,
@@ -163,7 +176,7 @@ function adopted(
   fromServer: Persona,
 ): Draft | null {
   if (current === null) return current;
-  // A write that carried none of these fields — a clone, an Archive, a
+  // A write that carried none of these fields — a fork, an Archive, or a
   // Restore — has nothing to adopt, because it asked about none of them.
   if (submitted === undefined || submitted.personaId !== current.personaId) {
     return current;
@@ -185,6 +198,18 @@ function adopted(
     }
   }
 
+  const theirModels = modelsDraftOf(fromServer.models);
+  const models = { ...current.models };
+  if (submitted.models !== undefined) {
+    for (const field of Object.keys(current.models) as (keyof ModelsDraft)[]) {
+      models[field] = answered(
+        current.models[field],
+        submitted.models[field],
+        theirModels[field],
+      );
+    }
+  }
+
   return {
     personaId: current.personaId,
     name: answered(current.name, submitted.name, fromServer.name),
@@ -194,7 +219,32 @@ function adopted(
       fromServer.description ?? "",
     ),
     traits,
+    models,
   };
+}
+
+/** The versioned facts, in the same order in every read-only view. */
+function versionFacts(
+  traits: PersonaTraits,
+  models: PersonaModels,
+): readonly { readonly label: string; readonly value: string }[] {
+  return [
+    ...describedTraits(traits),
+    {
+      label: "Language model",
+      value: `${models.llm.provider} — ${models.llm.model}`,
+    },
+    {
+      label: "Speech-to-text model",
+      value: `${models.stt.provider} — ${models.stt.model}`,
+    },
+    {
+      label: "Text-to-speech model",
+      value: `${models.tts.provider} — ${models.tts.model}`,
+    },
+    { label: "Voice", value: models.tts.voiceId },
+    { label: "Speech rate", value: String(models.tts.speed) },
+  ];
 }
 
 function PersonaDetail({
@@ -210,6 +260,8 @@ function PersonaDetail({
   const role = me === null ? null : roleOf(me);
   const router = useRouter();
   const now = useMinuteClock();
+  const historyId = useId();
+  const historyButton = useRef<HTMLButtonElement>(null);
 
   const { answer, reload } = useProjectRead<Persona>(
     personaPath(personaId),
@@ -220,15 +272,13 @@ function PersonaDetail({
       personaVersionsPath(personaId),
       projectId,
     );
-  const { answer: form } = useProjectRead<PersonaForm>(
+  const { answer: form, reload: reloadForm } = useProjectRead<PersonaForm>(
     PERSONA_FORM_PATH,
     projectId,
   );
-  const voiceProviders =
-    form?.status === "ready" ? form.value.voice_providers : null;
 
   /**
-   * What the two forms are holding.
+   * What the editor is holding.
    *
    * **They are filled from the read once and never overwritten by a later
    * one.** A reload that reset the fields would throw away work somebody is
@@ -239,6 +289,8 @@ function PersonaDetail({
 
   useEffect(() => {
     setHeld(null);
+    setSaved(false);
+    editVersion.current = 0;
   }, [personaId, projectId]);
 
   useEffect(() => {
@@ -252,20 +304,30 @@ function PersonaDetail({
             name: persona.name,
             description: persona.description ?? "",
             traits: draftOf(persona.traits),
+            models: modelsDraftOf(persona.models),
           },
     );
   }, [answer]);
 
   useEffect(() => {
-    if (answer?.status === "signed-out") window.location.replace("/sign-in");
-  }, [answer]);
+    if (answer?.status === "signed-out" || form?.status === "signed-out") {
+      window.location.replace("/sign-in");
+    }
+  }, [answer, form]);
 
-  const [saving, setSaving] = useState<"identity" | "traits" | "lifecycle" | null>(
-    null,
-  );
+  const [saving, setSaving] = useState<"changes" | "lifecycle" | null>(null);
+  const [saved, setSaved] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [reading, setReading] = useState<PersonaVersion | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const editVersion = useRef(0);
+
+  function edit(next: Draft): void {
+    editVersion.current += 1;
+    setSaved(false);
+    setHeld(next);
+  }
 
   const persona = answer?.status === "ready" ? answer.value : null;
   const changed =
@@ -274,7 +336,8 @@ function PersonaDetail({
     held.personaId === persona.id &&
     (held.name !== persona.name ||
       held.description !== (persona.description ?? "") ||
-      JSON.stringify(held.traits) !== JSON.stringify(draftOf(persona.traits)));
+      !sameTraitsDraft(held.traits, draftOf(persona.traits)) ||
+      !sameModelsDraft(held.models, modelsDraftOf(persona.models)));
   useUnsavedChanges(changed && saving === null, saving !== null);
 
   /**
@@ -320,7 +383,7 @@ function PersonaDetail({
     path: string,
     method: "POST" | "PATCH",
     body: Record<string, unknown>,
-    what: "identity" | "traits" | "lifecycle",
+    what: "changes" | "lifecycle",
     submitted?: Submitted,
   ): Promise<Persona | null> {
     const asked = { projectId, personaId };
@@ -357,10 +420,9 @@ function PersonaDetail({
     /**
      * **What the server kept is what the editor shows — field by field.**
      *
-     * egma trims a described trait and drops one that is only whitespace, so
-     * `"  calm  "` is stored as `"calm"`, and a draft left as it was typed
-     * would put the author in front of text the system did not accept. So the
-     * reply is adopted.
+     * egma can normalize authored text, so a draft left as it was typed can
+     * put the author in front of text the system did not accept. The reply is
+     * therefore adopted.
      *
      * **But only where the draft still holds what was sent.** A save takes a
      * moment, and somebody typing in the next field during that moment has
@@ -382,22 +444,68 @@ function PersonaDetail({
     }
 
     if (answer.status === "missing") {
-      return (
-        <NotFound message={answer.refusal.message} />
-      );
+      return <NotFound message={answer.refusal.message} />;
     }
 
     if (answer.status === "failed") {
       return <Failure message={answer.refusal.message} onRetry={reload} />;
     }
 
-    // The read has answered and the forms have not been filled from it yet,
+    // The read has answered and the editor has not been filled from it yet,
     // which is one render. Checked *after* the three refusals above, so a
     // persona that is not there says so rather than loading forever.
     if (held === null) return <Loading what="this persona" />;
 
     const one = answer.value;
-    const archived = one.archived_at !== null;
+    const egmaProvided = one.owner === "egma";
+    const historyContent = (
+      <div className={HISTORY_BODY} id={historyId}>
+        <p className={HISTORY_LEAD}>
+          Newest first. Past versions do not change and stay readable.
+        </p>
+        {history === null ? (
+          <Loading what="this persona's history" />
+        ) : history.status === "ready" ? (
+          <ol className="m-0 list-none p-0">
+            {history.value.items.map((version) => {
+              const current = version.id === one.version_id;
+              return (
+                <li className={VERSION_ROW} key={version.id}>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span
+                      className={cn(VERSION_NUMBER, current && "font-medium")}
+                    >
+                      v{version.version}
+                    </span>
+                    {current ? (
+                      <span className="text-sm text-muted-foreground">
+                        Current
+                      </span>
+                    ) : null}
+                  </div>
+                  <span className={VERSION_TIME}>
+                    <RelativeInstant instant={version.created_at} now={now} />
+                  </span>
+                  {/* The control spans both lines of the row it belongs to. */}
+                  <Button
+                    className="col-start-2 row-span-2 row-start-1"
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setReading(version)}
+                  >
+                    Read
+                  </Button>
+                </li>
+              );
+            })}
+          </ol>
+        ) : history.status === "signed-out" ? (
+          <Loading what="this persona's history" />
+        ) : (
+          <Failure message={history.refusal.message} onRetry={reloadHistory} />
+        )}
+      </div>
+    );
 
     return (
       <>
@@ -415,234 +523,106 @@ function PersonaDetail({
           />
         )}
 
-        {/*
-          One authoring surface beside a rail of what this persona has been.
-          The rail never goes under 280px, because a version and the day it was
-          written stop fitting on one line before that; below 68rem there is no
-          room for two columns and the rail goes under the editor.
-        */}
-        <div
-          className={
-            "grid min-w-0 items-start gap-6 " +
-            "grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] " +
-            "max-[68rem]:grid-cols-[minmax(0,1fr)]"
-          }
-        >
-          <div className={SURFACE}>
-            <section
-              className={EDITOR_SECTION}
-              aria-labelledby="persona-identity-title"
-            >
-              <header className="mb-5">
-                <h2 className={BLOCK_TITLE} id="persona-identity-title">
-                  Name and description
-                </h2>
-                <p className={BLOCK_LEAD}>
-                  These fields are live. Changing them does not change a past
-                  simulation.
-                </p>
-              </header>
-              {/*
-                **No editor at all until egma knows who is reading.** A
-                disabled field is a claim — *this is not yours to change* — and
-                while the session read is in flight there is nobody to make
-                that claim about.
-              */}
-              {settled ? (
-                <Form onSubmit={() => void saveIdentity()}>
-                  <Field label="Name" htmlFor="persona-name">
-                    <Input
-                      id="persona-name"
-                      value={held.name}
-                      disabled={!mayAuthor}
-                      autoComplete="off"
-                      spellCheck={false}
-                      onChange={(event) =>
-                        setHeld({ ...held, name: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label="Description" htmlFor="persona-description">
-                    <Input
-                      id="persona-description"
-                      value={held.description}
-                      disabled={!mayAuthor}
-                      autoComplete="off"
-                      spellCheck={false}
-                      onChange={(event) =>
-                        setHeld({ ...held, description: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <FormActions>
-                    <Button
-                      type="submit"
-                      disabled={!mayAuthor || saving !== null}
-                      {...(mayAuthor || whyNot === undefined
-                        ? {}
-                        : { why: whyNot })}
-                    >
-                      {saving === "identity" ? "Saving…" : "Save name"}
-                    </Button>
-                  </FormActions>
-                </Form>
-              ) : (
-                <>
-                  <Facts
-                    facts={[
-                      { label: "Name", value: one.name },
-                      {
-                        label: "Description",
-                        value: one.description ?? "—",
-                      },
-                    ]}
-                  />
-                  <Loading what="what your role may edit" />
-                </>
-              )}
+        <div className={DETAIL_CONTENT}>
+          {egmaProvided ? (
+            <section aria-label="Persona details">
+              <Facts
+                layout="panel"
+                facts={[
+                  { label: "Name", value: one.name },
+                  { label: "Description", value: one.description ?? "—" },
+                  ...versionFacts(one.traits, one.models),
+                ]}
+              />
             </section>
-
-            <section
-              className={EDITOR_SECTION}
-              aria-labelledby="persona-behavior-title"
-            >
-              <header className="mb-5">
-                <h2 className={BLOCK_TITLE} id="persona-behavior-title">
-                  Behavior and voice
-                </h2>
-                <p className={BLOCK_LEAD}>
-                  Saving a change makes a new version. Past simulations keep
-                  the version they used.
-                </p>
-              </header>
-              {settled ? (
-                <Form onSubmit={() => void saveTraits()}>
-                  <TraitFields
-                    draft={held.traits}
-                    voiceProviders={voiceProviders}
+          ) : settled && form?.status === "ready" ? (
+            <Form onSubmit={() => void saveChanges()}>
+              <FormRow>
+                <Field label="Name" htmlFor="persona-name">
+                  <Input
+                    id="persona-name"
+                    value={held.name}
                     disabled={!mayAuthor}
-                    onChange={(traits) => setHeld({ ...held, traits })}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(event) =>
+                      edit({ ...held, name: event.target.value })
+                    }
                   />
-                  <FormActions>
-                    <Button
-                      type="submit"
-                      disabled={!mayAuthor || saving !== null}
-                      {...(mayAuthor || whyNot === undefined
-                        ? {}
-                        : { why: whyNot })}
-                    >
-                      {saving === "traits"
-                        ? "Saving…"
-                        : "Save behavior and voice"}
-                    </Button>
-                  </FormActions>
-                </Form>
-              ) : (
-                <>
-                  <Facts
-                    facts={[
-                      {
-                        label: "Personality",
-                        value: one.traits.personality,
-                      },
-                      { label: "Language", value: one.traits.language },
-                      {
-                        label: "Voice",
-                        value: `${one.traits.voice.provider} · ${one.traits.voice.voiceId}`,
-                      },
-                      {
-                        label: "Speech rate",
-                        value: `${one.traits.voice.speed}×`,
-                      },
-                      ...describedTraits(one.traits).map((trait) => ({
-                        label: trait.label,
-                        value: trait.value,
-                      })),
-                    ]}
+                </Field>
+                <Field label="Description" htmlFor="persona-description">
+                  <Input
+                    id="persona-description"
+                    value={held.description}
+                    disabled={!mayAuthor}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(event) =>
+                      edit({ ...held, description: event.target.value })
+                    }
                   />
-                  <Loading what="what your role may edit" />
-                </>
-              )}
+                </Field>
+              </FormRow>
+              <TraitFields
+                draft={held.traits}
+                disabled={!mayAuthor}
+                onChange={(traits) => edit({ ...held, traits })}
+              />
+              <ModelFields
+                draft={held.models}
+                form={form.value}
+                disabled={!mayAuthor}
+                onChange={(models) => edit({ ...held, models })}
+              />
+              {saved && refusal === null ? <Help>Saved.</Help> : null}
+              <FormActions>
+                <Button
+                  type="submit"
+                  busy={saving === "changes"}
+                  disabled={!mayAuthor || !changed || saving !== null}
+                  {...(mayAuthor || whyNot === undefined
+                    ? {}
+                    : { why: whyNot })}
+                >
+                  {saving === "changes" ? "Saving…" : "Save changes"}
+                </Button>
+              </FormActions>
+            </Form>
+          ) : settled && form?.status === "failed" ? (
+            <Failure message={form.refusal.message} onRetry={reloadForm} />
+          ) : settled && form?.status === "missing" ? (
+            <NotFound message={form.refusal.message} />
+          ) : (
+            <section aria-label="Persona details">
+              <Facts
+                layout="panel"
+                facts={[
+                  { label: "Name", value: one.name },
+                  { label: "Description", value: one.description ?? "—" },
+                  ...versionFacts(one.traits, one.models),
+                ]}
+              />
+              <Loading
+                what={
+                  settled
+                    ? "the supported persona models"
+                    : "what your role may edit"
+                }
+              />
             </section>
-          </div>
-
-          <aside className={SURFACE} aria-labelledby="persona-history-title">
-            <header className="border-b border-border p-6 max-[40rem]:p-5">
-              <h2 className={BLOCK_TITLE} id="persona-history-title">
-                Version history
-              </h2>
-              <p className={BLOCK_LEAD}>
-                Newest first. Every past version stays readable.
-              </p>
-            </header>
-            {history === null ? (
-              <div className="p-5">
-                <Loading what="this persona's history" />
-              </div>
-            ) : history.status === "ready" ? (
-              <ol className="m-0 list-none p-0">
-                {history.value.items.map((version) => {
-                  const current = version.id === one.version_id;
-                  return (
-                    <li
-                      className={
-                        "grid min-w-0 min-h-(--tap-target) items-center " +
-                        "grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 " +
-                        "px-4 py-3 max-[40rem]:px-3 " +
-                        "border-t border-border first:border-t-0 " +
-                        /*
-                         * The current version's mark: a 3px edge, carried over
-                         * from the stylesheet this replaces rather than chosen,
-                         * so it is written as a measurement instead of as a
-                         * scale step that does not exist.
-                         */
-                        "border-s-[3px] " +
-                        (current
-                          ? "border-s-brand bg-selected"
-                          : "border-s-transparent")
-                      }
-                      key={version.id}
-                    >
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className="font-mono text-sm text-foreground">
-                          v{version.version}
-                        </span>
-                        {current ? (
-                          <span className="text-sm tracking-(--tracking-label) text-brand uppercase">
-                            Current
-                          </span>
-                        ) : null}
-                      </div>
-                      <span className="min-w-0 text-sm tabular-nums text-muted-foreground">
-                        <RelativeInstant instant={version.created_at} now={now} />
-                      </span>
-                      {/* The control spans both lines of the row it belongs to. */}
-                      <Button
-                        className="col-start-2 row-span-2 row-start-1"
-                        type="button"
-                        variant="secondary"
-                        onClick={() => setReading(version)}
-                      >
-                        Read
-                      </Button>
-                    </li>
-                  );
-                })}
-              </ol>
-            ) : history.status === "signed-out" ? (
-              <div className="p-5">
-                <Loading what="this persona's history" />
-              </div>
-            ) : (
-              <div className="p-5">
-                <Failure
-                  message={history.refusal.message}
-                  onRetry={reloadHistory}
-                />
-              </div>
-            )}
-          </aside>
+          )}
         </div>
+
+        {historyOpen ? (
+          <Dialog
+            kind="sheet"
+            title="Version history"
+            returnFocusTo={historyButton.current}
+            onClose={() => setHistoryOpen(false)}
+          >
+            {historyContent}
+          </Dialog>
+        ) : null}
 
         {reading === null ? null : (
           <Dialog
@@ -657,17 +637,7 @@ function PersonaDetail({
                     <RelativeInstant instant={reading.created_at} now={now} />
                   ),
                 },
-                { label: "Personality", value: reading.traits.personality },
-                { label: "Language", value: reading.traits.language },
-                {
-                  label: "Voice",
-                  value: `${reading.traits.voice.provider} · ${reading.traits.voice.voiceId}`,
-                },
-                { label: "Speech rate", value: `${reading.traits.voice.speed}×` },
-                ...describedTraits(reading.traits).map((trait) => ({
-                  label: trait.label,
-                  value: trait.value,
-                })),
+                ...versionFacts(reading.traits, reading.models),
               ]}
             />
           </Dialog>
@@ -683,46 +653,69 @@ function PersonaDetail({
             onArchive={(replacement) => void archive(replacement)}
           />
         ) : null}
-
       </>
     );
 
-    async function saveIdentity(): Promise<void> {
-      if (held === null || !mayAuthor || saving !== null) return;
-      await write(
+    async function saveChanges(): Promise<void> {
+      if (
+        held === null ||
+        !mayAuthor ||
+        one.owner !== "organization" ||
+        saving !== null
+      ) {
+        return;
+      }
+
+      const nameChanged = held.name !== one.name;
+      const descriptionChanged = held.description !== (one.description ?? "");
+      const traitsChanged = !sameTraitsDraft(
+        held.traits,
+        draftOf(one.traits),
+      );
+      const modelsChanged = !sameModelsDraft(
+        held.models,
+        modelsDraftOf(one.models),
+      );
+      if (
+        !nameChanged &&
+        !descriptionChanged &&
+        !traitsChanged &&
+        !modelsChanged
+      ) {
+        return;
+      }
+
+      const submittedEditVersion = editVersion.current;
+      const written = await write(
         personaPath(one.id),
         "PATCH",
         {
           expected_revision: one.revision,
-          name: held.name,
-          description: held.description,
+          ...(nameChanged ? { name: held.name } : {}),
+          ...(descriptionChanged ? { description: held.description } : {}),
+          ...(traitsChanged || modelsChanged
+            ? {
+                expected_version_id: one.version_id,
+              }
+            : {}),
+          ...(traitsChanged ? { traits: traitsFrom(held.traits) } : {}),
+          ...(modelsChanged ? { models: modelsFrom(held.models) } : {}),
         },
-        "identity",
-        // The two fields this body carries, and no others: an unsaved trait
-        // sitting in the form below is not this request's to answer for.
+        "changes",
         {
           personaId: one.id,
-          name: held.name,
-          description: held.description,
+          ...(nameChanged ? { name: held.name } : {}),
+          ...(descriptionChanged ? { description: held.description } : {}),
+          ...(traitsChanged ? { traits: held.traits } : {}),
+          ...(modelsChanged ? { models: held.models } : {}),
         },
       );
-    }
-
-    async function saveTraits(): Promise<void> {
-      if (held === null || !mayAuthor || saving !== null) return;
-      await write(
-        personaPath(one.id),
-        "PATCH",
-        {
-          expected_revision: one.revision,
-          expected_version_id: one.version_id,
-          traits: traitsFrom(held.traits),
-        },
-        "traits",
-        // The traits and nothing else: a name half-retyped in the form above
-        // is not this request's to answer for either.
-        { personaId: one.id, traits: held.traits },
-      );
+      if (
+        written !== null &&
+        editVersion.current === submittedEditVersion
+      ) {
+        setSaved(true);
+      }
     }
 
     async function archive(replacement: string | undefined): Promise<void> {
@@ -751,10 +744,10 @@ function PersonaDetail({
     );
   }
 
-  async function clone(): Promise<void> {
+  async function fork(): Promise<void> {
     if (persona === null) return;
     const made = await write(
-      `${personaPath(persona.id)}/clone`,
+      `${personaPath(persona.id)}/fork`,
       "POST",
       {},
       "lifecycle",
@@ -764,45 +757,86 @@ function PersonaDetail({
     }
   }
 
+  async function makeDefault(): Promise<void> {
+    if (persona === null || persona.archived_at !== null || persona.is_default) {
+      return;
+    }
+    await write(personaDefaultPath(persona.id), "POST", {}, "lifecycle");
+  }
+
   const archived = persona?.archived_at != null;
 
   const actions =
-    persona === null || role === null ? undefined : (
+    persona === null ? undefined : (
       <>
         <Button
+          ref={historyButton}
           type="button"
           variant="secondary"
-          disabled={!mayAuthor || saving !== null}
-          {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
-          onClick={() => void clone()}
+          aria-expanded={historyOpen}
+          aria-controls={historyId}
+          onClick={() => setHistoryOpen(true)}
         >
-          Clone
+          Version history
         </Button>
-        {archived ? (
-          <Button
-            type="button"
-            disabled={!mayAuthor || saving !== null}
-            {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
-            onClick={() => void restore()}
-          >
-            Restore
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!mayAuthor || saving !== null}
-            {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
-            onClick={() => setArchiving(true)}
-          >
-            Archive
-          </Button>
+        {role === null ? null : (
+          <>
+            {!archived && !persona.is_default ? (
+              <Button
+                type="button"
+                disabled={!mayAuthor || saving !== null}
+                {...(mayAuthor || whyNot === undefined
+                  ? {}
+                  : { why: whyNot })}
+                onClick={() => void makeDefault()}
+              >
+                {saving === "lifecycle"
+                  ? "Making default…"
+                  : "Make project default"}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!mayAuthor || saving !== null}
+              {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+              onClick={() => void fork()}
+            >
+              Fork
+            </Button>
+            {persona.owner === "organization" ? (
+              archived ? (
+                <Button
+                  type="button"
+                  disabled={!mayAuthor || saving !== null}
+                  {...(mayAuthor || whyNot === undefined
+                    ? {}
+                    : { why: whyNot })}
+                  onClick={() => void restore()}
+                >
+                  Restore
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!mayAuthor || saving !== null}
+                  {...(mayAuthor || whyNot === undefined
+                    ? {}
+                    : { why: whyNot })}
+                  onClick={() => setArchiving(true)}
+                >
+                  Archive
+                </Button>
+              )
+            ) : null}
+          </>
         )}
       </>
     );
 
   return (
-    <ProductPage wide>
+    <ProductPage>
       <PageHeader
         title={persona?.name ?? "Persona"}
         breadcrumbs={[
@@ -811,16 +845,30 @@ function PersonaDetail({
         ]}
         lead={
           persona === null ? undefined : (
-            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-              <span className="max-w-[58ch] text-muted-foreground">
-                {persona.description ?? "Who they are and how they behave."}
-              </span>
-              {persona.is_default ? <Badge>Project default</Badge> : null}
-              {archived ? <Badge variant="warning">Archived</Badge> : null}
-              <span className={HEADER_META}>v{persona.version}</span>
+            <span className={HEADER_SUMMARY}>
+              {persona.owner === "organization" ? (
+                <span className={HEADER_DESCRIPTION}>
+                  {persona.description ?? "Who they are and how they behave."}
+                </span>
+              ) : null}
               <span className={HEADER_META}>
-                Updated <RelativeInstant instant={persona.updated_at} now={now} />
+                Type: {persona.owner === "egma" ? "Egma-provided" : "Custom"}
               </span>
+              <span className={HEADER_META}>
+                Project default: {persona.is_default ? "Yes" : "No"}
+              </span>
+              {archived ? <Badge variant="warning">Archived</Badge> : null}
+              {persona.owner === "organization" ? (
+                <>
+                  <span className={HEADER_META}>
+                    v{persona.version}
+                  </span>
+                  <span className={HEADER_META}>
+                    Updated{" "}
+                    <RelativeInstant instant={persona.updated_at} now={now} />
+                  </span>
+                </>
+              ) : null}
             </span>
           )
         }
@@ -880,43 +928,45 @@ function ArchiveDialog({
     let current = true;
     setUnread(null);
 
-    void readJson<PersonaPage>(personasPath(false), { project: projectId }).then(
-      (answer) => {
-        if (!current) return;
+    void readJson<PersonaPage>(personasPath(false), {
+      project: projectId,
+    }).then((answer) => {
+      if (!current) return;
 
-        if (answer.status === "signed-out") {
-          window.location.replace("/sign-in");
-          return;
-        }
-        if (answer.status !== "ready") {
-          setUnread(answer.refusal);
-          return;
-        }
+      if (answer.status === "signed-out") {
+        window.location.replace("/sign-in");
+        return;
+      }
+      if (answer.status !== "ready") {
+        setUnread(answer.refusal);
+        return;
+      }
 
-        const rest = answer.value.items.filter((one) => one.id !== persona.id);
-        setOthers(rest);
-        setChosen(rest[0]?.id ?? "");
-      },
-    );
+      const rest = answer.value.items.filter((one) => one.id !== persona.id);
+      setOthers(rest);
+      setChosen(rest[0]?.id ?? "");
+    });
 
     return () => {
       current = false;
     };
   }, [persona.id, persona.is_default, projectId, attempt]);
 
-  const nobodyToTakeIt = persona.is_default && others !== null && others.length === 0;
+  const nobodyToTakeIt =
+    persona.is_default && others !== null && others.length === 0;
   /** Nothing may be archived until a default has somebody to hand the pointer to. */
   const cannotChoose =
-    persona.is_default && (unread !== null || others === null || nobodyToTakeIt);
+    persona.is_default &&
+    (unread !== null || others === null || nobodyToTakeIt);
 
   return (
     <Dialog title={`Archive ${persona.name}?`} onClose={onClose}>
       {(dismiss) => (
         <>
-          <p className="m-0 max-w-[62ch] text-base text-muted-foreground">
-            They leave the list your team authors from. Every version stays exactly
-            where it is, every run that pinned one stays readable, and Restore is on
-            this page.
+          <p className={STATE_LEAD}>
+            They leave the list your team authors from. Every version stays
+            exactly where it is, every run that pinned one stays readable, and
+            Restore is on this page.
           </p>
 
           {persona.is_default ? (
@@ -939,11 +989,11 @@ function ArchiveDialog({
                   }
                 />
               ) : others === null ? (
-                <p className="m-0 text-sm text-faint">
+                <p className={FIELD_HINT}>
                   Reading this project's personas…
                 </p>
               ) : nobodyToTakeIt ? (
-                <p className="m-0 text-sm text-faint">
+                <p className={FIELD_HINT}>
                   There is no other active persona in this project to take it.
                   Create one first.
                 </p>
@@ -969,15 +1019,15 @@ function ArchiveDialog({
             <Button
               type="button"
               variant="destructive"
-              disabled={busy || cannotChoose || (persona.is_default && chosen === "")}
+              disabled={
+                busy || cannotChoose || (persona.is_default && chosen === "")
+              }
               {...(cannotChoose
                 ? {
                     why: "Egma has not been able to read this project's personas, so there is nobody to hand the default pointer to yet.",
                   }
                 : {})}
-              onClick={() =>
-                onArchive(persona.is_default ? chosen : undefined)
-              }
+              onClick={() => onArchive(persona.is_default ? chosen : undefined)}
             >
               {busy ? "Archiving…" : "Archive persona"}
             </Button>

@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { readVerdicts } from "@egma/db";
+import { deleteGrader, readVerdicts } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +11,7 @@ import {
   eventually,
   makeWorld,
   seedGrader,
+  theSeededGrader,
   type World,
 } from "./support/world.ts";
 
@@ -59,6 +60,9 @@ function environmentWithoutSecrets(): NodeJS.ProcessEnv {
 
 beforeAll(async () => {
   world = await makeWorld("grader_entry_point");
+  // This case proves the code-only lane. A real project can switch off its
+  // model grader, and this process is deliberately given no provider bundle.
+  await deleteGrader(world.auth, await theSeededGrader(world));
   await seedGrader(world, aLatencyCopy());
 
   const environment = environmentWithoutSecrets();

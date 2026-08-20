@@ -6,7 +6,6 @@ import {
   archivePersona,
   editTest,
   type AuthContext,
-  type PersonaTraits,
   type Role,
 } from "@egma/db";
 import { newId } from "@egma/ids";
@@ -161,7 +160,7 @@ describe("creating a test", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
-    const starter = await defaultPersonaOf(ada.projectId);
+    const defaultPersonaId = await defaultPersonaOf(ada.projectId);
 
     const named = await createTestThrough(key, { ...RESCHEDULING, personas: [] });
     const absent = await createTestThrough(key, { ...RESCHEDULING });
@@ -169,7 +168,7 @@ describe("creating a test", () => {
     for (const created of [named, absent]) {
       expect(created.statusCode).toBe(201);
       expect(created.body.personas).toEqual([
-        { id: starter, name: expect.any(String), archived_at: null },
+        { id: defaultPersonaId, name: expect.any(String), archived_at: null },
       ]);
     }
   });

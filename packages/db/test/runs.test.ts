@@ -46,7 +46,6 @@ import {
 } from "./support/database.ts";
 import {
   seedGraderCopies,
-  seedJudge,
   seedOrganization,
   seedUser,
 } from "./support/tenancy.ts";
@@ -100,7 +99,6 @@ function actingAsGlobex(): AuthContext {
 const neutralTraits = {
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
 } as const;
 
 /** Acme's wired agent, the personas its runs conduct, and what they check. */
@@ -114,7 +112,12 @@ let twoCallers: string; // a test version naming both, so a run holds two
 let globexOwn: string; // a test version of Globex's, for the same refusals
 
 async function seedPersona(auth: AuthContext, name: string): Promise<string> {
-  return (await createPersona(auth, { name, traits: neutralTraits })).id;
+  return (
+    await createPersona(auth, {
+      name,
+      traits: neutralTraits,
+    })
+  ).id;
 }
 
 /**
@@ -200,9 +203,6 @@ beforeAll(async () => {
   await seedUser(database, grace, "grace@globex.example");
   // A judge, as provisioning gives a real project one. These fixtures build
   // their tenants by raw SQL and skip that transaction.
-  await seedJudge(actingAsAcme("admin"));
-  await seedJudge({ ...actingAsAcme("admin"), projectId: acme.outbound });
-  await seedJudge({ ...actingAsGlobex(), role: "admin" });
   // And the copy of the predefined expected-behaviors grader a real project is
   // born with, for the same reason: every run started in this file freezes a
   // grading plan, and a fixture with no copy would freeze an empty one. Nothing
@@ -291,7 +291,10 @@ describe("starting a run", () => {
     const started = await startRun(actingAsAcme(), aRun());
 
     await editPersona(actingAsAcme(), rita, {
-      traits: { ...neutralTraits, personality: "Now in a tearing hurry." },
+      traits: {
+        ...neutralTraits,
+        personality: "Now in a tearing hurry.",
+      },
     });
     const after = await getPersona(actingAsAcme(), rita);
     expect(after?.versionId).not.toBe(before?.versionId);

@@ -12,14 +12,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
 
 from aiohttp import web
 
 from ..contract import contract_dir
-from .app import WorkbenchState, build_app, dialling, load_spec_documents
+from .app import WorkbenchState, build_app, load_spec_documents
 
 
 def _arguments() -> argparse.Namespace:
@@ -37,16 +36,6 @@ def _arguments() -> argparse.Namespace:
         help=(
             "A spec JSON file, or a directory of them. Defaults to the "
             "contract package's valid spec fixtures."
-        ),
-    )
-    parser.add_argument(
-        "--phone-number",
-        default=os.environ.get("EGMA_WORKBENCH_PHONE_NUMBER", "").strip() or None,
-        help=(
-            "Dial this number, in E.164, instead of the placeholder a spec "
-            "fixture carries — and queue only the specs that dial one. This "
-            "is the whole of what turns the fixtures into a real phone call. "
-            "Also read from EGMA_WORKBENCH_PHONE_NUMBER."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")
@@ -69,8 +58,6 @@ async def _serve() -> None:
     specs_path = arguments.specs or contract_dir() / "fixtures" / "spec" / "valid"
     state = WorkbenchState(hold_seconds=arguments.hold_seconds)
     documents = load_spec_documents(specs_path)
-    if arguments.phone_number:
-        documents = dialling(documents, arguments.phone_number)
     for document in documents:
         await state.offer(document)
 
@@ -78,11 +65,8 @@ async def _serve() -> None:
     await runner.setup()
     site = web.TCPSite(runner, arguments.host, arguments.port)
     await site.start()
-    dialling_note = (
-        f", dialling {arguments.phone_number}" if arguments.phone_number else ""
-    )
     print(
-        f"workbench holding {len(documents)} spec(s){dialling_note} at "
+        f"workbench holding {len(documents)} spec(s) at "
         f"http://{arguments.host}:{arguments.port}",
         file=sys.stderr,
     )

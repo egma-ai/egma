@@ -89,8 +89,8 @@ const START_ACTION = "flex flex-col gap-2 [&>button]:w-full";
  *
  * **Nothing on this page decides anything.** Which versions would be pinned,
  * which conversations would be skipped and why, which graders would judge and
- * at which versions, and whether the project has a judge at all — all of it is
- * `GET /api/run-plan`, which is the same resolution `POST /api/runs` performs.
+ * at which versions — all of it is `GET /api/run-plan`, which is the same
+ * resolution `POST /api/runs` performs.
  * A page that worked any of it out for itself would be a second opinion, and
  * the moment the two disagreed somebody would approve one run and start
  * another.

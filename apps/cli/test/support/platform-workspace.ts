@@ -67,22 +67,15 @@ function hintOf(name: string, value: string): string {
 }
 
 function readinessOf(holds: Readonly<Record<string, string>>): {
-  setup: { state: string; missing: string[] };
   phone: { state: string; missing: string[] };
 } {
-  const missing = PLATFORM_SETTINGS.filter(
-    (setting) => setting.required && holds[setting.name] === undefined,
-  ).map((setting) => setting.label);
-  const phoneMissing = (
-    ["carrier_trunk_address", "carrier_trunk_number", "text_to_speech_provider"] as const
-  )
+  const phoneMissing = (["carrier_trunk_address", "carrier_trunk_number"] as const)
     .filter((name) => holds[name] === undefined)
     .map(
       (name) =>
         PLATFORM_SETTINGS.find((setting) => setting.name === name)?.label ?? name,
     );
   return {
-    setup: { state: missing.length === 0 ? "ready" : "setup_required", missing },
     phone: {
       state: phoneMissing.length === 0 ? "ready" : "setup_required",
       missing: phoneMissing,
@@ -159,7 +152,6 @@ export async function startPlatform(
     send(200, {
       instance_id: "pf_00000000000000000000000001",
       origin: options.reports === undefined ? url : options.reports(url),
-      setup: readiness.setup,
       phone: readiness.phone,
     });
   });
@@ -192,12 +184,9 @@ const RECORDED_VARIABLES = [
   "EGMA_BASE_URL",
   "EGMA_LIVEKIT_API_KEY",
   "EGMA_LIVEKIT_API_SECRET",
-  // Two settings, recorded so that a check can prove the *absence* of one. A
-  // workspace upgraded from the release that kept settings beside the
-  // deployment still has these lines in its file, and handing them to Compose
-  // would seed the platform from that file all over again.
+  // Recorded so a check can prove the carrier route does not enter the
+  // bootstrap file or a media-container recreation.
   "EGMA_PHONE_SOURCE_NUMBER",
-  "EGMA_PERSONA_MODEL_API_KEY",
 ] as const;
 
 export type PlatformWorkspace = {

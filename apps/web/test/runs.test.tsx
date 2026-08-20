@@ -163,12 +163,6 @@ function plannedTest(overrides: Record<string, unknown> = {}) {
         library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
         required: true,
         scope: "simulations",
-        judge: {
-          tag: "configured",
-          provider: "openai",
-          model: "gpt-4.1-mini",
-          source: "jcr_1",
-        },
       },
       {
         kind: "authored",
@@ -178,7 +172,6 @@ function plannedTest(overrides: Record<string, unknown> = {}) {
         library_id: "grl_01M01MH8KBE00TESCGQHVH0T8G",
         required: false,
         scope: "simulations",
-        judge: { tag: "not_required" },
       },
     ],
     ...overrides,
@@ -200,12 +193,6 @@ function planBody(overrides: Record<string, unknown> = {}) {
         checked_at: "2026-08-01T10:00:00.000Z",
         source: "transport",
       },
-    },
-    judge: {
-      state: "configured",
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: "jcr_1",
     },
     runnable_simulation_count: 1,
     skipped_simulation_count: 0,
@@ -516,7 +503,7 @@ describe("the server-owned run plan", () => {
     expect(screen.queryByText("would be skipped, not failed")).toBeNull();
   });
 
-  it("keeps connection, capability and judge facts out of the builder", async () => {
+  it("keeps connection and capability facts out of the builder", async () => {
     builder({
       tests: [testRow({ required_capabilities: ["raw_audio"] })],
     });
@@ -529,102 +516,11 @@ describe("the server-owned run plan", () => {
           .disabled,
       ).toBe(false);
     });
-    expect(screen.queryByText(/credential jcr_1/u)).toBeNull();
     expect(screen.queryByText(/measured raw_audio/u)).toBeNull();
     expect(screen.queryByText(/^Capabilities$/u)).toBeNull();
-    expect(screen.queryByText(/^Judge$/u)).toBeNull();
     expect(screen.queryByText("Impatient Rita")).toBeNull();
     expect(screen.queryByText(/Version 3/u)).toBeNull();
     expect(screen.queryByText(/Requires raw_audio/u)).toBeNull();
-  });
-
-  /**
-   * **A plan that would ask a model, in a project holding no judge.** The two
-   * halves are one answer and the fixture says both: the project reads
-   * `needs_setup`, and every item that judges by asking a model is frozen
-   * `unavailable_at_capture`, which is exactly what the server answers. A plan
-   * naming a configured judge on its items *and* `needs_setup` on the project is
-   * a shape no server produces, and a test built from one would prove a rule
-   * against a plan that cannot exist.
-   */
-  it("says a plan that would ask a model with no judge cannot start, and disables Start", async () => {
-    builder({
-      plan: {
-        status: 200,
-        body: planBody({
-          judge: { state: "needs_setup" },
-          tests: [
-            plannedTest({
-              graders: [
-                {
-                  kind: "authored",
-                  grader_id: "grd_seeded",
-                  grader_version_id: "grv_1",
-                  name: "expected_behaviors",
-                  library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
-                  required: true,
-                  scope: "simulations",
-                  judge: { tag: "unavailable_at_capture" },
-                },
-              ],
-            }),
-          ],
-        }),
-      },
-    });
-    render(<NewRunPage />);
-    await chooseEverything();
-
-    await screen.findByText(/no LLM judge configured/u);
-    await waitFor(() => {
-      expect(
-        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
-          .disabled,
-      ).toBe(true);
-    });
-  });
-
-  /**
-   * And the half the old rule got wrong. Every grader is a deletable running
-   * copy now, so a project may judge only by computation — nothing asks a model,
-   * nothing needs a key, and refusing the run would refuse it for a key it would
-   * never have spent.
-   */
-  it("offers Start with no judge when nothing in the plan asks a model", async () => {
-    builder({
-      plan: {
-        status: 200,
-        body: planBody({
-          judge: { state: "needs_setup" },
-          tests: [
-            plannedTest({
-              graders: [
-                {
-                  kind: "authored",
-                  grader_id: "grd_latency",
-                  grader_version_id: "grv_9",
-                  name: "Answers inside two seconds",
-                  library_id: "grl_01M01MH8KBE00TESCGQHVH0T8G",
-                  required: true,
-                  scope: "simulations",
-                  judge: { tag: "not_required" },
-                },
-              ],
-            }),
-          ],
-        }),
-      },
-    });
-    render(<NewRunPage />);
-    await chooseEverything();
-
-    expect(screen.queryByText(/no LLM judge configured/u)).toBeNull();
-    await waitFor(() => {
-      expect(
-        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
-          .disabled,
-      ).toBe(false);
-    });
   });
 
   /**
@@ -639,7 +535,6 @@ describe("the server-owned run plan", () => {
       plan: {
         status: 200,
         body: planBody({
-          judge: { state: "needs_setup" },
           tests: [plannedTest({ graders: [] })],
         }),
       },
@@ -717,7 +612,7 @@ describe("the server-owned run plan", () => {
 describe("starting", () => {
   it("shows the phone setup refusal and keeps every selected item", async () => {
     const phoneSetup =
-      "this Egma instance has not been set up to place phone calls, so nothing was dialed and nothing was charged. It is missing the text-to-speech provider. Whoever runs this platform makes it ready with one command in the platform workspace: egma self-host setup.";
+      "this Egma instance has not been set up to place phone calls, so nothing was dialed and nothing was charged. It is missing the carrier trunk. Whoever runs this platform makes it ready with one command in the platform workspace: egma self-host setup.";
     builder({
       started: {
         status: 409,

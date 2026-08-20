@@ -153,23 +153,23 @@ lets a reader tell the two apart on the day both are in that column.
 
 ## Judges
 
-A judge is the project's: **provider, model, and a key held in the encrypted
-credential store**, set once per project and overridable per grader (a grader
-version may name its own provider and model — never its own key, so no grader
-can move a project's judging onto an account nobody configured).
+A model-judged grader version owns its exact **provider and model**. The
+deployment owns one current key for each provider. A project chooses which
+grader copies run; it does not own or store a second model credential.
 
 v1 ships the OpenAI provider and nothing else, behind a provider-shaped seam: a
 second provider is a second file plus a line in one roster. Requests go to
 `https://api.openai.com/v1/chat/completions` — one POST, one JSON body, one JSON
 answer, no SDK.
 
-**The key is read once per conversation, handed to one `fetch`, and written
-nowhere.** It is not in a verdict row, not in a log line, not in a rationale, and
-not in what a refusal says. A verdict names the judge as `openai/<model>`, which
-is what "which judge said this" needs and all it needs.
+The service loads the current deployment credential bundle once for each
+claimed grading job. It resolves every selected grader model before any
+executor starts. A missing selected key therefore fails the job as one unit and
+writes no verdicts. It never becomes an agent failure.
 
-A project that configured no judge still runs every deterministic grader it has;
-its judged checks come back `errored` saying so, never quietly green.
+**The selected key is closed inside the provider adapter, handed to `fetch`, and
+written nowhere.** It is not in a grader, verdict row, log line, rationale, or
+refusal. Code graders need no model and no provider key.
 
 ## Configuration
 
@@ -179,7 +179,11 @@ Everything arrives as environment variables.
 | --- | --- | --- |
 | `DATABASE_URL` | (required) | Where conversations, graders and tests are read from. |
 | `CLICKHOUSE_URL` | (required) | Where verdicts are written. |
-| `EGMA_ENCRYPTION_KEY` | (unset) | What a project's judge key was sealed with. Only needed once a project configures a judge. |
+| `EGMA_PROVIDER_CREDENTIALS_SECRET_ID` | (unset) | AWS Secrets Manager secret holding the Egma Cloud provider bundle. Must be paired with `EGMA_PROVIDER_CREDENTIALS_REGION`. |
+| `EGMA_PROVIDER_CREDENTIALS_REGION` | (unset) | AWS region of that secret. Must be paired with `EGMA_PROVIDER_CREDENTIALS_SECRET_ID`. |
+| `EGMA_OPENAI_API_KEY` | (unset) | Self-host OpenAI key, used when the AWS source is not selected. |
+| `EGMA_DEEPGRAM_API_KEY` | (unset) | Self-host Deepgram key, used when the AWS source is not selected. |
+| `EGMA_CARTESIA_API_KEY` | (unset) | Self-host Cartesia key, used when the AWS source is not selected. |
 | `EGMA_GRADER_CLAIMANT` | `grader-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_GRADER_CAPACITY` | `4` | Most conversations judged at once. |
 | `EGMA_GRADER_HEARTBEAT_SECONDS` | `15` | How often a copy says it still holds a job. |
@@ -188,22 +192,16 @@ Everything arrives as environment variables.
 | `EGMA_GRADER_TRACE_IDLE_SECONDS` | `300` | How long a production conversation must be quiet before it is judged without ever having been closed. |
 | `EGMA_GRADER_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARN` or `ERROR`. |
 
-`EGMA_ENCRYPTION_KEY` is the same key the API seals with, and it is here because
-a judged grader replays the project's own judge key to the provider — the
-process making that call has to be able to open the envelope. What it can open
-is narrowed on the other side rather than by withholding the key: a judge key
-resolves only for a context built from a grading claim, and a connection's
-credentials sit behind a door asking for a permission the engine's context does
-not carry.
+Naming both AWS variables selects Secrets Manager. After a claimed job resolves
+its grader versions, the service reads the current secret once only if one of
+them calls a model. The next model job sees a rotated key without a service
+restart, while code-only grading does not depend on Secrets Manager. Naming
+neither selects the self-host environment keys. A half-named AWS source is
+refused at startup.
 
-It is optional, and its absence is an ordinary deployment: a project that
-configured no judge never opens an envelope. A project that did, on a grader
-given no key, gets `errored` verdicts saying the key could not be read — never a
-service that will not start, and never a silent pass.
-
-There is deliberately **no model key** here, and that one stays absent. A judge
-configured per container would be a judge no project chose, spending an account
-no project named. The judge belongs to the project.
+The database stores model choices, never model-provider keys. If the selected
+source lacks a key required by any grader in the job, the job is released for a
+later attempt before any executor or verdict write runs.
 
 ## How work reaches it
 
@@ -269,24 +267,20 @@ An entry that is on the shelf and has no executor yet answers `errored` rather
 than saying nothing, because a page that goes green because a grader quietly
 judged nothing is the exact false trust this product exists to kill.
 
-An executor that judges with a model asks for one through the `judging` it is
-handed.
-Every executor gets one, including the deterministic ones, and the deterministic
-ones simply never call it — resolving a judge is what unseals a project's key, so
-a conversation whose graders are all deterministic never opens the envelope
-however many of them were handed the seam.
+An executor that judges with a model receives one through the `judging` it is
+handed. A code executor receives `null` and never asks a provider.
 
 ```ts
-const resolved = await execution.judging.judge();
-if (resolved instanceof NoJudge) return errored(resolved.message);
-
-const judge = resolved.judging(execution.judging.model, execution.judging.makers);
+const judge = execution.judging.judge;
+if (judge === null) {
+  throw new Error("a model-judged grader reached execution without its judge");
+}
 const answer = await judge.ask({ criterion, evidence: judgeInputOf(conversation) });
 ```
 
-`judge` reads the project's configuration and unseals its key at most once per
-conversation, however many graders ask. `model` is this grader version's own
-`judge_model` — its override, or `null` for the project's default.
+Before any executor runs, the engine resolves every model-judged grader
+version's exact `judge_model` against the credential bundle loaded for this
+job. There is no project default and no provider fallback.
 
 What `judging(…)` answers with is one thing and no more: **`ask`**, a function
 that decides one criterion. The key is not on it, and that is the point:

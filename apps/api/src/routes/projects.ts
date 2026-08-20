@@ -13,7 +13,6 @@ import {
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
-import type { Config } from "../config.ts";
 import { cannotActIn } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
@@ -40,8 +39,8 @@ import {
  * `listProjects` is already scoped by it.
  *
  * **Creating one is the whole factory or nothing.** The data-access module
- * writes the project, its starter persona, the pointer that makes them the
- * default, and this deployment's judge where it has one, in one transaction —
+ * writes the project, its shared default-persona pointer, and its seeded grader
+ * in one transaction —
  * exactly what signup writes. A route that created a bare row would hand
  * somebody a project that refuses the first test written in it.
  *
@@ -53,15 +52,6 @@ import {
 export type ProjectRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
-  /**
-   * The judge this deployment was started with, if it was started with one.
-   *
-   * Handed to the create so that a project made from Settings is born gradable
-   * on the same terms as one made at signup. A deployment with none gives a new
-   * project the explicit `needs_setup` state instead, which the settings page
-   * says out loud rather than leaving somebody to discover on their first run.
-   */
-  readonly defaultJudge?: Config["defaultJudge"];
 };
 
 export const PROJECTS_PATH = "/api/projects";
@@ -180,9 +170,6 @@ export async function projectRoutes(
       name: text(body.name),
       ...(given(text(body.slug)) === undefined ? {} : { slug: text(body.slug) }),
       ...("description" in body ? { description: text(body.description) } : {}),
-      ...(options.defaultJudge === undefined
-        ? {}
-        : { defaultJudge: options.defaultJudge }),
     });
 
     return reply.code(201).send(described(created));

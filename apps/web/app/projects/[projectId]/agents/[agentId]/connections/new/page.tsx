@@ -469,7 +469,7 @@ function NewConnection({
                   >
                     {described.modalities.map((item) => (
                       <option key={item} value={item}>
-                        {item === "voice" ? "Voice" : "Text"}
+                        {item === "voice" ? "Voice" : "Chat"}
                       </option>
                     ))}
                   </Select>

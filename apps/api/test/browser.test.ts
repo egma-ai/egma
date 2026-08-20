@@ -71,7 +71,6 @@ const BROWSER_RETELL_NUMBER = "+14155550100";
 const BROWSER_PHONE_SETTINGS = {
   carrier_trunk_address: "browser-fixture.pstn.twilio.com",
   carrier_trunk_number: "+14155550101",
-  text_to_speech_provider: "openai",
 } as const;
 
 /** Retell's read-only setup surface, with no network outside the test. */
@@ -2708,15 +2707,13 @@ describe("the complete product, walked in order in a second project", () => {
         "#persona-description",
         "Somebody in a hurry, calling from a busy place.",
       );
-      // Who they are, which is the whole of a persona — never what they want,
-      // which is the test's. The voice is what the simulator brings them to
-      // life with, and the form asks for both because egma refuses a caller
-      // with no personality and no voice rather than inventing one.
+      // Who they are, never what they want, which belongs to the test. Human
+      // traits and the separate Models section are saved together in the same
+      // immutable persona version.
       await walk.fill(
         "#persona-personality",
         "Speaks quickly, interrupts, and wants the answer before the greeting is over.",
       );
-      await walk.fill("#persona-voice-id", "EXAVITQu4vr4xnSDxMaL");
       await walk.getByRole("button", { name: "Create persona" }).click();
 
       await walk.waitForURL(
@@ -3068,7 +3065,7 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "New persona",
         address: at("personas", "new"),
-        says: "Who calls, and how they behave",
+        says: "Who speaks with the agent, and how they behave",
       },
       {
         what: "one persona",
@@ -3123,11 +3120,6 @@ describe("the complete product, walked in order in a second project", () => {
         what: "Keys",
         address: at("settings", "keys"),
         says: "What a terminal or a script authenticates to Egma with",
-      },
-      {
-        what: "Judge",
-        address: at("settings", "judge"),
-        says: "The model that decides an LLM judgment in this project",
       },
       {
         what: "Organization",
@@ -4174,8 +4166,6 @@ describe("the complete product, walked in order in a second project", () => {
         await walk.keyboard.type("Deliberate Sam");
         await walk.locator("#persona-personality").focus();
         await walk.keyboard.type("Takes their time and repeats things back.");
-        await walk.locator("#persona-voice-id").focus();
-        await walk.keyboard.type("EXAVITQu4vr4xnSDxMaL");
         await walk.locator("#persona-name").focus();
         await walk.keyboard.press("Enter");
 

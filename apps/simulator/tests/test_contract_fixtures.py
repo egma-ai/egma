@@ -24,6 +24,7 @@ from egma_simulator.contract import (
     validate_report,
     validate_spec,
 )
+from egma_simulator.spec import SimulationSpec
 
 VALIDATORS = {"spec": spec_validator, "report": report_validator}
 VALIDATE = {"spec": validate_spec, "report": validate_report}
@@ -48,7 +49,14 @@ def read_json(path: Path) -> dict:
 # the property it names where the keyword names one. The same pins as the
 # TypeScript suite's EXPECTED_REJECTION, kept in its shape on purpose.
 EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
+    "spec/chat-carrying-speech-key.json": ("/models/stt", "not", None),
     "spec/limits-missing.json": ("", "required", "limits"),
+    "spec/model-provider-mismatch.json": (
+        "/models/stt/model",
+        "const",
+        None,
+    ),
+    "spec/models-missing.json": ("", "required", "models"),
     "spec/mock-tool-answering-two-ways.json": (
         "/mock_tools/0/answer",
         "additionalProperties",
@@ -56,15 +64,30 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
     ),
     "spec/modality-unknown.json": ("/modality", "enum", None),
     "spec/unknown-field.json": ("", "additionalProperties", "agent_id"),
-    # The platform's own settings are a closed list on both sides — the
-    # catalog the control plane stores them under, and the block this
-    # process reads. A field nobody writes is a setting nobody reads.
+    # Platform settings may carry the carrier only. Model and speech choices
+    # belong to the pinned persona version and are refused here.
     "spec/platform-setting-unknown.json": (
-        "/platform/model",
+        "/platform",
         "additionalProperties",
-        "base_url",
+        "model",
+    ),
+    "spec/phone-carrier-missing.json": ("", "required", "platform"),
+    "spec/persona-missing-language.json": (
+        "/persona/traits",
+        "required",
+        "language",
+    ),
+    "spec/persona-technical-voice.json": (
+        "/persona/traits",
+        "additionalProperties",
+        "voice",
     ),
     "spec/wrong-contract-version.json": ("/contract_version", "const", None),
+    "spec/voice-missing-stt-key.json": (
+        "/models/stt",
+        "required",
+        "key",
+    ),
     "report/completed-claiming-never-ran.json": (
         "/events/0/facts/ending",
         "enum",
@@ -99,16 +122,28 @@ def place_of(error: ValidationError) -> str:
     return "".join(f"/{part}" for part in error.absolute_path)
 
 
-def test_both_schemas_compile_and_pin_the_same_contract_version():
-    for direction, validator in VALIDATORS.items():
-        compiled = validator()
-        assert compiled.schema["properties"]["contract_version"]["const"] == 1, (
-            direction
-        )
-    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v1"
-    assert (
-        report_validator().schema["$id"] == "urn:egma:simulation-contract:report:v1"
+def test_each_schema_compiles_and_pins_its_contract_version():
+    assert spec_validator().schema["properties"]["contract_version"]["const"] == 2
+    assert report_validator().schema["properties"]["contract_version"]["const"] == 1
+    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v2"
+    assert report_validator().schema["$id"] == "urn:egma:simulation-contract:report:v1"
+
+
+def test_phone_connection_stays_phone_while_models_select_voice_legs():
+    document = read_json(
+        contract_dir()
+        / "fixtures"
+        / "spec"
+        / "valid"
+        / "voice-phone-platform-configured.json"
     )
+
+    spec = SimulationSpec.from_document(document)
+
+    assert spec.connection_type == "phone"
+    assert spec.models.stt.provider == "deepgram"
+    assert spec.models.tts.provider == "cartesia"
+    assert spec.models.tts.voice_id == "brisk-tenor-7"
 
 
 @pytest.mark.parametrize("direction", ["spec", "report"])
@@ -135,9 +170,7 @@ def test_every_invalid_fixture_is_rejected_at_the_place_it_is_wrong(direction: s
     for name, document in fixtures:
         place, keyword, named_property = EXPECTED_REJECTION[f"{direction}/{name}"]
 
-        errors = flattened(
-            list(VALIDATORS[direction]().iter_errors(document))
-        )
+        errors = flattened(list(VALIDATORS[direction]().iter_errors(document)))
         assert errors, f"{name} was accepted"
 
         decisive = [
@@ -217,6 +250,9 @@ def test_the_golden_fixtures_cover_what_the_simulator_must_speak():
     # carries the lifecycle and nothing else, because a conversation's record
     # is the spans it arrived as.
     assert {event["kind"] for event in events} == {"status"}
-    assert {
-        event["status"] for event in events if event["kind"] == "status"
-    } == {"running", "completed", "failed", "canceled"}
+    assert {event["status"] for event in events if event["kind"] == "status"} == {
+        "running",
+        "completed",
+        "failed",
+        "canceled",
+    }

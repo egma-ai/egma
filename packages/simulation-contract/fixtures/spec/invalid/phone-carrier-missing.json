@@ -1,0 +1,43 @@
+{
+  "contract_version": 2,
+  "simulation_id": "sim_fixture_phone_carrier_missing",
+  "modality": "voice",
+  "connection": {
+    "type": "phone",
+    "config": {
+      "phoneNumber": "+15551234567"
+    },
+    "credentials": null
+  },
+  "persona": {
+    "traits": {
+      "personality": "Dev, 34, calling from a train platform. In a hurry, talks over slow answers, background noise comes and goes.", "language": "en-US"
+    }
+  },
+  "scenario": {
+    "instructions": "Your card was charged twice for the same order this morning. You want the duplicate charge reversed and a confirmation number before you hang up. If asked to stay on hold for more than a moment, push back once, then accept."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 40
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3-general",
+      "key": "fixture-not-a-real-secret-stt"
+    },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "voice_id": "brisk-tenor-7",
+      "speed": 1.15,
+      "key": "fixture-not-a-real-secret-tts"
+    }
+  }
+}

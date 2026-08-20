@@ -3,7 +3,7 @@ import {
   PREDEFINED_GRADERS,
   type AuthContext,
   type Grader,
-  type LibraryEntry,
+  type GraderDefinitionSnapshot,
   type MeasuredFromSpans,
 } from "@egma/db";
 import {
@@ -41,25 +41,21 @@ const auth: AuthContext = {
   via: "session",
 };
 
-/** The entry as it is read through the copy's pointer — off the catalog itself. */
-function theLatencyEntry(): LibraryEntry {
+/** The immutable definition revision the test's grader version executes. */
+function theLatencyEntry(): GraderDefinitionSnapshot {
   const entry = GRADER_LIBRARY_CATALOG.find(
     (candidate) => candidate.id === PREDEFINED_GRADERS.latency,
   );
   if (entry === undefined) throw new Error("no latency entry in the catalog");
   return {
-    id: entry.id,
-    name: entry.name,
-    description: entry.description,
+    libraryId: entry.id,
+    libraryVersion: 1,
     type: entry.type,
-    owner: "egma",
-    projectId: null,
-    version: 1,
     prompt: entry.prompt,
     params: entry.params,
     outputDefinition: entry.outputDefinition,
-    createdAt: entry.createdAt,
-    updatedAt: entry.createdAt,
+    sourceCode: null,
+    sourceCodeLanguage: null,
   };
 }
 
@@ -268,14 +264,12 @@ describe("several config entries", () => {
    * One row each, keyed by **the measure it bounds** — never by its position,
    * and never by the bound.
    *
-   * Not the position, because a copy's config is not pinned by a run: an edit
-   * that removes an entry makes the next one first, and the key would then name
-   * a different measure than it did before while the fold, which ignores the
-   * grader version, silently let the new row replace the old one.
+   * Not the position, because an edit can remove an entry and make the next one
+   * first. Across grader-version history, that key would then name a different
+   * measure while the fold treats it as the same assertion.
    *
-   * Not the bound, because the fold prefers the latest grading of a key and a
-   * re-grade at a **tightened** bound must write over the row it supersedes
-   * rather than beside it.
+   * Not the bound, because a production re-grade can use a newer version with a
+   * tightened bound. The fold must still count that as the same assertion.
    *
    * The measure is what survives both.
    */

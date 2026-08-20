@@ -1,13 +1,9 @@
 import { newId } from "@egma/ids";
-import { eq } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
-import { judgeConfiguration } from "../schema/graders.ts";
-import { persona, personaVersion } from "../schema/personas.ts";
+import { EGMA_PROVIDED_PERSONAS } from "../persona-library/catalog.ts";
 import { organization, project } from "../schema/tenancy.ts";
-import { platformJudgeRow } from "./judges.ts";
 import { insertSeededGrader } from "./seeded-graders.ts";
-import type { PersonaTraits } from "./personas.ts";
 import type { Membership } from "./memberships.ts";
 import { insertMembership } from "./memberships.ts";
 
@@ -18,92 +14,24 @@ import { insertMembership } from "./memberships.ts";
  * and the only rows it can touch are the ones it just made.
  *
  * Signup either fully succeeds or fully fails. An account with an organization
- * but no project is a developer with no way forward, a project with no persona
- * in it is a first test waiting on one, and a project with no grader in it is a
- * first run nobody judges — so the organization, its first project, that
- * project's starter persona, its copy of egma's expected-behaviors grader and
- * the owner's membership are one transaction.
+ * but no project is a developer with no way forward, a project with no default
+ * persona is a first test waiting on one, and a project with no grader is a
+ * first run nobody judges. The organization, its first project, the pointer to
+ * Egma's shared default persona, its expected-behaviors grader and the owner's
+ * membership are therefore one transaction.
  */
-
-/**
- * Who the starter persona is.
- *
- * **This is a placeholder, and it is waiting to be replaced.** Which
- * personality a new project should meet, and which voice should say it, is a
- * product decision that has not been made yet; what is below is deliberately
- * plain, so that it says nothing about any industry, accent or manner while
- * still being a persona the factory would accept.
- */
-const STARTER_NAME = "Starter";
-const STARTER_DESCRIPTION =
-  "The persona a test gets when it names none. Rename them, rewrite them, or point the project at somebody else.";
-const STARTER_TRAITS: PersonaTraits = {
-  personality: "Speaks plainly, stays patient, and asks one question at a time.",
-  language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
-};
-
-/**
- * The starter persona, written into a project that exists but has nobody
- * in it yet.
- *
- * These are the same two inserts `createPersona` makes, in the same order
- * and the same shape: the identity row first, naming a version that does not
- * exist yet, because that pointer's constraint is deferred and Postgres checks
- * it at commit. They are made here rather than by calling that function,
- * because it opens a transaction of its own and takes an `AuthContext` — and
- * at this moment there is neither.
- *
- * The two write shapes are held together by a test rather than the compiler:
- * `provisioning-starter-persona.test.ts` compares these rows against ones
- * `createPersona` wrote, and fails on a column only one of them fills.
- */
-async function insertStarterPersona(
-  on: Queryable,
-  values: {
-    readonly organizationId: string;
-    readonly projectId: string;
-    readonly createdBy: string | null;
-  },
-): Promise<string> {
-  const id = newId("prs");
-  const versionId = newId("prsv");
-
-  await on.insert(persona).values({
-    id,
-    organizationId: values.organizationId,
-    projectId: values.projectId,
-    name: STARTER_NAME,
-    description: STARTER_DESCRIPTION,
-    currentVersionId: versionId,
-    createdBy: values.createdBy,
-  });
-
-  await on.insert(personaVersion).values({
-    id: versionId,
-    personaId: id,
-    version: 1,
-    traits: STARTER_TRAITS,
-    createdBy: values.createdBy,
-  });
-
-  return id;
-}
 
 /**
  * Everything a project needs to be a *usable* project, written in one
- * transaction: the row itself, the starter persona, the pointer that makes that
- * persona the project's default, and whatever judge state the deployment can
- * give it.
+ * transaction: the row itself, the pointer to Egma's shared default persona,
+ * and its seeded expected-behaviors grader. It creates no local
+ * copy of that persona; a customer fork is a separate, explicit authoring
+ * action.
  *
  * **One factory, two callers, and that is the whole reason it is a function.**
- * Signup provisions the first project and an admin creates every one after it,
- * and the two used to be different code — which is how a project created from
- * Settings came to have no starter persona and no judge while a project created
- * at signup had both. A project half-built is not a smaller project; it is one
- * that refuses the first test somebody writes in it and returns errored
- * verdicts on the first run, both for reasons nobody could see from the page
- * they were on.
+ * Signup provisions the first project and an admin creates every one after it.
+ * Both paths create the same complete project. There is no smaller project
+ * shape without an active default persona or its seeded grader.
  *
  * It takes the transaction rather than opening one, because both callers have
  * other rows to write in the same breath — an organization and a membership for
@@ -119,18 +47,6 @@ export type NewProjectRow = {
   readonly revision: string;
   /** Nullable, because a project can be created by nobody — a seeded one. */
   readonly createdBy: string | null;
-  /**
-   * The judge this deployment gives a project that has configured none, when it
-   * has one at all.
-   *
-   * **Absent is a state and not a gap.** A project born without one is in
-   * `needs_setup`: it can still run every deterministic grader it has, and it
-   * cannot ask a model anything until an admin points it at a credential. That
-   * is what the settings page says out loud, and it is honest — where a project
-   * silently born unjudged would look configured and produce errored verdicts
-   * after real calls had been paid for.
-   */
-  readonly defaultJudge?: NewPlatformJudge | undefined;
 };
 
 export async function insertProject(
@@ -144,25 +60,9 @@ export async function insertProject(
     slug: input.slug,
     description: input.description,
     revision: input.revision,
+    defaultPersonaId: EGMA_PROVIDED_PERSONAS.defaultPersona,
     createdBy: input.createdBy,
   });
-
-  // The project's first persona, and the project pointed at them, so a
-  // developer's first test never waits on authoring one. In this transaction
-  // like everything else, on the same terms the project itself is: a project
-  // pointing at nobody would refuse the first test written in it.
-  const starterId = await insertStarterPersona(on, {
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    createdBy: input.createdBy,
-  });
-
-  // Its own statement because the project has to exist before a persona
-  // can name it, and this reference back is not the deferred one.
-  await on
-    .update(project)
-    .set({ defaultPersonaId: starterId })
-    .where(eq(project.id, input.projectId));
 
   // The project's mandatory grading, in the same transaction as everything
   // else: an active, required copy of egma's `expected_behaviors` grader,
@@ -177,27 +77,6 @@ export async function insertProject(
     createdBy: input.createdBy ?? null,
   });
 
-  // The platform's own judge, where it has one, in the same transaction as
-  // everything else this project needs to be usable. `onConflictDoNothing` for
-  // the same reason the backfill has it: a project that has a judge has chosen
-  // it, and nothing here may spend from a different account than the one
-  // somebody picked.
-  if (input.defaultJudge !== undefined) {
-    await on
-      .insert(judgeConfiguration)
-      .values(
-        platformJudgeRow({
-          projectId: input.projectId,
-          organizationId: input.organizationId,
-          createdBy: input.createdBy,
-          provider: input.defaultJudge.provider,
-          model: input.defaultJudge.model,
-          key: input.defaultJudge.key,
-          now: new Date(),
-        }),
-      )
-      .onConflictDoNothing({ target: judgeConfiguration.projectId });
-  }
 }
 
 export type NewOrganization = {
@@ -207,28 +86,6 @@ export type NewOrganization = {
   readonly organizationSlug: string;
   readonly projectName: string;
   readonly projectSlug: string;
-  /**
-   * The judge this deployment gives a project that has configured none, if it
-   * has one. Applied here, in the transaction that creates the project, so a
-   * project is *born* gradable.
-   *
-   * It used to be applied only by a backfill at API startup, and the gap that
-   * left is exactly the shape of the ordinary first run: start a platform with
-   * no projects, then sign up — which creates the first project while the API
-   * is already running. That project had no judge until somebody restarted the
-   * API, and until then every model-based verdict came back `errored`. Nobody
-   * would have read that as "the platform is missing configuration", because a
-   * grading failure is an operational failure rather than anything the agent
-   * under test did.
-   */
-  readonly defaultJudge?: NewPlatformJudge | undefined;
-};
-
-/** A judge a deployment hands to projects that have configured none. */
-export type NewPlatformJudge = {
-  readonly provider: string;
-  readonly model: string;
-  readonly key: string;
 };
 
 export type ProvisionedOrganization = {
@@ -251,8 +108,8 @@ export async function provisionOrganization(
     });
 
     // The one project factory, on the same terms an admin's Settings create
-    // gets: the row, the starter persona, the pointer at them, and whatever
-    // judge this deployment can give. Signing up and creating a second project
+    // gets: the row, the shared default persona pointer, and seeded grader.
+    // Signing up and creating a second project
     // are the same act performed by different people, so they are the same
     // write.
     await insertProject(tx, {
@@ -263,9 +120,6 @@ export async function provisionOrganization(
       description: null,
       revision: newId("rev"),
       createdBy: input.ownerUserId,
-      ...(input.defaultJudge === undefined
-        ? {}
-        : { defaultJudge: input.defaultJudge }),
     });
 
     // Everyone is an admin in v1 and roles are invisible, but the permission

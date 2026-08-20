@@ -9,7 +9,6 @@ import {
   COLUMNS,
   LIBRARY,
   NOTHING,
-  OWNERS,
   TYPES,
   USE,
 } from "../../../../lib/grader-library-copy.ts";
@@ -21,7 +20,10 @@ import {
   type LibraryPage,
 } from "../../../../lib/graders.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
-import { graderDisplayName } from "../../../../lib/presentation.ts";
+import {
+  graderDisplayName,
+  ownerDisplayName,
+} from "../../../../lib/presentation.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
@@ -83,10 +85,6 @@ function typeOf(entry: LibraryEntry): string {
   return TYPES[entry.type] ?? entry.type;
 }
 
-function ownerOf(entry: LibraryEntry): string {
-  return OWNERS[entry.owner] ?? entry.owner;
-}
-
 /**
  * The columns, in the order they are shown, each beside what fills it.
  *
@@ -122,7 +120,7 @@ function columnsFor(
       header: COLUMNS.owner,
       hideOnMobile: true,
       width: "120px",
-      cell: ownerOf,
+      cell: (entry) => ownerDisplayName(entry.owner),
     },
     {
       key: "description",

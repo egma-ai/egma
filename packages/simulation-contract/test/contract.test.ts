@@ -66,7 +66,7 @@ async function fixturesUnder(
 const ajv = new Ajv2020({ strict: true, allErrors: true });
 addFormats(ajv);
 
-const specSchema = await readJson("schemas", "simulation-spec.v1.schema.json");
+const specSchema = await readJson("schemas", "simulation-spec.v2.schema.json");
 const reportSchema = await readJson(
   "schemas",
   "simulation-report.v1.schema.json",
@@ -97,12 +97,29 @@ type Rejection = {
 };
 
 const EXPECTED_REJECTION: Record<string, Rejection> = {
+  "spec/chat-carrying-speech-key.json": {
+    at: "/models/stt",
+    keyword: "not",
+  },
   "spec/limits-missing.json": {
     at: "",
     keyword: "required",
     property: "limits",
   },
   "spec/modality-unknown.json": { at: "/modality", keyword: "enum" },
+  // A model id belongs to the provider that owns it. This is the production
+  // failure shape: a field-by-field merge made a Deepgram provider and an
+  // OpenAI realtime model look configured until the first request. The
+  // contract refuses the pair before a simulator can claim it.
+  "spec/model-provider-mismatch.json": {
+    at: "/models/stt/model",
+    keyword: "const",
+  },
+  "spec/models-missing.json": {
+    at: "",
+    keyword: "required",
+    property: "models",
+  },
   // An answer is a value *or* a failure, and the tagged shape is what keeps
   // an authored `null` tellable from no answer at all. One that claims both
   // is refused inside the branch that would have taken the value: the
@@ -118,19 +135,36 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     keyword: "additionalProperties",
     property: "agent_id",
   },
-  // The platform's own settings are a closed list on both sides — the catalog
-  // the control plane stores them under, and the block the simulator reads. A
-  // field nobody writes is a setting nobody reads, and a spec carrying one has
-  // a deployment believing something is configured that is not, so it is
-  // refused rather than carried and dropped.
+  // Platform settings may carry the carrier only. Model and speech choices
+  // belong to the pinned persona version and are refused here.
   "spec/platform-setting-unknown.json": {
-    at: "/platform/model",
+    at: "/platform",
     keyword: "additionalProperties",
-    property: "base_url",
+    property: "model",
+  },
+  "spec/phone-carrier-missing.json": {
+    at: "",
+    keyword: "required",
+    property: "platform",
+  },
+  "spec/persona-missing-language.json": {
+    at: "/persona/traits",
+    keyword: "required",
+    property: "language",
+  },
+  "spec/persona-technical-voice.json": {
+    at: "/persona/traits",
+    keyword: "additionalProperties",
+    property: "voice",
   },
   "spec/wrong-contract-version.json": {
     at: "/contract_version",
     keyword: "const",
+  },
+  "spec/voice-missing-stt-key.json": {
+    at: "/models/stt",
+    keyword: "required",
+    property: "key",
   },
   "report/completed-claiming-never-ran.json": {
     at: "/events/0/facts/ending",
@@ -184,13 +218,127 @@ describe("the two schemas, as one contract", () => {
         (schema.properties as Record<string, Record<string, unknown>>)
           .contract_version as Record<string, unknown>
       ).const;
-    expect(versionOf(specSchema)).toBe(1);
+    expect(versionOf(specSchema)).toBe(2);
     expect(versionOf(reportSchema)).toBe(1);
   });
 
   it("each carry an identity a $ref or an error message can name", () => {
-    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v1");
+    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v2");
     expect(reportSchema.$id).toBe("urn:egma:simulation-contract:report:v1");
+  });
+
+  it("accepts only the shared speaking-speed range", async () => {
+    const base = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-loopback.json",
+    );
+    const withSpeed = (speed: number): Record<string, unknown> => {
+      const spec = structuredClone(base);
+      const models = spec.models as Record<string, Record<string, unknown>>;
+      const tts = models.tts;
+      if (tts === undefined) throw new Error("the valid fixture has no TTS selection");
+      tts.speed = speed;
+      return spec;
+    };
+
+    const tts = (
+      specSchema.$defs as Record<
+        string,
+        { properties: { speed: { minimum: number; maximum: number } } }
+      >
+    ).tts_selection;
+    if (tts === undefined) throw new Error("the contract has no TTS selection");
+    const { minimum, maximum } = tts.properties.speed;
+
+    for (const speed of [minimum, maximum]) {
+      const spec = withSpeed(speed);
+      expect(
+        validators.spec(spec),
+        `${speed}: ${ajv.errorsText(validators.spec.errors)}`,
+      ).toBe(true);
+    }
+
+    for (const [speed, keyword] of [
+      [minimum - 0.0001, "minimum"],
+      [maximum + 0.0001, "maximum"],
+    ] as const) {
+      expect(validators.spec(withSpeed(speed))).toBe(false);
+      expect(validators.spec.errors).toContainEqual(
+        expect.objectContaining({
+          instancePath: "/models/tts/speed",
+          keyword,
+        }),
+      );
+    }
+  });
+
+  it("accepts only complete carrier routes", async () => {
+    const base = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-phone-platform-configured.json",
+    );
+    const without = (...names: string[]): Record<string, unknown> => {
+      const spec = structuredClone(base);
+      const platform = spec.platform as Record<string, unknown>;
+      const carrier = platform.carrier as Record<string, unknown>;
+      for (const name of names) delete carrier[name];
+      return spec;
+    };
+
+    // The fixture proves the four-value credential-authenticated route. The
+    // two-value shape is the complete source-IP-authenticated route.
+    expect(validators.spec(base), ajv.errorsText(validators.spec.errors)).toBe(
+      true,
+    );
+    const sourceIpRoute = without("trunk_username", "trunk_password");
+    expect(
+      validators.spec(sourceIpRoute),
+      ajv.errorsText(validators.spec.errors),
+    ).toBe(true);
+
+    const phoneWithoutCarrier = structuredClone(base);
+    delete phoneWithoutCarrier.platform;
+    expect(validators.spec(phoneWithoutCarrier)).toBe(false);
+    expect(validators.spec.errors).toContainEqual(
+      expect.objectContaining({
+        instancePath: "",
+        keyword: "required",
+        params: { missingProperty: "platform" },
+      }),
+    );
+
+    const nonPhoneWithCarrier = structuredClone(base);
+    const connection = nonPhoneWithCarrier.connection as Record<
+      string,
+      unknown
+    >;
+    connection.type = "retell";
+    expect(validators.spec(nonPhoneWithCarrier)).toBe(false);
+    expect(validators.spec.errors).toContainEqual(
+      expect.objectContaining({
+        instancePath: "",
+        keyword: "not",
+      }),
+    );
+
+    for (const [missing, keyword] of [
+      [["trunk_address"], "required"],
+      [["trunk_number"], "required"],
+      [["trunk_username"], "dependentRequired"],
+      [["trunk_password"], "dependentRequired"],
+    ] as const) {
+      expect(validators.spec(without(...missing))).toBe(false);
+      expect(validators.spec.errors).toContainEqual(
+        expect.objectContaining({
+          instancePath: "/platform/carrier",
+          keyword,
+        }),
+      );
+    }
   });
 
   /**

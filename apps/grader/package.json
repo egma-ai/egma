@@ -11,6 +11,7 @@
   "dependencies": {
     "@egma/db": "workspace:*",
     "@egma/ids": "workspace:*",
+    "@egma/provider-credentials": "workspace:*",
     "@egma/simulation-contract": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/instrumentation": "^0.221.0",

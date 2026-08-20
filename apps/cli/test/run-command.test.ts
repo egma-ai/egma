@@ -6,10 +6,11 @@
  * asserted is what something driving this can act on — the lines it prints, in
  * the order it prints them, and the number it exits with.
  *
- * The lifecycle is scripted rather than waited for. A real run is a simulator
- * dialing a real voice agent; here a control says "this one is running now,
- * this one passed, this one errored", which is what lets a check assert on an
- * exact sequence instead of on whatever a machine happened to produce.
+ * The lifecycle is scripted rather than waited for. A real run has the
+ * simulator conduct a simulation against an agent over the selected
+ * connection; here a control says "this one is running now, this one passed,
+ * this one errored", which lets a check assert on an exact sequence instead of
+ * on whatever a machine happened to produce.
  */
 
 import { execFile } from "node:child_process";
@@ -68,11 +69,11 @@ afterEach(async () => {
 type Registered = { readonly agentId: string; readonly connectionId: string };
 
 /**
- * A voice agent and a way to reach it, registered through the public API — the
+ * An agent and a way to reach it, registered through the public API — the
  * same request `egma connect` makes, so the ids a run names are ids the
  * platform really issued.
  */
-async function register(type = "retell"): Promise<Registered> {
+async function register(type: "retell" | "phone" = "retell"): Promise<Registered> {
   const response = await fetch(`${platform.url}/api/agents`, {
     method: "POST",
     headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
@@ -80,7 +81,7 @@ async function register(type = "retell"): Promise<Registered> {
       name: "order-line",
       connection: {
         type,
-        modality: "voice",
+        modality: type === "retell" ? "chat" : "voice",
         ...(type === "retell"
           ? {
               config: { retellAgentId: "agent_0001" },
@@ -796,7 +797,7 @@ describe("the cursor a follower resumes from", () => {
     agentId: "agt_01",
     connectionId: "con_01",
     connectionType: "retell",
-    modality: "voice",
+    modality: "chat",
     testVersionIds: ["tstv_1", "tstv_2"],
     expectedSimulationCount: 2,
     resultsUrl: "https://app.egma.example/runs/run_01",

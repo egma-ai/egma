@@ -214,9 +214,8 @@ describe("a browser working in a project that is not the first", () => {
 
     // Made the way the New project page makes one, rather than by calling the
     // factory: what that page creates is the whole thing — the project, the
-    // persona a first test gets when it names none, and this deployment's
-    // judge. A project short of any of them is a project no run can start in,
-    // which is a state a browser never reaches.
+    // default persona a first test gets when it names none, and the seeded
+    // grader copy. A project made through this door is ready for its first run.
     const made = await api.app.inject({
       method: "POST",
       url: "/api/projects",
@@ -548,12 +547,12 @@ describe("a browser working in a project that is not the first", () => {
    * *and* the first project is still empty — because a door that ignored the
    * address would answer exactly the same status code.
    */
-  it("authors a test, a grader, a judge and a run in the project its address names", async () => {
+  it("authors a test, a grader and a run in the project its address names", async () => {
     const { ada, outbound } = await twoProjects("browser_writes_by_address");
     const inOutbound = { cookie: ada.cookie };
 
     const asBrowser = (
-      method: "POST" | "PATCH" | "PUT" | "GET",
+      method: "POST" | "PATCH" | "GET",
       url: string,
       payload?: Record<string, unknown>,
     ) =>
@@ -614,14 +613,6 @@ describe("a browser working in a project that is not the first", () => {
     );
     expect(retuned.statusCode, retuned.body).toBe(200);
 
-    /* PUT /api/judge */
-    const judged = await asBrowser("PUT", `/api/judge?project=${outbound}`, {
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: "platform",
-    });
-    expect(judged.statusCode, judged.body).toBe(200);
-
     /* POST /api/runs */
     const started = await asBrowser("POST", `/api/runs?project=${outbound}`, {
       connection: connectionId,
@@ -674,11 +665,6 @@ describe("a browser working in a project that is not the first", () => {
       ),
     ).toEqual(["expected_behaviors"]);
 
-    // The judge is the project's, and the first project's is untouched.
-    const outboundJudge = await asBrowser("GET", `/api/judge?project=${outbound}`);
-    expect((outboundJudge.json() as { model: string }).model).toBe(
-      "gpt-4.1-mini",
-    );
   });
 
   /**
@@ -785,7 +771,7 @@ describe("a key for the whole organization, where the organization holds two pro
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     // Through the product's own door, so the second project is the whole thing
-    // — persona, judge and all — rather than a bare row no run could start in.
+    // — default persona and seeded grader included — rather than a bare row.
     const made = await api.app.inject({
       method: "POST",
       url: "/api/projects",

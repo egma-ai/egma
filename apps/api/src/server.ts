@@ -21,7 +21,6 @@ import { graderLibraryRoutes } from "./routes/grader-library.ts";
 import { graderRoutes } from "./routes/graders.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
-import { judgeRoutes } from "./routes/judge.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { organizationRoutes } from "./routes/organization.ts";
@@ -171,30 +170,10 @@ export function buildApi(options: ServerOptions): Api {
     },
     hooks: {
       admitIdentity: admitIdentity(config.singleOrganization),
-      // **The platform's own judge goes to every project this deployment
-      // creates**, whichever organization it belongs to. A deployment that
-      // names a default judge is offering a working grader, and the offer is
-      // the whole point: a new project's first simulation is graded before
-      // anybody has configured anything. Withhold it and a new customer's
-      // first run comes back ungraded — `errored` verdicts naming a missing
-      // judge, after real calls have been paid for.
-      //
-      // **Said out loud, because it was weighed rather than missed.** On a
-      // deployment serving several organizations, that judge is the *operator's*
-      // own model credential, so every organization's new projects grade on the
-      // operator's account. That is what a hosted platform offering grading
-      // means, and an operator who does not want to pay for it names no default
-      // judge at all — then every project is ungraded until it configures its
-      // own, which is the honest failure rather than a quiet invoice.
-      //
-      // Two things keep this safe and neither is this wiring's to give up. A
-      // project that has chosen a judge is never overwritten —
-      // `onConflictDoNothing` in the transaction that creates a project and
-      // again in the boot backfill. And that backfill has always seeded every
-      // unconfigured project across every organization, so gating this path
-      // alone never withheld the operator's key; it only delayed it to the next
-      // restart, which is the exact gap this hook exists to close.
-      onIdentityCreated: onIdentityCreated(config.defaultJudge),
+      // A project's immutable grader versions now name their own models. The
+      // provider key is resolved only when grading work starts, so signup must
+      // not copy a deployment credential into the new project's Postgres rows.
+      onIdentityCreated: onIdentityCreated(),
     },
   });
 
@@ -335,12 +314,6 @@ export function buildApi(options: ServerOptions): Api {
   void app.register(projectRoutes, {
     provider: identity.provider,
     rateLimit,
-    // A project made from Settings is born on the same terms as the one signup
-    // makes: with this deployment's judge where there is one, and in the
-    // explicit `needs_setup` state where there is not.
-    ...(config.defaultJudge === undefined
-      ? {}
-      : { defaultJudge: config.defaultJudge }),
   });
 
   // What this deployment has been configured with, as an owner reads and
@@ -353,11 +326,10 @@ export function buildApi(options: ServerOptions): Api {
   void app.register(platformSettingsRoutes, {
     provider: identity.provider,
     rateLimit,
-    // The same flag the platform's own judge is gated on a few lines above, and
-    // for the same reason: what a deployment holds for itself is an owner's to
-    // read and to change only while that owner is the whole deployment. On one
-    // serving several customers these settings belong to none of them, and the
-    // question of whose they are is not answered yet.
+    // What a deployment holds for itself is an owner's to read and change only
+    // while that owner is the whole deployment. On one serving several
+    // customers the carrier route belongs to none of them, and the question of
+    // whose it is is not answered yet.
     singleOrganization: config.singleOrganization,
   });
 
@@ -396,23 +368,6 @@ export function buildApi(options: ServerOptions): Api {
   // this project already answers for among them — never reach another group's
   // error handler.
   void app.register(mockToolRoutes, { provider: identity.provider, rateLimit });
-
-  // Which model judges here, and which of the organization's keys it is asked
-  // with. Its own scope for the reason above, and separate from the grader
-  // group because the two answer to different roles: authoring a grader is a
-  // member's act, and committing the organization's account to a provider is an
-  // admin's.
-  void app.register(judgeRoutes, {
-    provider: identity.provider,
-    rateLimit,
-    // The same judge the seeding path gives a project that has configured none.
-    // It is handed here so that a project which moved to a key of its own can
-    // move back: the deployment's judge lives in this process's configuration,
-    // and nowhere a project could have thrown away.
-    ...(config.defaultJudge === undefined
-      ? {}
-      : { defaultJudge: config.defaultJudge }),
-  });
 
   // What a terminal starts and then watches: a run over one connection,
   // pinning exact versions, and the numbered feed a follower resumes from.
@@ -454,6 +409,7 @@ export function buildApi(options: ServerOptions): Api {
   // run can never eat a customer's request budget from the inside.
   void app.register(claimRoutes, {
     serviceToken: config.simulatorServiceToken,
+    providerCredentials: config.providerCredentials,
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),
