@@ -18,7 +18,7 @@ Voice agents are hard to test with unit tests alone. The behavior that matters e
 
 Egma is organized around three internal services that you never configure directly, but that are worth understanding at a high level.
 
-**The simulator** conducts conversations. It claims test work from the control plane, picks up the persona and scenario for each test, and holds a real exchange with your agent — over text, over a LiveKit room, or over the telephone network through a SIP trunk. It streams every turn, tool call, and timing as OpenTelemetry spans to Egma's own ingest, so simulated and production conversations land in the same store and are read by the same tools.
+**The simulator** conducts conversations. It claims test work from the control plane, picks up the persona and scenario for each test, and holds a real exchange with your agent — through a Retell Chat connection, a LiveKit room, or a Phone connection over a SIP trunk. It streams every turn, tool call, and timing as OpenTelemetry spans to Egma's own ingest, so simulated and production conversations land in the same store and are read by the same tools.
 
 **The grader** judges conversations. The moment a simulation finishes — or the moment a production call's telemetry goes quiet — the grader claims it, reads the transcript, resolves the graders that apply to it, and writes one verdict row per expected behavior. It runs on its own and scales horizontally — more throughput is simply more copies running in parallel, with nothing in front of them.
 
@@ -28,7 +28,11 @@ Egma is organized around three internal services that you never configure direct
 
 Egma works with the two most common voice agent platforms today.
 
-**Retell** is an agent platform with two simulation paths. A Retell chat agent uses the Retell Chat API. A Retell voice agent uses a public phone number. Production Monitoring is separate: enter one Retell API key on the Monitoring setup page and select the voice agents whose completed conversations Egma should poll.
+**Retell** is an agent platform with two simulation paths. `egma connect` reads
+the selected agent's modality. A chat agent uses the Retell Chat API. A voice
+agent uses a public phone number. Production Monitoring is separate: enter one
+Retell API key on the Monitoring setup page and select the voice agents whose
+completed conversations Egma should poll.
 
 **LiveKit Agents** can use a LiveKit room or a public phone number for simulations. A room connection can use project credentials or a customer token endpoint. Production Monitoring is separate again: call `monitor_livekit(ctx)` in the Python agent before `AgentSession.start`, whether the agent is customer-hosted or hosted in LiveKit Cloud.
 

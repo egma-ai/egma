@@ -13,9 +13,9 @@ import styles from "./settings-nav.module.css";
  *
  * The project selector stays on screen throughout Settings, because somebody
  * has to be able to see where they are and to leave. That is also the trap: a
- * flat list of five links under a visible project control reads as five
- * settings *of that project*, and four of them are not. Members, invitations,
- * retention and API keys are the organization's, and an admin who changed one
+ * flat list under a visible project control reads as settings *of that
+ * project*, but organization details, people and API keys are organization
+ * settings. An admin who changed one
  * believing it applied to Outbound only would be wrong in a way no page told
  * them about.
  *
@@ -32,7 +32,6 @@ import styles from "./settings-nav.module.css";
 
 export type SettingsSection =
   | "project"
-  | "judge"
   | "organization"
   | "people"
   | "keys";
@@ -46,7 +45,6 @@ type Item = {
 
 const PROJECT_SETTINGS: readonly Item[] = [
   { id: "project", label: "Project", rest: [] },
-  { id: "judge", label: "Judge", rest: ["judge"] },
 ];
 
 const ORGANIZATION_SETTINGS: readonly Item[] = [

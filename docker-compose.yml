@@ -267,10 +267,11 @@ services:
       # reader of this repository can mint a session with. `openssl rand
       # -base64 32` makes one; see .env.example.
       EGMA_AUTH_SECRET: ${EGMA_AUTH_SECRET:?no default — openssl rand -base64 32 makes one, set it in .env}
-      # Seals connection credentials and every platform setting before they
-      # reach the database. No default, and this is the sharpest of the three:
+      # Seals connection credentials and the carrier route before they reach
+      # the database. No default, and this is the sharpest of the three:
       # a deployment sealed with a key printed in a public repository is not
-      # sealed, and a copy of its database is a copy of its provider accounts.
+      # sealed, and a database copy carries the credentials needed to reach
+      # customer agents plus the platform's carrier route.
       # `openssl rand -hex 32` makes one. Back it up alongside the database;
       # losing it loses every stored credential and every stored setting.
       EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?no default — openssl rand -hex 32 makes one, set it in .env and back it up beside the database}
@@ -350,50 +351,18 @@ services:
       # prerequisite for anything, including adding a second person.
       EGMA_SMTP_URL: ${EGMA_SMTP_URL:-}
       EGMA_MAIL_FROM: ${EGMA_MAIL_FROM:-}
-      # The judge a project is given when it has configured none. It is the
-      # one thing setup does not put in the platform's store: a judge belongs
-      # to the project that chose it, so it is seeded from here on boot.
-      # Written into each project's own
-      # sealed row on boot and never over one that is already there. It is here
-      # rather than on the grader on purpose: a judge configured per container
-      # is a judge no project chose. All three or none — the API refuses to
-      # start on half, because half a judge errors every verdict it is given.
-      EGMA_JUDGE_PROVIDER: ${EGMA_JUDGE_PROVIDER:-}
-      EGMA_JUDGE_MODEL: ${EGMA_JUDGE_MODEL:-}
-      EGMA_JUDGE_API_KEY: ${EGMA_JUDGE_API_KEY:-}
-      # What this deployment has been configured with — the persona's model,
-      # its speech legs, and the carrier a phone call goes over. The
-      # platform's own settings rather than any one container's: they are
-      # written into the platform's store on boot, sealed, for anything the
-      # store does not already hold — and never over a value somebody
-      # changed, so a redeploy carrying an old key in a script cannot undo a
-      # new one. They then reach the simulator on the work order it claims,
-      # which is why no simulator container names any of them.
-      #
-      # Setting them here is one of the two ways in, and it is for a
-      # deployment that answers no questions; the other is
-      # `egma self-host setup`, which asks. Leave them empty and the platform
-      # reports `setup required` naming each one until somebody supplies it —
-      # which is the whole difference from the file this replaced, where an
-      # absent setting was an empty setting and nothing said so.
-      EGMA_PERSONA_MODEL_PROVIDER: ${EGMA_PERSONA_MODEL_PROVIDER:-}
-      EGMA_PERSONA_MODEL: ${EGMA_PERSONA_MODEL:-}
-      EGMA_PERSONA_MODEL_API_KEY: ${EGMA_PERSONA_MODEL_API_KEY:-}
-      EGMA_PERSONA_MODEL_REASONING_EFFORT: ${EGMA_PERSONA_MODEL_REASONING_EFFORT:-}
-      EGMA_PERSONA_STT_PROVIDER: ${EGMA_PERSONA_STT_PROVIDER:-}
-      EGMA_PERSONA_STT_API_KEY: ${EGMA_PERSONA_STT_API_KEY:-}
-      EGMA_PERSONA_STT_MODEL: ${EGMA_PERSONA_STT_MODEL:-}
-      EGMA_PERSONA_TTS_PROVIDER: ${EGMA_PERSONA_TTS_PROVIDER:-}
-      EGMA_PERSONA_TTS_API_KEY: ${EGMA_PERSONA_TTS_API_KEY:-}
-      EGMA_PERSONA_TTS_MODEL: ${EGMA_PERSONA_TTS_MODEL:-}
-      EGMA_PERSONA_TTS_VOICE: ${EGMA_PERSONA_TTS_VOICE:-}
-      EGMA_PERSONA_VAD_PROVIDER: ${EGMA_PERSONA_VAD_PROVIDER:-}
-      # The carrier, under the names the old phone setup wrote, so an
-      # operator upgrading meets the words they were given before. The API
-      # holds the trunk password only long enough to seal it — exactly as it
-      # already holds a judge's key and a connection's credentials — and it
-      # neither dials nor speaks with any of it.
-      EGMA_MEDIA_BACKEND: ${EGMA_MEDIA_BACKEND:-}
+      # Model choices are immutable persona and grader content. These are only
+      # the current provider credentials. A self-host supplies the three keys
+      # directly. Egma Cloud supplies a Secrets Manager id and region instead;
+      # the API reads that object once while preparing each claimed simulation.
+      EGMA_OPENAI_API_KEY: ${EGMA_OPENAI_API_KEY:-}
+      EGMA_DEEPGRAM_API_KEY: ${EGMA_DEEPGRAM_API_KEY:-}
+      EGMA_CARTESIA_API_KEY: ${EGMA_CARTESIA_API_KEY:-}
+      EGMA_PROVIDER_CREDENTIALS_SECRET_ID: ${EGMA_PROVIDER_CREDENTIALS_SECRET_ID:-}
+      EGMA_PROVIDER_CREDENTIALS_REGION: ${EGMA_PROVIDER_CREDENTIALS_REGION:-}
+      # The optional shared carrier route. The API seals the SIP password in
+      # the platform store; provider credentials use the variables above and
+      # never enter platform settings.
       EGMA_PHONE_TRUNK_ADDRESS: ${EGMA_PHONE_TRUNK_ADDRESS:-}
       EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
       EGMA_PHONE_TRUNK_USERNAME: ${EGMA_PHONE_TRUNK_USERNAME:-}
@@ -515,32 +484,17 @@ services:
       # is the one that matters: past it the carrier refuses, and a refused
       # call is a failed simulation rather than a queued one.
       EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-}
-      # **No provider setting reaches this container.** Which model the
-      # persona thinks with, what it speaks and hears with, what tells it
-      # the agent has stopped talking, which bridge places a call and which
-      # carrier trunk it goes over are all the *platform's* settings now:
-      # the API seals them into its own store and hands them to this
-      # container on the work order it claims, read afresh for every
-      # simulation. So there is nothing here to set, nothing to keep in
-      # step with the api service above, and nothing that can go missing
-      # when this container is recreated. A second simulator is started and
-      # nothing is copied to it.
-      #
-      # Two per-container exceptions stay, and each is here because it
-      # cannot be anywhere else. This is the address this container reaches
-      # a model provider at — a property of the network it is on rather
-      # than of the deployment's account:
-      EGMA_SIMULATOR_MODEL_BASE_URL: ${EGMA_SIMULATOR_MODEL_BASE_URL:-}
-      # And this is which model the listening leg asks for, which the
-      # platform's settings do not carry:
-      EGMA_SIMULATOR_STT_MODEL: ${EGMA_SIMULATOR_STT_MODEL:-}
-      # How hard the persona's model thinks before it speaks, and the key a
-      # cartesia mouth needs. Both are the platform's settings first — it
-      # holds them and hands them down with the work — and both are here for
-      # the same reason the two above are: a container may hold its own
-      # answer, and what the platform holds wins over it.
-      EGMA_SIMULATOR_MODEL_REASONING_EFFORT: ${EGMA_SIMULATOR_MODEL_REASONING_EFFORT:-}
-      EGMA_SIMULATOR_CARTESIA_API_KEY: ${EGMA_SIMULATOR_CARTESIA_API_KEY:-}
+      # No model, voice or provider key is container configuration. The pinned
+      # persona version supplies one complete selection, and the claim adds only
+      # the current keys for its selected providers. Missing data is refused;
+      # there is no environment fallback. Internal simulator adapters remain
+      # fixed deployment choices, not persona or platform authoring.
+      # The scripted detector understands only the deterministic test codec;
+      # every shipped live container must use the real speech detector.
+      EGMA_SIMULATOR_VAD_PROVIDER: silero
+      # The shipped phone bridge. A work order may supply a carrier route, but
+      # it cannot choose or create the deployment's media backend.
+      EGMA_SIMULATOR_MEDIA_BACKEND: livekit
       # The media server this container talks to. It is a third-party
       # binary that reads its own key and secret when it is *created*, so
       # it can never reach the platform's database and its address and
@@ -551,11 +505,9 @@ services:
       # generates one for the workspace and hands it to all three, so a
       # deployment never runs on a credential published in this repository.
       #
-      # Nothing here makes this simulator dial. Whether it may, and what
-      # trunk it goes over, is the platform's `media_backend` and carrier
-      # trunk — so `docker compose up` on a machine that has never seen a
-      # carrier starts exactly as it always did, and platform readiness
-      # never waits on carrier setup.
+      # Nothing here makes this simulator dial. The connection type selects the
+      # plug; the platform supplies the carrier route; this deployment supplies
+      # the LiveKit bridge. A platform with no carrier can still run chat work.
       EGMA_SIMULATOR_LIVEKIT_URL: ${EGMA_SIMULATOR_LIVEKIT_URL:-ws://livekit:7880}
       EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-${EGMA_LIVEKIT_API_KEY:?no default anywhere — egma self-host up generates this pair and writes it to .egma-platform/platform.env}}
       EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-${EGMA_LIVEKIT_API_SECRET:?no default anywhere — egma self-host up generates this pair and writes it to .egma-platform/platform.env}}
@@ -656,21 +608,6 @@ services:
       # nowhere to write to would look healthy and judge nothing.
       DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-egma}:${POSTGRES_PASSWORD:-egma}@postgres:5432/${POSTGRES_DB:-egma}}
       CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://${CLICKHOUSE_USER:-egma}:${CLICKHOUSE_PASSWORD:-egma}@clickhouse:8123/${CLICKHOUSE_DB:-egma}}
-      # The same key the API seals with, because a judged grader has to replay
-      # the project's own judge key to the provider, and the process making the
-      # call is this one. What it can open is held narrow on the other side: a
-      # judge key is resolved through one door that refuses every caller whose
-      # context did not come from a grading claim, and a connection's
-      # credentials sit behind a door asking for a permission the engine's
-      # context does not carry. It is the same variable the api service reads
-      # and it has no default on either — one line in .env, and the two
-      # processes open the same envelopes. A deployment whose projects
-      # configure no judge still needs it, because the platform's own settings
-      # are sealed with it too.
-      #
-      # There is still deliberately no model key here. A judge belongs to the
-      # project that configured it, never to a container.
-      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?no default — openssl rand -hex 32 makes one, set it in .env and back it up beside the database}
       # This copy's own name for itself, in claims and in its log. Unset is
       # fine and usual — it names itself after its host and process, which is
       # what tells two copies apart.
@@ -702,6 +639,14 @@ services:
       # exporter's conversations unjudged for an afternoon.
       EGMA_GRADER_TRACE_IDLE_SECONDS: ${EGMA_GRADER_TRACE_IDLE_SECONDS:-}
       EGMA_GRADER_LOG_LEVEL: ${EGMA_GRADER_LOG_LEVEL:-INFO}
+      # The grader resolves the current provider bundle once only when a
+      # claimed job includes a model-judged grader. Code-only grading does not
+      # depend on the secret store. No model key comes from Postgres.
+      EGMA_OPENAI_API_KEY: ${EGMA_OPENAI_API_KEY:-}
+      EGMA_DEEPGRAM_API_KEY: ${EGMA_DEEPGRAM_API_KEY:-}
+      EGMA_CARTESIA_API_KEY: ${EGMA_CARTESIA_API_KEY:-}
+      EGMA_PROVIDER_CREDENTIALS_SECRET_ID: ${EGMA_PROVIDER_CREDENTIALS_SECRET_ID:-}
+      EGMA_PROVIDER_CREDENTIALS_REGION: ${EGMA_PROVIDER_CREDENTIALS_REGION:-}
       # Egma platform telemetry, behind one flag that defaults to off. One
       # value in .env reaches this container and the api's alike — see the api
       # service.

@@ -386,7 +386,7 @@ describe("the pages", () => {
   });
 
   /**
-   * The Settings pages reach four more of the API's paths, and none of them is
+   * The Settings pages reach the API paths below, and none is
    * served by this process. Without the rules the pages would post at Next and
    * read its 404 page as egma's refusal.
    */
@@ -395,8 +395,14 @@ describe("the pages", () => {
 
     expect(rewrites).toContain("/api/organization");
     expect(rewrites).toContain("/api/projects/:path*");
-    expect(rewrites).toContain("/api/judge/:path*");
-    expect(rewrites).toContain("/api/judge-credentials/:path*");
+  });
+
+  it("reaches the API for persona form metadata at its exact path", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+
+    expect(rewrites).toContain(
+      '{ source: "/api/persona-form", destination: `${api}/api/persona-form` }',
+    );
   });
 
   /**
@@ -443,7 +449,7 @@ describe("the pages", () => {
     const unforwarded = [...named]
       .filter((one) => {
         // A rule for the collection, or a `:path*` rule on any parent segment,
-        // covers it. `/api/judge/registry` rides `/api/judge/:path*`.
+        // covers it.
         if (rewrites.includes(`source: "${one}"`)) return false;
         const segments = one.split("/").filter(Boolean);
         for (let depth = segments.length - 1; depth >= 2; depth -= 1) {

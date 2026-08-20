@@ -30,7 +30,7 @@ import {
   POSTGRES_ERROR,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The grading queue: how a finished conversation becomes work, and how the
@@ -137,8 +137,6 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, gene, "gene@globex.example");
-  await seedJudge({ ...actingAsAcme(), role: "admin" });
-  await seedJudge({ ...actingAsGlobex(), role: "admin" });
   // **No running graders here, and the claim under test is why that is right.**
   // A grading job is written for every conversation that lands terminal, in the
   // same commit that lands it, whatever the project happens to judge with — one
@@ -163,15 +161,7 @@ beforeAll(async () => {
   personaId = (
     await createPersona(auth, {
       name: "Impatient Rita",
-      traits: {
-        personality: "Speaks plainly.",
-        language: "en-US",
-        voice: {
-          provider: "elevenlabs",
-          voiceId: "EXAVITQu4vr4xnSDxMaL",
-          speed: 1,
-        },
-      },
+      traits: { personality: "Speaks plainly.", language: "en-US" },
     })
   ).id;
 
@@ -621,15 +611,7 @@ describe("the claim", () => {
     });
     const grace = await createPersona(globexAuth, {
       name: "Careful Grace",
-      traits: {
-        personality: "Speaks slowly.",
-        language: "en-US",
-        voice: {
-          provider: "elevenlabs",
-          voiceId: "EXAVITQu4vr4xnSDxMaL",
-          speed: 1,
-        },
-      },
+      traits: { personality: "Speaks slowly.", language: "en-US" },
     });
     const globexTest = await createTest(globexAuth, {
       name: "Cancels a booking",

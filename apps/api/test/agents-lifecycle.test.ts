@@ -1450,7 +1450,7 @@ describe("archiving a connection that work is queued over", () => {
 
 /**
  * A run with one conversation waiting to be claimed, built the way the product
- * builds one: a project's starter persona, a test that names it, and a run over
+ * builds one: a project's default persona, a test that names it, and a run over
  * one connection.
  */
 async function aQueuedRunFor(who: Customer): Promise<{

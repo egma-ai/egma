@@ -74,7 +74,6 @@ const PHONE = {
 const PHONE_IS_SET_UP = {
   carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
   carrier_trunk_number: "+18885550123",
-  text_to_speech_provider: "openai",
 } as const;
 
 const CLAIMANT = "simulator-blue-1";

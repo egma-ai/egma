@@ -48,13 +48,6 @@ export const ID_PREFIXES = [
   "grl",
   "grd",
   "grv",
-  /**
-   * An organization's judge credential: the label, the provider and the sealed
-   * key an LLM judge is asked with. Its own identity because one organization
-   * may hold several, and because a project's judge setting stores a
-   * *reference* to one rather than a second copy of the secret.
-   */
-  "jcr",
   "mck",
   "ste",
   "run",
@@ -62,10 +55,10 @@ export const ID_PREFIXES = [
   "gjb",
   /**
    * One run's frozen grading plan: which graders will judge each pinned test
-   * version, at which versions, with which judge behind them. Its own identity
+   * version, at which immutable versions. Its own identity
    * because it is written once beside the run and read long afterwards by the
-   * grader service, and because an archive refusal has to be able to name the
-   * plan that still needs a credential.
+   * grader service, and because an archive refusal has to name the plan that
+   * still depends on a grader version.
    */
   "gpl",
   "del",

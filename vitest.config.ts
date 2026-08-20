@@ -55,6 +55,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@egma/ids": resolve("./packages/ids/src/index.ts"),
+      "@egma/provider-credentials": resolve(
+        "./packages/provider-credentials/src/index.ts",
+      ),
       "@egma/retell": resolve("./packages/retell/src/index.ts"),
       "@egma/db": resolve("./packages/db/src/index.ts"),
       "@egma/simulation-contract": resolve(

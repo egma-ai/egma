@@ -2,6 +2,7 @@ import {
   authorize,
   cancelRun,
   connectionKindOf,
+  connectionKindUsesPlatformCarrier,
   foldRun,
   foldSimulation,
   getAgent,
@@ -10,7 +11,6 @@ import {
   getRun,
   getSimulation,
   IdempotencyConflictError,
-  JudgeNotConfiguredError,
   listRunHistory,
   planRun,
   listRunEvents,
@@ -44,7 +44,6 @@ import {
   type RecordedVerdict,
   type RunEvent,
   type RunStatus,
-  type JudgeChoice,
   type RunPlan,
   type RunVerdicts,
   type SimulationFold,
@@ -136,18 +135,6 @@ export type RunRoutesOptions = {
   /** Where this instance is, for the address a person opens results at. */
   readonly baseUrl: string;
 };
-
-/**
- * The connection kinds this deployment cannot dial over until its phone half
- * has been set up.
- *
- * One entry, and it is a list rather than an `=== "phone"` so that the next
- * carrier-backed kind is a line here instead of a condition somebody has to
- * find. What makes a kind belong is not that it is telephony-shaped: it is that
- * conducting it spends the platform's *own* carrier, which is the thing
- * `egma self-host setup` provides.
- */
-const NEEDS_THE_PLATFORMS_CARRIER: readonly string[] = ["phone_number"];
 
 export const RUNS_PATH = "/api/runs";
 /**
@@ -395,13 +382,9 @@ function describedMockTools(
  * items that would judge it — grader by grader, at the version each would be
  * frozen at.
  *
- * **The judge is a state rather than a refusal here**, because a page has to
- * draw it. `needs_setup` is what a project with no judge reads as, and starting
- * from that state is what the run door refuses.
- *
- * **No secret travels.** A configured judge choice carries the provider, the
- * model and the *reference* — a `jcr_` credential of this organization, or the
- * `platform` sentinel — and there is no field here a key could ride in.
+ * The immutable grader version id is the only model-execution pin. The model
+ * is not copied into this response or durable plan, and deployment credentials
+ * never enter either one.
  */
 function describedPlan(plan: RunPlan): Record<string, unknown> {
   return {
@@ -427,15 +410,6 @@ function describedPlan(plan: RunPlan): Record<string, unknown> {
               source: plan.connection.capabilities.source,
             },
     },
-    judge:
-      plan.judge.state === "needs_setup"
-        ? { state: "needs_setup" }
-        : {
-            state: "configured",
-            provider: plan.judge.provider,
-            model: plan.judge.model,
-            source: plan.judge.source,
-          },
     runnable_simulation_count: plan.runnableSimulationCount,
     skipped_simulation_count: plan.skippedSimulationCount,
     tests: plan.groups.map((group) => ({
@@ -460,20 +434,6 @@ function describedPlan(plan: RunPlan): Record<string, unknown> {
       graders: group.items.map(describedPlanItem),
     })),
   };
-}
-
-/** A judge choice on the wire: tagged, and never carrying a secret. */
-function describedJudgeChoice(
-  choice: JudgeChoice,
-): Record<string, unknown> {
-  return choice.tag === "configured"
-    ? {
-        tag: "configured",
-        provider: choice.provider,
-        model: choice.model,
-        source: choice.source,
-      }
-    : { tag: choice.tag };
 }
 
 /**
@@ -640,11 +600,9 @@ function describedRun(
  * plan reconstructed from today's graders would be a claim about an old run that
  * nobody can check.
  *
- * The groups keep their tagged shape whole. An authored item has a grader
- * identity and a pinned grader version; the built-in has a reserved key and an
- * engine version and takes its priority one behavior at a time. Folding the two
- * into one shape of mostly-null fields would make every reader guess which half
- * applied.
+ * The groups keep their tagged shape whole. Every item is an ordinary running
+ * copy with one grader identity and one pinned immutable grader version. The
+ * seeded expected-behaviors copy uses that same shape.
  */
 function describedGradingPlan(plan: GradingPlan): Record<string, unknown> {
   return {
@@ -684,7 +642,6 @@ function describedPlanItem(
       library_id: item.libraryId,
       required: item.required,
       scope: item.scope,
-      judge: describedJudgeChoice(item.judge),
   };
 }
 
@@ -981,13 +938,13 @@ export async function runRoutes(
    * What a run would freeze, for whichever selection is on screen.
    *
    * **The same resolution the start does, and that is the whole point.** A
-   * review step that worked out the pins, the skips and the judge for itself
+   * review step that worked out the pins, the skips and the graders for itself
    * would be a second opinion, and the moment the two disagreed a person would
    * have approved one run and started another. So this calls `planRun`, and so
    * does `startRun`.
    *
    * It answers rather than refuses wherever the answer is a state the page has
-   * to draw — a project with no judge, a test that would be skipped — and
+   * to draw — a project with no running graders, a test that would be skipped — and
    * refuses only what could never be written at all.
    */
   app.get(RUN_PLAN_PATH, async (request, reply) => {
@@ -1058,7 +1015,7 @@ export async function runRoutes(
     const carrier = phoneReadiness(await platformFacts());
     if (carrier.state !== "ready") {
       const kind = await connectionKindOf(acting.auth, text(body.connection));
-      if (kind !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(kind)) {
+      if (kind !== undefined && connectionKindUsesPlatformCarrier(kind)) {
         return phoneSetupRequired(reply, phoneSetupRequiredMessage(carrier));
       }
     }
@@ -1330,9 +1287,10 @@ export async function runRoutes(
    * two results would then be compared as though they were about the same thing.
    *
    * **It is honestly not a replay, and the answer says so by what it resolves.**
-   * Persona and grader versions, project-default graders, the judge setting, the
-   * connection's current configuration, and the project's mock tools are all
-   * resolved fresh — because a retry under current conditions is what this is.
+   * The earlier test versions stay exact. The new run resolves the executable
+   * persona versions, the current running-copy grader versions, the connection's
+   * current configuration, and the project's mock tools again — because a retry
+   * under current conditions is what this is.
    */
   app.post(RUN_RETRY_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1428,7 +1386,7 @@ export async function runRoutes(
     const carrier = phoneReadiness(await platformFacts());
     if (carrier.state !== "ready") {
       const kind = await connectionKindOf(acting.auth, source.connectionId);
-      if (kind !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(kind)) {
+      if (kind !== undefined && connectionKindUsesPlatformCarrier(kind)) {
         return phoneSetupRequired(reply, phoneSetupRequiredMessage(carrier));
       }
     }
@@ -1549,17 +1507,6 @@ export async function runRoutes(
         default:
           return unprocessable(reply, error.message);
       }
-    }
-
-    // A project with no judge, refused before any conversation is dialed. Its
-    // own code and its own sentence, because the fix is one page away and
-    // nothing about the selection is wrong.
-    if (error instanceof JudgeNotConfiguredError) {
-      return sendRefusal(
-        reply,
-        "judge_not_configured",
-        REFUSALS.judgeNotConfigured(error.projectId),
-      );
     }
 
     // A key reused over a different request. Answering the original run would

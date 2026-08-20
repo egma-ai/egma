@@ -2,7 +2,6 @@ import { connect, disconnect } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 import { expect, it } from "vitest";
 
-
 import { REPOSITORY_CONTRACT } from "../src/routes/platform.ts";
 import { buildApi } from "../src/server.ts";
 import {
@@ -12,38 +11,12 @@ import {
 import { testConfig } from "./support/api.ts";
 
 /**
- * What a platform nobody has configured answers about its own setup: every
- * setting it needs, named in the words a person would use, and nothing else.
- */
-const NOTHING_SET_UP = {
-  state: "setup_required",
-  missing: [
-    "the persona's model provider",
-    "the persona's model",
-    "the persona's model key",
-    "the speech-to-text provider",
-    "the speech-to-text key",
-    "the text-to-speech provider",
-    "the text-to-speech key",
-    "the voice-activity provider",
-    "the media backend",
-    "the carrier trunk",
-    "the source number",
-  ],
-};
-
-/**
- * And what its phone half answers: the three non-secret facts the carrier
- * stands on, named separately because a platform with no carrier still runs
- * text and chat simulations perfectly well.
+ * What an instance with no carrier answers about its optional phone half. The
+ * platform itself is ready because chat simulations can run.
  */
 const NO_CARRIER = {
   state: "setup_required",
-  missing: [
-    "the carrier trunk",
-    "the source number",
-    "the text-to-speech provider",
-  ],
+  missing: ["the carrier trunk", "the source number"],
 };
 
 /**
@@ -74,20 +47,13 @@ it("keeps one public platform identity across an API restart", async () => {
       "origin",
       "phone",
       "repository_contract",
-      "setup",
     ]);
     expect(identity).toEqual({
       instance_id: expect.stringMatching(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u),
       origin: config.baseUrl,
       repository_contract: REPOSITORY_CONTRACT,
-      // What the whole platform is still missing, read from the platform's own
-      // store rather than from this process's environment — which is why it
-      // survives a restart with nothing carried across but the database.
-      setup: NOTHING_SET_UP,
-      // Phone readiness is a second fact and never a component of the first.
-      // A platform with no carrier is ready — it runs text simulations
-      // perfectly well — and saying otherwise would make the first-run story
-      // impossible to tell. What it says instead is what setup still needs.
+      // Carrier setup is one optional capability. It does not make the whole
+      // platform unready when chat simulations can run.
       phone: NO_CARRIER,
     });
 
@@ -146,10 +112,8 @@ it("reads its identity rather than writing on every public request", async () =>
         // the build rather than anything in the store, so it is here on every
         // answer including the ones served entirely from memory.
         repository_contract: REPOSITORY_CONTRACT,
-        setup: NOTHING_SET_UP,
-        // A platform nobody has set a carrier up on says so here rather than
-        // anywhere a developer has to go looking, and says it separately from
-        // being ready — it runs text simulations perfectly well.
+        // A platform with no carrier says so here rather than making a
+        // developer discover it during a phone run. Chat still works.
         phone: NO_CARRIER,
       });
     }
@@ -188,7 +152,6 @@ it("reads its identity rather than writing on every public request", async () =>
       instance_id: minted.instance_id,
       origin: config.baseUrl,
       repository_contract: REPOSITORY_CONTRACT,
-      setup: NOTHING_SET_UP,
       phone: NO_CARRIER,
     });
   } finally {

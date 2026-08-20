@@ -22,9 +22,11 @@ from egma_simulator.model import (
     OpenAICompatibleModel,
     PersonaReply,
     ScriptedModel,
+    build_model_client,
     split_sentences,
 )
 from egma_simulator.redaction import REDACTED
+from egma_simulator.spec import SimulationSpec
 
 
 def test_sentences_split_deterministically():
@@ -262,41 +264,49 @@ async def test_a_model_that_never_answers_is_a_model_failure(model_stub):
         await client.close()
 
 
-async def test_a_reasoning_effort_rides_the_request_when_one_was_asked_for(
-    model_stub,
-):
-    model_stub.answer_with("Hello, I am calling about my appointment.")
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url,
-        api_key="key-under-test",
-        model_name="model-under-test",
-        reasoning_effort="none",
-    )
+async def test_runtime_model_uses_only_the_claimed_persona_selection(model_stub):
+    """The work order supplies provider, model, and current direct key."""
+    model_stub.answer_with("I need the next available appointment.")
+    document = {
+        "contract_version": 3,
+        "simulation_id": "sim_direct_model_selection",
+        "modality": "chat",
+        "connection": {
+            "agent_platform": "retell",
+            "connection_kind": "retell_chat_api",
+            "access_variant": "retell_chat_api.api_key",
+            "config": {"retellAgentId": "agent_fixture"},
+            "credentials": None,
+        },
+        "persona": {
+            "traits": {
+                "personality": "Patient and direct.",
+                "language": "en-US",
+            }
+        },
+        "scenario": {"instructions": "Ask for the next appointment."},
+        "limits": {"max_duration_seconds": 300, "max_turns": 20},
+        "models": {
+            "llm": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "key": "claim-key-under-test",
+            },
+            "stt": {"provider": "deepgram", "model": "nova-3-general"},
+            "tts": {
+                "provider": "cartesia",
+                "model": "sonic-3.5",
+                "voice_id": "fixture-voice",
+                "speed": 1,
+            },
+        },
+    }
+    spec = SimulationSpec.from_document(document)
+    client = build_model_client(spec, _base_url=model_stub.base_url)
     try:
-        await client.reply(system_and_history(("user", "Hello?")))
+        await client.reply(system_and_history(("user", "How can I help?")))
     finally:
         await client.close()
 
-    assert model_stub.requests[0]["reasoning_effort"] == "none"
-
-
-async def test_no_reasoning_field_is_sent_when_nobody_asked(model_stub):
-    """Absent stays absent on the wire.
-
-    Providers speaking one chat-completions shape do not agree on the
-    accepted values, and some models refuse the field outright — so a
-    request that always carried it would narrow which models a deployment
-    can run to the ones this file happened to know about.
-    """
-    model_stub.answer_with("Hello, I am calling about my appointment.")
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url,
-        api_key="key-under-test",
-        model_name="model-under-test",
-    )
-    try:
-        await client.reply(system_and_history(("user", "Hello?")))
-    finally:
-        await client.close()
-
-    assert "reasoning_effort" not in model_stub.requests[0]
+    assert model_stub.requests[0]["model"] == "gpt-4o-mini"
+    assert model_stub.headers[0]["Authorization"] == "Bearer claim-key-under-test"

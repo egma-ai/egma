@@ -80,7 +80,6 @@ const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
 const PHONE_IS_SET_UP = {
   carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
   carrier_trunk_number: "+18885550123",
-  text_to_speech_provider: "openai",
 } as const;
 
 /** The claimant every claim in this file conducts under. */
@@ -227,7 +226,12 @@ async function aClaimedSimulation(
     method: "POST",
     url: CLAIMS_PATH,
     headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
-    payload: { claimant: CONDUCTOR, capacity: 50, wait_seconds: 0 },
+    payload: {
+      claimant: CONDUCTOR,
+      capacity: 50,
+      wait_seconds: 0,
+      contract_versions: [3],
+    },
   });
   expect(claimed.statusCode).toBe(200);
   const specs = (claimed.json() as { specs: { simulation_id: string }[] }).specs;

@@ -142,7 +142,6 @@ export function projectKeyFor(
 export const NEUTRAL_TRAITS: PersonaTraits = {
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
 };
 
 /** A status and a parsed body, which is all these suites ever assert on. */

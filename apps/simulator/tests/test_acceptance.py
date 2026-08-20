@@ -22,9 +22,10 @@ from itertools import pairwise
 
 from conftest import (
     HEARTBEAT_SECONDS,
-    SCRIPTED_TRUNK_ENV,
-    SENTINEL_TRUNK_ENV,
-    TRUNK_SENTINELS,
+    PHONE_SENTINELS,
+    SCRIPTED_MEDIA_ENV,
+    SENTINEL_LIVEKIT_ENV,
+    SENTINEL_PLATFORM,
     all_terminal,
     assert_kept_secret,
     assert_one_speaker_to_a_channel,
@@ -555,7 +556,7 @@ async def test_a_spec_naming_an_unknown_connection_kind_is_refused_out_loud(
         and record["simulation_id"] == "sim-unplugged-001"
     ]
     assert unplugged_reports == []
-    assert "no platform plug" in simulator.output()
+    assert "no adapter for its connection kind" in simulator.output()
 
 
 async def test_a_plug_refusal_is_an_honest_failure_on_the_record(
@@ -946,9 +947,9 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     no trunk, no carrier and no network in this — and nothing above the
     plug knows that, which is the whole extensibility claim.
 
-    A real deployment's LiveKit and trunk credentials are in the process
-    the whole time, planted as sentinels, so the scan at the end is a
-    scan of a process that really held them.
+    The work order carries a sentinel carrier password. This proves the
+    simulator protects it after the claim even though scripted media does
+    not use it.
     """
     spec = phone_spec(
         "sim-phone-001",
@@ -964,10 +965,11 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
         ],
         answer_delay_seconds=0.3,
         provider_reference="SP_scripted_lakeside_1",
+        platform=SENTINEL_PLATFORM,
     )
     await workbench.offer(spec)
     simulator = start_simulator(
-        workbench, log_level="DEBUG", extra_env=SCRIPTED_TRUNK_ENV
+        workbench, log_level="DEBUG", extra_env=SCRIPTED_MEDIA_ENV
     )
 
     records = await workbench.wait_for(has_terminal("sim-phone-001"))
@@ -1039,7 +1041,7 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     assert_one_speaker_to_a_channel(recording, turns)
 
     simulator.stop()
-    for sentinel in TRUNK_SENTINELS:
+    for sentinel in PHONE_SENTINELS:
         assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
@@ -1063,10 +1065,12 @@ async def test_every_call_that_never_became_a_conversation_fails_honestly(
         "sim-phone-trunk": ("trunk_rejected", "error"),
     }
     for simulation_id, (outcome, _ending) in outcomes.items():
-        await workbench.offer(phone_spec(simulation_id, outcome=outcome))
+        await workbench.offer(
+            phone_spec(simulation_id, outcome=outcome, platform=SENTINEL_PLATFORM)
+        )
 
     simulator = start_simulator(
-        workbench, capacity=5, log_level="DEBUG", extra_env=SCRIPTED_TRUNK_ENV
+        workbench, capacity=5, log_level="DEBUG", extra_env=SCRIPTED_MEDIA_ENV
     )
 
     records = await workbench.wait_for(all_terminal(list(outcomes)), within_seconds=60)
@@ -1090,7 +1094,7 @@ async def test_every_call_that_never_became_a_conversation_fails_honestly(
     assert "403" in reasons[-1], reasons[-1]
 
     simulator.stop()
-    for sentinel in TRUNK_SENTINELS:
+    for sentinel in PHONE_SENTINELS:
         assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
@@ -1099,15 +1103,18 @@ async def test_a_livekit_that_cannot_be_reached_fails_without_a_credential(
 ):
     """The same honesty through the driver that really holds the secrets.
 
-    The simulator is started with a whole LiveKit deployment's worth of
-    credentials — every secret one a sentinel — pointed at a port nothing
-    answers on. So the code that fails is the code that would carry a
-    trunk password if anything ever did, and the scan afterwards is a scan
-    of a process that really held one.
+    The deployment supplies the LiveKit bridge. The work order supplies the
+    only carrier trunk. Both hold sentinel secrets, and neither may leak.
     """
-    await workbench.offer(phone_spec("sim-phone-livekit", backend="livekit"))
+    await workbench.offer(
+        phone_spec(
+            "sim-phone-livekit",
+            backend="livekit",
+            platform=SENTINEL_PLATFORM,
+        )
+    )
     simulator = start_simulator(
-        workbench, log_level="DEBUG", extra_env=SENTINEL_TRUNK_ENV
+        workbench, log_level="DEBUG", extra_env=SENTINEL_LIVEKIT_ENV
     )
 
     records = await workbench.wait_for(
@@ -1121,7 +1128,7 @@ async def test_a_livekit_that_cannot_be_reached_fails_without_a_credential(
     assert turns_for(records, "sim-phone-livekit") == []
 
     simulator.stop()
-    for sentinel in TRUNK_SENTINELS:
+    for sentinel in PHONE_SENTINELS:
         assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
@@ -1141,9 +1148,10 @@ async def test_the_far_end_hanging_up_is_the_agent_ending_the_exchange(
         greeting="Front desk.",
         replies=["I am afraid I have to go. Goodbye."],
         hangs_up_after_replies=True,
+        platform=SENTINEL_PLATFORM,
     )
     await workbench.offer(spec)
-    simulator = start_simulator(workbench, extra_env=SCRIPTED_TRUNK_ENV)
+    simulator = start_simulator(workbench, extra_env=SCRIPTED_MEDIA_ENV)
 
     records = await workbench.wait_for(has_terminal("sim-phone-hangup"))
 

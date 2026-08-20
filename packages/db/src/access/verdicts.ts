@@ -22,12 +22,11 @@ import { authorize, here } from "./permissions.ts";
  * exported call takes a predicate.
  *
  * **Write-once, and there is no update surface at all.** A judgment is a row; a
- * later judgment is another row; nothing edits one. Re-grading at a new grader
- * version adds beside what is there, and the only thing that ever collapses is
- * a literal rewrite of the identical judgment — the same grader at the same
- * version saying something about the same assertion again, which is what a
- * re-run after a transient error is. That collapse is the storage engine's, and
- * this module never asks a caller which case they are in.
+ * later judgment is another row; nothing updates one in place. A production
+ * re-grade at a new current grader version adds beside what is there. A
+ * simulation re-grade stays on its pinned version, so the storage engine
+ * collapses it as a literal rewrite of the same judgment identity. This module
+ * never asks a caller which case they are in.
  *
  * **There is no door for a person's disagreement, and its absence is a
  * decision.** Human corrections leave v0 with the `judged_by` column that
@@ -74,8 +73,8 @@ export type NewVerdict = {
   readonly graderId: string;
   /**
    * The immutable version of the grader that produced this. It is part of the
-   * row's identity, which is what makes re-grading at a tightened grader an
-   * addition rather than a loss.
+   * row's identity, which keeps production judgments made under different
+   * current versions distinct. A simulation re-grade reuses its pinned id.
    */
   readonly graderVersionId: string;
   /**

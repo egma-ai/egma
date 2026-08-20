@@ -8,6 +8,7 @@ import {
   disconnect,
   disconnectClickHouse,
   seedGraderLibrary,
+  seedPersonaLibrary,
   seedPlatformSettings,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
@@ -185,11 +186,10 @@ export async function startInstance(
   });
   connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
 
-  // egma's own graders, on the shelf before anything can point at one — what
-  // the real entry point writes in the same breath as applying its migrations.
-  // Every project created afterwards is seeded with a copy of one, so an
-  // instance that skipped this would refuse the first signup that reached it,
-  // for a reason no test here is about.
+  // The fixed-id persona and grader catalogs, on their shelves before anything
+  // can point at them — what the real entry point writes after migrations and
+  // before it serves a request.
+  await seedPersonaLibrary();
   await seedGraderLibrary();
   if (options.platformSettings !== undefined) {
     await seedPlatformSettings(options.platformSettings);
@@ -210,15 +210,12 @@ export async function startInstance(
         EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
         EGMA_BASE_URL: origin,
         EGMA_SINGLE_ORGANIZATION: "false",
-        // A deployment set up the way `egma self-host setup` sets one up. A run
-        // needs a judge when its plan holds a grader that asks a model, and
-        // every project is created holding the predefined expected-behaviors
-        // copy, which does — so an instance without one could start no run
-        // here. The key is nonsense and never reaches a provider; nothing here
-        // judges.
-        EGMA_JUDGE_PROVIDER: "openai",
-        EGMA_JUDGE_MODEL: "gpt-4o-mini",
-        EGMA_JUDGE_API_KEY: "sk-test-instance-judge",
+        // A self-host test deployment with one explicit key per provider
+        // account. They are nonsense and never reach a provider. Claim tests
+        // still exercise the real selection-to-credential path.
+        EGMA_OPENAI_API_KEY: "openai-key-held-by-this-test-instance",
+        EGMA_DEEPGRAM_API_KEY: "deepgram-key-held-by-this-test-instance",
+        EGMA_CARTESIA_API_KEY: "cartesia-key-held-by-this-test-instance",
       }),
       ...(options.blob === undefined ? {} : { blob: options.blob }),
     },

@@ -1,5 +1,5 @@
 {
-  "contract_version": 1,
+  "contract_version": 3,
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWEV",
   "modality": "voice",
   "connection": {
@@ -21,13 +21,7 @@
   },
   "persona": {
     "traits": {
-      "personality": "Dev, 34, calling from a train platform. In a hurry, talks over slow answers, background noise comes and goes.",
-      "language": "en-GB",
-      "voice": {
-        "provider": "elevenlabs",
-        "voiceId": "brisk-tenor-7",
-        "speed": 1.15
-      }
+      "personality": "Dev, 34, calling from a train platform. In a hurry, talks over slow answers, background noise comes and goes.", "language": "en-US"
     }
   },
   "scenario": {
@@ -36,5 +30,24 @@
   "limits": {
     "max_duration_seconds": 300,
     "max_turns": 40
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": {
+      "provider": "openai",
+      "model": "gpt-live-transcribe",
+      "key": "fixture-not-a-real-secret-stt"
+    },
+    "tts": {
+      "provider": "openai",
+      "model": "gpt-4o-mini-tts",
+      "voice_id": "alloy",
+      "speed": 1.15,
+      "key": "fixture-not-a-real-secret-tts"
+    }
   }
 }

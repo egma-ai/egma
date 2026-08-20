@@ -22,7 +22,6 @@ import {
   reportedMeasurementsPayload,
   seedGraderLibrary,
   seedRunningGraders,
-  setJudgeConfiguration,
   startRun,
   startSimulation,
   useLibraryEntry,
@@ -36,6 +35,7 @@ import {
   type Simulation,
   type SimulationFailure,
 } from "@egma/db";
+import type { ProviderCredentialSource } from "@egma/provider-credentials";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 
 import {
@@ -73,8 +73,6 @@ export type World = {
   readonly database: MigratedDatabase;
   readonly store: MigratedTraceStore;
   readonly auth: AuthContext;
-  /** The same person at the role that may set a project's judge. */
-  readonly adminAuth: AuthContext;
   readonly organizationId: string;
   readonly projectId: string;
   readonly agentId: string;
@@ -96,11 +94,8 @@ export async function makeWorld(label: string): Promise<World> {
   const database = await createMigratedDatabase(label);
   const store = await createMigratedTraceStore(label);
 
-  // The master key, held for the whole world: seeding an agent seals a
-  // connection's credentials, and setting a project's judge seals its key. The
-  // grading service opens exactly one of those two — a judge key resolves only
-  // for a context built from a grading claim, and a connection's credentials
-  // sit behind a permission the engine's context does not carry.
+  // The master key is still needed to seal the agent connection credentials.
+  // Model-provider credentials no longer use Postgres or this key.
   //
   // And a small pool on purpose: every file here owns two stores, the suite
   // runs files in parallel, and a generous default multiplied by the file count
@@ -164,37 +159,13 @@ export async function makeWorld(label: string): Promise<World> {
 
   const persona = await createPersona(auth, {
     name: "Impatient Rita",
-    traits: {
-      personality: "Speaks plainly.",
-      language: "en-US",
-      voice: {
-        provider: "elevenlabs",
-        voiceId: "EXAVITQu4vr4xnSDxMaL",
-        speed: 1,
-      },
-    },
+    traits: { personality: "Speaks plainly.", language: "en-US" },
   });
 
-  /**
-   * A judge, because a run in this world cannot start without one.
-   *
-   * The world above seeds the project's expected-behaviors copy, which judges by
-   * asking a model — so a run planned here in `needs_setup` is refused before
-   * anything is conducted, and "a provisioned project" and "a project with a
-   * judge" are the same thing for these files. A test about the *absence* of a
-   * judge clears the row after its run exists, which is also the only way that
-   * state can arise now: a project that deleted the copy needs no judge, and is
-   * refused nothing.
-   */
-  await setJudgeConfiguration(
-    { ...auth, role: "admin" },
-    { provider: "openai", model: "gpt-4.1-mini", key: THE_JUDGE_KEY },
-  );
-
   const bare = await createTest(auth, {
-    name: "A conversation with nothing named about it",
+    name: "A minimal conversation",
     scenario: "Their cleaning has to move to any afternoon next week.",
-    expectedBehaviors: ["confirms the new time back before finishing"],
+    expectedBehaviors: ["finishes the conversation"],
     personaIds: [persona.id],
   });
 
@@ -202,7 +173,6 @@ export async function makeWorld(label: string): Promise<World> {
     database,
     store,
     auth,
-    adminAuth: { ...auth, role: "admin" },
     organizationId,
     projectId,
     agentId: agent.id,
@@ -252,31 +222,14 @@ export async function theSeededGrader(world: World): Promise<string> {
 }
 
 /**
- * The one judge key every test in this suite configures, and it is written here
+ * The one deployment provider key every test in this suite supplies, written here
  * rather than inline so a test can assert it never appears anywhere else.
  *
  * Distinctive on purpose: a substring nothing else in the codebase, the
  * fixtures or the store could produce, so "the key is not in this log" is an
  * assertion about the key rather than about luck.
  */
-export const THE_JUDGE_KEY = "sk-egma-test-judge-NEVERLEAKME-9Z8Y7X";
-
-/**
- * The project's default judge. No judge speaks over the wire in these tests —
- * the scripted judge stands in at the provider seam — but everything up to that
- * seam is the real path: the key is sealed on the way in, resolved through the
- * one door on the way out, and never seen by anything in between.
- */
-export async function seedJudge(
-  world: World,
-  judge: { readonly model?: string; readonly key?: string } = {},
-): Promise<void> {
-  await setJudgeConfiguration(world.adminAuth, {
-    provider: "openai",
-    model: judge.model ?? "gpt-4.1-mini",
-    key: judge.key ?? THE_JUDGE_KEY,
-  });
-}
+export const THE_PROVIDER_KEY = "sk-egma-test-provider-NEVERLEAKME-9Z8Y7X";
 
 /**
  * A copy of the `latency` entry: a measure from the catalog and a bound, which
@@ -351,6 +304,10 @@ export async function conductSimulation(
      */
     readonly failedBecause?: SimulationFailure["reason"] | undefined;
     readonly testId?: string | undefined;
+    /** Runs after the plan is frozen and before the simulation is conducted. */
+    readonly afterRunStarted?:
+      | ((runId: string, simulationId: string) => Promise<void>)
+      | undefined;
   } = {},
 ): Promise<ConductedSimulation> {
   const claimant = "simulator-1";
@@ -366,18 +323,7 @@ export async function conductSimulation(
   });
   const [only] = started.simulations;
   if (only === undefined) throw new Error("the run has no simulation");
-
-  // A conduct that named no test wants a conversation with nothing to judge it
-  // against — the row an instance upgraded across the pin's migration holds.
-  // No verb writes one any more, because `startRun` names a version for every
-  // conversation it creates, so it is written here by hand and before the
-  // landing that makes this conversation grading work.
-  if (landing.testId === undefined) {
-    await world.database.sql(
-      "update simulation set test_id = null, test_version_id = null where id = $1",
-      [only.id],
-    );
-  }
+  await landing.afterRunStarted?.(started.id, only.id);
 
   // The claim takes the oldest queued rows rather than this caller's, and it
   // skips whatever another claim holds locked — so two conducts running at once
@@ -988,9 +934,6 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
   return {
     databaseUrl: "",
     clickhouseUrl: "",
-    // The stores are already connected by `makeWorld`, which is also what held
-    // the master key — the service under test never reads either of these.
-    encryptionKey: undefined,
     claimant: "grader-under-test",
     capacity: 4,
     heartbeatSeconds: 1,
@@ -1009,6 +952,8 @@ export type ServiceUnderTest = {
   readonly makers?: JudgeMakers | undefined;
   /** Where the service's own log lines go, for a test that reads them. */
   readonly log?: Log | undefined;
+  /** Current deployment credentials. Defaults to a fixed in-memory OpenAI key. */
+  readonly providerCredentials?: ProviderCredentialSource | undefined;
 };
 
 export function runService(
@@ -1018,6 +963,12 @@ export function runService(
   return startService({
     config,
     log: options.log ?? makeLog(config.logLevel, config.claimant),
+    providerCredentials:
+      options.providerCredentials ?? {
+        async load() {
+          return { openai: THE_PROVIDER_KEY };
+        },
+      },
     ...(options.makers === undefined ? {} : { makers: options.makers }),
   });
 }

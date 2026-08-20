@@ -33,7 +33,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The simulator's claim, instance-wide, and the door its credentials come
@@ -80,11 +80,6 @@ function actingAsGlobex(): AuthContext {
 const NEUTRAL_TRAITS = {
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
-  voice: {
-    provider: "elevenlabs",
-    voiceId: "EXAVITQu4vr4xnSDxMaL",
-    speed: 1,
-  },
 } as const;
 
 const SCENARIO =
@@ -116,7 +111,10 @@ async function seedCustomer(
   });
 
   const personaId = (
-    await createPersona(auth, { name: "Impatient Rita", traits: NEUTRAL_TRAITS })
+    await createPersona(auth, {
+      name: "Impatient Rita",
+      traits: NEUTRAL_TRAITS,
+    })
   ).id;
 
   const authored = await createTest(auth, {
@@ -174,8 +172,6 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
-  await seedJudge({ ...actingAsAcme(), role: "admin" });
-  await seedJudge({ ...actingAsGlobex(), role: "admin" });
   // No running graders: a claim carries identifiers and no content, and nothing
   // about who may claim what changes with a project's judging. The one grading
   // job this file reads is the one a terminal conversation always leaves

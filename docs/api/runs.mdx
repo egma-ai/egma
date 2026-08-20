@@ -160,6 +160,7 @@ The connection kind must have a compatible adapter installed on this deployment.
     <ResponseField name="test_version_id" type="string">The exact version that was executed (immutable).</ResponseField>
     <ResponseField name="persona_id" type="string | null">The persona used for this simulation.</ResponseField>
     <ResponseField name="persona_name" type="string | null">The persona's display name.</ResponseField>
+    <ResponseField name="persona_version_id" type="string">The exact persona version used. This pins the persona instructions and its model selections for the simulation.</ResponseField>
     <ResponseField name="status" type="string">Simulation status: `queued`, `running`, `completed`, `failed`, `errored`, or `canceled`.</ResponseField>
     <ResponseField name="grading" type="string">`pending` or `graded`.</ResponseField>
     <ResponseField name="verdict" type="string | null">Simulation-level verdict: `passed`, `failed`, `skipped`, or `errored`. `null` while ungraded.</ResponseField>

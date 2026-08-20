@@ -29,10 +29,10 @@ from .blob import BlobStore
 from .conductor import DEFAULT_CONDUCT, ConductParameters, VoiceConductor
 from .config import MediaSettings
 from .mock_tools import ExchangedToolCall, MockToolSeam
-from .plugs import PlatformPlug, PlugError, VoiceConnection, plug_for
+from .plugs import ConnectionPlug, PlugError, VoiceConnection, plug_for
 from .recording import RECORDING_NAME
 from .spec import SimulationSpec
-from .speech import SCRIPTED_PAIR, SpeechProviders, voice_from_traits
+from .speech import SpeechProviders, voice_from_models
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class Assembled:
     voice conductor, which owns the plug's Pipecat transport.
     """
 
-    plug: PlatformPlug | None = None
+    plug: ConnectionPlug | None = None
     """Text in, text out — the walk's whole view of a platform."""
 
     conductor: VoiceConductor | None = None
@@ -79,7 +79,7 @@ def assemble(
     spec: SimulationSpec,
     *,
     blobs: BlobStore,
-    speech: SpeechProviders = SCRIPTED_PAIR,
+    speech: SpeechProviders,
     media: MediaSettings | None = None,
     parameters: ConductParameters | None = None,
 ) -> Assembled:
@@ -89,11 +89,9 @@ def assemble(
     and no pipeline is started until the exchange opens — so a spec that
     cannot be conducted fails here, honestly, before anything happens.
 
-    ``speech`` is where a deployment's choice of real providers enters,
-    and the only place: the spec says what the simulation is, the
-    configuration says what carries it. Left alone it is the scripted
-    pair, so a deployment with nothing to say about providers gets
-    exactly the pipeline it always got.
+    ``speech`` is the pinned persona version's direct STT and TTS selection.
+    It is required even for chat, where no speech legs are built, so callers
+    cannot grow a second fallback assembly path.
 
     ``media`` is the same for the telephone network — this container's
     bridge with the platform's own carrier already laid over it, resolved
@@ -134,7 +132,7 @@ def assemble(
     return Assembled(
         conductor=VoiceConductor(
             connection=plug,
-            voice=voice_from_traits(spec.persona_traits),
+            voice=voice_from_models(spec.models),
             speech=speech,
             blobs=blobs,
             recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",

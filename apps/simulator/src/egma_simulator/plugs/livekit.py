@@ -109,10 +109,9 @@ class LiveKitRoom:
         media: object = None,
         driver: Any = None,
     ) -> None:
-        # A room is reached over the deployment's own media server, whose
-        # address and credential are this container's bootstrap
-        # configuration rather than a platform setting — so the carrier
-        # resolved for this simulation is nothing to this plug.
+        # A room is reached with this connection's URL and authority. It does
+        # not use the deployment's phone media bridge or the platform carrier
+        # resolved for a phone simulation.
         del media
 
         if modality != "voice":

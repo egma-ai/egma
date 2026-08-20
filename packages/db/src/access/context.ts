@@ -55,9 +55,9 @@ export type AuthContext = {
  * exactly the same terms: `claimSimulations` builds one per claimed row, from
  * the row's own tenancy and from nothing the service said. It exists as its
  * own word rather than reusing `engine` because the two services are answered
- * different secrets — a connection's credentials open only to `simulator`, a
- * judge key only to `engine` — and a door that gated on one word for both
- * would hand each service the other's.
+ * different capabilities — connection credentials open only to `simulator`,
+ * while `engine` may write grading results — and one shared service identity
+ * would make either boundary wider than its work.
  *
  * `monitoring` is the third of them, for background production ingestion.
  * `claimDueRetellMonitoringAgent` builds one from the project-owned Monitoring
@@ -66,8 +66,8 @@ export type AuthContext = {
  *
  * It is its own word so that a context which came from claimed Monitoring work
  * says so wherever it is read, and so that it opens neither of the other two
- * services' secrets: `resolveJudgeKey` admits `engine` and
- * `resolveSimulationConnection` admits `simulator`, and this is neither.
+ * services' capabilities: `resolveSimulationConnection` admits `simulator`,
+ * and this is not it.
  *
  * The Retell key is opened only while a due selected agent is claimed. That
  * internal claim takes no customer identifier, so a caller cannot use a

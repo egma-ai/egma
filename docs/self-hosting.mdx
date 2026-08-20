@@ -1,7 +1,7 @@
 ---
 title: "Self-Hosting Egma: Deploy on Your Own Infrastructure"
 sidebarTitle: "Self-Hosting"
-description: "Run Egma with Docker Compose — set required secrets, configure LLM and speech providers, enable phone simulation, and invite your team."
+description: "Run Egma with Docker Compose — set deployment secrets and provider keys, configure phone simulation, and invite your team."
 ---
 
 Egma is fully self-hostable. A single `npx @egma/cli self-host up` command starts the entire stack — API, web application, simulator, grader, databases, object store, and media server — on your own machine or server. This guide walks you through the prerequisites, required secrets, provider configuration, and day-two operations so you can run a production-ready instance without surprises.
@@ -34,7 +34,7 @@ Seven of the ten required values are secrets you generate yourself. The remainin
 
 ### `EGMA_ENCRYPTION_KEY`
 
-Seals every provider credential and platform setting stored in the database. Generate a 32-byte hex string:
+Seals connection credentials and the carrier SIP password stored in Postgres. Generate a 32-byte hex string:
 
 ```bash
 openssl rand -hex 32
@@ -108,39 +108,52 @@ npx @egma/cli self-host up
 This command:
 1. Generates the LiveKit API key and secret for your workspace, writes them to `.egma-platform/platform.env`, and sets `EGMA_BASE_URL` to the printed address
 2. Starts all containers and waits for the platform to answer
-3. Reports what the platform is **still missing** (provider configuration) and what is ready
+3. Reports whether the optional phone carrier route is configured
 
 ```
-platform: up
+platform: pf_...
 url: http://localhost:3101
-setup: setup_required
-missing: persona_model, persona_tts, persona_stt
-phone: not_configured
+phone: setup_required
+phone_missing: the carrier trunk, the source number
+status: ready
 ```
 
-A started platform is not yet a configured one. Open `http://localhost:3101`, sign up, and claim the instance. You become the organization admin. **The first person to sign up claims it — open signup closes behind them.** Everyone after that arrives by invitation.
+The platform is ready. Chat simulations can run without a carrier.
+`phone: setup_required` means only that phone calls need the optional carrier
+route. Open `http://localhost:3101`, sign up, and claim the instance. You become
+the organization admin. **The first person to sign up claims it — open signup
+closes behind them.** Everyone after that arrives by invitation.
 
 <Note>
   `egma self-host up` is not the same as `docker compose up`. The CLI version generates the media server credentials, waits for the platform to be healthy, and handles first-boot initialization automatically. Use `egma self-host up` every time you start the platform.
 </Note>
 
-## Step 4 — Configure providers with `egma self-host setup`
+## Step 4 — Set provider keys and the carrier route
 
-Log in as the organization owner, then run the interactive setup wizard:
+Put one current key for each model provider you use in `.env`:
+
+```bash
+EGMA_OPENAI_API_KEY=...
+EGMA_DEEPGRAM_API_KEY=...
+EGMA_CARTESIA_API_KEY=...
+```
+
+Persona versions choose the LLM, speech-to-text provider, text-to-speech
+provider, and voice. Grader versions choose their judge model. The deployment
+keys above supply credentials only. They are not copied into Postgres.
+
+Then log in as the organization owner and configure the optional shared phone
+route with the interactive setup wizard:
 
 ```bash
 npx @egma/cli login --url http://localhost:3101
 npx @egma/cli self-host setup
 ```
 
-The wizard asks the platform what it is missing and then prompts you for exactly that — in a fixed order so you can gather one provider's credentials at a time:
-
-1. **LLM provider** — who the simulator persona thinks with (e.g. OpenAI GPT-4o)
-2. **TTS provider** — what the persona speaks with (e.g. ElevenLabs)
-3. **STT provider** — what the persona hears with (e.g. Deepgram)
-4. **Phone carrier** — a trunk address, source number, SIP username, and SIP password (optional — press Enter to skip)
-
-Every answer is written through the platform's own API and sealed with `EGMA_ENCRYPTION_KEY`. Settings survive restarts, upgrades, and moves to another machine. A setting the platform already holds is never asked for again — running setup a second time after adding one new credential asks exactly one question.
+The wizard asks only for a trunk address and source number. If the carrier uses
+SIP credentials, it also asks for a SIP username and password. The complete
+two-value or four-value route is written through the platform API. A complete
+route is never asked for again.
 
 <Tip>
   To see what the wizard would ask without writing anything, run:
@@ -149,7 +162,8 @@ Every answer is written through the platform's own API and sealed with `EGMA_ENC
   npx @egma/cli self-host setup --plan
   ```
 
-  For automated deployments where no human is watching, every answer can come from the environment variable named for it in `.env.example`:
+  For automated deployments, the carrier route can come from the four
+  `EGMA_PHONE_*` variables in `.env.example`:
 
   ```bash
   npx @egma/cli self-host setup --json
@@ -238,23 +252,9 @@ EGMA_MAIL_FROM='Egma <noreply@example.com>'
 
 Setting `EGMA_SMTP_URL` automatically enables email verification on signup and password-reset emails. There is no second setting to keep in step.
 
-## Default judge model
-
-To give new projects a grading model without requiring them to configure one manually, set the three judge variables in `.env`:
-
-```bash
-EGMA_JUDGE_PROVIDER=openai
-EGMA_JUDGE_MODEL=gpt-4o
-EGMA_JUDGE_API_KEY=sk-...
-```
-
-These are written into each new project's sealed configuration on boot and never overwrite an existing project's choice.
-
 ## Upgrading
 
 Run `egma self-host up` again from your platform workspace after pulling the latest code. The API applies database migrations on boot. No manual migration step is required.
-
-If you are upgrading from a release that used `egma self-host phone setup`, do not reuse its global SIP credential on every machine. Ask a Twilio administrator to create one credential per developer in the existing credential list. Save each four-value bundle outside the database, run `egma self-host setup --replace-carrier --yes` on each existing local platform, and run one phone simulation. After every platform has moved and passed, the administrator can revoke the old shared credential. The old `.egma-platform/platform.env` file stays because it also holds the LiveKit key and secret.
 
 ## Troubleshooting
 
@@ -267,7 +267,10 @@ If you are upgrading from a release that used `egma self-host phone setup`, do n
 </Accordion>
 
 <Accordion title="egma self-host up works but the run never starts">
-  Check that `egma self-host setup` has been run and that the platform reports no missing settings. A platform missing its persona model will accept runs but the simulator will error on every simulation. Run `npx @egma/cli self-host setup --plan` to see what is still unset.
+  Check that the persona version has complete model selections and that `.env`
+  contains the key for every selected provider. Recreate the API and grader
+  containers after changing direct provider keys. For a phone run, also run
+  `npx @egma/cli self-host setup --plan` to check the carrier route.
 </Accordion>
 
 <Accordion title="ClickHouse logs 'Too many open files'">

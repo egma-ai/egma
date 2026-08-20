@@ -75,7 +75,7 @@ function complaintsFrom(
  * complaint per attempt that will never be retried.
  */
 export function specComplaints(document: unknown): readonly string[] {
-  compiledSpec ??= compileFromDisk("simulation-spec.v1.schema.json");
+  compiledSpec ??= compileFromDisk("simulation-spec.v3.schema.json");
   return complaintsFrom(compiledSpec, document);
 }
 

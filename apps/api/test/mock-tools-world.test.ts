@@ -577,7 +577,7 @@ describe("the longest delay, said in two places", () => {
       await readFile(
         fileURLToPath(
           new URL(
-            "../../../packages/simulation-contract/schemas/simulation-spec.v1.schema.json",
+            "../../../packages/simulation-contract/schemas/simulation-spec.v3.schema.json",
             import.meta.url,
           ),
         ),

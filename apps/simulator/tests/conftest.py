@@ -61,9 +61,7 @@ class Workbench:
             assert response.status == 204, await response.text()
 
     async def records(self) -> list[dict]:
-        async with self.session.get(
-            f"{self.base_url}/workbench/records"
-        ) as response:
+        async with self.session.get(f"{self.base_url}/workbench/records") as response:
             assert response.status == 200, await response.text()
             body = await response.json()
         return body["records"]
@@ -173,10 +171,9 @@ class SimulatorProcess:
         return object_in_storage(self.env, reference)
 
     def output(self) -> str:
-        return (
-            self.stdout_path.read_text(errors="replace")
-            + self.stderr_path.read_text(errors="replace")
-        )
+        return self.stdout_path.read_text(
+            errors="replace"
+        ) + self.stderr_path.read_text(errors="replace")
 
     def kill_hard(self) -> None:
         """SIGKILL: no goodbye, no cleanup — the crash the orphan sweep exists for."""
@@ -206,6 +203,8 @@ def start_simulator(
         log_level: str = "INFO",
         claimant: str = "sim-under-test",
         extra_env: dict[str, str] | None = None,
+        direct_model: bool = False,
+        direct_speech: bool = False,
     ) -> SimulatorProcess:
         stdout_path = tmp_path / f"simulator-{len(started)}.out"
         stderr_path = tmp_path / f"simulator-{len(started)}.err"
@@ -218,37 +217,49 @@ def start_simulator(
         # the regression this starves. See the package docstring.
         starved = tmp_path / f"no-corpus-{len(started)}"
         starved.mkdir(exist_ok=True)
-        env = os.environ | {
-            "NLTK_DATA": str(starved),
-            "HOME": str(starved),
-            "EGMA_SIMULATOR_CONTROL_PLANE_URL": workbench.base_url,
-            "EGMA_SIMULATOR_CLAIMANT": claimant,
-            "EGMA_SIMULATOR_CAPACITY": str(capacity),
-            "EGMA_SIMULATOR_HEARTBEAT_SECONDS": str(HEARTBEAT_SECONDS),
-            "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "2",
-            "EGMA_SIMULATOR_WAL_DIR": str(wal_dir),
-            "EGMA_SIMULATOR_BLOB_DIR": str(blob_dir),
-            # Blanked rather than left alone, for the same reason the two
-            # directories above are pinned: this suite inherits the
-            # environment it was run in, and a developer who did
-            # `set -a; source .env` to drive compose has a real endpoint
-            # and a real write credential exported. Left through, every
-            # voice test here would need their container running and
-            # would write its recordings into their store. Blank counts
-            # as unset in `config.py`, so this is the filesystem store,
-            # which is what a suite that costs no infrastructure means.
-            # A test that wants a real store puts it back through
-            # `extra_env` below.
-            "EGMA_SIMULATOR_S3_ENDPOINT": "",
-            "EGMA_SIMULATOR_S3_BUCKET": "",
-            "EGMA_SIMULATOR_S3_REGION": "",
-            "EGMA_SIMULATOR_S3_ACCESS_KEY_ID": "",
-            "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY": "",
-            "EGMA_SIMULATOR_LOG_LEVEL": log_level,
-        } | (extra_env or {})
+        env = (
+            os.environ
+            | {
+                "NLTK_DATA": str(starved),
+                "HOME": str(starved),
+                "EGMA_SIMULATOR_CONTROL_PLANE_URL": workbench.base_url,
+                "EGMA_SIMULATOR_CLAIMANT": claimant,
+                "EGMA_SIMULATOR_CAPACITY": str(capacity),
+                "EGMA_SIMULATOR_HEARTBEAT_SECONDS": str(HEARTBEAT_SECONDS),
+                "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "2",
+                "EGMA_SIMULATOR_WAL_DIR": str(wal_dir),
+                "EGMA_SIMULATOR_BLOB_DIR": str(blob_dir),
+                # Blanked rather than left alone, for the same reason the two
+                # directories above are pinned: this suite inherits the
+                # environment it was run in, and a developer who did
+                # `set -a; source .env` to drive compose has a real endpoint
+                # and a real write credential exported. Left through, every
+                # voice test here would need their container running and
+                # would write its recordings into their store. Blank counts
+                # as unset in `config.py`, so this is the filesystem store,
+                # which is what a suite that costs no infrastructure means.
+                # A test that wants a real store puts it back through
+                # `extra_env` below.
+                "EGMA_SIMULATOR_S3_ENDPOINT": "",
+                "EGMA_SIMULATOR_S3_BUCKET": "",
+                "EGMA_SIMULATOR_S3_REGION": "",
+                "EGMA_SIMULATOR_S3_ACCESS_KEY_ID": "",
+                "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY": "",
+                "EGMA_SIMULATOR_LOG_LEVEL": log_level,
+            }
+            | (extra_env or {})
+        )
         with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
+            command = [
+                sys.executable,
+                str(Path(__file__).with_name("simulator_process.py")),
+            ]
+            if direct_speech:
+                command.append("--direct-speech")
+            if direct_model:
+                command.append("--direct-model")
             process = subprocess.Popen(
-                [sys.executable, "-m", "egma_simulator"],
+                command,
                 stdout=stdout,
                 stderr=stderr,
                 env=env,
@@ -359,9 +370,7 @@ class ObjectStorage:
             "EGMA_SIMULATOR_S3_ENDPOINT": self.endpoint,
             "EGMA_SIMULATOR_S3_BUCKET": self.bucket,
             "EGMA_SIMULATOR_S3_ACCESS_KEY_ID": OBJECT_STORAGE_ACCESS_KEY_ID,
-            "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY": (
-                OBJECT_STORAGE_SECRET_ACCESS_KEY
-            ),
+            "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY": (OBJECT_STORAGE_SECRET_ACCESS_KEY),
         }
 
 
@@ -544,6 +553,7 @@ def a_spec(
     max_turns: int,
     max_duration_seconds: int,
     modality: str = "chat",
+    models: dict | None = None,
     mock_tools: list[dict] | None = None,
     platform: dict | None = None,
 ) -> dict:
@@ -557,16 +567,19 @@ def a_spec(
     really sends for a project that mocks nothing, and a spec that said
     ``[]`` would be exercising a shape nothing produces."""
     spec = {
-        "contract_version": 1,
+        "contract_version": 3,
         "simulation_id": simulation_id,
         "modality": modality,
         "connection": connection,
-        "persona": {"traits": {"personality": personality, "language": "en-US"}},
+        "persona": {
+            "traits": {"personality": personality, "language": "en-US"}
+        },
         "scenario": {"instructions": scenario},
         "limits": {
             "max_duration_seconds": max_duration_seconds,
             "max_turns": max_turns,
         },
+        "models": models or direct_models(modality=modality),
     }
     if mock_tools:
         spec["mock_tools"] = mock_tools
@@ -578,6 +591,51 @@ def a_spec(
         # produces.
         spec["platform"] = platform
     return spec
+
+
+def direct_models(
+    *,
+    modality: str,
+    voice: dict | None = None,
+    stt_provider: str = "deepgram",
+    llm_key: str = "sentinel-direct-llm-key",
+    stt_key: str = "sentinel-direct-stt-key",
+    tts_key: str = "sentinel-direct-tts-key",
+) -> dict:
+    """One complete direct selection for a test work order.
+
+    These are contract-shaped sentinel credentials. Unit tests inject their
+    own deterministic clients; no production fallback reads these values.
+    """
+    voice = voice or {}
+    tts_provider = voice.get("provider", "cartesia")
+    tts_model = {
+        "cartesia": "sonic-3.5",
+        "openai": "gpt-4o-mini-tts",
+    }[tts_provider]
+    stt_model = {
+        "deepgram": "nova-3-general",
+        "openai": "gpt-live-transcribe",
+    }[stt_provider]
+    stt = {"provider": stt_provider, "model": stt_model}
+    tts = {
+        "provider": tts_provider,
+        "model": tts_model,
+        "voice_id": voice.get("voice_id", voice.get("voiceId", "warm-alto-2")),
+        "speed": voice.get("speed", 1.0),
+    }
+    if modality == "voice":
+        stt["key"] = stt_key
+        tts["key"] = tts_key
+    return {
+        "llm": {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "key": llm_key,
+        },
+        "stt": stt,
+        "tts": tts,
+    }
 
 
 def scripted_spec(
@@ -595,6 +653,7 @@ def scripted_spec(
     max_duration_seconds: int = 600,
     credentials: dict | None = None,
     platform: dict | None = None,
+    models: dict | None = None,
 ) -> dict:
     """One spec against the scripted counterpart, the whole suite's staple.
 
@@ -626,6 +685,7 @@ def scripted_spec(
         personality=personality,
         max_turns=max_turns,
         max_duration_seconds=max_duration_seconds,
+        models=models,
     )
 
 
@@ -639,6 +699,7 @@ def retell_spec(
     personality: str = A_PERSONALITY,
     max_turns: int = 60,
     max_duration_seconds: int = 600,
+    models: dict | None = None,
 ) -> dict:
     """One spec against a Retell chat connection, pointed wherever asked.
 
@@ -660,6 +721,7 @@ def retell_spec(
         personality=personality,
         max_turns=max_turns,
         max_duration_seconds=max_duration_seconds,
+        models=models,
     )
 
 
@@ -705,6 +767,7 @@ def loopback_spec(
     max_turns: int = 60,
     max_duration_seconds: int = 600,
     credentials: dict | None = None,
+    models: dict | None = None,
 ) -> dict:
     """One voice spec against the loopback counterpart.
 
@@ -738,9 +801,8 @@ def loopback_spec(
         personality=personality,
         max_turns=max_turns,
         max_duration_seconds=max_duration_seconds,
+        models=models or direct_models(modality="voice", voice=voice),
     )
-    if voice is not None:
-        spec["persona"]["traits"]["voice"] = voice
     return spec
 
 
@@ -763,6 +825,7 @@ def phone_spec(
     max_duration_seconds: int = 600,
     credentials: dict | None = None,
     platform: dict | None = None,
+    models: dict | None = None,
 ) -> dict:
     """One voice spec that dials a number.
 
@@ -806,41 +869,41 @@ def phone_spec(
         personality=personality,
         max_turns=max_turns,
         max_duration_seconds=max_duration_seconds,
+        models=models or direct_models(modality="voice", voice=voice),
     )
-    if voice is not None:
-        spec["persona"]["traits"]["voice"] = voice
     return spec
 
 
-SENTINEL_TRUNK_ENV = {
+SENTINEL_LIVEKIT_ENV = {
     "EGMA_SIMULATOR_MEDIA_BACKEND": "livekit",
     "EGMA_SIMULATOR_LIVEKIT_URL": "ws://127.0.0.1:1",
     "EGMA_SIMULATOR_LIVEKIT_API_KEY": "SENTINEL-livekit-key-6b13c7f0a45e",
     "EGMA_SIMULATOR_LIVEKIT_API_SECRET": "SENTINEL-livekit-secret-2a9d4f6c8b71",
-    "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS": "egma-test.pstn.twilio.com",
-    "EGMA_SIMULATOR_SIP_TRUNK_NUMBER": "+15550000000",
-    "EGMA_SIMULATOR_SIP_TRUNK_USERNAME": "egma-trunk-user",
-    "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD": "SENTINEL-trunk-password-d5e8017a3c92",
 }
-"""A whole LiveKit deployment's worth of credentials, every secret one a
-sentinel, pointed at a port nothing answers on.
+"""A LiveKit bridge pointed at a port nothing answers on.
 
-It is what the acceptance suite plants on a simulator so that the
-credentials a real phone deployment holds are really in the process while
-it succeeds and while it fails — which is the only way scanning its output
-proves anything.
+Only these bridge facts belong to deployment configuration.
 """
 
-TRUNK_SENTINELS = tuple(
-    value for value in SENTINEL_TRUNK_ENV.values() if value.startswith("SENTINEL-")
-)
-"""The planted values that must appear in nothing the simulator emits."""
+SENTINEL_PLATFORM = {
+    "carrier": {
+        "trunk_address": "egma-test.pstn.twilio.com",
+        "trunk_number": "+15550000000",
+        "trunk_username": "egma-trunk-user",
+        "trunk_password": "SENTINEL-trunk-password-d5e8017a3c92",
+    }
+}
+"""The only carrier source: the platform block on a claimed work order."""
 
-SCRIPTED_TRUNK_ENV = SENTINEL_TRUNK_ENV | {"EGMA_SIMULATOR_MEDIA_BACKEND": "scripted"}
-"""The same planted deployment, placing its calls through the scripted
-bridge instead. The LiveKit and trunk secrets are still in the process,
-which is the point: a simulator holding them must not emit them whichever
-bridge it is dialling through."""
+PHONE_SENTINELS = (
+    SENTINEL_LIVEKIT_ENV["EGMA_SIMULATOR_LIVEKIT_API_KEY"],
+    SENTINEL_LIVEKIT_ENV["EGMA_SIMULATOR_LIVEKIT_API_SECRET"],
+    SENTINEL_PLATFORM["carrier"]["trunk_password"],
+)
+"""Bridge and claimed carrier values that must appear in no output."""
+
+SCRIPTED_MEDIA_ENV = SENTINEL_LIVEKIT_ENV | {"EGMA_SIMULATOR_MEDIA_BACKEND": "scripted"}
+"""A scripted bridge with unused LiveKit bridge values planted beside it."""
 
 
 def credential(*names: str) -> str:
@@ -1004,9 +1067,7 @@ def measures_for(records: list[dict], simulation_id: str) -> list[str]:
 
 def milliseconds_of(span: dict) -> float:
     """One timing span's measurement: its own duration, and nothing beside it."""
-    return (
-        int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])
-    ) / 1_000_000
+    return (int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])) / 1_000_000
 
 
 def heartbeats_for(records: list[dict], simulation_id: str) -> list[dict]:

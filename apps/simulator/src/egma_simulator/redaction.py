@@ -1,12 +1,12 @@
 """Credential redaction for everything this process logs.
 
-A spec's ``connection.credentials`` block is the only secret material the
-simulator ever holds. The discipline is to never log a spec at all — but a
-discipline is not a guarantee, so every credential value that enters the
-process is also registered here, and a logging filter rewrites any record
-that carries one before a handler can emit it. The acceptance suite closes
-the loop from outside: it plants a sentinel credential and scans every byte
-the process writes.
+A claimed spec can hold connection credentials, the selected model-provider
+keys, and a phone route's SIP password. The discipline is to never log a spec
+at all — but a discipline is not a guarantee, so every secret value that enters
+the process is also registered here. A logging filter rewrites any record that
+carries one before a handler can emit it. The acceptance suite closes the loop
+from outside: it plants sentinel secrets and scans every byte the process
+writes.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ REDACTED = "[redacted]"
 
 
 def credential_values(credentials: object) -> Iterable[str]:
-    """Every string leaf inside a spec's credentials block."""
+    """Every string leaf inside one registered secret-bearing value."""
     if isinstance(credentials, str):
         if credentials:
             yield credentials

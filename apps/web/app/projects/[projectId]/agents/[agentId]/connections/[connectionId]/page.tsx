@@ -286,7 +286,7 @@ function ConnectionDetail({
               },
               {
                 label: "Modality",
-                value: connection.modality === "voice" ? "Voice" : "Text",
+                value: connection.modality === "voice" ? "Voice" : "Chat",
               },
             ]}
           />

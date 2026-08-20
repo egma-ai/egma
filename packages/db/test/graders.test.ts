@@ -81,7 +81,6 @@ describe("using a library entry", () => {
       required: false,
       scope: "both",
       productionSampleRate: 10,
-      judgeModel: { provider: "openai", model: "gpt-4.1" },
     });
 
     expect(isId("grd", created.id)).toBe(true);
@@ -96,20 +95,15 @@ describe("using a library entry", () => {
     expect(fetched?.required).toBe(false);
     expect(fetched?.scope).toBe("both");
     expect(fetched?.productionSampleRate).toBe(10);
-    expect(fetched?.judgeModel).toEqual({
-      provider: "openai",
-      model: "gpt-4.1",
-    });
+    expect(fetched?.judgeModel).toBeNull();
     expect(fetched?.projectId).toBe(acme.project);
   });
 
   /**
-   * The type is the entry's answer and never the caller's. Nothing in the input
-   * shape can say it, and what lands on the row is what the shelf said — which
-   * is what keeps every version behind this copy holding values that this kind
-   * of judgment actually takes.
+   * The type is the stable Library identity's answer and never the caller's.
+   * Nothing in the input or project copy stores a second answer for it.
    */
-  it("copies the type down from the entry, and takes none from the caller", async () => {
+  it("resolves the type from the entry, and takes none from the caller", async () => {
     const computed = await useLibraryEntry(actingAsAcme(), aLatencyCopy);
     const judged = await useLibraryEntry(actingAsAcme(), aBehaviorsCopy);
 
@@ -190,8 +184,8 @@ describe("using a library entry", () => {
       await connection.sql("begin");
       await connection.sql(
         `insert into grader
-           (id, organization_id, project_id, library_id, name, type, current_version_id)
-         values ($1, $2, $3, $4, 'Halfway', 'code', $5)`,
+           (id, organization_id, project_id, library_id, name, current_version_id)
+         values ($1, $2, $3, $4, 'Halfway', $5)`,
         [
           orphan,
           acme.organization,
@@ -224,8 +218,8 @@ describe("using a library entry", () => {
     await expect(
       database.sql(
         `insert into grader
-           (id, organization_id, project_id, library_id, name, type, current_version_id)
-         values ($1, $2, $3, $4, 'Points at nothing', 'code', $5)`,
+           (id, organization_id, project_id, library_id, name, current_version_id)
+         values ($1, $2, $3, $4, 'Points at nothing', $5)`,
         [
           newId("grd"),
           acme.organization,
@@ -239,30 +233,6 @@ describe("using a library entry", () => {
     );
   });
 
-  /**
-   * Two words and no more. The reserved three — `human`, `ml_model`, `external`
-   * — are refused by name here as they are on the shelf, because a copy holding
-   * a type no engine executes is a grader somebody believes in that can never
-   * fire.
-   */
-  it("refuses a type the shelf never writes, even for raw SQL", async () => {
-    await expect(
-      database.sql(
-        `insert into grader
-           (id, organization_id, project_id, library_id, name, type, current_version_id)
-         values ($1, $2, $3, $4, 'Judged by a person', 'human', $5)`,
-        [
-          newId("grd"),
-          acme.organization,
-          acme.project,
-          PREDEFINED_GRADERS.latency,
-          newId("grv"),
-        ],
-      ),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
-  });
 });
 
 /**
@@ -293,20 +263,34 @@ describe("the filled-in values a copy is born with", () => {
   });
 
   /**
-   * The definition is read through the pointer at judging time and is never
-   * written down onto the copy. A prompt on this row would be a second copy of
-   * one text, and the day the two disagreed the Library screen would go on
-   * describing a judgment nobody was making.
+   * A project row stores one exact immutable Library-definition reference. It
+   * does not copy prompt text into config, so every project shares one revision
+   * while a pinned run can still keep that revision forever.
    */
-  it("never copies the entry's definition down onto the version row", async () => {
+  it("references the exact shared definition without copying its prompt", async () => {
     const created = await useLibraryEntry(actingAsAcme(), aBehaviorsCopy);
 
-    const { rows } = await database.sql<{ config: unknown }>(
-      "select config from grader_version where id = $1",
+    const { rows } = await database.sql<{
+      config: unknown;
+      library_id: string;
+      library_version: number;
+      prompt: string | null;
+    }>(
+      `select gv.config, gv.library_id, gv.library_version, glv.prompt
+         from grader_version gv
+         join grader_library_version glv
+           on glv.library_id = gv.library_id
+          and glv.version = gv.library_version
+        where gv.id = $1`,
       [created.versionId],
     );
     expect(rows[0]?.config).toEqual({ assertions: [] });
     expect(JSON.stringify(rows[0]?.config)).not.toContain("cannot_determine");
+    expect(rows[0]).toMatchObject({
+      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+      library_version: 1,
+    });
+    expect(rows[0]?.prompt ?? "").toContain("cannot_determine");
   });
 });
 
@@ -571,7 +555,7 @@ describe("a copy whose settings are not settings", () => {
         ...aBehaviorsCopy,
         judgeModel: { provider: "acme-labs" as never, model: "big" },
       }),
-    ).rejects.toThrow(/judge provider/);
+    ).rejects.toThrow(/supported acme-labs llm model/);
     await expect(
       useLibraryEntry(actingAsAcme(), {
         ...aBehaviorsCopy,
@@ -646,8 +630,8 @@ describe("tenancy", () => {
     await expect(
       database.sql(
         `insert into grader
-           (id, organization_id, project_id, library_id, name, type, current_version_id)
-         values ($1, $2, $3, $4, 'Smuggled', 'code', $5)`,
+           (id, organization_id, project_id, library_id, name, current_version_id)
+         values ($1, $2, $3, $4, 'Smuggled', $5)`,
         [
           newId("grd"),
           acme.organization,
@@ -662,19 +646,20 @@ describe("tenancy", () => {
   });
 });
 
-describe("a version row somebody hand-corrupted", () => {
-  it("fails loudly on the read, naming the version, rather than leaking", async () => {
+describe("a direct attempt to rewrite a grader version", () => {
+  it("is refused before a pinned run can observe changed meaning", async () => {
     const created = await useLibraryEntry(actingAsAcme(), aLatencyCopy);
 
-    // Raw SQL on purpose: the factory can never write this, so the guard is the
-    // only thing standing between the row and the caller.
-    await database.sql(
-      `update grader_version set config = '{"assertions": "two seconds"}'::jsonb where id = $1`,
-      [created.versionId],
+    await expect(
+      database.sql(
+        `update grader_version set config = '{"assertions": "two seconds"}'::jsonb where id = $1`,
+        [created.versionId],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
-
-    await expect(getGrader(actingAsAcme(), created.id)).rejects.toThrow(
-      created.versionId,
+    expect((await getGrader(actingAsAcme(), created.id))?.config).toEqual(
+      created.config,
     );
   });
 });

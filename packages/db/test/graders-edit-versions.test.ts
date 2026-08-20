@@ -40,11 +40,10 @@ import {
  * a live setting cannot reach a page about the past — only that it never
  * touches a row.
  *
- * **The filled-in values are all a copy holds, and they are checked against the
- * entry it points at** — read live, on every edit, which is the same check Use
- * made. A copy cannot edit its way into holding a value the form never asked
- * for, and it cannot edit its way to a different definition either: the pointer
- * and the type are set at Use time and are not on the change surface at all.
+ * **The filled-in values are all a copy authors, and they are checked against
+ * the entry's current immutable definition revision on every edit**, which is
+ * the same check Use made. If that revision moved, the edit pins it in a new
+ * grader version. The stable Library identity and type are not editable.
  */
 
 let database: MigratedDatabase;
@@ -176,30 +175,28 @@ describe("editing what a grader judges by", () => {
     expect(swapped?.version).toBe(3);
   });
 
-  it("versions on the judge model, and on clearing it again", async () => {
-    const created = await useLibraryEntry(actingAsAcme(), latency);
-
-    const overridden = await editGrader(actingAsAcme(), created.id, {
-      judgeModel: { provider: "openai", model: "gpt-4.1-mini" },
+  it("requires the exact cataloged model on model-judged versions", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
     });
-    expect(overridden?.version).toBe(2);
-    expect(overridden?.judgeModel).toEqual({
+
+    const same = await editGrader(actingAsAcme(), created.id, {
+      judgeModel: { provider: "openai", model: "gpt-4o-mini" },
+    });
+    expect(same?.version).toBe(1);
+    expect(same?.judgeModel).toEqual({
       provider: "openai",
-      model: "gpt-4.1-mini",
+      model: "gpt-4o-mini",
     });
 
-    const again = await editGrader(actingAsAcme(), created.id, {
-      judgeModel: { provider: "openai", model: "gpt-4.1-mini" },
-    });
-    expect(again?.version).toBe(2);
-
-    // Null is not "leave it alone" — it is "go back to the project's judge",
-    // which is a different judgment and mints a version like any other.
-    const cleared = await editGrader(actingAsAcme(), created.id, {
-      judgeModel: null,
-    });
-    expect(cleared?.version).toBe(3);
-    expect(cleared?.judgeModel).toBeNull();
+    await expect(
+      editGrader(actingAsAcme(), created.id, { judgeModel: null }),
+    ).rejects.toThrow(/cannot be cleared/u);
+    await expect(
+      editGrader(actingAsAcme(), created.id, {
+        judgeModel: { provider: "openai", model: "gpt-4.1-mini" },
+      }),
+    ).rejects.toThrow(/supported openai llm model/u);
   });
 
   it("numbers each edit after the last, and keeps every version fetchable by its grv_ id", async () => {
@@ -225,10 +222,9 @@ describe("editing what a grader judges by", () => {
   });
 
   /**
-   * An edit is checked against the entry this copy points at, read live — the
-   * same check Use made. So there is no way to edit a copy into holding values
-   * its form never asked for, which is what would otherwise turn a grader into
-   * one judging by less than somebody wrote down.
+   * An edit is checked against the current immutable definition revision of the
+   * entry this copy points at — the same check Use made. So there is no way to
+   * edit a copy into holding values its form never asked for.
    */
   it("holds an edited config to what the entry this copy points at asks for", async () => {
     const created = await useLibraryEntry(actingAsAcme(), latency);

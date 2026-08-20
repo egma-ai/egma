@@ -171,7 +171,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     agent_id: agt_01K…
     agent_name: order-line
     connection_id: con_01K…
-    connection_name: phone-1
+    connection_name: phone_number-1
     agent_platform: retell
     connection_kind: phone_number
     access_variant: phone_number.public_e164
@@ -355,7 +355,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 
     <Note>
       A `skipped` result is not a failure. It means the test required something
-      the connection cannot do (e.g. DTMF on a text connection). A `failed` result
+      the connection cannot do (e.g. DTMF on a Chat connection). A `failed` result
       means the agent did not meet an expected behavior. Only `errored` means
       something went wrong with the simulation infrastructure itself.
     </Note>
@@ -382,11 +382,11 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
   </Accordion>
 
   <Accordion title="egma self-host setup — configure a running instance">
-    Configures a running Egma instance by asking for provider credentials and writing them through the platform API. Run this after `egma self-host up` and after signing in with `egma login --url <address>`.
+    Configures a running Egma instance's shared carrier route. Run this after `egma self-host up` and after signing in with `egma login --url <address>`.
 
-    The command asks the platform what it is missing, then prompts you for exactly that — in a fixed order: the model provider (for persona reasoning), the speech provider (TTS and STT), and the telephony carrier (for phone simulations). A setting the platform already holds is never asked for again, so a second run only asks about what is still missing, and on a fully configured platform it changes nothing and says so.
+    The command asks only for a trunk address and source number. If the carrier uses SIP credentials, it also asks for a SIP username and password. A complete route is never asked for again.
 
-    For phone setup, Egma asks for a trunk address, source number, SIP username, and SIP password. A Twilio administrator creates that limited credential in the list already attached to the shared trunk. Setup copies the four values into the platform as one bundle. It never asks for the Twilio Account SID or Auth Token and never reads or changes Twilio.
+    A Twilio administrator creates the limited SIP credential in the list already attached to the shared trunk. Setup copies the complete two-value or four-value route into the platform. It never asks for the Twilio Account SID or Auth Token and never reads or changes Twilio.
 
     Normal setup never replaces a held bundle. To replace one developer credential safely, an administrator first adds the new credential beside the old one. Export the trunk address, source number, new SIP username, and new SIP password, then use `--replace-carrier --yes` to replace them together in the platform store. Run one phone simulation with the new bundle, then revoke the old credential. Hosted production uses its deployment secret instead of this command.
 

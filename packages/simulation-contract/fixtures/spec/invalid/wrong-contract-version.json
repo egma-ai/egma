@@ -15,13 +15,7 @@
   },
   "persona": {
     "traits": {
-      "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.",
-      "language": "en-US",
-      "voice": {
-        "provider": "cartesia",
-        "voiceId": "warm-alto-2",
-        "speed": 0.9
-      }
+      "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.", "language": "en-US"
     }
   },
   "scenario": {
@@ -30,5 +24,19 @@
   "limits": {
     "max_duration_seconds": 600,
     "max_turns": 60
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": { "provider": "deepgram", "model": "nova-3-general" },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "voice_id": "warm-alto-2",
+      "speed": 0.9
+    }
   }
 }

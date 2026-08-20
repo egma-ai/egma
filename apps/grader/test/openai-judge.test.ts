@@ -31,11 +31,9 @@ const EVIDENCE: JudgeInput = {
  * carries them.
  *
  * **This adapter holds no prompt of its own**, and that is the property worth
- * stating here: what a judge is told is the definition on the shelf, read
- * through the running copy's pointer at judging time, so the Library screen and
- * the request are one row. A prompt written into this file would be a second
- * copy, and the day the two disagreed the screen would go on describing a
- * judgment nobody was making.
+ * stating here: what a judge is told comes from the immutable Library revision
+ * pinned by the grader version. A prompt written into this adapter would be a
+ * second owner, and a catalog update would no longer have one place to version.
  */
 const THE_PROMPT =
   GRADER_LIBRARY_CATALOG.find(

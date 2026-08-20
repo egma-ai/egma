@@ -44,12 +44,21 @@ from egma_simulator.plugs.phone import BACKEND_VARIABLE, PhoneCall
 from egma_simulator.recording import channels_of
 from egma_simulator.redaction import REDACTED, SecretRegistry
 from egma_simulator.spec import SimulationSpec
+from egma_simulator.speech import SCRIPTED_PAIR
 from egma_simulator.walk import Conducted, WalkControls
 
 A_NUMBER = "+15551234567"
 
 SCRIPTED = MediaSettings(backend="scripted")
 """A deployment that places calls through the scripted backend."""
+
+PLATFORM = {
+    "carrier": {
+        "trunk_address": "scripted-carrier.example.com",
+        "trunk_number": "+15550100100",
+    }
+}
+"""A complete source-IP carrier route for contract-valid phone work."""
 
 
 def phone(script: dict | None = None, *, media=SCRIPTED, **config) -> PhoneCall:
@@ -153,12 +162,18 @@ class _PhoneRun:
 async def _conduct_phone(tmp_path: Path, **overrides: object) -> _PhoneRun:
     """Conduct one phone spec through the production Pipecat path."""
     spec = SimulationSpec.from_document(
-        phone_spec("sim-phone-plug", number=A_NUMBER, **overrides)
+        phone_spec(
+            "sim-phone-plug",
+            number=A_NUMBER,
+            platform=PLATFORM,
+            **overrides,
+        )
     )
     assembled = assemble(
         spec,
         blobs=FilesystemBlobStore(tmp_path),
         media=SCRIPTED,
+        speech=SCRIPTED_PAIR,
     )
     conductor = assembled.conductor
     assert conductor is not None
@@ -202,8 +217,7 @@ async def test_a_phone_spec_dials_converses_records_and_tears_down(tmp_path: Pat
     run = await _conduct_phone(
         tmp_path,
         scenario=(
-            "I need to move my Tuesday cleaning to Thursday. "
-            "My name is Margaret Hale."
+            "I need to move my Tuesday cleaning to Thursday. My name is Margaret Hale."
         ),
         greeting="Lakeside Dental, how can I help?",
         replies=["Of course — could I take your name?", "Booked for Thursday."],
@@ -311,9 +325,7 @@ def test_the_busy_and_declined_statuses_are_the_far_end_and_not_the_path():
     for status_code, _phrase in REFUSALS.values():
         refusal = sip_refusal(status_code)
         answered_by_the_phone = status_code in NOT_ANSWERED_STATUSES
-        assert refusal.ending == (
-            NOT_ANSWERED if answered_by_the_phone else ERROR
-        )
+        assert refusal.ending == (NOT_ANSWERED if answered_by_the_phone else ERROR)
     assert 486 in NOT_ANSWERED_STATUSES
     assert 503 not in NOT_ANSWERED_STATUSES
 
@@ -324,9 +336,7 @@ def test_a_carrier_refusal_carries_its_words_and_not_a_secret():
     refusal = sip_refusal(
         401,
         "Unauthorized",
-        told=secrets.redact(
-            "auth failed for egma with password SENTINEL-trunk-abc"
-        ),
+        told=secrets.redact("auth failed for egma with password SENTINEL-trunk-abc"),
     )
     assert "401" in str(refusal)
     assert "SENTINEL-trunk-abc" not in str(refusal)
@@ -368,7 +378,7 @@ def test_a_script_for_a_backend_this_deployment_does_not_use_is_refused():
         livekit_url="ws://127.0.0.1:1",
         livekit_api_key="key",
         livekit_api_secret="secret",
-        trunk_id="ST_trunk",
+        trunk_address="test.pstn.twilio.com",
     )
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
@@ -400,7 +410,7 @@ def test_credentials_on_a_phone_connection_are_refused():
             media=SCRIPTED,
         )
     told = str(refusal.value)
-    assert "environment" in told
+    assert "work order" in told
     assert "SENTINEL-not-read-here" not in told
 
 
@@ -439,7 +449,10 @@ def test_a_deployment_handed_no_backend_does_not_read_the_environment(
             credentials=None,
             media=None,
         )
-    assert "places no phone calls" in str(refusal.value)
+    told = str(refusal.value)
+    assert "places no phone calls" in told
+    assert "EGMA_SIMULATOR_MEDIA_BACKEND" in told
+    assert "platform" not in told
 
 
 def taken_by(method) -> list[tuple[str, object]]:
@@ -491,7 +504,7 @@ def livekit_settings(**overrides) -> MediaSettings:
             "livekit_url": "ws://127.0.0.1:1",
             "livekit_api_key": "key",
             "livekit_api_secret": "test-livekit-secret-at-least-32-bytes",
-            "trunk_id": "ST_trunk",
+            "trunk_address": "test.pstn.twilio.com",
         }
         | overrides
     )
@@ -541,4 +554,6 @@ def test_the_livekit_driver_reads_no_connection_config():
             config={"replies": ["Noted."]},
             caller_id=None,
         )
-    assert "deployment" in str(refusal.value)
+    told = str(refusal.value)
+    assert "connection config" in told
+    assert "work order" in told

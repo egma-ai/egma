@@ -95,14 +95,12 @@ const config: NextConfig = {
           source: "/api/capabilities",
           destination: `${api}/api/capabilities`,
         },
+        { source: "/api/persona-form", destination: `${api}/api/persona-form` },
         { source: "/api/personas", destination: `${api}/api/personas` },
         {
           source: "/api/personas/:path*",
           destination: `${api}/api/personas/:path*`,
         },
-        // The shape of the persona editor, which the server owns so a field can
-        // be added without shipping the browser again.
-        { source: "/api/persona-form", destination: `${api}/api/persona-form` },
         { source: "/api/keys", destination: `${api}/api/keys` },
         { source: "/api/keys/:path*", destination: `${api}/api/keys/:path*` },
         { source: "/api/members", destination: `${api}/api/members` },
@@ -135,18 +133,6 @@ const config: NextConfig = {
         {
           source: "/api/projects/:path*",
           destination: `${api}/api/projects/:path*`,
-        },
-        // Which model judges a project, and the organization keys behind it.
-        // Both halves are reached from Settings, and neither is served here.
-        { source: "/api/judge", destination: `${api}/api/judge` },
-        { source: "/api/judge/:path*", destination: `${api}/api/judge/:path*` },
-        {
-          source: "/api/judge-credentials",
-          destination: `${api}/api/judge-credentials`,
-        },
-        {
-          source: "/api/judge-credentials/:path*",
-          destination: `${api}/api/judge-credentials/:path*`,
         },
         // The shelf of grader definitions the Library screen draws itself
         // from. One rule and no `:path*` beside it, because the library is

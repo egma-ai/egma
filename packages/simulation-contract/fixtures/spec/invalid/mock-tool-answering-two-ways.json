@@ -1,5 +1,5 @@
 {
-  "contract_version": 1,
+  "contract_version": 3,
   "simulation_id": "sim_01K4RE4P0D3S8VXHNB2GQZT6MF",
   "modality": "voice",
   "connection": {
@@ -16,8 +16,7 @@
   },
   "persona": {
     "traits": {
-      "personality": "Terse and to the point; asks one thing and waits.",
-      "language": "en-US"
+      "personality": "Terse and to the point; asks one thing and waits.", "language": "en-US"
     }
   },
   "scenario": {
@@ -26,6 +25,25 @@
   "limits": {
     "max_duration_seconds": 300,
     "max_turns": 40
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3-general",
+      "key": "fixture-not-a-real-secret-stt"
+    },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "voice_id": "fixture-voice",
+      "speed": 1,
+      "key": "fixture-not-a-real-secret-tts"
+    }
   },
   "mock_tools": [
     {

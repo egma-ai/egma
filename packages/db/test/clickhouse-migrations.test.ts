@@ -48,6 +48,26 @@ const THE_ONE_FILE_THAT_DROPS_A_TABLE = "0003_verdicts_speak_the_redesign.sql";
 const THE_ONE_FILE_THAT_DELETES_PRODUCTION_TRACE_DATA =
   "0006_production_platform_identity.sql";
 
+/**
+ * These files have run in production. Even a comment edit changes the hash in
+ * the migration ledger and makes the API refuse to boot. Corrections therefore
+ * belong in a new migration file; these bytes never change again.
+ */
+const RELEASED_MIGRATION_HASHES = {
+  "0000_spans.sql":
+    "1e7bbb7ea92573fb662c4ffe61534a6dc872ef8e8c3e18bd2b7fc20197c23bf6",
+  "0001_rename_digital_human_version_id.sql":
+    "1e2574fc06f86c387dd89c6a0c511bba70aba40c7a46ae1b1d50c98a33e67901",
+  "0002_verdicts.sql":
+    "2efa180c0e84bc8af53564af28b5ae5469a809205af0f7c4aa3f275a0bde817e",
+  "0003_verdicts_speak_the_redesign.sql":
+    "c344b6678cecac6a865108d3c3728f265612c4e4ba7d186a70cd837a22154a1d",
+  "0004_retire_normalised_otlp_audio_columns.sql":
+    "981367806805a95b51bfb196a436ce0dc633023b7b3554d60c566ae5f4c1a792",
+  "0005_drop_retired_audio_columns.sql":
+    "bcce5a059cce8a67f03ef75c615297e13ed8e2589e00ffd8a66ccfa9d3868319",
+} as const;
+
 type Table = {
   readonly name: string;
   readonly engine: string;
@@ -147,6 +167,19 @@ function statementsOf(sql: string): string[] {
 
 
 describe("the trace store's migration files", () => {
+  it("never rewrites a migration already released to production", async () => {
+    const migrations = await readMigrations(CLICKHOUSE_MIGRATIONS_DIRECTORY);
+    const currentHashes = new Map(
+      migrations.map((migration) => [migration.name, migration.hash]),
+    );
+
+    for (const [name, releasedHash] of Object.entries(
+      RELEASED_MIGRATION_HASHES,
+    )) {
+      expect(currentHashes.get(name), name).toBe(releasedHash);
+    }
+  });
+
   it("are numbered plain SQL, applied in that order", async () => {
     const migrations = await readMigrations(CLICKHOUSE_MIGRATIONS_DIRECTORY);
     expect(migrations.length).toBeGreaterThan(0);

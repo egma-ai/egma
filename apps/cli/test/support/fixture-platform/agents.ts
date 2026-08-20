@@ -399,30 +399,75 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
 
 const CONNECTION_KINDS = Object.keys(REGISTRY);
 
+const CONNECTION_OPTIONS = [
+  {
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
+    modality: "chat",
+    productLabel: "Retell chat",
+  },
+  {
+    agentPlatform: "retell",
+    connectionKind: "phone_number",
+    accessVariant: "phone_number.public_e164",
+    modality: "voice",
+    productLabel: "Retell phone",
+  },
+  {
+    agentPlatform: "livekit_agents",
+    connectionKind: "livekit_room",
+    accessVariant: "livekit_room.project_credentials",
+    modality: "voice",
+    productLabel: "LiveKit project credentials",
+  },
+  {
+    agentPlatform: "livekit_agents",
+    connectionKind: "livekit_room",
+    accessVariant: "livekit_room.customer_token_endpoint",
+    modality: "voice",
+    productLabel: "LiveKit token endpoint",
+  },
+  {
+    agentPlatform: "livekit_agents",
+    connectionKind: "phone_number",
+    accessVariant: "phone_number.public_e164",
+    modality: "voice",
+    productLabel: "Phone number",
+  },
+  {
+    agentPlatform: null,
+    connectionKind: "phone_number",
+    accessVariant: "phone_number.public_e164",
+    modality: "voice",
+    productLabel: "Phone number",
+  },
+] as const;
+
+export const FIXTURE_CONNECTION_OPTION_FACTS = CONNECTION_OPTIONS.map((option) => ({
+  ...option,
+  topology: (REGISTRY[option.connectionKind] as Descriptor).topology,
+  simulatorAdapter: (REGISTRY[option.connectionKind] as Descriptor).simulatorAdapter,
+}));
+
 function productLabelOf(
   agentPlatform: string | null,
   connectionKind: string,
   accessVariant: string,
   modality: string,
 ): string {
-  const key = [agentPlatform ?? "unknown", connectionKind, accessVariant, modality].join(":");
-  const labels: Readonly<Record<string, string>> = {
-    "retell:retell_chat_api:retell_chat_api.api_key:chat": "Retell chat",
-    "retell:phone_number:phone_number.public_e164:voice": "Retell phone",
-    "livekit_agents:livekit_room:livekit_room.project_credentials:voice":
-      "LiveKit project credentials",
-    "livekit_agents:livekit_room:livekit_room.customer_token_endpoint:voice":
-      "LiveKit token endpoint",
-    "livekit_agents:phone_number:phone_number.public_e164:voice": "Phone number",
-    "unknown:phone_number:phone_number.public_e164:voice": "Phone number",
-  };
-  const label = labels[key];
-  if (label === undefined) {
-    throw new Refusal(
-      "agent platform, connection kind, access variant, and modality do not form a supported simulation connection",
-    );
-  }
-  return label;
+  const option = CONNECTION_OPTIONS.find(
+    (one) =>
+      one.agentPlatform === agentPlatform &&
+      one.connectionKind === connectionKind &&
+      one.accessVariant === accessVariant &&
+      one.modality === modality,
+  );
+  if (option !== undefined) return option.productLabel;
+
+  throw new Refusal(
+    "agent platform, connection kind, access variant, and modality do not form a supported simulation connection",
+  );
 }
 
 /** How a refusal names an access variant: the kind itself, unless the variant says. */
@@ -1014,8 +1059,8 @@ export function agentRoutes(options: {
    * The living connection in this project that is about the same vendor agent,
    * if there is one — the whole of what makes registering retry-safe.
    *
-   * Oldest first, so which agent a second modality attaches to is the same
-   * answer every time.
+   * Oldest first, so a repeated registration chooses the same agent every
+   * time.
    */
   const sameVendorAgent = (
     projectId: string,
@@ -1028,9 +1073,9 @@ export function agentRoutes(options: {
     const named = input.config[reuseKey];
     if (named === undefined || named.trim() === "") return [];
 
-    // Oldest first, so which agent gains a second way of being reached is the
-    // same answer every time. The ids sort by mint time, so the order they were
-    // written in and the order the real instance sorts them by are one thing.
+    // Oldest first, so a repeated registration chooses the same agent every
+    // time. The ids sort by mint time, so the order they were written in and
+    // the order the real instance sorts them by are one thing.
     return connections.filter(
       (held) =>
         held.projectId === projectId &&
@@ -1052,9 +1097,8 @@ export function agentRoutes(options: {
          *
          * Both rows or neither, and the reuse rule runs in the same breath:
          * a living connection about the same vendor agent decides the outcome.
-         * Same modality answers what is there with the credential rotated
-         * whole; a different modality gives that same agent another way of
-         * being reached; no match writes both. `result` says which.
+         * A matching Retell Chat connection answers what is there with the
+         * credential rotated whole; no match writes both. `result` says which.
          */
         method: "POST",
         path: "/api/agents",

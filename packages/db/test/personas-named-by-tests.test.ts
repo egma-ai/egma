@@ -5,6 +5,7 @@ import {
   archivePersona,
   createTest,
   DefaultPersonaReplacementError,
+  EGMA_PROVIDED_PERSONAS,
   archiveTest,
   editTest,
   getPersona,
@@ -68,6 +69,16 @@ async function refusalFrom(
   );
   expect(error).toBeInstanceOf(PersonaNamedByTestsError);
   return error as PersonaNamedByTestsError;
+}
+
+/** Observe an expected rejection now, even when the test releases its lock later. */
+function rejectionFrom(work: Promise<unknown>, ifResolved: string): Promise<unknown> {
+  return work.then(
+    () => {
+      throw new Error(ifResolved);
+    },
+    (thrown: unknown) => thrown,
+  );
 }
 
 describe("archiving a persona an active test names", () => {
@@ -187,24 +198,31 @@ describe("a persona only archived tests name", () => {
   });
 });
 
-/**
- * How long to let a write run before calling it blocked. A write waiting on a
- * row lock never finishes on its own; one that got past the lock finishes in
- * about a millisecond, against a database on this machine.
- */
-const A_BEAT = 250;
+/** The backend whose open transaction will block the competing write. */
+async function backendPid(connection: SingleConnection): Promise<number> {
+  const { rows } = await connection.sql<{ pid: number }>(
+    "select pg_backend_pid() as pid",
+  );
+  const pid = rows[0]?.pid;
+  if (pid === undefined) throw new Error("Postgres did not answer its backend pid");
+  return pid;
+}
 
-/** Whether a write has finished by the time that beat has passed. */
-async function hasFinished(work: Promise<unknown>): Promise<boolean> {
-  const finished = Symbol("finished");
-  const outcome = await Promise.race([
-    work.then(
-      () => finished,
-      () => finished,
-    ),
-    new Promise((resolve) => setTimeout(resolve, A_BEAT)),
-  ]);
-  return outcome === finished;
+/** Wait for a real Postgres lock edge, not an elapsed-time guess. */
+async function waitUntilBlockedBy(blockerPid: number): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const { rows } = await database.sql<{ blocked: boolean }>(
+      `select exists (
+         select 1
+           from pg_stat_activity
+          where $1::integer = any(pg_blocking_pids(pid))
+       ) as blocked`,
+      [blockerPid],
+    );
+    if (rows[0]?.blocked === true) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("the competing persona write never reached its lock");
 }
 
 /**
@@ -262,6 +280,7 @@ describe("the race between archiving a persona and naming them", () => {
   it("makes a create wait behind an Archive already holding the row, then refuses the create", async () => {
     const cora = await seedPersona(actingAsAcme(), "Contested Cora");
     const connection = await openSingleConnection(database.url);
+    const blockerPid = await backendPid(connection);
 
     try {
       // The first two statements of an Archive, held open: the exclusive lock on
@@ -277,14 +296,17 @@ describe("the race between archiving a persona and naming them", () => {
       );
 
       const before = await rowCounts();
-      const creating = createTest(actingAsAcme(), {
-        ...rescheduling,
-        personaIds: [cora],
-      });
+      const creating = rejectionFrom(
+        createTest(actingAsAcme(), {
+          ...rescheduling,
+          personaIds: [cora],
+        }),
+        "the concurrent create was expected to be refused",
+      );
 
       // The create cannot decide yet: checking that Cora is alive takes the
       // shared lock, and the Archive is holding the row exclusively.
-      expect(await hasFinished(creating)).toBe(false);
+      await waitUntilBlockedBy(blockerPid);
       expect(await rowCounts()).toEqual(before);
 
       await connection.sql("commit");
@@ -293,7 +315,9 @@ describe("the race between archiving a persona and naming them", () => {
       // marker and refuses — rather than writing an active test naming an archived
       // persona, which is what a create deciding on its own snapshot would have
       // done.
-      await expect(creating).rejects.toThrow(/is archived/);
+      expect(await creating).toMatchObject({
+        message: expect.stringMatching(/is archived/),
+      });
       expect(await rowCounts()).toEqual(before);
     } finally {
       await connection.close();
@@ -303,6 +327,7 @@ describe("the race between archiving a persona and naming them", () => {
   it("makes an Archive wait behind a create already naming them, then refuses the Archive", async () => {
     const cyrus = await seedPersona(actingAsAcme(), "Contested Cyrus");
     const connection = await openSingleConnection(database.url);
+    const blockerPid = await backendPid(connection);
 
     try {
       // What a create does, held open: the shared lock on the persona it is
@@ -318,16 +343,16 @@ describe("the race between archiving a persona and naming them", () => {
         name: "Races the Archive",
       });
 
-      const archiving = archivePersona(actingAsAcme(), cyrus);
+      const archiving = refusalFrom(archivePersona(actingAsAcme(), cyrus));
 
       // The Archive cannot decide yet: it takes the row exclusively before it
       // counts anything, and the create is holding it shared.
-      expect(await hasFinished(archiving)).toBe(false);
+      await waitUntilBlockedBy(blockerPid);
 
       await connection.sql("commit");
 
       // It counts the rows the create committed while it waited, and refuses.
-      const refusal = await refusalFrom(archiving);
+      const refusal = await archiving;
       expect(refusal.tests).toEqual([
         { id: written.testId, name: "Races the Archive" },
       ]);
@@ -343,7 +368,10 @@ describe("the persona a project points at by default", () => {
   const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
 
   afterAll(async () => {
-    await pointProjectAt(acme.outbound, null);
+    await pointProjectAt(
+      acme.outbound,
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
+    );
   });
 
   it("is refused while nobody has been named to take the pointer", async () => {
@@ -403,46 +431,125 @@ describe("the persona a project points at by default", () => {
     expect((await getPersona(inOutbound, holding))?.archivedAt).toBeNull();
   });
 
-  it("makes a create taking the default wait behind an Archive, then refuses it in the pointer's own words", async () => {
+  it("refuses a raw write that would archive the project default", async () => {
     const dee = await seedPersona(inOutbound, "Default Dee");
     await pointProjectAt(acme.outbound, dee);
     const connection = await openSingleConnection(database.url);
 
     try {
-      // The first two statements of an Archive, held open.
-      await connection.sql("begin");
-      await connection.sql(
-        "select id from persona where id = $1 for update",
-        [dee],
-      );
-      await connection.sql(
-        "update persona set archived_at = now() where id = $1",
-        [dee],
-      );
-
-      const before = await rowCounts();
-      // Naming nobody, which is the commonest create there is: who calls comes
-      // off the project's pointer rather than out of the input.
-      const creating = createTest(inOutbound, rescheduling);
-
-      // The create cannot decide yet: resolving the pointer takes the shared
-      // lock on the persona it points at, and the Archive is holding the row
-      // exclusively.
-      expect(await hasFinished(creating)).toBe(false);
-      expect(await rowCounts()).toEqual(before);
-
-      await connection.sql("commit");
-
-      const refused = String(await creating.catch((thrown: unknown) => thrown));
-      // Released onto the row the Archive left behind, the create reads the
-      // marker off it and names the fix that matches: repoint the default.
-      expect(refused).toMatch(/default persona .* is archived/);
-      // Not the other way a pointer can be wrong, which wants a different fix —
-      // which is what a read that filtered the archived row out would say.
-      expect(refused).not.toMatch(/there is no persona/);
-      expect(await rowCounts()).toEqual(before);
+      await expect(
+        connection.sql(
+          "update persona set archived_at = now() where id = $1",
+          [dee],
+        ),
+      ).rejects.toMatchObject({
+        code: "23503",
+        constraint: "project_default_persona_availability",
+      });
+      expect((await getPersona(inOutbound, dee))?.archivedAt).toBeNull();
     } finally {
       await connection.close();
+    }
+  });
+
+  it("orders a new default and a concurrent archive as one decision", async () => {
+    const oldDefault = await seedPersona(inOutbound, "Old Default Odette");
+    const newDefault = await seedPersona(inOutbound, "New Default Nia");
+    await pointProjectAt(acme.outbound, oldDefault);
+    const choosing = await openSingleConnection(database.url);
+    const archiving = await openSingleConnection(database.url);
+    const blockerPid = await backendPid(choosing);
+
+    try {
+      await choosing.sql("begin");
+      await choosing.sql(
+        "update project set default_persona_id = $1 where id = $2",
+        [newDefault, acme.outbound],
+      );
+
+      const concurrentArchive = rejectionFrom(
+        archiving.sql(
+          "update persona set archived_at = now() where id = $1",
+          [newDefault],
+        ),
+        "the concurrent Archive was expected to be refused",
+      );
+      await waitUntilBlockedBy(blockerPid);
+
+      await choosing.sql("commit");
+      expect(await concurrentArchive).toMatchObject({
+        code: "23503",
+        constraint: "project_default_persona_availability",
+      });
+
+      const stored = await choosing.sql<{
+        default_persona_id: string;
+        archived_at: Date | null;
+      }>(
+        `select target.default_persona_id, chosen.archived_at
+         from project target
+         join persona chosen on chosen.id = target.default_persona_id
+         where target.id = $1`,
+        [acme.outbound],
+      );
+      expect(stored.rows[0]).toEqual({
+        default_persona_id: newDefault,
+        archived_at: null,
+      });
+    } finally {
+      await choosing.sql("rollback").catch(() => undefined);
+      await Promise.all([choosing.close(), archiving.close()]);
+    }
+  });
+
+  it("rechecks an archived candidate after waiting for the archive", async () => {
+    const oldDefault = await seedPersona(inOutbound, "Kept Default Kit");
+    const candidate = await seedPersona(inOutbound, "Archived Candidate Ada");
+    await pointProjectAt(acme.outbound, oldDefault);
+    const archiving = await openSingleConnection(database.url);
+    const choosing = await openSingleConnection(database.url);
+    const blockerPid = await backendPid(archiving);
+
+    try {
+      await archiving.sql("begin");
+      await archiving.sql(
+        "update persona set archived_at = now() where id = $1",
+        [candidate],
+      );
+
+      const concurrentChoice = rejectionFrom(
+        choosing.sql(
+          "update project set default_persona_id = $1 where id = $2",
+          [candidate, acme.outbound],
+        ),
+        "the concurrent default choice was expected to be refused",
+      );
+      await waitUntilBlockedBy(blockerPid);
+
+      await archiving.sql("commit");
+      expect(await concurrentChoice).toMatchObject({
+        code: "23503",
+        constraint: "project_default_persona_availability",
+      });
+
+      const stored = await database.sql<{
+        default_persona_id: string;
+        archived_at: Date | null;
+      }>(
+        `select target.default_persona_id, candidate.archived_at
+         from project target
+         join persona candidate on candidate.id = $1
+         where target.id = $2`,
+        [candidate, acme.outbound],
+      );
+      expect(stored.rows[0]?.default_persona_id).toBe(oldDefault);
+      expect(stored.rows[0]?.archived_at).toBeInstanceOf(Date);
+    } finally {
+      await Promise.all([
+        archiving.sql("rollback").catch(() => undefined),
+        choosing.sql("rollback").catch(() => undefined),
+      ]);
+      await Promise.all([archiving.close(), choosing.close()]);
     }
   });
 
@@ -450,6 +557,7 @@ describe("the persona a project points at by default", () => {
     const dixon = await seedPersona(inOutbound, "Default Dixon");
     await pointProjectAt(acme.outbound, dixon);
     const connection = await openSingleConnection(database.url);
+    const blockerPid = await backendPid(connection);
 
     try {
       // What a create naming nobody does, held open: read the pointer, take the
@@ -471,14 +579,14 @@ describe("the persona a project points at by default", () => {
         name: "Takes the default",
       });
 
-      const archiving = archivePersona(inOutbound, dixon);
+      const archiving = refusalFrom(archivePersona(inOutbound, dixon));
 
-      expect(await hasFinished(archiving)).toBe(false);
+      await waitUntilBlockedBy(blockerPid);
 
       await connection.sql("commit");
 
       // The test that took the default is a test naming them like any other.
-      const refusal = await refusalFrom(archiving);
+      const refusal = await archiving;
       expect(refusal.tests).toEqual([
         { id: written.testId, name: "Takes the default" },
       ]);

@@ -193,19 +193,9 @@ const WORK_DISPATCHING = [
  * The exports through which the deployment configures *itself*, before it has
  * served a request and while there is no session anything could be done under.
  *
- * `seedDefaultJudge` gives the platform's own judge to every project that has
- * configured none — the self-hoster's one OpenAI key, written into each
- * project's ordinary sealed row rather than handed to the grader as a
- * container-wide key. There is no user to build a context from: this happens in
- * the same breath as applying migrations, on the deployment's own
- * configuration, and it names no customer.
- *
- * `seedPlatformSettings` was added on 2026-08-14 and is the same act one scope
- * up: the settings the deployment itself owns — the persona's model provider,
- * its model and its key to begin with — written from the environment on start
- * for anything the platform does not already hold, and never over a value
- * somebody chose. It names no customer because there is none to name: these
- * belong to the platform and to nobody on it.
+ * `seedPlatformSettings` installs the deployment's carrier route when the
+ * store is empty. Model choices live on persona and grader versions; provider
+ * keys never pass through this settings table.
  *
  * `reconcileDeploymentCarrierSettings` is the explicit environment-owned form
  * of that same act. `EGMA_CARRIER_SETTINGS_SOURCE=environment` says the
@@ -213,14 +203,13 @@ const WORK_DISPATCHING = [
  * authority. The call can name settings, never an organization or project,
  * and replaces only that one deployment-owned route.
  *
- * `seedGraderLibrary` was added on 2026-08-14 with the grader library, and it
- * is the same act again on the one table whose tenancy is nullable: egma's own
- * grader definitions, written from a catalog in egma's code on every start, as
- * an upsert that refreshes what a release changed and writes nothing at all
- * when nothing did. It names no customer because a predefined entry belongs to
- * none — null tenancy is exactly what *predefined* means in that schema — and
- * its one parameter is the catalog itself, so a test can hand in an edited copy
- * and watch a version move.
+ * `seedGraderLibrary` writes predefined grader definitions from the product
+ * catalog. It names no customer because a predefined entry belongs to none,
+ * and it contains no provider credential.
+ *
+ * `seedPersonaLibrary` does the same for the fixed Egma-provided persona
+ * catalog. It can create only the catalog's null-tenancy identities and
+ * immutable versions; it accepts no customer identifier or authored value.
  *
  * `seedRunningGraders` was added on 2026-08-14 with the running copies, and it
  * is the other half of `seedGraderLibrary` one table down. A shelf full of
@@ -238,12 +227,12 @@ const WORK_DISPATCHING = [
  * function here that grew one would be an ordinary cross-tenant *write* wearing
  * an exemption, which is worse than the read work dispatch guards against.
  *
- * A sixth name here is a decision somebody has to make on purpose.
+ * Another name here is a decision somebody has to make on purpose.
  */
 const DEPLOYMENT_CONFIGURING = [
   "reconcileDeploymentCarrierSettings",
-  "seedDefaultJudge",
   "seedGraderLibrary",
+  "seedPersonaLibrary",
   "seedPlatformSettings",
   "seedRunningGraders",
 ];

@@ -27,11 +27,13 @@
 import {
   LARGEST_MOCK_TOOL_ANSWER_BYTES,
   LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
+  connectionOptionMetadata,
 } from "@egma/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { REFUSALS } from "../../api/src/http/refusals.ts";
 import { agentNotApplicable } from "../src/sync/refusals.ts";
+import { FIXTURE_CONNECTION_OPTION_FACTS } from "./support/fixture-platform/agents.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 
 let platform: Platform;
@@ -115,6 +117,32 @@ function connectionPayload(
     ...overrides,
   };
 }
+
+describe("the offline connection catalog", () => {
+  it("matches every public option fact in the real registry", () => {
+    expect(FIXTURE_CONNECTION_OPTION_FACTS).toEqual(
+      connectionOptionMetadata().map(
+        ({
+          agentPlatform,
+          connectionKind,
+          accessVariant,
+          modality,
+          productLabel,
+          topology,
+          simulatorAdapter,
+        }) => ({
+          agentPlatform,
+          connectionKind,
+          accessVariant,
+          modality,
+          productLabel,
+          topology,
+          simulatorAdapter,
+        }),
+      ),
+    );
+  });
+});
 
 function agentOf(answer: Answer): Record<string, unknown> {
   return answer.body.agent as Record<string, unknown>;

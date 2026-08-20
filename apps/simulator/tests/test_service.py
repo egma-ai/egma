@@ -124,7 +124,7 @@ def test_a_spec_naming_an_unplugged_connection_kind_is_refused(tmp_path, caplog)
     service._accept([unplugged, good], executor)
 
     assert [spec.simulation_id for spec in executor.accepted] == ["sim-plugged"]
-    assert "no platform plug" in caplog.text
+    assert "no adapter for its connection kind" in caplog.text
 
 
 def test_an_id_that_would_make_an_invalid_otel_trace_is_refused_before_running(
@@ -187,9 +187,7 @@ async def test_a_claim_failure_that_never_changes_is_said_once_not_forever(
     with contextlib.suppress(asyncio.CancelledError):
         await claiming
 
-    shouted = [
-        record for record in caplog.records if record.levelno == logging.WARNING
-    ]
+    shouted = [record for record in caplog.records if record.levelno == logging.WARNING]
     assert len(shouted) == 1, [record.getMessage() for record in shouted]
     assert "claim did not land" in shouted[0].getMessage()
     assert client.attempts >= 25, "the loop kept trying, quietly"
@@ -198,7 +196,7 @@ async def test_a_claim_failure_that_never_changes_is_said_once_not_forever(
 async def test_an_outage_that_speaks_again_counts_from_when_it_began(
     tmp_path, caplog, monkeypatch
 ):
-    """"After N attempts" means since the failure started, not since it last spoke.
+    """ "After N attempts" means since the failure started, not since it last spoke.
 
     Nobody reads a number in a log line and mentally scopes it to the
     window it was counted in. With the repeat interval collapsed to
@@ -236,7 +234,11 @@ def test_the_typed_spec_reads_what_the_document_says():
     assert spec.scenario_instructions == "Hello there."
     assert spec.limits.max_turns == 7
     assert spec.connection_kind == "scripted"
-    assert spec.persona_traits["language"] == "en-US"
+    assert spec.persona_traits == {
+        "personality": "Terse test person; sticks to the script.",
+        "language": "en-US",
+    }
+    assert spec.models.llm.model == "gpt-4o-mini"
 
 
 def test_the_typed_spec_refuses_a_document_that_breaks_the_contract():

@@ -26,6 +26,7 @@ import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
+  bootstrapVariables,
   platformDirectory,
   readPlatformConfig,
   writePlatformConfig,
@@ -159,9 +160,8 @@ const ATTEMPTS = 3;
  * Compose is the pair in the file by construction rather than by argument.
  *
  * A file lock rather than an exclusive create of the configuration itself:
- * that file legitimately already exists on the deployment this most matters to
- * — one upgraded from a release that wrote carrier settings and no media pair
- * — so creating it exclusively would decide nothing there.
+ * the configuration file can already hold the platform address, so creating it
+ * exclusively would decide nothing there.
  *
  * **A holder that was displaced starts over rather than trusting itself.** A
  * lock old enough to look abandoned is taken from whoever left it, and a
@@ -192,7 +192,10 @@ export async function recordMediaCredential(
       const stored = readPlatformConfig(workspace);
       const decided = mediaCredential(environment, stored);
       if (!recorded(decided, stored)) {
-        writePlatformConfig(workspace, { ...stored, ...decided.values });
+        writePlatformConfig(workspace, {
+          ...bootstrapVariables(stored),
+          ...decided.values,
+        });
       }
       // What actually landed, rather than what was decided in memory.
       landed = {

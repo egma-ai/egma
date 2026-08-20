@@ -41,8 +41,8 @@ touching the others:
 - **The media backends** (`media/`) — how a voice exchange's audio
   travels. One driver per way in, behind a four-method seam: create a
   Pipecat transport, dial, wait until somebody answers, tear it down.
-  `livekit.py` places real phone calls over a SIP trunk the deployment
-  brings from any carrier; `livekit_room.py` holds an exchange in the
+  `livekit.py` places real phone calls over the SIP trunk carried by the
+  claimed work order; `livekit_room.py` holds an exchange in the
   customer's own room and dispatches their agent into it, where "dial" means asking for a
   worker rather than placing a call; `scripted.py` is the local stand-in
   that answers a call nobody placed, and is what CI runs on. The two that
@@ -55,13 +55,12 @@ touching the others:
   with three more legs: the persona's words spoken into audio, the
   agent's audio read back into words, and a detector that hears *whether*
   the agent is speaking at all. Which one fills each is configuration
-  read at assembly and nowhere else — a deterministic set, or ElevenLabs
-  speaking, Deepgram listening and Silero hearing, each chosen on its
-  own. The deterministic set is the default everywhere and what CI speaks
-  and listens with: no account, no network, no downloaded corpus, and the
-  same words out that went in. Nothing above the assembly learns which
-  set it got, which is what keeps a future speech-to-speech persona a
-  different leg-set rather than a rewrite.
+  read from the pinned persona version at assembly and nowhere else. Cartesia
+  or OpenAI speaks; Deepgram or OpenAI listens; Silero hears activity. The
+  deterministic model and speech implementations exist only as explicit test
+  injections: no account, no network, and the same words out that went in.
+  Nothing above the assembly learns which set it got, which is what keeps a
+  future speech-to-speech persona a different leg-set rather than a rewrite.
 
 One pipeline is assembled per simulation from its own spec and torn down
 after (`pipeline.py`). Modality selects the legs. Connection kind selects the
@@ -178,10 +177,11 @@ uv run egma-simulator
 The workbench prints one JSON line per observation — queued, the claim,
 each heartbeat, each reported event, each span as it arrives at its small
 OTLP sink — which is a simulation going queued → claimed → running →
-completed, live, with the conversation streaming past in between. The two `scripted` fixtures
-conduct whole exchanges over chat and the `loopback` one conducts a spoken
-one, leaving a real `.wav` under `EGMA_SIMULATOR_BLOB_DIR` that you can
-open and listen to a channel at a time; the `retell` fixture really does
+completed, live, with the conversation streaming past in between. The checked-in
+fixtures use sentinel direct provider keys, so a bare production simulator
+reports the provider refusal honestly. The black-box tests inject deterministic
+model and speech implementations explicitly; production has no scripted
+fallback. The `retell` fixture really does
 dial Retell and fails at the door, because the key in a fixture is a
 placeholder, and so does the `livekit` one, whose server is an example
 hostname; the `phone` fixture is refused with a clear log
@@ -192,54 +192,22 @@ configures no media backend to place a call through.
 next heartbeat; `POST /workbench/specs` queues another spec while
 everything runs.
 
-To hear the persona speak through a real model instead of the script, set
-the model provider — conversations stop being deterministic, which is
-exactly why CI never does this:
+Model and speech choices are not container settings. Every contract-v2 work
+order carries one complete `models` block from the pinned persona version.
+Chat requires the direct LLM key. Voice also requires the direct STT and TTS
+keys. The TTS selection owns `voice_id` and `speed`; persona traits contain
+behavior only.
 
-```bash
-EGMA_SIMULATOR_MODEL_PROVIDER=openai \
-EGMA_SIMULATOR_MODEL_NAME=gpt-4o-mini \
-EGMA_SIMULATOR_MODEL_API_KEY=sk-... \
-EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
-uv run egma-simulator
-```
+The simulator accepts only the proved provider/model pairs. OpenAI STT always
+means its realtime adapter. There is no container or traits fallback. The
+scripted model and speech pair exist only as explicit test injections.
 
-To hear a real voice instead of the test tone, name the speech providers.
-The `.wav` the `loopback` fixture leaves behind is then genuinely spoken
-audio on one channel, and the transcript's agent turns are what a real
-transcriber made of the other. Each leg is chosen on its own, so a real
-voice with scripted ears is one variable:
+Voice activity detection is still deployment configuration. Real speech uses
+`EGMA_SIMULATOR_VAD_PROVIDER=silero`; it needs no key and downloads nothing.
 
-```bash
-EGMA_SIMULATOR_TTS_PROVIDER=elevenlabs \
-EGMA_SIMULATOR_ELEVENLABS_API_KEY=... \
-EGMA_SIMULATOR_STT_PROVIDER=deepgram \
-EGMA_SIMULATOR_DEEPGRAM_API_KEY=... \
-EGMA_SIMULATOR_VAD_PROVIDER=silero \
-EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
-uv run egma-simulator
-```
-
-The third one is the detector: real speech is neither as loud nor as
-silent as the test tone, so a deployment that hears real voices wants the
-real detector too. It needs no key and downloads nothing — the model
-ships inside the pinned pipecat wheel.
-
-Which voice the persona speaks with comes from its own authored traits —
-a `voice` block naming a `voiceId` — and a persona naming none speaks
-with a default English voice. A voice id belongs to the provider it was
-authored for, so a `voice` block naming a *different* provider than the
-one configured is treated as naming none: the default English voice
-speaks and a log line says why, rather than the simulation failing on a
-timbre. A block naming a `voiceId` and no provider is authored for
-whichever deployment runs it, and is used as written. Setting neither
-variable leaves everything exactly as it was: the scripted pair, no
-account, no network.
-
-To dial a real phone number, point the simulator at a LiveKit server and
-give it a SIP trunk. The trunk is yours, from any carrier — either one
-already stored in LiveKit or the inline fields below — and the same three
-LiveKit variables serve a self-hosted server and LiveKit Cloud.
+To dial a real phone number, point the simulator at a LiveKit server. The same
+three LiveKit variables serve a self-hosted server and LiveKit Cloud. They
+configure only the media bridge. They do not select a carrier route.
 
 For Twilio, an administrator creates one shared trunk, source number, and
 attached credential list. Each developer and production gets one SIP
@@ -247,11 +215,9 @@ username/password in that list. `egma self-host setup`, in the platform
 workspace, copies that deployment's trunk address, source number, and SIP
 pair into the **platform's own store**, sealed. It never receives the
 Twilio Account SID or Auth Token and never changes the Twilio account.
-Every simulator receives the stored runtime values on the work order it
-claims. See the root README.
-
-The variables below are the same runtime values for a deployment that
-configures its own environment.
+Every simulator receives the stored carrier route on the work order it claims.
+There is no simulator trunk environment fallback and no stored LiveKit trunk
+ID. See the root README.
 
 Real speech providers belong with all this: a call spoken in the test
 tone reaches a real agent as noise.
@@ -261,33 +227,23 @@ EGMA_SIMULATOR_MEDIA_BACKEND=livekit \
 EGMA_SIMULATOR_LIVEKIT_URL=wss://... \
 EGMA_SIMULATOR_LIVEKIT_API_KEY=... \
 EGMA_SIMULATOR_LIVEKIT_API_SECRET=... \
-EGMA_SIMULATOR_SIP_TRUNK_ADDRESS=your-trunk.pstn.twilio.com \
-EGMA_SIMULATOR_SIP_TRUNK_NUMBER=+1... \
-EGMA_SIMULATOR_SIP_TRUNK_USERNAME=... \
-EGMA_SIMULATOR_SIP_TRUNK_PASSWORD=... \
-EGMA_SIMULATOR_TTS_PROVIDER=elevenlabs EGMA_SIMULATOR_ELEVENLABS_API_KEY=... \
-EGMA_SIMULATOR_STT_PROVIDER=deepgram EGMA_SIMULATOR_DEEPGRAM_API_KEY=... \
 EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
 uv run egma-simulator
 ```
 
-A connection's config carries the number and nothing secret: the trunk
-and the media backend belong to the deployment, which is why they arrive
-here and never in a spec. Anything missing stops the process on its first
-line naming the variable, the way every other required-if-enabled
-variable does — including a trunk given only half a credential, since a
-carrier answers half a username-and-password the same 403 it answers a
-wrong one, once per call, forever. Set none of these and nothing changes
-— the simulator conducts chat and loopback simulations exactly as
-before, and refuses a spec that names a phone number with a sentence
-naming the variable to set.
+A connection's config carries the destination number and nothing secret. The
+media backend belongs only to the deployment. A phone work order carries the
+platform's complete SIP route as one unit. A missing route fails that phone
+simulation; it does not make the simulator search another source. Chat and
+loopback simulations do not need a carrier route.
 
 Where the LiveKit server itself comes from is the root README's story:
 it, its SIP gateway and their Redis are part of the default deployment,
 told there with the honest account of what that gateway needs from your
-network. `egma-workbench --phone-number +1...` is the other half of the
-local demo — it points the phone fixture at a real agent instead of the
-placeholder it carries, and queues nothing else.
+network. The workbench is not a real-call launcher. Its fixtures use sentinel
+provider keys and only prove the simulator contract. Create a run through the
+platform to prove a real phone simulation through the same claim path that
+production uses.
 
 Pipecat and the transport choose the media rate. Egma does not force a
 phone processing rate or store a separate sample-rate field. The
@@ -298,16 +254,9 @@ describe the connection's codec or acoustic quality.
 
 Everything arrives as environment variables.
 
-**The provider settings in this table are a fallback, and a deployment does
-not use them.** Which model the persona thinks with, what it speaks and hears
-with, which media backend places a call and which carrier trunk it goes over
-are the *platform's* settings: the control plane stores them sealed and hands
-them to this process on the work order it claims, read afresh for every simulation. A
-work-order value replaces whatever this environment said, and no compose file
-passes any of them — so on a real deployment there is nothing here to set and
-nothing to keep in step. They stay readable for the one reader who has no
-platform behind them: a bare `egma-simulator` process, which is what the
-workbench story and every contributor's checkout run.
+Model, speech, voice, and their direct keys are absent from this table because
+the work order is their only source. The environment contains deployment
+transport and process settings only.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -318,30 +267,11 @@ workbench story and every contributor's checkout run.
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |
 | `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | `30` | How long one claim request is willing to hang, sent as the claim's `wait_seconds` so the control plane holds no longer than the client will wait. The control plane caps its own hold below this default. |
 | `EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS` | `120` | How long one report is resent before the log on disk becomes its only record. |
-| `EGMA_SIMULATOR_MODEL_PROVIDER` | `scripted` | Where the persona's words come from: `scripted` or `openai`. |
-| `EGMA_SIMULATOR_MODEL_BASE_URL` | `https://api.openai.com/v1` | The provider, for `openai` — any OpenAI-compatible endpoint. |
-| `EGMA_SIMULATOR_MODEL_NAME` | (required for `openai`) | Which model to ask for. |
-| `EGMA_SIMULATOR_MODEL_API_KEY` | (required for `openai`) | The provider key. Never logged. |
-| `EGMA_SIMULATOR_MODEL_REASONING_EFFORT` | (none) | How hard the model thinks before the persona speaks, in the provider's own words. Unset sends nothing at all, which is what a model that has never heard of the field needs. A caller on a live line does not pause to reason, so turning it off is the ordinary setting. |
-| `EGMA_SIMULATOR_STT_PROVIDER` | `scripted` | What the persona hears with, in a voice simulation: `scripted`, `deepgram`, `openai` or `openai_realtime`. The last two are one account and two transports: `openai` posts a finished recording of each turn and waits for the answer, `openai_realtime` holds a socket open and transcribes while the agent is still talking. On a phone line the second is the one worth having. |
-| `EGMA_SIMULATOR_DEEPGRAM_API_KEY` | (required for `deepgram`) | The provider key. Never logged. |
-| `EGMA_SIMULATOR_TTS_PROVIDER` | `scripted` | What the persona speaks with: `scripted`, `elevenlabs`, `openai` or `cartesia`. |
-| `EGMA_SIMULATOR_ELEVENLABS_API_KEY` | (required for `elevenlabs`) | The provider key. Never logged. |
-| `EGMA_SIMULATOR_CARTESIA_API_KEY` | (required for `cartesia`) | The provider key. Never logged. |
-| `EGMA_SIMULATOR_OPENAI_API_KEY` | (required for `openai` ears or mouth) | One key for both legs, and for `openai_realtime` too, because one account speaks and listens over either transport. Never logged. |
-| `EGMA_SIMULATOR_STT_MODEL` | per provider | Which model the listening leg asks for. Unset, each leg asks for its own provider's default: `gpt-4o-transcribe` for `openai`, `gpt-live-transcribe` for `openai_realtime`. |
-| `EGMA_SIMULATOR_TTS_MODEL` | per provider | Which model the speaking leg asks for. Unset, each leg asks for its own provider's default: `gpt-4o-mini-tts` for `openai`, `sonic-3.5` for `cartesia`. |
-| `EGMA_SIMULATOR_TTS_VOICE` | per provider | Which voice a persona speaks with when its own traits name none. A voice identifier belongs to the provider that minted it, so unset means each leg uses its own provider's default voice. |
 | `EGMA_SIMULATOR_VAD_PROVIDER` | `scripted` | What hears the agent start and stop speaking: `scripted`, which reads the test tone exactly, or `silero`. Needs no key either way — Silero ships inside the pinned pipecat wheel and downloads nothing. |
 | `EGMA_SIMULATOR_MEDIA_BACKEND` | (none) | Which media backend places a phone call: `livekit`, or `scripted` for the local stand-in that places none. Unset, the simulator places no calls and says so when a simulation names a number. |
 | `EGMA_SIMULATOR_LIVEKIT_URL` | (required for `livekit`) | The LiveKit server — self-hosted or Cloud, only the URL differs. |
 | `EGMA_SIMULATOR_LIVEKIT_API_KEY` | (required for `livekit`) | The LiveKit API key. |
 | `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | (required for `livekit`) | The LiveKit API secret. Never logged. |
-| `EGMA_SIMULATOR_SIP_TRUNK_ID` | (one of the two trunk forms) | A SIP trunk already stored in LiveKit, by id. |
-| `EGMA_SIMULATOR_SIP_TRUNK_ADDRESS` | (the other trunk form) | The carrier's termination hostname, for a trunk given inline. |
-| `EGMA_SIMULATOR_SIP_TRUNK_NUMBER` | (none) | The number calls appear to come from. |
-| `EGMA_SIMULATOR_SIP_TRUNK_USERNAME` | (with the password, or neither) | Credential auth for the inline trunk. |
-| `EGMA_SIMULATOR_SIP_TRUNK_PASSWORD` | (with the username, or neither) | The trunk password. Never logged. |
 | `EGMA_SIMULATOR_WAL_DIR` | `.egma-simulator/wal` | Where report documents land before sending. |
 | `EGMA_SIMULATOR_S3_ENDPOINT` | (none) | Where the object store recordings go to answers, on the deployment's own network. Naming it is the whole of what selects object storage, and what makes the two credentials below required; naming none keeps the filesystem store, so a checkout needs no container. |
 | `EGMA_SIMULATOR_S3_BUCKET` | `egma-recordings` | The bucket recordings land in. The deployment creates it on first start. |
@@ -434,16 +364,15 @@ protocol needs no account, no key and no network — failure paths included,
 where a refused key and an endpoint nobody answers each end the simulation
 `failed` with an honest reason and no leaked secret.
 
-The `phone` plug converses through the scripted media backend the same
-way: a spec naming a number yields a transcript, an ending, per-turn
-timings and a recording, with no LiveKit and no trunk
-anywhere. Its failure paths are the point of the plug, so each is proved
-too — busy, no answer, declined, a carrier that failed, and a trunk that
-cannot be used at all — each ending `failed` with a reason naming what
-the carrier said, and none of them ever reading as the agent failing. A
-whole deployment's worth of LiveKit and trunk credentials is planted as
-sentinels for those runs, so the scan afterwards is a scan of a process
-that really held them.
+The `phone` plug converses through the scripted media backend the same way: a
+spec naming a number yields a transcript, an ending, per-turn timings and a
+recording without contacting LiveKit or a real carrier. Its failure paths are
+the point of the plug, so each is proved too — busy, no answer, declined, a
+carrier that failed, and a trunk that cannot be used at all — each ending
+`failed` with a reason naming what the carrier said, and none of them ever
+reading as the agent failing. The deployment's LiveKit bridge values and the
+work order's carrier fields are planted as sentinels, so the scan afterwards
+covers both credential paths the process really held.
 
 The `livekit` plug converses with `tests/room_stub.py`, which stands in
 for the three places its driver reaches a LiveKit — the requests it makes
@@ -467,28 +396,24 @@ uv run --frozen pytest tests/test_live_retell.py -v
 
 `TEST_RETELL_BASE_URL` points that test somewhere other than Retell.
 
-Real speech is opt-in the same way, one test per provider so a failure
-names the leg, plus one for the pair working together. Each skips on its
-own credential, and CI runs none of them:
+Real speech is opt-in the same way. Each test skips without its credentials,
+and CI runs none of them:
 
 ```bash
-ELEVENLABS_API_KEY=... uv run --frozen pytest tests/test_live_elevenlabs.py -v
 DEEPGRAM_API_KEY=...   uv run --frozen pytest tests/test_live_deepgram.py -v
-DEEPGRAM_API_KEY=... ELEVENLABS_API_KEY=... \
+DEEPGRAM_API_KEY=... CARTESIA_API_KEY=... \
   uv run --frozen pytest tests/test_live_speech.py -v
 ```
 
-The first hears the persona speak for real and reads the recording back:
-one channel a synthesized voice, the other still the test codec. The
-second hands a checked-in recording of one spoken sentence —
+The first hands a checked-in recording of one spoken sentence —
 `fixtures/spoken-sentence/` — to a real transcriber and checks the words
-that come back, so proving the ears needs no synthesis. The third
-conducts a whole voice simulation through both, against the loopback's
+that come back, so proving the ears needs no synthesis. The second
+conducts a whole voice simulation through Cartesia and Deepgram, against the loopback's
 echo mode, where what a real voice says is what real ears read. All three
 also plant their keys and scan every byte the run emitted, the way the
 offline sentinel tests do. `TEST_DEEPGRAM_API_KEY` and
-`TEST_ELEVENLABS_API_KEY` are read first, for a machine that keeps its
-test credentials apart from its working ones.
+`TEST_CARTESIA_API_KEY` are read first, for a machine that keeps its test
+credentials apart from its working ones.
 
 Object storage is real in `tests/test_object_storage.py` and costs you
 nothing to have: it starts a MinIO container of its own, on a port of its
@@ -508,12 +433,12 @@ trunk and SIP credential. `egma self-host setup` copies only the four runtime
 values into the platform store and never contacts Twilio. Its tests use a local
 server shaped like the Twilio APIs as a tripwire and require zero requests.
 
-`tests/test_deployment.py` compares the deployment story against the code
-that reads it: every variable the simulator looks up is in
-`.env.example`, in a compose file, and in the table above; nothing is
-documented that nothing reads; the simulator publishes no port in any
-compose file in the repository; and a plain `docker compose up` starts
-none of the phone stack.
+`tests/test_deployment.py` compares the deployment story against the code that
+reads it. Every operator-controlled simulator variable is documented; the
+shipped Compose file fixes the media backend to LiveKit and VAD to Silero;
+nothing documents a variable the code does not read; and the simulator
+publishes no port. Plain `docker compose up` starts LiveKit, its SIP gateway and
+their Redis as part of the default stack.
 
 One real phone call is opt-in too, and it takes a whole live deployment —
 a LiveKit, a trunk, a number, and real speech providers, because a call
@@ -523,20 +448,22 @@ visibly listing whatever is missing, so CI never waits on any of it:
 ```bash
 TEST_LIVEKIT_URL=wss://... \
 TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \
-TEST_SIP_TRUNK_ID=ST_... \
+TEST_SIP_TRUNK_ADDRESS=your-trunk.pstn.twilio.com \
+TEST_SIP_TRUNK_NUMBER=+1... \
+TEST_SIP_TRUNK_USERNAME=... TEST_SIP_TRUNK_PASSWORD=... \
 TEST_PHONE_NUMBER=+1... \
-TEST_DEEPGRAM_API_KEY=... TEST_ELEVENLABS_API_KEY=... \
+TEST_MODEL_API_KEY=... TEST_DEEPGRAM_API_KEY=... \
+TEST_CARTESIA_API_KEY=... \
   uv run --frozen pytest tests/test_live_phone.py -v
 ```
 
-Every name falls back to the `EGMA_SIMULATOR_*` one a real deployment
-already sets, and a trunk arrives either as `TEST_SIP_TRUNK_ID` or inline
-as `TEST_SIP_TRUNK_ADDRESS` with `TEST_SIP_TRUNK_USERNAME` and
-`TEST_SIP_TRUNK_PASSWORD`. What it asserts is structure and not content:
-a live agent says different words every time, so it checks that a
-conversation happened, that it ended honestly, that the recording
-resolves with both channels carrying sound, and that no credential
-reached a single byte the simulator wrote.
+The harness puts these test-only SIP values into that test work order's
+`platform.carrier`. They are not production configuration or a fallback for a
+claimed work order. What the test asserts is structure and not content: a live
+agent says different words every time, so it checks that a conversation
+happened, that it ended honestly, that the recording resolves with both
+channels carrying sound, and that no credential reached a single byte the
+simulator wrote.
 
 ## Layout
 

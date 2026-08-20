@@ -20,7 +20,7 @@ from egma_simulator.plugs import AgentReply
 from egma_simulator.plugs.scripted import ScriptedCounterpart
 from egma_simulator.walk import Conducted, WalkControls, conduct
 
-TRAITS = {"personality": "Terse test person.", "language": "en-US"}
+TRAITS = {"personality": "Terse test person."}
 
 
 def persona_for(scenario: str) -> Persona:
@@ -99,9 +99,7 @@ async def test_a_greeted_walk_alternates_and_the_persona_concludes():
 
 
 async def test_an_ungreeted_walk_opens_with_the_persona():
-    _, turns = await walk(
-        scenario="Just this.", plug_config={"replies": ["Noted."]}
-    )
+    _, turns = await walk(scenario="Just this.", plug_config={"replies": ["Noted."]})
     assert turns[0] == ("human", "Just this.")
 
 

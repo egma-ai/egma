@@ -1,5 +1,5 @@
 {
-  "contract_version": 1,
+  "contract_version": 3,
   "simulation_id": "sim_01K4QW7M4E8YB2FVN0H9TZQWEU",
   "modality": "chat",
   "connection": {
@@ -15,8 +15,7 @@
   },
   "persona": {
     "traits": {
-      "personality": "Margaret, 68, retired schoolteacher.",
-      "language": "en-US"
+      "personality": "Margaret, 68, retired schoolteacher.", "language": "en-US"
     }
   },
   "scenario": {
@@ -26,12 +25,25 @@
     "max_duration_seconds": 600,
     "max_turns": 60
   },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": { "provider": "deepgram", "model": "nova-3-general" },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "voice_id": "warm-alto-2",
+      "speed": 0.9
+    }
+  },
   "platform": {
     "model": {
       "provider": "openai",
       "model": "gpt-4o-mini",
-      "key": "fixture-not-a-real-secret-persona-model-0001",
-      "base_url": "https://api.openai.example/v1"
+      "key": "fixture-not-a-real-secret-persona-model-0001"
     }
   }
 }

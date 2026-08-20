@@ -90,7 +90,7 @@ export const REACH_ASK_LINE = "How should Egma reach this agent?";
 
 /** One line per way, said in what it tests rather than in what it is made of. */
 export const REACH_LINES: Readonly<Record<Reach, string>> = {
-  text: "Text — Egma exchanges messages with the agent. No phone call, nothing dialled.",
+  text: "Chat — Egma exchanges messages with the agent. No phone call, nothing dialled.",
   phone:
     "Phone — Egma dials one of the agent's numbers and talks to it over the " +
     "telephone network, the way the people who call it do.",
@@ -98,13 +98,13 @@ export const REACH_LINES: Readonly<Record<Reach, string>> = {
 
 /** What a developer can do after asking Retell for the wrong connection kind. */
 export const VOICE_REQUIRES_PHONE_LINE =
-  "Retell says this is a voice agent. Voice agents can be reached only by phone, not text. " +
-  "Choose phone and try again. Nothing was written.";
+  "Retell says this is a voice agent. Voice agents require a Phone connection. " +
+  "Choose --reach phone and try again. Nothing was written.";
 
 /** What a developer can do after asking Retell for a phone connection to chat. */
 export const CHAT_REQUIRES_TEXT_LINE =
-  "Retell says this is a chat agent. Chat agents can be reached only by text, not phone. " +
-  "Choose text and try again. Nothing was written.";
+  "Retell says this is a chat agent. Chat agents require a Chat connection. " +
+  "Choose --reach text and try again. Nothing was written.";
 
 /** What the developer is asked when the phone was chosen. */
 export const NUMBER_ASK_LINE =
@@ -198,7 +198,7 @@ export type ConnectOutcome =
       readonly onTheAccount: number;
       /** Which way the developer chose, and the only one egma wrote. */
       readonly reach: Reach;
-      /** The number egma will dial, or `null` for a text connection. */
+      /** The number egma will dial, or `null` for a Chat connection. */
       readonly number: string | null;
       /** Whether each half was written or found already there. */
       readonly registration: Registration;
@@ -240,7 +240,7 @@ export type ConnectOptions = {
   /** Which of several, by id, or `null` when nobody chose. */
   readonly chooseAgent: (agents: readonly RetellAgent[]) => Promise<string | null>;
   /**
-   * Text or phone, or `null` when nobody chose.
+   * The `text` or `phone` reach flag, or `null` when nobody chose.
    *
    * Asked once the agent is settled and never before it: which numbers exist
    * is a fact about *that* agent, so there is nothing honest to offer until
@@ -359,7 +359,7 @@ type Selected = {
   readonly reach: Reach;
   /** The connection body for the chosen reach, and no other. */
   readonly connection: NewConnection;
-  /** The number egma will dial, or `null` for a text connection. */
+  /** The number egma will dial, or `null` for a Chat connection. */
   readonly number: string | null;
 };
 

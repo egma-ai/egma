@@ -20,8 +20,8 @@
  * 3. **The secret is never printed, and the file it lands in is private.** It
  *    is a password between egma's own parts, and the operator never sees it,
  *    chooses it or types it.
- * 4. **A workspace prepared before this change is told** what happened, because
- *    its containers are recreated underneath it.
+ * 4. **A newly generated pair is reported**, because its containers are
+ *    recreated with that pair.
  */
 
 import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
@@ -139,55 +139,6 @@ describe("the media server's credential", () => {
       // deployment is the line that explains why its containers were replaced.
       expect(second.stdout).toContain("media_credential: existing");
       expect(second.stdout).not.toContain("media_credential: generated");
-    } finally {
-      await platform.close();
-    }
-  });
-
-  it("gives a workspace prepared before this change a pair, and says so", async () => {
-    const platform = await startPlatform();
-    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
-    try {
-      // What an upgrading deployment's workspace holds: the settings the old
-      // phone setup wrote here, and no media credential, because there was
-      // nothing to write it.
-      await mkdir(path.dirname(workspace.configFile), { recursive: true });
-      await writeFile(
-        workspace.configFile,
-        "EGMA_PHONE_SOURCE_NUMBER=+15550100100\nEGMA_PERSONA_MODEL_API_KEY=sk-an-old-key\n",
-      );
-
-      const run = await runUp(workspace, platform);
-
-      expect(run.code).toBe(0);
-      const stored = await workspace.storedConfig();
-      expect(stored[KEY_VARIABLE]).not.toBe(undefined);
-      expect(stored[SECRET_VARIABLE]).not.toBe(undefined);
-      // **A line egma no longer writes is left exactly where it is.** An
-      // operator upgrading may need to read their own key out of this file
-      // once, and a provider that shows a key exactly once is a provider whose
-      // key egma must not throw away on their behalf.
-      expect(stored.EGMA_PHONE_SOURCE_NUMBER).toBe("+15550100100");
-      expect(stored.EGMA_PERSONA_MODEL_API_KEY).toBe("sk-an-old-key");
-      // **And neither reaches a container.** Handing an old setting to Compose
-      // would seed the platform from this file all over again — the
-      // compatibility reader this effort deliberately did not build, arriving
-      // by accident, and quietly contradicting the upgrade note that says the
-      // settings are gone and setup runs once more.
-      const calls = await workspace.dockerCalls();
-      expect(calls).toContain("EGMA_PHONE_SOURCE_NUMBER=\n");
-      expect(calls).toContain("EGMA_PERSONA_MODEL_API_KEY=\n");
-      expect(calls).not.toContain("+15550100100");
-      expect(calls).not.toContain("sk-an-old-key");
-      // A file somebody loosened is tightened again by the write, rather than
-      // keeping whatever mode it happened to have.
-      expect((await stat(workspace.configFile)).mode & 0o777).toBe(0o600);
-      // And the operator is told, in sentences, because their media containers
-      // are being replaced by this run — and because what those containers held
-      // until this moment is a security fact they are entitled to hear plainly.
-      expect(run.stderr).toContain("media-server credential was generated");
-      expect(run.stderr).toContain("published in Egma's own repository");
-      expect(run.stderr).toContain("media containers are replaced by this start");
     } finally {
       await platform.close();
     }

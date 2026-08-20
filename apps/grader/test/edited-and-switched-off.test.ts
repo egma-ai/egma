@@ -2,6 +2,7 @@ import {
   deleteGrader,
   editGrader,
   readVerdicts,
+  regrade,
   type UseLibraryEntry,
 } from "@egma/db";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -9,10 +10,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   aLatencyCopy,
   conductSimulation,
+  eventually,
   jobFor,
   makeWorld,
   oneServiceAtATime,
   seedGrader,
+  theSeededGrader,
   type World,
 } from "./support/world.ts";
 
@@ -28,9 +31,9 @@ import {
  * changed, which the data-access suite already proves, but that the next
  * conversation is judged differently and the last one is not judged again.
  *
- * **Every conversation here names no test**, so the copy every project is
- * created with has nothing to judge it against and writes nothing. What is left
- * is the latency copy this file switches on, and one row per conversation —
+ * The project-owned expected-behaviors copy is switched off before these runs,
+ * so what is left is the latency copy this file switches on and one row per
+ * conversation —
  * which is what makes "it wrote nothing afterwards" an assertion about the
  * delete rather than about arithmetic.
  *
@@ -46,6 +49,10 @@ let switchedOn: string[] = [];
 
 beforeAll(async () => {
   world = await makeWorld("grader_edited_switched_off");
+  // These cases isolate computed latency. The minimal test has one required
+  // behavior because every real test must be falsifiable, so switch off the
+  // model-judged copy before any run freezes its plan.
+  await deleteGrader(world.auth, await theSeededGrader(world));
 });
 
 /**
@@ -97,6 +104,42 @@ async function rowsFrom(conversationId: string, graderId: string) {
 }
 
 describe("editing what a copy judges by", () => {
+  it("uses the version frozen when the run started for initial grading and re-grade", async () => {
+    await service.start();
+    const graderId = await aCopyOnTheProject(
+      aLatencyCopy({ name: "Frozen at two seconds" }),
+    );
+
+    let nextVersionId = "";
+    const { simulationId, runId } = await conductSimulation(world, {
+      afterRunStarted: async () => {
+        const edited = await editGrader(world.auth, graderId, {
+          params: { metric: "turn_response_latency", bound: 1_000 },
+        });
+        nextVersionId = edited?.versionId ?? "";
+      },
+    });
+    await judged(simulationId);
+
+    const [frozen] = await rowsFrom(simulationId, graderId);
+    expect(frozen?.verdict).toBe("passed");
+    expect(frozen?.graderVersionId).not.toBe(nextVersionId);
+
+    const asked = await regrade(world.auth, { runId, graderId });
+    expect(asked?.reopened).toHaveLength(1);
+    const repeated = await eventually("the pinned version to judge again", async () => {
+      const [row] = await rowsFrom(simulationId, graderId);
+      return row !== undefined &&
+        row.judgedAtMicroseconds > (frozen?.judgedAtMicroseconds ?? 0n)
+        ? row
+        : undefined;
+    });
+    expect(repeated.graderVersionId).toBe(frozen?.graderVersionId);
+    expect(repeated.graderVersionId).not.toBe(nextVersionId);
+    expect(repeated.verdict).toBe("passed");
+    expect(await rowsFrom(simulationId, graderId)).toHaveLength(1);
+  });
+
   /**
    * **The next conversation is judged by the new bound, and the last one keeps
    * its own answer.** An edit to the values mints the next version rather than

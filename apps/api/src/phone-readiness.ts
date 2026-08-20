@@ -1,32 +1,29 @@
-import type { PlatformFacts, PlatformSettingName } from "@egma/db";
-
-import { holds, labelOf } from "./platform-readiness.ts";
+import {
+  PLATFORM_SETTINGS,
+  type PlatformFacts,
+  type PlatformSettingName,
+} from "@egma/db";
 
 /**
  * Whether this platform can place a phone call, and what is missing when it
  * cannot.
  *
- * **Platform readiness and phone readiness are two facts, not one.** A
- * deployment that has never been given a carrier still runs chat and text
- * simulations perfectly well, and saying it is unhealthy for that would be a
- * lie that stops a first-run story dead. So `self-host up` brings a platform up
- * *ready*, and this says separately whether the phone half has been set up.
+ * **Phone readiness is not platform readiness.** A deployment that has never
+ * been given a carrier still runs chat simulations. `self-host up`
+ * brings that platform up ready, and this says only whether it can place a
+ * phone call.
  *
  * **It is read from the platform's own store rather than from this process's
- * environment**, and that move is what makes the answer recoverable. The three
- * facts used to arrive as environment variables of this container, so a
+ * environment**, and that move is what makes the answer recoverable. The route
+ * used to arrive as environment variables of this container, so a
  * platform started any other way than through the CLI reported `setup required`
  * with the carrier paperwork already done — and the only way back was to find
  * the file and restart. They are ordinary settings now: an operator who supplies
  * a missing one is ready on the next request, with nothing restarted.
  *
- * **Everything here is non-secret, and that is deliberate.** The facts are the
- * carrier's own hostname, the number a call appears to come from, and which
- * speech provider was configured — three things a caller sees on their handset
- * or an invoice, and none of which opens anything. The trunk password and the
- * provider keys are sealed in the same store and reach only the work order a
- * simulator claims; `platformFacts` answers `null` for every one of them, so no
- * answer built here can carry one even by accident.
+ * **Everything returned here is non-secret.** The facts are the carrier's
+ * hostname and the number a call appears to come from. Speech readiness comes
+ * from the pinned persona version plus the deployment credential source.
  */
 
 /** What a platform's phone half can be. */
@@ -44,19 +41,16 @@ export type PhoneReadiness = {
   readonly trunkAddress: string | null;
   /** The number a call appears to come from, E.164. Non-secret. */
   readonly sourceNumber: string | null;
-  /** Which speech provider the persona speaks and listens with. Non-secret. */
-  readonly speechProvider: string | null;
 };
 
 /**
- * The three things the phone half stands on, as the platform stores them and
- * as a refusal names them.
+ * The two public facts the phone half stands on, as the platform stores them
+ * and as a refusal names them.
  *
- * A trunk with no source number places a call the carrier refuses; a carrier
- * with no speech provider places a call nobody can talk on. Neither is *nearly*
- * ready, so a partial answer is still `setup_required` — and it says which
- * half, because the one thing worse than "not ready" is "not ready" with no
- * indication of what to do.
+ * A trunk with no source number places a call the carrier refuses. The store
+ * accepts only a complete two-value source-IP route or a complete four-value
+ * credential route, so readiness does not preserve or diagnose older partial
+ * SIP shapes.
  *
  * The label is not restated here: the settings catalog already carries the
  * words each setting is named in, and a second copy of them is a second copy to
@@ -66,47 +60,39 @@ export type PhoneReadiness = {
 export const PHONE_SETUP_FACTS = {
   trunkAddress: "carrier_trunk_address",
   sourceNumber: "carrier_trunk_number",
-  // The persona's mouth, which is also its ears on every deployment that
-  // configured one account for both. It is the one of the two legs a caller
-  // would notice, which is what makes it the fact worth reporting.
-  speechProvider: "text_to_speech_provider",
 } as const satisfies Record<string, PlatformSettingName>;
+
+/** Required route members, derived from the platform catalog that owns them. */
+const REQUIRED_PHONE_SETTINGS = PLATFORM_SETTINGS.filter(
+  (setting) => setting.required,
+);
+
+/**
+ * Whether the store holds a setting at all.
+ *
+ * Presence is the fact because `platformFacts` returns `null` for a secret
+ * value. Testing the value would report every secret setting as missing.
+ */
+function holds(held: PlatformFacts, name: PlatformSettingName): boolean {
+  return Object.hasOwn(held, name);
+}
 
 export function phoneReadiness(held: PlatformFacts): PhoneReadiness {
   const fact = (
     which: keyof typeof PHONE_SETUP_FACTS,
   ): string | null => held[PHONE_SETUP_FACTS[which]] ?? null;
 
-  // Asked with the same predicate the whole-platform answer asks, and never
-  // of the value: `platformFacts` answers `null` for every setting the catalog
-  // marks secret, so the day one of these three becomes a secret a value test
-  // would read it as absent forever. See `holds`.
-  const missing = (
-    Object.keys(PHONE_SETUP_FACTS) as (keyof typeof PHONE_SETUP_FACTS)[]
-  )
-    .filter((which) => !holds(held, PHONE_SETUP_FACTS[which]))
-    .map((which) => labelOf(PHONE_SETUP_FACTS[which]));
-
-  // Old releases allowed the SIP username and password to be written one at a
-  // time. Neither is required for a source-IP route, but one without the other
-  // is not a route the simulator can use. Keep that legacy row visible and
-  // name its missing half instead of reporting the phone path ready.
-  const hasUsername = holds(held, "carrier_trunk_username");
-  const hasPassword = holds(held, "carrier_trunk_password");
-  if (hasUsername !== hasPassword) {
-    missing.push(
-      labelOf(
-        hasUsername ? "carrier_trunk_password" : "carrier_trunk_username",
-      ),
-    );
-  }
+  // Ask about presence, never the value: `platformFacts` answers `null` for a
+  // secret, so a value test would read a secret setting as absent forever.
+  const missing = REQUIRED_PHONE_SETTINGS.filter(
+    (setting) => !holds(held, setting.name),
+  ).map((setting) => setting.label);
 
   return {
     state: missing.length === 0 ? "ready" : "setup_required",
     missing,
     trunkAddress: fact("trunkAddress"),
     sourceNumber: fact("sourceNumber"),
-    speechProvider: fact("speechProvider"),
   };
 }
 

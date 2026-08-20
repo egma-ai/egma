@@ -84,7 +84,7 @@ async function claim(
       "content-type": "application/json",
       authorization: `Bearer ${SERVICE_TOKEN}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ contract_versions: [3], ...body }),
   });
   const answered = (await response.json()) as { specs: unknown[] };
   return {
@@ -164,7 +164,10 @@ beforeAll(async () => {
     role: "member",
     via: "session",
   };
-  await createPersona(author, { name: "Impatient Rita", traits: NEUTRAL_TRAITS });
+  await createPersona(author, {
+    name: "Impatient Rita",
+    traits: NEUTRAL_TRAITS,
+  });
 
   const pushed = await api(
     "POST",

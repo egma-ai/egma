@@ -6,10 +6,11 @@
  * asserted is what something driving this can act on — the lines it prints, in
  * the order it prints them, and the number it exits with.
  *
- * The lifecycle is scripted rather than waited for. A real run is a simulator
- * dialing a real voice agent; here a control says "this one is running now,
- * this one passed, this one errored", which is what lets a check assert on an
- * exact sequence instead of on whatever a machine happened to produce.
+ * The lifecycle is scripted rather than waited for. A real run has the
+ * simulator conduct a simulation against an agent over the selected
+ * connection; here a control says "this one is running now, this one passed,
+ * this one errored", which lets a check assert on an exact sequence instead of
+ * on whatever a machine happened to produce.
  */
 
 import { execFile } from "node:child_process";
@@ -132,7 +133,10 @@ async function makeFolder(registered: Registered | null): Promise<void> {
         ? null
         : { origin: platform.url, instance: platform.instanceId },
     agent: registered === null ? null : { name: "order-line", id: registered.agentId },
-    connection: registered === null ? null : { name: "retell-1", id: registered.connectionId },
+    connection:
+      registered === null
+        ? null
+        : { name: "retell_chat_api-1", id: registered.connectionId },
     suite: { name: "first-suite", id: null },
   });
 }

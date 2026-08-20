@@ -2,6 +2,7 @@ import {
   appendVerdicts,
   claimGradingJobs,
   finishGradingJob,
+  listGraders,
   listGradingJobsForSimulation,
   PREDEFINED_GRADERS,
   useLibraryEntry,
@@ -152,6 +153,20 @@ async function aGraderOf(auth: AuthContext, name: string): Promise<string> {
   return created.id;
 }
 
+/** The seeded expected-behaviors copy, reached through the ordinary grader list. */
+async function expectedBehaviorsGraderOf(auth: AuthContext): Promise<string> {
+  const page = await listGraders(auth);
+  const matches = page.items.filter(
+    (item) => item.libraryId === PREDEFINED_GRADERS.expectedBehaviors,
+  );
+  if (matches.length !== 1) {
+    throw new Error(
+      `expected one expected-behaviors grader, found ${matches.length}`,
+    );
+  }
+  return matches[0]?.id ?? "";
+}
+
 /**
  * Take the outstanding work the way the grader service takes it: the real claim,
  * instance-wide and oldest-first, which is the only thing that moves a job to
@@ -196,6 +211,14 @@ describe("one conversation's evidence, in one read", () => {
     const persona = read.body.persona as Record<string, unknown>;
     expect(String(persona.version_id)).toMatch(/^prsv_/u);
     expect(persona.traits).not.toBeNull();
+    const personaTraits = persona.traits as Record<string, unknown>;
+    expect(Object.keys(personaTraits).sort()).toEqual([
+      "language",
+      "personality",
+    ]);
+    expect(personaTraits.personality).toEqual(expect.any(String));
+    expect(personaTraits.language).toEqual(expect.any(String));
+    expect(personaTraits).not.toHaveProperty("voice");
 
     // Who it was against, and exactly how egma reached them.
     expect((read.body.agent as { name: string }).name).toMatch(
@@ -338,10 +361,37 @@ describe("judging one conversation again", () => {
       { grader_id: "expected_behaviors_v1" },
     );
     expect(asked.statusCode).toBe(400);
-    expect(String(asked.body.message)).toContain("built-in");
+    expect(String(asked.body.message)).toContain("active grader");
+    expect(String(asked.body.message)).not.toContain("never a row");
     // Nothing was reopened by a refused ask.
     const jobs = await listGradingJobsForSimulation(who.auth, run.heard);
     expect(jobs.map((job) => job.status)).toEqual(["graded"]);
+  });
+
+  it("targets the seeded expected-behaviors grader by its ordinary grader id", async () => {
+    const { who, run } = await aCustomerWhoHasRun(
+      "evidence_regrade_expected_behaviors",
+    );
+    await finishGrading(who.auth);
+    const grader = await expectedBehaviorsGraderOf(who.auth);
+
+    const asked = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      { grader_id: grader },
+    );
+
+    expect(asked.statusCode, JSON.stringify(asked.body)).toBe(200);
+    expect(asked.body).toMatchObject({
+      simulation_id: run.heard,
+      grader_id: grader,
+      reopened: 1,
+    });
+    expect(await theJobOn(who.auth, run.heard)).toEqual({
+      status: "pending",
+      narrowedTo: grader,
+    });
   });
 
   it("is not there for a grader this customer cannot reach", async () => {

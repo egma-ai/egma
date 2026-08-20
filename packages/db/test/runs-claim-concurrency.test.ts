@@ -15,7 +15,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * Two simulators, one queue — the deployment's whole queue, because the claim
@@ -62,7 +62,6 @@ beforeAll(async () => {
     { id: projectId, slug: "default" },
   ]);
   await seedUser(database, ada, "ada@acme.example");
-  await seedJudge({ ...auth, role: "admin" });
   // No running graders: what races here is two claimants over one queue, and
   // the guarantee under test is Postgres's locking. Nothing in this file is
   // ever judged.
@@ -84,15 +83,7 @@ beforeAll(async () => {
   personaId = (
     await createPersona(auth, {
       name: "Impatient Rita",
-      traits: {
-        personality: "Speaks plainly.",
-        language: "en-US",
-        voice: {
-          provider: "elevenlabs",
-          voiceId: "EXAVITQu4vr4xnSDxMaL",
-          speed: 1,
-        },
-      },
+      traits: { personality: "Speaks plainly.", language: "en-US" },
     })
   ).id;
 

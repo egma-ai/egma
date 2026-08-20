@@ -79,6 +79,10 @@ EGMA_RETELL_API_KEY=key_live_... egma connect \
   --phone-number +14155550111
 ```
 
+Pass `--headless` to suppress all prompts. With `--headless` and no `--reach`,
+the command exits with code 5. The selected agent determines the compatible
+value, but you must still state it before the command writes a connection.
+
 Useful environment variables:
 
 | Variable | Purpose |
@@ -91,6 +95,19 @@ Useful environment variables:
 `egma connect` is safe to repeat. It reuses the same Egma agent when it can
 prove the Retell identity, and adds or reuses the requested connection. A phone
 connection itself remains a generic phone path.
+
+The `registration:` output says what happened:
+
+| Value | Meaning |
+|---|---|
+| `created` | Egma created an agent and its first connection. |
+| `reused` | The compatible agent and connection already existed. |
+| `connection_added` | Egma matched the agent and added this connection. |
+
+Nothing in simulation setup writes to Retell. Egma only reads the selected
+agent and its routed numbers. If your local prompt differs from Retell,
+`egma connect` prints `drift: yes` and says which version grounds the tests. It
+does not block the connection.
 
 ## Set up Retell production Monitoring
 

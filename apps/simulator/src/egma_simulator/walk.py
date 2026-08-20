@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .persona import Persona, Turn
-from .plugs import PlatformPlug
+from .plugs import ConnectionPlug
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +161,7 @@ def duration_limit_reached(max_duration_seconds: float) -> Ending:
 async def conduct(
     *,
     persona: Persona,
-    plug: PlatformPlug,
+    plug: ConnectionPlug,
     max_turns: int,
     max_duration_seconds: float,
     on_turn: OnTurn,
@@ -266,7 +266,7 @@ async def _duration_watchdog(
     controls.trip_duration_limit()
 
 
-async def _close_quietly(plug: PlatformPlug, name: str) -> None:
+async def _close_quietly(plug: ConnectionPlug, name: str) -> None:
     """Tear the exchange down; a failure to close is logged, never raised —
     it would otherwise eat the walk's own answer."""
     try:

@@ -1,6 +1,6 @@
 {
-  "id": "65ee56e4-e7ed-4849-9789-1d21f90ca99b",
-  "prevId": "7b2b1492-dc94-4ee0-9456-f9e16d81f24e",
+  "id": "95715ba6-e4ea-479e-b592-3662836e9850",
+  "prevId": "9106f89e-4b89-480f-8b84-cda283b76c09",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -118,6 +118,10 @@
         "platform_setting_id_prefix": {
           "name": "platform_setting_id_prefix",
           "value": "\"platform_setting\".\"id\" ~ '^pfs_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "platform_setting_name_allowed": {
+          "name": "platform_setting_name_allowed",
+          "value": "\"platform_setting\".\"name\" in ('carrier_trunk_address', 'carrier_trunk_number', 'carrier_trunk_username', 'carrier_trunk_password')"
         }
       },
       "isRLSEnabled": false
@@ -1149,7 +1153,8 @@
           "name": "default_persona_id",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "'prs_01M0E4EVJ6ECGVJEA4NSBTC0CC'"
         },
         "deleted_at": {
           "name": "deleted_at",
@@ -1220,7 +1225,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "project_created_by_user_id_fk": {
@@ -1468,13 +1473,13 @@
           "name": "organization_id",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "project_id": {
           "name": "project_id",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "name": {
           "name": "name",
@@ -1528,6 +1533,22 @@
         }
       },
       "indexes": {
+        "persona_egma_provided_name_unique": {
+          "name": "persona_egma_provided_name_unique",
+          "columns": [
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"persona\".\"organization_id\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "persona_organization_id_project_id_idx": {
           "name": "persona_organization_id_project_id_idx",
           "columns": [
@@ -1608,21 +1629,20 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "persona_id_project_id_unique": {
-          "name": "persona_id_project_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "project_id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
         "persona_id_prefix": {
           "name": "persona_id_prefix",
           "value": "\"persona\".\"id\" ~ '^prs_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "persona_tenancy_is_whole_or_egmas": {
+          "name": "persona_tenancy_is_whole_or_egmas",
+          "value": "(\"persona\".\"organization_id\" is null) = (\"persona\".\"project_id\" is null)"
+        },
+        "persona_egma_provided_is_active": {
+          "name": "persona_egma_provided_is_active",
+          "value": "\"persona\".\"organization_id\" is not null or \"persona\".\"archived_at\" is null"
         }
       },
       "isRLSEnabled": false
@@ -1651,6 +1671,12 @@
         },
         "traits": {
           "name": "traits",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "models": {
+          "name": "models",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
@@ -1722,6 +1748,14 @@
         "persona_version_id_prefix": {
           "name": "persona_version_id_prefix",
           "value": "\"persona_version\".\"id\" ~ '^prsv_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "persona_version_traits_valid": {
+          "name": "persona_version_traits_valid",
+          "value": "\n        jsonb_typeof(\"persona_version\".\"traits\") is not distinct from 'object'\n        and (\"persona_version\".\"traits\" - array[\n          'personality', 'language', 'manner', 'patience', 'accent',\n          'backgroundNoise', 'underFriction'\n        ]::text[]) is not distinct from '{}'::jsonb\n        and jsonb_typeof(\"persona_version\".\"traits\"->'personality') is not distinct from 'string'\n        and nullif(btrim(\"persona_version\".\"traits\"->>'personality'), '') is not null\n        and jsonb_typeof(\"persona_version\".\"traits\"->'language') is not distinct from 'string'\n        and nullif(btrim(\"persona_version\".\"traits\"->>'language'), '') is not null\n        and (\n          not (\"persona_version\".\"traits\" ? 'manner')\n          or (\n            jsonb_typeof(\"persona_version\".\"traits\"->'manner') is not distinct from 'string'\n            and nullif(btrim(\"persona_version\".\"traits\"->>'manner'), '') is not null\n          )\n        )\n        and (\n          not (\"persona_version\".\"traits\" ? 'patience')\n          or (\n            jsonb_typeof(\"persona_version\".\"traits\"->'patience') is not distinct from 'string'\n            and nullif(btrim(\"persona_version\".\"traits\"->>'patience'), '') is not null\n          )\n        )\n        and (\n          not (\"persona_version\".\"traits\" ? 'accent')\n          or (\n            jsonb_typeof(\"persona_version\".\"traits\"->'accent') is not distinct from 'string'\n            and nullif(btrim(\"persona_version\".\"traits\"->>'accent'), '') is not null\n          )\n        )\n        and (\n          not (\"persona_version\".\"traits\" ? 'backgroundNoise')\n          or (\n            jsonb_typeof(\"persona_version\".\"traits\"->'backgroundNoise') is not distinct from 'string'\n            and nullif(btrim(\"persona_version\".\"traits\"->>'backgroundNoise'), '') is not null\n          )\n        )\n        and (\n          not (\"persona_version\".\"traits\" ? 'underFriction')\n          or (\n            jsonb_typeof(\"persona_version\".\"traits\"->'underFriction') is not distinct from 'string'\n            and nullif(btrim(\"persona_version\".\"traits\"->>'underFriction'), '') is not null\n          )\n        )\n      "
+        },
+        "persona_version_models_valid": {
+          "name": "persona_version_models_valid",
+          "value": "\n        jsonb_typeof(\"persona_version\".\"models\") is not distinct from 'object'\n        and (\"persona_version\".\"models\" - array['llm', 'stt', 'tts']::text[])\n          is not distinct from '{}'::jsonb\n        and (\"persona_version\".\"models\"->'llm') is not distinct from\n          jsonb_build_object('provider', 'openai', 'model', 'gpt-4o-mini')\n        and (\n          (\"persona_version\".\"models\"->'stt') is not distinct from\n            jsonb_build_object('provider', 'openai', 'model', 'gpt-live-transcribe')\n          or (\"persona_version\".\"models\"->'stt') is not distinct from\n            jsonb_build_object('provider', 'deepgram', 'model', 'nova-3-general')\n        )\n        and jsonb_typeof(\"persona_version\".\"models\"->'tts') is not distinct from 'object'\n        and ((\"persona_version\".\"models\"->'tts') - array[\n          'provider', 'model', 'voiceId', 'speed'\n        ]::text[]) is not distinct from '{}'::jsonb\n        and (\n          (\n            \"persona_version\".\"models\"->'tts'->>'provider' is not distinct from 'cartesia'\n            and \"persona_version\".\"models\"->'tts'->>'model' is not distinct from 'sonic-3.5'\n          )\n          or (\n            \"persona_version\".\"models\"->'tts'->>'provider' is not distinct from 'openai'\n            and \"persona_version\".\"models\"->'tts'->>'model' is not distinct from 'gpt-4o-mini-tts'\n          )\n        )\n        and jsonb_typeof(\"persona_version\".\"models\"->'tts'->'voiceId') is not distinct from 'string'\n        and nullif(btrim(\"persona_version\".\"models\"->'tts'->>'voiceId'), '') is not null\n        and jsonb_path_exists(\n          \"persona_version\".\"models\",\n          '$.tts.speed ? (@.type() == \"number\" && @ >= 0.6 && @ <= 1.5)'::jsonpath\n        )\n      "
         }
       },
       "isRLSEnabled": false
@@ -3156,12 +3190,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "required": {
           "name": "required",
           "type": "boolean",
@@ -3332,16 +3360,21 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "grader_id_library_id_unique": {
+          "name": "grader_id_library_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "library_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "grader_id_prefix": {
           "name": "grader_id_prefix",
           "value": "\"grader\".\"id\" ~ '^grd_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "grader_type_allowed": {
-          "name": "grader_type_allowed",
-          "value": "\"grader\".\"type\" in ('llm_as_judge', 'code')"
         },
         "grader_scope_allowed": {
           "name": "grader_scope_allowed",
@@ -3404,36 +3437,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 1
-        },
-        "prompt": {
-          "name": "prompt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "params": {
-          "name": "params",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "output_definition": {
-          "name": "output_definition",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_code": {
-          "name": "source_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_code_language": {
-          "name": "source_code_language",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -3517,6 +3520,21 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "grader_library_current_version_fk": {
+          "name": "grader_library_current_version_fk",
+          "tableFrom": "grader_library",
+          "tableTo": "grader_library_version",
+          "columnsFrom": [
+            "id",
+            "version"
+          ],
+          "columnsTo": [
+            "library_id",
+            "version"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3534,14 +3552,103 @@
         "grader_library_tenancy_is_whole_or_egmas": {
           "name": "grader_library_tenancy_is_whole_or_egmas",
           "value": "(\"grader_library\".\"organization_id\" is null) = (\"grader_library\".\"project_id\" is null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.grader_library_version": {
+      "name": "grader_library_version",
+      "schema": "",
+      "columns": {
+        "library_id": {
+          "name": "library_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
         },
-        "grader_library_source_code_within_budget": {
-          "name": "grader_library_source_code_within_budget",
-          "value": "\"grader_library\".\"source_code\" is null or octet_length(\"grader_library\".\"source_code\") <= 262144"
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
         },
-        "grader_library_source_code_columns_agree": {
-          "name": "grader_library_source_code_columns_agree",
-          "value": "(\"grader_library\".\"source_code\" is null) = (\"grader_library\".\"source_code_language\" is null)"
+        "prompt": {
+          "name": "prompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "params": {
+          "name": "params",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "output_definition": {
+          "name": "output_definition",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_code": {
+          "name": "source_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_code_language": {
+          "name": "source_code_language",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "grader_library_version_library_id_grader_library_id_fk": {
+          "name": "grader_library_version_library_id_grader_library_id_fk",
+          "tableFrom": "grader_library_version",
+          "tableTo": "grader_library",
+          "columnsFrom": [
+            "library_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "grader_library_version_library_id_version_pk": {
+          "name": "grader_library_version_library_id_version_pk",
+          "columns": [
+            "library_id",
+            "version"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "grader_library_version_library_id_prefix": {
+          "name": "grader_library_version_library_id_prefix",
+          "value": "\"grader_library_version\".\"library_id\" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "grader_library_version_source_code_within_budget": {
+          "name": "grader_library_version_source_code_within_budget",
+          "value": "\"grader_library_version\".\"source_code\" is null or octet_length(\"grader_library_version\".\"source_code\") <= 262144"
+        },
+        "grader_library_version_source_code_columns_agree": {
+          "name": "grader_library_version_source_code_columns_agree",
+          "value": "(\"grader_library_version\".\"source_code\" is null) = (\"grader_library_version\".\"source_code_language\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -3564,6 +3671,18 @@
         },
         "version": {
           "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "library_id": {
+          "name": "library_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "library_version": {
+          "name": "library_version",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
@@ -3596,19 +3715,6 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "grader_version_grader_id_grader_id_fk": {
-          "name": "grader_version_grader_id_grader_id_fk",
-          "tableFrom": "grader_version",
-          "tableTo": "grader",
-          "columnsFrom": [
-            "grader_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "grader_version_created_by_user_id_fk": {
           "name": "grader_version_created_by_user_id_fk",
           "tableFrom": "grader_version",
@@ -3620,6 +3726,36 @@
             "id"
           ],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "grader_version_library_version_fk": {
+          "name": "grader_version_library_version_fk",
+          "tableFrom": "grader_version",
+          "tableTo": "grader_library_version",
+          "columnsFrom": [
+            "library_id",
+            "library_version"
+          ],
+          "columnsTo": [
+            "library_id",
+            "version"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "grader_version_grader_library_fk": {
+          "name": "grader_version_grader_library_fk",
+          "tableFrom": "grader_version",
+          "tableTo": "grader",
+          "columnsFrom": [
+            "grader_id",
+            "library_id"
+          ],
+          "columnsTo": [
+            "id",
+            "library_id"
+          ],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -3639,297 +3775,10 @@
         "grader_version_id_prefix": {
           "name": "grader_version_id_prefix",
           "value": "\"grader_version\".\"id\" ~ '^grv_[0-9A-HJKMNP-TV-Z]{26}$'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.judge_configuration": {
-      "name": "judge_configuration",
-      "schema": "",
-      "columns": {
-        "project_id": {
-          "name": "project_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
         },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_id": {
-          "name": "credential_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "credentials": {
-          "name": "credentials",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "credentials_hint": {
-          "name": "credentials_hint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "judge_configuration_organization_id_organization_id_fk": {
-          "name": "judge_configuration_organization_id_organization_id_fk",
-          "tableFrom": "judge_configuration",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "judge_configuration_credential_id_judge_credential_id_fk": {
-          "name": "judge_configuration_credential_id_judge_credential_id_fk",
-          "tableFrom": "judge_configuration",
-          "tableTo": "judge_credential",
-          "columnsFrom": [
-            "credential_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "judge_configuration_created_by_user_id_fk": {
-          "name": "judge_configuration_created_by_user_id_fk",
-          "tableFrom": "judge_configuration",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "judge_configuration_project_organization_fk": {
-          "name": "judge_configuration_project_organization_fk",
-          "tableFrom": "judge_configuration",
-          "tableTo": "project",
-          "columnsFrom": [
-            "project_id",
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "judge_configuration_project_id_prefix": {
-          "name": "judge_configuration_project_id_prefix",
-          "value": "\"judge_configuration\".\"project_id\" ~ '^prj_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "judge_configuration_provider_allowed": {
-          "name": "judge_configuration_provider_allowed",
-          "value": "\"judge_configuration\".\"provider\" in ('openai')"
-        },
-        "judge_configuration_source_allowed": {
-          "name": "judge_configuration_source_allowed",
-          "value": "\"judge_configuration\".\"source\" in ('credential', 'platform')"
-        },
-        "judge_configuration_has_one_key_source": {
-          "name": "judge_configuration_has_one_key_source",
-          "value": "(\"judge_configuration\".\"source\" = 'credential' and \"judge_configuration\".\"credential_id\" is not null and \"judge_configuration\".\"credentials\" is null and \"judge_configuration\".\"credentials_hint\" is null) or (\"judge_configuration\".\"source\" = 'platform' and \"judge_configuration\".\"credential_id\" is null and \"judge_configuration\".\"credentials\" is not null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.judge_credential": {
-      "name": "judge_credential",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credentials": {
-          "name": "credentials",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credentials_hint": {
-          "name": "credentials_hint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revision": {
-          "name": "revision",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "judge_credential_organization_id_idx": {
-          "name": "judge_credential_organization_id_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"judge_credential\".\"archived_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "judge_credential_organization_id_organization_id_fk": {
-          "name": "judge_credential_organization_id_organization_id_fk",
-          "tableFrom": "judge_credential",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "judge_credential_created_by_user_id_fk": {
-          "name": "judge_credential_created_by_user_id_fk",
-          "tableFrom": "judge_credential",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "judge_credential_id_prefix": {
-          "name": "judge_credential_id_prefix",
-          "value": "\"judge_credential\".\"id\" ~ '^jcr_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "judge_credential_revision_prefix": {
-          "name": "judge_credential_revision_prefix",
-          "value": "\"judge_credential\".\"revision\" ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "judge_credential_provider_allowed": {
-          "name": "judge_credential_provider_allowed",
-          "value": "\"judge_credential\".\"provider\" in ('openai')"
+        "grader_version_judge_model_allowed": {
+          "name": "grader_version_judge_model_allowed",
+          "value": "\"grader_version\".\"judge_model\" is null or \"grader_version\".\"judge_model\" = jsonb_build_object('provider', 'openai', 'model', 'gpt-4o-mini')"
         }
       },
       "isRLSEnabled": false
@@ -5679,21 +5528,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "simulation_persona_project_fk": {
-          "name": "simulation_persona_project_fk",
-          "tableFrom": "simulation",
-          "tableTo": "persona",
-          "columnsFrom": [
-            "persona_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "simulation_test_version_test_fk": {
           "name": "simulation_test_version_test_fk",
           "tableFrom": "simulation",
@@ -5891,12 +5725,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "judge_credential_ids": {
-          "name": "judge_credential_ids",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -5906,21 +5734,6 @@
         }
       },
       "indexes": {
-        "grading_plan_judge_credential_ids_idx": {
-          "name": "grading_plan_judge_credential_ids_idx",
-          "columns": [
-            {
-              "expression": "judge_credential_ids",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gin",
-          "with": {}
-        },
         "grading_plan_organization_id_project_id_idx": {
           "name": "grading_plan_organization_id_project_id_idx",
           "columns": [
@@ -6016,13 +5829,9 @@
           "name": "grading_plan_groups_are_a_list",
           "value": "jsonb_typeof(\"grading_plan\".\"groups\") = 'array'"
         },
-        "grading_plan_credentials_are_a_list": {
-          "name": "grading_plan_credentials_are_a_list",
-          "value": "jsonb_typeof(\"grading_plan\".\"judge_credential_ids\") = 'array'"
-        },
         "grading_plan_unrecorded_holds_nothing": {
           "name": "grading_plan_unrecorded_holds_nothing",
-          "value": "\"grading_plan\".\"state\" <> 'not_recorded'\n        or (\"grading_plan\".\"groups\" = '[]'::jsonb\n          and \"grading_plan\".\"judge_credential_ids\" = '[]'::jsonb)"
+          "value": "\"grading_plan\".\"state\" <> 'not_recorded'\n        or \"grading_plan\".\"groups\" = '[]'::jsonb"
         }
       },
       "isRLSEnabled": false
