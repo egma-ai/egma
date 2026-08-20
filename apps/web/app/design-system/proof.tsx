@@ -2,6 +2,44 @@
 
 import { useRef, useState } from "react";
 
+import { EllipsisIcon } from "lucide-react";
+
+import { Badge as BaseBadge } from "@/components/ui/badge";
+import { Button as BaseButton } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog as BaseDialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+
 import type { Me } from "../../lib/me.ts";
 import type { EvidenceTranscript } from "../../lib/simulations.ts";
 import {
@@ -133,6 +171,7 @@ export function DesignSystemProof() {
   );
   const [environment, setEnvironment] = useState<"staging" | "production">("production");
   const [list, setList] = useState<"active" | "archived">("active");
+  const [onlyFailed, setOnlyFailed] = useState(true);
   const nextFeedbackInput = useRef<FeedbackInput>("keyboard");
 
   return (
@@ -149,6 +188,206 @@ export function DesignSystemProof() {
       </header>
 
       <section className={styles.grid} aria-label="Shared component proof">
+        <article className={`${styles.panel} ${styles.wide}`}>
+          <p className={styles.kicker}>Component base — shadcn on Tailwind</p>
+          <div className="flex flex-col gap-8">
+            <p className="m-0 max-w-[68ch] text-base text-muted-foreground">
+              The primitives every new screen is built from. Nothing here sets a
+              colour, a radius, or a duration of its own: the Tailwind theme
+              reads <code className="font-mono text-sm">ui/tokens.css</code>, so
+              these surfaces and the CSS Modules surfaces below cannot disagree
+              while both exist.
+            </p>
+
+            <div className="flex flex-col gap-4">
+              <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                Buttons
+              </h3>
+              <div className="flex flex-wrap items-center gap-3">
+                <BaseButton>Start run</BaseButton>
+                <BaseButton variant="secondary">Add grader</BaseButton>
+                <BaseButton variant="ghost">Open transcript</BaseButton>
+                <BaseButton variant="link">See the run plan</BaseButton>
+                <BaseButton variant="destructive">Delete persona</BaseButton>
+                <BaseButton disabled>Unavailable</BaseButton>
+                <BaseButton size="sm" variant="secondary">
+                  Dense row action
+                </BaseButton>
+                <BaseButton
+                  size="icon"
+                  variant="secondary"
+                  aria-label="More base actions"
+                >
+                  <EllipsisIcon />
+                </BaseButton>
+              </div>
+              <p className="m-0 text-sm text-muted-foreground">
+                Beside the CSS Modules button, which reads the same tokens:
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <BaseButton>Base primary</BaseButton>
+                <Button weight="strong">Modules primary</Button>
+                <BaseButton variant="secondary">Base secondary</BaseButton>
+                <Button>Modules secondary</Button>
+              </div>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="flex flex-col gap-4">
+                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                  Fields
+                </h3>
+                <label className="flex flex-col gap-2" htmlFor="base-suite">
+                  <span className="text-sm font-medium">Test suite name</span>
+                  <Input id="base-suite" defaultValue="Refund regression" />
+                </label>
+                <label className="flex flex-col gap-2" htmlFor="base-trace">
+                  <span className="text-sm font-medium">Trace identifier</span>
+                  <Input id="base-trace" readOnly value="trc_01JQ0A2B3C4D5E" />
+                </label>
+                <label className="flex flex-col gap-2" htmlFor="base-locked">
+                  <span className="text-sm font-medium">Frozen agent</span>
+                  <Input
+                    id="base-locked"
+                    disabled
+                    placeholder="Chosen when the run starts"
+                  />
+                </label>
+              </div>
+
+              <div className="flex flex-col gap-4">
+                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                  Chips
+                </h3>
+                <div className="flex flex-wrap items-center gap-3">
+                  <BaseBadge>Viewer</BaseBadge>
+                  <BaseBadge variant="success">Passed</BaseBadge>
+                  <BaseBadge variant="warning">Skipped</BaseBadge>
+                  <BaseBadge variant="failure">Failed</BaseBadge>
+                </div>
+                <p className="m-0 text-sm text-muted-foreground">
+                  Brand orange is absent on purpose. It never means passed,
+                  failed, skipped, or errored.
+                </p>
+                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                  Theme, straight from the tokens
+                </h3>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="h-10 rounded-input border border-border bg-background" title="Neutral Paper" />
+                  <div className="h-10 rounded-input border border-border bg-surface-soft" title="Quiet neutral" />
+                  <div className="h-10 rounded-input border border-border bg-selected" title="Ember Wash" />
+                  <div className="h-10 rounded-input border border-border bg-primary" title="Deep Ember" />
+                  <div className="h-10 rounded-input border border-border bg-brand" title="Ember" />
+                  <div className="h-10 rounded-input border border-border bg-failure" title="Failure" />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Refund policy grader</CardTitle>
+                  <CardDescription>
+                    Judges whether the agent stated the refund window before it
+                    offered one.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <BaseBadge variant="success">Passed 41</BaseBadge>
+                    <BaseBadge variant="failure">Failed 3</BaseBadge>
+                  </div>
+                </CardContent>
+                <CardFooter>
+                  <BaseButton size="sm">Use this grader</BaseButton>
+                  <BaseButton size="sm" variant="ghost">
+                    Read the definition
+                  </BaseButton>
+                </CardFooter>
+              </Card>
+
+              <div className="flex flex-col gap-4">
+                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                  Menus and layers
+                </h3>
+                <div className="flex flex-wrap items-center gap-3">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <BaseButton variant="secondary">
+                        Simulation actions
+                      </BaseButton>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuLabel>This simulation</DropdownMenuLabel>
+                      <DropdownMenuItem>Open the transcript</DropdownMenuItem>
+                      <DropdownMenuItem>Download the recording</DropdownMenuItem>
+                      <DropdownMenuCheckboxItem
+                        checked={onlyFailed}
+                        onCheckedChange={(next) => setOnlyFailed(next === true)}
+                      >
+                        Show failed turns only
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem variant="destructive">
+                        Delete this simulation
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <BaseButton variant="secondary">
+                        What a run freezes
+                      </BaseButton>
+                    </PopoverTrigger>
+                    <PopoverContent align="start">
+                      <p className="m-0 text-sm text-muted-foreground">
+                        A run freezes the agent, the persona, the grader, and
+                        the test version it started from, so a later edit never
+                        changes what already happened.
+                      </p>
+                    </PopoverContent>
+                  </Popover>
+
+                  <BaseDialog>
+                    <DialogTrigger asChild>
+                      <BaseButton variant="destructive">
+                        Delete grader
+                      </BaseButton>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>
+                          Delete the Refund policy grader?
+                        </DialogTitle>
+                        <DialogDescription>
+                          Runs that already used it keep their verdicts. No new
+                          run can be judged by it.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogFooter>
+                        <DialogClose asChild>
+                          <BaseButton variant="secondary">Keep it</BaseButton>
+                        </DialogClose>
+                        <DialogClose asChild>
+                          <BaseButton variant="destructive">
+                            Delete grader
+                          </BaseButton>
+                        </DialogClose>
+                      </DialogFooter>
+                    </DialogContent>
+                  </BaseDialog>
+                </div>
+                <p className="m-0 text-sm text-muted-foreground">
+                  The menu and the popover grow from the control that opened
+                  them; the dialog stays centred. Every duration is a DESIGN.md
+                  motion token and every one is under 300ms.
+                </p>
+              </div>
+            </div>
+          </div>
+        </article>
+
         <article className={styles.panel}>
           <p className={styles.kicker}>Project context</p>
           <ProjectSelector
