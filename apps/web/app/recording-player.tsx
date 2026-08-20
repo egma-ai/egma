@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 
 import { offersNothing } from "../lib/recording-refusals.ts";
-import styles from "./ui.module.css";
 import { Notice } from "./ui.tsx";
 
 /**
@@ -242,7 +241,9 @@ export function RecordingPlayer({
     // including the ones that recorded nothing, which is a promise of audio
     // being made and then withdrawn.
     return knownToExist ? (
-      <p className={styles.recordingSearching}>Finding the recording…</p>
+      <p className="my-4 text-sm text-muted-foreground">
+        Finding the recording…
+      </p>
     ) : null;
   }
   if (playable.status === "unresolved") {
@@ -253,14 +254,14 @@ export function RecordingPlayer({
       { code: playable.code },
       { knownToExist, afterOneWorked: asked > 0 },
     );
-    return nothing ? null : <Notice tone="error">{playable.why}</Notice>;
+    return nothing ? null : <Said>{playable.why}</Said>;
   }
   if (playable.status === "unplayable") {
-    return <Notice tone="error">{words.unplayable}</Notice>;
+    return <Said>{words.unplayable}</Said>;
   }
 
   return (
-    <section className={styles.recording} aria-label={words.label}>
+    <section className="my-4" aria-label={words.label}>
       {/*
         `preload="metadata"` rather than `none`: the browser fetches enough to
         know how long the recording is, which is what makes the scrubber a
@@ -269,7 +270,7 @@ export function RecordingPlayer({
       */}
       <audio
         ref={player}
-        className={styles.recordingPlayer}
+        className="block h-10 w-full max-w-[520px]"
         controls
         preload="metadata"
         src={playable.url}
@@ -314,7 +315,27 @@ export function RecordingPlayer({
       >
         {words.fallback}
       </audio>
-      <p>{words.caption}</p>
+      <p className="mt-2 mb-0 text-sm text-muted-foreground">{words.caption}</p>
     </section>
+  );
+}
+
+/**
+ * A refusal, said where the player would have been.
+ *
+ * It keeps the standing-off room the player's own section has, because it
+ * stands in the same place: what sits above it is a strip of facts, and a
+ * sentence pressed against the edge of one reads as part of it. That spacing
+ * used to be a sibling rule in the transcript stylesheet — the notice was
+ * spaced by whatever happened to precede it — which meant the same refusal was
+ * spaced differently depending on whether the exchange had been graded. The
+ * shared notice still owns everything else: the edge, the tone, and telling
+ * somebody who is not looking at the screen.
+ */
+function Said({ children }: { readonly children: string }) {
+  return (
+    <div className="mt-4">
+      <Notice tone="error">{children}</Notice>
+    </div>
   );
 }
