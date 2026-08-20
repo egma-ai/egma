@@ -2,6 +2,7 @@
 
 import { useId, type ReactNode } from "react";
 
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 import { FieldHintContext } from "./field-hint.ts";
@@ -28,6 +29,10 @@ import { FieldHintContext } from "./field-hint.ts";
  * wiring `aria-describedby` by hand forgets exactly the fields nobody checks,
  * because the page still looks right without it. `field-hint.ts` says why it
  * is a context and holds the context itself.
+ *
+ * The label is the kit's, which is Radix's: a double click on a plain `<label>`
+ * selects the words around it, which is what a person sees when they meant to
+ * select the value in the field beside it.
  */
 export function Field({
   label,
@@ -45,12 +50,7 @@ export function Field({
 
   return (
     <div className="flex flex-col gap-2" data-slot="field">
-      <label
-        className="text-sm font-medium text-foreground"
-        htmlFor={htmlFor}
-      >
-        {label}
-      </label>
+      <Label htmlFor={htmlFor}>{label}</Label>
       <FieldHintContext.Provider value={hint === undefined ? undefined : said}>
         {children}
       </FieldHintContext.Provider>

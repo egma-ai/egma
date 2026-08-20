@@ -692,32 +692,43 @@
   }
 
   /*
-   * The tooltip and the toast.
+   * The tooltip.
+   *
+   * Radix says how it was opened and the two answers want different things.
+   * `delayed-open` is a pointer that waited, so it arrives about its trigger
+   * on opacity and `transform`. `instant-open` is keyboard focus, or a pointer
+   * inside the grouping window, and neither of those gets a rule at all: "do
+   * not animate actions used many times each day, especially keyboard
+   * navigation", and a delay repeated across a row of controls is the tooltip
+   * behaviour everybody complains about.
+   *
+   * The exit is scoped by `data-input`, which the shared `Tooltip` sets on the
+   * way in, because Radix reports "closed" the same way whichever opened it.
+   * An animation is what Radix waits for before unmounting, so the pointer
+   * exit runs to completion and the keyboard one is not made to wait for
+   * anything.
+   */
+  [data-slot="tooltip-content"][data-state="delayed-open"] {
+    animation: egma-anchored-in var(--duration-popover-in) var(--ease-out);
+  }
+
+  [data-slot="tooltip-content"][data-input="pointer"][data-state="closed"] {
+    animation: egma-anchored-out var(--duration-popover-out) var(--ease-out);
+  }
+
+  /*
+   * The toast.
    *
    * Position and motion are on separate properties on purpose, which is the
-   * same rule the dialog above follows and for the same reason. A tooltip is
-   * centred on its trigger by `translate`, so its arrival is written on
-   * `scale`; a toast arrives by moving, so its motion is on `translate` and
-   * nothing else writes that property. Neither can cancel the other however
-   * the class lists are later edited.
+   * same rule the dialog above follows and for the same reason: a toast
+   * arrives by moving, so its motion is on `translate` and nothing else writes
+   * that property.
    *
-   * A *warm* tooltip has no transition at all. Once one has been shown the
-   * next opens at once, because a delay repeated across a row of controls is
-   * the tooltip behaviour everybody complains about.
-   *
-   * These rules leave with the hand-written feedback surfaces.
+   * These stay transitions rather than animations, unlike everything else in
+   * this section. `DESIGN.md` asks this one surface for an *interruptible*
+   * exit, and the component keeps itself mounted until the `transitionend`
+   * rather than handing the decision to Radix.
    */
-  [data-slot="tooltip"][data-input="pointer"]:not([data-instant="true"]) {
-    transition:
-      opacity var(--duration-hover) var(--ease-out),
-      scale var(--duration-hover) var(--ease-out);
-  }
-
-  [data-slot="tooltip"][data-input="pointer"][data-closing="true"] {
-    opacity: 0;
-    scale: 0.97;
-  }
-
   [data-slot="toast"][data-input="pointer"] {
     transition:
       opacity var(--duration-popover-in) var(--ease-out),
@@ -731,11 +742,6 @@
   }
 
   @starting-style {
-    [data-slot="tooltip"][data-input="pointer"]:not([data-instant="true"]) {
-      opacity: 0;
-      scale: 0.97;
-    }
-
     [data-slot="toast"][data-input="pointer"] {
       opacity: 0;
       translate: 0 100%;
@@ -746,22 +752,23 @@
    * The development proof can show the same contract without changing the OS.
    * Deliberately outside the media query below: this is how the reduced-motion
    * form is inspected, not a second definition of it.
+   *
+   * **This is why `components/ui/tooltip.tsx` does not portal its panel.** A
+   * portalled tooltip is a child of `body`, and no descendant selector written
+   * here can reach it from the frame it belongs to — the panel would go on
+   * demonstrating full motion while the words above it said the opposite,
+   * which is worse than not demonstrating it. Radix positions the panel
+   * `fixed` either way, so staying in place costs none of the collision
+   * handling; `tooltip.tsx` records the whole trade.
    */
-  [data-preview="reduced-motion"] [data-slot="tooltip"][data-input="pointer"] {
-    scale: 1;
-    transition: opacity var(--duration-hover) linear;
+  [data-preview="reduced-motion"]
+    [data-slot="tooltip-content"][data-state="delayed-open"] {
+    animation: egma-fade-in var(--duration-hover) linear;
   }
 
   [data-preview="reduced-motion"]
-    [data-slot="tooltip"][data-input="pointer"][data-closing="true"] {
-    scale: 1;
-  }
-
-  @starting-style {
-    [data-preview="reduced-motion"] [data-slot="tooltip"][data-input="pointer"] {
-      opacity: 0;
-      scale: 1;
-    }
+    [data-slot="tooltip-content"][data-input="pointer"][data-state="closed"] {
+    animation: egma-fade-out var(--duration-hover) linear;
   }
 
   /*
@@ -1049,18 +1056,23 @@
       animation: egma-fade-out var(--duration-hover) linear;
     }
 
+    /*
+     * The tooltip keeps both ends and drops the movement, so the panel still
+     * says it came and it went. It is named apart from the popovers above
+     * because it is keyed on `data-state="delayed-open"` rather than "open",
+     * and because its exit is the one scoped by `data-input`.
+     */
+    [data-slot="tooltip-content"][data-state="delayed-open"] {
+      animation: egma-fade-in var(--duration-hover) linear;
+    }
+
+    [data-slot="tooltip-content"][data-input="pointer"][data-state="closed"] {
+      animation: egma-fade-out var(--duration-hover) linear;
+    }
+
     [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
       transform: none;
       transition: opacity var(--duration-popover-out) linear;
-    }
-
-    [data-slot="tooltip"][data-input="pointer"],
-    [data-slot="tooltip"][data-input="pointer"][data-closing="true"] {
-      scale: 1;
-    }
-
-    [data-slot="tooltip"][data-input="pointer"] {
-      transition: opacity var(--duration-hover) linear;
     }
 
     [data-slot="toast"][data-input="pointer"],
@@ -1076,11 +1088,6 @@
       [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
         opacity: 0;
         transform: none;
-      }
-
-      [data-slot="tooltip"][data-input="pointer"] {
-        opacity: 0;
-        scale: 1;
       }
 
       [data-slot="toast"][data-input="pointer"] {
