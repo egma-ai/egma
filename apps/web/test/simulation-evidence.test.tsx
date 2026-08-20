@@ -569,7 +569,7 @@ describe("one simulation's evidence", () => {
     const graders = within(workspace).getByRole("region", {
       name: "Grader results",
     });
-    const evidenceSheet = screen.getByRole("dialog", {
+    const evidenceSheet = await screen.findByRole("dialog", {
       name: "Transcript and audio",
     });
     const transcript = within(evidenceSheet).getByRole("region", {
