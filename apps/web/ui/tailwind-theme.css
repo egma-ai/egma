@@ -426,6 +426,38 @@
   }
 
   /*
+   * The product's own anchored panel, beside the Radix one and for the same
+   * reasons: `@starting-style` for the entrance, `data-closing` for an exit
+   * that finishes before React removes the panel, and a pointer-only rule
+   * because a keyboard dismissal is immediate.
+   *
+   * The corner it grows from is `transform-origin` on the panel, set by the
+   * placement it was given. Radix measures that from the trigger; this one
+   * knows it, because a caller has said which edge anchors the panel.
+   *
+   * These rules leave with the hand-written menu when it is retired.
+   */
+  [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
+    transition:
+      opacity var(--duration-popover-in) var(--ease-out),
+      transform var(--duration-popover-in) var(--ease-out);
+  }
+
+  [data-slot="menu"][data-input="pointer"][data-closing="true"]
+    [data-slot="menu-panel"] {
+    opacity: 0;
+    transform: scale(0.97);
+    transition-duration: var(--duration-popover-out);
+  }
+
+  @starting-style {
+    [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+  }
+
+  /*
    * The product's own dialog, which is a native `<dialog>` rather than Radix.
    *
    * It is here for the same reason the Radix motion above is here: an entrance
@@ -550,6 +582,18 @@
     [data-slot="dialog-content"][data-state="closed"],
     [data-slot="dialog-overlay"][data-state="closed"] {
       animation: egma-fade-out var(--duration-hover) linear;
+    }
+
+    [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
+      transform: none;
+      transition: opacity var(--duration-popover-out) linear;
+    }
+
+    @starting-style {
+      [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
+        opacity: 0;
+        transform: none;
+      }
     }
 
     /*

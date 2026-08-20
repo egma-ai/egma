@@ -79,7 +79,7 @@ export function ProjectSelector({
     const active = document.activeElement;
     const selectorTrigger = active instanceof HTMLElement
       ? active
-        .closest<HTMLElement>(`.${styles.menu}`)
+        .closest<HTMLElement>('[data-slot="menu"]')
         ?.querySelector<HTMLButtonElement>("button[aria-haspopup]") ?? null
       : null;
     close();

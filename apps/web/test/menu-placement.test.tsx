@@ -3,17 +3,16 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { Menu, MenuItem } from "../ui/menu.tsx";
-import styles from "../ui/system.module.css";
 
 afterEach(cleanup);
 
 describe("anchored menu placement", () => {
   it.each([
-    ["right-start", styles.menuRightStart],
-    ["right-end", styles.menuRightEnd],
-    ["below-start", styles.menuBelowStart],
-    ["below-end", styles.menuBelowEnd],
-  ] as const)("anchors %s without covering its trigger column", (placement, className) => {
+    "right-start",
+    "right-end",
+    "below-start",
+    "below-end",
+  ] as const)("anchors %s without covering its trigger column", (placement) => {
     render(
       <Menu label={`Open ${placement}`} placement={placement} trigger={<span>Open</span>}>
         {(close) => <MenuItem onClick={close}>One choice</MenuItem>}
@@ -22,6 +21,6 @@ describe("anchored menu placement", () => {
 
     fireEvent.click(screen.getByRole("button", { name: `Open ${placement}` }));
 
-    expect(screen.getByRole("menu").classList.contains(className)).toBe(true);
+    expect(screen.getByRole("menu").dataset.placement).toBe(placement);
   });
 });
