@@ -3,7 +3,6 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DataTable, type Column } from "../ui/data-table.tsx";
-import styles from "../ui/system.module.css";
 
 type Row = {
   readonly id: string;
@@ -57,7 +56,7 @@ describe("DataTable row links", () => {
 
     expect(primaryLink.getAttribute("href")).toBe("/agents/agt_1");
     expect(primaryLink.getAttribute("tabindex")).toBeNull();
-    expect(row.classList.contains(styles.tableRowInteractive)).toBe(true);
+    expect(row.dataset.stretchPrimaryLink).toBe("true");
     expect(within(row).getAllByRole("link")).toHaveLength(1);
     expect(within(row).getByRole("button", { name: "Edit agent" })).toBeTruthy();
   });
@@ -83,9 +82,8 @@ describe("DataTable row links", () => {
     expect(registeredHeader.getAttribute("data-mobile-hidden")).toBe("true");
     expect(registeredCell.getAttribute("data-mobile-hidden")).toBe("true");
     expect(
-      (within(table).getAllByRole("row")[1] as HTMLElement).classList.contains(
-        styles.tableRowInteractive,
-      ),
-    ).toBe(false);
+      (within(table).getAllByRole("row")[1] as HTMLElement).dataset
+        .stretchPrimaryLink,
+    ).toBeUndefined();
   });
 });

@@ -28,8 +28,11 @@ const buttonVariants = cva(
   [
     "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap",
     "rounded-button text-sm font-medium no-underline",
-    // Named properties, never `all`.
-    "transition-colors duration-(--duration-hover) ease-out",
+    // Named properties, never `all`, and never `outline-color`. Tailwind's
+    // `transition-colors` includes it, which fades the focus ring in over
+    // 140ms on every Tab step — motion on keyboard navigation, which
+    // `DESIGN.md` forbids outright.
+    "transition-[color,background-color,border-color] duration-(--duration-hover) ease-out",
     "disabled:cursor-not-allowed disabled:opacity-55",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   ],
@@ -42,14 +45,24 @@ const buttonVariants = cva(
           "pointer-hover:bg-primary-hover pointer-hover:border-primary-hover",
           "active:bg-primary-pressed active:border-primary-pressed",
         ],
-        /* Secondary: transparent with a one-pixel Midnight Ink border. */
+        /*
+         * Secondary: transparent with a one-pixel Midnight Ink border.
+         *
+         * Hover raises the border to `--foreground` as well as the fill. In
+         * light theme that is invisible — `--border-strong` and `--foreground`
+         * are both Midnight Ink — which is exactly why it went missing: the
+         * CSS Modules button it replaces said it out loud, and dark theme is
+         * where the two part company (`#4a4a44` against `#f2f2ed`). Without
+         * it a quiet button in dark theme answered a hover with a fill change
+         * and a border that stayed put.
+         */
         secondary: [
           "border border-border-strong bg-transparent text-foreground",
-          "pointer-hover:bg-surface-soft",
+          "pointer-hover:border-foreground pointer-hover:bg-surface-soft",
         ],
         outline: [
           "border border-border-strong bg-transparent text-foreground",
-          "pointer-hover:bg-surface-soft",
+          "pointer-hover:border-foreground pointer-hover:bg-surface-soft",
         ],
         /* Quiet action: text only. */
         ghost:

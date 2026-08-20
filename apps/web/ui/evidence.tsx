@@ -2,6 +2,8 @@
 
 import type { ReactNode } from "react";
 
+import { cn } from "@/lib/utils";
+
 import { asSecond } from "../lib/instants.ts";
 import {
   citedTurnPositions,
@@ -17,7 +19,6 @@ import { howFarIn, howLong } from "../lib/transcripts.ts";
 import { Help } from "./controls.tsx";
 import { Empty } from "./page-state.tsx";
 import { VerdictBadge } from "./run-status.tsx";
-import styles from "./evidence.module.css";
 
 /**
  * The parts one conversation's evidence page is built from.
@@ -25,14 +26,15 @@ import styles from "./evidence.module.css";
  * **Each one takes finished data and decides nothing.** A transcript is handed
  * turns; the timed view is handed steps; the verdict block is handed a judged
  * dimension that has already been folded. That is what makes them reusable and
- * what makes them tunable: their appearance is `evidence.module.css` and their
- * contract is `lib/simulations.ts`, and neither can be changed by touching the
- * other. A component that fetched, folded or filtered would put a second opinion
- * inside the page and the two would disagree the day somebody changed one.
+ * what makes them tunable: their appearance is the class list on each element
+ * and their contract is `lib/simulations.ts`, and neither can be changed by
+ * touching the other. A component that fetched, folded or filtered would put a
+ * second opinion inside the page and the two would disagree the day somebody
+ * changed one.
  *
- * They live in their own file with their own stylesheet, beside `run-status.tsx`
- * and for the same reason: the shared system in `controls.tsx` and
- * `system.module.css` is deliberately held closed.
+ * They live in their own file, beside `run-status.tsx` and for the same reason:
+ * the shared system in `controls.tsx` and `system.module.css` is deliberately
+ * held closed.
  *
  * **Speech, timing and judgement stay three things.** The transcript is what was
  * said and nothing else — tool calls and system work are not interleaved into
@@ -41,7 +43,56 @@ import styles from "./evidence.module.css";
  * And a verdict is never drawn inside a turn: judging is a separate act from
  * speaking, and a page that mixed them would let a reader take a grader's
  * sentence for something the agent said.
+ *
+ * **The appearance is Tailwind on the shadcn base**, and `evidence.module.css`
+ * is gone with it. What it said about these surfaces still holds and is worth
+ * keeping: a transcript stays prose, a timeline stays a clock, a measure stays
+ * a number, and a verdict stays a judgement. They share the palette and the
+ * hairlines without those four different facts becoming one card pattern.
+ *
+ * What each surface *is* moved from a module class name onto `data-slot`, and
+ * the one state a class name used to carry moved onto `data-cited`. Neither is
+ * styled by anything. They are there because a name like `turnCited` was
+ * readable in an inspector or a test and a class list is not.
  */
+
+/**
+ * The quiet hover tint on a row, and the one colour here that is written out
+ * rather than named.
+ *
+ * `tokens.css` names the derived values that mean something on their own — a
+ * status chip's edge, the dialog scrim. This is not one of those. It is
+ * `--surface-soft` held back to 62% so a row lights up under the pointer
+ * without becoming a surface of its own, and nothing else in the product wants
+ * it. A token would be a name with one caller, so the recipe stays an arbitrary
+ * value here; a second surface that ever wants the same tint earns the token
+ * then.
+ */
+const ROW_HOVER =
+  "pointer-hover:bg-[color-mix(in_srgb,var(--surface-soft)_62%,transparent)]";
+
+/** Identifiers, scores and clock times, in the shared monospace face. */
+const MONO = "font-mono text-sm text-muted-foreground";
+
+/** The same face for a paragraph, which has a margin to drop. */
+const CITED = ["m-0", MONO];
+
+/**
+ * The marker on a disclosure, drawn rather than typed.
+ *
+ * It is a clipped square in the current colour, so it follows the text it sits
+ * beside instead of arriving as a second colour decision, and it turns on
+ * `transform` alone. Reduced motion keeps the turn and drops the movement.
+ */
+const DISCLOSURE = [
+  "list-none [&::-webkit-details-marker]:hidden",
+  "before:flex-none before:bg-current before:content-['']",
+  "before:[clip-path:polygon(25%_12%,75%_50%,25%_88%)]",
+  "before:origin-center before:transition-transform",
+  "before:duration-(--duration-popover-in) before:ease-in-out",
+  "group-open:before:rotate-90",
+  "motion-reduce:before:transition-none",
+];
 
 /* ------------------------------------------------------------------------ *
  * What was said.
@@ -102,32 +153,66 @@ export function Transcript({
   }
 
   return (
-    <div className={styles.transcript}>
+    <div
+      className="flex flex-col overflow-hidden rounded-card border border-border bg-surface"
+      data-slot="transcript"
+    >
       {transcript.turns.map((turn, at) => {
         const inside = everyStep(turn.spans);
         const failed = inside.some((step) => step.status === "error");
+        const cited = marked.has(at + 1);
         return (
           <div
             key={turn.span_id}
             id={`transcript-turn-${String(at + 1)}`}
-            className={`${styles.turn} ${marked.has(at + 1) ? styles.turnCited : ""}`}
+            className={cn(
+              "grid grid-cols-[68px_minmax(0,1fr)] items-baseline gap-4 px-5 py-4",
+              /* The leading edge is always there and usually invisible, so a
+                 cited turn colours it rather than moving the text along. */
+              "border-s-[3px] border-s-transparent",
+              "not-first:border-t not-first:border-t-border",
+              /* A verdict points here. */
+              cited && "border-s-brand bg-selected",
+              /* Somebody followed a `Cites turn 3` link to this turn. The
+                 scroll margin keeps it clear of whatever is pinned above. */
+              "target:scroll-mt-10 target:border-s-brand target:bg-surface-soft",
+              /* A cited turn is already lit, so it does not also light up. */
+              !cited && ROW_HOVER,
+              /* Narrow, the speaker label sits above what was said. */
+              "max-[40rem]:grid-cols-[1fr] max-[40rem]:gap-1",
+            )}
             data-turn={String(at + 1)}
+            data-cited={cited ? "true" : undefined}
           >
             <p
-              className={`${styles.speaker} ${isHuman(turn) ? styles.speakerHuman : ""}`}
+              className={cn(
+                "m-0 font-mono text-sm whitespace-nowrap text-muted-foreground",
+                isHuman(turn) && "text-foreground",
+              )}
             >
               {isHuman(turn) ? SPEAKERS.human : SPEAKERS.agent}
             </p>
             <div>
-              <p className={styles.said}>
+              <p className="m-0 text-sm whitespace-pre-wrap text-foreground">
                 {turn.text === "" ? (
-                  <span className={styles.saidNothing}>Nothing was said.</span>
+                  <span className="text-faint italic">Nothing was said.</span>
                 ) : (
                   turn.text
                 )}
               </p>
               {!showMetadata ? null : (
-                <p className={styles.turnAside}>
+                <p
+                  className={cn(
+                    "mx-0 mt-1 mb-0 flex flex-wrap gap-2",
+                    "text-sm text-muted-foreground tabular-nums",
+                    /*
+                     * The dot between two facts. It is a child selector because
+                     * which facts are here changes with the turn, and only the
+                     * ones after the first take a separator.
+                     */
+                    "[&>*+*]:before:me-2 [&>*+*]:before:content-['·']",
+                  )}
+                >
                   <span>{howFarIn(turn.started_at, openedAt)}</span>
                   <span>{howLong(turn.duration_ns)}</span>
                   {inside.length === 0 ? null : (
@@ -136,10 +221,12 @@ export function Transcript({
                     </span>
                   )}
                   {failed ? (
-                    <span className={styles.wrong}>something failed inside</span>
+                    <span className="font-medium text-failure">
+                      something failed inside
+                    </span>
                   ) : null}
-                  {marked.has(at + 1) ? (
-                    <span className={styles.citationMark}>cited by a verdict</span>
+                  {cited ? (
+                    <span className="text-foreground">cited by a verdict</span>
                   ) : null}
                 </p>
               )}
@@ -227,7 +314,14 @@ export function ExecutionTimeline({
   }
 
   return (
-    <ol className={styles.execution} aria-label="Execution flow">
+    <ol
+      className={cn(
+        "m-0 flex list-none flex-col overflow-hidden p-0",
+        "rounded-card border border-border bg-surface",
+      )}
+      aria-label="Execution flow"
+      data-slot="execution-timeline"
+    >
       {milestones.map((step) => {
         const inside = flatten(step.spans);
         const failed = step.status === "error";
@@ -236,22 +330,50 @@ export function ExecutionTimeline({
         );
         const detail = step.kind === "tool" ? step.tool_name : "";
         return (
-          <li className={styles.executionStep} key={step.span_id}>
-            <div className={styles.executionMilestone}>
-              <span className={styles.executionAt}>
+          <li
+            className={cn(
+              "min-w-0 px-4 py-2 text-sm",
+              "not-first:border-t not-first:border-t-border",
+              ROW_HOVER,
+            )}
+            key={step.span_id}
+          >
+            <div
+              className={cn(
+                "grid min-h-(--tap-target) items-center gap-3",
+                "grid-cols-[56px_12px_minmax(0,1fr)_max-content]",
+                /* Narrow, the duration drops under the step it belongs to. */
+                "max-[40rem]:grid-cols-[48px_12px_minmax(0,1fr)]",
+              )}
+            >
+              <span className="font-mono text-muted-foreground tabular-nums">
                 {howFarIn(step.started_at, transcript.started_at)}
               </span>
-              <span className={styles.executionMarker} aria-hidden="true" />
-              <span className={styles.executionWhat}>
-                <strong>{labelFor(step)}</strong>
-                {detail === "" ? null : <span>{detail}</span>}
+              <span
+                className="size-2 rounded-chip border-2 border-foreground bg-surface"
+                aria-hidden="true"
+              />
+              <span className="flex min-w-0 items-baseline gap-2">
+                <strong className="font-medium text-foreground">
+                  {labelFor(step)}
+                </strong>
+                {detail === "" ? null : (
+                  <span className="overflow-hidden font-mono text-ellipsis whitespace-nowrap text-muted-foreground">
+                    {detail}
+                  </span>
+                )}
               </span>
               <span
-                className={`${styles.executionHow} ${failed ? styles.executionHowBad : ""}`}
+                className={cn(
+                  "flex flex-col items-end gap-1 text-end",
+                  "font-mono text-muted-foreground tabular-nums",
+                  "max-[40rem]:col-start-3 max-[40rem]:items-start max-[40rem]:text-start",
+                  failed && "font-medium text-failure",
+                )}
               >
                 <span>{failed ? "Failed" : howLong(step.duration_ns)}</span>
                 {containsFailedStep ? (
-                  <span className={styles.executionContainsFailure}>
+                  <span className="font-sans text-sm font-medium whitespace-nowrap text-failure">
                     Contains failed step
                   </span>
                 ) : null}
@@ -259,26 +381,43 @@ export function ExecutionTimeline({
             </div>
 
             {inside.length === 0 ? null : (
-              <details className={styles.executionDetails}>
-                <summary>
+              <details
+                className={cn(
+                  /* `group`, so the marker on the summary can read `[open]`. */
+                  "group mt-0 mb-2 ms-20 text-muted-foreground",
+                  "max-[40rem]:ms-18",
+                )}
+              >
+                <summary
+                  className={cn(
+                    DISCLOSURE,
+                    "inline-flex min-h-(--tap-target) cursor-pointer items-center gap-2",
+                    "text-foreground before:size-2.5",
+                  )}
+                >
                   Show {inside.length} step{inside.length === 1 ? "" : "s"}
                 </summary>
-                <ul className={styles.executionChildren}>
+                <ul className="mx-0 mt-1 mb-2 flex list-none flex-col gap-2 p-0">
                   {inside.map(({ step: nested, depth }) => (
                     <li
+                      className="flex min-w-0 items-baseline justify-between gap-3"
                       key={nested.span_id}
                       style={{ paddingInlineStart: `${String(Math.min(depth, 5) * 12)}px` }}
                     >
-                      <span>
-                        <strong>{labelFor(nested)}</strong>
+                      <span className="flex min-w-0 items-baseline gap-2">
+                        <strong className="font-medium text-foreground">
+                          {labelFor(nested)}
+                        </strong>
                         {nested.kind === "tool" && nested.tool_name !== "" ? (
-                          <span>{nested.tool_name}</span>
+                          <span className="overflow-hidden font-mono text-ellipsis whitespace-nowrap">
+                            {nested.tool_name}
+                          </span>
                         ) : null}
                       </span>
                       <span
                         className={
                           nested.status === "error"
-                            ? styles.executionHowBad
+                            ? "font-medium text-failure"
                             : undefined
                         }
                       >
@@ -350,13 +489,31 @@ export function Measures({
   }
 
   return (
-    <dl className={styles.measures}>
+    <dl
+      className={cn(
+        "m-0 grid grid-cols-[repeat(auto-fit,minmax(148px,1fr))] overflow-hidden",
+        /*
+         * The hairline between two measures is the grid gap showing the
+         * background through it, so a row of them needs no border of its own
+         * and no rule about which edge is doubled.
+         */
+        "gap-px rounded-card border border-border bg-border",
+      )}
+      data-slot="measures"
+    >
       {entries.map(([name, value]) => {
         const how = MEASURES[name];
         return (
-          <div className={styles.measure} key={name}>
-            <dt>{how?.label ?? name.replaceAll("_", " ")}</dt>
-            <dd>{how === undefined ? String(value) : how.shown(value)}</dd>
+          <div
+            className="flex min-w-0 flex-col gap-1 bg-surface p-5"
+            key={name}
+          >
+            <dt className="text-sm text-muted-foreground">
+              {how?.label ?? name.replaceAll("_", " ")}
+            </dt>
+            <dd className="m-0 font-mono text-base text-foreground tabular-nums">
+              {how === undefined ? String(value) : how.shown(value)}
+            </dd>
           </div>
         );
       })}
@@ -367,6 +524,10 @@ export function Measures({
 /* ------------------------------------------------------------------------ *
  * The mocked world.
  * ------------------------------------------------------------------------ */
+
+/** One tool name, as a chip. Not a `Badge`: that one is an uppercase verdict. */
+const TOOL_CHIP =
+  "rounded-chip border border-border px-3 py-1 font-mono text-sm text-foreground";
 
 /**
  * Which of the agent's tools egma answered for, and which ran for real.
@@ -402,12 +563,17 @@ export function MockToolEvidence({
   }
 
   return (
-    <div className={styles.tools}>
+    <div
+      className="flex flex-col gap-4 rounded-card border border-border bg-surface p-5"
+      data-slot="mock-tools"
+    >
       {frozen.length === 0 ? null : (
-        <div className={styles.toolGroup}>
-          <strong>Frozen for this simulation</strong>
+        <div className="flex flex-wrap items-baseline gap-2">
+          <strong className="me-2 text-sm font-medium text-foreground">
+            Frozen for this simulation
+          </strong>
           {frozen.map((one) => (
-            <span className={styles.tool} key={`frozen:${one.tool_name}`}>
+            <span className={TOOL_CHIP} key={`frozen:${one.tool_name}`}>
               {one.tool_name}
             </span>
           ))}
@@ -421,26 +587,30 @@ export function MockToolEvidence({
         </Help>
       ) : (
         <>
-          <div className={styles.toolGroup}>
-            <strong>Answered by Egma</strong>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <strong className="me-2 text-sm font-medium text-foreground">
+              Answered by Egma
+            </strong>
             {coverage.covered.length === 0 ? (
-              <span className={styles.mono}>none</span>
+              <span className={MONO}>none</span>
             ) : (
               coverage.covered.map((name) => (
-                <span className={styles.tool} key={`covered:${name}`}>
+                <span className={TOOL_CHIP} key={`covered:${name}`}>
                   {name}
                 </span>
               ))
             )}
           </div>
-          <div className={styles.toolGroup}>
-            <strong>Ran for real</strong>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <strong className="me-2 text-sm font-medium text-foreground">
+              Ran for real
+            </strong>
             {coverage.uncovered.length === 0 ? (
-              <span className={styles.mono}>none</span>
+              <span className={MONO}>none</span>
             ) : (
               coverage.uncovered.map((name) => (
                 <span
-                  className={`${styles.tool} ${styles.toolUncovered}`}
+                  className={cn(TOOL_CHIP, "border-brand")}
                   key={`uncovered:${name}`}
                 >
                   {name}
@@ -496,47 +666,72 @@ export function VerdictEvidence({
 
   return (
     <article
-      className={styles.verdict}
+      className="flex flex-col gap-4 border-t border-t-border py-4"
       data-assertion={judged.assertion}
+      data-slot="verdict"
       data-verdict={speaking.verdict ?? "pending"}
     >
-      <header className={styles.verdictHead}>
-        <span className={styles.verdictWhat}>
+      <header className="flex flex-wrap items-center gap-3">
+        <span className="flex min-w-0 flex-[1_1_260px] flex-col gap-1">
           {/*
             The words where they could be resolved, and the bare key where they
             could not. A guessed sentence would be unfalsifiable; a key is
             merely terse.
           */}
-          <strong>{judged.assertionText ?? judged.assertion}</strong>
+          <strong className="text-sm font-medium text-foreground">
+            {judged.assertionText ?? judged.assertion}
+          </strong>
         </span>
         <VerdictBadge verdict={speaking.verdict} />
-        <span className={styles.mono}>
+        <span className={MONO}>
           {speaking.score.toFixed(2)}
         </span>
         {action}
       </header>
 
-      <p className={styles.rationale}>{speaking.rationale}</p>
+      <p className="m-0 max-w-[88ch] text-sm text-foreground">
+        {speaking.rationale}
+      </p>
       {cited.length === 0 ? null : (
-        <p className={styles.cited}>
+        <p className={cn(CITED)}>
           Cites {cited.map((turn, at) => (
             <span key={turn}>
               {at === 0 ? "" : ", "}
-              <a href={`#transcript-turn-${String(turn)}`}>turn {turn}</a>
+              <a
+                className="text-foreground underline-offset-3"
+                href={`#transcript-turn-${String(turn)}`}
+              >
+                turn {turn}
+              </a>
             </span>
           ))}
         </p>
       )}
 
       {judged.superseded.length === 0 ? null : (
-        <details className={styles.beneath}>
-          <summary>
+        <details
+          className={cn(
+            /* `group`, so the marker on the summary can read `[open]`. */
+            "group flex flex-col gap-2 ps-4 text-muted-foreground",
+            /* An older judgement is filed under this one, not beside it. */
+            "border-s-2 border-s-border",
+          )}
+        >
+          <summary
+            className={cn(
+              DISCLOSURE,
+              "inline-flex w-fit cursor-pointer items-center gap-2",
+              "text-sm text-foreground before:size-3",
+              /* A keyboard opening is immediate: no motion delays input. */
+              "focus-visible:before:transition-none",
+            )}
+          >
             {judged.superseded.length} earlier judgement
             {judged.superseded.length === 1 ? "" : "s"} of this assertion
           </summary>
           {judged.superseded.map((row) => (
-            <p className={styles.cited} key={row.judged_at}>
-              <span className={styles.mono}>{asSecond(row.judged_at)}</span>{" "}
+            <p className={cn(CITED)} key={row.judged_at}>
+              <span className={MONO}>{asSecond(row.judged_at)}</span>{" "}
               {row.verdict} — {row.rationale}
             </p>
           ))}
@@ -570,14 +765,27 @@ export function PlanItems({
   }
 
   return (
-    <ul className={styles.plan}>
+    <ul
+      className={cn(
+        "m-0 flex list-none flex-col overflow-hidden p-0",
+        "rounded-card border border-border bg-surface",
+      )}
+      data-slot="grading-plan"
+    >
       {items.map((item) => (
         <li
-          className={styles.planItem}
+          className={cn(
+            "grid grid-cols-[minmax(140px,0.7fr)_minmax(0,1.3fr)] gap-4 px-5 py-4 text-sm",
+            "not-first:border-t not-first:border-t-border",
+            /* Narrow, the note sits under the grader it describes. */
+            "max-[40rem]:grid-cols-[1fr] max-[40rem]:gap-1",
+          )}
           key={`${item.grader_id}:${item.grader_version_id}`}
         >
-          <strong>{graderDisplayName(item.name)}</strong>
-          <span className={styles.planNote}>
+          <strong className="font-medium text-foreground">
+            {graderDisplayName(item.name)}
+          </strong>
+          <span className="min-w-0 font-mono wrap-anywhere text-muted-foreground">
             {`${item.required ? "blocks" : "reports only"} · ${item.grader_version_id}`}
             {" · "}
             {item.judge.tag === "configured"
@@ -594,7 +802,18 @@ export function PlanItems({
 
 /** The block a page shows while grading is still outstanding. */
 export function GradingPending({ what }: { readonly what: string }) {
-  return <p className={styles.pending}>{what}</p>;
+  return (
+    <p
+      className={cn(
+        "m-0 px-4 py-3 text-sm text-foreground",
+        /* Attention, not a verdict: Ember Wash behind an Ember edge. */
+        "border-s-[3px] border-s-brand bg-selected",
+      )}
+      data-slot="grading-pending"
+    >
+      {what}
+    </p>
+  );
 }
 
 /*

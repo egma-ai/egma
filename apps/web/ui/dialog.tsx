@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
-import styles from "./system.module.css";
+import { cn } from "@/lib/utils";
 
 export type DialogDismiss = (event?: { readonly detail?: number }) => void;
 
@@ -32,7 +32,34 @@ export type DialogDismiss = (event?: { readonly detail?: number }) => void;
  * backdrop. Pointer dismissal gets the short exit. Keyboard dismissal stays
  * immediate. Successful writes may still call the owner's `onClose` directly,
  * because the system response should not wait for decoration.
+ *
+ * **The appearance is here and the motion is not.** Sizes, surfaces and the
+ * three shapes are utilities on the elements below. The entrance, the exit and
+ * the reduced-motion form of both are in `tailwind-theme.css`, keyed on the
+ * `data-slot` and `data-kind` this file writes — the same arrangement the Radix
+ * surfaces already use, and for the same reason: an exit that has to finish
+ * before the element is removed is a thing a class list says badly.
  */
+
+/** What each shape is, once, so the panel and the scrim cannot disagree. */
+const SCRIM_SHAPE = {
+  dialog: "open:items-center open:justify-center open:p-5",
+  drawer: "open:items-stretch open:justify-start open:p-0",
+  sheet: "open:items-stretch open:justify-end open:p-0",
+} as const;
+
+const PANEL_SHAPE = {
+  dialog: "w-[min(420px,100%)] origin-center p-5",
+  drawer: [
+    "w-[min(340px,calc(100%-var(--space-7)))] min-h-full origin-left p-5",
+    "rounded-[0_var(--radius-lg)_var(--radius-lg)_0] border-y-0 border-l-0",
+  ],
+  sheet: [
+    "flex h-full min-h-full w-[min(640px,100%)] flex-col overflow-hidden",
+    "origin-right rounded-none border-y-0 border-r-0 p-0",
+    "max-[40rem]:w-full max-[40rem]:rounded-none max-[40rem]:border-l-0",
+  ],
+} as const;
 
 export function Dialog({
   kind = "dialog",
@@ -55,16 +82,6 @@ export function Dialog({
   const closeTimerRef = useRef<number | null>(null);
   const [closing, setClosing] = useState(false);
   closeRef.current = onClose;
-  const scrimClass = [
-    styles.scrim,
-    kind === "drawer" ? styles.scrimDrawer : "",
-    kind === "sheet" ? styles.scrimSheet : "",
-  ].filter(Boolean).join(" ");
-  const dialogClass = [
-    styles.dialog,
-    kind === "drawer" ? styles.dialogDrawer : "",
-    kind === "sheet" ? styles.dialogSheet : "",
-  ].filter(Boolean).join(" ");
 
   const finishClose = useCallback(() => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
@@ -140,7 +157,26 @@ export function Dialog({
 
   return (
     <dialog
-      className={scrimClass}
+      className={cn(
+        /*
+         * The `<dialog>` element is the scrim. The browser gives it a border, a
+         * padding and a centred box of its own, so every one of those is said
+         * away here and the layout is the flex box below.
+         */
+        "fixed inset-0 z-30 m-0 h-full max-h-none w-full max-w-none",
+        "overflow-y-auto border-0 bg-transparent p-0 text-foreground",
+        /*
+         * The scrim colour is a utility and its opacity deliberately is not.
+         * Utilities outrank `@layer components`, so an `opacity-100` here would
+         * beat the theme rule that fades the backdrop out and the dialog would
+         * leave with its scrim still at full strength. A backdrop is opaque by
+         * default, so there is nothing to say.
+         */
+        "backdrop:bg-scrim",
+        "open:flex",
+        SCRIM_SHAPE[kind],
+      )}
+      data-slot="dialog-scrim"
       ref={dialogRef}
       aria-labelledby={titleId}
       aria-modal="true"
@@ -156,19 +192,38 @@ export function Dialog({
       }}
     >
       <div
-        className={dialogClass}
+        className={cn(
+          "rounded-card border border-border bg-surface shadow-modal",
+          PANEL_SHAPE[kind],
+        )}
+        data-slot="dialog-panel"
         onTransitionEnd={(event) => {
           if (closing && event.target === event.currentTarget && event.propertyName === "opacity") {
             finishClose();
           }
         }}
       >
-        <div className={styles.dialogHead}>
-          <h2 className={styles.dialogTitle} id={titleId}>
+        <div
+          className={cn(
+            "mb-4 flex items-center justify-between gap-4",
+            /* A sheet's head is a fixed bar over a scrolling body. */
+            kind === "sheet" &&
+              "mb-0 flex-none border-b border-border p-5",
+          )}
+        >
+          <h2 className="m-0 text-lg font-medium" id={titleId}>
             {title}
           </h2>
           <button
-            className={styles.iconButton}
+            className={cn(
+              "grid size-(--control-md) shrink-0 place-items-center p-0",
+              "rounded-button border border-border bg-surface text-sm text-foreground",
+              "cursor-pointer transition-transform duration-(--duration-press) ease-out",
+              "pointer-hover:border-border-strong pointer-hover:bg-surface-soft",
+              "[&:active:not(:focus-visible)]:scale-97",
+              "pointer-coarse:size-(--tap-target)",
+              "motion-reduce:transition-none motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+            )}
             type="button"
             aria-label="Close"
             onClick={(event) => requestClose(event.detail > 0)}

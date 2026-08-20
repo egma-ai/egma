@@ -19,6 +19,11 @@ import { cn } from "@/lib/utils";
  *
  * Items are 44px so a coarse pointer can hit them, and take the 6px button
  * radius inside the 12px menu.
+ *
+ * The transitions name their properties. `transition-colors` would include
+ * `outline-color`, and an item reached with the arrow keys would then fade its
+ * focus ring in rather than showing it — motion on keyboard navigation, which
+ * `DESIGN.md` forbids.
  */
 function DropdownMenu(
   props: ComponentProps<typeof DropdownMenuPrimitive.Root>,
@@ -85,7 +90,7 @@ function DropdownMenuItem({
       className={cn(
         "relative flex min-h-(--control-lg) cursor-pointer items-center gap-2 rounded-button px-3",
         "text-sm outline-none select-none",
-        "transition-colors duration-(--duration-hover) ease-out",
+        "transition-[color,background-color] duration-(--duration-hover) ease-out",
         "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-55",
         "data-[inset]:pl-8",
@@ -115,7 +120,7 @@ function DropdownMenuCheckboxItem({
       className={cn(
         "relative flex min-h-(--control-lg) cursor-pointer items-center gap-2 rounded-button py-2 pr-3 pl-8",
         "text-sm outline-none select-none",
-        "transition-colors duration-(--duration-hover) ease-out",
+        "transition-[color,background-color] duration-(--duration-hover) ease-out",
         "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
         "data-[state=checked]:bg-selected data-[state=checked]:text-selected-foreground",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-55",
@@ -198,7 +203,7 @@ function DropdownMenuSubTrigger({
       className={cn(
         "flex min-h-(--control-lg) cursor-pointer items-center gap-2 rounded-button px-3",
         "text-sm outline-none select-none",
-        "transition-colors duration-(--duration-hover) ease-out",
+        "transition-[color,background-color] duration-(--duration-hover) ease-out",
         "data-[highlighted]:bg-accent data-[state=open]:bg-accent",
         "data-[inset]:pl-8",
         className,
@@ -217,7 +222,7 @@ function DropdownMenuSubContent({
 }: ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
   return (
     <DropdownMenuPrimitive.SubContent
-      data-slot="dropdown-menu-content"
+      data-slot="dropdown-menu-sub-content"
       className={cn(
         "z-30 min-w-40 overflow-hidden rounded-card border border-border bg-popover p-1",
         "text-popover-foreground shadow-popover outline-none",

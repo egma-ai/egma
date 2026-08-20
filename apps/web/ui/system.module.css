@@ -970,7 +970,7 @@
 }
 
 .scrim::backdrop {
-  background: color-mix(in srgb, var(--foreground) 32%, transparent);
+  background: var(--scrim);
   opacity: 1;
 }
 

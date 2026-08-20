@@ -3,13 +3,14 @@
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
+import { cn } from "@/lib/utils";
+
 import { projectsMatching, type Organization, type Project } from "../lib/me.ts";
 import { inProject } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
 import { TextInput } from "./controls.tsx";
 import { useDraftNavigation } from "./draft-navigation.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
-import styles from "./system.module.css";
 
 /**
  * Where you are working: the organization, and the project inside it.
@@ -30,6 +31,31 @@ import styles from "./system.module.css";
  * organization in this version, and offering a menu of one would suggest
  * otherwise.
  */
+
+/**
+ * The trigger, which is a two-line control rather than a row in a list.
+ *
+ * The compact form is the mobile top bar's, and the width it is held to used to
+ * be a rule in the shell's stylesheet reaching in by class name. It is here
+ * now, on the one prop that asks for it, because a shared component's own size
+ * should not depend on which page happened to put it somewhere.
+ */
+const TRIGGER = [
+  "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_12px] items-center gap-2",
+  "min-h-[calc(var(--control-lg)+var(--space-5))] p-3",
+  "rounded-input border border-border bg-surface text-left",
+  "cursor-pointer transition-transform duration-(--duration-press) ease-out",
+  "pointer-coarse:min-h-(--tap-target)",
+  "pointer-hover:border-border-strong pointer-hover:bg-surface-soft",
+  "[&:active:not(:focus-visible)]:scale-97",
+  "motion-reduce:transition-none",
+  "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+];
+
+const TRIGGER_COMPACT = [
+  "min-h-(--control-lg) max-w-[220px] py-1",
+  "max-[900px]:min-w-0 max-[900px]:max-w-[min(220px,56vw)]",
+];
 
 export function ProjectSelector({
   organization,
@@ -79,7 +105,7 @@ export function ProjectSelector({
     const active = document.activeElement;
     const selectorTrigger = active instanceof HTMLElement
       ? active
-        .closest<HTMLElement>(`.${styles.menu}`)
+        .closest<HTMLElement>('[data-slot="menu"]')
         ?.querySelector<HTMLButtonElement>("button[aria-haspopup]") ?? null
       : null;
     close();
@@ -90,18 +116,36 @@ export function ProjectSelector({
   return (
     <Menu
       label={`Organization ${organizationName}, project ${projectName}. Choose a project`}
-      triggerClassName={`${styles.selector} ${compact ? styles.selectorCompact : ""}`}
-      openClassName={styles.selectorOpen}
+      triggerClassName={cn(TRIGGER, compact && TRIGGER_COMPACT)}
+      openClassName="border-brand bg-selected"
       placement={compact ? "below-start" : "right-start"}
       // A panel with a field to type in, so a dialog rather than a menu.
       panelRole="dialog"
       trigger={
         <>
-          <span className={styles.selectorText}>
-            <span className={styles.selectorOrganization}>{organizationName}</span>
-            <span className={styles.selectorProject}>{projectName}</span>
+          <span className="min-w-0">
+            {/*
+             * Both lines are one line each, whatever the name. The tight line
+             * height is the 1.0 step rather than body text's 1.5, because these
+             * are two labels stacked and not a paragraph.
+             */}
+            <span className="block overflow-hidden text-base leading-(--line-tight) font-medium text-ellipsis whitespace-nowrap text-foreground">
+              {organizationName}
+            </span>
+            <span className="mt-1 block overflow-hidden text-sm leading-(--line-tight) font-normal text-ellipsis whitespace-nowrap text-muted-foreground">
+              {projectName}
+            </span>
           </span>
-          <svg className={styles.selectorChevron} aria-hidden="true" viewBox="0 0 12 12">
+          <svg
+            className="block size-3.5 text-muted-foreground"
+            aria-hidden="true"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.4}
+          >
             <path d="M3.25 4.75 6 7.5l2.75-2.75" />
           </svg>
         </>
@@ -111,7 +155,7 @@ export function ProjectSelector({
         <>
           <MenuLabel>{organizationName}</MenuLabel>
           {projects.length > 1 ? (
-            <div className={styles.menuSearch}>
+            <div className="px-1 pt-1 pb-2">
               <TextInput
                 id="project-search"
                 label="Search projects"
@@ -127,9 +171,11 @@ export function ProjectSelector({
               />
             </div>
           ) : null}
-          <div className={styles.menuList}>
+          <div className="max-h-60 overflow-y-auto">
             {shown.length === 0 ? (
-              <p className={styles.menuEmpty}>No project matches that.</p>
+              <p className="m-0 p-3 text-sm text-muted-foreground">
+                No project matches that.
+              </p>
             ) : (
               shown.map((project) => (
                 <MenuItem
@@ -140,7 +186,7 @@ export function ProjectSelector({
                 >
                   <span>{project.name}</span>
                   {project.id === projectId ? (
-                    <span className={styles.menuCheck} aria-hidden="true">
+                    <span className="ml-auto text-brand" aria-hidden="true">
                       ✓
                     </span>
                   ) : null}
