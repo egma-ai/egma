@@ -84,11 +84,14 @@ function columnsFor(
        * Second, because it is what somebody came to read. The width is claimed
        * rather than left to the browser: this cell holds a line per connection
        * and the description beside it would otherwise take the room those lines
-       * need and push them into an ellipsis.
+       * need. Half the table, because a line here is four facts — the
+       * environment, the platform, the channel and whether the target has been
+       * measured — and the platform is named in the registry's own words,
+       * which are words rather than tokens.
        */
       key: "connections",
       header: "Connections",
-      width: "42%",
+      width: "50%",
       cell: (agent) => (
         <ConnectionsOnRow connections={agent.connections} now={now} />
       ),

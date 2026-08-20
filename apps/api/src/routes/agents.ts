@@ -480,6 +480,34 @@ function describedAgent(one: Agent): Record<string, unknown> {
 }
 
 /**
+ * What a person is shown for a connection's type, from the registry that
+ * decides what that type *is*.
+ *
+ * **The label travels with the connection so that no surface has to ask a
+ * second time.** The connection page already draws `Retell` rather than
+ * `retell`, by reading the type catalog; a list of agents cannot afford that
+ * read per row, and a label table written into the browser would be a second
+ * vocabulary able to disagree with the registry that gates the forms. So the
+ * one read that paints a page carries it.
+ *
+ * Built once and kept, because the registry is fixed at build time and
+ * assembling the whole catalog per connection would be work repeated for every
+ * row of every page.
+ *
+ * A type the registry does not know falls back to the type itself, for the same
+ * reason the capability catalog does: a row written under a later release must
+ * show what it has rather than a blank where a word belongs.
+ */
+let typeLabels: ReadonlyMap<string, string> | undefined;
+
+function typeLabelOf(type: string): string {
+  typeLabels ??= new Map(
+    connectionTypeMetadata().map((one) => [String(one.type), one.label]),
+  );
+  return typeLabels.get(type) ?? type;
+}
+
+/**
  * A connection, as every read of one describes it.
  *
  * The sealed envelope has no line here and no line in the type this is built
@@ -494,6 +522,11 @@ function describedConnection(one: Connection): Record<string, unknown> {
     project_id: one.projectId,
     name: one.name,
     type: one.type,
+    // The word for that type and the word for it, in the same object. The type
+    // is what a client branches on; the label is what a person is shown, and
+    // shipping only the first is what left two surfaces spelling one fact two
+    // ways.
+    type_label: typeLabelOf(one.type),
     variant_id: one.variantId,
     modality: one.modality,
     topology: one.topology,

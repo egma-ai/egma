@@ -41,7 +41,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import { CapabilityState } from "../connection-facts.tsx";
+import { CapabilityState, modalityLabel } from "../connection-facts.tsx";
 
 /**
  * One agent: what egma owns about it, and every way egma can reach it.
@@ -80,10 +80,11 @@ export default function AgentDetailPage() {
 /**
  * A connection, said the same way the agents list says it.
  *
- * The platform and the channel are the server's own words rather than a
- * friendlier pair kept here: a label table in this application would be a
- * second vocabulary, able to disagree with the registry that decides what a
- * connection of that type may even hold.
+ * The platform's name comes down on the connection, decided by the registry
+ * that says what a connection of that type may even hold. A label table kept in
+ * this application would be a second vocabulary able to disagree with it — and
+ * a row that spelled a platform differently from the page it links to is
+ * exactly what that disagreement looks like.
  */
 function connectionColumns(
   projectId: string,
@@ -118,15 +119,15 @@ function connectionColumns(
     {
       key: "type",
       header: "Provider",
-      width: "110px",
-      cell: (one) => one.type,
+      width: "140px",
+      cell: (one) => one.type_label,
     },
     {
       key: "modality",
       header: "Modality",
       hideOnMobile: true,
       width: "100px",
-      cell: (one) => one.modality,
+      cell: (one) => modalityLabel(one.modality),
     },
     {
       key: "capabilities",

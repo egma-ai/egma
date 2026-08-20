@@ -138,6 +138,7 @@ const CONNECTION = {
   project_id: "prj_1",
   name: "staging",
   type: "retell",
+  type_label: "Retell",
   variant_id: "retell.api_key",
   modality: "chat",
   topology: "hosted-broker",
@@ -176,6 +177,7 @@ const MEASURED_CONNECTION = {
   // the same would let a cell showing the wrong one pass.
   name: "phone line",
   type: "phone",
+  type_label: "Phone number",
   variant_id: "phone.number",
   modality: "voice",
   environment: "production",
@@ -500,12 +502,15 @@ describe("reading an agent's reach from the list", () => {
     // The staging one, which nobody has measured. "Not checked" and "measured
     // and found wanting" are different sentences and must not share one.
     expect(screen.getByText("staging")).toBeDefined();
-    expect(screen.getByText("retell · chat")).toBeDefined();
+    // The registry's word for the platform, not the token a client branches
+    // on: the connection page says "Retell", and a row that said "retell"
+    // would be a second vocabulary for one fact.
+    expect(screen.getByText("Retell · Text")).toBeDefined();
     expect(screen.getByText("Not checked")).toBeDefined();
 
     // The production one, which somebody has.
     expect(screen.getByText("production")).toBeDefined();
-    expect(screen.getByText("phone · voice")).toBeDefined();
+    expect(screen.getByText("Phone number · Voice")).toBeDefined();
     expect(screen.getByText("Checked")).toBeDefined();
 
     // With its time, kept exactly rather than only as an age that drifts.
@@ -907,6 +912,11 @@ describe("one agent's page", () => {
     // The environment label, which is this connection's own and not its name:
     // the phone line is named apart from the environment it points at.
     expect(screen.getByText("production")).toBeDefined();
+    // And the same words for the platform and the channel as the row shows.
+    expect(screen.getByText("Phone number")).toBeDefined();
+    expect(screen.getByText("Retell")).toBeDefined();
+    expect(screen.getByText("Voice")).toBeDefined();
+    expect(screen.getByText("Text")).toBeDefined();
 
     // What left.
     expect(screen.queryByRole("navigation", { name: "Agent sections" })).toBeNull();

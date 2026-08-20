@@ -19,11 +19,23 @@ import { RelativeInstant } from "@/ui/relative-time.tsx";
  * than discovered when a run refuses to start.
  *
  * Everything is drawn from what the list read already carried. There is no
- * second request behind any of it, and there is no label table in this
- * application: the platform and the channel are shown in the server's own
- * words, because a friendly name kept here would be a second vocabulary able
- * to disagree with the registry that gates the forms.
+ * second request behind any of it: the platform's name comes down on the
+ * connection, decided by the registry that gates the connection forms, so this
+ * application keeps no label table able to disagree with it.
  */
+
+/**
+ * What a person is shown for a channel.
+ *
+ * Two values, and the words are the product's rather than the API's: a
+ * connection's modality is `voice` or `chat`, and a person reading a list is
+ * shown Voice or Text. The connection page has drawn them that way since it
+ * shipped, and these surfaces say the same words rather than inventing a third
+ * pair. When that page migrates, its copy of this comes here.
+ */
+export function modalityLabel(modality: string): string {
+  return modality === "voice" ? "Voice" : "Text";
+}
 
 /**
  * The state of a capability record, which is never a verdict.
@@ -86,7 +98,7 @@ export function ConnectionFacts({
         {connection.environment ?? NO_ENVIRONMENT}
       </span>
       <span className="truncate text-sm text-muted-foreground">
-        {connection.type} · {connection.modality}
+        {connection.type_label} · {modalityLabel(connection.modality)}
       </span>
       <CapabilityState capabilities={connection.capabilities} now={now} />
     </span>

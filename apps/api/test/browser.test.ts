@@ -2662,9 +2662,10 @@ describe("the complete product, walked in order in a second project", () => {
 
       /*
        * And the list says egma can reach it, without anybody opening it. This
-       * is the whole point of the widened read: the row carries the platform,
-       * the channel, the environment label — written out, because this
-       * connection has none — and whether the target has been measured.
+       * is the whole point of the widened read: the row carries the platform in
+       * the registry's own words, the channel, the environment label — written
+       * out, because this connection has none — and whether the target has been
+       * measured.
        */
       await walk.goto(at("agents"));
       await saysWithin(walk, "The Support line");
@@ -2673,7 +2674,7 @@ describe("the complete product, walked in order in a second project", () => {
         .first();
       await expect
         .poll(() => row.innerText(), { timeout: 30_000 })
-        .toContain("phone · voice");
+        .toContain("Phone number · Voice");
       const said = await row.innerText();
       expect(said).toContain("Unlabelled");
       // Read without regard to case: a chip is drawn in capitals, and the word

@@ -1382,6 +1382,27 @@ describe("a sealed credential", () => {
       expect(held.credentials_hint).toBe("WXYZ");
     }
 
+    /*
+     * And the same check on the list's own copies, asked of them directly.
+     *
+     * The stringify sweep above catches a plaintext key wherever it appears,
+     * which is the failure worth catching first. It would not catch a sealed
+     * envelope arriving under a name nobody expected — ciphertext contains no
+     * secret to search for — so the field list is checked here rather than
+     * inferred from the agent's own read happening to agree with it.
+     */
+    for (const carried of listed.body.items as {
+      readonly connections: Record<string, unknown>[];
+    }[]) {
+      expect(carried.connections).not.toHaveLength(0);
+      for (const held of carried.connections) {
+        expect(
+          Object.keys(held).filter((named) => /credential/.test(named)),
+        ).toEqual(["credential_present", "credentials_hint"]);
+        expect(held.credentials_hint).toBe("WXYZ");
+      }
+    }
+
     // And what actually landed is a versioned envelope, not the key.
     const { rows } = await api.database.sql<{ credentials: string }>(
       "select credentials from connection",
@@ -1554,6 +1575,10 @@ describe("reading agents", () => {
     );
     expect(wired).toMatchObject({
       type: "phone",
+      // The word a client branches on, and beside it the word a person is
+      // shown. Both, because a row that carried only the first left the
+      // screens spelling one fact two ways.
+      type_label: "Phone number",
       modality: "voice",
       environment: "production",
     });

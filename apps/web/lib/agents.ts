@@ -93,6 +93,15 @@ export type ListedConnection = {
   readonly project_id: string;
   readonly name: string;
   readonly type: string;
+  /**
+   * What a person is shown for that type, decided by the server's registry.
+   *
+   * It travels with the connection so that a list of agents can name a platform
+   * without a second read, and so that no surface has to keep a label table of
+   * its own — a second vocabulary here could disagree with the registry that
+   * gates the connection forms.
+   */
+  readonly type_label: string;
   /** Which shape of its type this is, frozen when it was created. */
   readonly variant_id: string;
   readonly modality: string;
