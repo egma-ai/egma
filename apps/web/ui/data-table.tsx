@@ -146,7 +146,7 @@ export function DataTable<Row>({
                     "[&_td_:is(a,button,input,select,textarea,label,summary,[role=button],[role=link],[role=checkbox],[role=switch])]:relative",
                     "[&_td_:is(a,button,input,select,textarea,label,summary,[role=button],[role=link],[role=checkbox],[role=switch])]:z-2",
                     "[&_[data-primary=true]_a:first-of-type]:static",
-                    "[&_[data-primary=true]_a:first-of-type]:transition-colors",
+                    "[&_[data-primary=true]_a:first-of-type]:transition-[color]",
                     "[&_[data-primary=true]_a:first-of-type]:duration-(--duration-hover)",
                     "[&_[data-primary=true]_a:first-of-type]:ease-out",
                     "[&_[data-primary=true]_a:first-of-type]:after:absolute",

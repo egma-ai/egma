@@ -28,8 +28,11 @@ const buttonVariants = cva(
   [
     "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap",
     "rounded-button text-sm font-medium no-underline",
-    // Named properties, never `all`.
-    "transition-colors duration-(--duration-hover) ease-out",
+    // Named properties, never `all`, and never `outline-color`. Tailwind's
+    // `transition-colors` includes it, which fades the focus ring in over
+    // 140ms on every Tab step — motion on keyboard navigation, which
+    // `DESIGN.md` forbids outright.
+    "transition-[color,background-color,border-color] duration-(--duration-hover) ease-out",
     "disabled:cursor-not-allowed disabled:opacity-55",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   ],
