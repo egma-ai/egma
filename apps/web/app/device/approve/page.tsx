@@ -37,12 +37,16 @@ type State =
   | { at: "ready"; authorization: Pending }
   | { at: "unreachable" };
 
-/** One labelled fact about what is being approved. */
-const ROWS = "m-0 border-t border-border";
-const ROW =
+/*
+ * The facts about what is being approved: a list, a row, the name of a fact,
+ * and the fact itself. A row is 56px so that the one row carrying a control
+ * has room for a 44px target without the rows around it changing height.
+ */
+const FACT_LIST = "m-0 border-t border-border";
+const FACT_ROW =
   "flex min-h-[56px] items-center justify-between gap-5 border-b border-border py-3";
-const TERM = "text-sm text-muted-foreground";
-const FACT = "m-0 text-right font-normal";
+const FACT_NAME = "text-sm text-muted-foreground";
+const FACT_VALUE = "m-0 text-right font-normal";
 
 /** Where each ending sends the browser. */
 const ENDING: Record<string, string> = {
@@ -173,18 +177,18 @@ export default function ApproveDevicePage() {
        * The project is a control only when there is more than one to choose
        * between; one project is a fact and a select over it is clutter.
        */}
-      <dl className={ROWS}>
-        <div className={ROW}>
-          <dt className={TERM}>Organization</dt>
-          <dd className={FACT}>{authorization.organization.name}</dd>
+      <dl className={FACT_LIST}>
+        <div className={FACT_ROW}>
+          <dt className={FACT_NAME}>Organization</dt>
+          <dd className={FACT_VALUE}>{authorization.organization.name}</dd>
         </div>
 
         {projects.length > 1 ? (
-          <div className={ROW}>
-            <dt className={TERM}>
+          <div className={FACT_ROW}>
+            <dt className={FACT_NAME}>
               <label htmlFor="project">Project</label>
             </dt>
-            <dd className={`${FACT} [&_select]:min-w-40`}>
+            <dd className={`${FACT_VALUE} [&_select]:min-w-40`}>
               <Select
                 id="project"
                 value={projectId}
@@ -197,9 +201,9 @@ export default function ApproveDevicePage() {
             </dd>
           </div>
         ) : (
-          <div className={ROW}>
-            <dt className={TERM}>Project</dt>
-            <dd className={FACT}>{projects[0]?.name ?? "—"}</dd>
+          <div className={FACT_ROW}>
+            <dt className={FACT_NAME}>Project</dt>
+            <dd className={FACT_VALUE}>{projects[0]?.name ?? "—"}</dd>
           </div>
         )}
       </dl>
