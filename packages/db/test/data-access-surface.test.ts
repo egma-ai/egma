@@ -189,6 +189,7 @@ const CONTEXT_REQUIRING = [
   "restoreTest",
   // Which agents a test applies to. Its own door because it moves its own
   // revision and mints no version — target coverage is not test content.
+  "setDefaultPersona",
   "setTestAgents",
   "editGrader",
   "editMockTool",

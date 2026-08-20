@@ -622,23 +622,27 @@ describe("the shipped simulator against the real API", () => {
       const conducted = await startRunOver(goodConnection);
       const refused = await startRunOver(refusedConnection);
 
-      // The shipped service, exactly as compose starts it: pointed at this
-      // instance, holding the deployment's service token, everything else
-      // its defaults — the scripted persona model included.
-      simulator = spawn("uv", ["run", "--frozen", "egma-simulator"], {
-        cwd: SIMULATOR_DIRECTORY,
-        env: {
-          ...process.env,
-          EGMA_SIMULATOR_CONTROL_PLANE_URL: instance.origin,
-          EGMA_SIMULATOR_SERVICE_TOKEN: SERVICE_TOKEN,
-          EGMA_SIMULATOR_CLAIMANT: "walking-simulator-1",
-          EGMA_SIMULATOR_CLAIM_WAIT_SECONDS: "2",
-          EGMA_SIMULATOR_HEARTBEAT_SECONDS: "1",
-          EGMA_SIMULATOR_WAL_DIR: path.join(scratch, "wal"),
-          EGMA_SIMULATOR_BLOB_DIR: path.join(scratch, "blobs"),
+      // The shipped service loop, pointed at this instance and holding the
+      // deployment's service token. Its model client is the one explicit test
+      // seam: deterministic replies keep this proof off a provider account.
+      simulator = spawn(
+        "uv",
+        ["run", "--frozen", "python", "tests/simulator_process.py"],
+        {
+          cwd: SIMULATOR_DIRECTORY,
+          env: {
+            ...process.env,
+            EGMA_SIMULATOR_CONTROL_PLANE_URL: instance.origin,
+            EGMA_SIMULATOR_SERVICE_TOKEN: SERVICE_TOKEN,
+            EGMA_SIMULATOR_CLAIMANT: "walking-simulator-1",
+            EGMA_SIMULATOR_CLAIM_WAIT_SECONDS: "2",
+            EGMA_SIMULATOR_HEARTBEAT_SECONDS: "1",
+            EGMA_SIMULATOR_WAL_DIR: path.join(scratch, "wal"),
+            EGMA_SIMULATOR_BLOB_DIR: path.join(scratch, "blobs"),
+          },
+          stdio: ["ignore", "pipe", "pipe"],
         },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      );
       simulator.stdout?.on("data", (piece: Buffer) => {
         simulatorSaid += piece.toString("utf8");
       });

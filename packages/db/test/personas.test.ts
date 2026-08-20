@@ -499,39 +499,42 @@ describe("a persona that fails validation", () => {
   });
 });
 
-describe("a version row somebody hand-corrupted", () => {
-  it("fails loudly on every read, naming the version, rather than leaking", async () => {
+describe("an immutable persona version", () => {
+  it("refuses a direct traits rewrite at the database boundary", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
-    // Raw SQL on purpose: the factory can never write this, so the guard is
-    // the only thing standing between the row and the caller.
-    await database.sql(
-      `update persona_version set traits = '{"personality": 12}'::jsonb where id = $1`,
-      [created.versionId],
-    );
+    await expect(
+      database.sql(
+        `update persona_version set traits = '{"personality": 12}'::jsonb where id = $1`,
+        [created.versionId],
+      ),
+    ).rejects.toMatchObject({
+      code: POSTGRES_ERROR.checkViolation,
+      constraint: "persona_version_semantics_immutable",
+    });
 
-    await expect(getPersona(actingAsAcme(), created.id)).rejects.toThrow(
-      created.versionId,
+    expect((await getPersona(actingAsAcme(), created.id))?.traits).toEqual(
+      ritaTraits,
     );
-    await expect(
-      getPersonaVersion(actingAsAcme(), created.versionId),
-    ).rejects.toThrow(created.versionId);
-    await expect(
-      editPersona(actingAsAcme(), created.id, { name: "Renamed anyway" }),
-    ).rejects.toThrow(created.versionId);
   });
 
-  it("fails loudly when required models no longer match a shipped adapter", async () => {
+  it("refuses a direct models rewrite at the database boundary", async () => {
     const created = await createPersona(actingAsAcme(), rita);
-    await database.sql(
-      `update persona_version
-          set models = jsonb_set(models, '{stt,model}', '"gpt-4o-transcribe"')
-        where id = $1`,
-      [created.versionId],
-    );
 
-    await expect(getPersona(actingAsAcme(), created.id)).rejects.toThrow(
-      /needs repairing/i,
+    await expect(
+      database.sql(
+        `update persona_version
+            set models = jsonb_set(models, '{stt,model}', '"gpt-4o-transcribe"')
+          where id = $1`,
+        [created.versionId],
+      ),
+    ).rejects.toMatchObject({
+      code: POSTGRES_ERROR.checkViolation,
+      constraint: "persona_version_semantics_immutable",
+    });
+
+    expect((await getPersona(actingAsAcme(), created.id))?.models).toEqual(
+      RECOMMENDED_PERSONA_MODELS,
     );
   });
 });

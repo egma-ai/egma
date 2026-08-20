@@ -38,6 +38,7 @@ import {
   Form,
   FormActions,
   FormRow,
+  Help,
   Refused,
   Select,
   TextInput,
@@ -263,6 +264,8 @@ function PersonaDetail({
 
   useEffect(() => {
     setHeld(null);
+    setSaved(false);
+    editVersion.current = 0;
   }, [personaId, projectId]);
 
   useEffect(() => {
@@ -288,10 +291,18 @@ function PersonaDetail({
   }, [answer, form]);
 
   const [saving, setSaving] = useState<"changes" | "lifecycle" | null>(null);
+  const [saved, setSaved] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [reading, setReading] = useState<PersonaVersion | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const editVersion = useRef(0);
+
+  function edit(next: Draft): void {
+    editVersion.current += 1;
+    setSaved(false);
+    setHeld(next);
+  }
 
   const persona = answer?.status === "ready" ? answer.value : null;
   const changed =
@@ -498,7 +509,7 @@ function PersonaDetail({
                     id="persona-name"
                     value={held.name}
                     disabled={!mayAuthor}
-                    onChange={(name) => setHeld({ ...held, name })}
+                    onChange={(name) => edit({ ...held, name })}
                   />
                 </Field>
                 <Field label="Description" htmlFor="persona-description">
@@ -507,7 +518,7 @@ function PersonaDetail({
                     value={held.description}
                     disabled={!mayAuthor}
                     onChange={(description) =>
-                      setHeld({ ...held, description })
+                      edit({ ...held, description })
                     }
                   />
                 </Field>
@@ -515,14 +526,15 @@ function PersonaDetail({
               <TraitFields
                 draft={held.traits}
                 disabled={!mayAuthor}
-                onChange={(traits) => setHeld({ ...held, traits })}
+                onChange={(traits) => edit({ ...held, traits })}
               />
               <ModelFields
                 draft={held.models}
                 form={form.value}
                 disabled={!mayAuthor}
-                onChange={(models) => setHeld({ ...held, models })}
+                onChange={(models) => edit({ ...held, models })}
               />
+              {saved && refusal === null ? <Help>Saved.</Help> : null}
               <FormActions>
                 <Button
                   weight="strong"
@@ -634,7 +646,8 @@ function PersonaDetail({
         return;
       }
 
-      await write(
+      const submittedEditVersion = editVersion.current;
+      const written = await write(
         personaPath(one.id),
         "PATCH",
         {
@@ -658,6 +671,12 @@ function PersonaDetail({
           ...(modelsChanged ? { models: held.models } : {}),
         },
       );
+      if (
+        written !== null &&
+        editVersion.current === submittedEditVersion
+      ) {
+        setSaved(true);
+      }
     }
 
     async function archive(replacement: string | undefined): Promise<void> {

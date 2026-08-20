@@ -5,6 +5,7 @@ import {
   archivePersona,
   createTest,
   DefaultPersonaReplacementError,
+  EGMA_PROVIDED_PERSONAS,
   archiveTest,
   editTest,
   getPersona,
@@ -343,7 +344,10 @@ describe("the persona a project points at by default", () => {
   const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
 
   afterAll(async () => {
-    await pointProjectAt(acme.outbound, null);
+    await pointProjectAt(
+      acme.outbound,
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
+    );
   });
 
   it("is refused while nobody has been named to take the pointer", async () => {

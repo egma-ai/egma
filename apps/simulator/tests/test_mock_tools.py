@@ -164,7 +164,7 @@ async def conducted_record(
     monkeypatch.setattr(
         service_module,
         "build_model_client",
-        lambda _config, spec: ScriptedModel(spec.scenario_instructions),
+        lambda spec: ScriptedModel(spec.scenario_instructions),
     )
     monkeypatch.setattr(
         service_module.SpeechProviders,
@@ -368,7 +368,7 @@ async def test_a_connection_egma_stands_outside_claims_nothing_about_tools(
     monkeypatch.setattr(
         service_module,
         "build_model_client",
-        lambda _config, spec: ScriptedModel(spec.scenario_instructions),
+        lambda spec: ScriptedModel(spec.scenario_instructions),
     )
     monkeypatch.setattr(
         service_module.SpeechProviders,

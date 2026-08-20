@@ -6,9 +6,19 @@ deterministic audio legs. This child-process entry point injects those test
 implementations before it starts the same service loop used in production.
 """
 
+# ruff: noqa: E402 -- removing Loguru's sink before service imports is the test seam
 from __future__ import annotations
 
 import sys
+
+from loguru import logger as loguru_logger
+
+# This test entry point imports the service early so it can replace two
+# explicit provider seams. Production imports it only after Loguru is gathered
+# into the redacting JSON logger. Remove Loguru's default sink here so the test
+# does not create an unstructured path that production does not have; main()
+# installs the real gathered sink before the service starts.
+loguru_logger.remove()
 
 from egma_simulator import service
 from egma_simulator.__main__ import main
@@ -16,7 +26,7 @@ from egma_simulator.model import ScriptedModel
 from egma_simulator.speech import SCRIPTED_PAIR
 
 
-def _scripted_model(_config, spec):
+def _scripted_model(spec):
     return ScriptedModel(spec.scenario_instructions)
 
 

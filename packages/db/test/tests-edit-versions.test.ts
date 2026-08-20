@@ -38,14 +38,12 @@ import {
 let database: MigratedDatabase;
 /** Acme's starter persona, and the one its project points at. */
 let rita: string;
-/** Globex's, so its test has a persona of its own to name. */
-let grace: string;
 /** Two more of Acme's, for the sets an edit moves between. */
 let nadia: string;
 let omar: string;
 
 beforeAll(async () => {
-  ({ database, rita, grace } = await seedTestFactory("tests_edit"));
+  ({ database, rita } = await seedTestFactory("tests_edit"));
 
   nadia = await seedPersona(actingAsAcme(), "Nadia");
   omar = await seedPersona(actingAsAcme(), "Omar");
@@ -394,19 +392,6 @@ describe("an edit naming no persona", () => {
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("errors clearly when the project has no default, and versions nothing", async () => {
-    const created = await createTest(actingAsGlobex(), {
-      ...rescheduling,
-      personaIds: [grace],
-    });
-    const before = await rowCounts();
-
-    await expect(
-      editTest(actingAsGlobex(), created.id, { personaIds: [] }),
-    ).rejects.toThrow(/no default persona/);
-
-    expect(await rowCounts()).toEqual(before);
-  });
 });
 
 describe("one frozen version", () => {

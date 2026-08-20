@@ -712,6 +712,12 @@ describe("one persona's page", () => {
     expect(written).not.toHaveProperty("expected_version_id");
     expect(written).not.toHaveProperty("traits");
     expect(written).not.toHaveProperty("description");
+
+    expect(await screen.findByText("Saved.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Rita again" },
+    });
+    expect(screen.queryByText("Saved.")).toBeNull();
   });
 
   it("saves personality with both expectations, because it mints a version", async () => {
@@ -1713,5 +1719,6 @@ describe("a save answering while the author is still typing", () => {
     expect(
       (screen.getByLabelText("Description") as HTMLInputElement).value,
     ).toBe("Typed while saving");
+    expect(screen.queryByText("Saved.")).toBeNull();
   });
 });

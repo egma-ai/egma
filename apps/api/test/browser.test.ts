@@ -3023,7 +3023,7 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "New persona",
         address: at("personas", "new"),
-        says: "Who calls, and how they behave",
+        says: "Who speaks with the agent, and how they behave",
       },
       {
         what: "one persona",

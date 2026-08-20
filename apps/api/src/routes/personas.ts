@@ -26,7 +26,6 @@ import {
   WriteAbortedError,
   type AuthContext,
   type Persona,
-  type PersonaModels,
   type PersonaTraits,
   type PersonaVersion,
 } from "@egma/db";
@@ -285,15 +284,6 @@ function traitsIn(value: unknown): WrittenTraits {
   } as WrittenTraits;
 }
 
-/**
- * One complete model selection. The database catalog validates the exact
- * provider/model pairs, so the API cannot accept two fields that each look
- * valid but do not have an adapter together.
- */
-function modelsIn(value: unknown): PersonaModels {
-  return validPersonaModels(value);
-}
-
 /* ------------------------------------------------------------ the project */
 
 /**
@@ -507,7 +497,7 @@ export async function personaRoutes(
         "a persona needs one complete models value with llm, stt and tts",
       );
     }
-    const models = modelsIn(body.models);
+    const models = validPersonaModels(body.models);
 
     const acting = await projectFor(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
@@ -560,7 +550,8 @@ export async function personaRoutes(
     if (written !== undefined && "refusal" in written) {
       return sendRefusal(reply, "unprocessable", written.refusal);
     }
-    const models = "models" in body ? modelsIn(body.models) : undefined;
+    const models =
+      "models" in body ? validPersonaModels(body.models) : undefined;
 
     const expectedVersionId = given(text(body.expected_version_id));
     if (

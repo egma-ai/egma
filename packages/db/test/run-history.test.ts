@@ -680,8 +680,8 @@ describe("retrying a run", () => {
       ]);
     } finally {
       await database.sql(
-        "update project set default_persona_id = null where id = $1",
-        [acme.project],
+        "update project set default_persona_id = $1 where id = $2",
+        [EGMA_PROVIDED_PERSONAS.defaultPersona, acme.project],
       );
     }
   });

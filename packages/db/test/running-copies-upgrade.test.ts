@@ -278,7 +278,8 @@ async function seedAProjectAsItWas(
   );
   await legacy.sql(
     `insert into persona_version (id, persona_id, version, traits)
-     values ($1, $2, 1, '{}'::jsonb)`,
+     values ($1, $2, 1,
+       '{"personality":"Impatient but clear.","language":"en-US","voice":{"provider":"cartesia","voiceId":"legacy-cartesia-voice","speed":1}}'::jsonb)`,
     [project.personaVersion, project.personaId],
   );
   await legacy.sql(
@@ -599,8 +600,12 @@ describe("the release that turns graders into running copies (0026)", () => {
     ).toEqual(everyProject.map(() => "pending"));
   });
 
-  it("loses nothing else on its way past", async () => {
-    expect(await countThese(KEPT_TABLES)).toEqual(whatWasThere);
+  it("loses nothing else and installs the one shared persona library entry", async () => {
+    expect(await countThese(KEPT_TABLES)).toEqual({
+      ...whatWasThere,
+      persona: (whatWasThere.persona ?? 0) + 1,
+      persona_version: (whatWasThere.persona_version ?? 0) + 1,
+    });
   });
 });
 
