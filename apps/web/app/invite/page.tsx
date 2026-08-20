@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import {
   DEFAULT_SIGNED_IN_PATH,
   withReturnTo,
 } from "../../lib/return-to.ts";
-import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
-import { AuthShell, Notice, StatePage, styles } from "../ui.tsx";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+import { Field } from "../../ui/controls.tsx";
+import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**
  * The page a colleague lands on.
@@ -41,6 +44,9 @@ type State =
   | { status: "ready"; invitation: Lookup; signedInAs: string | null };
 
 export default function InvitePage() {
+  /* The hint's id, named by the field it belongs to. The base input reads no
+     context, so the page that writes the sentence is the page that names it. */
+  const emailHint = useId();
   const [state, setState] = useState<State>({ status: "loading" });
   const [token, setToken] = useState("");
   const [password, setPassword] = useState("");
@@ -140,7 +146,7 @@ export default function InvitePage() {
     return (
       <StatePage title="The invitation could not be checked" lead="Egma could not reach the invitation service right now.">
         <Button
-          weight="strong"
+          type="button"
           onClick={() => {
             setState({ status: "loading" });
             setAttempt((value) => value + 1);
@@ -158,9 +164,9 @@ export default function InvitePage() {
         title="That link is missing something"
         lead="An invitation link carries a token. Check it was copied whole, or ask whoever sent it for another."
       >
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href="/sign-in">Sign in</a> if you already have an account.
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -171,9 +177,9 @@ export default function InvitePage() {
         title="That invitation does not name anything"
         lead="Check the link was copied whole, or ask whoever sent it for another."
       >
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href="/sign-in">Sign in</a> if you already have an account.
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -186,9 +192,9 @@ export default function InvitePage() {
         title="That invitation has expired"
         lead={`Ask an admin of ${invitation.organization.name} to send another one.`}
       >
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href="/sign-in">Sign in</a> if you already have an account.
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -199,9 +205,9 @@ export default function InvitePage() {
         title="That invitation has already been accepted"
         lead="If it was you, you are already in — sign in instead."
       >
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href="/sign-in">Sign in</a>
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -217,7 +223,7 @@ export default function InvitePage() {
       >
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
         <Button
-          weight="strong"
+          type="button"
           disabled={submitting}
           onClick={() => {
             void post("/api/invitations/accept", { token });
@@ -237,7 +243,7 @@ export default function InvitePage() {
         invitation.role === "admin" ? "an" : "a"
       } ${invitation.role}.`}
     >
-      <Form
+      <AuthForm
         onSubmit={() => {
           void post("/api/signup", {
             email: invitation.email,
@@ -248,35 +254,42 @@ export default function InvitePage() {
       >
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
-        <Field label="Email" hint="The address this invitation was sent to." htmlFor="email">
-          <TextInput
+        <Field label="Email" htmlFor="email">
+          <Input
             id="email"
             name="email"
             type="email"
+            autoComplete="off"
+            spellCheck={false}
             readOnly
+            aria-describedby={emailHint}
             value={invitation.email}
           />
+          <p className="m-0 text-sm text-faint" id={emailHint}>
+            The address this invitation was sent to.
+          </p>
         </Field>
 
         <Field label="Choose a password" htmlFor="password">
-          <TextInput
+          <Input
             id="password"
             name="password"
             type="password"
             autoComplete="new-password"
+            spellCheck={false}
             required
             minLength={8}
             value={password}
-            onChange={setPassword}
+            onChange={(event) => setPassword(event.target.value)}
           />
         </Field>
 
-        <Button weight="strong" type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting}>
           {submitting ? "Joining…" : `Join ${invitation.organization.name}`}
         </Button>
-      </Form>
+      </AuthForm>
 
-      <p className={styles.linkLine}>
+      <LinkLine>
         Already have an Egma account?{" "}
         <a
           href={withReturnTo(
@@ -287,7 +300,7 @@ export default function InvitePage() {
           Sign in
         </a>{" "}
         and this page will let you join.
-      </p>
+      </LinkLine>
     </AuthShell>
   );
 }
