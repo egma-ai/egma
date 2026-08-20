@@ -46,11 +46,19 @@ const EDGE: Readonly<Record<string, string>> = {
  * somehow did not count. Nothing is marked on the ordinary case: a blocking
  * grader is what a grader is.
  *
- * **The verdict is a word, a shape and a colour, in that order.** The chip is
- * the product's own — `DESIGN.md` puts every chip at the tag radius and gives
- * the three state edges one recipe — and the small dot inside it is what keeps
- * the state off colour alone, which a red-green reader needs and which the
- * hand-drawn chip this replaced did not have.
+ * **The chip is the product's own**, so `DESIGN.md`'s tag radius and its one
+ * recipe for a state edge are read rather than restated. The chip this replaced
+ * mixed its own edge at 40%, next to a status chip at 35% and a failed step at
+ * 45%, for one thing all three were saying.
+ *
+ * **The dot is not what keeps this state off colour alone — the word is.** It
+ * is `bg-current`, so it takes the chip's own colour and is the same circle in
+ * all three tones: to a reader who cannot separate red from green it says
+ * nothing the chip did not already say. What satisfies "state is not
+ * communicated by color alone" is `passed`, `failed` or `errored` written out,
+ * and that was here before this. The dot is here so a verdict chip reads as the
+ * same kind of chip as the one over the page, which has carried a dot since it
+ * was drawn by hand — one chip vocabulary rather than two.
  */
 export function JudgmentCard({
   judgment,

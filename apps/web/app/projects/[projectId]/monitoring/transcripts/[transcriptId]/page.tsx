@@ -399,7 +399,12 @@ export default function TranscriptPage({
           }
           action={
             <Badge variant={errored > 0 ? "failure" : "success"}>
-              {/* A word, a shape and a colour — in that order, never colour alone. */}
+              {/*
+                The dot the hand-drawn chip carried as `::before`, kept. It is
+                `bg-current` and the same circle either way, so it separates
+                nothing on its own — `Recorded` and `1 error` are what say which
+                state this is. It is the chip's mark, not its meaning.
+              */}
               <span
                 aria-hidden="true"
                 className="size-1.5 shrink-0 rounded-chip bg-current"
