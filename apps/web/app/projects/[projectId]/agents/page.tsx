@@ -15,7 +15,7 @@ import {
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import { Toolbar } from "../../../../ui/section.tsx";
+import { Toolbar, TOOLBAR_SEARCH } from "../../../../ui/section.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useMinuteClock } from "../../../../ui/relative-time.tsx";
@@ -359,28 +359,26 @@ function Agents({ projectId }: { readonly projectId: string }) {
     <ProductPage>
       {header}
       <PageBody>
+        {/*
+         * Search left and held to a readable width, Connect agent hard right.
+         *
+         * It read the other way round until the developer put it beside a
+         * competitor's dashboard: the button led the row, which made it look
+         * bigger than it is — it was and still is the default size — and the
+         * search box took every remaining pixel behind it, running past
+         * 1400px on a wide screen for a field holding an agent's name.
+         *
+         * The comment this replaces described a flex fight between the two,
+         * where the search box's `width: 100%` squeezed the button until the
+         * toolbar's gap disappeared. That fight is over rather than won: the
+         * action is its own `flex-none` slot now, and the search box has a
+         * maximum, so neither one is under pressure from the other.
+         */}
         {nothingHereYet ? null : (
-          <Toolbar>
-            {/*
-             * The reason a disabled control gives is a sentence, and the
-             * toolbar is one line. Wrapping the pair lets the sentence fall
-             * under its own control rather than squeezing the search box
-             * across the row.
-             *
-             * No `min-w-0` here, and that is the difference between a gap and
-             * no gap. The search box is `width: 100%` and shrinks to fit, so
-             * everything beside it is under shrinking pressure; a flex item
-             * told its minimum is zero gives way past its own contents, and
-             * this one did — measured at 105.5px around a 119.9px button,
-             * which put the button 2.3px over the search box and swallowed the
-             * toolbar's 12px gap whole. Left at `auto`, the minimum is the
-             * button, the sentence wraps under it, and the gap survives.
-             */}
-            <div className="flex flex-wrap items-center gap-3">
-              {connect()}
-            </div>
+          <Toolbar action={connect()}>
             <Input
               id="agent-search"
+              className={TOOLBAR_SEARCH}
               value={typed}
               aria-label="Search agents by name"
               placeholder="Search by name"

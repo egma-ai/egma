@@ -282,50 +282,26 @@ describe("the Personas list", () => {
     expect(screen.getAllByRole("table")).toHaveLength(1);
   });
 
-  it("shows the archive as a separate list, asked for separately", async () => {
-    const archived: Persona = {
-      ...RITA,
-      id: "prs_9",
-      name: "Retired Rex",
-      archived_at: "2026-08-14T09:00:00.000Z",
-    };
-    const { asked } = apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/personas": [
-        { status: 200, body: { items: [RITA], next_cursor: null } },
-        { status: 200, body: { items: [archived], next_cursor: null } },
-      ],
-    });
-    render(<PersonasPage />);
-
-    expect(await screen.findAllByText("Impatient Rita")).not.toHaveLength(0);
-    fireEvent.click(screen.getByRole("radio", { name: "Archived" }));
-
-    expect(await screen.findAllByText("Retired Rex")).not.toHaveLength(0);
-    expect(screen.queryByText("Impatient Rita")).toBeNull();
-    expect(asked.map((one) => one.path)).toContain(
-      "/api/personas?archived=true&project=prj_1",
-    );
-  });
-
-  it("says an empty archive is empty rather than saying the project has no personas", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/personas": [
-        { status: 200, body: { items: [RITA], next_cursor: null } },
-        { status: 200, body: { items: [], next_cursor: null } },
-      ],
-    });
-    render(<PersonasPage />);
-
-    expect(await screen.findAllByText("Impatient Rita")).not.toHaveLength(0);
-    fireEvent.click(screen.getByRole("radio", { name: "Archived" }));
-
-    expect(
-      await screen.findByText("Nothing has been archived here"),
-    ).toBeDefined();
-    expect(screen.queryByRole("alert")).toBeNull();
-  });
+  /*
+   * **Three tests stood here and all three pressed the Archived radio.** The
+   * control came off every list page in this batch, so none of them could
+   * survive it — a test that clicks a control that is not drawn is not a
+   * weakened test, it is a broken one.
+   *
+   * What they proved, and where it still is:
+   *
+   * - *The archive is asked for separately.* Still true and still proven, on
+   *   the side that owns it: `apps/api/test/personas-routes.test.ts` asks
+   *   `/api/personas?archived=true` and reads the archived half back, keyset
+   *   cursor and all. `personasPath` and `personasAfter` still carry the flag.
+   * - *An empty archive says it is empty rather than saying the project has no
+   *   personas.* The branch is still written and still reachable the moment the
+   *   control returns, and it is now the one thing here with no test on it.
+   *   Recorded rather than quietly dropped.
+   * - *A next page that arrives after the filter changed is dropped.* The guard
+   *   is untouched, and the test directly above still drives the same guard
+   *   across a project change — the same state, the same race, one value along.
+   */
 
   /**
    * **An unanswered session is not a viewer.** A page that guessed the least
@@ -475,56 +451,6 @@ describe("the Personas list", () => {
     expect(screen.queryAllByText("Impatient Rita")).toHaveLength(0);
   });
 
-  /**
-   * The same race, one filter across instead of one project across. Both are
-   * the same component with another value in it, so the same state outlives
-   * both changes — and an archived page rendered into the active list would be
-   * a list of rows nobody can act on.
-   */
-  it("drops a next page that arrives after the filter changed", async () => {
-    let release: (answer: Response) => void = () => undefined;
-    const pending = new Promise<Response>((resolve) => {
-      release = resolve;
-    });
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string) => {
-        const at = new URL(String(input), "http://egma.test");
-        if (at.pathname === "/api/me") return json(200, meWith("admin"));
-        if (at.searchParams.has("cursor")) return pending;
-        const archived = at.searchParams.get("archived") === "true";
-        return json(200, {
-          items: [
-            {
-              ...RITA,
-              id: archived ? "prs_a" : "prs_b",
-              name: archived ? "Retired Rex" : "Impatient Rita",
-              archived_at: archived ? "2026-08-14T09:00:00.000Z" : null,
-            },
-          ],
-          next_cursor: "prs_cursor",
-        });
-      }),
-    );
-
-    render(<PersonasPage />);
-    expect(await screen.findAllByText("Impatient Rita")).not.toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
-
-    fireEvent.click(screen.getByRole("radio", { name: "Archived" }));
-    expect(await screen.findAllByText("Retired Rex")).not.toHaveLength(0);
-
-    release(
-      json(200, {
-        items: [{ ...RITA, id: "prs_stale", name: "An active persona" }],
-        next_cursor: null,
-      }),
-    );
-    await new Promise((settle) => setTimeout(settle, 0));
-
-    expect(screen.queryByText("An active persona")).toBeNull();
-  });
 });
 
 /* ------------------------------------------------------------------------ */
@@ -1288,46 +1214,17 @@ describe("one persona's page", () => {
 /* ------------------------------------------------------------------------ */
 
 /**
- * The keyboard, on the two controls this area adds to the shared system.
+ * The keyboard, on the control this area adds to the shared system.
  *
- * Neither is a link and neither is a native radio, so neither gets any of this
- * for free — and a filter that only a pointer can reach is a filter half the
- * people using egma do not have.
+ * It is not a link and not a native dialog, so it gets none of this for free.
+ *
+ * A second test sat here, on the archive filter: one Tab stop for the group, an
+ * arrow key moving inside it, and selection following focus. The control came
+ * off every list page in this batch and the test went with it. `ui/choice.tsx`
+ * is untouched and still does all of that — `apps/web/test/components.test.tsx`
+ * is where the shared control is proven, which is where that proof belongs.
  */
 describe("driving the Personas area without a pointer", () => {
-  it("chooses the other list from the keyboard, and says which is chosen", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/personas": [
-        { status: 200, body: { items: [RITA], next_cursor: null } },
-        { status: 200, body: { items: [], next_cursor: null } },
-      ],
-    });
-    render(<PersonasPage />);
-
-    const archived = await screen.findByRole("radio", { name: "Archived" });
-    const active = screen.getByRole("radio", { name: "Active" });
-    expect(active.getAttribute("aria-checked")).toBe("true");
-    expect(archived.getAttribute("aria-checked")).toBe("false");
-
-    // One Tab stop for the group, and an arrow key moves inside it — which is
-    // what announcing a radiogroup promises anybody using a screen reader.
-    expect(active.getAttribute("tabindex")).toBe("0");
-    expect(archived.getAttribute("tabindex")).toBe("-1");
-
-    active.focus();
-    fireEvent.keyDown(active, { key: "ArrowRight" });
-
-    expect(
-      await screen.findByText("Nothing has been archived here"),
-    ).toBeDefined();
-    const now = screen.getByRole("radio", { name: "Archived" });
-    expect(now.getAttribute("aria-checked")).toBe("true");
-    expect(now.getAttribute("tabindex")).toBe("0");
-    // Selection follows focus, so the keyboard and the announcement agree.
-    expect(document.activeElement).toBe(now);
-  });
-
   it("traps focus in version history, closes it with Escape, and restores its trigger", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },

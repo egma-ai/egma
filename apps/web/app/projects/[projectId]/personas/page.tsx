@@ -18,8 +18,6 @@ import {
   projectPath,
 } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import { Choice } from "../../../../ui/choice.tsx";
-import { Toolbar } from "../../../../ui/section.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import {
   Empty,
@@ -130,7 +128,25 @@ function Personas({ projectId }: { readonly projectId: string }) {
   // admin their role cannot do something it can, on every load.
   const role = me === null ? null : roleOf(me);
 
-  const [shown, setShown] = useState<Shown>("active");
+  /**
+   * Which list this page asks the server for, and for now it is always the
+   * active one.
+   *
+   * **The archive filter's control came off every list page in this batch.**
+   * The developer wants a filter row to hold what somebody reaches for daily,
+   * and the archive is not that. Nothing under the control moved: the server
+   * still keeps the two lists apart, `personasPath` and `personasAfter` still
+   * carry the flag, the paging below still keys on which list it asked for, and
+   * the archive's own empty state is still written. Putting the control back is
+   * handing a `Choice` the setter this deliberately does not take.
+   *
+   * State rather than a constant, and that is not an oversight. A `const` here
+   * narrows to the literal `"active"`, and every `shown === "archived"` below
+   * it becomes a comparison TypeScript calls unintentional — so removing one
+   * control would mean rewriting the half of this page that knows the archive
+   * exists, which is exactly what "the route behavior stays" rules out.
+   */
+  const [shown] = useState<Shown>("active");
   const archived = shown === "archived";
   const { answer, reload } = useProjectRead<PersonaPage>(
     personasPath(archived),
@@ -347,16 +363,6 @@ function Personas({ projectId }: { readonly projectId: string }) {
     );
   }
 
-  /**
-   * The filter stays on screen while the list it chose is loading.
-   *
-   * Rendering it inside the state fold would unmount it on every change —
-   * which loses the keyboard's place in it, and makes the control somebody
-   * just pressed disappear while they are still looking at it. It goes when
-   * there is no list to filter at all, and only then.
-   */
-  const filterable = answer === null || answer.status === "ready";
-
   return (
     <ProductPage>
       <PageHeader
@@ -365,22 +371,14 @@ function Personas({ projectId }: { readonly projectId: string }) {
         lead="The synthetic people who speak with agents in this project. One persona is used in many situations; what they want in one simulation is the test's."
         action={author()}
       />
-      <PageBody>
-        {filterable ? (
-          <Toolbar>
-            <Choice<Shown>
-              label="Which personas to show"
-              value={shown}
-              options={[
-                { value: "active", label: "Active" },
-                { value: "archived", label: "Archived" },
-              ]}
-              onChange={setShown}
-            />
-          </Toolbar>
-        ) : null}
-        {body()}
-      </PageBody>
+      {/*
+        No toolbar at all, because the archive filter was the only thing in it
+        and this page has nothing else to filter by. An empty strip above the
+        list would be 12px of margin pretending to be a control set. The one
+        action this page offers is *New persona*, and it is where every list
+        page keeps its action: the right end of the page header.
+      */}
+      <PageBody>{body()}</PageBody>
     </ProductPage>
   );
 }
