@@ -60,7 +60,7 @@ import { VerdictBadge } from "./run-status.tsx";
  * The quiet hover tint on a row, and the one colour here that is written out
  * rather than named.
  *
- * `tokens.css` names the derived values that mean something on their own — a
+ * The theme names the derived values that mean something on their own — a
  * status chip's edge, the dialog scrim. This is not one of those. It is
  * `--surface-soft` held back to 62% so a row lights up under the pointer
  * without becoming a surface of its own, and nothing else in the product wants

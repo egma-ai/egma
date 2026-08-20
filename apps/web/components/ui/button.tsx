@@ -20,9 +20,10 @@ import { cn } from "@/lib/utils";
  * used. A migrated quiet button therefore has to say `variant="secondary"` out
  * loud; a migration that drops the prop turns a quiet button primary.
  *
- * Every value here is a theme key, and every theme key is a `tokens.css`
- * declaration. The result is the same 44px, 6px-radius, weight-500 button the
- * CSS Modules `Button` already draws — which is the point while both exist.
+ * Every value here is a theme key, and every theme key reads one of egma's
+ * own declarations in `tailwind-theme.css`. The result is the same 44px,
+ * 6px-radius, weight-500 button the CSS Modules `Button` drew, which is what
+ * made replacing it a restyle rather than a redesign.
  */
 const buttonVariants = cva(
   [
