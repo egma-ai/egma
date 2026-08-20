@@ -938,13 +938,15 @@ describe("what a project recorded in production", () => {
       expect(await sidebar.innerText()).not.toContain("Settings");
 
       await account.click();
+      // The account menu's panel portals to `body` since the kit overlays,
+      // so its items are found on the page, not inside the sidebar tree.
       expect(
-        await sidebar.getByRole("menuitem", { name: "Sign out" }).count(),
+        await page.getByRole("menuitem", { name: "Sign out" }).count(),
       ).toBe(1);
       expect(
         await page.locator("main").getByRole("button", { name: "Sign out" }).count(),
       ).toBe(0);
-      await sidebar.getByRole("menuitem", { name: "Settings" }).click();
+      await page.getByRole("menuitem", { name: "Settings" }).click();
       // Settings is inside the product shell now, so its address names the
       // project like every other product page and the selector stays on screen
       // throughout it. Its own navigation is what separates the settings that
@@ -1662,7 +1664,7 @@ describe("the saved theme", () => {
       await account.click();
       const controls = page.getByRole("switch", { name: "Dark theme" });
       await expect.poll(() => controls.count()).toBe(1);
-      await page.locator("aside").getByRole("switch", { name: "Dark theme" }).click();
+      await controls.first().click();
 
       expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
       expect(await page.evaluate(() => localStorage.getItem("egma-theme"))).toBe("dark");
@@ -1672,7 +1674,7 @@ describe("the saved theme", () => {
       expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
       await page.locator('aside button[aria-label^="Account"]').click();
       await expect
-        .poll(() => page.locator("aside").getByRole("switch", { name: "Dark theme" }).getAttribute("aria-checked"))
+        .poll(() => page.getByRole("switch", { name: "Dark theme" }).first().getAttribute("aria-checked"))
         .toBe("true");
     },
     SETTLE,
