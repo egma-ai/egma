@@ -149,9 +149,10 @@ export function ProjectSelector({
     }
     /*
      * No element to carry here: the panel is portaled out of the trigger's
-     * tree, so there is nothing to walk up to. `close()` returns focus to the
-     * trigger itself, and passing `null` lets the guarded navigation fall
-     * back to whatever holds focus after the close — the same button.
+     * tree, so there is nothing to walk up to. What keeps focus right is
+     * `close()` focusing the trigger synchronously, then the dialog's own
+     * `returnFocusTo ?? opener` fallback — `null` rides through the guarded
+     * navigation untouched.
      */
     close();
     setQuery("");

@@ -87,13 +87,11 @@ const NAV_ITEM = [
    * the reason `button.tsx` gives.
    *
    * **`motion-reduce:transition-none` went with the movement, on purpose.**
-   * `sidebar.tsx` still carries it beside the same colour-only transition, so
-   * this is a deliberate difference rather than a line dropped by accident.
    * `DESIGN.md` asks every movement for "a reduced-motion form with useful
    * opacity or colour feedback" — a colour fade *is* that form. Switching it
    * off under reduced motion removes the fallback instead of the motion, and
    * leaves somebody who asked for less movement with less feedback than
-   * everybody else. The sidebar is the one that should come to this.
+   * everybody else. `sidebar.tsx` came to the same form in the closing sweep.
    */
   "transition-[color,background-color] duration-(--duration-hover) ease-out",
   "pointer-coarse:h-(--tap-target) pointer-coarse:min-h-(--tap-target)",

@@ -185,10 +185,10 @@ export function Menu({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       {/*
-       * The root stays, and it is not decoration: the project selector finds
-       * its own trigger by walking up from whatever has focus to
-       * `[data-slot="menu"]`, which is how the unsaved-work dialog it opens
-       * knows where to put focus back.
+       * The root stays for structure, not for lookup: the panel is portaled
+       * to `body`, so nothing can walk up to this slot from a menu item any
+       * more. Focus return is owned by `close()`, which focuses the trigger
+       * synchronously, and by the dialog's opener fallback above it.
        */}
       <div className="relative" data-slot="menu" data-open={open ? "true" : "false"}>
         <PopoverTrigger

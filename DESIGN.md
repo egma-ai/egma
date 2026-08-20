@@ -41,7 +41,7 @@ Where the pieces live:
 - `apps/web/ui/` holds the shared components built from those primitives — the table, the dialog, the menu, the form, the shell.
 - `apps/web/lib/utils.ts` holds `cn`, which every primitive merges a caller's classes with.
 - `apps/web/app/globals.css` is the one stylesheet the application loads.
-- `apps/web/app/ui.module.css` is the one CSS Module left in the application, and it is a survivor rather than an oversight. It dresses the transcript detail page and the two components that page composes, the recording player and the judgment card. That is a whole page's layout rather than a shared control set, so moving it is its own change with its own proof. It reads the same declarations as everything else.
+- No CSS Module remains in the application. The last one, `app/ui.module.css`, dressed the transcript detail page and retired with that page's migration onto the base — its own change with its own render-test proof, as this section once promised.
 
 Rules:
 
