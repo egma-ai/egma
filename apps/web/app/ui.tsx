@@ -330,7 +330,16 @@ export function Notice({
         "mb-5 rounded-input border border-l-[3px] border-border bg-surface-soft",
         "px-4 py-3 text-sm text-foreground",
         "[&_p]:m-0 [&_p+p]:mt-2",
-        tone === "error" && "border-l-brand",
+        /*
+         * The failure colour, never the brand one. `DESIGN.md`: "Brand orange
+         * does not mean passed, failed, skipped, or errored." The edge is the
+         * only thing separating this from a neutral notice at a glance, so
+         * painting it Ember said "look here" where it had to say "this went
+         * wrong". The `role="alert"` above carries the same news to anybody
+         * not looking, which is why the colour is supporting information
+         * rather than the whole signal.
+         */
+        tone === "error" && "border-l-failure",
         tone === "success" && "border-l-foreground",
       )}
       role={role}
