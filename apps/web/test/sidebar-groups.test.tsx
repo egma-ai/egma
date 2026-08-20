@@ -194,9 +194,30 @@ describe("the grouped sidebar", () => {
     expect(agents.className).toContain("data-[active=true]:bg-selected");
     expect(agents.className).toContain("data-[active=true]:before:bg-brand");
     expect(agents.className).toContain("before:content-['']");
-    // And the row keeps the theme's hover, dropped under reduced motion.
-    expect(agents.className).toContain("motion-reduce:transition-none");
+  });
+
+  /**
+   * **The row moves two properties, and `outline-color` is deliberately not one
+   * of them.**
+   *
+   * `transition-colors` looks like the right class and is not: Tailwind's
+   * colour group sweeps in `outline-color`, this product's focus indicator is
+   * an outline, and the result was a focus ring that faded up from the row's
+   * text colour over 140ms on every Tab step. `DESIGN.md` names keyboard
+   * navigation first among the things not to animate, so the two properties
+   * hover actually changes are named instead. A keyboard pass found this; only
+   * this assertion can keep it found.
+   */
+  it("moves the hover colours without dragging the focus ring with them", () => {
+    drawShell();
+
+    const agents = within(sidebarNavigation()).getByRole("link", {
+      name: "Agents",
+    });
+    expect(agents.className).toContain("transition-[color,background-color]");
+    expect(agents.className).not.toContain("transition-colors");
     expect(agents.className).not.toContain("transition-all");
+    expect(agents.className).toContain("motion-reduce:transition-none");
   });
 
   /**

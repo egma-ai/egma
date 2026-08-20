@@ -218,6 +218,15 @@ function SidebarMenuItem({ className, ...props }: ComponentProps<"li">) {
  * dropped entirely under reduced motion the way the rest of the bar's
  * ancestors already drop theirs.
  *
+ * **The two properties are named rather than reached for as `transition-colors`,
+ * and a keyboard pass is what found the difference.** Tailwind's `colors` group
+ * sweeps in `outline-color`, and this product's focus indicator is an outline —
+ * so every Tab step through the bar faded its ring up from the row's text
+ * colour over 140ms. That is animating keyboard navigation, which `DESIGN.md`
+ * names first among the things not to animate, and it is a focus indicator
+ * arriving late, which is worse. Hover changes the background and the text and
+ * nothing else, so those two are what move.
+ *
  * The row is 44px tall in every theme and at every width, so a coarse pointer
  * needs no separate rule to reach it.
  */
@@ -243,7 +252,8 @@ function SidebarMenuButton({
         "relative flex w-full min-w-0 items-center gap-3",
         "min-h-(--control-lg) rounded-button px-3",
         "text-base text-muted-foreground no-underline",
-        "transition-colors duration-(--duration-hover) ease-out motion-reduce:transition-none",
+        "transition-[color,background-color] duration-(--duration-hover) ease-out",
+        "motion-reduce:transition-none",
         "before:absolute before:inset-y-3 before:left-0 before:w-0.5",
         "before:rounded-chip before:bg-transparent before:content-['']",
         "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
