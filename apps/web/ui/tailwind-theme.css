@@ -303,14 +303,34 @@
   to { opacity: 0; transform: scale(0.97); }
 }
 
+/*
+ * The dialog scales on the `scale` property rather than inside `transform`,
+ * and that is load-bearing rather than a style preference.
+ *
+ * A centred dialog is held in place by a half-its-own-size shift, and
+ * `transform` is a single property: a keyframe that sets `transform: scale()`
+ * replaces whatever shift was there, and the panel slides down and right for
+ * the length of the animation before snapping back at the end. Today that does
+ * not happen, because Tailwind 4 compiles `-translate-x-1/2` to the separate
+ * `translate` property, which composes with `transform` instead of being
+ * overwritten by it — so the two never meet. But that is Tailwind's
+ * implementation detail holding the dialog together, not anything this file
+ * says, and it was different in Tailwind 3.
+ *
+ * Animating `scale` puts the movement on its own property too. Position lives
+ * on `translate`, motion lives on `scale`, `transform` is written by neither,
+ * and no future centring — however it is expressed — can be cancelled by this
+ * animation. `transform-origin` still applies, so the panel still scales about
+ * its own centre.
+ */
 @keyframes egma-dialog-in {
-  from { opacity: 0; transform: scale(0.98); }
-  to { opacity: 1; transform: scale(1); }
+  from { opacity: 0; scale: 0.98; }
+  to { opacity: 1; scale: 1; }
 }
 
 @keyframes egma-dialog-out {
-  from { opacity: 1; transform: scale(1); }
-  to { opacity: 0; transform: scale(0.98); }
+  from { opacity: 1; scale: 1; }
+  to { opacity: 0; scale: 0.98; }
 }
 
 @layer components {

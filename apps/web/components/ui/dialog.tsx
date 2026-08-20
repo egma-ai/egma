@@ -61,6 +61,14 @@ function DialogContent({
   return (
     <DialogPortal>
       <DialogOverlay />
+      {/*
+       * The panel is centred by `-translate-x-1/2 -translate-y-1/2`, which
+       * Tailwind puts on the `translate` property. Keep it there. The theme
+       * animates the dialog on `scale`, so position and motion never share a
+       * property; centring rewritten as a `transform` would be cancelled by
+       * the animation for as long as it runs. `tailwind-theme.css` says the
+       * same thing from the other side.
+       */}
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
