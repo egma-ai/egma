@@ -1,5 +1,5 @@
 /**
- * The connection forms this Egma instance knows how to accept.
+ * The simulation connection forms this Egma instance accepts.
  *
  * The platform owns this catalog. The CLI reads it instead of carrying a
  * second list of fields, labels, or credential rules that can drift from the
@@ -8,9 +8,9 @@
 
 import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
 import type { RegisterOptions } from "./agents.ts";
-import { ask, saidBy, text, textList } from "./wire.ts";
+import { ask, saidBy, text } from "./wire.ts";
 
-export const CONNECTION_TYPES_PATH = "/api/connection-types";
+export const CONNECTION_OPTIONS_PATH = "/api/connection-options";
 
 export type ConnectionFieldKind = "text" | "url" | "e164" | "json";
 export type CredentialFieldKind = "secret" | "json";
@@ -22,6 +22,7 @@ export type ConnectionField = {
   readonly kind: ConnectionFieldKind;
   readonly required: boolean;
   readonly help: string;
+  readonly afterCredentials: boolean;
 };
 
 export type CredentialField = {
@@ -32,33 +33,29 @@ export type CredentialField = {
   readonly help: string;
 };
 
-export type ConnectionVariant = {
-  readonly id: string;
-  readonly label: string;
-  /** The config key whose presence chooses this shape, or null for the first. */
-  readonly chosenBy: string | null;
+export type ConnectionOption = {
+  readonly agentPlatform: string | null;
+  readonly agentPlatformLabel: string;
+  readonly connectionKind: string;
+  readonly accessVariant: string;
+  readonly accessVariantLabel: string;
+  readonly modality: string;
+  readonly productLabel: string;
+  readonly topology: string;
+  readonly simulatorAdapter: boolean;
+  readonly capabilityDiscovery: boolean;
   readonly fields: readonly ConnectionField[];
   readonly credentialRule: CredentialRule;
   readonly credentialHelp: string;
   readonly credentialFields: readonly CredentialField[];
 };
 
-export type ConnectionTypeDescription = {
-  readonly type: string;
-  readonly label: string;
-  readonly modalities: readonly string[];
-  readonly topology: string;
-  readonly simulatorAdapter: boolean;
-  readonly capabilityDiscovery: boolean;
-  readonly variants: readonly ConnectionVariant[];
+export type ConnectionOptionCatalog = {
+  readonly items: readonly ConnectionOption[];
 };
 
-export type ConnectionTypeCatalog = {
-  readonly items: readonly ConnectionTypeDescription[];
-};
-
-export type ConnectionTypeCatalogResult =
-  | { readonly kind: "catalog"; readonly catalog: ConnectionTypeCatalog }
+export type ConnectionOptionCatalogResult =
+  | { readonly kind: "catalog"; readonly catalog: ConnectionOptionCatalog }
   | { readonly kind: "not-authenticated" }
   | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "unreachable"; readonly reason: string };
@@ -85,6 +82,7 @@ function fieldIn(value: Record<string, unknown>): ConnectionField | null {
     kind: kind as ConnectionFieldKind,
     required: value.required === true,
     help: text(value.help),
+    afterCredentials: value.after_credentials === true,
   };
 }
 
@@ -101,15 +99,35 @@ function credentialFieldIn(value: Record<string, unknown>): CredentialField | nu
   };
 }
 
-function variantIn(value: Record<string, unknown>): ConnectionVariant | null {
-  const id = text(value.id);
+function optionIn(value: Record<string, unknown>): ConnectionOption | null {
+  const connectionKind = text(value.connection_kind);
+  const accessVariant = text(value.access_variant);
+  const modality = text(value.modality);
+  const productLabel = text(value.product_label);
   const rule = text(value.credential_rule);
-  if (id === "" || !CREDENTIAL_RULES.includes(rule)) return null;
+  const rawPlatform = value.agent_platform;
+  if (
+    (rawPlatform !== null && typeof rawPlatform !== "string") ||
+    connectionKind === "" ||
+    accessVariant === "" ||
+    modality === "" ||
+    productLabel === "" ||
+    !CREDENTIAL_RULES.includes(rule)
+  ) {
+    return null;
+  }
 
   return {
-    id,
-    label: text(value.label),
-    chosenBy: value.chosen_by === null ? null : (text(value.chosen_by) || null),
+    agentPlatform: rawPlatform === null ? null : text(rawPlatform),
+    agentPlatformLabel: text(value.agent_platform_label),
+    connectionKind,
+    accessVariant,
+    accessVariantLabel: text(value.access_variant_label),
+    modality,
+    productLabel,
+    topology: text(value.topology),
+    simulatorAdapter: value.simulator_adapter === true,
+    capabilityDiscovery: value.capability_discovery === true,
     fields: objectsIn(value.fields).flatMap((field) => {
       const read = fieldIn(field);
       return read === null ? [] : [read];
@@ -123,41 +141,26 @@ function variantIn(value: Record<string, unknown>): ConnectionVariant | null {
   };
 }
 
-function typeIn(value: Record<string, unknown>): ConnectionTypeDescription | null {
-  const type = text(value.type);
-  if (type === "") return null;
-  return {
-    type,
-    label: text(value.label),
-    modalities: textList(value.modalities),
-    topology: text(value.topology),
-    simulatorAdapter: value.simulator_adapter === true,
-    capabilityDiscovery: value.capability_discovery === true,
-    variants: objectsIn(value.variants).flatMap((variant) => {
-      const read = variantIn(variant);
-      return read === null ? [] : [read];
-    }),
-  };
-}
-
-/** One type by name, or nothing when the catalog does not hold it. */
-export function connectionTypeNamed(
-  catalog: ConnectionTypeCatalog,
-  type: string,
-): ConnectionTypeDescription | undefined {
-  return catalog.items.find((entry) => entry.type === type);
+/** The options for one agent platform, in the server's preferred order. */
+export function connectionOptionsForPlatform(
+  catalog: ConnectionOptionCatalog,
+  agentPlatform: string | null,
+): readonly ConnectionOption[] {
+  return catalog.items.filter((option) => option.agentPlatform === agentPlatform);
 }
 
 /** Read the server-owned catalog used to draw connection questions. */
-export async function readConnectionTypes(
+export async function readConnectionOptions(
   options: RegisterOptions,
-): Promise<ConnectionTypeCatalogResult> {
+): Promise<ConnectionOptionCatalogResult> {
   let answered: Awaited<ReturnType<typeof ask>>;
   try {
     answered = await ask({
       signedIn: { url: options.url.replace(/\/+$/u, ""), key: options.key },
-      path: CONNECTION_TYPES_PATH,
-      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl as Fetch }),
+      path: CONNECTION_OPTIONS_PATH,
+      ...(options.fetchImpl === undefined
+        ? {}
+        : { fetchImpl: options.fetchImpl as Fetch }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
   } catch (error) {
@@ -179,7 +182,7 @@ export async function readConnectionTypes(
     kind: "catalog",
     catalog: {
       items: objectsIn(answered.body.items).flatMap((entry) => {
-        const read = typeIn(entry);
+        const read = optionIn(entry);
         return read === null ? [] : [read];
       }),
     },

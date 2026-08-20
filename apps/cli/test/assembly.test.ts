@@ -299,9 +299,11 @@ describe("the whole walk, offline", () => {
     // choice exists to kill.
     expect(connection).toMatchObject({
       agentId: platform.registered.agents[0]?.id,
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
-      name: "retell-1",
+      name: "retell_chat_api-1",
       config: { retellAgentId: RETELL_AGENT_ID },
     });
     // The key reached egma, and only its last characters ever came back.
@@ -390,7 +392,7 @@ describe("the whole walk, offline", () => {
       id: platform.registered.agents[0]?.id,
     });
     expect(config.connection).toMatchObject({
-      name: "retell-1",
+      name: "retell_chat_api-1",
       id: connection?.id,
     });
     expect(config.suite?.name).toBe("first-suite");

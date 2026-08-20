@@ -106,12 +106,10 @@ const WORK_DISPATCHING = [
   "resolveSimulationStanding",
   "sweepOrphanedSimulations",
   "watchGradingWork",
-  // Production watching's three, on the grading claim's own terms: a poller
-  // has no user, a provider's delivery has proved nothing, and each of these
-  // hands back the context narrowed to the connection's own tenancy — which is
-  // what every write that follows goes through.
-  "countRetellWebhookRefusal",
-  "resolveRetellWatch",
+  // The poller names no customer. It claims the next due selected agent and
+  // receives the context narrowed to that row. Every later update and trace
+  // write requires that context.
+  "claimDueRetellMonitoringAgent",
   "sweepStaleProductionClaims",
 ];
 
@@ -159,13 +157,15 @@ const CONTEXT_REQUIRING = [
   "clonePersona",
   "cloneTest",
   "completeSimulation",
-  // The type of one connection, by its id alone — the only connection read
+  "configureLiveKitMonitoring",
+  "configureRetellMonitoring",
+  // The kind of one connection, by its id alone — the only connection read
   // that does not name an agent. It exists for the deployment gate in front of
   // run creation, which is handed a connection id and no agent id and has to
-  // know whether a phone call is what this run would place. It answers a type
+  // know whether a phone call is what this run would place. It answers a kind
   // and nothing else, so what this widening lets out is a word from a closed
   // set and never a config or a credential.
-  "connectionTypeOf",
+  "connectionKindOf",
   "createAgent",
   "createApiKey",
   "createInvitation",
@@ -208,7 +208,10 @@ const CONTEXT_REQUIRING = [
   // dispatch failure is the platform's confession, not a report anybody
   // files.
   "failSimulationDispatch",
+  "failRetellIngestionFailureReplay",
+  "failRetellMonitoringTarget",
   "finishGradingJob",
+  "finishRetellMonitoringScan",
   "getAgent",
   "getConnection",
   "getGrader",
@@ -236,6 +239,7 @@ const CONTEXT_REQUIRING = [
   "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
+  "listMonitoringSetups",
   "listTestVersions",
   "listMockTools",
   "listPendingInvitations",
@@ -288,18 +292,19 @@ const CONTEXT_REQUIRING = [
   "readRunVerdicts",
   "readTrace",
   "readVerdicts",
+  "recordLiveKitMonitoringReceived",
+  "recordRetellCallReceived",
+  "recordRetellIngestionFailure",
+  "recordRetellMonitoringReceived",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  // The ledger that chooses one live writer for a Retell conversation: the
-  // claim a transport takes on an identity, and the mark that moves the
-  // connection's cursor once the spans are stored. Both take the context the
-  // watch resolver handed out.
-  "advanceProductionCursor",
+  // The ledger chooses one writer for a Retell call. Poll progress belongs to
+  // the selected Monitoring agent, never to a simulation connection.
+  "checkpointRetellMonitoringPage",
+  "claimRetellIngestionFailureReplay",
   "claimProductionTrace",
   "finishProductionTrace",
-  "recordRetellWebhookDelivery",
-  "recordRetellWebhookRegistration",
   // The measurement door: it asks this connection's adapter what its target
   // can do and writes down what came back. Its own verb rather than a flag on
   // an edit, because a measurement is not an authored change and must not be
@@ -307,6 +312,9 @@ const CONTEXT_REQUIRING = [
   "refreshConnectionCapabilities",
   "registerAgent",
   "regrade",
+  "recoverRetellMonitoringSetup",
+  "releaseRetellIngestionFailureReplay",
+  "releaseRetellMonitoringLease",
   "releaseGradingJob",
   "releaseSimulationClaim",
   "reopenGradingJob",
@@ -317,6 +325,10 @@ const CONTEXT_REQUIRING = [
   // shape's terms.
   "restoreAgent",
   "restoreConnection",
+  "removeMonitoringSetup",
+  "renewRetellMonitoringLease",
+  "retellCallIsAccountedFor",
+  "resolveRetellIngestionFailureReplay",
   // No `listGraderVersions` and no `restoreGrader`, and both were here. A
   // running copy has no version history a person browses and no archive to come
   // back from: it is made by pressing **Use** and deleted whole, and what it
@@ -396,6 +408,7 @@ const CONTEXT_REQUIRING = [
   // and the answers to whatever that entry's form asked.
   "useLibraryEntry",
   "writePlatformSettings",
+  "yieldRetellMonitoringLease",
 ];
 
 /**
@@ -594,13 +607,13 @@ const VALUES = [
   // against. Exported so a deployment can put it back after standing another
   // one in its place.
   "transportCapabilities",
-  // The connection registry, as a browser may be told about it — labels, field
-  // shapes, the credential rule, and the two adapter facts. Never a gate, a
-  // hint function, a refusal sentence or a credential.
-  "connectionTypeMetadata",
+  // The simulation options a browser may be told about — the five model axes,
+  // field shapes, credential rule, and the two adapter facts. Never a gate, a
+  // hint function, refusal sentence, or credential.
+  "connectionOptionMetadata",
   "credentialRuleOf",
-  "variantById",
-  "variantIdOf",
+  "productLabelOf",
+  "accessVariantById",
   // The settled vocabulary of a running copy's scope, exported so that a form
   // and a refusal read the same list the schema is checked against. `GRADER_READS`
   // stood beside it and does not exist: a copy declares no evidence reads.

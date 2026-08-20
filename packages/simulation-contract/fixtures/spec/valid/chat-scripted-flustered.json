@@ -3,7 +3,9 @@
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWET",
   "modality": "chat",
   "connection": {
-    "type": "scripted",
+    "agent_platform": null,
+    "connection_kind": "scripted",
+    "access_variant": "scripted.in_memory",
     "config": {
       "greeting": "Lakeside Dental scheduling, good afternoon. How can I help?",
       "replies": [

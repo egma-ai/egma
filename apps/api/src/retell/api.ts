@@ -1,7 +1,9 @@
+import { safeRetellProviderData } from "@egma/retell";
+
 import type { RetellCall } from "./normalise.ts";
 
 /**
- * The three things egma asks Retell for while it is watching an agent.
+ * The provider reads Egma uses for Retell Monitoring.
  *
  * Retell's own names are used for Retell's own objects — its addresses, its
  * field names, its filter shape. Renaming somebody else's API inside a client
@@ -9,8 +11,8 @@ import type { RetellCall } from "./normalise.ts";
  * the one thing this file has to stay true to.
  *
  * Every ending is a value rather than an exception. A key the customer rotated
- * and a Retell that is briefly down are different facts about a sweep, and
- * neither of them is a fault in egma.
+ * and a Retell that is briefly down are different facts about an import, and
+ * neither of them is a fault in Egma.
  */
 
 /** Retell's own address. Overridden only so a test can answer as Retell. */
@@ -23,25 +25,68 @@ export const PAGE_SIZE = 100;
 export type RetellReach = {
   readonly url?: string | undefined;
   readonly fetchImpl?: typeof fetch | undefined;
+  readonly signal?: AbortSignal | undefined;
+};
+
+export type RetellRefusalReason =
+  | "invalid-window"
+  | "invalid-response"
+  | "invalid-call-id"
+  | "rate-limited"
+  | "provider-unavailable"
+  | "request-refused";
+
+export type RetellRefused = {
+  readonly kind: "refused";
+  readonly reason: RetellRefusalReason;
+  readonly status?: number | undefined;
+  readonly retryAfterMilliseconds?: number | undefined;
 };
 
 export type ListedCalls =
-  | { readonly kind: "calls"; readonly calls: readonly RetellCall[] }
+  | {
+      readonly kind: "calls";
+      readonly calls: readonly RetellCall[];
+      readonly hasMore: boolean;
+      readonly paginationKey: string | null;
+    }
   | { readonly kind: "invalid-key" }
-  | { readonly kind: "refused"; readonly reason: string }
+  | RetellRefused
   | { readonly kind: "unreachable"; readonly reason: string };
 
-export type Registered =
-  | { readonly kind: "registered" }
+export type RetrievedCall =
+  | { readonly kind: "call"; readonly call: RetellCall }
   | { readonly kind: "invalid-key" }
-  | { readonly kind: "refused"; readonly reason: string }
+  | { readonly kind: "not-found" }
+  | RetellRefused
   | { readonly kind: "unreachable"; readonly reason: string };
+
+export const TERMINAL_CALL_STATUSES = [
+  "ended",
+  "error",
+  "not_connected",
+] as const;
+
+/** One fixed v3 page request. The bounds do not change while it is paged. */
+export type RetellCallPageRequest = {
+  readonly retellAgentId: string;
+  readonly from: Date;
+  readonly to: Date;
+  readonly paginationKey?: string | undefined;
+  /** Every cursor already followed in this fixed scan. */
+  readonly seenPaginationKeys?: ReadonlySet<string> | undefined;
+  readonly limit?: number | undefined;
+};
 
 function base(reach: RetellReach): string {
   return (reach.url ?? RETELL_API).replace(/\/+$/u, "");
 }
 
-type Answer = { readonly status: number; readonly body: string };
+type Answer = {
+  readonly status: number;
+  readonly body: string;
+  readonly retryAfter: string | null;
+};
 
 /**
  * One request, with the key in the header and nowhere else.
@@ -54,7 +99,7 @@ async function ask(
   apiKey: string,
   reach: RetellReach,
   request: {
-    readonly method: "GET" | "POST" | "PATCH";
+    readonly method: "GET" | "POST";
     readonly path: string;
     readonly body?: unknown;
   },
@@ -75,35 +120,53 @@ async function ask(
       ...(request.body === undefined
         ? {}
         : { body: JSON.stringify(request.body) }),
+      ...(reach.signal === undefined ? {} : { signal: reach.signal }),
     });
-  } catch (cause) {
+  } catch {
     return {
-      unreachable: `Retell at ${base(reach)} did not answer${
-        cause instanceof Error ? `: ${cause.message}` : ""
-      }`,
+      unreachable: `Retell at ${base(reach)} did not answer`,
     };
   }
 
-  return { status: response.status, body: await response.text() };
+  return {
+    status: response.status,
+    body: await response.text(),
+    retryAfter: response.headers.get("retry-after"),
+  };
 }
 
-/** What Retell said went wrong, in a sentence rather than a status code alone. */
-function refusalIn(answer: Answer): string {
-  try {
-    const held = JSON.parse(answer.body) as Record<string, unknown>;
-    for (const field of ["error_message", "message", "error", "detail"]) {
-      const said = held[field];
-      if (typeof said === "string" && said.trim() !== "") return said.trim();
-    }
-  } catch {
-    // A refusal that is not JSON says nothing useful, and quoting a page of
-    // HTML into a log line is worse than saying what the number means.
+function retryAfterMilliseconds(value: string | null): number | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.ceil(seconds * 1000);
   }
-  return `Retell answered ${answer.status}`;
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return undefined;
+  return Math.max(0, at - Date.now());
+}
+
+/** A bounded scheduler fact. Retell's raw error body never leaves this client. */
+function refusalFrom(answer: Answer): RetellRefused {
+  const reason: RetellRefusalReason =
+    answer.status === 429
+      ? "rate-limited"
+      : answer.status >= 500
+        ? "provider-unavailable"
+        : "request-refused";
+  const retryAfter = retryAfterMilliseconds(answer.retryAfter);
+  return {
+    kind: "refused",
+    reason,
+    status: answer.status,
+    ...(retryAfter === undefined
+      ? {}
+      : { retryAfterMilliseconds: retryAfter }),
+  };
 }
 
 /**
- * One page of conversations this agent finished at or after `since`.
+ * One page of this agent's terminal conversations in one fixed time window.
  *
  * **Ascending, and the lower bound is inclusive.** Both are load-bearing:
  * oldest-first is what lets the poller checkpoint each conversation before it
@@ -111,34 +174,37 @@ function refusalIn(answer: Answer): string {
  * offered again after a resume — which the ledger absorbs, and which is what
  * lets the cursor logic stay as simple as it is.
  *
- * The answer's shape is read permissively — an array, or an object with the
- * page under `calls` or `items` — because that is the one thing about somebody
- * else's API this cannot check against a live account here. Nothing depends on
- * which shape it was: whatever comes back is a list of call objects, and the
- * normalizer reads each one as verbatim as it stores it.
+ * Retell v3 owns the cursor. Egma never derives one from a call id. A page that
+ * says there is more work but does not give a new non-empty cursor is a broken
+ * provider answer, not the end of the scan.
  */
-export async function listEndedCalls(
+export async function listTerminalCalls(
   apiKey: string,
-  request: {
-    readonly retellAgentId: string;
-    readonly since: Date | null;
-    readonly paginationKey?: string | undefined;
-    readonly limit?: number | undefined;
-  },
+  request: RetellCallPageRequest,
   reach: RetellReach = {},
 ): Promise<ListedCalls> {
+  const from = request.from.getTime();
+  const to = request.to.getTime();
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) {
+    return { kind: "refused", reason: "invalid-window" };
+  }
+
   const answer = await ask(apiKey, reach, {
     method: "POST",
-    path: "/v2/list-calls",
+    path: "/v3/list-calls",
     body: {
       filter_criteria: {
-        agent_id: [request.retellAgentId],
-        call_status: ["ended"],
-        ...(request.since === null
-          ? {}
-          : {
-              end_timestamp: { lower_threshold: request.since.getTime() },
-            }),
+        agent: [{ agent_id: request.retellAgentId }],
+        call_status: {
+          type: "enum",
+          op: "in",
+          value: TERMINAL_CALL_STATUSES,
+        },
+        end_timestamp: {
+          type: "range",
+          op: "bt",
+          value: [from, to],
+        },
       },
       sort_order: "ascending",
       limit: request.limit ?? PAGE_SIZE,
@@ -155,50 +221,80 @@ export async function listEndedCalls(
     return { kind: "invalid-key" };
   }
   if (answer.status < 200 || answer.status >= 300) {
-    return { kind: "refused", reason: refusalIn(answer) };
+    return refusalFrom(answer);
   }
 
-  let held: unknown;
+  let parsed: unknown;
   try {
-    held = JSON.parse(answer.body);
+    parsed = JSON.parse(answer.body);
   } catch {
-    return { kind: "refused", reason: "Retell answered something that is not JSON" };
+    return { kind: "refused", reason: "invalid-response" };
   }
 
-  const rows = Array.isArray(held)
-    ? held
-    : typeof held === "object" && held !== null
-      ? ((held as Record<string, unknown>)["calls"] ??
-        (held as Record<string, unknown>)["items"])
-      : undefined;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { kind: "refused", reason: "invalid-response" };
+  }
+  const held = parsed as Record<string, unknown>;
+  const rows = held["items"];
+  const hasMore = held["has_more"];
+  if (!Array.isArray(rows) || typeof hasMore !== "boolean") {
+    return { kind: "refused", reason: "invalid-response" };
+  }
+  if (
+    rows.some(
+      (row) =>
+        typeof row !== "object" || row === null || Array.isArray(row),
+    )
+  ) {
+    return { kind: "refused", reason: "invalid-response" };
+  }
+  if (
+    rows.some((row) => {
+      const callId = (row as Record<string, unknown>)["call_id"];
+      return typeof callId !== "string" || callId.trim() === "";
+    })
+  ) {
+    return { kind: "refused", reason: "invalid-response" };
+  }
 
-  if (!Array.isArray(rows)) return { kind: "calls", calls: [] };
+  const suppliedCursor =
+    typeof held["pagination_key"] === "string"
+      ? held["pagination_key"].trim()
+      : "";
+  if (
+    hasMore &&
+    (suppliedCursor === "" ||
+      suppliedCursor === request.paginationKey ||
+      request.seenPaginationKeys?.has(suppliedCursor) === true)
+  ) {
+    return {
+      kind: "refused",
+      reason: "invalid-response",
+    };
+  }
 
   return {
     kind: "calls",
-    calls: rows.filter(
-      (row): row is RetellCall =>
-        typeof row === "object" && row !== null && !Array.isArray(row),
-    ),
+    calls: rows.map((row) => safeRetellProviderData(row as RetellCall)),
+    hasMore,
+    paginationKey: hasMore ? suppliedCursor : null,
   };
 }
 
-/**
- * Point this agent's webhook at egma, or take it away again.
- *
- * `null` is the deregistration a switch-off performs, and it is written as
- * Retell's own way of clearing the field rather than as a second endpoint.
- */
-export async function setAgentWebhook(
+/** Read one complete call. V3 list rows do not contain transcript fields. */
+export async function getRetellCall(
   apiKey: string,
-  retellAgentId: string,
-  webhookUrl: string | null,
+  callId: string,
   reach: RetellReach = {},
-): Promise<Registered> {
+): Promise<RetrievedCall> {
+  const wanted = callId.trim();
+  if (wanted === "") {
+    return { kind: "refused", reason: "invalid-call-id" };
+  }
+
   const answer = await ask(apiKey, reach, {
-    method: "PATCH",
-    path: `/update-agent/${encodeURIComponent(retellAgentId)}`,
-    body: { webhook_url: webhookUrl },
+    method: "GET",
+    path: `/v2/get-call/${encodeURIComponent(wanted)}`,
   });
 
   if ("unreachable" in answer) {
@@ -207,8 +303,45 @@ export async function setAgentWebhook(
   if (answer.status === 401 || answer.status === 403) {
     return { kind: "invalid-key" };
   }
+  if (answer.status === 404) return { kind: "not-found" };
   if (answer.status < 200 || answer.status >= 300) {
-    return { kind: "refused", reason: refusalIn(answer) };
+    return refusalFrom(answer);
   }
-  return { kind: "registered" };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(answer.body);
+  } catch {
+    return { kind: "refused", reason: "invalid-response" };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { kind: "refused", reason: "invalid-response" };
+  }
+
+  const call = parsed as RetellCall;
+  if (typeof call["call_id"] !== "string" || call["call_id"].trim() !== wanted) {
+    return { kind: "refused", reason: "invalid-response" };
+  }
+  return { kind: "call", call: safeRetellProviderData(call) };
+}
+
+/**
+ * Replace a light v3 list item with its full Get Call document.
+ *
+ * The list item is kept underneath fields only it supplied. The full document
+ * wins when both supplied the same field because it is the later provider read.
+ */
+export async function hydrateRetellCall(
+  apiKey: string,
+  listed: RetellCall,
+  reach: RetellReach = {},
+): Promise<RetrievedCall> {
+  const callId =
+    typeof listed["call_id"] === "string" ? listed["call_id"].trim() : "";
+  const hydrated = await getRetellCall(apiKey, callId, reach);
+  if (hydrated.kind !== "call") return hydrated;
+  return {
+    kind: "call",
+    call: safeRetellProviderData({ ...listed, ...hydrated.call }),
+  };
 }

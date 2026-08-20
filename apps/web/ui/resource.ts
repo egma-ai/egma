@@ -20,19 +20,25 @@ export function useProjectRead<T>(
 ): {
   readonly answer: Answer<T> | null;
   readonly reload: () => void;
+  /** Ask again without replacing the current page with a loading state. */
+  readonly refresh: () => void;
 } {
   const [answer, setAnswer] = useState<Answer<T> | null>(null);
-  const [attempt, setAttempt] = useState(0);
+  const [attempt, setAttempt] = useState({ number: 0, quiet: false });
 
   const reload = useCallback(() => {
     setAnswer(null);
-    setAttempt((one) => one + 1);
+    setAttempt((one) => ({ number: one.number + 1, quiet: false }));
+  }, []);
+
+  const refresh = useCallback(() => {
+    setAttempt((one) => ({ number: one.number + 1, quiet: true }));
   }, []);
 
   useEffect(() => {
     if (project === null) return undefined;
     let current = true;
-    setAnswer(null);
+    if (!attempt.quiet) setAnswer(null);
 
     void readJson<T>(path, { project }).then((next) => {
       if (current) setAnswer(next);
@@ -43,5 +49,5 @@ export function useProjectRead<T>(
     };
   }, [path, project, attempt]);
 
-  return { answer, reload };
+  return { answer, reload, refresh };
 }

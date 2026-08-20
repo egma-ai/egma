@@ -181,18 +181,39 @@ After startup, the following services are available:
 
 The simulator and grader publish no ports — they claim work outbound and need no inbound networking.
 
-### Receiving telemetry from your agent
+### Set up production Monitoring
 
-Point your agent's OTLP exporter at the API to stream production spans:
+Open **Monitoring → Set up monitoring** inside the project. Choose the agent
+platform first.
+
+- **Retell:** enter one Retell API key and select the voice agents to monitor.
+  The API service imports the previous 30 days and then polls for completed
+  conversations.
+- **LiveKit Agents:** install the Egma Python SDK in the agent process. Set
+  `EGMA_URL` to the published API address and `EGMA_API_KEY` to an existing
+  project key, then call `monitor_livekit(ctx)` before `AgentSession.start`.
+
+```bash
+export EGMA_URL=http://localhost:3100
+export EGMA_API_KEY=egma_sk_...
+```
+
+If another agent runtime already creates and registers an OpenTelemetry
+exporter, it can use the standard OTLP settings directly:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3100
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
 ```
 
-Either origin reaches the same door: the ingest endpoint lives on the API (`3100`), and the web application (`3101`) forwards `/v1/traces` to it. The API is one hop shorter. Leave `/v1/traces` off the end — the exporter appends it.
+These OTLP variables configure an exporter that already exists. They do not
+create one. The API (`3100`) is the direct ingest address. The web application
+(`3101`) also forwards `/v1/traces` to it. Leave `/v1/traces` off the base
+endpoint when the exporter appends its signal path.
 
-Mint the exporter's API key against a specific project. A key that names the whole organization files its spans under no project, and none of them appear in the dashboard.
+Use a project-scoped Egma key for LiveKit or direct OTLP Monitoring. An
+organization-scoped key does not place the evidence on a project's Monitoring
+page.
 
 ## Single-organization mode
 

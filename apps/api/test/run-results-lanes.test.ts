@@ -86,7 +86,9 @@ async function aJudgedRun(label: string): Promise<{
   const registered = await request("POST", "/api/agents", key, {
     name: "Front desk",
     connection: {
-      type: "retell",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -449,7 +451,11 @@ function aSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
     toolArguments: "",
     toolResult: "",
     providerCallId: "",
-    connectionType: "retell",
+    agentPlatform: "retell",
+    platformAgentId: "",
+    platformAgentName: "",
+    platformAgentVersion: "",
+    connectionKind: "retell",
     runId: "",
     agentId: "",
     agentVersionId: "",

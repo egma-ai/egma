@@ -79,15 +79,16 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // column — the shape both junction tables have, for the same reason.
   idempotent_operation: "org",
   grading_job: "gjb",
+  // One project's setup for one production agent platform.
+  monitoring_setup: "mns",
+  // One provider agent selected under a Retell monitoring setup.
+  retell_monitored_agent: "rma",
   // The exactly-once ledger for a conversation egma watched on somebody else's
   // platform. Its identity is its own because the row outlives the write it
   // guards: a sweep reads it back to replay an append that never landed.
   production_trace_claim: "ptc",
-  // How many deliveries the receiving endpoint turned away, by reason. Below
-  // the tenancy tables like the platform's own settings, and for the same kind
-  // of reason: a delivery that matched no switched-on connection belongs to no
-  // customer, which is what being refused means on that door.
-  retell_webhook_refusal: "rwr",
+  // A provider call that could not be normalized or written, held for replay.
+  retell_ingestion_failure: "rif",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])
@@ -451,7 +452,9 @@ describe("every enumerated value", () => {
       { table: "invitation", column: "role" },
       { table: "api_key", column: "scope" },
       { table: "device_code", column: "status" },
-      { table: "connection", column: "type" },
+      { table: "connection", column: "agent_platform" },
+      { table: "connection", column: "connection_kind" },
+      { table: "connection", column: "access_variant" },
       { table: "connection", column: "modality" },
       { table: "connection", column: "topology" },
       { table: "grader", column: "type" },

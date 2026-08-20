@@ -59,6 +59,7 @@ def phone(script: dict | None = None, *, media=SCRIPTED, **config) -> PhoneCall:
         whole["scripted"] = script
     return PhoneCall(
         modality="voice",
+        access_variant="phone_number.public_e164",
         config=whole,
         credentials=None,
         media=media,
@@ -66,7 +67,7 @@ def phone(script: dict | None = None, *, media=SCRIPTED, **config) -> PhoneCall:
 
 
 def test_the_registry_knows_the_phone_connection():
-    assert plug_for("phone") is PhoneCall
+    assert plug_for("phone_number") is PhoneCall
 
 
 def test_a_phone_call_is_one_pipecat_voice_connection():
@@ -348,6 +349,7 @@ def test_config_the_connection_does_not_understand_is_refused(config: dict):
     with pytest.raises(PlugError):
         PhoneCall(
             modality="voice",
+            access_variant="phone_number.public_e164",
             config=config,
             credentials=None,
             media=SCRIPTED,
@@ -371,6 +373,7 @@ def test_a_script_for_a_backend_this_deployment_does_not_use_is_refused():
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
             modality="voice",
+            access_variant="phone_number.public_e164",
             config={
                 "phoneNumber": A_NUMBER,
                 "scripted": {"replies": ["Noted."]},
@@ -391,6 +394,7 @@ def test_credentials_on_a_phone_connection_are_refused():
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
             modality="voice",
+            access_variant="phone_number.public_e164",
             config={"phoneNumber": A_NUMBER},
             credentials={"apiKey": "SENTINEL-not-read-here"},
             media=SCRIPTED,
@@ -404,6 +408,7 @@ def test_the_connection_speaks_voice_only():
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
             modality="chat",
+            access_variant="phone_number.public_e164",
             config={"phoneNumber": A_NUMBER},
             credentials=None,
             media=SCRIPTED,
@@ -414,6 +419,7 @@ def test_the_connection_speaks_voice_only():
 def test_the_deployment_is_what_places_the_call():
     connection = PhoneCall(
         modality="voice",
+        access_variant="phone_number.public_e164",
         config={"phoneNumber": A_NUMBER},
         credentials=None,
         media=SCRIPTED,
@@ -428,6 +434,7 @@ def test_a_deployment_handed_no_backend_does_not_read_the_environment(
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
             modality="voice",
+            access_variant="phone_number.public_e164",
             config={"phoneNumber": A_NUMBER},
             credentials=None,
             media=None,

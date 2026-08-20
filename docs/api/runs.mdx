@@ -18,7 +18,7 @@ You can follow a run in real time using the events feed, which operates as a num
 
 Start a new run by specifying the test versions to execute and the connection to use. Returns `201 Created` with the full run object, including every simulation in `queued` state.
 
-The connection type must have a compatible adapter installed on this deployment. If you attempt a `phone` run on a deployment without a carrier configured, Egma returns `phone_setup_required` before writing anything.
+The connection kind must have a compatible adapter installed on this deployment. If you attempt a `phone_number` run on a deployment without a carrier configured, Egma returns `phone_setup_required` before writing anything.
 
 ### Request body
 
@@ -64,12 +64,24 @@ The connection type must have a compatible adapter installed on this deployment.
   The connection used for this run.
 </ResponseField>
 
-<ResponseField name="connection_type" type="string">
-  Provider type, e.g. `retell` or `livekit`.
+<ResponseField name="agent_platform" type="string | null">
+  Where the customer agent runs, such as `retell` or `livekit_agents`. It can be `null` for a platform-independent connection.
+</ResponseField>
+
+<ResponseField name="connection_kind" type="string">
+  The simulator path, such as `retell_chat_api`, `phone_number`, or `livekit_room`.
+</ResponseField>
+
+<ResponseField name="access_variant" type="string">
+  How Egma gets access to that connection kind, such as `phone_number.public_e164`.
+</ResponseField>
+
+<ResponseField name="product_label" type="string">
+  Display text derived from the supported combination. It never selects simulator code.
 </ResponseField>
 
 <ResponseField name="modality" type="string">
-  Always `voice` for current connection types.
+  `chat` or `voice`, as frozen from the selected connection.
 </ResponseField>
 
 <ResponseField name="label" type="string | null">

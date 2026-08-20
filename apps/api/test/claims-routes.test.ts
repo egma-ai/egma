@@ -54,7 +54,9 @@ const RESCHEDULING = {
 } as const;
 
 const RETELL = {
-  type: "retell",
+  agent_platform: "retell",
+  connection_kind: "retell_chat_api",
+  access_variant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -279,7 +281,9 @@ describe("claiming work", () => {
     });
     expect(spec.modality).toBe("chat");
     expect(spec.connection).toEqual({
-      type: "retell",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
     });

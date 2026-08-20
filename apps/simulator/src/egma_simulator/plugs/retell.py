@@ -80,6 +80,7 @@ class RetellChat:
         self,
         *,
         modality: str,
+        access_variant: str,
         config: dict[str, Any],
         credentials: object,
         simulation_id: str | None = None,
@@ -93,6 +94,12 @@ class RetellChat:
         # claims nothing about tools. Retell carries its own audio, so the
         # deployment's carrier is nothing to it either.
         del simulation_id, mock_tools, media
+
+        if access_variant != "retell_chat_api.api_key":
+            raise PlugError(
+                "the retell chat adapter does not support access variant "
+                f"{access_variant!r}"
+            )
 
         if modality != "chat":
             raise PlugError(

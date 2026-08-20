@@ -353,13 +353,18 @@ async function main(): Promise<void> {
     // The agent and the way to reach it are on the platform.
     check(platform.registered.agents.length >= 1, "an agent landed on the platform");
     const connection = platform.registered.connections.at(-1);
-    check(connection?.type === "retell", `the connection is a retell one (${connection?.type})`);
     check(
-      connection?.modality === "voice" || connection?.modality === "chat",
-      `the connection names a modality (${connection?.modality})`,
+      connection?.agentPlatform === "retell" &&
+        connection.connectionKind === "retell_chat_api" &&
+        connection.accessVariant === "retell_chat_api.api_key",
+      `the connection is Retell chat (${connection?.productLabel})`,
     );
     check(
-      /^retell-\d+$/u.test(connection?.name ?? ""),
+      connection?.modality === "chat",
+      `the Retell chat API connection names chat modality (${connection?.modality})`,
+    );
+    check(
+      /^retell_chat_api-\d+$/u.test(connection?.name ?? ""),
       `the connection was named by the platform (${connection?.name})`,
     );
     check(

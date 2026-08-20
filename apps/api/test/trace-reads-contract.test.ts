@@ -881,7 +881,9 @@ describe("narrowing a list to one kind of traffic", () => {
     const agent = await createAgent(auth, {
       name: "Front desk",
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_mixed" },
         credentials: { apiKey: "retell-secret-mixed" },

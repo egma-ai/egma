@@ -119,13 +119,17 @@ describe("the captured trace, found in a list", () => {
     expect(trace?.ended_at).toBe("2026-08-02T18:05:53.776865Z");
   });
 
-  it("says where it came from and what it was reached over", async () => {
+  it("says which platform produced it without inventing a connection kind", async () => {
     const [trace] = (await listed()).traces;
     expect(trace?.source).toBe("production");
     expect(trace?.emitter).toBe("agent");
     expect(trace?.environment).toBe("default");
-    expect(trace?.connection_type).toBe("livekit");
+    expect(trace?.connection_kind).toBe("");
     expect(trace?.provider_call_id).toBe(FIXTURE_PROVIDER_CALL_ID);
+    expect(trace?.agent_platform).toBe("livekit_agents");
+    expect(trace?.platform_agent_id).toBe("");
+    expect(trace?.platform_agent_name).toBe("");
+    expect(trace?.platform_agent_version).toBe("");
     // Nothing started this one, so there is no run and no agent pinned to it.
     expect(trace?.run_id).toBe("");
     expect(trace?.agent_id).toBe("");
@@ -421,6 +425,11 @@ describe("the captured trace, read as a transcript", () => {
       agent: FIXTURE_TRACE.agentTurns,
     });
     expect(detail.trace.started_at).toBe("2026-08-02T18:04:40.281989Z");
+    expect(detail.trace.provider_call_id).toBe(FIXTURE_PROVIDER_CALL_ID);
+    expect(detail.trace.agent_platform).toBe("livekit_agents");
+    expect(detail.trace.platform_agent_id).toBe("");
+    expect(detail.trace.platform_agent_name).toBe("");
+    expect(detail.trace.platform_agent_version).toBe("");
     expect(detail.spans_truncated).toBe(false);
 
     // The verbatim payload is the largest column on the row and is deliberately
@@ -531,7 +540,11 @@ describe("what one measure looks like on the wire", () => {
       toolArguments: "",
       toolResult: "",
       providerCallId: "room-wire",
-      connectionType: "livekit",
+      agentPlatform: "livekit_agents",
+      platformAgentId: "",
+      platformAgentName: "",
+      platformAgentVersion: "",
+      connectionKind: "livekit",
       runId: "",
       agentId: "",
       agentVersionId: "",
@@ -566,7 +579,7 @@ describe("what one measure looks like on the wire", () => {
         spanId: "5100000000000001",
         source: "simulation",
         emitter: "egma-runtime",
-        connectionType: "",
+        connectionKind: "",
         runId: "run_01JQZ0000000000000000000AA",
         agentId: "agt_01JQZ0000000000000000000AA",
       }),
@@ -576,7 +589,7 @@ describe("what one measure looks like on the wire", () => {
         parentSpanId: "5100000000000001",
         source: "simulation",
         emitter: "egma-runtime",
-        connectionType: "",
+        connectionKind: "",
         runId: "run_01JQZ0000000000000000000AA",
         agentId: "agt_01JQZ0000000000000000000AA",
         name: "turn_response_latency",
@@ -595,7 +608,7 @@ describe("what one measure looks like on the wire", () => {
         spanId: "5200000000000001",
         name: "retell_call",
         kind: "conversation",
-        connectionType: "retell",
+        connectionKind: "retell",
         providerCallId: "call_wire",
         payload: JSON.stringify({
           call_id: "call_wire",

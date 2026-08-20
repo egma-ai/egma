@@ -221,7 +221,7 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
     ui.pushStatus(`${ACTION_MARK} Retell agent ${config.name}`);
     ui.pushStatus(`${DETAIL_MARK} ${config.agentId}`);
     ui.pushStatus(
-      `${ACTION_MARK} ${registered.agent.name} is on Egma, reachable over ${registered.connection.name} (${registered.connection.type} ${registered.connection.modality}).`,
+      `${ACTION_MARK} ${registered.agent.name} is on Egma, reachable over ${registered.connection.name} (${registered.connection.productLabel}, ${registered.connection.modality}).`,
     );
     ui.pushStatus(
       `${DETAIL_MARK} agent ${outcome.registration.agent}, connection ${outcome.registration.connection}`,

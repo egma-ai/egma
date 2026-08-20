@@ -16,7 +16,7 @@
  *
  * One shape of answer is a value rather than an exception, because it is an
  * ordinary thing that happens: **the platform refusing to start the run**. A
- * connection type whose adapter has not shipped is the case that matters, and
+ * connection kind whose adapter has not shipped is the case that matters, and
  * the platform's own sentence is carried up untouched — a terminal that
  * paraphrased it would be inventing an explanation for a decision it did not
  * make.
@@ -87,7 +87,7 @@ export type PlatformRun = {
   readonly status: RunStatus;
   readonly agentId: string;
   readonly connectionId: string;
-  readonly connectionType: string;
+  readonly productLabel: string;
   readonly modality: string;
   /** The versions this run executed against, exactly as they were pinned. */
   readonly testVersionIds: readonly string[];
@@ -197,7 +197,7 @@ function runFrom(body: Record<string, unknown>): PlatformRun {
     status: runStatusOf(body.status),
     agentId: text(body.agent_id),
     connectionId: text(body.connection_id),
-    connectionType: text(body.connection_type),
+    productLabel: text(body.product_label),
     modality: text(body.modality),
     testVersionIds: textList(body.test_versions),
     expectedSimulationCount: whole(body.expected_simulation_count),
@@ -232,7 +232,7 @@ function eventFrom(body: Record<string, unknown>): RunEvent | null {
  * Start a run, pinning the versions it will execute.
  *
  * A refusal is an answer and not an exception. The one that matters is a
- * connection type egma has no adapter for: it can never be conducted, so it is
+ * connection kind egma has no adapter for: it can never be conducted, so it is
  * refused here at creation rather than left queued, and the sentence comes back
  * whole for the terminal to print as it stands.
  */

@@ -127,7 +127,7 @@ function Step({
 function connectionLabel(connection: ListedConnection): string {
   const where =
     connection.environment === null ? "" : ` · ${connection.environment}`;
-  return `${connection.name} · ${connection.type} · ${connection.modality}${where}`;
+  return `${connection.name} · ${connection.product_label} · ${connection.modality}${where}`;
 }
 
 /** A fresh browser intent, reused only while that same start is retried. */

@@ -84,11 +84,14 @@ export const ID_PREFIXES = [
    */
   "ptc",
   /**
-   * One reason a webhook delivery was refused, and how many times. Its own
-   * identity because the row belongs to the deployment rather than to any
-   * customer: a delivery that matched nobody has no tenancy to be filed under.
+   * One project's setup for bringing production evidence in from an agent
+   * platform. This is separate from the connections used by simulations.
    */
-  "rwr",
+  "mns",
+  /** One Retell voice agent selected inside a Retell Monitoring setup. */
+  "rma",
+  /** One Retell call that bounded retries could not import. */
+  "rif",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

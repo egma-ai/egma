@@ -4,7 +4,7 @@
  * The CLI talks to Retell over plain HTTP, so that is the seam a check stands
  * in at: a server on this machine answering `/v2/list-agents`, `/get-agent/…`,
  * `/get-chat-agent/…`, `/get-retell-llm/…`, `/get-conversation-flow/…`,
- * `/list-phone-numbers` and `/get-phone-number/…` with the fields the SDK's own
+ * `/v2/list-phone-numbers` and `/get-phone-number/…` with the fields the SDK's own
  * types name. Nothing in CI ever reaches the real Retell, and no real key
  * exists anywhere near these checks.
  *
@@ -258,10 +258,28 @@ export async function startFakeRetell(script: FakeRetellScript): Promise<FakeRet
           return;
         }
 
-        if (incoming.method === "GET" && at.pathname === "/list-phone-numbers") {
-          // A bare array, which is what Retell answers here — not the paged
-          // envelope the agent listing uses.
-          send(200, (script.numbers ?? []).map(numberBody));
+        if (incoming.method === "GET" && at.pathname === "/v2/list-phone-numbers") {
+          const numbers = script.numbers ?? [];
+          const askedLimit = Number(at.searchParams.get("limit"));
+          const limit = Number.isInteger(askedLimit) && askedLimit > 0
+            ? askedLimit
+            : 1000;
+          const cursor = at.searchParams.get("pagination_key");
+          const start = cursor === null
+            ? 0
+            : Number(cursor.replace(/^phone-page:/u, ""));
+          if (!Number.isInteger(start) || start < 0 || start > numbers.length) {
+            send(400, { error_message: "invalid pagination key" });
+            return;
+          }
+          const next = Math.min(numbers.length, start + limit);
+          send(200, {
+            items: numbers.slice(start, next).map(numberBody),
+            has_more: next < numbers.length,
+            ...(next < numbers.length
+              ? { pagination_key: `phone-page:${next}` }
+              : {}),
+          });
           return;
         }
 

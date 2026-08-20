@@ -232,8 +232,8 @@ describe("the database itself", () => {
     await expect(
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
-         values ($1, $2, $3, $4, 'staging', 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001')`,
+           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision)
+         values ($1, $2, $3, $4, 'staging', 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001')`,
         [newId("con"), acme.organization, globex.project, anchor.id],
       ),
     ).rejects.toSatisfy(
@@ -250,8 +250,8 @@ describe("the database itself", () => {
     await expect(
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
-         values ($1, $2, $3, $4, 'astray', 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001')`,
+           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision)
+         values ($1, $2, $3, $4, 'astray', 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001')`,
         [newId("con"), acme.organization, acme.secondProject, homed.id],
       ),
     ).rejects.toSatisfy(
@@ -265,8 +265,8 @@ describe("the database itself", () => {
     const halfSealed = (credentials: string | null, hint: string | null) =>
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision, credentials, credentials_hint)
-         values ($1, $2, $3, $4, $5, 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001', $6, $7)`,
+           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision, credentials, credentials_hint)
+         values ($1, $2, $3, $4, $5, 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001', $6, $7)`,
         [
           newId("con"),
           acme.organization,
@@ -292,8 +292,8 @@ describe("the database itself", () => {
     const staging = (id: string) =>
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
-         values ($1, $2, $3, $4, 'staging', 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001')`,
+           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision)
+         values ($1, $2, $3, $4, 'staging', 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001')`,
         [id, acme.organization, acme.project, wired.id],
       );
 
@@ -328,9 +328,9 @@ describe("the database itself", () => {
     ) =>
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision,
+           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision,
             capability_state, capabilities_measured, capabilities_supported, capabilities_checked_at, capability_source)
-         values ($1, $2, $3, $4, $5, 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001',
+         values ($1, $2, $3, $4, $5, 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001',
             $6, $7, $7, $8, $9)`,
         [
           newId("con"),
@@ -388,9 +388,9 @@ describe("a capability found without being measured", () => {
     await expect(
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision,
+           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision,
             capability_state, capabilities_measured, capabilities_supported, capabilities_checked_at, capability_source)
-         values ($1, $2, $3, $4, 'impossible', 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001',
+         values ($1, $2, $3, $4, 'impossible', 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001',
             'known', '["raw_audio"]', '["dtmf"]', now(), 'confused adapter')`,
         [newId("con"), acme.organization, acme.project, held.id],
       ),

@@ -239,13 +239,18 @@ export function simulationNamedBy(resourceSpans: OtlpResourceSpans): string {
   return attribute(resourceSpans.resource?.attributes, SIMULATION_ID_ATTRIBUTE);
 }
 
-/**
- * The connection an agent was reached over, when the telemetry says so. Only
- * the framework is knowable from a scope name.
- */
-const CONNECTION_TYPE_BY_SCOPE: Readonly<Record<string, string>> = {
-  [LIVEKIT_SCOPE]: "livekit",
+/** A scope proves the framework, not how the caller reached the agent. */
+const AGENT_PLATFORM_BY_SCOPE: Readonly<Record<string, string>> = {
+  [LIVEKIT_SCOPE]: "livekit_agents",
 };
+
+const PLATFORM_AGENT_ID_ATTRIBUTES = ["lk.cloud_agent_id", "lk.agent_id"];
+// `lk.agent_name` is the dispatched worker name when LiveKit has one.
+// `lk.agent_label` is preserved in the provider payload. Its product meaning
+// is not settled, so it must not be relabelled as platform-agent identity.
+const PLATFORM_AGENT_NAME_ATTRIBUTES = ["lk.agent_name"];
+const PLATFORM_AGENT_VERSION_ATTRIBUTES = ["lk.agent_version"];
+const CONNECTION_KIND_ATTRIBUTES = ["egma.connection_kind"];
 
 /**
  * How much of one export egma will turn into rows.
@@ -623,7 +628,30 @@ export function normaliseOtlpExport(
             [attributes, resourceSpans.resource?.attributes],
             PROVIDER_CALL_ID_ATTRIBUTES,
           ),
-          connectionType: CONNECTION_TYPE_BY_SCOPE[scope?.name ?? ""] ?? "",
+          agentPlatform: AGENT_PLATFORM_BY_SCOPE[scope?.name ?? ""] ?? "",
+          platformAgentId: firstAttribute(
+            [attributes, resourceSpans.resource?.attributes],
+            PLATFORM_AGENT_ID_ATTRIBUTES,
+          ),
+          platformAgentName: firstAttribute(
+            [attributes, resourceSpans.resource?.attributes],
+            PLATFORM_AGENT_NAME_ATTRIBUTES,
+          ),
+          platformAgentVersion: firstAttribute(
+            [attributes, resourceSpans.resource?.attributes],
+            PLATFORM_AGENT_VERSION_ATTRIBUTES,
+          ),
+          // The service-token path is Egma's own simulator and may state the
+          // connection kind it used. Customer OTLP is production evidence;
+          // this release does not let an arbitrary payload create a shared
+          // production connection-kind fact.
+          connectionKind:
+            attribution.source === "simulation"
+              ? firstAttribute(
+                  [attributes, resourceSpans.resource?.attributes],
+                  CONNECTION_KIND_ATTRIBUTES,
+                )
+              : "",
           // The run and pins ride the attribution: the door resolved them from
           // egma's own simulation row on the service path, and a customer
           // key's traffic has none — a trace arriving there was not started by

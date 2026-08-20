@@ -88,26 +88,34 @@ Leave it running; Egma's simulations dispatch it per room.
   it joins only rooms whose dispatch asks for `front-desk`. Egma's
   named-`agentName` path.
 
-## Point its telemetry at an Egma
+## Send production telemetry to Egma
 
-Three standard OpenTelemetry variables, and nothing else. Set them where
-this worker runs and every conversation it holds lands in that project's
-**Monitoring**; leave `OTEL_EXPORTER_OTLP_ENDPOINT` unset and the agent
-builds no exporter at all and behaves exactly as it did before.
+The fixture uses the same public function as a customer agent:
 
-```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3100
-export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
-export OTEL_SERVICE_NAME=dumb-agent
+```python
+monitor_livekit(ctx)
 ```
 
-Three things about those. The endpoint is the **API's** port and carries
-**no `/v1/traces`** on the end — the exporter appends the signal's own
-path. The space in the header is percent-encoded because OpenTelemetry
-does not allow a literal one, and an SDK that refuses the whole variable
-exports nothing and says nothing about it. And the key has to name a
-**project**: a key minted for the whole organization files its telemetry
-outside every project, where no Monitoring page is looking.
+Set the Egma API origin and an existing project API key where the worker
+runs. When both are blank, this multipurpose fixture leaves monitoring off so
+its simulation smoke test needs no Monitoring setup. A partial setup stops
+with a direct error.
+
+```bash
+export EGMA_URL=http://localhost:3100
+export EGMA_API_KEY=egma_sk_...
+```
+
+`EGMA_URL` is the API address and carries no `/v1/traces` on the end. On
+hosted Egma it is `https://api.egma.ai`. The key must name a **project**:
+an organization-wide key files telemetry outside every project, where no
+Monitoring page is looking.
+
+The same setup works when this worker is customer-hosted or hosted in LiveKit
+Cloud. The helper preserves LiveKit Cloud observability, batches export to
+Egma, and flushes the last batch when the job stops. It skips Egma simulation
+jobs, because those already have a simulation trace and must not appear a
+second time in Monitoring.
 
 ## The suites that simulate against it
 

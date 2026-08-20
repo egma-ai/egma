@@ -16,11 +16,21 @@ from egma_simulator.plugs.scripted import FALLBACK_REPLY, ScriptedCounterpart
 
 
 def scripted(config: dict, *, modality: str = "chat") -> ScriptedCounterpart:
-    return ScriptedCounterpart(modality=modality, config=config, credentials=None)
+    return ScriptedCounterpart(
+        modality=modality,
+        access_variant="scripted.in_memory",
+        config=config,
+        credentials=None,
+    )
 
 
 def loopback(config: dict, *, modality: str = "voice") -> LoopbackCounterpart:
-    return LoopbackCounterpart(modality=modality, config=config, credentials=None)
+    return LoopbackCounterpart(
+        modality=modality,
+        access_variant="loopback.in_process",
+        config=config,
+        credentials=None,
+    )
 
 
 def test_the_registry_knows_the_two_plugs_and_nothing_imaginary():

@@ -4,7 +4,11 @@ sidebarTitle: "Overview"
 description: "Understand the Egma REST API: base URL, authentication, JSON conventions, cursor pagination, error format, rate limits, and OTLP trace ingest."
 ---
 
-The Egma REST API gives you programmatic access to everything the platform manages — agents, tests, runs, graders, traces, and more. Every operation available in the Egma web interface is backed by this API, so you can integrate Egma into CI pipelines, build custom dashboards, or automate any part of your simulation workflow.
+The Egma REST API gives you programmatic access to agents, simulation
+connections, tests, runs, graders, Monitoring setup, and traces. Every
+operation available in the Egma web interface is backed by this API, so you can
+integrate Egma into CI, build dashboards, or automate simulation and production
+Monitoring work.
 
 ## Base URL
 
@@ -140,7 +144,10 @@ Egma accepts OpenTelemetry traces at the standard OTLP/HTTP endpoint:
 POST /v1/traces
 ```
 
-This is how you connect a live voice agent to Egma — configure your OpenTelemetry exporter to target your Egma instance and Egma picks up the spans automatically, with no custom integration code required.
+This endpoint is the direct OTLP path for an agent runtime that already emits
+OpenTelemetry spans. For LiveKit Agents, use the Egma Python SDK's
+`monitor_livekit(ctx)` helper to create or safely reuse the tracer provider and
+add the exporter. Retell Monitoring uses API polling instead of this endpoint.
 
 <CardGroup cols={2}>
   <Card title="Protobuf encoding" icon="binary">

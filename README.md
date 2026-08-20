@@ -848,16 +848,34 @@ they minted. Every role may mint a key for themselves, including `viewer` —
 logging in mints one as its last step, so an admin-only rule would close the
 product to most of an instance.
 
-## Sending an agent's traces
+## Production Monitoring
 
-Egma listens on the OpenTelemetry endpoint your agent already knows how to
-export to. Point it at this instance with an Egma key and write no integration
-code:
+Production Monitoring starts with the agent platform. It is separate from the
+connections the simulator uses.
+
+- For Retell, open **Monitoring → Set up monitoring**, enter one Retell API
+  key, and select the voice agents to monitor. Egma imports the previous 30
+  days and then polls for completed conversations about every 30 seconds.
+- For LiveKit Agents, install the Egma Python SDK and call
+  `monitor_livekit(ctx)` before `AgentSession.start`. The same helper works in a
+  customer-hosted worker and a LiveKit Cloud-hosted Python agent.
+
+Both paths write to the same trace store and use the same transcript, measure,
+and production grading code.
+
+### Direct OTLP
+
+Egma also accepts standard OTLP/HTTP from an exporter your agent runtime
+already creates. Point that exporter at this instance with an Egma project key:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3100
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
 ```
+
+These variables configure an existing exporter. They do not create a tracer
+provider or register one with an agent runtime. The LiveKit helper owns that
+setup for LiveKit Agents.
 
 The `%20` is not a typo: the OpenTelemetry specification says this variable is a
 list of `key=value` pairs whose values are percent-encoded, and a literal space
@@ -895,9 +913,11 @@ A few things worth knowing about what happens next:
 - **The ids are yours.** Egma stores the trace and span ids that arrived and
   mints neither; a span carrying no usable id is reported back as rejected
   rather than given one.
-- **Nothing is invented and nothing is dropped.** One span in is one row; what
-  the columns have no place for — every attribute, event and resource field —
-  is kept verbatim on the row it came on.
+- **Direct OTLP keeps the evidence it receives.** One accepted span is one row;
+  attributes, events, and resource fields that have no typed column remain in
+  that span's payload. Retell takes a different path: Egma removes access
+  tokens and authentication header values before its provider payload reaches
+  storage.
 - **A recent exact retry is free.** ClickHouse suppresses a byte-identical
   insert block while that block remains in its recent deduplication window.
   A later repeat can append, and regrouping, reordering, or changing any
@@ -912,7 +932,7 @@ A few things worth knowing about what happens next:
   does not. There is nothing to declare first. Names beginning `egma` are
   reserved and are refused with a reason.
 
-The same telemetry path works with a development server on your machine or
+The LiveKit helper works with a development server on your machine or with
 LiveKit Cloud.
 
 Spans Egma will not store are reported in the response's partial-success field
@@ -969,8 +989,8 @@ that catalog counts it in, one sample per measurement in the order they were
 taken, the span each sample came off, and **`worst`**: the single measurement a
 grader holds against a bound, as `{value, span_id}`. A measure this exchange did
 not produce is **absent** rather than present with nothing in it, so an empty
-list means nothing was measured — which is the ordinary answer for a production
-exchange, since Egma files a timing span only for its own simulator's telemetry.
+  list means nothing was measured. Production conversations have measures only
+  when their stored spans contain the timing evidence that measure needs.
 
 **`worst` is on the wire because the reduction is part of the answer.** A bound
 is held against one number, and which number that is — the worst measurement
@@ -1013,9 +1033,11 @@ Five things about the contract are worth knowing before you build on it:
 - **The organization comes from the credential.** There is no parameter that
   could name another one, and a trace id belonging to somebody else answers
   exactly as an id nobody ever minted does.
-- **The verbatim payload is not in either response.** It is by a wide margin the
+- **The stored payload is not in either response.** It is by a wide margin the
   largest thing on a span, and a transcript carrying it would be megabytes of
-  JSON nobody asked to render. It is still stored in full on the row.
+  JSON nobody asked to render. Direct OTLP span payloads stay on their rows;
+  Retell provider payloads stay there after credential-like values are
+  redacted.
 - **A transcript of more than 10,000 spans is a prefix, and says so.**
   `spans_truncated` is then `true`, and it means exactly one thing: `turns` and
   `spans` hold the first 10,000 spans in time order, while `span_count` and every

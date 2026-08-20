@@ -159,7 +159,9 @@ beforeAll(async () => {
   const created = await createAgent(actingAsAcme(), {
     name: "Front desk",
     connection: {
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       environment: "staging",
       config: { retellAgentId: "agent_in_retell_1" },
@@ -178,7 +180,9 @@ beforeAll(async () => {
   const second = await createAgent(actingAsAcme(), {
     name: "Night desk",
     connection: {
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       environment: "staging",
       config: { retellAgentId: "agent_in_retell_2" },
@@ -370,7 +374,9 @@ describe("the review, before anybody starts anything", () => {
     const strangerAgent = await createAgent(actingAsAcme(), {
       name: "Somewhere else",
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_3" },
         credentials: { apiKey: "a-third-retell-key" },
@@ -692,7 +698,9 @@ describe("a project with no judge", () => {
     const agent = await createAgent(auth, {
       name: "Unjudged",
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: `agent_in_retell_${slug}` },
         credentials: { apiKey: `a-key-for-${slug}` },

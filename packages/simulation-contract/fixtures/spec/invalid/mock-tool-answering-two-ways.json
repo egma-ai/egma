@@ -3,7 +3,9 @@
   "simulation_id": "sim_01K4RE4P0D3S8VXHNB2GQZT6MF",
   "modality": "voice",
   "connection": {
-    "type": "livekit",
+    "agent_platform": "livekit_agents",
+    "connection_kind": "livekit_room",
+    "access_variant": "livekit_room.project_credentials",
     "config": {
       "url": "wss://lakeside-dental.livekit.cloud"
     },

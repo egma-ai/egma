@@ -217,11 +217,13 @@ function evidence(overrides: Record<string, unknown> = {}) {
     agent: { id: "agt_1", name: "Front desk", archived: false },
     connection: { id: "con_1", name: "retell-staging", archived: false },
     connection_snapshot: {
-      type: "retell",
+      agent_platform: "retell",
+      connection_kind: "phone_number",
+      access_variant: "phone_number.public_e164",
       modality: "voice",
-      topology: "hosted-broker",
+      topology: "egma-dials-in",
       environment: "staging",
-      config: { retellAgentId: "agent_abc" },
+      config: { phoneNumber: "+15551234567" },
     },
     mock_tool_coverage: {
       discovered: ["book_appointment", "charge_card"],

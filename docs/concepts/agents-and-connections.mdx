@@ -1,113 +1,162 @@
 ---
 title: "Agents and Connections: How Egma Reaches Your Agent"
 sidebarTitle: "Agents & Connections"
-description: "Learn how Egma models your voice agents and the connections it uses to reach them — via Retell or LiveKit — during simulation and testing."
+description: "Understand the separate platform, connection kind, access variant, modality, and product label used for simulations."
 ---
 
-An **Agent** is Egma's record of one of your voice agents. It holds the agent's name, its project membership, and a history of every test run and simulation ever conducted against it. A **Connection** is how Egma actually reaches that agent when a simulation starts — it carries the provider credentials, the reach type, and everything else the simulator needs to place a call or exchange messages.
+An **agent** is Egma's stable record of the agent you test. A **connection** is
+one way Egma can reach that agent for a simulation.
 
-## Agents
+Connections are separate database records. Each connection has an `agent_id`
+that links it to one agent. An agent does not store a connection inside its own
+row. Agent API responses can include related connections as a convenience, but
+the two are still separate records with separate identifiers and lifecycles.
 
-Register an agent once and Egma assigns it a stable `agt_` identifier. That identifier ties together everything that runs against that agent: test suites, individual runs, simulation traces, and verdict history. You never need to re-register after an update to your agent's prompt or tooling — the identifier stays the same.
+## The five simulation facts
 
-Registering is idempotent by design. If you run `egma connect` a second time for the same vendor agent, Egma looks up the existing registration rather than creating a duplicate. The `registration` field in the response tells you exactly what happened:
+Every connection states five separate facts:
 
-| Value | Meaning |
-|---|---|
-| `created` | A new agent and connection were registered. |
-| `reused` | The agent and connection already existed. The stored credentials were updated with what you sent — safe to use for key rotation. No new rows were written. |
-| `connection_added` | The agent already existed and a new connection was attached to it. |
+| Fact | Meaning | Example |
+|---|---|---|
+| **Agent platform** | The product or framework the customer uses | Retell, LiveKit Agents, or unknown |
+| **Connection kind** | The path the simulator uses to reach the agent | `retell_chat_api`, `phone_number`, `livekit_room` |
+| **Access variant** | How Egma gets access to that path | API key, public E.164 number, project credentials, token endpoint |
+| **Modality** | The conversation form | `chat` or `voice` |
+| **Product label** | Display text derived by Egma | Retell chat, Retell phone, LiveKit token endpoint |
 
-This makes it safe to run from CI pipelines or after a network failure — you will never end up with two agent records for one vendor agent.
+These facts do different jobs. The connection kind selects simulator code. The
+access variant selects the configuration and credential rules inside that
+adapter. Modality selects chat or voice behavior. Agent platform records where
+the agent runs; it does not select the adapter. Product label is display text
+and never selects code.
 
-## Connections
+The supported combinations are:
 
-A Connection defines the path from Egma to your agent. One agent can have multiple connections, each representing a different way to reach it. This is useful when you want to test the same agent over both a text channel and a phone line.
+| Agent platform | Connection kind | Access variant | Modality | Product label |
+|---|---|---|---|---|
+| Retell | `retell_chat_api` | `retell_chat_api.api_key` | chat | Retell chat |
+| Retell | `phone_number` | `phone_number.public_e164` | voice | Retell phone |
+| LiveKit Agents | `livekit_room` | `livekit_room.project_credentials` | voice | LiveKit project credentials |
+| LiveKit Agents | `livekit_room` | `livekit_room.customer_token_endpoint` | voice | LiveKit token endpoint |
+| LiveKit Agents | `phone_number` | `phone_number.public_e164` | voice | Phone number |
+| Any or unknown | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 
-### Connection types
+## Platform and connection kind are independent
 
-<CardGroup cols={2}>
-  <Card title="Retell" icon="phone">
-    Connects via the Retell API. Requires a Retell API key and a Retell agent ID. Egma seals the key on arrival and uses it only when placing simulation calls.
-  </Card>
-  <Card title="LiveKit" icon="satellite-dish">
-    Connects to a LiveKit agent by joining a room in your own LiveKit project. Requires a LiveKit URL, API key, and API secret. Optionally accepts an agent name if your worker registers one.
-  </Card>
-</CardGroup>
+A LiveKit Agents worker can answer a public phone number. In that case:
 
-### Reach types
+- agent platform is LiveKit Agents;
+- connection kind is `phone_number`;
+- access variant is `phone_number.public_e164`;
+- modality is voice.
 
-Each connection has a **reach type** that determines what kind of conversation Egma simulates:
+The phone adapter does not need to know that LiveKit Agents runs the agent. It
+dials the number with Egma's own telephony configuration.
 
-<CardGroup cols={2}>
-  <Card title="text" icon="message">
-    Egma exchanges messages directly with your agent. No phone call, nothing dialled. Tests your prompt, reasoning logic, and tool integrations.
-  </Card>
-  <Card title="phone" icon="phone-volume">
-    Egma places a real SIP call to one of your agent's phone numbers. Tests everything the text reach tests, *plus* your speech stack, TTS/STT providers, and the telephone network path.
-  </Card>
-</CardGroup>
+The same agent can also have a `livekit_room` connection. That connection joins
+the customer's LiveKit room directly and does not place a phone call.
 
-<Tip>
-Running the same test over both a `text` connection and a `phone` connection is the sharpest diagnostic Egma offers. A test that passes on text and fails on phone tells you the prompt is fine and the speech stack is not.
-</Tip>
+This model can add future paths without changing what an agent platform means.
+For example, a WebSocket or WebRTC adapter can become a new connection kind
+with its own access variants and supported modalities.
 
-### Credential sealing
+## Current connection kinds
 
-Credentials you provide when creating a connection — API keys, secrets — are **encrypted immediately on arrival** and never stored in plaintext. After creation, they are not readable through any Egma API. The response returns only a `credentials_hint` (the last four characters of the key) so you can confirm a rotation landed without seeing the credential itself.
+### Retell chat API
 
-This is enforced structurally: the sealed field is absent from every read response shape, not merely blanked. There is no serializer path that could accidentally expose it.
+`retell_chat_api` uses Retell's Chat API. It is chat-only. The
+`retell_chat_api.api_key` variant stores a sealed Retell API key and the Retell
+chat agent ID.
 
-## Registering via the CLI
+This connection kind does not stand for every way to reach a Retell agent. A
+Retell voice agent is reached through a `phone_number` connection today.
 
-The fastest way to register an agent is with `egma connect`. Run it inside your voice agent repository:
+### Phone number
 
-```bash
-egma connect
-```
+`phone_number` is platform-independent and voice-only. Its
+`phone_number.public_e164` variant stores a public number such as
+`+15551234567`. It stores no provider credential. Egma dials it with the
+deployment's telephony configuration.
 
-The wizard asks for your provider API key (input is masked), lists the agents on your account, and asks which reach type to create. For phone connections, it lists the numbers routed to the agent and asks you to pick one.
+### LiveKit room
 
-To run non-interactively (for CI or a coding agent), supply the key and options without a terminal:
+`livekit_room` joins a room in the customer's LiveKit project. It is
+voice-only and has two access variants:
 
-```bash
-# From an environment variable
-EGMA_RETELL_API_KEY=key_... egma connect --reach text
+- `livekit_room.project_credentials`: Egma stores the project key pair sealed,
+  mints a token, creates the room, and can dispatch a named worker.
+- `livekit_room.customer_token_endpoint`: the customer keeps the project key
+  pair and exposes a public HTTPS endpoint that returns a room token. Egma
+  stores only the endpoint authentication headers sealed.
 
-# Piped from a file
-cat retell-key.txt | egma connect --reach phone --phone-number +15551234567
-```
+These variants control the same connection kind. They are not different agent
+platforms.
 
-## Registering via the API
+## Create a connection through the API
 
-You can also register directly with `POST /api/agents`. Include the connection inline in the same request:
+Create an agent with an inline Retell chat connection:
 
 ```json
 {
   "name": "order-line",
   "connection": {
-    "type": "retell",
-    "modality": "voice",
-    "config": { "retell_agent_id": "agent_abc123" },
-    "credentials": { "api_key": "key_..." }
+    "agent_platform": "retell",
+    "connection_kind": "retell_chat_api",
+    "access_variant": "retell_chat_api.api_key",
+    "modality": "chat",
+    "config": { "retellAgentId": "agent_abc123" },
+    "credentials": { "apiKey": "key_..." }
   }
 }
 ```
 
-To attach a second connection to an existing agent, use `POST /api/agents/:agentId/connections` with the same connection body.
+Attach a generic phone connection to an existing agent:
 
-<Note>
-A connection is only ever reachable through its agent. There is no `/api/connections` root. To list the connections on an agent, use `GET /api/agents/:agentId`.
-</Note>
-
-## One agent, multiple connections
-
-Having multiple connections on one agent keeps all run history unified. You do not need separate agents for "text testing" and "phone testing" — they are the same agent reached two different ways, and Egma tracks their results together.
-
-```
-agent: order-line  (agt_01K…)
-  └── connection: text-1   (con_01K…)   type: retell   reach: text
-  └── connection: phone-1  (con_01K…)   type: phone    reach: phone
+```json
+{
+  "agent_platform": null,
+  "connection_kind": "phone_number",
+  "access_variant": "phone_number.public_e164",
+  "modality": "voice",
+  "config": { "phoneNumber": "+15551234567" }
+}
 ```
 
-Each run names a specific `connection_id`, so results from each reach type stay distinct in your history.
+Use `POST /api/agents/:agentId/connections` for the second request. There is no
+root `/api/connections` route. A connection is always reached through its
+agent.
+
+The response includes the five facts, plus `id`, topology,
+environment, safe configuration, capability evidence, and a credential hint
+when that variant stores a credential. It never returns a stored secret.
+
+## One agent can have several connections
+
+One agent can be tested through several paths while keeping one run history:
+
+```text
+agent: order-line (agt_01K...)
+  connection: Retell chat (con_01K...)
+    platform: Retell
+    kind: retell_chat_api
+    variant: retell_chat_api.api_key
+    modality: chat
+  connection: Retell phone (con_01K...)
+    platform: Retell
+    kind: phone_number
+    variant: phone_number.public_e164
+    modality: voice
+```
+
+Each run names one `connection_id`. The run freezes that connection's facts so
+later edits do not rewrite history.
+
+## Monitoring setup is separate
+
+A simulation connection tells Egma how to contact an agent during a test. A
+**Monitoring setup** tells Egma how to receive evidence from real production
+conversations.
+
+Retell Monitoring uses API polling. LiveKit Agents Monitoring uses OTLP from the
+running agent process. Neither setup creates or changes a simulation
+connection. See [Production telemetry](/concepts/telemetry).

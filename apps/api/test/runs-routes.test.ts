@@ -121,7 +121,9 @@ async function applyTo(
 }
 
 const RETELL = {
-  type: "retell",
+  agent_platform: "retell",
+  connection_kind: "retell_chat_api",
+  access_variant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -129,7 +131,9 @@ const RETELL = {
 
 /** A number egma dials: the shipped phone adapter's own connection shape. */
 const PHONE = {
-  type: "phone",
+  agent_platform: null,
+  connection_kind: "phone_number",
+  access_variant: "phone_number.public_e164",
   modality: "voice",
   config: { phoneNumber: "+15551234567" },
 } as const;
@@ -224,7 +228,10 @@ describe("starting a run", () => {
       status: "pending",
       agent_id: agentId,
       connection_id: connectionId,
-      connection_type: "retell",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
+      product_label: "Retell chat",
       modality: "chat",
       label: "the whole folder",
       test_versions: [oneCaller, twoCallers],
@@ -577,7 +584,10 @@ describe("starting a run", () => {
     expect(started.body).toMatchObject({
       status: "pending",
       connection_id: dialled.connectionId,
-      connection_type: "phone",
+      agent_platform: null,
+      connection_kind: "phone_number",
+      access_variant: "phone_number.public_e164",
+      product_label: "Phone number",
       modality: "voice",
     });
 
@@ -676,7 +686,12 @@ describe("starting a run", () => {
     });
 
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-    expect(started.body).toMatchObject({ connection_type: "retell" });
+    expect(started.body).toMatchObject({
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
+      product_label: "Retell chat",
+    });
   });
 
   it("answers a phone connection belonging to somebody else the way a missing one is answered, rather than refusing about it", async () => {

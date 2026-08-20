@@ -84,8 +84,8 @@ const config: NextConfig = {
         // What a connection can be, and what one turned out to be able to do.
         // Both are read by the connection forms rather than posted to.
         {
-          source: "/api/connection-types",
-          destination: `${api}/api/connection-types`,
+          source: "/api/connection-options",
+          destination: `${api}/api/connection-options`,
         },
         {
           source: "/api/providers/retell/voice-agents",

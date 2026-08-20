@@ -217,7 +217,9 @@ export type SimulationEvidence = {
     readonly archived: boolean | null;
   };
   readonly connection_snapshot: {
-    readonly type: string;
+    readonly agent_platform: string | null;
+    readonly connection_kind: string;
+    readonly access_variant: string;
     readonly modality: string;
     readonly topology: string;
     readonly environment: string | null;

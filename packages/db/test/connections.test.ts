@@ -64,7 +64,9 @@ function actingAsGlobex(): AuthContext {
 function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection {
   return {
     name: `retell-${newId("con").slice(-8)}`,
-    type: "retell",
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_1" },
     credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -79,7 +81,9 @@ function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection
 function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnection {
   return {
     name: `livekit-${newId("con").slice(-8)}`,
-    type: "livekit",
+    agentPlatform: "livekit_agents",
+    connectionKind: "livekit_room",
+    accessVariant: "livekit_room.project_credentials",
     modality: "voice",
     config: { url: "wss://acme.livekit.cloud" },
     credentials: {
@@ -119,7 +123,9 @@ describe("adding a connection", () => {
 
     const added = await addConnection(actingAsAcme(), agentId, {
       name: "staging",
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       environment: "staging",
       config: { retellAgentId: "agent_abc" },
@@ -133,12 +139,14 @@ describe("adding a connection", () => {
     expect(fetched).toMatchObject({
       agentId,
       name: "staging",
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
+      productLabel: "Retell chat",
       modality: "chat",
       topology: "hosted-broker",
       environment: "staging",
       config: { retellAgentId: "agent_abc" },
-      variantId: "retell.api_key",
       credentialsHint: "WXYZ",
       // Nobody has measured this target, and that is written down as its own
       // state rather than as an empty list of what it can do.
@@ -151,7 +159,9 @@ describe("adding a connection", () => {
 
     const added = await addConnection(actingAsAcme(), agentId, {
       name: "production-line",
-      type: "phone",
+      agentPlatform: null,
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+15551234567" },
     });
@@ -174,8 +184,8 @@ describe("adding a connection", () => {
       retellConnection({ name: undefined }),
     );
 
-    expect(first?.name).toBe("retell-1");
-    expect(second?.name).toBe("retell-2");
+    expect(first?.name).toBe("retell_chat_api-1");
+    expect(second?.name).toBe("retell_chat_api-2");
   });
 
   it("is allowed to a member and refused to a viewer", async () => {
@@ -194,11 +204,13 @@ describe("what the registry refuses at the door, by name", () => {
     await expect(
       addConnection(actingAsAcme(), agentId, {
         name: "impossible",
-        type: "phone",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "chat",
         config: { phoneNumber: "+15551234567" },
       }),
-    ).rejects.toThrow(/phone connection speaks voice/);
+    ).rejects.toThrow(/phone_number connection speaks voice/);
   });
 
   it("refuses an unknown config key by its name", async () => {
@@ -229,7 +241,9 @@ describe("what the registry refuses at the door, by name", () => {
     await expect(
       addConnection(actingAsAcme(), agentId, {
         name: "landline",
-        type: "phone",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "555-1234" },
       }),
@@ -242,7 +256,9 @@ describe("what the registry refuses at the door, by name", () => {
     await expect(
       addConnection(actingAsAcme(), agentId, {
         name: "with-secret",
-        type: "phone",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
         credentials: { apiKey: "should-not-be-here" },
@@ -298,7 +314,10 @@ describe("a livekit connection", () => {
     const fetched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
     expect(fetched).toMatchObject({
       name: "quickstart",
-      type: "livekit",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
+      productLabel: "LiveKit project credentials",
       modality: "voice",
       // Derived from the type: the agent joins the room egma opened.
       topology: "agent-dials-out",
@@ -339,7 +358,7 @@ describe("a livekit connection", () => {
       agentId,
       livekitConnection({ name: undefined }),
     );
-    expect(first?.name).toBe("livekit-1");
+    expect(first?.name).toBe("livekit_room-1");
   });
 
   it("seals both halves, and neither is in the row", async () => {
@@ -390,7 +409,9 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
   function atEndpoint(overrides: Partial<NewConnection> = {}): NewConnection {
     return {
       name: `livekit-endpoint-${newId("con").slice(-8)}`,
-      type: "livekit",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
         url: "wss://acme.livekit.cloud",
@@ -407,7 +428,10 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
 
     const fetched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
     expect(fetched).toMatchObject({
-      type: "livekit",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
+      productLabel: "LiveKit token endpoint",
       topology: "agent-dials-out",
       config: {
         url: "wss://acme.livekit.cloud",
@@ -467,7 +491,7 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
    * credentials, which is what makes them a different connection rather than a
    * different setting.
    */
-  it("refuses an edit that moves a connection between the shapes", async () => {
+  it("refuses config keys outside the stored access variant", async () => {
     const agentId = await agentNamed("LiveKit Shape Change");
     const added = await addConnection(actingAsAcme(), agentId, livekitConnection());
 
@@ -478,14 +502,7 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
           tokenEndpoint: "https://acme.example/egma/livekit-token",
         },
       }),
-    ).rejects.toThrow(
-      "a connection's shape is fixed when it is created, and this change " +
-        "moves it from LiveKit project credentials — Recommended to " +
-        "Customer token endpoint — Advanced. " +
-        "The two hold different config keys and different credentials, so " +
-        "this is a new connection rather than an edit — add one, and archive " +
-        "this.",
-    );
+    ).rejects.toThrow('config has no key "tokenEndpoint"');
 
     // Nothing moved: the row is the shape it was, with the credential it had.
     expect(
@@ -505,10 +522,10 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
         },
         credentials: { headers: HEADERS },
       }),
-    ).rejects.toThrow(/shape is fixed when it is created/);
+    ).rejects.toThrow(/config has no key "tokenEndpoint"/);
 
     const untouched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
-    expect(untouched?.variantId).toBe("livekit.key_pair");
+    expect(untouched?.accessVariant).toBe("livekit_room.project_credentials");
     expect(untouched?.config).toEqual({ url: "wss://acme.livekit.cloud" });
   });
 
@@ -644,7 +661,7 @@ describe("updating a connection", () => {
 
     await expect(
       updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
-        type: "phone",
+        connectionKind: "phone_number",
       } as never),
     ).rejects.toThrow(/new connection/);
 
@@ -655,7 +672,7 @@ describe("updating a connection", () => {
     ).rejects.toThrow(/new connection/);
 
     const untouched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
-    expect(untouched?.type).toBe("retell");
+    expect(untouched?.connectionKind).toBe("retell_chat_api");
     expect(untouched?.modality).toBe("chat");
   });
 });
@@ -835,7 +852,7 @@ describe("creating an agent with its first connection inline", () => {
       connection: retellConnection({ name: undefined }),
     });
 
-    expect(created.connection?.name).toBe("retell-1");
+    expect(created.connection?.name).toBe("retell_chat_api-1");
   });
 
   it("leaves no agent behind when the connection payload is bad", async () => {

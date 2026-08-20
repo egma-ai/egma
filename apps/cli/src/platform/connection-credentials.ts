@@ -21,7 +21,7 @@ export class ConnectionCredentials {
   /**
    * Hold one complete credential block.
    *
-   * The connection-type registry on the platform remains the source of truth
+   * The connection-option registry on the platform remains the source of truth
    * for which field names belong to which connection shape. This object only
    * keeps those values from falling into logs before they reach that registry.
    */

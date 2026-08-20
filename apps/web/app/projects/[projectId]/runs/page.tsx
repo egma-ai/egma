@@ -510,7 +510,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
     for (const run of answer.value.items) {
       connections.set(
         run.connection_id,
-        `${run.connection_type} · ${run.modality}${
+        `${run.product_label} · ${run.modality}${
           run.environment === null ? "" : ` · ${run.environment}`
         }`,
       );

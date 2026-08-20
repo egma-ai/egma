@@ -117,8 +117,11 @@ export type RunPlan = {
   readonly agent_id: string;
   readonly connection_id: string;
   readonly connection: {
-    readonly type: string;
+    readonly agent_platform: string | null;
+    readonly connection_kind: string;
+    readonly access_variant: string;
     readonly modality: string;
+    readonly product_label: string;
     readonly environment: string | null;
     readonly capabilities: PlanCapabilities;
   };
@@ -342,8 +345,11 @@ export type RunRow = {
   readonly label: string | null;
   readonly agent_id: string;
   readonly connection_id: string;
-  readonly connection_type: string;
+  readonly agent_platform: string | null;
+  readonly connection_kind: string;
+  readonly access_variant: string;
   readonly modality: string;
+  readonly product_label: string;
   readonly environment: string | null;
   readonly retry_of_run_id: string | null;
   readonly expected_simulation_count: number;
@@ -448,7 +454,9 @@ export type FrozenPlan = {
 };
 
 export type ConnectionSnapshot = {
-  readonly type: string;
+  readonly agent_platform: string | null;
+  readonly connection_kind: string;
+  readonly access_variant: string;
   readonly modality: string;
   readonly topology: string;
   readonly environment: string | null;
@@ -480,8 +488,11 @@ export type RunDetail = {
   readonly label: string | null;
   readonly agent_id: string;
   readonly connection_id: string;
-  readonly connection_type: string | null;
+  readonly agent_platform: string | null;
+  readonly connection_kind: string;
+  readonly access_variant: string;
   readonly modality: string | null;
+  readonly product_label: string;
   readonly connection_snapshot: ConnectionSnapshot;
   readonly retry_of_run_id: string | null;
   readonly test_versions: readonly string[];
@@ -510,7 +521,7 @@ export type RunDetail = {
   readonly connection: {
     readonly id: string;
     readonly name: string;
-    readonly type: string;
+    readonly product_label: string;
     readonly archived: boolean;
   } | null;
 };

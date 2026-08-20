@@ -72,7 +72,7 @@ export const COLUMNS = {
   tools: "Tools",
   errors: "Errors",
   environment: "Environment",
-  connection: "Connection",
+  platform: "Platform",
 } as const;
 
 /**
@@ -112,36 +112,8 @@ export const QUIET = {
   setUp: {
     title: "Nothing has been recorded here yet",
     lead:
-      "Point an agent's OpenTelemetry export at Egma and what it does in " +
-      "production lands on this page.",
-    endpoint: "This deployment listens for OpenTelemetry at",
-    variables:
-      "Set these two where the agent runs. The exporter adds the rest of the " +
-      "path itself, and the space in the header is percent-encoded because " +
-      "OpenTelemetry does not allow a literal one.",
-    /** The two variables, with this deployment's own address filled in. */
-    exports: (endpoint: string): string =>
-      `export OTEL_EXPORTER_OTLP_ENDPOINT=${endpoint}\n` +
-      `export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_…"`,
-    key: "Mint a key for this project",
-    keyLead:
-      "The key that export carries has to name this project. Egma shows the " +
-      "secret once.",
-    /**
-     * The caution that rides with the teaching, and the reason it rides here at
-     * all.
-     *
-     * State 3 below says the same thing louder, and it can only fire for
-     * somebody the key list answers for — the server shows an ordinary member
-     * their own keys and nobody else's, so a member looking at a project whose
-     * exporter uses an admin's organization-wide key would never meet that
-     * state. The sentence therefore lives in both places: once as a caution
-     * everybody reads, once as the whole answer for whoever can see the key.
-     */
-    caution:
-      "Already exporting and still seeing nothing? Check what the key names. " +
-      "A key minted for the whole organization files its telemetry outside " +
-      "every project, and none of it appears here.",
+      "Choose Retell or LiveKit Agents and complete its production Monitoring setup.",
+    action: "Set up monitoring",
   },
   organizationKey: {
     title: "A key here names the whole organization",
@@ -266,7 +238,10 @@ export const FACTS = {
   /** A fact about one exchange, and never a column — see `COLUMNS` above. */
   source: "Source",
   environment: COLUMNS.environment,
-  connection: COLUMNS.connection,
+  platform: COLUMNS.platform,
+  platformAgentName: "Platform agent name",
+  platformAgentId: "Platform agent ID",
+  platformAgentVersion: "Platform agent version",
   reference: "Provider reference",
   identifier: "Identifier",
   within: "Inside",

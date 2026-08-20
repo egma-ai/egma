@@ -58,6 +58,7 @@ class ScriptedCounterpart:
         self,
         *,
         modality: str,
+        access_variant: str,
         config: dict[str, Any],
         credentials: object,
         simulation_id: str | None = None,
@@ -68,7 +69,7 @@ class ScriptedCounterpart:
         # over is ignored unread, the way a sentinel-planting test expects.
         # It has nobody to tell which simulation this is, either, nobody's
         # tools to stand in front of, and no telephone network to reach.
-        del credentials, simulation_id, mock_tools, media
+        del access_variant, credentials, simulation_id, mock_tools, media
 
         if modality != "chat":
             raise PlugError(

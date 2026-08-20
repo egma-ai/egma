@@ -4,7 +4,12 @@ sidebarTitle: "Traces"
 description: "Send OpenTelemetry spans from your voice agent to Egma and query them back with time-windowed list and single-trace detail endpoints."
 ---
 
-Traces are the raw telemetry record of a conversation — spans emitted by your voice agent as it processes audio, calls tools, and generates responses. Egma accepts spans over the standard OTLP/HTTP protocol, so you connect your agent by pointing its OpenTelemetry exporter at Egma's ingest endpoint. No custom SDK is required. Once spans arrive, use the read endpoints to list conversations by time window or fetch the full transcript and verdict details for a single trace.
+Traces are the storage record of a conversation. Egma accepts standard
+OTLP/HTTP from an agent runtime that already emits OpenTelemetry spans. LiveKit
+Agents should use `monitor_livekit(ctx)` from the Egma Python SDK to create or
+safely reuse the required telemetry setup. Retell Monitoring polls Retell and
+writes normalized production traces without using this ingest endpoint. Use the
+read endpoints below for either source.
 
 ---
 
@@ -60,11 +65,11 @@ curl -X POST https://your-egma-instance/v1/traces \
 ```
 
 <Note>
-  Prefer your Egma instance's API port for telemetry ingest — port **3100** by default. The web UI port (3101) also reaches this endpoint, because the web application forwards `/v1/traces` to the API, so an exporter pointed at the address you open the dashboard on works; the API is simply one hop shorter. Both may differ in self-hosted deployments — check your `EGMA_API_URL` environment variable, or read the address off the empty **Monitoring** page, which shows the one this deployment answers on.
+  Prefer your Egma instance's API port for telemetry ingest — port **3100** by default. The web UI port (3101) also reaches this endpoint because the web application forwards `/v1/traces` to the API. The API is one hop shorter. Both addresses may differ in self-hosted deployments, so check `EGMA_API_URL`.
 </Note>
 
 <Note>
-  When setting the endpoint URL in environment variables or SDK configuration, encode spaces as `%20`, not as literal spaces. Many OpenTelemetry SDKs pass headers verbatim, and a literal space in an `Authorization` header value is not valid HTTP.
+  In `OTEL_EXPORTER_OTLP_HEADERS`, encode the space in `Bearer egma_sk_...` as `%20`. A literal space can make an OpenTelemetry SDK reject or misread the header.
 </Note>
 
 <Note>
@@ -156,7 +161,7 @@ curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-
 </ResponseField>
 
 <ResponseField name="source" type="string">
-  `"simulation"` for runs Egma conducted, `"production"` for live traffic from your agent.
+  `"simulation"` for runs Egma conducted, `"production"` for production evidence received through Monitoring or direct OTLP.
 </ResponseField>
 
 <ResponseField name="tool_span_count" type="number">
@@ -175,12 +180,28 @@ curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-
   The deployment environment reported by the emitter, e.g. `"production"`.
 </ResponseField>
 
-<ResponseField name="connection_type" type="string">
-  The connection type used by the agent for this conversation.
+<ResponseField name="connection_kind" type="string">
+  A connection kind only when the emitter explicitly supplied one. Egma does not infer a production connection from an agent platform.
 </ResponseField>
 
 <ResponseField name="provider_call_id" type="string">
   The provider-assigned call identifier, if the emitter included one.
+</ResponseField>
+
+<ResponseField name="agent_platform" type="string">
+  The agent platform that produced the production evidence, such as `retell` or `livekit_agents`.
+</ResponseField>
+
+<ResponseField name="platform_agent_id" type="string">
+  The platform-owned agent identifier, when the platform supplied one.
+</ResponseField>
+
+<ResponseField name="platform_agent_name" type="string">
+  The platform-owned agent name observed for this conversation, when supplied.
+</ResponseField>
+
+<ResponseField name="platform_agent_version" type="string">
+  The platform-owned agent version observed for this conversation, when supplied.
 </ResponseField>
 
 <ResponseField name="run_id" type="string">

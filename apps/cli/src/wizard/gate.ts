@@ -62,14 +62,8 @@ export type TestGate = {
   /** What the tests would run against, for the sentence above the keys. */
   readonly agentName: string;
   readonly connectionName: string;
-  /**
-   * What kind of reach this is — `phone`, `retell`, whichever the platform
-   * registered. On the screen because the name does not say it: a connection
-   * called `retell-1` and a connection called `retell-2` can be a text one and
-   * a phone one, and the key being pressed here is the last one before either
-   * of them is used.
-   */
-  readonly connectionType: string;
+  /** Human-facing label derived from the connection's technical axes. */
+  readonly productLabel: string;
   readonly modality: string;
   /**
    * The number every simulation will dial, or `null` when nothing is dialled.
@@ -88,7 +82,7 @@ export type TestGate = {
 /** The connection's public config, as the platform answered it. */
 export type GateConnection = {
   readonly name: string;
-  readonly type: string;
+  readonly productLabel: string;
   readonly modality: string;
   readonly config: Readonly<Record<string, string>>;
 };
@@ -96,8 +90,8 @@ export type GateConnection = {
 /**
  * Where a connection dials, when it dials anywhere.
  *
- * Read off the connection's own config rather than from the type, because the
- * config is what the platform stored and the type is only what it is called.
+ * Read off the connection's own config rather than from its label, because the
+ * config is what the platform stored and the label is only what it is called.
  * A connection that reaches an agent some other way answers nothing here and
  * the screen says nothing about dialling, which is the truth about it.
  */
@@ -140,7 +134,7 @@ export function gateFrom(
   about: {
     readonly agentName: string;
     readonly connectionName: string;
-    readonly connectionType: string;
+    readonly productLabel: string;
     readonly modality: string;
     readonly destination: string | null;
     readonly suite: string;

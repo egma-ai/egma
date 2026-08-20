@@ -803,7 +803,7 @@ class SimulatorService:
                 )
                 continue
 
-            if plug_for(spec.connection_type) is None:
+            if plug_for(spec.connection_kind) is None:
                 # Same shape as a contract refusal: conducting is not
                 # possible, so nothing is reported and the control plane's
                 # sweep accounts for the row it thinks is claimed.
@@ -811,10 +811,10 @@ class SimulatorService:
                     logger,
                     logging.ERROR,
                     "egma.simulation.claim_response_invalid",
-                    "claimed simulation has no platform plug for its connection type",
+                    "claimed simulation has no platform plug for its connection kind",
                     attributes={
                         "egma.simulation_id": spec.simulation_id,
-                        "error.type": "unsupported_connection_type",
+                        "error.type": "unsupported_connection_kind",
                     },
                 )
                 continue

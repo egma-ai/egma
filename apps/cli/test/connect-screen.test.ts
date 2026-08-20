@@ -331,7 +331,11 @@ describe("the choice between text and phone", () => {
     // The phone connection, and nothing else. No retell connection was made
     // alongside it, and the key never reached egma at all.
     expect(platform.registered.connections).toHaveLength(1);
-    expect(platform.registered.connections[0]?.type).toBe("phone");
+    expect(platform.registered.connections[0]?.agentPlatform).toBe("retell");
+    expect(platform.registered.connections[0]?.connectionKind).toBe("phone_number");
+    expect(platform.registered.connections[0]?.accessVariant).toBe(
+      "phone_number.public_e164",
+    );
     expect(platform.registered.connections[0]?.config).toEqual({ phoneNumber: DIALLED });
     expect(platform.registered.sealed).toEqual([]);
     expect(run.raw()).not.toContain(KEY);

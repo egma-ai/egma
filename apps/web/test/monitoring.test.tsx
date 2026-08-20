@@ -72,8 +72,12 @@ const FACTS: Facts = {
   source: "production",
   emitter: "agent",
   environment: "default",
-  connection_type: "livekit",
+  connection_kind: "",
   provider_call_id: "egma-fixture-capture-1",
+  agent_platform: "livekit_agents",
+  platform_agent_id: "",
+  platform_agent_name: "kelly",
+  platform_agent_version: "",
   run_id: "",
   agent_id: "",
 };
@@ -302,6 +306,8 @@ describe("what the Monitoring list shows", () => {
 
     expect(headings).toContain(COLUMNS.started);
     expect(headings).toContain(COLUMNS.environment);
+    expect(headings).toContain(COLUMNS.platform);
+    expect(headings).not.toContain("Connection");
     expect(headings).not.toContain("Source");
     expect(Object.values(COLUMNS)).not.toContain("Source");
   });
@@ -417,7 +423,7 @@ describe("what a quiet Monitoring page says", () => {
    * them and the instructions written for them, so the page asks the wider
    * question instead.
    */
-  it("teaches the export setup on the default window when nothing has ever arrived", async () => {
+  it("opens the platform setup on the default window when nothing has ever arrived", async () => {
     const { asked } = stub({
       rows: [],
       everRecorded: [],
@@ -430,33 +436,11 @@ describe("what a quiet Monitoring page says", () => {
     expect(guidance()).toEqual(["set-up-capture"]);
     expect(probed(asked)).toHaveLength(1);
 
-    /*
-     * The two variables, carrying the address **this deployment** listens on —
-     * read off the page rather than written down anywhere, because a
-     * self-hoster's egma is wherever they put it and a printed example would be
-     * somebody else's. The origin is only knowable in a browser, so it arrives
-     * one render after the block does and this waits for it.
-     */
-    const shown = await screen.findByText(
-      (text) =>
-        text.includes("OTEL_EXPORTER_OTLP_ENDPOINT") &&
-        text.includes(globalThis.location.origin),
-      { selector: "pre" },
-    );
-    expect(shown.textContent).toContain("OTEL_EXPORTER_OTLP_HEADERS");
-    expect(shown.textContent).toContain("Bearer%20");
-    // And somewhere to mint the key it carries.
     expect(
-      screen.getByRole("link", { name: QUIET.setUp.key }).getAttribute("href"),
-    ).toBe("/projects/prj_2/settings/keys");
-    /*
-     * The caution rides with the teaching, and this is why. The key list
-     * answers for an admin and for whoever minted the key, so a member whose
-     * project is fed by somebody else's organization-wide key never reaches the
-     * state below — and that key is the one step of this setup that fails
-     * without saying anything.
-     */
-    expect(screen.getByText(QUIET.setUp.caution)).toBeDefined();
+      screen
+        .getByRole("link", { name: QUIET.setUp.action })
+        .getAttribute("href"),
+    ).toBe("/projects/prj_2/monitoring/setup");
   });
 
   /**

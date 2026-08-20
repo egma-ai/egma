@@ -155,8 +155,11 @@ describe("egma connect", () => {
     expect(said.agent_name).toBe("order-line");
     expect(said.agent_id).toMatch(/^agt_/u);
     expect(said.connection_id).toMatch(/^con_/u);
-    expect(said.connection_name).toBe("retell-1");
-    expect(said.connection_type).toBe("retell");
+    expect(said.connection_name).toBe("retell_chat_api-1");
+    expect(said.agent_platform).toBe("retell");
+    expect(said.connection_kind).toBe("retell_chat_api");
+    expect(said.access_variant).toBe("retell_chat_api.api_key");
+    expect(said.product_label).toBe("Retell chat");
     expect(said.connection_modality).toBe("chat");
     expect(said.reach).toBe("text");
     expect(said.phone_number).toBe("none");
@@ -202,7 +205,7 @@ describe("egma connect", () => {
     expect(facts(theirs.stdout).agent_registration).toBe("reused");
     expect(facts(theirs.stdout).connection_registration).toBe("reused");
     expect(theirs.stdout).toContain(
-      "note: This voice agent was already registered as order-line, and retell-1 was " +
+      "note: This voice agent was already registered as order-line, and retell_chat_api-1 was " +
         "already the way Egma reaches it. Nothing new was registered.",
     );
     expect(platform.registered.agents).toHaveLength(1);
@@ -413,9 +416,12 @@ describe("which connection egma creates", () => {
     const said = facts(result.stdout);
     expect(said.reach).toBe("phone");
     expect(said.phone_number).toBe(DIALLED);
-    expect(said.connection_type).toBe("phone");
+    expect(said.agent_platform).toBe("retell");
+    expect(said.connection_kind).toBe("phone_number");
+    expect(said.access_variant).toBe("phone_number.public_e164");
+    expect(said.product_label).toBe("Retell phone");
     expect(said.connection_modality).toBe("voice");
-    expect(said.connection_name).toBe("phone-1");
+    expect(said.connection_name).toBe("phone_number-1");
 
     expect(platform.registered.connections).toHaveLength(1);
     expect(platform.registered.connections[0]?.config).toEqual({ phoneNumber: DIALLED });
@@ -425,7 +431,7 @@ describe("which connection egma creates", () => {
 
     // And the committed file names the connection egma really made.
     const written = await readConfig(folderPathsIn(workspace.dir).config);
-    expect(written.connection).toEqual({ name: "phone-1", id: said.connection_id });
+    expect(written.connection).toEqual({ name: "phone_number-1", id: said.connection_id });
     expect(JSON.stringify(written)).not.toContain(KEY);
   });
 
@@ -603,7 +609,7 @@ describe("the whole walk, headless", () => {
     // The drift the coding agent's answer made checkable, said once.
     expect(result.stdout).toContain(DRIFT_LINE);
     expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.registered.connections[0]?.name).toBe("retell-1");
+    expect(platform.registered.connections[0]?.name).toBe("retell_chat_api-1");
 
     // And the walk did not stop at connecting: the test the coding agent wrote
     // is a file in the repository and a version on egma.

@@ -240,10 +240,9 @@ export async function createApi(
     ...(options.retellReach === undefined
       ? {}
       : { retellReach: options.retellReach }),
-    // The production sweep's loop is never wanted in a route test: a suite that
-    // wants one drives `runProductionSweep` itself, where it can say when a
-    // tick happens instead of waiting for one.
-    productionSweepIntervalMilliseconds: 60 * 60_000,
+    // Retell production ingestion is not needed in a route test. Its focused
+    // tests drive one ingestion turn directly and choose when that turn runs.
+    retellProductionIngestionIntervalMilliseconds: 60 * 60_000,
   });
   await app.ready();
 

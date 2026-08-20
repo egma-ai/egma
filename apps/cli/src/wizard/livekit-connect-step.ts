@@ -11,12 +11,12 @@ import {
 } from "../livekit/connect.ts";
 import type { Registered, RegisterOptions } from "../platform/agents.ts";
 import {
-  connectionTypeNamed,
-  readConnectionTypes,
+  connectionOptionsForPlatform,
+  readConnectionOptions,
   type ConnectionField,
-  type ConnectionVariant,
+  type ConnectionOption,
   type CredentialField,
-} from "../platform/connection-types.ts";
+} from "../platform/connection-options.ts";
 import { readCredentials } from "../platform/credentials.ts";
 import type { ConnectionAsk, ConnectionAskId, WizardUI } from "../ui/wizard-ui.ts";
 import type { ExitReport } from "./exit-line.ts";
@@ -73,7 +73,7 @@ function askId(part: string): ConnectionAskId {
 function fieldAsk(
   scope: "config" | "credentials",
   field: ConnectionField | CredentialField,
-  variant: ConnectionVariant,
+  option: ConnectionOption,
   problem: string | null = null,
 ): ConnectionAsk {
   const key = "key" in field ? field.key : field.field;
@@ -84,7 +84,7 @@ function fieldAsk(
     kind: field.kind === "e164" ? "text" : field.kind,
     required: field.required,
     problem,
-    ...(scope === "credentials" ? { custody: variant.credentialHelp || SECRET_CUSTODY } : {}),
+    ...(scope === "credentials" ? { custody: option.credentialHelp || SECRET_CUSTODY } : {}),
   };
 }
 
@@ -107,7 +107,7 @@ async function collectFields(
   signal: AbortSignal,
   scope: "config" | "credentials",
   fields: readonly (ConnectionField | CredentialField)[],
-  variant: ConnectionVariant,
+  option: ConnectionOption,
 ): Promise<Collected> {
   const values: Record<string, string> = {};
 
@@ -115,7 +115,7 @@ async function collectFields(
     const key = "key" in field ? field.key : field.field;
     let problem: string | null = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const value = await ask(ui, signal, fieldAsk(scope, field, variant, problem));
+      const value = await ask(ui, signal, fieldAsk(scope, field, option, problem));
       if (signal.aborted) return { kind: "interrupted" };
       if (value === null || value.trim() === "") {
         if (field.required) return { kind: "stopped", field: field.label };
@@ -167,7 +167,7 @@ export async function connectLiveKitStep(
     signal: options.signal,
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   };
-  const catalog = await readConnectionTypes(registerOptions);
+  const catalog = await readConnectionOptions(registerOptions);
   if (catalog.kind !== "catalog") {
     if (catalog.kind === "not-authenticated") {
       return ending("This machine is not signed in to Egma. Run egma login, then try again.");
@@ -175,14 +175,14 @@ export async function connectLiveKitStep(
     return ending(catalog.reason);
   }
 
-  const livekit = connectionTypeNamed(catalog.catalog, "livekit");
-  if (livekit === undefined || !livekit.simulatorAdapter) {
-    return ending("This Egma instance cannot run LiveKit simulations yet.");
-  }
-  const variants = livekit.variants.filter(
-    (variant) =>
-      variant.id === LIVEKIT_KEY_PAIR_VARIANT ||
-      variant.id === LIVEKIT_TOKEN_ENDPOINT_VARIANT,
+  const variants = connectionOptionsForPlatform(
+    catalog.catalog,
+    "livekit_agents",
+  ).filter(
+    (option) =>
+      option.simulatorAdapter &&
+      (option.accessVariant === LIVEKIT_KEY_PAIR_VARIANT ||
+        option.accessVariant === LIVEKIT_TOKEN_ENDPOINT_VARIANT),
   );
   if (variants.length === 0) {
     return ending("This Egma instance did not describe a LiveKit connection setup.");
@@ -217,13 +217,16 @@ export async function connectLiveKitStep(
         "secret with you; Egma calls it for each simulation.",
       kind: "choice",
       required: true,
-      defaultValue: variants[0]!.id,
-      choices: variants.map((variant) => ({ value: variant.id, label: variant.label })),
+      defaultValue: variants[0]!.accessVariant,
+      choices: variants.map((variant) => ({
+        value: variant.accessVariant,
+        label: variant.accessVariantLabel,
+      })),
     });
     if (options.signal.aborted) {
       return { report: stopReport(options.signal, null), connected: null };
     }
-    const variant = variants.find((entry) => entry.id === selected);
+    const variant = variants.find((entry) => entry.accessVariant === selected);
     if (variant === undefined) return ending("No LiveKit connection method was chosen.");
 
     const config = await collectFields(
@@ -255,7 +258,7 @@ export async function connectLiveKitStep(
 
     const common = { name: suggestedName, url: config.values["url"] ?? "" };
     let input: LiveKitRegistration;
-    if (variant.id === LIVEKIT_KEY_PAIR_VARIANT) {
+    if (variant.accessVariant === LIVEKIT_KEY_PAIR_VARIANT) {
       input = {
         ...common,
         variant: LIVEKIT_KEY_PAIR_VARIANT,

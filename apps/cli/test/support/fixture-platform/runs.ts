@@ -32,7 +32,7 @@
 // The platform's own identifier generator, reached by path for the same reason
 // the test group reaches it that way: the smoke checks run this fixture under
 // plain node, where a package name nothing has installed does not resolve.
-import { CONDUCTABLE_TYPES } from "./agents.ts";
+import { CONDUCTABLE_KINDS } from "./agents.ts";
 import { given, isId, newId, NOT_AUTHENTICATED, text, textList } from "./reading.ts";
 import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 
@@ -103,7 +103,10 @@ type StoredRun = {
   readonly id: string;
   readonly agentId: string;
   readonly connectionId: string;
-  readonly connectionType: string;
+  readonly agentPlatform: string | null;
+  readonly connectionKind: string;
+  readonly accessVariant: string;
+  readonly productLabel: string;
   readonly modality: string;
   readonly label: string | null;
   readonly testVersionIds: readonly string[];
@@ -159,8 +162,11 @@ export type PinnedVersion = {
 export type ReachableConnection = {
   readonly id: string;
   readonly agentId: string;
-  readonly type: string;
+  readonly agentPlatform: string | null;
+  readonly connectionKind: string;
+  readonly accessVariant: string;
   readonly modality: string;
+  readonly productLabel: string;
 };
 
 /** One step of a scripted lifecycle. */
@@ -214,22 +220,22 @@ export type RunControls = {
   /** Record a verdict after execution has finished, as the real grader does. */
   grade(step: GradeStep): void;
   /**
-   * Make this egma refuse a run over a connection of this type, because no
+   * Make this egma refuse a run over this connection kind, because no
    * simulator adapter for it has shipped. The refusal is the platform's own
    * and the CLI must relay it word for word.
    *
-   * The registry already answers this for every type it ships — `phone` has no
+   * The registry already answers this for every kind it ships — `phone_number` has no
    * adapter and never has — so this is for taking away one that does.
    */
-  noAdapterFor(type: string): void;
+  noAdapterFor(connectionKind: string): void;
   /**
    * The words that refusal is made of, so a check can assert on the same ones.
    *
    * It is a control rather than a bare function because the sentence ends on
-   * the list of types this instance can conduct over, and that list is the
+   * the list of connection kinds this instance can conduct over, and that list is the
    * registry's answer minus whatever a check has taken away.
    */
-  noAdapterMessage(type: string): string;
+  noAdapterMessage(connectionKind: string): string;
 };
 
 function refuse(status: number, error: string, message: string): FixtureAnswer {
@@ -246,21 +252,24 @@ const NO_SUCH_RUN =
   "/api/runs.";
 
 /**
- * The platform's own words for a connection type it cannot conduct a run over.
+ * The platform's own words for a connection kind it cannot conduct a run over.
  *
- * A connection type lands in egma one adapter at a time, and a run over a type
+ * A connection kind lands in egma one adapter at a time, and a run over a kind
  * whose adapter has not shipped can never happen — so it is refused at
  * creation, loudly, rather than left queued forever. The wording is the
  * platform's; egma's terminal repeats it and never paraphrases it.
  *
  * It says all of it in one place: what is missing, why egma would rather refuse
  * now than queue something forever, and the move that works today. The list of
- * types that work comes off the registry rather than out of the sentence, so it
+ * kinds that work comes off the registry rather than out of the sentence, so it
  * can never name an adapter that has not shipped or miss one that has.
  */
-export function noAdapterMessage(type: string, conductable: readonly string[]): string {
+export function noAdapterMessage(
+  connectionKind: string,
+  conductable: readonly string[],
+): string {
   return (
-    `Egma has no simulator adapter for a ${type} connection yet, ` +
+    `Egma has no simulator adapter for a ${connectionKind} connection yet, ` +
     `so it will not start a run it cannot conduct. Run these tests over a ` +
     `connection Egma conducts today: ${conductable.join(", ")}.`
   );
@@ -290,9 +299,9 @@ export function runRoutes(options: {
   // actually written down. A check may take one more away.
   const withoutAdapter = new Set<string>();
 
-  /** The types this instance can conduct a run over, right now. */
+  /** The connection kinds this instance can conduct a run over, right now. */
   const conductable = (): readonly string[] =>
-    CONDUCTABLE_TYPES.filter((type) => !withoutAdapter.has(type));
+    CONDUCTABLE_KINDS.filter((kind) => !withoutAdapter.has(kind));
 
   const record = (event: NewEvent): void => {
     events.push({ ...event, seq: events.length + 1, at: new Date().toISOString() });
@@ -388,8 +397,11 @@ export function runRoutes(options: {
     status: run.status,
     agent_id: run.agentId,
     connection_id: run.connectionId,
-    connection_type: run.connectionType,
+    agent_platform: run.agentPlatform,
+    connection_kind: run.connectionKind,
+    access_variant: run.accessVariant,
     modality: run.modality,
+    product_label: run.productLabel,
     label: run.label,
     test_versions: [...run.testVersionIds],
     expected_simulation_count: run.expectedSimulationCount,
@@ -542,8 +554,12 @@ export function runRoutes(options: {
 
     // Refused at creation, in the platform's own words, before a single
     // simulation is written: a run nothing can conduct must never be queued.
-    if (!conductable().includes(connection.type)) {
-      return refuse(422, "no_adapter", noAdapterMessage(connection.type, conductable()));
+    if (!conductable().includes(connection.connectionKind)) {
+      return refuse(
+        422,
+        "no_adapter",
+        noAdapterMessage(connection.connectionKind, conductable()),
+      );
     }
 
     const pinned: PinnedVersion[] = [];
@@ -575,7 +591,10 @@ export function runRoutes(options: {
       id: newId("run"),
       agentId: connection.agentId,
       connectionId: connection.id,
-      connectionType: connection.type,
+      agentPlatform: connection.agentPlatform,
+      connectionKind: connection.connectionKind,
+      accessVariant: connection.accessVariant,
+      productLabel: connection.productLabel,
       modality: connection.modality,
       label: text(said.label).trim() || null,
       testVersionIds: pinned.map((one) => one.versionId),
@@ -774,10 +793,10 @@ export function runRoutes(options: {
       simulation.verdict = step.verdict;
       simulation.reason = step.reason ?? simulation.reason;
     },
-    noAdapterFor(type) {
-      withoutAdapter.add(type);
+    noAdapterFor(connectionKind) {
+      withoutAdapter.add(connectionKind);
     },
-    noAdapterMessage: (type) => noAdapterMessage(type, conductable()),
+    noAdapterMessage: (connectionKind) => noAdapterMessage(connectionKind, conductable()),
   };
 
   return { group, controls };
@@ -822,11 +841,14 @@ export function runControlRoutes(controls: () => RunControls): RouteGroup {
         method: "POST",
         path: "/fixture/runs/no-adapter",
         handle: (request) => {
-          const type = text(request.body?.type).trim();
-          if (type === "") {
-            return { status: 400, body: { done: false, message: "name a connection type" } };
+          const connectionKind = text(request.body?.connectionKind).trim();
+          if (connectionKind === "") {
+            return {
+              status: 400,
+              body: { done: false, message: "name a connection kind" },
+            };
           }
-          controls().noAdapterFor(type);
+          controls().noAdapterFor(connectionKind);
           return { status: 200, body: { done: true } };
         },
       },

@@ -88,10 +88,15 @@ export type ListedConnection = {
   readonly agent_id: string;
   readonly project_id: string;
   readonly name: string;
-  readonly type: string;
-  /** Which shape of its type this is, frozen when it was created. */
-  readonly variant_id: string;
+  /** Who runs the agent, or null when Egma does not know. */
+  readonly agent_platform: string | null;
+  /** What Egma connects to for a simulation. */
+  readonly connection_kind: string;
+  /** How Egma gets access to that connection. */
+  readonly access_variant: string;
   readonly modality: string;
+  /** Human display text derived from the four technical axes. */
+  readonly product_label: string;
   readonly topology: string;
   readonly environment: string | null;
   readonly config: Readonly<Record<string, string>>;

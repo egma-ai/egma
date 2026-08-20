@@ -260,6 +260,20 @@
       "when": 1786994156000,
       "tag": "0036_transient_claim_release",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787210505037,
+      "tag": "0037_last_captain_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787212479852,
+      "tag": "0038_slow_mentallo",
+      "breakpoints": true
     }
   ]
 }

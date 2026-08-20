@@ -54,8 +54,8 @@ export type ReportedMeasurement = {
 /** The whole block: who reported, and everything they reported. */
 export type ReportedMeasurements = {
   readonly version: typeof REPORTED_MEASUREMENTS_VERSION;
-  /** The platform that measured — `retell` — exactly as the connection type
-   * names it. Provenance, and the word a rationale prints. */
+  /** The agent platform that measured — `retell`. This records provider
+   * provenance and gives a rationale the correct platform name to print. */
   readonly reportedBy: string;
   readonly measurements: readonly ReportedMeasurement[];
 };

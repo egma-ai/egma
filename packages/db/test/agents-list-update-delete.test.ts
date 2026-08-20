@@ -72,7 +72,9 @@ function actingAsGlobex(): AuthContext {
 function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection {
   return {
     name: `retell-${newId("con").slice(-8)}`,
-    type: "retell",
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_1" },
     credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },

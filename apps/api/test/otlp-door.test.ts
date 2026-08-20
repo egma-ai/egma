@@ -1,5 +1,10 @@
 import { gzipSync } from "node:zlib";
 
+import {
+  configureLiveKitMonitoring,
+  listMonitoringSetups,
+  type AuthContext,
+} from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
@@ -24,6 +29,7 @@ let api: TestApi;
 let secret: string;
 let organizationId: string;
 let projectId: string;
+let userId: string;
 
 /** One span, written the way the OTLP JSON mapping says to write one. */
 function jsonSpan(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -46,12 +52,13 @@ function jsonSpan(overrides: Record<string, unknown> = {}): Record<string, unkno
 function jsonExport(
   spans: readonly Record<string, unknown>[],
   resourceAttributes: readonly Record<string, unknown>[] = [],
+  scopeName = "livekit-agents",
 ): string {
   return JSON.stringify({
     resourceSpans: [
       {
         resource: { attributes: resourceAttributes },
-        scopeSpans: [{ scope: { name: "livekit-agents" }, spans }],
+        scopeSpans: [{ scope: { name: scopeName }, spans }],
       },
     ],
   });
@@ -90,9 +97,11 @@ beforeAll(async () => {
   });
   expect(created.statusCode).toBe(201);
   const landed = created.json() as {
+    userId: string;
     organization: { id: string };
     project: { id: string };
   };
+  userId = landed.userId;
   organizationId = landed.organization.id;
   projectId = landed.project.id;
 
@@ -110,6 +119,72 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await api?.close();
+});
+
+describe("LiveKit Monitoring health", () => {
+  function auth(): AuthContext {
+    return {
+      userId,
+      organizationId,
+      projectId,
+      role: "admin",
+      via: "session",
+    };
+  }
+
+  it("changes only after a valid LiveKit production span reaches storage", async () => {
+    const configured = await configureLiveKitMonitoring(auth());
+    expect(configured.lastReceivedAt).toBeNull();
+
+    const refused = await post(
+      jsonExport([
+        jsonSpan({
+          traceId: "not-an-otel-trace-id",
+          spanId: "not-an-otel-span",
+        }),
+      ]),
+    );
+    expect(refused.statusCode).toBe(200);
+    expect(
+      (await listMonitoringSetups(auth())).find(
+        (setup) => setup.agentPlatform === "livekit_agents",
+      )?.lastReceivedAt,
+    ).toBeNull();
+
+    const anotherPlatform = await post(
+      jsonExport(
+        [
+          jsonSpan({
+            traceId: "35353535353535353535353535353535",
+            spanId: "3535353535353535",
+          }),
+        ],
+        [],
+        "another-agent-platform",
+      ),
+    );
+    expect(anotherPlatform.statusCode).toBe(200);
+    expect(
+      (await listMonitoringSetups(auth())).find(
+        (setup) => setup.agentPlatform === "livekit_agents",
+      )?.lastReceivedAt,
+    ).toBeNull();
+
+    const accepted = await post(
+      jsonExport([
+        jsonSpan({
+          traceId: "45454545454545454545454545454545",
+          spanId: "4545454545454545",
+        }),
+      ]),
+    );
+    expect(accepted.statusCode).toBe(200);
+    expect(
+      (await listMonitoringSetups(auth())).find(
+        (setup) => setup.agentPlatform === "livekit_agents",
+      )?.lastReceivedAt,
+    ).toBeInstanceOf(Date);
+  });
 });
 
 describe("the JSON encoding", () => {

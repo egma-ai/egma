@@ -3,61 +3,35 @@ import {
   claimProductionTrace,
   finishProductionTrace,
   recordProductionTraces,
-  type ProductionTransport,
-  type RetellWatchTarget,
+  recordRetellCallReceived,
+  recordRetellMonitoringReceived,
+  type AuthContext,
+  type ProductionTraceClaim,
 } from "@egma/db";
+import { safeRetellProviderData } from "@egma/retell";
 
 import { normaliseRetellCall, type RetellCall } from "./normalise.ts";
 
 /**
- * The one write path, and both transports go through it.
+ * The shared production-trace write protocol used by Retell ingestion.
  *
- * The protocol across the two stores, in order. The Postgres claim makes one
- * live transport the writer; recovery remains at-least-once across the two
- * stores:
+ * Postgres first owns the provider conversation. ClickHouse then receives the
+ * deterministic span block, and the grading queue receives those same spans.
+ * A process that stops between the stores leaves a stale Postgres claim. The
+ * production-ingestion loop replays that safe claim later.
  *
- *  1. **Claim** in Postgres, carrying the verbatim payload. An insert on a
- *     unique identity, never a check — the loser conflicts and walks away.
- *  2. **Append** the spans to ClickHouse.
- *  3. **Mark written**, and move the connection's cursor to the conversation
- *     that was just stored.
- *
- * A crash between 1 and 2 leaves a claimed-but-unwritten row that the lease
- * sweep replays from the payload on the claim. A crash between 2 and 3 replays
- * the identical append. ClickHouse normally suppresses that byte-identical
- * block inside its recent deduplication window. A delayed replay can append a
- * second copy; readers and operators must not be promised global exactly-once
- * storage. Neither store needs a transaction spanning the other.
- *
- * **Grading gets nothing new.** `recordProductionTraces` is the door's own
- * bookkeeping, called here with the very spans that were just appended: the
- * root span arrives closed, so the job is written with `root_closed_at` set and
- * the notification wakes the grader service. Every production-scoped grader
- * judges Retell traffic from the first conversation, with no grading code
- * written for it.
+ * The claim belongs to the project and Retell provider conversation. It has no
+ * simulation connection and no Egma agent identity.
  */
 
 export type WriteOutcome =
-  /** This call stored it. */
   | {
       readonly kind: "written";
       readonly traceId: string;
       readonly degraded: boolean;
-      /** The normalizer's answer, so a caller never re-reads the payload. */
       readonly endedAt: Date;
-      /** Whether the provider reported that end, or egma stood in for one. */
       readonly endReported: boolean;
     }
-  /**
-   * Somebody else holds the claim — the other transport, or an earlier tick.
-   *
-   * It carries the same two instants a write does, because **an already-claimed
-   * conversation is an accounted-for conversation**: the claim is the write
-   * duty, and whoever holds it writes the spans or the lease sweep replays them
-   * from the payload on the claim. So a poller may move its cursor past this
-   * exactly as it moves past its own writes, and the two answers have to look
-   * the same for it to be able to.
-   */
   | {
       readonly kind: "already";
       readonly traceId: string;
@@ -65,41 +39,123 @@ export type WriteOutcome =
       readonly endReported: boolean;
     };
 
+export type RetellProductionWriteTarget = {
+  readonly setupId: string;
+  readonly monitoredAgentId: string;
+  readonly providerAgentId: string;
+  readonly providerAgentName: string;
+  readonly auth: AuthContext;
+};
+
+/** The durable stores at the writer seam. Tests use an in-memory adapter. */
+export type RetellProductionWriteStore = {
+  readonly claimProductionTrace: typeof claimProductionTrace;
+  readonly appendSpans: typeof appendSpans;
+  readonly recordProductionTraces: typeof recordProductionTraces;
+  readonly finishProductionTrace: typeof finishProductionTrace;
+  readonly recordRetellCallReceived: typeof recordRetellCallReceived;
+  readonly recordRetellMonitoringReceived: typeof recordRetellMonitoringReceived;
+};
+
+const STORES: RetellProductionWriteStore = {
+  claimProductionTrace,
+  appendSpans,
+  recordProductionTraces,
+  finishProductionTrace,
+  recordRetellCallReceived,
+  recordRetellMonitoringReceived,
+};
+
+function projectIdOf(target: Pick<RetellProductionWriteTarget, "auth">): string {
+  const projectId = target.auth.projectId;
+  if (projectId === undefined) {
+    throw new Error("Retell production ingestion requires a project context");
+  }
+  return projectId;
+}
+
+function providerText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function retellCallBelongsToTarget(
+  target: Pick<RetellProductionWriteTarget, "providerAgentId">,
+  call: RetellCall,
+): boolean {
+  const providerAgentId = providerText(call["agent_id"]);
+  return providerAgentId === "" || providerAgentId === target.providerAgentId;
+}
+
+function providerIdentityOf(
+  target: Pick<
+    RetellProductionWriteTarget,
+    "providerAgentId" | "providerAgentName"
+  >,
+  call: RetellCall,
+): { readonly id: string; readonly name: string; readonly version: string } {
+  if (!retellCallBelongsToTarget(target, call)) {
+    throw new Error("A Retell call belongs to a different selected agent");
+  }
+  return {
+    id: providerText(call["agent_id"]) || target.providerAgentId,
+    name: providerText(call["agent_name"]) || target.providerAgentName,
+    version: providerAgentVersionOf(call),
+  };
+}
+
+function providerAgentVersionOf(call: RetellCall): string {
+  const value = call["agent_version"];
+  return typeof value === "string" || typeof value === "number"
+    ? String(value)
+    : "";
+}
+
+function parsedCall(payload: string): RetellCall {
+  const value: unknown = JSON.parse(payload);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("A stale Retell production claim has an invalid safe payload");
+  }
+  return value as RetellCall;
+}
+
 /**
- * Store one Retell conversation under one connection, or find out it is
- * already stored.
+ * Claim and write one hydrated Retell call.
  *
- * `now` is injected so that a payload missing its timestamps normalises the
- * same way twice, which is what a replay after a crash depends on.
+ * The provider document is made safe before it enters the durable claim. The
+ * normalizer also applies the same protection to every ClickHouse payload.
  */
 export async function writeRetellCall(
-  target: RetellWatchTarget,
+  target: RetellProductionWriteTarget,
   call: RetellCall,
-  transport: ProductionTransport,
-  now: number = Date.now(),
+  receivedAt = new Date(),
+  stores: RetellProductionWriteStore = STORES,
 ): Promise<WriteOutcome> {
+  const safeCall = safeRetellProviderData(call);
+  const providerIdentity = providerIdentityOf(target, safeCall);
   const normalised = normaliseRetellCall(
-    call,
+    safeCall,
     {
-      connectionId: target.connectionId,
-      connectionType: target.connectionType,
-      agentId: target.agentId,
-      environment: target.environment,
+      projectId: projectIdOf(target),
+      environment: "production",
+      platformAgentId: providerIdentity.id,
+      platformAgentName: providerIdentity.name,
+      platformAgentVersion: providerIdentity.version,
     },
-    now,
+    receivedAt.getTime(),
   );
 
-  const claim = await claimProductionTrace(target.auth, {
-    connectionId: target.connectionId,
+  const claim = await stores.claimProductionTrace(target.auth, {
     traceId: normalised.traceId,
     providerCallId: normalised.providerCallId,
-    transport,
-    payload: JSON.stringify(call),
+    providerAgentId: providerIdentity.id,
+    providerAgentName: providerIdentity.name,
+    ...(providerIdentity.version === ""
+      ? {}
+      : { providerAgentVersion: providerIdentity.version }),
+    payload: JSON.stringify(safeCall),
     endedAt: normalised.endedAt,
   });
 
-  // The loser of the race, and the ordinary answer at the boundary of every
-  // resumed sweep. Nothing is written and nothing is wrong.
   if (claim === undefined) {
     return {
       kind: "already",
@@ -109,18 +165,16 @@ export async function writeRetellCall(
     };
   }
 
-  await appendSpans(target.auth, normalised.spans);
-  await recordProductionTraces(target.auth, normalised.spans);
-  await finishProductionTrace(target.auth, {
+  await stores.appendSpans(target.auth, normalised.spans);
+  await stores.recordProductionTraces(target.auth, normalised.spans);
+  // Keep the claim replayable until every side effect of accepting this
+  // provider conversation is durable. If this health update fails, the claim
+  // remains stale and replay can finish it instead of leaving Monitoring in
+  // "waiting" after the trace already arrived.
+  await stores.recordRetellCallReceived(target.auth, target, receivedAt);
+  await stores.finishProductionTrace(target.auth, {
     traceId: normalised.traceId,
-    connectionId: target.connectionId,
-    endedAt: normalised.endedAt,
     degraded: normalised.degraded,
-    // Two conditions, and each is load-bearing. Only the poller's own cursor is
-    // the poller's to move; and a cursor may only move to an instant the
-    // provider actually reported, never to egma's stand-in for one — which is
-    // the wall clock, and would jump the cursor past everything not yet drained.
-    advanceCursor: transport === "pull" && normalised.endReported,
   });
 
   return {
@@ -132,62 +186,41 @@ export async function writeRetellCall(
   };
 }
 
-/**
- * Finish a claim somebody else started and did not get to the end of.
- *
- * The payload is the one stored on the claim, so this normalises the identical
- * input into the identical batch. A recent byte-identical append that already
- * landed is normally suppressed by ClickHouse, while an append that never
- * happened lands now. If recovery is delayed beyond ClickHouse's recent
- * deduplication window, a second copy may land; the claim still prevents
- * another live transport from racing this replay.
- *
- * **The claim's own `ended_at` stands in for the clock**, and that is what makes
- * "identical" true rather than nearly true. A payload carrying no timestamps
- * normalises against the moment it was read, and the moment it was read is
- * exactly what the first pass wrote into `ended_at` — so a replay hours later
- * reproduces the first pass's spans instead of stamping them with today.
- */
+/** Finish one claim that stopped between Postgres and ClickHouse. */
 export async function replayProductionClaim(
-  claim: {
-    readonly auth: RetellWatchTarget["auth"];
-    readonly connectionId: string;
-    readonly traceId: string;
-    readonly payload: string;
-    readonly endedAt: Date;
-    /** Which transport claimed it, because only the poller's cursor moves. */
-    readonly transport: ProductionTransport;
-  },
-  into: {
-    readonly connectionType: string;
-    readonly agentId: string;
-    readonly environment: string | null;
-  },
+  claim: ProductionTraceClaim,
+  stores: RetellProductionWriteStore = STORES,
 ): Promise<void> {
-  let call: RetellCall;
-  try {
-    const held: unknown = JSON.parse(claim.payload);
-    call =
-      typeof held === "object" && held !== null && !Array.isArray(held)
-        ? (held as RetellCall)
-        : {};
-  } catch {
-    call = {};
+  const call = parsedCall(claim.payload);
+  const projectId = claim.auth.projectId;
+  if (projectId === undefined) {
+    throw new Error("A stale Retell production claim has no project context");
   }
-
   const normalised = normaliseRetellCall(
     call,
-    { connectionId: claim.connectionId, ...into },
+    {
+      projectId,
+      environment: "production",
+      platformAgentId: claim.providerAgentId,
+      platformAgentName: claim.providerAgentName ?? "",
+      platformAgentVersion: claim.providerAgentVersion ?? "",
+    },
     claim.endedAt.getTime(),
   );
+  if (
+    normalised.traceId !== claim.traceId ||
+    normalised.providerCallId !== claim.providerCallId
+  ) {
+    throw new Error("A stale Retell production claim changed trace identity");
+  }
 
-  await appendSpans(claim.auth, normalised.spans);
-  await recordProductionTraces(claim.auth, normalised.spans);
-  await finishProductionTrace(claim.auth, {
-    traceId: normalised.traceId,
-    connectionId: claim.connectionId,
-    endedAt: normalised.endedAt,
+  await stores.appendSpans(claim.auth, normalised.spans);
+  await stores.recordProductionTraces(claim.auth, normalised.spans);
+  await stores.recordRetellMonitoringReceived(claim.auth, {
+    providerAgentId: claim.providerAgentId,
+  });
+  await stores.finishProductionTrace(claim.auth, {
+    traceId: claim.traceId,
     degraded: normalised.degraded,
-    advanceCursor: claim.transport === "pull" && normalised.endReported,
   });
 }

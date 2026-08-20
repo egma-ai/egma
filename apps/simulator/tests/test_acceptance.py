@@ -529,12 +529,12 @@ async def test_an_over_granting_control_plane_does_not_take_the_simulator_down(
     assert len([r for r in later if r["kind"] == "claim"]) > claims_before
 
 
-async def test_a_spec_naming_an_unknown_connection_type_is_refused_out_loud(
+async def test_a_spec_naming_an_unknown_connection_kind_is_refused_out_loud(
     workbench, start_simulator
 ):
     """No plug, no exchange, no report — and the simulator carries on."""
     unplugged = scripted_spec("sim-unplugged-001")
-    unplugged["connection"]["type"] = "a-platform-with-no-plug-yet"
+    unplugged["connection"]["connection_kind"] = "a-connection-with-no-plug-yet"
     await workbench.offer(unplugged)
     simulator = start_simulator(workbench)
 

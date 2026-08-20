@@ -70,6 +70,7 @@ class PhoneCall:
         self,
         *,
         modality: str,
+        access_variant: str,
         config: dict[str, Any],
         credentials: object,
         simulation_id: str | None = None,
@@ -81,6 +82,12 @@ class PhoneCall:
         # nothing to tell the far end about the simulation and no way to
         # stand in front of its tools.
         del simulation_id, mock_tools
+
+        if access_variant != "phone_number.public_e164":
+            raise PlugError(
+                "the phone-number adapter does not support access variant "
+                f"{access_variant!r}"
+            )
 
         # Which media backend and trunk this call goes over, resolved by
         # assembly from this container's own configuration and the

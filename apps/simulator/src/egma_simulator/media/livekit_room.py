@@ -370,7 +370,7 @@ class RoomSettings:
 
     @classmethod
     def from_connection(
-        cls, config: dict[str, Any], credentials: Any
+        cls, access_variant: str, config: dict[str, Any], credentials: Any
     ) -> RoomSettings:
         """Read one connection block, or refuse it in a sentence.
 
@@ -379,8 +379,17 @@ class RoomSettings:
         before anything is reached rather than a failure part-way through
         an exchange.
         """
-        if config.get("tokenEndpoint") is not None:
+        if access_variant == "livekit_room.customer_token_endpoint":
             return cls._at_an_endpoint(config, credentials)
+        if access_variant != "livekit_room.project_credentials":
+            raise MediaBackendError(
+                "the livekit-room adapter does not support access variant "
+                f"{access_variant!r}"
+            )
+        if config.get("tokenEndpoint") is not None:
+            raise MediaBackendError(
+                "livekit project-credential access does not accept tokenEndpoint"
+            )
 
         unknown = set(config) - KNOWN_CONFIG_KEYS
         if unknown:

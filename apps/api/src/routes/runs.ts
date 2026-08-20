@@ -1,7 +1,7 @@
 import {
   authorize,
   cancelRun,
-  connectionTypeOf,
+  connectionKindOf,
   foldRun,
   foldSimulation,
   getAgent,
@@ -17,6 +17,7 @@ import {
   listSimulations,
   NotPermittedError,
   platformFacts,
+  productLabelOf,
   ProjectOutsideOrganizationError,
   readAssertionShelf,
   readRunVerdicts,
@@ -98,7 +99,7 @@ import {
  * whole creation — a run that quietly executed eleven of the twelve versions
  * somebody named would report green about a suite that did not run.
  *
- * **A type nothing can conduct is refused at the door**, with the platform's
+ * **A connection kind nothing can conduct is refused at the door**, with the platform's
  * own sentence and the code `no_adapter`. A run left queued for a conductor
  * that does not exist is a promise egma cannot keep, and it would be
  * discovered by a person waiting for a terminal that never moves.
@@ -137,16 +138,16 @@ export type RunRoutesOptions = {
 };
 
 /**
- * The connection types this deployment cannot dial over until its phone half
+ * The connection kinds this deployment cannot dial over until its phone half
  * has been set up.
  *
  * One entry, and it is a list rather than an `=== "phone"` so that the next
- * carrier-backed type is a line here instead of a condition somebody has to
- * find. What makes a type belong is not that it is telephony-shaped: it is that
+ * carrier-backed kind is a line here instead of a condition somebody has to
+ * find. What makes a kind belong is not that it is telephony-shaped: it is that
  * conducting it spends the platform's *own* carrier, which is the thing
  * `egma self-host setup` provides.
  */
-const NEEDS_THE_PLATFORMS_CARRIER: readonly string[] = ["phone"];
+const NEEDS_THE_PLATFORMS_CARRIER: readonly string[] = ["phone_number"];
 
 export const RUNS_PATH = "/api/runs";
 /**
@@ -407,8 +408,11 @@ function describedPlan(plan: RunPlan): Record<string, unknown> {
     agent_id: plan.agentId,
     connection_id: plan.connectionId,
     connection: {
-      type: plan.connection.type,
+      agent_platform: plan.connection.agentPlatform,
+      connection_kind: plan.connection.connectionKind,
+      access_variant: plan.connection.accessVariant,
       modality: plan.connection.modality,
+      product_label: plan.connection.productLabel,
       environment: plan.connection.environment,
       // Unknown and known-and-bare are different facts and read differently:
       // one is a Refresh away from an answer, the other is settled.
@@ -516,14 +520,24 @@ function describedRun(
     status: one.status,
     agent_id: one.agentId,
     connection_id: one.connectionId,
-    connection_type: one.connectionSnapshot.type,
+    agent_platform: one.connectionSnapshot.agentPlatform,
+    connection_kind: one.connectionSnapshot.connectionKind,
+    access_variant: one.connectionSnapshot.accessVariant,
     modality: one.connectionSnapshot.modality,
+    product_label: productLabelOf(
+      one.connectionSnapshot.agentPlatform,
+      one.connectionSnapshot.connectionKind,
+      one.connectionSnapshot.accessVariant,
+      one.connectionSnapshot.modality,
+    ),
     // The connection's non-secret shape as this run executed over it, frozen at
     // start. Connections are unversioned, so this is the only record of what the
     // run actually reached — and there is no field here a credential could ride
     // in: the secret lives in its own sealed column and was never copied.
     connection_snapshot: {
-      type: one.connectionSnapshot.type,
+      agent_platform: one.connectionSnapshot.agentPlatform,
+      connection_kind: one.connectionSnapshot.connectionKind,
+      access_variant: one.connectionSnapshot.accessVariant,
       modality: one.connectionSnapshot.modality,
       topology: one.connectionSnapshot.topology,
       environment: one.connectionSnapshot.environment,
@@ -695,8 +709,16 @@ function describedHistoryEntry(
     label: run.label,
     agent_id: run.agentId,
     connection_id: run.connectionId,
-    connection_type: run.connectionSnapshot.type,
+    agent_platform: run.connectionSnapshot.agentPlatform,
+    connection_kind: run.connectionSnapshot.connectionKind,
+    access_variant: run.connectionSnapshot.accessVariant,
     modality: run.connectionSnapshot.modality,
+    product_label: productLabelOf(
+      run.connectionSnapshot.agentPlatform,
+      run.connectionSnapshot.connectionKind,
+      run.connectionSnapshot.accessVariant,
+      run.connectionSnapshot.modality,
+    ),
     environment: run.connectionSnapshot.environment,
     retry_of_run_id: run.retryOfRunId,
     expected_simulation_count: run.expectedSimulationCount,
@@ -1035,8 +1057,8 @@ export async function runRoutes(
      */
     const carrier = phoneReadiness(await platformFacts());
     if (carrier.state !== "ready") {
-      const type = await connectionTypeOf(acting.auth, text(body.connection));
-      if (type !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(type)) {
+      const kind = await connectionKindOf(acting.auth, text(body.connection));
+      if (kind !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(kind)) {
         return phoneSetupRequired(reply, phoneSetupRequiredMessage(carrier));
       }
     }
@@ -1226,7 +1248,7 @@ export async function runRoutes(
           : {
               id: ranOver.id,
               name: ranOver.name,
-              type: ranOver.type,
+              product_label: ranOver.productLabel,
               archived: ranOver.archivedAt !== null,
             },
     });
@@ -1405,8 +1427,8 @@ export async function runRoutes(
     // platform's carrier.
     const carrier = phoneReadiness(await platformFacts());
     if (carrier.state !== "ready") {
-      const type = await connectionTypeOf(acting.auth, source.connectionId);
-      if (type !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(type)) {
+      const kind = await connectionKindOf(acting.auth, source.connectionId);
+      if (kind !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(kind)) {
         return phoneSetupRequired(reply, phoneSetupRequiredMessage(carrier));
       }
     }

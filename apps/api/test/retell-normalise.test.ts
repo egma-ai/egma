@@ -17,16 +17,17 @@ import {
  */
 
 const FILED_INTO = {
-  connectionId: "con_01K3XQ7M4E8YB2FVN0H9TZQWER",
-  connectionType: "retell",
-  agentId: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER",
+  projectId: "prj_01K3XQ7M4E8YB2FVN0H9TZQWER",
   environment: "production",
+  platformAgentId: "agent_in_retell_1",
+  platformAgentName: "Front desk",
+  platformAgentVersion: "7",
 } as const;
 
 /**
  * A Retell call object as their documentation shapes one, trimmed to the
  * fields egma reads plus a few it does not — because the ones it does not read
- * are exactly what "kept verbatim" has to be checked against.
+ * are exactly what "kept after credential removal" has to be checked against.
  */
 export function capturedCall(overrides: Partial<RetellCall> = {}): RetellCall {
   return {
@@ -46,16 +47,27 @@ export function capturedCall(overrides: Partial<RetellCall> = {}): RetellCall {
         role: "agent",
         content: "Let me check the calendar.",
         words: [],
-        tool_calls: [
-          {
-            id: "tool_1",
-            function: {
-              name: "check_calendar",
-              arguments: '{"day":"tuesday"}',
-            },
-            result: '{"slots":["10:00","14:00"]}',
-          },
-        ],
+      },
+    ],
+    transcript_with_tool_calls: [
+      { role: "agent", content: "Hello, front desk.", words: [] },
+      { role: "user", content: "I would like to reschedule Tuesday.", words: [] },
+      {
+        role: "agent",
+        content: "Let me check the calendar.",
+        words: [],
+      },
+      {
+        role: "tool_call_invocation",
+        tool_call_id: "tool_1",
+        name: "check_calendar",
+        arguments: '{"day":"tuesday"}',
+      },
+      {
+        role: "tool_call_result",
+        tool_call_id: "tool_1",
+        content: '{"slots":["10:00","14:00"]}',
+        successful: true,
       },
     ],
     // One object per stage, as Retell's documentation shapes one: the summary
@@ -108,7 +120,7 @@ export function capturedCall(overrides: Partial<RetellCall> = {}): RetellCall {
         num: 3,
         values: [280, 300, 380],
       },
-      // A stage egma maps to nothing. It stays in the verbatim payload and out
+      // A stage egma maps to nothing. It stays in the safe provider payload and out
       // of the block, which is what "only the mapped stages" has to be checked
       // against.
       llm_websocket_network_rtt: {
@@ -119,7 +131,7 @@ export function capturedCall(overrides: Partial<RetellCall> = {}): RetellCall {
         values: [22, 40, 61],
       },
     },
-    // Nothing reads this. That is the point of the verbatim rule.
+    // Nothing reads this. That is the point of keeping safe provider data.
     call_analysis: { user_sentiment: "Positive", call_successful: true },
     ...overrides,
   };
@@ -135,7 +147,7 @@ function asBytes(spans: readonly unknown[]): string {
 }
 
 describe("the trace identity", () => {
-  it("is the same twice for the same call on the same connection", () => {
+  it("is the same twice for the same call in the same project", () => {
     const once = normaliseRetellCall(capturedCall(), FILED_INTO, NOW);
     const again = normaliseRetellCall(capturedCall(), FILED_INTO, NOW);
 
@@ -153,9 +165,9 @@ describe("the trace identity", () => {
     expect(traceId).toMatch(/^[0-9a-f]{32}$/u);
   });
 
-  it("differs per connection, so one agent in two projects never collides", () => {
-    const here = traceIdFor("con_one", "call_a1b2c3d4e5f6");
-    const there = traceIdFor("con_two", "call_a1b2c3d4e5f6");
+  it("differs per project, so one provider call can belong to both", () => {
+    const here = traceIdFor("prj_one", "call_a1b2c3d4e5f6");
+    const there = traceIdFor("prj_two", "call_a1b2c3d4e5f6");
     expect(here).not.toBe(there);
   });
 });
@@ -177,8 +189,12 @@ describe("the spans a captured payload becomes", () => {
       expect(span.source).toBe("production");
       expect(span.emitter).toBe("agent");
       expect(span.environment).toBe("production");
-      expect(span.connectionType).toBe("retell");
-      expect(span.agentId).toBe(FILED_INTO.agentId);
+      expect(span.connectionKind).toBe("");
+      expect(span.agentId).toBe("");
+      expect(span.agentPlatform).toBe("retell");
+      expect(span.platformAgentId).toBe("agent_in_retell_1");
+      expect(span.platformAgentName).toBe("Front desk");
+      expect(span.platformAgentVersion).toBe("7");
       // The join across an audio channel, on every row.
       expect(span.providerCallId).toBe("call_a1b2c3d4e5f6");
       // Nothing about a simulation is claimed by a production trace.
@@ -203,6 +219,94 @@ describe("the spans a captured payload becomes", () => {
     expect(tools[0]?.toolArguments).toBe('{"day":"tuesday"}');
     expect(tools[0]?.toolResult).toBe('{"slots":["10:00","14:00"]}');
     expect(tools[0]?.parentSpanId).toBe(turns[2]?.spanId);
+  });
+
+  it("pairs woven tool results by id across other provider events", () => {
+    const current = normaliseRetellCall(
+      capturedCall({
+        transcript_object: [
+          { role: "agent", content: "This older transcript is not selected." },
+        ],
+        transcript_with_tool_calls: [
+          { role: "agent", content: "Hello.", words: [] },
+          { role: "user", content: "Please book Tuesday.", words: [] },
+          { role: "agent", content: "I will check.", words: [] },
+          {
+            role: "tool_call_invocation",
+            tool_call_id: "tool_calendar",
+            name: "check_calendar",
+            arguments: '{"day":"tuesday"}',
+          },
+          {
+            role: "node_transition",
+            former_node_id: "greeting",
+            new_node_id: "booking",
+          },
+          {
+            role: "tool_call_invocation",
+            tool_call_id: "tool_customer",
+            name: "load_customer",
+            arguments: '{"id":"cust_1"}',
+          },
+          {
+            role: "tool_call_result",
+            tool_call_id: "tool_customer",
+            content: '{"name":"Ada"}',
+            successful: true,
+          },
+          { role: "future_retell_event", value: "kept only in provider data" },
+          {
+            role: "tool_call_result",
+            tool_call_id: "tool_calendar",
+            content: '{"slots":[]}',
+            success: false,
+          },
+        ],
+      }),
+      FILED_INTO,
+      NOW,
+    );
+
+    expect(
+      current.spans
+        .filter((span) => span.kind.startsWith("turn:"))
+        .map((span) => [span.kind, span.text]),
+    ).toEqual([
+      ["turn:agent", "Hello."],
+      ["turn:human", "Please book Tuesday."],
+      ["turn:agent", "I will check."],
+    ]);
+    const currentTools = current.spans.filter((span) => span.kind === "tool");
+    expect(
+      currentTools.map((span) => ({
+        name: span.toolName,
+        arguments: span.toolArguments,
+        result: span.toolResult,
+        status: span.status,
+      })),
+    ).toEqual([
+      {
+        name: "check_calendar",
+        arguments: '{"day":"tuesday"}',
+        result: '{"slots":[]}',
+        status: "error",
+      },
+      {
+        name: "load_customer",
+        arguments: '{"id":"cust_1"}',
+        result: '{"name":"Ada"}',
+        status: "ok",
+      },
+    ]);
+    expect(current.degraded).toBe(false);
+    const rootPayload = JSON.parse(current.spans[0]?.payload ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(rootPayload["transcript_with_tool_calls"]).toContainEqual({
+      role: "future_retell_event",
+      value: "kept only in provider data",
+    });
   });
 
   it("synthesises no per-turn timing, because Retell reports none", () => {
@@ -257,7 +361,7 @@ describe("the spans a captured payload becomes", () => {
     );
   });
 
-  it("keeps the vendor payload verbatim, fields egma never reads included", () => {
+  it("keeps safe provider fields Egma does not read", () => {
     const held = JSON.parse(root?.payload ?? "{}") as Record<string, unknown>;
     expect(held["call_analysis"]).toEqual({
       user_sentiment: "Positive",
@@ -267,6 +371,35 @@ describe("the spans a captured payload becomes", () => {
     expect(held["transcript"]).toBe(
       "Agent: Hello. User: I would like to reschedule.",
     );
+  });
+
+  it("removes provider credentials before they enter any span payload", () => {
+    const accessToken = "SENTINEL-web-call-access-token";
+    const authorization = "Bearer SENTINEL-customer-authorization";
+    const normalised = normaliseRetellCall(
+      capturedCall({
+        access_token: accessToken,
+        custom_sip_headers: {
+          Authorization: authorization,
+          "X-Customer-Route": "support",
+        },
+      }),
+      FILED_INTO,
+      NOW,
+    );
+
+    const stored = asBytes(normalised.spans);
+    expect(stored).not.toContain(accessToken);
+    expect(stored).not.toContain(authorization);
+    const payload = JSON.parse(normalised.spans[0]?.payload ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(payload["access_token"]).toBe("[REDACTED]");
+    expect(payload["custom_sip_headers"]).toEqual({
+      Authorization: "[REDACTED]",
+      "X-Customer-Route": "support",
+    });
   });
 });
 
@@ -332,7 +465,7 @@ describe("the reported-measurements block", () => {
     };
     // Provenance, and the word a rationale will print: one spelling of this
     // platform, on the block and on the row it rides alike.
-    expect(block.reported_by).toBe(spans[0]?.connectionType);
+    expect(block.reported_by).toBe(spans[0]?.agentPlatform);
   });
 
   it("carries the measurements, and leaves the summary to the vendor's own block", () => {
@@ -518,5 +651,41 @@ describe("a payload the normalizer cannot fully read", () => {
     );
     expect(quiet.degraded).toBe(false);
     expect(quiet.spans).toHaveLength(1);
+  });
+
+  it("keeps every transcript-free terminal state as one honest root", () => {
+    for (const [callStatus, spanStatus] of [
+      ["ended", "ok"],
+      ["error", "error"],
+      ["not_connected", "error"],
+    ] as const) {
+      const terminal = normaliseRetellCall(
+        {
+          call_id: `call_${callStatus}`,
+          call_status: callStatus,
+          call_type: "phone_call",
+          start_timestamp: 1_786_000_000_000,
+          end_timestamp: 1_786_000_001_000,
+        },
+        FILED_INTO,
+        NOW,
+      );
+
+      expect(terminal.degraded, callStatus).toBe(false);
+      expect(terminal.spans, callStatus).toHaveLength(1);
+      expect(terminal.spans[0]?.kind, callStatus).toBe("conversation");
+      expect(terminal.spans[0]?.status, callStatus).toBe(spanStatus);
+      const payload = JSON.parse(terminal.spans[0]?.payload ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(payload["call_status"], callStatus).toBe(callStatus);
+      expect(payload["call_type"], callStatus).toBe("phone_call");
+      const normalised = payload["egma_normalised"] as Record<string, unknown>;
+      expect(
+        Object.hasOwn(normalised, "reported_measurements"),
+        callStatus,
+      ).toBe(false);
+    }
   });
 });

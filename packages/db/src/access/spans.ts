@@ -93,17 +93,23 @@ export type NewSpan = {
    * whatever the provider hands out. Absence is normal.
    */
   readonly providerCallId: string;
-  readonly connectionType: string;
+  /** The product or framework that produced this production evidence. */
+  readonly agentPlatform: string;
+  /** Provider-owned agent identity, when the platform supplies it. */
+  readonly platformAgentId: string;
+  readonly platformAgentName: string;
+  readonly platformAgentVersion: string;
+  readonly connectionKind: string;
   readonly runId: string;
   readonly agentId: string;
   readonly agentVersionId: string;
   readonly testVersionId: string;
   readonly personaVersionId: string;
   /**
-   * The provider's payload for this span, exactly as it arrived, and the reason
-   * truncating the columns above loses nothing: whatever a cap shortened is
-   * still here in full. Never truncated, never normalised — data that was not
-   * captured cannot be recovered by any later migration.
+   * Safe provider data for this span. A platform adapter removes credentials
+   * and bearer-like values before this boundary; generic OTLP keeps the source
+   * span document. This field is never truncated, while child spans may hold a
+   * normalized provider-specific subset.
    */
   readonly payload: string;
 };
@@ -143,7 +149,7 @@ const SPANS_TABLE = "spans";
  * ClickHouse stores and what a `String` column is measured in. The cut itself
  * still lands on a character boundary; see `truncated`.
  *
- * Only the normalised columns are capped, and never the verbatim payload — the
+ * Only the normalised columns are capped, and never the safe provider payload — the
  * whole arrangement is that a cap costs presentation rather than data, because
  * the untruncated original is on the same row. Transcripts and tool payloads
  * are what actually reach these, which is why they get the generous ones.
@@ -158,7 +164,11 @@ const FIELD_LIMITS = {
   toolArguments: 65_536,
   toolResult: 65_536,
   providerCallId: 512,
-  connectionType: 64,
+  agentPlatform: 64,
+  platformAgentId: 512,
+  platformAgentName: 512,
+  platformAgentVersion: 128,
+  connectionKind: 64,
   environment: 128,
 } as const satisfies Readonly<Record<string, number>>;
 
@@ -245,7 +255,20 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
       span.providerCallId,
       FIELD_LIMITS.providerCallId,
     ),
-    connection_type: truncated(span.connectionType, FIELD_LIMITS.connectionType),
+    agent_platform: truncated(span.agentPlatform, FIELD_LIMITS.agentPlatform),
+    platform_agent_id: truncated(
+      span.platformAgentId,
+      FIELD_LIMITS.platformAgentId,
+    ),
+    platform_agent_name: truncated(
+      span.platformAgentName,
+      FIELD_LIMITS.platformAgentName,
+    ),
+    platform_agent_version: truncated(
+      span.platformAgentVersion,
+      FIELD_LIMITS.platformAgentVersion,
+    ),
+    connection_type: truncated(span.connectionKind, FIELD_LIMITS.connectionKind),
     run_id: span.runId,
     agent_id: span.agentId,
     agent_version_id: span.agentVersionId,

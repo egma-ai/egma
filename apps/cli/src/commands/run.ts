@@ -19,7 +19,7 @@
  * coding agent reading that green reports an edit verified that never ran.
  *
  * **A refusal is repeated, never rewritten.** The platform decides whether a
- * run can happen — a connection type whose adapter has not shipped is the case
+ * run can happen — a connection kind whose adapter has not shipped is the case
  * this exists for — and when it says no, its sentence is what appears. egma
  * neither paraphrases it nor wraps it in an explanation it did not give.
  *

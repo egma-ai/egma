@@ -81,8 +81,10 @@ type AgentBody = {
 type ConnectionBody = {
   readonly id: string;
   readonly name: string;
-  readonly type: string;
-  readonly variant_id: string;
+  readonly agent_platform: string | null;
+  readonly connection_kind: string;
+  readonly access_variant: string;
+  readonly product_label: string;
   readonly revision: string;
   readonly archived: boolean;
   readonly credential_present: boolean;
@@ -102,7 +104,9 @@ const RETELL_KEY = "retell-secret-A1B2C3D4WXYZ";
 
 /** A voice connection that needs no carrier configuration in this test API. */
 const LIVEKIT_VOICE = {
-  type: "livekit",
+  agent_platform: "livekit_agents",
+  connection_kind: "livekit_room",
+  access_variant: "livekit_room.project_credentials",
   modality: "voice",
   config: { url: "wss://acme.livekit.cloud" },
   credentials: {
@@ -127,7 +131,9 @@ async function aConnection(
     `/api/agents/${agentId}/connections`,
     who,
     {
-      type: "retell",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: RETELL_KEY },
@@ -552,43 +558,53 @@ describe("a connection's stored credential", () => {
   });
 
   it("is described to a form without any of it crossing", async () => {
-    api = await createApi("agents_browser_connection_types");
+    api = await createApi("agents_browser_connection_options");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const catalog = await browser("GET", "/api/connection-types", ada);
+    const catalog = await browser("GET", "/api/connection-options", ada);
     expect(catalog.status).toBe(200);
 
     const items = held<
       readonly {
-        readonly type: string;
+        readonly agent_platform: string | null;
+        readonly connection_kind: string;
+        readonly access_variant: string;
         readonly simulator_adapter: boolean;
         readonly capability_discovery: boolean;
-        readonly variants: readonly {
-          readonly id: string;
-          readonly credential_rule: string;
-          readonly fields: readonly { readonly key: string; readonly kind: string }[];
-          readonly credential_fields: readonly { readonly field: string }[];
-        }[];
+        readonly credential_rule: string;
+        readonly fields: readonly { readonly key: string; readonly kind: string }[];
+        readonly credential_fields: readonly { readonly field: string }[];
       }[]
     >(catalog, "items");
 
-    const livekit = items.find((one) => one.type === "livekit");
-    expect(livekit?.variants.map((one) => one.id)).toEqual([
-      "livekit.key_pair",
-      "livekit.token_endpoint",
+    const livekit = items.filter(
+      (one) =>
+        one.agent_platform === "livekit_agents" &&
+        one.connection_kind === "livekit_room",
+    );
+    expect(livekit.map((one) => one.access_variant)).toEqual([
+      "livekit_room.project_credentials",
+      "livekit_room.customer_token_endpoint",
     ]);
 
     // The three credential rules the product's Restore is written against,
     // each named on the shape that has it.
     expect(
-      items.find((one) => one.type === "retell")?.variants[0]?.credential_rule,
+      items.find((one) => one.connection_kind === "retell_chat_api")
+        ?.credential_rule,
     ).toBe("required");
     expect(
-      items.find((one) => one.type === "phone")?.variants[0]?.credential_rule,
+      items.find(
+        (one) =>
+          one.agent_platform === null &&
+          one.connection_kind === "phone_number",
+      )?.credential_rule,
     ).toBe("forbidden");
     expect(
-      livekit?.variants.find((one) => one.id === "livekit.token_endpoint")
-        ?.credential_rule,
+      livekit.find(
+        (one) =>
+          one.access_variant === "livekit_room.customer_token_endpoint",
+      )?.credential_rule,
     ).toBe("required");
 
     // Nothing that could be a validator, an internal refusal or a secret. The
@@ -608,7 +624,9 @@ describe("a connection's shape", () => {
 
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id, {
-      type: "livekit",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.project_credentials",
       modality: "voice",
       config: { url: "wss://acme.livekit.cloud" },
       credentials: {
@@ -616,7 +634,7 @@ describe("a connection's shape", () => {
         apiSecret: "livekit-secret-E5F6G7H8QRST",
       },
     });
-    expect(wiring.variant_id).toBe("livekit.key_pair");
+    expect(wiring.access_variant).toBe("livekit_room.project_credentials");
 
     const moved = await browser(
       "PATCH",
@@ -632,15 +650,17 @@ describe("a connection's shape", () => {
       },
     );
     expect(moved.status).toBe(400);
-    expect(String(moved.body.message)).toContain("shape is fixed");
+    expect(String(moved.body.message)).toContain(
+      'config has no key "tokenEndpoint"',
+    );
 
     const read = await browser(
       "GET",
       `/api/agents/${agent.id}/connections/${wiring.id}`,
       ada,
     );
-    expect(held<ConnectionBody>(read, "connection").variant_id).toBe(
-      "livekit.key_pair",
+    expect(held<ConnectionBody>(read, "connection").access_variant).toBe(
+      "livekit_room.project_credentials",
     );
   });
 });
@@ -673,7 +693,7 @@ describe("restoring a connection", () => {
     expect(bare.status).toBe(422);
     expect(bare.body.error).toBe("credential_required");
     expect(bare.body.message).toBe(
-      `Connection ${wiring.id} uses retell, which requires a new credential ` +
+      `Connection ${wiring.id} uses retell_chat_api, which requires a new credential ` +
         `after Archive. Enter a new credential and restore it again.`,
     );
 
@@ -705,7 +725,9 @@ describe("restoring a connection", () => {
 
     const phone = await aConnection(ada, agent.id, {
       name: "hotline",
-      type: "phone",
+      agent_platform: null,
+      connection_kind: "phone_number",
+      access_variant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+15551234567" },
       credentials: undefined,
@@ -741,7 +763,9 @@ describe("restoring a connection", () => {
     // A public token endpoint always needs a fresh auth credential on Restore.
     const endpoint = await aConnection(ada, agent.id, {
       name: "endpoint",
-      type: "livekit",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
         url: "wss://acme.livekit.cloud",
@@ -1089,7 +1113,7 @@ describe("a connection's capability record", () => {
      * `required_capability_unsupported`, which says the target cannot and sends
      * somebody to rewrite a test that was fine.
      */
-    const before = registerCapabilityDiscovery("livekit", async () => ({
+    const before = registerCapabilityDiscovery("livekit_room", async () => ({
       measured: ["raw_audio"],
       supported: ["raw_audio"],
     }));
@@ -1110,7 +1134,7 @@ describe("a connection's capability record", () => {
       expect(capabilities.standing.barge_in).toBe("not_measured");
       expect(Object.values(capabilities.standing)).not.toContain("unsupported");
     } finally {
-      registerCapabilityDiscovery("livekit", before);
+      registerCapabilityDiscovery("livekit_room", before);
     }
   });
 
@@ -1124,7 +1148,7 @@ describe("a connection's capability record", () => {
     // Every shipped type carries the transport adapter, so this is the state a
     // type added ahead of its adapter would be in — taken by removing the one
     // that is there.
-    const before = registerCapabilityDiscovery("retell", undefined);
+    const before = registerCapabilityDiscovery("retell_chat_api", undefined);
     try {
       const asked = await browser(
         "POST",
@@ -1137,7 +1161,7 @@ describe("a connection's capability record", () => {
       // cleared a measurement.
       expect(String(asked.body.message)).toContain("stays unknown");
     } finally {
-      registerCapabilityDiscovery("retell", before);
+      registerCapabilityDiscovery("retell_chat_api", before);
     }
   });
 
@@ -1152,7 +1176,7 @@ describe("a connection's capability record", () => {
       measured: ["dtmf", "raw_audio"],
       supported: ["dtmf", "raw_audio"],
     });
-    const before = registerCapabilityDiscovery("retell", found);
+    const before = registerCapabilityDiscovery("retell_chat_api", found);
 
     try {
       const measured = await browser(
@@ -1165,7 +1189,7 @@ describe("a connection's capability record", () => {
       expect(known.state).toBe("known");
       expect(known.supported).toEqual(["dtmf", "raw_audio"]);
       expect(known.checked_at).toBeTypeOf("string");
-      expect(known.source).toBe("retell adapter");
+      expect(known.source).toBe("retell_chat_api adapter");
 
       // Changing where the connection points changes which target this is, so
       // a measurement of the old one stops being evidence about it.
@@ -1183,7 +1207,7 @@ describe("a connection's capability record", () => {
         "unknown",
       );
     } finally {
-      registerCapabilityDiscovery("retell", before);
+      registerCapabilityDiscovery("retell_chat_api", before);
     }
   });
 
@@ -1194,7 +1218,7 @@ describe("a connection's capability record", () => {
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id);
 
-    const before = registerCapabilityDiscovery("retell", async () => {
+    const before = registerCapabilityDiscovery("retell_chat_api", async () => {
       throw new Error("the provider did not answer");
     });
 
@@ -1221,7 +1245,7 @@ describe("a connection's capability record", () => {
         "unknown",
       );
     } finally {
-      registerCapabilityDiscovery("retell", before);
+      registerCapabilityDiscovery("retell_chat_api", before);
     }
   });
 });
@@ -1244,7 +1268,7 @@ describe("the capability catalog", () => {
     // capability nobody could ever require would be a fact nothing reads.
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id);
-    const before = registerCapabilityDiscovery("retell", async () => ({
+    const before = registerCapabilityDiscovery("retell_chat_api", async () => ({
       measured: ["telepathy"],
       supported: ["telepathy"],
     }));
@@ -1264,7 +1288,7 @@ describe("the capability catalog", () => {
         "unknown",
       );
     } finally {
-      registerCapabilityDiscovery("retell", before);
+      registerCapabilityDiscovery("retell_chat_api", before);
     }
   });
 });
@@ -1284,7 +1308,7 @@ describe("what a viewer may do here", () => {
     expect(
       (await browser("GET", `/api/agents/${agent.id}`, viewer)).status,
     ).toBe(200);
-    expect((await browser("GET", "/api/connection-types", viewer)).status).toBe(
+    expect((await browser("GET", "/api/connection-options", viewer)).status).toBe(
       200,
     );
 

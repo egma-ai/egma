@@ -533,7 +533,9 @@ describe("the shipped simulator against the real API", () => {
         body: {
           name: "Front desk",
           connection: {
-            type: "retell",
+            agent_platform: "retell",
+            connection_kind: "retell_chat_api",
+            access_variant: "retell_chat_api.api_key",
             modality: "chat",
             config: { retellAgentId: "agent_under_walk" },
             credentials: { apiKey: COUNTERPART_KEY },
@@ -547,7 +549,9 @@ describe("the shipped simulator against the real API", () => {
       const attached = await call("POST", `/api/agents/${agentId}/connections`, {
         key,
         body: {
-          type: "retell",
+          agent_platform: "retell",
+          connection_kind: "retell_chat_api",
+          access_variant: "retell_chat_api.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_under_walk" },
           credentials: { apiKey: REFUSED_KEY },

@@ -1,6 +1,6 @@
 """Platform plugs: the one place that knows how to reach a platform.
 
-A **plug** is the component behind a connection type. It alone knows how
+A **plug** is the component behind a connection kind. It alone knows how
 to open an exchange with that platform, deliver the persona's turns, hear
 the agent's answers, and end the exchange. Everything else in the
 simulator is plug-blind: the persona brain, the walk, the claim loop, and
@@ -134,8 +134,8 @@ the persona model and speech services work.
 ## Registration
 
 The registry lives in :func:`plug_for` below: one entry per connection
-type, the type string exactly as specs will name it. A simulator holding
-no plug for a claimed spec's type refuses the claim out loud and reports
+kind, the connection-kind string exactly as specs will name it. A simulator holding
+no plug for a claimed spec's kind refuses the claim out loud and reports
 nothing — the row is the control plane's to sweep.
 """
 
@@ -247,14 +247,15 @@ class VoiceConnection(Protocol):
 
 
 PlugFactory = Callable[..., PlatformPlug | VoiceConnection]
-"""What the registry hands back: called with ``modality=``, ``config=``,
-``credentials=``, ``simulation_id=``, ``mock_tools=`` and ``media=``
+"""What the registry hands back: called with ``modality=``,
+``access_variant=``, ``config=``, ``credentials=``, ``simulation_id=``,
+``mock_tools=`` and ``media=``
 keywords, it returns one plug for one simulation — in practice, the plug
 class itself."""
 
 
-def plug_for(connection_type: str) -> PlugFactory | None:
-    """The plug factory registered for one connection type, or ``None``.
+def plug_for(connection_kind: str) -> PlugFactory | None:
+    """The plug factory registered for one connection kind, or ``None``.
 
     The registry is deliberately a literal here: adding a platform is one
     import and one line, and the diff that adds it touches nothing else.
@@ -266,9 +267,9 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     from .scripted import ScriptedCounterpart
 
     return {
-        "livekit": LiveKitRoom,
+        "livekit_room": LiveKitRoom,
         "loopback": LoopbackCounterpart,
-        "phone": PhoneCall,
-        "retell": RetellChat,
+        "phone_number": PhoneCall,
+        "retell_chat_api": RetellChat,
         "scripted": ScriptedCounterpart,
-    }.get(connection_type)
+    }.get(connection_kind)

@@ -109,7 +109,9 @@ const PHONE_IS_SET_UP = {
 
 /** A number egma dials, registered the way the wizard registers one. */
 const PHONE_CONNECTION = {
-  type: "phone",
+  agent_platform: null,
+  connection_kind: "phone_number",
+  access_variant: "phone_number.public_e164",
   modality: "voice",
   config: { phoneNumber: "+15551234567" },
 } as const;
@@ -152,7 +154,9 @@ async function readyToRun(
   const registered = await ask("/api/agents", {
     name: "Front desk",
     connection: {
-      type: "retell",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -206,7 +210,7 @@ describe("starting a run from the terminal's own code", () => {
     expect(answer.run.status).toBe("pending");
     expect(answer.run.agentId).toBe(agentId);
     expect(answer.run.connectionId).toBe(connectionId);
-    expect(answer.run.connectionType).toBe("retell");
+    expect(answer.run.productLabel).toBe("Retell chat");
     expect(answer.run.modality).toBe("chat");
     expect(answer.run.testVersionIds).toEqual(versions);
     expect(answer.run.expectedSimulationCount).toBe(2);
@@ -243,7 +247,9 @@ describe("starting a run from the terminal's own code", () => {
       payload: {
         name: "Front desk line",
         connection: {
-          type: "phone",
+          agent_platform: null,
+          connection_kind: "phone_number",
+          access_variant: "phone_number.public_e164",
           modality: "voice",
           config: { phoneNumber: "+15551234567" },
         },
@@ -285,7 +291,7 @@ describe("starting a run from the terminal's own code", () => {
     // does over any other type egma conducts.
     expect(answer.kind).toBe("started");
     if (answer.kind !== "started") return;
-    expect(answer.run.connectionType).toBe("phone");
+    expect(answer.run.productLabel).toBe("Phone number");
     expect(answer.run.modality).toBe("voice");
   });
 

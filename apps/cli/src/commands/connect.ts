@@ -353,7 +353,10 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       options.out(`agent_name: ${registered.agent.name}`);
       options.out(`connection_id: ${registered.connection.id}`);
       options.out(`connection_name: ${registered.connection.name}`);
-      options.out(`connection_type: ${registered.connection.type}`);
+      options.out(`agent_platform: ${registered.connection.agentPlatform ?? "unknown"}`);
+      options.out(`connection_kind: ${registered.connection.connectionKind}`);
+      options.out(`access_variant: ${registered.connection.accessVariant}`);
+      options.out(`product_label: ${registered.connection.productLabel}`);
       options.out(`connection_modality: ${registered.connection.modality}`);
       // Which of the three things egma did, as its own fact line: a coding
       // agent retrying this verb reads whether it made a second agent from

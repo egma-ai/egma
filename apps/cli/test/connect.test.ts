@@ -217,7 +217,7 @@ describe("the key, and the two failures worth a second try", () => {
     expect(report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "retell-1",
+      connectionName: "retell_chat_api-1",
     });
   });
 
@@ -268,7 +268,7 @@ describe("one agent, and several", () => {
     expect(report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "retell-1",
+      connectionName: "retell_chat_api-1",
     });
   });
 
@@ -286,7 +286,7 @@ describe("one agent, and several", () => {
     expect(report).toEqual({
       kind: "connected",
       agentName: "chat-desk",
-      connectionName: "retell-1",
+      connectionName: "retell_chat_api-1",
     });
 
     const [connection] = platform.registered.connections;
@@ -418,8 +418,10 @@ describe("what lands on the platform", () => {
         name: "order-line",
         pulled: { vendor: "retell", documents: [], prompt: null, voice: null, tools: [] },
         connection: {
-          type: "retell",
-          modality: "voice",
+          agent_platform: "retell",
+          connection_kind: "retell_chat_api",
+          access_variant: "retell_chat_api.api_key",
+          modality: "chat",
           config: { retellAgentId: "agent_0001" },
           credentials: { apiKey: KEY },
         },
@@ -450,9 +452,12 @@ describe("what lands on the platform", () => {
     expect(agent?.name).toBe("order-line");
     expect(agent?.id).toMatch(/^agt_[0-9A-HJKMNP-TV-Z]{26}$/u);
     expect(connection?.id).toMatch(/^con_[0-9A-HJKMNP-TV-Z]{26}$/u);
-    expect(connection?.name).toBe("retell-1");
-    expect(connection?.type).toBe("retell");
+    expect(connection?.name).toBe("retell_chat_api-1");
+    expect(connection?.agentPlatform).toBe("retell");
+    expect(connection?.connectionKind).toBe("retell_chat_api");
+    expect(connection?.accessVariant).toBe("retell_chat_api.api_key");
     expect(connection?.modality).toBe("chat");
+    expect(connection?.productLabel).toBe("Retell chat");
     expect(connection?.topology).toBe("hosted-broker");
     expect(connection?.agentId).toBe(agent?.id);
   });
@@ -489,7 +494,7 @@ describe("what lands on the platform", () => {
     expect(second.report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "retell-1",
+      connectionName: "retell_chat_api-1",
     });
     expect(second.connected?.registered.result).toBe("reused");
     expect(first.connected?.registered.result).toBe("created");
@@ -508,7 +513,7 @@ describe("what lands on the platform", () => {
 
     // Said in plain words, on the screen, and never as a failure.
     expect(second.ui.record.statuses.join("\n")).toContain(
-      "This voice agent was already registered as order-line, and retell-1 was " +
+      "This voice agent was already registered as order-line, and retell_chat_api-1 was " +
         "already the way Egma reaches it. Nothing new was registered.",
     );
     // And each half is reported on its own, because a retry cares about both.
@@ -653,7 +658,9 @@ describe("the platform's own rules, held by the fixture", () => {
       body: JSON.stringify({
         name: "front-desk",
         connection: {
-          type: "phone",
+          agent_platform: null,
+          connection_kind: "phone_number",
+          access_variant: "phone_number.public_e164",
           modality: "chat",
           config: { phoneNumber: "+15551234567" },
         },
@@ -662,7 +669,7 @@ describe("the platform's own rules, held by the fixture", () => {
 
     expect(answer.status).toBe(400);
     expect(((await answer.json()) as { message: string }).message).toContain(
-      "a phone connection speaks voice",
+      "a phone_number connection speaks voice",
     );
     expect(platform.registered.agents).toHaveLength(0);
   });
@@ -675,8 +682,10 @@ describe("the platform's own rules, held by the fixture", () => {
       body: JSON.stringify({
         name: "front-desk",
         connection: {
-          type: "retell",
-          modality: "voice",
+          agent_platform: "retell",
+          connection_kind: "retell_chat_api",
+          access_variant: "retell_chat_api.api_key",
+          modality: "chat",
           config: { retellAgentId: "agent_0001", retellLlmId: "llm_0001" },
           credentials: { apiKey: KEY },
         },
@@ -697,7 +706,9 @@ describe("the platform's own rules, held by the fixture", () => {
       body: JSON.stringify({
         name: "front-desk",
         connection: {
-          type: "phone",
+          agent_platform: null,
+          connection_kind: "phone_number",
+          access_variant: "phone_number.public_e164",
           modality: "voice",
           config: { phoneNumber: "+15551234567" },
           credentials: { apiKey: KEY },
@@ -722,7 +733,9 @@ describe("the platform's own rules, held by the fixture", () => {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
-        type: "retell",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_0002" },
         credentials: { apiKey: OTHER_KEY },
@@ -731,16 +744,18 @@ describe("the platform's own rules, held by the fixture", () => {
 
     expect(second.status).toBe(201);
     expect(((await second.json()) as { connection: { name: string } }).connection.name).toBe(
-      "retell-2",
+      "retell_chat_api-2",
     );
 
     const clash = await fetch(`${platform.url}/api/agents/${agentId}/connections`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
-        name: "retell-1",
-        type: "retell",
-        modality: "voice",
+        name: "retell_chat_api-1",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
+        modality: "chat",
         config: { retellAgentId: "agent_0003" },
         credentials: { apiKey: OTHER_KEY },
       }),
@@ -789,9 +804,12 @@ describe("a registration answer this build cannot read", () => {
   const AGENT = { id: "agt_01K000000000000000000000AA", name: "order-line" };
   const CONNECTION = {
     id: "con_01K000000000000000000000BB",
-    name: "retell-1",
-    type: "retell",
-    modality: "voice",
+    name: "retell_chat_api-1",
+    agent_platform: "retell",
+    connection_kind: "retell_chat_api",
+    access_variant: "retell_chat_api.api_key",
+    modality: "chat",
+    product_label: "Retell chat",
     credentials_hint: "WXYZ",
   };
 
@@ -811,8 +829,10 @@ describe("a registration answer this build cannot read", () => {
       {
         name: "order-line",
         connection: {
-          type: "retell",
-          modality: "voice",
+          agentPlatform: "retell",
+          connectionKind: "retell_chat_api",
+          accessVariant: "retell_chat_api.api_key",
+          modality: "chat",
           config: { retellAgentId: "agent_0001" },
         },
       },
@@ -824,27 +844,12 @@ describe("a registration answer this build cannot read", () => {
     );
   }
 
-  it("reads a reply that names no outcome as a creation, which is what it was", async () => {
-    // Every egma before the field existed answered exactly this, and a reply
-    // carrying an agent and a connection meant one thing then: both were
-    // written. That is the only reading that cannot describe a write egma did
-    // not make, so it stays.
+  it("refuses a reply that names no outcome instead of decoding an old response", async () => {
     const answer = await register({ agent: AGENT, connection: CONNECTION });
 
     expect(answer).toEqual({
-      kind: "registered",
-      registered: {
-        result: "created",
-        agent: AGENT,
-        connection: {
-          id: CONNECTION.id,
-          name: "retell-1",
-          type: "retell",
-          modality: "voice",
-          credentialsHint: "WXYZ",
-          config: {},
-        },
-      },
+      kind: "refused",
+      reason: "Egma answered without saying what it wrote. Check that this Egma instance is up to date.",
     });
   });
 

@@ -80,7 +80,9 @@ it("refuses a repository bound to another real local platform before sending its
         name: "Real receptionist",
         connection: {
           name: "real-retell-1",
-          type: "retell",
+          agent_platform: "retell",
+          connection_kind: "retell_chat_api",
+          access_variant: "retell_chat_api.api_key",
           modality: "chat",
           config: { retellAgentId: "synthetic-agent-on-platform-a" },
           credentials: { apiKey: "synthetic-key-used-only-by-this-test" },
@@ -281,7 +283,9 @@ it("refuses when the bound real platform is down, and reaches no other platform"
         name: "Real receptionist",
         connection: {
           name: "real-retell-down",
-          type: "retell",
+          agent_platform: "retell",
+          connection_kind: "retell_chat_api",
+          access_variant: "retell_chat_api.api_key",
           modality: "chat",
           config: { retellAgentId: "synthetic-agent-on-the-bound-platform" },
           credentials: { apiKey: "synthetic-key-used-only-by-this-test" },

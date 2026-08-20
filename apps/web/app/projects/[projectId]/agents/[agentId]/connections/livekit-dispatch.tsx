@@ -5,7 +5,7 @@ import {
   Select,
   TextInput,
 } from "../../../../../../ui/controls.tsx";
-import type { ConnectionVariant } from "../../../../../../lib/connection-types.ts";
+import type { ConnectionOption } from "../../../../../../lib/connection-options.ts";
 
 export type LiveKitDispatch = "named" | "automatic";
 
@@ -16,7 +16,7 @@ export type LiveKitDispatchForm = {
   readonly mode: LiveKitDispatch;
   readonly agentName: string;
   readonly ready: boolean;
-  readonly variant: ConnectionVariant | undefined;
+  readonly option: ConnectionOption | undefined;
 };
 
 /** A new LiveKit connection uses the safest, deterministic dispatch contract. */
@@ -35,22 +35,22 @@ export function savedLiveKitDispatch(
  * Describe the LiveKit-specific part of a connection form.
  *
  * Both create and edit use this model so field extraction and readiness cannot
- * drift apart. The returned variant omits `agentName`, which this module owns.
+ * drift apart. The returned option omits `agentName`, which this module owns.
  */
 export function liveKitDispatchForm({
-  type,
-  variant,
+  connectionKind,
+  option,
   config,
   mode,
 }: {
-  readonly type: string | undefined;
-  readonly variant: ConnectionVariant | undefined;
+  readonly connectionKind: string | undefined;
+  readonly option: ConnectionOption | undefined;
   readonly config: LiveKitConfig;
   readonly mode: LiveKitDispatch;
 }): LiveKitDispatchForm {
   const enabled =
-    type === "livekit" &&
-    variant?.fields.some((field) => field.key === "agentName") === true;
+    connectionKind === "livekit_room" &&
+    option?.fields.some((field) => field.key === "agentName") === true;
   const agentName = config.agentName ?? "";
 
   return {
@@ -58,13 +58,13 @@ export function liveKitDispatchForm({
     mode,
     agentName,
     ready: !enabled || mode === "automatic" || agentName.trim().length > 0,
-    variant:
-      enabled && variant !== undefined
+    option:
+      enabled && option !== undefined
         ? {
-            ...variant,
-            fields: variant.fields.filter((field) => field.key !== "agentName"),
+            ...option,
+            fields: option.fields.filter((field) => field.key !== "agentName"),
           }
-        : variant,
+        : option,
   };
 }
 

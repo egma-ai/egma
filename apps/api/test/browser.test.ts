@@ -98,15 +98,18 @@ const browserRetellFetch: typeof fetch = async (input, init) => {
       { status: 200 },
     );
   }
-  if (url.pathname === "/list-phone-numbers") {
+  if (url.pathname === "/v2/list-phone-numbers") {
     return new Response(
-      JSON.stringify([
-        {
-          phone_number: BROWSER_RETELL_NUMBER,
-          nickname: "Support",
-          inbound_agents: [{ agent_id: BROWSER_RETELL_AGENT }],
-        },
-      ]),
+      JSON.stringify({
+        items: [
+          {
+            phone_number: BROWSER_RETELL_NUMBER,
+            nickname: "Support",
+            inbound_agents: [{ agent_id: BROWSER_RETELL_AGENT }],
+          },
+        ],
+        has_more: false,
+      }),
       { status: 200 },
     );
   }
@@ -2605,7 +2608,7 @@ describe("the complete product, walked in order in a second project", () => {
         .replace(/\/connections\/new\?onboarding=connection$/u, "");
       // The form is drawn from the registry rather than from a list in the
       // browser, so waiting for the first field is waiting for that read.
-      await walk.waitForSelector("#connection-type");
+      await walk.waitForSelector("#agent-platform");
 
       await walk.fill("#connection-name", "Retell staging");
       await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
@@ -2630,12 +2633,14 @@ describe("the complete product, walked in order in a second project", () => {
         config: Record<string, unknown>;
         credentials: string | null;
       }>(
-        `select id, type, modality, config, credentials
+        `select id, agent_platform, connection_kind, access_variant, modality, config, credentials
            from connection where name = 'Retell staging'`,
       );
       expect(stored.rows).toHaveLength(1);
       expect(stored.rows[0]).toMatchObject({
-        type: "phone",
+        agent_platform: "retell",
+        connection_kind: "phone_number",
+        access_variant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: BROWSER_RETELL_NUMBER },
         credentials: null,

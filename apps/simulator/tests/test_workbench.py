@@ -223,7 +223,9 @@ def test_only_the_specs_that_dial_are_queued():
 
     queued = dialling(every, "+12025550143")
 
-    assert [spec["connection"]["type"] for spec in queued] == ["phone"]
+    assert [spec["connection"]["connection_kind"] for spec in queued] == [
+        "phone_number"
+    ]
 
 
 def test_a_number_with_nothing_to_dial_it_is_refused_rather_than_ignored():

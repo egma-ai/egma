@@ -27,13 +27,14 @@ class LoopbackCounterpart:
         self,
         *,
         modality: str,
+        access_variant: str,
         config: dict[str, Any],
         credentials: object,
         simulation_id: str | None = None,
         mock_tools: object = None,
         media: object = None,
     ) -> None:
-        del credentials, simulation_id, mock_tools, media
+        del access_variant, credentials, simulation_id, mock_tools, media
         if modality != "voice":
             raise PlugError(
                 f"the loopback counterpart speaks voice only; a {modality!r} "

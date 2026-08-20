@@ -112,13 +112,13 @@ def test_credentials_from_an_accepted_spec_are_registered_for_redaction(tmp_path
     assert service._secrets.redact("saw hunter2-not-real here") == "saw [redacted] here"
 
 
-def test_a_spec_naming_an_unplugged_connection_type_is_refused(tmp_path, caplog):
+def test_a_spec_naming_an_unplugged_connection_kind_is_refused(tmp_path, caplog):
     """No plug for the type: the claim is refused out loud, nothing reported."""
     service = a_service(tmp_path, capacity=4)
     executor = RecordingExecutor(capacity=4)
 
     unplugged = scripted_spec("sim-unplugged")
-    unplugged["connection"]["type"] = "a-platform-with-no-plug-yet"
+    unplugged["connection"]["connection_kind"] = "a-connection-with-no-plug-yet"
     good = scripted_spec("sim-plugged")
 
     service._accept([unplugged, good], executor)
@@ -235,7 +235,7 @@ def test_the_typed_spec_reads_what_the_document_says():
     assert spec.modality == "chat"
     assert spec.scenario_instructions == "Hello there."
     assert spec.limits.max_turns == 7
-    assert spec.connection_type == "scripted"
+    assert spec.connection_kind == "scripted"
     assert spec.persona_traits["language"] == "en-US"
 
 

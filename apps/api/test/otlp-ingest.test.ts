@@ -322,11 +322,28 @@ describe("the captured trace, posted at the door", () => {
     expect(row?.payload).toContain("telemetry.sdk.version");
   });
 
-  it("says which framework the agent was reached over", async () => {
-    const rows = await store().rows<{ connection_type: string }>(
-      "select distinct connection_type from spans",
+  it("records LiveKit Agents as the platform without inventing a connection kind", async () => {
+    const rows = await store().rows<{
+      agent_platform: string;
+      connection_type: string;
+    }>(
+      "select distinct agent_platform, connection_type from spans",
     );
-    expect(rows).toEqual([{ connection_type: "livekit" }]);
+    expect(rows).toEqual([
+      { agent_platform: "livekit_agents", connection_type: "" },
+    ]);
+  });
+
+  it("keeps an unproven LiveKit agent label in payload without calling it an agent name", async () => {
+    const rows = await store().rows<{ platform_agent_name: string }>(
+      "select distinct platform_agent_name from spans",
+    );
+    expect(rows).toEqual([{ platform_agent_name: "" }]);
+    const [root] = await store().rows<{ payload: string }>(
+      "select payload from spans where kind = 'root' limit 1",
+    );
+    expect(root?.payload).toContain("lk.agent_label");
+    expect(root?.payload).toContain("kelly");
   });
 
   it("pins no run, no agent and no versions, because nothing here started one", async () => {

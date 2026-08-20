@@ -7,7 +7,7 @@ import {
   CAPABILITY_CATALOG,
   capabilityStanding,
   CapabilityCheckFailedError,
-  connectionTypeMetadata,
+  connectionOptionMetadata,
   ConnectionRestoreRefusedError,
   getAgent,
   getConnection,
@@ -24,9 +24,11 @@ import {
   updateAgent,
   updateConnection,
   type Agent,
+  type AccessVariant,
+  type AgentPlatform,
   type AuthContext,
   type Connection,
-  type ConnectionType,
+  type ConnectionKind,
   type Modality,
   type NewConnection,
   type RestoreCredential,
@@ -43,9 +45,6 @@ import {
 } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { platformEvent, safeExceptionType } from "../platform-log.ts";
-import type { RetellReach } from "../retell/api.ts";
-import { reconcileRetellWebhook } from "../retell/registration.ts";
 import { given, projectNamed, text } from "../http/reading.ts";
 import {
   discoverRetellVoiceAgents,
@@ -92,14 +91,6 @@ export type AgentRoutesOptions = {
   readonly rateLimit: RateLimit;
   /** Test seam for Retell account reads. Production uses the global fetch. */
   readonly retellFetch?: typeof fetch | undefined;
-  /**
-   * The origin this deployment is reached at. Switching production watching on
-   * registers a webhook at it, when it is an address a provider could reach —
-   * and quietly does not when it is not, which is every laptop.
-   */
-  readonly baseUrl: string;
-  /** Where Retell answers. A test stands a Retell-shaped server on loopback. */
-  readonly retellReach?: RetellReach;
 };
 
 type Body = Record<string, unknown>;
@@ -381,7 +372,6 @@ const CONNECTION_EDIT_KEYS = [
   "environment",
   "config",
   "credentials",
-  "watch_production",
   "expected_revision",
 ] as const;
 const CONNECTION_RESTORE_KEYS = [
@@ -393,7 +383,9 @@ const CONNECTION_RESTORE_KEYS = [
 const AGENT_KEYS = ["name", "description", "project", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
-  "type",
+  "agent_platform",
+  "connection_kind",
+  "access_variant",
   "modality",
   "environment",
   "config",
@@ -405,13 +397,13 @@ const CONNECTION_KEYS = [
  * standalone on an attach.
  *
  * Almost nothing is checked here: the registry behind the seam owns what a
- * type's config holds, which modalities it speaks and whether it takes a
+ * access variant's config fields and credential rule, and the kind's modalities,
  * credential, and it says so in sentences written to be relayed. Duplicating
  * any of that would produce a second opinion that could disagree. What this
  * does own is the shape of the envelope: which keys exist at all, and that the
  * ones carrying text carry text.
  *
- * **Topology is not in the list on purpose.** It is derived from the type — it
+ * **Topology is not in the list on purpose.** It is derived from the connection kind — it
  * predicts who moves first when a simulation starts — so a guess would just be
  * wrong, and a supplied one is refused as the unknown key it is.
  */
@@ -434,10 +426,21 @@ function connectionIn(value: unknown): NewConnection | Refusal {
     // "a connection needs a name" is what comes back. Absent is different and
     // means the smallest free numbered name.
     ...(typeof body.name === "string" ? { name: name ?? "" } : {}),
-    // Handed on as they arrived. The registry names an unknown type, a
-    // modality the type does not speak and a config key it has no place for,
+    // Handed on as they arrived. The registry names an unsupported tuple, a
+    // config key it has no place for, and a credential that does not belong,
     // each in its own words.
-    type: (typeof body.type === "string" ? body.type : "") as ConnectionType,
+    agentPlatform:
+      body.agent_platform === null
+        ? null
+        : ((typeof body.agent_platform === "string"
+            ? body.agent_platform
+            : "") as AgentPlatform),
+    connectionKind: (typeof body.connection_kind === "string"
+      ? body.connection_kind
+      : "") as ConnectionKind,
+    accessVariant: (typeof body.access_variant === "string"
+      ? body.access_variant
+      : "") as AccessVariant,
     modality: (typeof body.modality === "string"
       ? body.modality
       : "") as Modality,
@@ -492,9 +495,11 @@ function describedConnection(one: Connection): Record<string, unknown> {
     agent_id: one.agentId,
     project_id: one.projectId,
     name: one.name,
-    type: one.type,
-    variant_id: one.variantId,
+    agent_platform: one.agentPlatform,
+    connection_kind: one.connectionKind,
+    access_variant: one.accessVariant,
     modality: one.modality,
+    product_label: one.productLabel,
     topology: one.topology,
     environment: one.environment,
     config: one.config,
@@ -503,13 +508,6 @@ function describedConnection(one: Connection): Record<string, unknown> {
     credential_present: one.credentialsHint !== null,
     credentials_hint: one.credentialsHint,
     capabilities: describedCapabilities(one),
-    // The switch, and whether egma got a webhook registered for it. Two fields
-    // rather than one because they are two facts: a deployment with no public
-    // address watches by polling, which is watching, and a reader who saw only
-    // the second would think nothing was happening.
-    watch_production: one.watchProduction,
-    webhook_registered: one.webhookRegisteredAt !== null,
-    webhook_registered_at: one.webhookRegisteredAt?.toISOString() ?? null,
     revision: one.revision,
     archived: one.archivedAt !== null,
     archived_at: one.archivedAt?.toISOString() ?? null,
@@ -804,7 +802,9 @@ export async function agentRoutes(
 
       const added = await addConnection(acting, agentId, {
         ...(name === undefined ? {} : { name }),
-        type: "phone",
+        agentPlatform: "retell",
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: checked.number },
       });
@@ -814,10 +814,11 @@ export async function agentRoutes(
   );
 
   /**
-   * Every connection type egma supports, as a form may be drawn from it.
+   * Every simulation connection option egma supports, as a form may be drawn
+   * from it.
    *
    * **The web application must never keep its own copy of any of this.** The
-   * registry decides which config keys a shape holds, which modalities the type
+   * registry decides which config keys an access variant holds, which modalities the kind
    * speaks, and whether a credential is required, forbidden or optional; a
    * second handwritten copy in a browser would be a second opinion able to
    * disagree with the gate, and the disagreement would surface as a form that
@@ -827,41 +828,40 @@ export async function agentRoutes(
    * **What crosses is labels, field shapes, the credential rule and two adapter
    * facts.** No gate function, no hint function, no refusal sentence, no
    * credential value. It is built by reading the registry rather than by
-   * copying it, so nothing can be left behind when a type is added.
+   * copying it, so nothing can be left behind when an option is added.
    */
-  app.get("/api/connection-types", async (_request, reply) => {
+  app.get("/api/connection-options", async (_request, reply) => {
     return reply.send({
-      items: connectionTypeMetadata().map((type) => ({
-        type: type.type,
-        label: type.label,
-        modalities: type.modalities,
-        topology: type.topology,
-        // Whether egma can conduct a run over this type at all, and whether it
-        // ships anything that can measure one of its targets. Two different
+      items: connectionOptionMetadata().map((option) => ({
+        agent_platform: option.agentPlatform,
+        agent_platform_label: option.agentPlatformLabel,
+        connection_kind: option.connectionKind,
+        access_variant: option.accessVariant,
+        access_variant_label: option.accessVariantLabel,
+        modality: option.modality,
+        product_label: option.productLabel,
+        topology: option.topology,
+        // Whether egma can conduct a run over this option at all, and whether
+        // it ships anything that can measure one of its targets. Two different
         // facts, and a form says both rather than implying either.
-        simulator_adapter: type.simulatorAdapter,
-        capability_discovery: type.capabilityDiscovery,
-        variants: type.variants.map((variant) => ({
-          id: variant.id,
-          label: variant.label,
-          chosen_by: variant.chosenBy,
-          fields: variant.fields.map((field) => ({
-            key: field.key,
-            label: field.label,
-            kind: field.kind,
-            required: field.required,
-            help: field.help,
-            after_credentials: field.afterCredentials === true,
-          })),
-          credential_rule: variant.credentialRule,
-          credential_help: variant.credentialHelp,
-          credential_fields: variant.credentialFields.map((field) => ({
-            field: field.field,
-            label: field.label,
-            kind: field.kind,
-            required: field.required,
-            help: field.help,
-          })),
+        simulator_adapter: option.simulatorAdapter,
+        capability_discovery: option.capabilityDiscovery,
+        fields: option.fields.map((field) => ({
+          key: field.key,
+          label: field.label,
+          kind: field.kind,
+          required: field.required,
+          help: field.help,
+          after_credentials: field.afterCredentials === true,
+        })),
+        credential_rule: option.credentialRule,
+        credential_help: option.credentialHelp,
+        credential_fields: option.credentialFields.map((field) => ({
+          field: field.field,
+          label: field.label,
+          kind: field.kind,
+          required: field.required,
+          help: field.help,
         })),
       })),
     });
@@ -913,7 +913,7 @@ export async function agentRoutes(
      * the two ignores the other rather than refusing it, and for what that cost
      * this very route.
      *
-     * The type gate stays this group's own, and it has to run first: a
+     * The connection gate stays this group's own, and it has to run first: a
      * `project` that is not text is refused **by name** here, and
      * `projectNamed` would read it as absent and fall back to the credential's
      * own project — silently, which is the thing this route already got wrong
@@ -1141,7 +1141,7 @@ export async function agentRoutes(
 
   /**
    * Bring an agent back — and only the agent. Its connections stay archived
-   * until each is restored on its own shape's credential terms.
+   * until each is restored on its own access variant's credential terms.
    */
   app.post("/api/agents/:agentId/restore", async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1223,17 +1223,6 @@ export async function agentRoutes(
       const acting = await actingProject(auth, request, "writes into");
       if (isRefusal(acting)) return refused(reply, acting);
 
-      const watching = body.watch_production;
-      if (watching !== undefined && typeof watching !== "boolean") {
-        return refused(
-          reply,
-          invalid(
-            "watch_production is true or false: whether Egma stores this " +
-              "connection's production traffic as production traces",
-          ),
-        );
-      }
-
       const updated = await updateConnection(acting, agentId, connectionId, {
         ...(name === undefined ? {} : { name }),
         ...(body.environment === undefined ? {} : { environment }),
@@ -1247,54 +1236,10 @@ export async function agentRoutes(
                 Record<string, unknown>
               >,
             }),
-        ...(watching === undefined ? {} : { watchProduction: watching }),
         ...(revision === undefined ? {} : { expectedRevision: revision }),
       });
 
       if (updated === undefined) return refused(reply, NO_SUCH_CONNECTION);
-
-      // The switch moved, so the provider's own webhook is brought into line
-      // with it. **Never fatal.** Registration is an accelerator on top of a
-      // pull floor that is already running, so a deployment with no public
-      // address completes silently and a Retell that would not take the change
-      // costs seconds rather than conversations.
-      if (watching !== undefined && updated.type === "retell") {
-        const outcome = await reconcileRetellWebhook(
-          acting,
-          connectionId,
-          watching,
-          options.baseUrl,
-          options.retellReach ?? {},
-        ).catch((cause: unknown) => {
-          request.log.error(
-            platformEvent(
-              "egma.retell.webhook.reconcile_failed",
-              "Retell webhook reconciliation failed; Egma will poll this connection",
-              {
-                "error.type": "retell_webhook_reconcile_failed",
-                "exception.type": safeExceptionType(cause),
-              },
-            ),
-          );
-          return undefined;
-        });
-
-        if (outcome?.kind === "not-taken") {
-          request.log.info(
-            platformEvent(
-              "egma.retell.webhook.reconcile_deferred",
-              "Retell did not take the webhook change; Egma will poll this connection",
-              { "error.type": "retell_webhook_not_taken" },
-            ),
-          );
-        }
-
-        // Read back, because a successful registration stamped the row.
-        const settled = await getConnection(acting, agentId, connectionId);
-        if (settled !== undefined) {
-          return reply.send({ connection: describedConnection(settled) });
-        }
-      }
 
       return reply.send({ connection: describedConnection(updated) });
     },
@@ -1332,7 +1277,7 @@ export async function agentRoutes(
   );
 
   /**
-   * Bring a connection back, on the terms its own shape sets — and never on
+   * Bring a connection back, on the terms its own access variant sets — and never on
    * the credential it was archived with.
    */
   app.post(

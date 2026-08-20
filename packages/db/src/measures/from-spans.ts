@@ -118,8 +118,8 @@ export type MeasuredFromSpans = {
    */
   readonly origin: "timed" | "derived" | "reported";
   /**
-   * Who reported it — `retell`, exactly as the connection type names the
-   * platform — and the empty string for every measure egma measured itself.
+   * Who reported it — the agent platform name, such as `retell` — and the
+   * empty string for every measure egma measured itself.
    *
    * Empty rather than absent, so that reading it is never a narrowing: anything
    * printing a platform's name asks `origin === "reported"` first, and there is

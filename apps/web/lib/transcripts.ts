@@ -34,8 +34,12 @@ export type Facts = {
   readonly source: string;
   readonly emitter: string;
   readonly environment: string;
-  readonly connection_type: string;
+  readonly connection_kind: string;
   readonly provider_call_id: string;
+  readonly agent_platform: string;
+  readonly platform_agent_id: string;
+  readonly platform_agent_name: string;
+  readonly platform_agent_version: string;
   readonly run_id: string;
   readonly agent_id: string;
 };
@@ -236,6 +240,18 @@ export function turnsCited(one: Judgment): readonly number[] {
 export function humanizeIdentifier(value: string): string {
   const words = value.replaceAll(/[_-]+/g, " ").trim();
   return words === "" ? value : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
+}
+
+/** The platform vocabulary as a person reads it, with unknown values kept. */
+export function agentPlatformLabel(value: string): string {
+  switch (value) {
+    case "retell":
+      return "Retell";
+    case "livekit_agents":
+      return "LiveKit Agents";
+    default:
+      return humanizeIdentifier(value);
+  }
 }
 
 /**

@@ -31,22 +31,31 @@
       "enum": ["chat", "voice"]
     },
     "connection": {
-      "description": "How the simulator reaches the agent under test, resolved by the control plane from the connection the run named. The simulator selects its platform plug by `type` and hands the plug the config and credentials whole.",
+      "description": "How the simulator reaches the agent under test. Connection kind selects the adapter, access variant selects the authority and configuration inside it, and agent platform records what runs the target without selecting code.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "config", "credentials"],
+      "required": ["agent_platform", "connection_kind", "access_variant", "config", "credentials"],
       "properties": {
-        "type": {
-          "description": "The connection type, from the platform's open, growing list — `retell`, `phone`, and whatever lands next. Deliberately not an enum here: the list grows one plug at a time, and a simulator holding no plug for a type refuses the claim at runtime rather than this schema refusing the document.",
+        "agent_platform": {
+          "description": "The product or framework that runs or exposes the agent, or null when unknown. It records provenance and never selects simulator code.",
+          "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }]
+        },
+        "connection_kind": {
+          "description": "The direct path the simulator selects. It is an open vocabulary so a simulator without the named adapter can refuse it clearly at runtime.",
+          "type": "string",
+          "minLength": 1
+        },
+        "access_variant": {
+          "description": "The configuration and authority used inside the selected connection kind. It is explicit and is never inferred from config keys.",
           "type": "string",
           "minLength": 1
         },
         "config": {
-          "description": "The non-secret reach configuration, exactly as stored on the connection — what to reach, never how to prove. Its keys belong to the plug for `type`; this schema does not know them.",
+          "description": "The non-secret reach configuration, exactly as stored on the connection. Its keys belong to the selected access variant; this schema does not know them.",
           "type": "object"
         },
         "credentials": {
-          "description": "The resolved secret material for this connection, unsealed by the control plane for exactly this hand-off, or null for types where the customer supplies no secret. The simulator holds it in memory for the simulation, hands it only to the plug, and never logs, persists, or reports it. No report document has anywhere to put it.",
+          "description": "The resolved secret material for this connection, unsealed by the control plane for exactly this hand-off, or null where the access variant takes no customer secret. The simulator holds it in memory, hands it only to the adapter, and never logs, persists, or reports it.",
           "oneOf": [{ "type": "object" }, { "type": "null" }]
         }
       }

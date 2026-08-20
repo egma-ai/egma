@@ -11,15 +11,15 @@ import {
   type ListedConnection,
 } from "../../../../../../../lib/agents.ts";
 import {
-  CONNECTION_TYPES_PATH,
+  agentPlatformChoices,
+  CONNECTION_OPTIONS_PATH,
+  optionsForPlatform,
   RETELL_VOICE_AGENTS_PATH,
   retellPhoneConnectionPath,
-  typeNamed,
-  type ConnectionTypeCatalog,
-  type ConnectionVariant,
+  type ConnectionOptionCatalog,
   type RetellVoiceAgent,
   type RetellVoiceAgents,
-} from "../../../../../../../lib/connection-types.ts";
+} from "../../../../../../../lib/connection-options.ts";
 import { roleOf } from "../../../../../../../lib/me.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
@@ -67,10 +67,6 @@ export default function NewConnectionPage() {
   );
 }
 
-function voiceFirst(modalities: readonly string[]): string {
-  return modalities.includes("voice") ? "voice" : (modalities[0] ?? "");
-}
-
 function NewConnection({
   projectId,
   agentId,
@@ -83,12 +79,11 @@ function NewConnection({
   const onboarding = searchParams.get("onboarding") === "connection";
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
-  const [catalog, setCatalog] = useState<ConnectionTypeCatalog | null>(null);
+  const [catalog, setCatalog] = useState<ConnectionOptionCatalog | null>(null);
   const [catalogRefused, setCatalogRefused] = useState<Refusal | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [provider, setProvider] = useState<string | null>(null);
-  const [variantId, setVariantId] = useState<string | null>(null);
-  const [modality, setModality] = useState("");
+  const [platformValue, setPlatformValue] = useState("");
+  const [accessVariant, setAccessVariant] = useState("");
   const [name, setName] = useState("");
   const [draft, setDraft] = useState<Draft>({ config: {}, credentials: {} });
   const [livekitDispatch, setLivekitDispatch] =
@@ -115,7 +110,7 @@ function NewConnection({
     let current = true;
     setCatalog(null);
     setCatalogRefused(null);
-    void readJson<ConnectionTypeCatalog>(CONNECTION_TYPES_PATH).then((read) => {
+    void readJson<ConnectionOptionCatalog>(CONNECTION_OPTIONS_PATH).then((read) => {
       if (!current) return;
       if (read.status === "signed-out") {
         window.location.replace("/sign-in");
@@ -123,9 +118,8 @@ function NewConnection({
         setCatalog(read.value);
         const first = read.value.items[0];
         if (first !== undefined) {
-          setProvider(first.type);
-          setVariantId(first.variants[0]?.id ?? null);
-          setModality(voiceFirst(first.modalities));
+          setPlatformValue(first.agent_platform ?? "unknown");
+          setAccessVariant(first.access_variant);
         }
       } else {
         setCatalogRefused(read.refusal);
@@ -142,12 +136,18 @@ function NewConnection({
     }
   }, [parentAgent]);
 
-  const described = typeNamed(catalog, provider ?? "");
-  const variant = described?.variants.find((one) => one.id === variantId);
+  const selectedPlatform = platformValue === "unknown" ? null : platformValue;
+  const platformOptions = optionsForPlatform(catalog, selectedPlatform);
+  const option = platformOptions.find(
+    (one) => one.access_variant === accessVariant,
+  );
+  const retellPhone =
+    option?.agent_platform === "retell" &&
+    option.connection_kind === "phone_number";
   const chosenRetell = retellAgents?.find((one) => one.id === retellAgentId);
   const liveKitForm = liveKitDispatchForm({
-    type: described?.type,
-    variant,
+    connectionKind: option?.connection_kind,
+    option,
     config: draft.config,
     mode: livekitDispatch,
   });
@@ -162,11 +162,11 @@ function NewConnection({
 
   const mayAuthor = role !== null && canAuthor(role);
 
-  function chooseProvider(next: string): void {
-    const chosen = typeNamed(catalog, next);
-    setProvider(next);
-    setVariantId(chosen?.variants[0]?.id ?? null);
-    setModality(voiceFirst(chosen?.modalities ?? []));
+  function choosePlatform(next: string): void {
+    const platform = next === "unknown" ? null : next;
+    const chosen = optionsForPlatform(catalog, platform)[0];
+    setPlatformValue(next);
+    setAccessVariant(chosen?.access_variant ?? "");
     setDraft({ config: {}, credentials: {} });
     setLivekitDispatch(newLiveKitDispatch());
     setRetellKey("");
@@ -177,8 +177,8 @@ function NewConnection({
     setRefused(null);
   }
 
-  function chooseVariant(next: string): void {
-    setVariantId(next);
+  function chooseOption(next: string): void {
+    setAccessVariant(next);
     setDraft({ config: {}, credentials: {} });
     setLivekitDispatch(newLiveKitDispatch());
   }
@@ -225,13 +225,13 @@ function NewConnection({
   }
 
   async function add(): Promise<void> {
-    if (!mayAuthor || saving || described === undefined || variant === undefined) {
+    if (!mayAuthor || saving || option === undefined) {
       return;
     }
 
     let body: Record<string, unknown>;
     let path = connectionsPath(agentId);
-    if (described.type === "retell") {
+    if (retellPhone) {
       if (
         chosenRetell === undefined ||
         retellNumber === "" ||
@@ -252,21 +252,23 @@ function NewConnection({
       path = retellPhoneConnectionPath(agentId);
     } else {
       const config: Record<string, string> = {};
-      for (const field of variant.fields) {
+      for (const field of option.fields) {
         const written = draft.config[field.key]?.trim() ?? "";
         if (written !== "") config[field.key] = written;
       }
       const credentials: Record<string, string> = {};
-      for (const field of variant.credential_fields) {
+      for (const field of option.credential_fields) {
         const written = draft.credentials[field.field]?.trim() ?? "";
         if (written !== "") credentials[field.field] = written;
       }
       body = {
         ...(name.trim() === "" ? {} : { name: name.trim() }),
-        type: described.type,
-        modality,
+        agent_platform: option.agent_platform,
+        connection_kind: option.connection_kind,
+        access_variant: option.access_variant,
+        modality: option.modality,
         config,
-        ...(variant.credential_rule === "forbidden" ||
+        ...(option.credential_rule === "forbidden" ||
         Object.keys(credentials).length === 0
           ? {}
           : { credentials }),
@@ -289,7 +291,7 @@ function NewConnection({
     } else if (answer.status !== "ready") {
       setRefused(answer.refusal);
     } else {
-      if (described.type === "retell") setRetellKey("");
+      if (retellPhone) setRetellKey("");
       router.push(
         onboarding
           ? projectPath(projectId, "agents", agentId, "onboarding")
@@ -355,7 +357,7 @@ function NewConnection({
         {header}
         <PageBody>
           <Failure
-            title="Egma could not describe the connection types."
+            title="Egma could not describe the connection options."
             message={catalogRefused.message}
             onRetry={() => setAttempt((current) => current + 1)}
           />
@@ -365,22 +367,21 @@ function NewConnection({
   }
   if (
     catalog === null ||
-    described === undefined ||
-    variant === undefined ||
-    liveKitForm.variant === undefined
+    option === undefined ||
+    liveKitForm.option === undefined
   ) {
     return (
       <ProductPage>
         {header}
         <PageBody>
-          <Loading what="the connection types" />
+          <Loading what="the connection options" />
         </PageBody>
       </ProductPage>
     );
   }
 
   const retellReady =
-    described.type !== "retell" ||
+    !retellPhone ||
     (chosenRetell !== undefined &&
       retellNumber !== "" &&
       retellKey.trim() !== "");
@@ -397,17 +398,34 @@ function NewConnection({
       <PageBody>
         {onboarding ? <AgentOnboardingProgress current="connection" /> : null}
         <Form onSubmit={() => void add()}>
-          <Field label="Platform" htmlFor="connection-type">
+          <Field label="Platform" htmlFor="agent-platform">
             <Select
-              id="connection-type"
-              value={described.type}
-              options={catalog.items.map((item) => ({
-                value: item.type,
+              id="agent-platform"
+              value={platformValue}
+              options={agentPlatformChoices(catalog).map((item) => ({
+                value: item.value,
                 label: item.label,
               }))}
-              onChange={chooseProvider}
+              onChange={choosePlatform}
             />
           </Field>
+
+          {platformOptions.length > 1 ? (
+            <Field label="Access" htmlFor="access-variant">
+              <Select
+                id="access-variant"
+                value={option.access_variant}
+                options={platformOptions.map((item) => ({
+                  value: item.access_variant,
+                  label: item.access_variant_label,
+                }))}
+                onChange={chooseOption}
+              />
+              <Help>
+                {option.modality === "voice" ? "Voice" : "Chat"} connection
+              </Help>
+            </Field>
+          ) : null}
 
           <Field label="Connection name (optional)" htmlFor="connection-name">
             <TextInput
@@ -419,7 +437,7 @@ function NewConnection({
             <Help>The label shown for this connection in Egma.</Help>
           </Field>
 
-          {described.type === "retell" ? (
+          {retellPhone ? (
             <RetellSetup
               apiKey={retellKey}
               agents={retellAgents}
@@ -440,36 +458,8 @@ function NewConnection({
             />
           ) : (
             <>
-              {described.variants.length > 1 ? (
-                <Field label="Access" htmlFor="connection-variant">
-                  <Select
-                    id="connection-variant"
-                    value={variant.id}
-                    options={described.variants.map((item) => ({
-                      value: item.id,
-                      label: item.label,
-                    }))}
-                    onChange={chooseVariant}
-                  />
-                </Field>
-              ) : null}
-
-              {described.modalities.length > 1 ? (
-                <Field label="Modality" htmlFor="connection-modality">
-                  <Select
-                    id="connection-modality"
-                    value={modality}
-                    options={described.modalities.map((item) => ({
-                      value: item,
-                      label: item === "voice" ? "Voice" : "Text",
-                    }))}
-                    onChange={setModality}
-                  />
-                </Field>
-              ) : null}
-
               <ConnectionFields
-                variant={liveKitForm.variant}
+                option={liveKitForm.option}
                 draft={draft}
                 onChange={setDraft}
                 credentialsEditable

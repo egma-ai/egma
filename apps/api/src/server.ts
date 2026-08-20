@@ -24,6 +24,7 @@ import { invitationRoutes } from "./routes/invitations.ts";
 import { judgeRoutes } from "./routes/judge.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { monitoringRoutes } from "./routes/monitoring.ts";
 import { organizationRoutes } from "./routes/organization.ts";
 import { personaRoutes } from "./routes/personas.ts";
 import { projectRoutes } from "./routes/projects.ts";
@@ -32,7 +33,6 @@ import { passwordResetRoutes } from "./routes/password-reset.ts";
 import { platformRoutes } from "./routes/platform.ts";
 import { platformSettingsRoutes } from "./routes/platform-settings.ts";
 import { recordingRoutes } from "./routes/recordings.ts";
-import { retellWebhookRoutes } from "./routes/retell-webhook.ts";
 import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
@@ -44,9 +44,9 @@ import { traceRoutes } from "./routes/traces.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
 import {
-  startProductionSweep,
-  type ProductionSweep,
-} from "./production-sweep.ts";
+  startRetellProductionIngestion,
+  type RetellProductionIngestion,
+} from "./retell-production-ingestion.ts";
 import type { RetellReach } from "./retell/api.ts";
 import { startOrphanSweep, type OrphanSweep } from "./simulation-sweep.ts";
 import type { Config } from "./config.ts";
@@ -90,14 +90,13 @@ export type ServerOptions = {
    */
   readonly orphanSweepIntervalMilliseconds?: number;
   /**
-   * How often the standing production sweep polls watched connections.
-   * Defaults to the ~30s cadence; a test hands in a shorter one, or leaves the
-   * loop off entirely by driving `runProductionSweep` itself.
+   * How often the standing Retell production-ingestion loop checks for due
+   * Monitoring targets. Each target keeps its own stable ~30s schedule.
    */
-  readonly productionSweepIntervalMilliseconds?: number;
+  readonly retellProductionIngestionIntervalMilliseconds?: number;
   /**
-   * Where Retell answers, for the poller and for webhook registration. Absent
-   * is Retell itself; a test stands a Retell-shaped server on loopback.
+   * Where Retell answers production-ingestion reads. Absent is Retell itself;
+   * a test stands a Retell-shaped server on loopback.
    */
   readonly retellReach?: RetellReach;
   /** Test-only device-flow pace; a production server uses five seconds. */
@@ -308,9 +307,16 @@ export function buildApi(options: ServerOptions): Api {
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),
-    // Switching production watching on registers a webhook at this origin,
-    // when it is one a provider could reach.
-    baseUrl: config.baseUrl,
+  });
+
+  // Production Monitoring setup is project configuration, not a simulation
+  // connection. Each platform opens its own setup flow behind this route group.
+  void app.register(monitoringRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    ...(options.retellFetch === undefined
+      ? {}
+      : { retellFetch: options.retellFetch }),
     ...(options.retellReach === undefined
       ? {}
       : { retellReach: options.retellReach }),
@@ -495,15 +501,6 @@ export function buildApi(options: ServerOptions): Api {
     rateLimit,
   });
 
-  // Where Retell delivers a conversation the moment it ends. Outside the
-  // credentialed scope on purpose and necessarily: a provider's delivery
-  // carries no egma credential, and working out whose conversation it is — by
-  // the agent it names and the key that signed it — is the whole job of the
-  // door. Registered without `fastify-plugin`, like the OTLP door, because it
-  // replaces its own body parser so the signature is checked against the bytes
-  // that were sent.
-  void app.register(retellWebhookRoutes);
-
   // Outside the credentialed scope on purpose: somebody following an
   // invitation has no membership, so there is no context to resolve them into
   // and no organization to key a budget on. The token is the credential there.
@@ -525,9 +522,10 @@ export function buildApi(options: ServerOptions): Api {
   // Its timer is unref'd, so a shutdown never waits on a sweep that has not
   // happened; every replica runs one, which the seam makes harmless.
   let orphanSweep: OrphanSweep | undefined;
-  // And the production sweep beside it, on the same terms: the pull floor that
-  // makes watching a Retell agent work on a laptop no webhook can reach.
-  let productionSweep: ProductionSweep | undefined;
+  // Retell production ingestion runs beside the orphan sweep. Every selected
+  // agent is DB-leased before a provider request, so every API replica can run
+  // the same loop without overlapping one target.
+  let retellProductionIngestion: RetellProductionIngestion | undefined;
   app.addHook("onReady", async () => {
     orphanSweep = startOrphanSweep({
       log: app.log,
@@ -535,11 +533,14 @@ export function buildApi(options: ServerOptions): Api {
         ? {}
         : { intervalMilliseconds: options.orphanSweepIntervalMilliseconds }),
     });
-    productionSweep = startProductionSweep({
+    retellProductionIngestion = startRetellProductionIngestion({
       log: app.log,
-      ...(options.productionSweepIntervalMilliseconds === undefined
+      ...(options.retellProductionIngestionIntervalMilliseconds === undefined
         ? {}
-        : { intervalMilliseconds: options.productionSweepIntervalMilliseconds }),
+        : {
+            intervalMilliseconds:
+              options.retellProductionIngestionIntervalMilliseconds,
+          }),
       ...(options.retellReach === undefined ? {} : { reach: options.retellReach }),
     });
   });
@@ -547,7 +548,7 @@ export function buildApi(options: ServerOptions): Api {
     // Awaited, so closing drains any tick in flight: whoever closes the app
     // and then the stores knows the sweep holds no connection to them.
     await orphanSweep?.stop();
-    await productionSweep?.stop();
+    await retellProductionIngestion?.stop();
   });
 
   return { app, identity };

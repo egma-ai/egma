@@ -1,0 +1,169 @@
+name: Release Python SDK
+
+# Publishing is one deliberate tag push. Merging does not publish.
+#
+#   git tag python-sdk-v0.1.0
+#   git push origin python-sdk-v0.1.0
+#
+# PyPI must trust this repository, workflow, and `pypi` environment. GitHub
+# then supplies one short-lived OIDC credential. No long-lived PyPI token is
+# stored in this repository.
+
+on:
+  push:
+    tags:
+      - "python-sdk-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Verify and publish
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/egma
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      # Every action is pinned to the commit behind its release tag. This job
+      # holds publication authority, so a moved tag must not change its code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          # Match the package's declared uv-build minor. A release must not
+          # silently change build backends because the CLI moved forward.
+          version: "0.11.33"
+
+      - name: Check the tag matches both package versions
+        working-directory: sdks/python
+        run: |
+          set -e
+          tagged="${GITHUB_REF_NAME#python-sdk-v}"
+          packaged="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          workspace="$(python -c 'import json; print(json.load(open("package.json"))["version"])')"
+          if [ "$tagged" != "$packaged" ] || [ "$packaged" != "$workspace" ]; then
+            echo "Tag says $tagged, pyproject.toml says $packaged, and package.json says $workspace." >&2
+            exit 1
+          fi
+          echo "Releasing egma $packaged."
+
+      - name: Test the source tree
+        working-directory: sdks/python
+        run: |
+          uv sync --frozen
+          uv run --frozen ruff check src tests
+          uv run --frozen pytest
+
+      - name: Test the LiveKit fixture
+        working-directory: fixtures/livekit-dumb-agent
+        run: |
+          uv sync --frozen
+          uv run --frozen ruff check .
+          uv run --frozen pytest
+
+      - name: Build the wheel and source distribution
+        working-directory: sdks/python
+        run: uv build --out-dir dist
+
+      - name: Prove the built wheel in a clean environment
+        working-directory: sdks/python
+        run: |
+          set -e
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          clean="$(mktemp -d)"
+          uv venv --python 3.11 "$clean/venv"
+          uv pip install --python "$clean/venv/bin/python" "$wheel"
+          "$clean/venv/bin/python" - <<'PY'
+          import asyncio
+          import os
+          from importlib.metadata import version
+          from egma import mockable, monitor_livekit
+          from egma import monitoring
+
+
+          class Job:
+              metadata = ""
+
+
+          class Context:
+              job = Job()
+
+              def __init__(self):
+                  self.callbacks = []
+
+              def add_shutdown_callback(self, callback):
+                  self.callbacks.append(callback)
+
+          expected = os.environ["GITHUB_REF_NAME"].removeprefix("python-sdk-v")
+          assert version("egma") == expected
+          assert callable(mockable)
+          assert callable(monitor_livekit)
+          context = Context()
+          monitor_livekit(
+              context,
+              endpoint="http://127.0.0.1:9",
+              api_key="release-proof-key",
+          )
+          assert monitoring._state is not None
+          assert monitoring._livekit_provider() is monitoring._state.provider
+          assert len(context.callbacks) == 1
+          asyncio.run(context.callbacks[0]())
+          PY
+
+      - name: Inspect the distributions
+        working-directory: sdks/python
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          from tarfile import open as open_tar
+          from zipfile import ZipFile
+
+          wheel = next(Path("dist").glob("*.whl"))
+          source = next(Path("dist").glob("*.tar.gz"))
+          with ZipFile(wheel) as archive:
+              wheel_names = set(archive.namelist())
+          with open_tar(source) as archive:
+              source_names = set(archive.getnames())
+
+          required = {"egma/__init__.py", "egma/monitoring.py", "egma/mockable.py"}
+          missing = sorted(required - wheel_names)
+          if missing:
+              raise SystemExit(f"wheel is missing: {', '.join(missing)}")
+          if not any(
+              name.endswith(".dist-info/licenses/LICENSE")
+              for name in wheel_names
+          ):
+              raise SystemExit("wheel is missing LICENSE")
+          if not any(name.endswith("/LICENSE") for name in source_names):
+              raise SystemExit("source distribution is missing LICENSE")
+
+          secret = re.compile(rb"egma_sk_[A-Za-z0-9_-]{43}")
+          with ZipFile(wheel) as archive:
+              for name in archive.namelist():
+                  if secret.search(archive.read(name)):
+                      raise SystemExit(f"wheel contains an Egma API key: {name}")
+          with open_tar(source) as archive:
+              for member in archive.getmembers():
+                  if not member.isfile():
+                      continue
+                  extracted = archive.extractfile(member)
+                  if extracted is not None and secret.search(extracted.read()):
+                      raise SystemExit(
+                          f"source distribution contains an Egma API key: {member.name}"
+                      )
+          PY
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: sdks/python/dist/

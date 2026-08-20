@@ -6,31 +6,31 @@ import {
   type NewSpan,
   type ReportedMeasurement,
 } from "@egma/db";
+import { safeRetellProviderData } from "@egma/retell";
 import { catalogedMeasure, isSpanDerivedMeasure } from "@egma/simulation-contract";
 
 /**
  * One Retell call object, as spans. The single place that reading happens.
  *
- * Both transports carry the same document — a webhook delivers it the moment a
- * conversation ends, the poller fetches it from the list API — so the transport
- * is delivery and nothing else, and this is what makes them agree. Two
- * transports that each read the payload for themselves would be two opinions
- * about what a conversation is, disagreeing the first day either changed.
+ * The v3 list selects terminal calls. Get Call then supplies the complete
+ * document. This file is the one place that document becomes Egma spans, so a
+ * live polling pass and a historical import cannot disagree about what a
+ * conversation is.
  *
  * **Nothing here is synthesised.** Retell publishes no per-turn timing, so
  * there is no per-turn span: the turns come from the transcript, and every
  * latency figure Retell reports rides the root span as an attribute of the
- * whole conversation. The trace store's rule is verbatim — never write a span
+ * whole conversation. The trace store's rule is literal — never write a span
  * egma did not observe — and a per-turn duration invented by dividing a total
  * would be exactly that, wearing a number that looks measured.
  *
- * **The payload is kept whole.** Every span carries the vendor's own document
- * verbatim, per the store's irreversible rule: what is not captured cannot be
- * recovered by any later migration, and a field egma has no place for today is
- * still there tomorrow.
+ * **The safe payload is kept whole on the root.** Every span is built from the
+ * same copy after access tokens and authentication header values are removed.
+ * What is not captured cannot be recovered by a later migration, while a
+ * credential that was captured would already be a leak.
  *
  * **A payload this cannot fully read is still written.** `degraded` says so,
- * the root span still lands, whatever parsed is on it, and the verbatim
+ * the root span still lands, whatever parsed is on it, and the safe provider
  * document is intact — so a conversation Retell shaped in a way egma has not
  * met yet costs a flag rather than a hole in somebody's monitoring, and the
  * poller's cursor moves past it instead of grinding on it forever.
@@ -66,34 +66,34 @@ export type NormalisedTrace = {
 
 /** What the normalizer is told about where a conversation is being filed. */
 export type NormaliseInto = {
-  readonly connectionId: string;
-  readonly connectionType: string;
-  readonly agentId: string;
+  readonly projectId: string;
   readonly environment: string | null;
+  readonly platformAgentId: string;
+  readonly platformAgentName: string;
+  readonly platformAgentVersion: string;
 };
 
 /**
  * The trace identity, minted deterministically from the provider's call id and
- * the connection.
+ * the project.
  *
- * **Deterministic is the whole point**: two transports have to agree on
- * identity without talking to each other, and the only thing they share is the
- * document. So the id is a function of the document's own call id, and the
- * ledger's unique constraint does the rest.
+ * **Deterministic is the whole point**: a retry, a historical import, and a
+ * recreated Monitoring setup must agree on identity without stored connection
+ * state. So the id is a function of the project and the provider's call id,
+ * and the ledger's unique constraint does the rest.
  *
- * **The connection is in it because of fan-out.** The same Retell agent
- * registered in two projects is two connections, each filing its own copy into
- * its own project; without the connection in the identity the two copies would
- * collide on one trace id and one project would silently lose its conversation
- * to the other's ledger claim.
+ * **The project is in it because of fan-out.** The same Retell call can be
+ * monitored in two Egma projects, and each project owns its own visible trace.
+ * Recreating a Monitoring setup or rotating its key inside one project must not
+ * create a second trace for that same provider call.
  *
  * Thirty-two hex characters, which is the shape a trace id has in this store —
- * the same 128 bits OpenTelemetry writes, so the ids the two ingest paths
- * produce are indistinguishable to every reader downstream.
+ * the same 128 bits OpenTelemetry writes, so every trace reader sees one shared
+ * identity shape.
  */
-export function traceIdFor(connectionId: string, callId: string): string {
+export function traceIdFor(projectId: string, callId: string): string {
   return createHash("sha256")
-    .update(`egma:retell:trace\n${connectionId}\n${callId}`)
+    .update(`egma:retell:trace\n${projectId}\n${callId}`)
     .digest("hex")
     .slice(0, 32);
 }
@@ -162,12 +162,12 @@ export function endInstantOf(call: RetellCall): {
  * unsigned**, so a payload whose end precedes its start cannot be allowed to
  * produce one: the store refuses the whole batch, the claim stays unwritten,
  * and the sweep that replays it hits the same refusal on every tick for ever.
- * One clock-skewed conversation would stop the deployment watching anything.
+ * One clock-skewed conversation would stop all later Monitoring imports.
  *
  * So a contradictory pair is a degraded payload like any other: it is filed at
  * the instant the provider called the end, with no duration, flagged, and with
- * both original timestamps intact in the verbatim payload. The same is true of
- * a call reporting only one of the two.
+ * both original timestamps intact in the safe provider payload. The same is
+ * true of a call reporting only one of the two.
  *
  * A call reporting neither is filed at the moment egma read it — honest (egma
  * heard about this now) and findable in a window somebody would actually ask
@@ -198,48 +198,37 @@ function extent(call: RetellCall, now: number): {
   };
 }
 
-/** One entry of Retell's `transcript_object`, as much as egma reads of it. */
+/** One spoken entry in Retell's current woven transcript. */
 type Turn = {
   readonly kind: "turn:human" | "turn:agent";
   readonly text: string;
-  readonly toolCalls: readonly {
-    readonly name: string;
-    readonly arguments: string;
-    readonly result: string;
-  }[];
 };
 
-/**
- * The turns, from Retell's structured transcript.
- *
- * `transcript_object` rather than the flat `transcript` string, because the
- * structured one says who spoke and carries the tool invocations; splitting the
- * flat one on speaker labels would be egma guessing at a format Retell never
- * promised.
- *
- * A tool call rides the turn it happened in as a child span, which is where the
- * transcript surface already looks for one. Nothing about a tool call is
- * invented: the name, the arguments and the result are Retell's own, and a call
- * Retell reported without a result comes through with an empty one rather than
- * with a guess.
- */
-function turnsIn(call: RetellCall): {
+type ToolCall = {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: string;
+  readonly result: string;
+  readonly successful: boolean | undefined;
+  readonly parentTurn: number | null;
+};
+
+type Transcript = {
+  readonly turns: readonly Turn[];
+  readonly toolCalls: readonly ToolCall[];
+  readonly whole: boolean;
+};
+
+function spokenTurnsIn(value: unknown): {
   readonly turns: readonly Turn[];
   readonly whole: boolean;
 } {
-  const held = call["transcript_object"];
-  if (held === undefined || held === null) {
-    // No structured transcript at all is not a malformed payload — a
-    // conversation with nothing said in it is a real thing, and so is a Retell
-    // account that has the field switched off.
-    return { turns: [], whole: true };
-  }
-  if (!Array.isArray(held)) return { turns: [], whole: false };
+  if (value === undefined || value === null) return { turns: [], whole: true };
+  if (!Array.isArray(value)) return { turns: [], whole: false };
 
   const turns: Turn[] = [];
   let whole = true;
-
-  for (const entry of held) {
+  for (const entry of value) {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       whole = false;
       continue;
@@ -247,46 +236,145 @@ function turnsIn(call: RetellCall): {
     const row = entry as Record<string, unknown>;
     const role = text(row["role"]);
     if (role !== "user" && role !== "agent") {
-      whole = false;
+      // Retell also reports transfers, node transitions, DTMF, SMS, injected
+      // context, and new event kinds. They remain in the safe provider data.
+      // None of them gives Egma permission to invent a speaker turn.
       continue;
     }
-
-    const invocations = Array.isArray(row["tool_calls"])
-      ? (row["tool_calls"] as unknown[])
-      : [];
-    const toolCalls: Turn["toolCalls"] = invocations.flatMap((invocation) => {
-      if (
-        typeof invocation !== "object" ||
-        invocation === null ||
-        Array.isArray(invocation)
-      ) {
-        whole = false;
-        return [];
-      }
-      const held = invocation as Record<string, unknown>;
-      // Retell nests the name and the arguments under `function`, as the
-      // OpenAI tool-call shape does, and reports the answer beside it.
-      const fn =
-        typeof held["function"] === "object" && held["function"] !== null
-          ? (held["function"] as Record<string, unknown>)
-          : {};
-      return [
-        {
-          name: text(fn["name"]) || text(held["name"]),
-          arguments: text(fn["arguments"]) || text(held["arguments"]),
-          result: text(held["result"]) || text(held["content"]),
-        },
-      ];
-    });
-
     turns.push({
       kind: role === "user" ? "turn:human" : "turn:agent",
       text: text(row["content"]),
-      toolCalls,
     });
   }
-
   return { turns, whole };
+}
+
+function toolSuccessIn(call: RetellCall): ReadonlyMap<string, boolean> {
+  const summaries = call["tool_calls"];
+  if (!Array.isArray(summaries)) return new Map();
+
+  const successes = new Map<string, boolean>();
+  for (const summary of summaries) {
+    if (typeof summary !== "object" || summary === null || Array.isArray(summary)) {
+      continue;
+    }
+    const row = summary as Record<string, unknown>;
+    const id = text(row["tool_call_id"]);
+    if (id !== "" && typeof row["success"] === "boolean") {
+      successes.set(id, row["success"]);
+    }
+  }
+  return successes;
+}
+
+/**
+ * Spoken turns and tools from Retell's current woven transcript.
+ *
+ * Tool invocation and result entries are separate and can have other provider
+ * events between them. Their `tool_call_id` is the relationship Retell states,
+ * so it is the only relationship used here. Position gives the preceding
+ * spoken turn, when one exists; a tool before all speech stays under the root.
+ *
+ * A provider that does not supply the woven form can still supply spoken turns
+ * through `transcript_object`. Egma does not read the retired nested tool-call
+ * assumption from that fallback.
+ */
+function turnsIn(call: RetellCall): Transcript {
+  const woven = call["transcript_with_tool_calls"];
+  if (woven === undefined || woven === null) {
+    const fallback = spokenTurnsIn(call["transcript_object"]);
+    return { ...fallback, toolCalls: [] };
+  }
+  if (!Array.isArray(woven)) {
+    return { turns: [], toolCalls: [], whole: false };
+  }
+
+  type Pair = {
+    id: string;
+    name: string;
+    arguments: string;
+    result: string;
+    successful: boolean | undefined;
+    firstAt: number;
+    invocationAt: number | undefined;
+    parentTurn: number | null;
+  };
+
+  const turns: Turn[] = [];
+  const pairs = new Map<string, Pair>();
+  let whole = true;
+
+  for (const [at, entry] of woven.entries()) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      whole = false;
+      continue;
+    }
+    const row = entry as Record<string, unknown>;
+    const role = text(row["role"]);
+    if (role === "user" || role === "agent") {
+      turns.push({
+        kind: role === "user" ? "turn:human" : "turn:agent",
+        text: text(row["content"]),
+      });
+      continue;
+    }
+
+    if (role === "tool_call_invocation" || role === "tool_call_result") {
+      const id = text(row["tool_call_id"]);
+      if (id === "") {
+        whole = false;
+        continue;
+      }
+      const pair = pairs.get(id) ?? {
+        id,
+        name: "",
+        arguments: "",
+        result: "",
+        successful: undefined,
+        firstAt: at,
+        invocationAt: undefined,
+        parentTurn: turns.length === 0 ? null : turns.length - 1,
+      };
+      if (role === "tool_call_invocation") {
+        if (pair.invocationAt !== undefined) whole = false;
+        pair.invocationAt = at;
+        pair.name = text(row["name"]);
+        pair.arguments = text(row["arguments"]);
+        pair.parentTurn = turns.length === 0 ? null : turns.length - 1;
+      } else {
+        pair.result = text(row["content"]);
+        const success = row["successful"] ?? row["success"];
+        if (typeof success === "boolean") {
+          pair.successful = success;
+        }
+      }
+      pairs.set(id, pair);
+      continue;
+    }
+
+    // A known non-spoken event or a role Retell adds later remains in the root
+    // payload. It is not malformed merely because Egma has no typed span for it.
+  }
+
+  const reportedSuccess = toolSuccessIn(call);
+  const toolCalls = [...pairs.values()]
+    .sort(
+      (left, right) =>
+        (left.invocationAt ?? left.firstAt) -
+        (right.invocationAt ?? right.firstAt),
+    )
+    .map(
+      (pair): ToolCall => ({
+        id: pair.id,
+        name: pair.name,
+        arguments: pair.arguments,
+        result: pair.result,
+        successful: pair.successful ?? reportedSuccess.get(pair.id),
+        parentTurn: pair.parentTurn,
+      }),
+    );
+
+  return { turns, toolCalls, whole };
 }
 
 /**
@@ -297,7 +385,7 @@ function turnsIn(call: RetellCall): {
  * beside `values`, the individual measurements the summary was worked out from.
  * They describe the call rather than any moment in it, so the root span is the
  * only honest place for them. This keeps the whole object under the vendor's
- * own names, verbatim, which is where a reader who knows Retell will look; the
+ * own names, unchanged, which is where a reader who knows Retell will look; the
  * translation into egma's vocabulary is `reportedLatencyOf` below, and it reads
  * `values` alone.
  */
@@ -309,7 +397,7 @@ function latencyOf(call: RetellCall): Record<string, unknown> {
 }
 
 /**
- * What this platform is called wherever egma names it: the connection type on
+ * What this agent platform is called wherever egma names it: the span fact on
  * every row it files, the prefix on a measure only Retell has a word for, and
  * the reporter's name on the block. One spelling, in one place.
  */
@@ -401,8 +489,8 @@ const REPORTED_LATENCY_MEASURES: readonly (readonly [
  * a conversation — no id, contradictory instants, a transcript that is not one
  * — because that is a trace somebody has to look at. One unreadable entry in a
  * stage's list is not: the rest of the list is still true, the vendor's whole
- * document is still on the row verbatim, and flagging the trace would spend
- * somebody's attention on a number egma never needed.
+ * document is still on the row after credential removal, and flagging the
+ * trace would spend somebody's attention on a number egma never needed.
  */
 function reportedLatencyOf(
   call: RetellCall,
@@ -437,7 +525,18 @@ function reportedLatencyOf(
 }
 
 /** One span with every field stated, including the empty ones. */
-function span(fields: Partial<NewSpan> & Pick<NewSpan, "traceId" | "spanId" | "name" | "kind" | "startedAtMicroseconds" | "payload">): NewSpan {
+function span(
+  fields: Partial<NewSpan> &
+    Pick<
+      NewSpan,
+      | "traceId"
+      | "spanId"
+      | "name"
+      | "kind"
+      | "startedAtMicroseconds"
+      | "payload"
+    >,
+): NewSpan {
   return {
     parentSpanId: "",
     source: "production",
@@ -451,9 +550,13 @@ function span(fields: Partial<NewSpan> & Pick<NewSpan, "traceId" | "spanId" | "n
     toolArguments: "",
     toolResult: "",
     providerCallId: "",
-    connectionType: "",
+    connectionKind: "",
     runId: "",
     agentId: "",
+    agentPlatform: "",
+    platformAgentId: "",
+    platformAgentName: "",
+    platformAgentVersion: "",
     agentVersionId: "",
     testVersionId: "",
     personaVersionId: "",
@@ -473,14 +576,14 @@ export function normaliseRetellCall(
   into: NormaliseInto,
   now: number,
 ): NormalisedTrace {
-  const providerCallId = text(call["call_id"]);
-  const traceId = traceIdFor(into.connectionId, providerCallId);
-  const payload = JSON.stringify(call);
+  const safeCall = safeRetellProviderData(call);
+  const providerCallId = text(safeCall["call_id"]);
+  const traceId = traceIdFor(into.projectId, providerCallId);
 
-  const times = extent(call, now);
-  const transcript = turnsIn(call);
+  const times = extent(safeCall, now);
+  const transcript = turnsIn(safeCall);
   // A conversation with no id of its own is the one thing that cannot be
-  // repaired — the identity would be the connection's alone, and every such
+  // repaired — the identity would be the project's alone, and every such
   // call would collide with the last one. It still lands, because the store's
   // rule is that nothing is dropped, and it lands flagged.
   const degraded =
@@ -489,7 +592,10 @@ export function normaliseRetellCall(
   const startedAt = microseconds(times.startedAt);
   const endedAt = microseconds(times.endedAt);
   const environment = into.environment ?? "default";
-  const reported = reportedLatencyOf(call);
+  const reported = reportedLatencyOf(safeCall);
+  const callStatus = text(safeCall["call_status"]);
+  const providerFailed =
+    callStatus === "error" || callStatus === "not_connected";
 
   const shared = {
     traceId,
@@ -497,8 +603,12 @@ export function normaliseRetellCall(
     emitter: "agent" as const,
     environment,
     providerCallId,
-    connectionType: into.connectionType,
-    agentId: into.agentId,
+    connectionKind: "",
+    agentId: "",
+    agentPlatform: RETELL,
+    platformAgentId: into.platformAgentId,
+    platformAgentName: into.platformAgentName,
+    platformAgentVersion: into.platformAgentVersion,
   };
 
   const rootId = spanIdFor(traceId, "root");
@@ -513,19 +623,19 @@ export function normaliseRetellCall(
       kind: "conversation",
       startedAtMicroseconds: startedAt,
       durationNanoseconds: (endedAt - startedAt) * 1000n,
-      status: degraded ? "error" : "ok",
+      status: degraded || providerFailed ? "error" : "ok",
       // Retell's own word for why the conversation ended, and its own
       // aggregates, on the one span they describe.
-      text: text(call["disconnection_reason"]),
+      text: text(safeCall["disconnection_reason"]),
       // egma copies no audio: the reference is the provider's link, and it
       // renders as the listen affordance.
-      audioUrl: text(call["recording_url"]),
+      audioUrl: text(safeCall["recording_url"]),
       payload: JSON.stringify({
-        ...call,
+        ...safeCall,
         egma_normalised: {
           degraded,
-          disconnection_reason: text(call["disconnection_reason"]),
-          latency: latencyOf(call),
+          disconnection_reason: text(safeCall["disconnection_reason"]),
+          latency: latencyOf(safeCall),
           // Under the contract's own key, never a spelling of egma's own: the
           // read side looks the block up by the same constant. Absent rather
           // than empty where Retell measured nothing, so a reader meets the
@@ -538,8 +648,10 @@ export function normaliseRetellCall(
     }),
   ];
 
+  const turnIds: string[] = [];
   for (const [index, turn] of transcript.turns.entries()) {
     const turnId = spanIdFor(traceId, `turn/${index}`);
+    turnIds.push(turnId);
     spans.push(
       span({
         ...shared,
@@ -557,23 +669,27 @@ export function normaliseRetellCall(
         payload: JSON.stringify(turn),
       }),
     );
+  }
 
-    for (const [at, invocation] of turn.toolCalls.entries()) {
-      spans.push(
-        span({
-          ...shared,
-          spanId: spanIdFor(traceId, `turn/${index}/tool/${at}`),
-          parentSpanId: turnId,
-          name: invocation.name === "" ? "tool" : invocation.name,
-          kind: "tool",
-          startedAtMicroseconds: startedAt,
-          toolName: invocation.name,
-          toolArguments: invocation.arguments,
-          toolResult: invocation.result,
-          payload: JSON.stringify(invocation),
-        }),
-      );
-    }
+  for (const [index, invocation] of transcript.toolCalls.entries()) {
+    spans.push(
+      span({
+        ...shared,
+        spanId: spanIdFor(traceId, `tool/${index}`),
+        parentSpanId:
+          invocation.parentTurn === null
+            ? rootId
+            : (turnIds[invocation.parentTurn] ?? rootId),
+        name: invocation.name === "" ? "tool" : invocation.name,
+        kind: "tool",
+        startedAtMicroseconds: startedAt,
+        status: invocation.successful === false ? "error" : "ok",
+        toolName: invocation.name,
+        toolArguments: invocation.arguments,
+        toolResult: invocation.result,
+        payload: JSON.stringify(invocation),
+      }),
+    );
   }
 
   return {

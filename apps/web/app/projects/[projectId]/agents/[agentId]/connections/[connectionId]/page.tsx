@@ -11,12 +11,11 @@ import {
   type ListedConnection,
 } from "../../../../../../../lib/agents.ts";
 import {
-  CONNECTION_TYPES_PATH,
-  typeNamed,
-  variantNamed,
-  type ConnectionTypeCatalog,
-  type ConnectionVariant,
-} from "../../../../../../../lib/connection-types.ts";
+  CONNECTION_OPTIONS_PATH,
+  optionNamed,
+  type ConnectionOption,
+  type ConnectionOptionCatalog,
+} from "../../../../../../../lib/connection-options.ts";
 import { roleOf } from "../../../../../../../lib/me.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
@@ -127,7 +126,7 @@ function ConnectionDetail({
     agentDetailQuery(agentId, "active"),
     projectId,
   );
-  const [catalog, setCatalog] = useState<ConnectionTypeCatalog | null>(null);
+  const [catalog, setCatalog] = useState<ConnectionOptionCatalog | null>(null);
   const [catalogRefused, setCatalogRefused] = useState<Refusal | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [editing, setEditing] = useState(false);
@@ -135,7 +134,7 @@ function ConnectionDetail({
   useEffect(() => {
     let current = true;
     setCatalogRefused(null);
-    void readJson<ConnectionTypeCatalog>(CONNECTION_TYPES_PATH).then((read) => {
+    void readJson<ConnectionOptionCatalog>(CONNECTION_OPTIONS_PATH).then((read) => {
       if (!current) return;
       if (read.status === "signed-out") {
         window.location.replace("/sign-in");
@@ -210,12 +209,11 @@ function ConnectionDetail({
   }
 
   const connection = answer.value.connection;
-  const type = typeNamed(catalog, connection.type);
-  const variant = variantNamed(catalog, connection.type, connection.variant_id);
+  const option = optionNamed(catalog, connection);
   const mayAuthor = role !== null && canAuthor(role);
-  const configKeys = new Set(variant?.fields.map((field) => field.key) ?? []);
+  const configKeys = new Set(option?.fields.map((field) => field.key) ?? []);
   const configFacts: readonly DetailFact[] = [
-    ...(variant?.fields.flatMap((field) => {
+    ...(option?.fields.flatMap((field) => {
       const value = connection.config[field.key];
       return value === undefined
         ? []
@@ -236,14 +234,14 @@ function ConnectionDetail({
           { label: agentLabel, href: agentHome },
           { label: connection.name },
         ]}
-        lead={`${type?.label ?? connection.type} · ${connection.modality === "voice" ? "Voice" : "Text"}`}
+        lead={`${connection.product_label} · ${connection.modality === "voice" ? "Voice" : "Chat"}`}
         action={
           role === null ? undefined : (
             <Actions>
               <Button
-                disabled={!mayAuthor || variant === undefined}
+                disabled={!mayAuthor || option === undefined}
                 why={
-                  variant === undefined
+                  option === undefined
                     ? "Egma could not describe this connection's fields."
                     : mayAuthor
                       ? undefined
@@ -270,11 +268,22 @@ function ConnectionDetail({
           <SurfaceHeader
             id="connection-overview-title"
             title="Overview"
-            lead="The provider and channel this connection uses."
+            lead="The agent platform and the way Egma reaches it."
           />
           <DetailFacts
             facts={[
-              { label: "Provider", value: type?.label ?? connection.type },
+              {
+                label: "Agent platform",
+                value:
+                  option?.agent_platform_label ??
+                  connection.agent_platform ??
+                  "Any or unknown",
+              },
+              { label: "Connection", value: connection.product_label },
+              {
+                label: "Access",
+                value: option?.access_variant_label ?? connection.access_variant,
+              },
               {
                 label: "Modality",
                 value: connection.modality === "voice" ? "Voice" : "Text",
@@ -297,11 +306,11 @@ function ConnectionDetail({
         </section>
       </PageBody>
 
-      {editing && variant !== undefined ? (
+      {editing && option !== undefined ? (
         <EditConnection
           projectId={projectId}
           connection={connection}
-          variant={variant}
+          option={option}
           onClose={() => setEditing(false)}
           onSaved={() => {
             setEditing(false);
@@ -316,13 +325,13 @@ function ConnectionDetail({
 function EditConnection({
   projectId,
   connection,
-  variant,
+  option,
   onClose,
   onSaved,
 }: {
   readonly projectId: string;
   readonly connection: ListedConnection;
-  readonly variant: ConnectionVariant;
+  readonly option: ConnectionOption;
   readonly onClose: () => void;
   readonly onSaved: () => void;
 }) {
@@ -338,8 +347,8 @@ function EditConnection({
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [nameProblem, setNameProblem] = useState<string | null>(null);
   const liveKitForm = liveKitDispatchForm({
-    type: connection.type,
-    variant,
+    connectionKind: connection.connection_kind,
+    option,
     config: draft.config,
     mode: livekitDispatch,
   });
@@ -373,7 +382,7 @@ function EditConnection({
     }
 
     const config: Record<string, string> = { ...connection.config };
-    for (const field of variant.fields) {
+    for (const field of option.fields) {
       const written = draft.config[field.key]?.trim() ?? "";
       if (written === "") delete config[field.key];
       else config[field.key] = written;
@@ -422,7 +431,7 @@ function EditConnection({
             {nameProblem === null ? null : <Problem>{nameProblem}</Problem>}
           </Field>
           <ConnectionFields
-            variant={liveKitForm.variant ?? variant}
+            option={liveKitForm.option ?? option}
             draft={draft}
             onChange={setDraft}
             credentialsEditable={false}

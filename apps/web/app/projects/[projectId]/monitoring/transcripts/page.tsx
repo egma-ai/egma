@@ -12,6 +12,7 @@ import {
   rowsIn,
   type ApiKeyList,
 } from "../../../../../lib/settings.ts";
+import { monitoringSetupPath } from "../../../../../lib/monitoring.ts";
 import {
   COLUMNS,
   DEFAULT_WINDOW,
@@ -21,6 +22,7 @@ import {
   type WindowChoice,
 } from "../../../../../lib/transcript-copy.ts";
 import {
+  agentPlatformLabel,
   everRecordedPath,
   howLong,
   isWidestWindow,
@@ -53,7 +55,6 @@ import {
   ProductPage,
 } from "../../../../../ui/shell.tsx";
 import { Notice, styles } from "../../../../ui.tsx";
-import setup from "./setup.module.css";
 
 /**
  * **Monitoring**: what this project's agents did in production, newest first.
@@ -364,13 +365,18 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
         title={LIST.title}
         lead={LIST.lead}
         action={
-          <Select
-            id="window"
-            value={choice ?? DEFAULT_WINDOW}
-            label={LIST.window}
-            options={WINDOW_OPTIONS}
-            onChange={choose}
-          />
+          <>
+            <ButtonLink href={monitoringSetupPath(projectId)}>
+              Set up monitoring
+            </ButtonLink>
+            <Select
+              id="window"
+              value={choice ?? DEFAULT_WINDOW}
+              label={LIST.window}
+              options={WINDOW_OPTIONS}
+              onChange={choose}
+            />
+          </>
         }
       />
       <PageBody>
@@ -404,7 +410,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
           />
         ) : null}
 
-        {quiet === "set-up-capture" ? <SetUp projectId={projectId} /> : null}
+        {quiet === "set-up-capture" ? <SetUp /> : null}
 
         {quiet === "key-names-the-organization" ? (
           <Empty
@@ -456,39 +462,11 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
  * the sign, which is a variable somebody could copy and an instruction that is
  * wrong for as long as it is on screen. Teaching arrives once and complete.
  */
-function SetUp({ projectId }: { readonly projectId: string }) {
-  const [origin, setOrigin] = useState<string | null>(null);
-
-  useEffect(() => {
-    setOrigin(globalThis.location.origin);
-  }, []);
-
-  if (origin === null) return null;
-
+function SetUp() {
   return (
     <Empty
       title={QUIET.setUp.title}
       lead={QUIET.setUp.lead}
-      action={
-        <div className={setup.setUp}>
-          <p className={setup.note}>{QUIET.setUp.endpoint}</p>
-          <pre className={setup.address}>{origin}</pre>
-          <p className={setup.note}>{QUIET.setUp.variables}</p>
-          <pre className={setup.exports}>{QUIET.setUp.exports(origin)}</pre>
-          <p className={setup.note}>{QUIET.setUp.keyLead}</p>
-          <ButtonLink weight="strong" href={settingsPath(projectId, "keys")}>
-            {QUIET.setUp.key}
-          </ButtonLink>
-          {/*
-            The caution, which the state below says louder and to fewer people:
-            the key list answers for an admin and for whoever minted the key,
-            so a member whose project is fed by somebody else's
-            organization-wide key would otherwise never be told what to look
-            at. It is one line here and the whole answer there.
-          */}
-          <p className={setup.note}>{QUIET.setUp.caution}</p>
-        </div>
-      }
     />
   );
 }
@@ -559,7 +537,15 @@ function columnsFor(projectId: string, now: number): readonly Column<Listed>[] {
         ),
     ],
     [COLUMNS.environment, (row) => row.environment],
-    [COLUMNS.connection, (row) => row.connection_type],
+    [
+      COLUMNS.platform,
+      (row) =>
+        row.agent_platform === "" ? (
+          <Nothing />
+        ) : (
+          agentPlatformLabel(row.agent_platform)
+        ),
+    ],
   ];
 
   return order.map(([header, cell], index) => ({

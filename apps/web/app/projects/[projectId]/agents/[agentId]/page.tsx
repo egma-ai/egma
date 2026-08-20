@@ -105,10 +105,10 @@ function connectionColumns(
       ),
     },
     {
-      key: "type",
-      header: "Provider",
-      width: "110px",
-      cell: (one) => (one.type === "phone" ? "Phone" : one.type),
+      key: "product-label",
+      header: "Connection",
+      width: "180px",
+      cell: (one) => one.product_label,
     },
     {
       key: "modality",

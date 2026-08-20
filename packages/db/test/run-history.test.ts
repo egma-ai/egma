@@ -201,7 +201,9 @@ beforeAll(async () => {
   const created = await createAgent(auth, {
     name: "Front desk",
     connection: {
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       environment: "staging",
       config: { retellAgentId: "agent_in_retell_1" },
@@ -212,7 +214,9 @@ beforeAll(async () => {
   connectionId = created.connection?.id ?? "";
   const production = await addConnection(auth, agentId, {
     name: "retell-production",
-    type: "retell",
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     environment: "production",
     config: { retellAgentId: "agent_in_retell_2" },
@@ -674,7 +678,9 @@ describe("retrying a run", () => {
     const spare = await createAgent(auth, {
       name: `Archived under a repeat ${newId("agt")}`,
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_4" },
         credentials: { apiKey: "retell-secret-R1R2R3R4WXYZ" },
@@ -765,7 +771,9 @@ describe("retrying a run", () => {
     const spare = await createAgent(auth, {
       name: `Spare for archive ${newId("agt")}`,
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_3" },
         credentials: { apiKey: "retell-secret-Q1Q2Q3Q4WXYZ" },

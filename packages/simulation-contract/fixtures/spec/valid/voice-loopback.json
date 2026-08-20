@@ -3,7 +3,9 @@
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWEV",
   "modality": "voice",
   "connection": {
-    "type": "loopback",
+    "agent_platform": null,
+    "connection_kind": "loopback",
+    "access_variant": "loopback.in_process",
     "config": {
       "greeting": "Thanks for calling, this is the billing line.",
       "replies": [

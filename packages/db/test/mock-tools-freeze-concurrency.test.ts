@@ -174,7 +174,9 @@ beforeAll(async () => {
     await createAgent(auth, {
       name: "Front desk",
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_front" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -186,7 +188,9 @@ beforeAll(async () => {
     await createAgent(auth, {
       name: "Night desk",
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_night" },
         credentials: { apiKey: "retell-secret-E5F6G7H8WXYZ" },

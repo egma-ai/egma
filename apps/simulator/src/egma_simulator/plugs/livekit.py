@@ -101,6 +101,7 @@ class LiveKitRoom:
         self,
         *,
         modality: str,
+        access_variant: str,
         config: dict[str, Any],
         credentials: object,
         simulation_id: str,
@@ -130,7 +131,7 @@ class LiveKitRoom:
         # LiveKit.
         self._backend = _built(
             driver or LiveKitRoomBackend,
-            settings=_read(config, credentials),
+            settings=_read(access_variant, config, credentials),
             simulation_id=simulation_id,
             mock_tools=mock_tools,
         )
@@ -186,10 +187,12 @@ class LiveKitRoom:
         await self._backend.teardown()
 
 
-def _read(config: dict[str, Any], credentials: object) -> RoomSettings:
+def _read(
+    access_variant: str, config: dict[str, Any], credentials: object
+) -> RoomSettings:
     """The connection, read by the driver that uses it, in the plug's words."""
     try:
-        return RoomSettings.from_connection(config, credentials)
+        return RoomSettings.from_connection(access_variant, config, credentials)
     except MediaBackendError as refused:
         raise PlugError(str(refused), ending=refused.ending) from refused
 

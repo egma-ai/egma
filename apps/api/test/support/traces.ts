@@ -324,8 +324,12 @@ export type ListedTrace = {
   readonly source: string;
   readonly emitter: string;
   readonly environment: string;
-  readonly connection_type: string;
+  readonly connection_kind: string;
   readonly provider_call_id: string;
+  readonly agent_platform: string;
+  readonly platform_agent_id: string;
+  readonly platform_agent_name: string;
+  readonly platform_agent_version: string;
   readonly run_id: string;
   readonly agent_id: string;
   readonly preview: string;

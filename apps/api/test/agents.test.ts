@@ -60,7 +60,9 @@ function registration(
       ...(overrides.connectionName === undefined
         ? {}
         : { name: overrides.connectionName }),
-      type: "retell",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
       modality: overrides.modality ?? "chat",
       config: { retellAgentId: overrides.retellAgentId ?? "agent_in_retell_1" },
       credentials: { apiKey: overrides.apiKey ?? "retell-secret-A1B2C3D4WXYZ" },
@@ -121,7 +123,9 @@ function connectionPayload(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
-    type: "retell",
+    agent_platform: "retell",
+    connection_kind: "retell_chat_api",
+    access_variant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_2" },
     credentials: { apiKey: "retell-secret-B2C3D4E5WXYZ" },
@@ -159,16 +163,19 @@ describe("reading a Retell account for voice setup", () => {
             { status: 200 },
           );
         }
-        if (url.endsWith("/list-phone-numbers")) {
+        if (new URL(url).pathname === "/v2/list-phone-numbers") {
           return new Response(
-            JSON.stringify([
-              {
-                phone_number: "+14155550100",
-                nickname: " Main\u0007 line ",
-                inbound_agents: [{ agent_id: "agent_voice_1" }],
-                outbound_agent_id: "must-not-cross",
-              },
-            ]),
+            JSON.stringify({
+              items: [
+                {
+                  phone_number: "+14155550100",
+                  nickname: " Main\u0007 line ",
+                  inbound_agents: [{ agent_id: "agent_voice_1" }],
+                  outbound_agent_id: "must-not-cross",
+                },
+              ],
+              has_more: false,
+            }),
             { status: 200 },
           );
         }
@@ -281,7 +288,10 @@ describe("reading a Retell account for voice setup", () => {
     expect(answer.status).toBe(201);
     expect(connectionOf(answer)).toMatchObject({
       name: "Retell main number",
-      type: "phone",
+      agent_platform: "retell",
+      connection_kind: "phone_number",
+      access_variant: "phone_number.public_e164",
+      product_label: "Retell phone",
       modality: "voice",
       config: { phoneNumber: "+14155550100" },
       credential_present: false,
@@ -294,16 +304,20 @@ describe("reading a Retell account for voice setup", () => {
     expect(held).not.toContain(retellKey);
     expect(held).not.toContain("agent_voice_1");
     const stored = await api.database.sql<{
-      type: string;
+      agent_platform: string;
+      connection_kind: string;
+      access_variant: string;
       config: Record<string, unknown>;
       credentials: string | null;
     }>(
-      "select type, config, credentials from connection where agent_id = $1",
+      "select agent_platform, connection_kind, access_variant, config, credentials from connection where agent_id = $1",
       [agentId],
     );
     expect(stored.rows).toEqual([
       {
-        type: "phone",
+        agent_platform: "retell",
+        connection_kind: "phone_number",
+        access_variant: "phone_number.public_e164",
         config: { phoneNumber: "+14155550100" },
         credentials: null,
       },
@@ -331,8 +345,11 @@ describe("registering an agent", () => {
     });
     expect(connectionOf(registered)).toMatchObject({
       agent_id: agentOf(registered).id,
-      name: "retell-1",
-      type: "retell",
+      name: "retell_chat_api-1",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
+      product_label: "Retell chat",
       modality: "chat",
       // Derived from the type, never caller-supplied.
       topology: "hosted-broker",
@@ -358,7 +375,9 @@ describe("registering an agent", () => {
     const refused = await post("/api/agents", withKey(ada.secret), {
       name: "Front desk",
       connection: {
-        type: "retell",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
         modality: "chat",
         // One letter wrong, which is the whole point: a typo dies at the door.
         config: { retellAgentld: "agent_in_retell_1" },
@@ -370,7 +389,7 @@ describe("registering an agent", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a retell connection\'s config has no key "retellAgentld"; it holds retellAgentId',
+        'a Retell chat connection\'s config has no key "retellAgentld"; it holds retellAgentId',
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -408,39 +427,65 @@ describe("registering an agent", () => {
   });
 });
 
-describe("a connection payload its type will not take", () => {
+describe("a connection payload its kind will not take", () => {
   /**
    * The connection registry owns these four rules and writes their sentences,
    * and the route relays them without touching a word. They are asserted here
    * rather than only at the seam below because the sentence a developer's
    * terminal prints is the one that came over the wire.
    */
-  it("names an unknown connection type, and what egma does know", async () => {
+  it("names an unknown connection kind, and what egma does know", async () => {
     api = await createApi("agents_unknown_type");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/api/agents", withKey(ada.secret), {
       name: "Front desk",
-      connection: connectionPayload({ type: "vapi" }),
+      connection: connectionPayload({ connection_kind: "vapi" }),
     });
 
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"vapi" is not a connection type Egma knows; expected one of retell, phone, livekit',
+        '"vapi" is not a connection kind Egma knows; expected one of retell_chat_api, phone_number, livekit_room',
     });
     expect(await agentRowCount()).toBe(0);
   });
 
-  it("names a modality the type does not speak", async () => {
+  it("refuses an agent platform outside the explicit supported tuples", async () => {
+    api = await createApi("agents_unknown_platform");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const refused = await post("/api/agents", withKey(ada.secret), {
+      name: "Reception line",
+      connection: {
+        agent_platform: "vapi",
+        connection_kind: "phone_number",
+        access_variant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+15551234567" },
+      },
+    });
+
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        "agent platform, connection kind, access variant, and modality do not form a supported simulation connection",
+    });
+    expect(await agentRowCount()).toBe(0);
+  });
+
+  it("names a modality the connection kind does not speak", async () => {
     api = await createApi("agents_wrong_modality");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/api/agents", withKey(ada.secret), {
       name: "Reception line",
       connection: {
-        type: "phone",
+        agent_platform: null,
+        connection_kind: "phone_number",
+        access_variant: "phone_number.public_e164",
         modality: "chat",
         config: { phoneNumber: "+15551234567" },
       },
@@ -450,7 +495,7 @@ describe("a connection payload its type will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "a phone connection speaks voice, and this one was asked for chat",
+        "a phone_number connection speaks voice, and this one was asked for chat",
     });
   });
 
@@ -461,7 +506,9 @@ describe("a connection payload its type will not take", () => {
     const refused = await post("/api/agents", withKey(ada.secret), {
       name: "Front desk",
       connection: {
-        type: "retell",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_1" },
       },
@@ -470,7 +517,7 @@ describe("a connection payload its type will not take", () => {
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
-      message: "a retell connection needs credentials shaped { apiKey }",
+      message: "a Retell chat connection needs credentials shaped { apiKey }",
     });
   });
 
@@ -487,7 +534,7 @@ describe("a connection payload its type will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "a retell connection's credentials need apiKey to be at least 8 characters",
+        "a Retell chat connection's credentials need apiKey to be at least 8 characters",
     });
   });
 
@@ -527,7 +574,9 @@ describe("a livekit connection", () => {
     overrides: Record<string, unknown> = {},
   ): Record<string, unknown> {
     return {
-      type: "livekit",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.project_credentials",
       modality: "voice",
       config: { url: "wss://acme.livekit.cloud" },
       credentials: { apiKey: API_KEY, apiSecret: API_SECRET },
@@ -546,8 +595,11 @@ describe("a livekit connection", () => {
 
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
-      name: "livekit-1",
-      type: "livekit",
+      name: "livekit_room-1",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.project_credentials",
+      product_label: "LiveKit project credentials",
       modality: "voice",
       // Derived from the type, never caller-supplied.
       topology: "agent-dials-out",
@@ -608,7 +660,9 @@ describe("a livekit connection", () => {
     const registered = await post("/api/agents", withKey(ada.secret), {
       name: "Production agent",
       connection: {
-        type: "livekit",
+        agent_platform: "livekit_agents",
+        connection_kind: "livekit_room",
+        access_variant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "wss://acme.livekit.cloud",
@@ -620,7 +674,10 @@ describe("a livekit connection", () => {
 
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
-      type: "livekit",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.customer_token_endpoint",
+      product_label: "LiveKit token endpoint",
       modality: "voice",
       topology: "agent-dials-out",
       config: {
@@ -639,7 +696,9 @@ describe("a livekit connection", () => {
     const refused = await post("/api/agents", withKey(ada.secret), {
       name: "Private-network agent",
       connection: {
-        type: "livekit",
+        agent_platform: "livekit_agents",
+        connection_kind: "livekit_room",
+        access_variant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "ws://livekit.internal:7880",
@@ -675,19 +734,19 @@ describe("a livekit connection", () => {
       slug: "wrong_modality",
       payload: { modality: "chat" },
       message:
-        "a livekit connection speaks voice, and this one was asked for chat",
+        "a livekit_room connection speaks voice, and this one was asked for chat",
     },
     {
       named: "a word that is not a modality at all",
       slug: "not_a_modality",
       payload: { modality: "telepathy" },
-      message: '"telepathy" is not a modality; a livekit connection speaks voice',
+      message: '"telepathy" is not a modality; a livekit_room connection speaks voice',
     },
     {
       named: "no url",
       slug: "no_url",
       payload: { config: {} },
-      message: "a livekit connection's config needs url",
+      message: "a LiveKit room connection's config needs url",
     },
     {
       named: "a url in a scheme the SDKs do not take",
@@ -722,11 +781,11 @@ describe("a livekit connection", () => {
         config: { url: "wss://acme.livekit.cloud", roomName: "lobby" },
       },
       message:
-        'a livekit connection\'s config has no key "roomName"; it holds url, ' +
+        'a LiveKit room connection\'s config has no key "roomName"; it holds url, ' +
         "agentName (optional), metadata (optional)",
     },
     {
-      // Neither of the two shapes: no key pair, and no endpoint to ask for a
+      // Neither access variant: no key pair, and no endpoint to ask for a
       // token either. The sentence names both doors, because either is a
       // whole answer and a caller who read about one may have missed the
       // other.
@@ -737,13 +796,14 @@ describe("a livekit connection", () => {
         "a livekit connection mints its own tokens, so it needs the " +
         "project's apiKey and apiSecret. Send the pair, or name a " +
         "tokenEndpoint in the config and Egma will ask that endpoint for a " +
-        "token instead — which is the shape where the project's secret " +
+        "token instead — which is the access variant where the project's secret " +
         "never leaves the customer.",
     },
     {
       named: "a key pair sent alongside a token endpoint",
       slug: "pair_and_endpoint",
       payload: {
+        access_variant: "livekit_room.customer_token_endpoint",
         config: {
           url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
@@ -760,6 +820,7 @@ describe("a livekit connection", () => {
       named: "a token endpoint with no auth headers",
       slug: "endpoint_without_headers",
       payload: {
+        access_variant: "livekit_room.customer_token_endpoint",
         config: {
           url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
@@ -783,7 +844,7 @@ describe("a livekit connection", () => {
         "a livekit connection mints its own tokens, so it needs the " +
         "project's apiKey and apiSecret. Send the pair, or name a " +
         "tokenEndpoint in the config and Egma will ask that endpoint for a " +
-        "token instead — which is the shape where the project's secret " +
+        "token instead — which is the access variant where the project's secret " +
         "never leaves the customer.",
     },
     {
@@ -791,6 +852,7 @@ describe("a livekit connection", () => {
       named: "a token endpoint in a scheme Egma cannot post to",
       slug: "bad_token_endpoint",
       payload: {
+        access_variant: "livekit_room.customer_token_endpoint",
         config: {
           url: "wss://acme.livekit.cloud",
           tokenEndpoint: "wss://acme.livekit.cloud",
@@ -806,6 +868,7 @@ describe("a livekit connection", () => {
       named: "an agent to dispatch on a connection that cannot dispatch",
       slug: "agent_name_with_endpoint",
       payload: {
+        access_variant: "livekit_room.customer_token_endpoint",
         config: {
           url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
@@ -821,6 +884,7 @@ describe("a livekit connection", () => {
       named: "headers that are not a JSON object of name to value",
       slug: "bad_headers",
       payload: {
+        access_variant: "livekit_room.customer_token_endpoint",
         config: {
           url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
@@ -837,14 +901,14 @@ describe("a livekit connection", () => {
       slug: "half_credential",
       payload: { credentials: { apiKey: API_KEY } },
       message:
-        "a livekit connection's credentials need apiSecret to be a non-empty string",
+        "a LiveKit room connection's credentials need apiSecret to be a non-empty string",
     },
     {
       named: "a credential half too short for its hint to stay a hint",
       slug: "short_credential",
       payload: { credentials: { apiKey: API_KEY, apiSecret: "abcd" } },
       message:
-        "a livekit connection's credentials need apiSecret to be at least 8 characters",
+        "a LiveKit room connection's credentials need apiSecret to be at least 8 characters",
     },
     {
       // Even the right answer: the type decides it, so there is nowhere in a
@@ -853,8 +917,8 @@ describe("a livekit connection", () => {
       slug: "supplied_topology",
       payload: { topology: "agent-dials-out" },
       message:
-        'a connection has no key "topology"; it holds name, type, modality, ' +
-        "environment, config, credentials",
+        'a connection has no key "topology"; it holds name, agent_platform, ' +
+        "connection_kind, access_variant, modality, environment, config, credentials",
     },
     {
       named: "a credential key that does not belong",
@@ -867,7 +931,7 @@ describe("a livekit connection", () => {
         },
       },
       message:
-        'a livekit connection\'s credentials have no key "apiToken"; they are ' +
+        'a LiveKit room connection\'s credentials have no key "apiToken"; they are ' +
         "shaped { apiKey, apiSecret }",
     },
   ];
@@ -975,7 +1039,9 @@ describe("a livekit connection", () => {
     const endpointPayload = (
       overrides: Record<string, unknown> = {},
     ): Record<string, unknown> => ({
-      type: "livekit",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
         url: "wss://acme.livekit.cloud",
@@ -1117,7 +1183,7 @@ describe("registering the same vendor agent again", () => {
     expect(voice.status).toBe(400);
     expect(voice.body).toEqual({
       error: "invalid_request",
-      message: "a retell connection speaks chat, and this one was asked for voice",
+      message: "a retell_chat_api connection speaks chat, and this one was asked for voice",
     });
 
     const one = await get(
@@ -1229,8 +1295,8 @@ describe("the vendor payload egma no longer keeps", () => {
       error: "invalid_request",
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
-        'connection has no "pulled" key. Drop it and send name, type, ' +
-        "modality, environment, config, credentials; the agent's content " +
+        'connection has no "pulled" key. Drop it and send name, agent_platform, ' +
+        "connection_kind, access_variant, modality, environment, config, credentials; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
@@ -1253,7 +1319,7 @@ describe("the vendor payload egma no longer keeps", () => {
     });
   });
 
-  it("refuses a supplied topology, which the type decides", async () => {
+  it("refuses a supplied topology, which the connection kind decides", async () => {
     api = await createApi("agents_topology_derived");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -1266,13 +1332,13 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, type, modality, environment, config, credentials',
+        'a connection has no key "topology"; it holds name, agent_platform, connection_kind, access_variant, modality, environment, config, credentials',
     });
   });
 });
 
 describe("a connection's name", () => {
-  it("defaults to the smallest free numbered name for its type", async () => {
+  it("defaults to the smallest free numbered name for its connection kind", async () => {
     api = await createApi("agents_default_names");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -1290,8 +1356,8 @@ describe("a connection's name", () => {
     );
 
     expect(second.status).toBe(201);
-    expect(connectionOf(registered).name).toBe("retell-1");
-    expect(connectionOf(second).name).toBe("retell-2");
+    expect(connectionOf(registered).name).toBe("retell_chat_api-1");
+    expect(connectionOf(second).name).toBe("retell_chat_api-2");
   });
 
   it("is refused when a living connection on the agent already holds it", async () => {
@@ -1307,13 +1373,13 @@ describe("a connection's name", () => {
     const clash = await post(
       `/api/agents/${String(agentOf(registered).id)}/connections`,
       withKey(ada.secret),
-      connectionPayload({ name: "retell-1" }),
+      connectionPayload({ name: "retell_chat_api-1" }),
     );
 
     expect(clash.status).toBe(409);
     expect(clash.body).toEqual({
       error: "name_taken",
-      message: 'a connection named "retell-1" already exists on this agent',
+      message: 'a connection named "retell_chat_api-1" already exists on this agent',
     });
   });
 });

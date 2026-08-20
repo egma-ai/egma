@@ -204,7 +204,9 @@ def room_spec() -> dict:
         SIMULATION,
         modality="voice",
         connection={
-            "type": "livekit",
+            "agent_platform": "livekit_agents",
+            "connection_kind": "livekit_room",
+            "access_variant": "livekit_room.project_credentials",
             "config": config,
             "credentials": {
                 "apiKey": LIVEKIT_API_KEY,

@@ -291,7 +291,7 @@ export class HeadlessUI implements WizardUI {
     for (const held of gate.heldBack) this.write(`held-back: ${held.shown} ${held.reason}`);
     this.write(`tests: ${gate.rows.length}`);
     this.write(
-      `connection: ${gate.connectionName} ${gate.connectionType} ${gate.modality}`,
+      `connection: ${gate.connectionName} ${gate.productLabel} ${gate.modality}`,
     );
     if (gate.destination !== null) this.write(`dials: ${gate.destination}`);
   }

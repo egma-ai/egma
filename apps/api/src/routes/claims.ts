@@ -322,7 +322,7 @@ async function assembledSpec(
     };
   }
 
-  if (connection.type === "retell") {
+  if (connection.connectionKind === "retell_chat_api") {
     const apiKey = connection.credentials?.["apiKey"] ?? "";
     const agentId = connection.config["retellAgentId"] ?? "";
     let checked = retellTargets.get(connection.connectionId);
@@ -381,7 +381,9 @@ async function assembledSpec(
     simulation_id: claim.id,
     modality: claim.modality,
     connection: {
-      type: connection.type,
+      agent_platform: connection.agentPlatform,
+      connection_kind: connection.connectionKind,
+      access_variant: connection.accessVariant,
       config: connection.config,
       credentials: connection.credentials,
     },
