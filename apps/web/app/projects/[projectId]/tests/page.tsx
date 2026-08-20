@@ -20,8 +20,11 @@ import {
   type ListedTest,
   type TestPage,
 } from "../../../../lib/tests.ts";
-import { Choice } from "../../../../ui/choice.tsx";
-import { Toolbar } from "../../../../ui/section.tsx";
+import {
+  Toolbar,
+  TOOLBAR_FILTER,
+  TOOLBAR_SEARCH,
+} from "../../../../ui/section.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import {
@@ -159,7 +162,19 @@ function Tests({ projectId }: { readonly projectId: string }) {
   const now = useMinuteClock();
 
   /** Which shelf is being looked at: what can run, or what was taken out. */
-  const [archived, setArchived] = useState(false);
+  /**
+   * Which list this page asks the server for, and for now it is always the
+   * active one.
+   *
+   * **The archive filter's control came off every list page in this batch.**
+   * The developer wants a filter row to hold what somebody reaches for daily,
+   * and the archive is not that. Nothing under the control moved: the server
+   * still keeps the two lists apart, `testsPath` still carries the flag, and
+   * every branch below that draws the archive still draws it. Putting the
+   * control back is handing a `Choice` the setter this deliberately does not
+   * take.
+   */
+  const [archived] = useState(false);
   /** Narrowed to one agent's coverage, or to none. */
   const [agent, setAgent] = useState("");
   /** What somebody typed in the search box, and what has been asked for. */
@@ -400,6 +415,7 @@ function Tests({ projectId }: { readonly projectId: string }) {
         <Toolbar>
           <Input
             id="tests-search"
+            className={TOOLBAR_SEARCH}
             value={typed}
             aria-label="Search tests by name"
             placeholder="Search by name"
@@ -416,6 +432,7 @@ function Tests({ projectId }: { readonly projectId: string }) {
           />
           <Select
             id="tests-agent"
+            className={TOOLBAR_FILTER}
             value={agent}
             aria-label="Show only tests that apply to one agent"
             onChange={(event) => setAgent(event.target.value)}
@@ -427,15 +444,6 @@ function Tests({ projectId }: { readonly projectId: string }) {
               </option>
             ))}
           </Select>
-          <Choice
-            label="Which tests to show"
-            value={archived ? "archived" : "active"}
-            options={[
-              { value: "active", label: "Active" },
-              { value: "archived", label: "Archived" },
-            ]}
-            onChange={(which) => setArchived(which === "archived")}
-          />
         </Toolbar>
         {body()}
       </PageBody>

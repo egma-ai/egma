@@ -46,6 +46,7 @@ import {
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import { Toolbar, TOOLBAR_FILTER } from "../../../../../ui/section.tsx";
 import { settingsPath } from "../../../../../ui/settings-nav.tsx";
 import { useOrganizationRead } from "../../../../../ui/settings-read.ts";
 import {
@@ -380,13 +381,21 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage wide>
-      <PageHeader
-        eyebrow={LIST.eyebrow}
-        title={LIST.title}
-        lead={LIST.lead}
-        action={
+      <PageHeader eyebrow={LIST.eyebrow} title={LIST.title} lead={LIST.lead} />
+      <PageBody>
+        {/*
+          The window is a filter, so it sits where every list page in this
+          product now keeps its filters: the left of the strip above the list.
+          It was in the page header's action slot, which is where a page keeps
+          the *act* it offers — and this page offers none, so the one control it
+          had was standing in a slot that means something else. A person moving
+          between Runs and Monitoring had to look in two places for the same
+          kind of control.
+        */}
+        <Toolbar>
           <Select
             id="window"
+            className={TOOLBAR_FILTER}
             value={choice ?? DEFAULT_WINDOW}
             aria-label={LIST.window}
             onChange={(event) => choose(event.target.value as WindowChoice)}
@@ -397,9 +406,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
               </option>
             ))}
           </Select>
-        }
-      />
-      <PageBody>
+        </Toolbar>
         {state.status === "failed" ? (
           <Failure
             message={state.why}

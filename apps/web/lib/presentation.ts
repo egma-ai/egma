@@ -57,11 +57,25 @@ export function ownerDisplayName(owner: string): string {
 /**
  * The two screens inside the Graders section, and the order they read in.
  *
- * **The library first, because that is where a grader comes from.** A running
- * grader is a copy of a library entry, so somebody who has just arrived meets
- * the shelf, presses Use on something, and finds it on the second tab. The
- * reverse order would show a list of copies before anything explained what they
- * were copies of.
+ * **Running first, because that is the screen somebody comes back to.** The
+ * library led, on the argument that a running grader is a copy of a library
+ * entry and the shelf is where the idea starts. That is the right order for the
+ * first visit and the wrong one for every visit after it: the shelf is read
+ * once and switched on, and what is judging this project right now is the
+ * question a person returns with. Ordering a two-tab strip by where a thing
+ * comes from taught the product to somebody who already knew it, and charged
+ * everybody else a click on every arrival.
+ *
+ * The first visit keeps its answer. Running is the one screen in the product
+ * whose empty state has always pointed straight at the library, and it now says
+ * so twice — in the empty state, and in the *Add grader* action on the strip.
+ * Somebody who arrives at an empty Running screen is one press from the shelf,
+ * which is the same journey the old order made them take blind.
+ *
+ * The sidebar follows the strip. `navigation.ts` opens Graders on `running`
+ * through the same `opens` mechanism Monitoring already uses, because a first
+ * tab a person never lands on is not a first tab. Both addresses still work,
+ * and a link copied to either one still opens what it opened.
  *
  * Here rather than in either screen's copy file, because a strip whose labels
  * lived in one of the two pages would be a page naming its sibling — and the
@@ -81,8 +95,8 @@ export const GRADER_VIEW_LABELS = {
 } as const;
 
 const GRADER_TABS = [
-  { id: "library", label: GRADER_VIEW_LABELS.library, rest: [] },
   { id: "running", label: GRADER_VIEW_LABELS.running, rest: ["running"] },
+  { id: "library", label: GRADER_VIEW_LABELS.library, rest: [] },
 ] as const satisfies readonly {
   readonly id: string;
   readonly label: string;

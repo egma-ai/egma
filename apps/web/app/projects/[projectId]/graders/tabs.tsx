@@ -1,6 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
+
+import { cn } from "@/lib/utils";
 
 import { graderTabsFor, type GraderTab } from "../../../../lib/presentation.ts";
 
@@ -23,6 +26,18 @@ const TAB =
   "text-sm text-muted-foreground no-underline " +
   "max-[640px]:flex-1 max-[640px]:justify-center";
 
+/**
+ * **Merged with `cn` rather than joined with a space, and that is a bug fix.**
+ * Both halves set `border-bottom-color`, so a plain join left
+ * `border-b-transparent` and `border-b-brand` in one class list and let the
+ * stylesheet's own order decide — and transparent was winning. The current tab
+ * has been drawing a 2px rule nobody could see since the strip was written.
+ * `cn` is tailwind-merge, which drops the losing half instead of shipping both.
+ *
+ * Found by the proof pass for this batch, on the screen the batch moved to the
+ * front. `DESIGN.md` asks a current tab for a shape as well as a colour, and
+ * the shape was the half that was missing.
+ */
 const TAB_CURRENT = "border-b-brand text-foreground";
 
 /**
@@ -64,25 +79,40 @@ export const VIEW_CONTENT = "mt-5 flex flex-col gap-5 [&>section]:mt-0!";
 export function GraderTabs({
   projectId,
   active,
+  action,
 }: {
   readonly projectId: string;
   readonly active: GraderTab;
+  /**
+   * The one thing this section offers, drawn at the right end of the strip.
+   *
+   * The strip is what a grader screen has instead of a filter row, so the
+   * action goes where every list page in this product now keeps its action.
+   * The rule under the row belongs to the row rather than to the tabs, so it
+   * runs the full width whether or not an action is passed.
+   */
+  readonly action?: ReactNode;
 }) {
   return (
-    <nav
-      className="flex items-end gap-6 border-b border-border max-[640px]:gap-0"
-      aria-label="Grader views"
-    >
-      {graderTabsFor(projectId).map((tab) => (
-        <Link
-          key={tab.id}
-          className={`${TAB} ${active === tab.id ? TAB_CURRENT : ""}`}
-          href={tab.href}
-          aria-current={active === tab.id ? "page" : undefined}
-        >
-          {tab.label}
-        </Link>
-      ))}
-    </nav>
+    <div className="flex items-end justify-between gap-3 border-b border-border">
+      <nav
+        className="flex min-w-0 items-end gap-6 max-[640px]:flex-1 max-[640px]:gap-0"
+        aria-label="Grader views"
+      >
+        {graderTabsFor(projectId).map((tab) => (
+          <Link
+            key={tab.id}
+            className={cn(TAB, active === tab.id && TAB_CURRENT)}
+            href={tab.href}
+            aria-current={active === tab.id ? "page" : undefined}
+          >
+            {tab.label}
+          </Link>
+        ))}
+      </nav>
+      {action === undefined ? null : (
+        <div className="flex flex-none items-center pb-2">{action}</div>
+      )}
+    </div>
   );
 }

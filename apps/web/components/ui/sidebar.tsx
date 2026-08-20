@@ -129,25 +129,37 @@ function SidebarFooter({ className, ...props }: ComponentProps<"div">) {
 }
 
 /**
- * A labelled set of rows.
+ * A set of rows, labelled or not.
  *
  * The label is tied to the group rather than left floating above it, so a
  * screen reader says which group it has entered instead of reading six links
  * with nothing between them. The id is made here and taken by the label,
  * because a group knows it has one and a caller should not have to invent a
  * unique string for every bar it draws.
+ *
+ * **`labelled={false}` is for the group that is drawn without a heading**, and
+ * it takes the region away with the heading rather than only hiding the word.
+ * A `role="group"` still pointing `aria-labelledby` at a heading that is not
+ * rendered is a named region with a dangling name — a screen reader announces a
+ * group and then has nothing to call it. So an unlabelled group is a plain
+ * wrapper: the rows inside it are still links in the same `<nav>`, and they are
+ * reached exactly as they were. It defaults to `true`, so every group that had
+ * a heading before this prop existed keeps the heading and the region it had.
  */
 const SidebarGroupLabelId = createContext<string | null>(null);
 
-function SidebarGroup({ className, ...props }: ComponentProps<"div">) {
+function SidebarGroup({
+  className,
+  labelled = true,
+  ...props
+}: ComponentProps<"div"> & { readonly labelled?: boolean }) {
   const labelId = useId();
 
   return (
-    <SidebarGroupLabelId.Provider value={labelId}>
+    <SidebarGroupLabelId.Provider value={labelled ? labelId : null}>
       <div
         data-slot="sidebar-group"
-        role="group"
-        aria-labelledby={labelId}
+        {...(labelled ? { role: "group", "aria-labelledby": labelId } : {})}
         className={cn("flex w-full min-w-0 flex-col gap-1", className)}
         {...props}
       />
@@ -162,8 +174,10 @@ function SidebarGroup({ className, ...props }: ComponentProps<"div">) {
  * `aria-labelledby` wiring above already gives the group its accessible name;
  * this is the other half, and they answer different questions. The name is what
  * a person hears once they are *inside* a group. A heading is how they get to
- * one at all — the heading list is Global, Simulations, Monitoring, and jumping
- * between them is one keystroke rather than six arrow presses.
+ * one at all — the heading list is Simulations and Monitoring, and jumping
+ * between them is one keystroke rather than six arrow presses. The top group
+ * is not in that list, because it is drawn with no heading at all: it is the
+ * two rows a person lands on, reached before any jump is needed.
  *
  * `h2` because the bar has no heading above it and the page's own title is the
  * `h1` beside it. It carries no size of its own — `DESIGN.md` removed those —
@@ -241,8 +255,13 @@ function SidebarMenuItem({ className, ...props }: ComponentProps<"li">) {
  * arriving late, which is worse. Hover changes the background and the text and
  * nothing else, so those two are what move.
  *
- * The row is 44px tall in every theme and at every width, so a coarse pointer
- * needs no separate rule to reach it.
+ * **The row is 36px where the pointer is fine and 44px where it is coarse.** A
+ * bar of six rows is read as a block rather than pressed one row at a time, and
+ * at 44px each the block was loose enough to read as six boxes stacked instead
+ * of two or three clusters. 36px is `--control-md`, the height this product
+ * already gives a compact control. The 44px tap target is not traded away for
+ * that: `pointer-coarse` puts it straight back on every touch screen, which is
+ * the same rule the segmented choice control already uses.
  */
 function SidebarMenuButton({
   className,
@@ -264,11 +283,12 @@ function SidebarMenuButton({
       aria-current={isActive ? "page" : undefined}
       className={cn(
         "relative flex w-full min-w-0 items-center gap-3",
-        "min-h-(--control-lg) rounded-button px-3",
-        "text-base text-muted-foreground no-underline",
+        "min-h-(--control-md) rounded-button px-3",
+        "pointer-coarse:min-h-(--tap-target)",
+        "text-sm text-muted-foreground no-underline",
         "transition-[color,background-color] duration-(--duration-hover) ease-out",
         "motion-reduce:transition-none",
-        "before:absolute before:inset-y-3 before:left-0 before:w-0.5",
+        "before:absolute before:inset-y-2 before:left-0 before:w-0.5",
         "before:rounded-chip before:bg-transparent before:content-['']",
         "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
         "data-[active=true]:bg-selected data-[active=true]:text-foreground",

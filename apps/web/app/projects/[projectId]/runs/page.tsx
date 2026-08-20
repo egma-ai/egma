@@ -27,7 +27,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Actions, Toolbar } from "../../../../ui/section.tsx";
+import {
+  Actions,
+  Toolbar,
+  TOOLBAR_FILTER,
+} from "../../../../ui/section.tsx";
 import { Refused } from "../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
@@ -571,6 +575,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
         <Toolbar>
           <Select
             id="runs-agent"
+            className={TOOLBAR_FILTER}
             value={agent}
             aria-label="Show only runs against one agent"
             onChange={(event) => setAgent(event.target.value)}
@@ -584,6 +589,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
           </Select>
           <Select
             id="runs-connection"
+            className={TOOLBAR_FILTER}
             value={connection}
             aria-label="Show only runs over one connection"
             onChange={(event) => setConnection(event.target.value)}
@@ -597,6 +603,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
           </Select>
           <Select
             id="runs-status"
+            className={TOOLBAR_FILTER}
             value={status}
             aria-label="Show only runs whose machinery is in one state"
             onChange={(event) =>
@@ -612,6 +619,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
           </Select>
           <Select
             id="runs-verdict"
+            className={TOOLBAR_FILTER}
             value={verdict}
             aria-label="Show only runs with one verdict"
             onChange={(event) =>
@@ -634,6 +642,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
           */}
           <Input
             id="runs-since"
+            className={TOOLBAR_FILTER}
             type="text"
             value={typedSince}
             aria-label="Show only runs started on or after a day"

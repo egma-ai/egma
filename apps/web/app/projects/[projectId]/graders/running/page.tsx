@@ -473,7 +473,32 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
         ]}
       />
       <PageBody>
-        <GraderTabs projectId={projectId} active="running" />
+        {/*
+          **Add grader opens the library, because adopting an entry is the only
+          way a grader starts.** There is no create-a-grader flow in this
+          product and this button does not pretend there is one: a grader is a
+          copy of a library entry, made by pressing Use on the entry itself, and
+          the Use form is drawn from the entry it is opened on — so there is no
+          entry-less form for a page-level button to open. It takes somebody to
+          the shelf where the Use affordance is, which is the same journey this
+          screen's empty state has always offered, now offered before the screen
+          is empty as well.
+
+          It is on this screen and not the library's. There, the same button
+          would link to the page it is already on, and a control that does
+          nothing is worse than no control.
+        */}
+        <GraderTabs
+          projectId={projectId}
+          active="running"
+          action={
+            <Button asChild>
+              <Link href={projectPath(projectId, GRADERS_SECTION)}>
+                Add grader
+              </Link>
+            </Button>
+          }
+        />
         <div className={VIEW_CONTENT}>
           {/*
             What the last act came to, and it stays until the next one. Both

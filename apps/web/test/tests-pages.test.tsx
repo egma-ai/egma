@@ -269,16 +269,16 @@ describe("the list of tests", () => {
     });
   });
 
-  it("asks for the archived shelf as a different list, never as a column", async () => {
-    list();
-    await screen.findAllByText("Front desk");
-
-    fireEvent.click(screen.getByRole("radio", { name: "Archived" }));
-
-    await waitFor(() => {
-      expect(sent.some((one) => one.url.includes("archived=true"))).toBe(true);
-    });
-  });
+  /*
+   * **The archive filter's control came off this row and the archive did not
+   * move.** The test that used to sit here pressed the Archived radio and
+   * watched for `archived=true` on the wire, so it could not survive the
+   * control going. What it proved still holds and is still proven: the server
+   * keeps the two lists apart, and `apps/api/test/tests-lifecycle.test.ts`
+   * asks `/api/tests?archived=true` for the archived one and reads it back.
+   * `testsPath` still carries the flag, and this page still asks with it —
+   * pinned to the active list, which is what the row above now says.
+   */
 
   it("gives a viewer the same page and a control that is genuinely inert", async () => {
     list("viewer");
