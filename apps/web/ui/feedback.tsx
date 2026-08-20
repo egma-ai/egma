@@ -34,12 +34,15 @@ export type FeedbackInput = "keyboard" | "pointer";
  * page, and a panel hard-centred over its trigger that ran off the side of a
  * narrow window rather than answering the edge.
  *
- * One thing that global timestamp did is not replaced yet: Radix groups the
- * "open the next one at once" window per provider, and the kit gives each
- * tooltip its own, so *this* trigger re-hovered is instant while its neighbour
- * still waits the first delay. One `TooltipProvider` near the application root
- * restores the group, and that is a change to a file this component cannot
- * make for itself.
+ * One thing that global timestamp did is not replaced, and mounting a provider
+ * would not replace it. Radix keeps the "open the next one at once" window on
+ * the provider, and the kit's `Tooltip` wraps every root in a provider of its
+ * own, so each tooltip only ever groups with itself: this trigger re-hovered
+ * is instant, its neighbour still waits the full delay. A provider mounted
+ * higher up changes nothing, because the nearest one wins and the nearest one
+ * is always the inner one. Restoring the shared window means removing that
+ * wrapper *and* mounting one provider above the product — two files at once,
+ * recorded with the coordinator rather than done here.
  *
  * `data-input` is only read by the exit: Radix reports "closed" the same way
  * whichever input opened it, and a keyboard close must not wait for a movement.

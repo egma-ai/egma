@@ -38,9 +38,15 @@ function TooltipProvider({
 /**
  * One tooltip, which carries its own provider so a lone one works.
  *
- * A provider higher up still decides for every tooltip under it that does not
- * override it: `delayDuration` passed here lands on the root, and Radix reads
- * the root's before the provider's.
+ * **The inner provider is also what stops the delay grouping from working
+ * across tooltips.** Radix keeps "one has just been shown, so open the next at
+ * once" on the provider, and a provider per tooltip means each one only ever
+ * groups with itself: the same trigger re-hovered is instant, its neighbour
+ * still waits the full delay. A `TooltipProvider` mounted higher up does not
+ * change that, because the nearest provider is the one a tooltip reads and the
+ * nearest is always this one. Restoring the shared window means removing this
+ * wrapper *and* mounting one provider above the product, which is two files at
+ * once and is recorded with the coordinator rather than done here.
  */
 function Tooltip(props: ComponentProps<typeof TooltipPrimitive.Root>) {
   return (
@@ -55,21 +61,26 @@ function TooltipTrigger(props: ComponentProps<typeof TooltipPrimitive.Trigger>) 
 }
 
 /**
- * The panel itself, and the one state that must not move.
+ * The panel itself.
  *
- * Radix says how the tooltip was opened, and the two answers want different
- * things. `delayed-open` is a pointer that waited, so it arrives on opacity
- * and `scale`, about the trigger it belongs to. `instant-open` is either
- * keyboard focus or a pointer inside the grouping window, and both of those
- * appear at once and without movement — "do not animate actions used many
- * times each day, especially keyboard navigation", and a delay repeated across
- * a row of controls is the tooltip behaviour everybody complains about.
+ * **No motion here.** `tailwind-theme.css` writes it, keyed on `data-slot` and
+ * Radix's `data-state`, exactly as it does for the popover, the dropdown menu
+ * and the dialog. Two things need that placement rather than a class list: the
+ * reduced-motion form has to be a real `@media` block that comes later, where
+ * a `motion-reduce:` utility of equal specificity leaves the winner to
+ * Tailwind's variant sort order — a reduced-motion failure that fails silently
+ * — and the development proof's reduced-motion frame keys off an ancestor,
+ * which no class on this element can express.
  *
- * The exit is scoped by the `data-input` its caller sets, because Radix says
- * "closed" the same way whichever opened it. An animation is what Radix waits
- * for before it unmounts, so a pointer exit runs to completion and a keyboard
- * one is not made to wait for anything. A caller that sets no `data-input`
- * gets the arrival and an exit that is simply immediate.
+ * **No portal, and that is the deliberate part.** The registry portals this to
+ * `body`, and a panel under `body` is out of reach of every descendant
+ * selector in the theme, including the one the proof page's reduced-motion
+ * frame is drawn with. Radix positions the panel `position: fixed` either way,
+ * so staying in place keeps the collision handling and the escape from
+ * ordinary `overflow` scrolling; what it gives up is an ancestor that is
+ * itself a containing block for fixed children — a `transform`, `filter` or
+ * `contain` — and the hand-written tooltip this replaces was
+ * `position: absolute` inside its trigger, so it lost that case too.
  *
  * **No arrow.** This product's tooltip has never drawn one, and Radix measures
  * an arrow with a `ResizeObserver`, which the component tests have no
@@ -82,35 +93,25 @@ function TooltipContent({
   ...props
 }: ComponentProps<typeof TooltipPrimitive.Content>) {
   return (
-    <TooltipPrimitive.Portal>
-      <TooltipPrimitive.Content
-        data-slot="tooltip-content"
-        sideOffset={sideOffset}
-        className={cn(
-          /*
-           * A tooltip holds no action, so it takes no presses either. Without
-           * this it is a panel sitting over the control it explains, and the
-           * click meant for that control lands on the explanation.
-           */
-          "pointer-events-none",
-          "z-40 w-max max-w-[min(240px,calc(100vw-var(--space-7)))]",
-          "rounded-button border border-foreground bg-foreground px-3 py-2",
-          "text-sm text-balance text-surface",
-          /* "Popovers use their trigger as `transform-origin`." Radix measures it. */
-          "origin-(--radix-tooltip-content-transform-origin)",
-          "data-[state=delayed-open]:animate-[egma-anchored-in_var(--duration-popover-in)_var(--ease-out)]",
-          "data-[input=pointer]:data-[state=closed]:animate-[egma-anchored-out_var(--duration-popover-out)_var(--ease-out)]",
-          /*
-           * The reduced-motion form keeps the arrival and the departure and
-           * drops the movement, so the panel still says it came and went.
-           */
-          "motion-reduce:data-[state=delayed-open]:animate-[egma-fade-in_var(--duration-hover)_linear]",
-          "motion-reduce:data-[input=pointer]:data-[state=closed]:animate-[egma-fade-out_var(--duration-hover)_linear]",
-          className,
-        )}
-        {...props}
-      />
-    </TooltipPrimitive.Portal>
+    <TooltipPrimitive.Content
+      data-slot="tooltip-content"
+      sideOffset={sideOffset}
+      className={cn(
+        /*
+         * A tooltip holds no action, so it takes no presses either. Without
+         * this it is a panel sitting over the control it explains, and the
+         * click meant for that control lands on the explanation.
+         */
+        "pointer-events-none",
+        "z-40 w-max max-w-[min(240px,calc(100vw-var(--space-7)))]",
+        "rounded-button border border-foreground bg-foreground px-3 py-2",
+        "text-sm text-balance text-surface",
+        /* "Popovers use their trigger as `transform-origin`." Radix measures it. */
+        "origin-(--radix-tooltip-content-transform-origin)",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 

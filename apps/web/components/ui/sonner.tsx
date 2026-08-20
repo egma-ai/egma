@@ -88,7 +88,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--info-text": "var(--foreground)",
           "--info-border": "var(--border)",
           /* The card radius, which is what a raised surface this size wears. */
-          "--border-radius": "var(--radius-lg)",
+          "--border-radius": "var(--radius-card)",
         } as CSSProperties
       }
       {...props}
