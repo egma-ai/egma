@@ -16,6 +16,7 @@ import path from "node:path";
 import RunResultsAddress from "../app/runs/[runId]/page.tsx";
 import AgentsLoading from "../app/projects/[projectId]/agents/loading.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
+import TestLoading from "../app/projects/[projectId]/tests/[testId]/loading.tsx";
 import type { Me } from "../lib/me.ts";
 import { EVERY_NAVIGATION_ITEM } from "../lib/navigation.ts";
 import { Button } from "@/components/ui/button";
@@ -1037,13 +1038,15 @@ describe("a page that is not showing its data", () => {
 /**
  * The loading state, which used to be a sentence and nothing else.
  *
- * `DESIGN.md` asks it for a "fast, quiet indicator", and the four rules below
- * are what "quiet" costs: theme timing rather than Tailwind's, a wait before
- * anything appears, a reduced-motion form, and a stagger that cannot be
- * cancelled by the order Tailwind happens to emit its rules in.
+ * `DESIGN.md` asks it for a "fast, quiet indicator", and none of what that
+ * costs is written in these components: the wait before anything appears, the
+ * breath in the bars, the phase between them and the reduced-motion form all
+ * live in `tailwind-theme.css`, keyed on the slots the components publish.
  *
- * The class lists are read directly because jsdom computes no animation. That
- * is the trade: these assert the declaration rather than the movement, and the
+ * So the tests come in two halves. The first reads the DOM and proves the
+ * components emit the hooks and say the true sentence. The second reads the
+ * theme and proves the rules keyed on those hooks are made of egma's tokens.
+ * Neither half watches anything move — jsdom computes no animation — and the
  * movement itself is proven in a browser.
  */
 describe("the state a page shows while it is still waiting", () => {
@@ -1052,12 +1055,8 @@ describe("the state a page shows while it is still waiting", () => {
     return screen.getByRole("status");
   }
 
-  function bars(within_: HTMLElement): readonly HTMLElement[] {
-    return [...within_.querySelectorAll<HTMLElement>('[data-slot="skeleton"]')];
-  }
-
-  function classStartingWith(on: HTMLElement, prefix: string): string | undefined {
-    return [...on.classList].find((one) => one.startsWith(prefix));
+  function bars(inside: HTMLElement): readonly HTMLElement[] {
+    return [...inside.querySelectorAll<HTMLElement>('[data-slot="skeleton"]')];
   }
 
   it("still says what it is waiting for, in the quiet tone it always had", () => {
@@ -1077,65 +1076,135 @@ describe("the state a page shows while it is still waiting", () => {
     expect(said.textContent).toBe("Loading agents…");
   });
 
-  it("is timed by the theme, never by the numbers shadcn shipped", () => {
-    const [first] = bars(loadingState());
-    const pulse = classStartingWith(first as HTMLElement, "[--animate-pulse:");
+  /**
+   * The hooks are the contract between the two halves. A rename here is a rule
+   * in the theme that silently stops matching anything, which is the one
+   * failure this arrangement can have and the one nothing else would catch.
+   */
+  it("publishes the slots the theme's motion is keyed on", () => {
+    const said = loadingState();
 
-    expect(pulse).toContain("var(--duration-drawer-in)");
-    expect(pulse).toContain("var(--ease-in-out)");
-    // Tailwind's own `2s cubic-bezier(0.4, 0, 0.6, 1)`, gone.
-    expect(pulse).not.toContain("2s");
-    expect(pulse).not.toContain("cubic-bezier");
+    expect(said.dataset.slot).toBe("page-state");
+    expect(said.querySelector('[data-slot="loading-indicator"]')).toBeTruthy();
+    expect(bars(said)).toHaveLength(3);
   });
 
-  /**
-   * The rule this proves is a number: a page that answers before the delay is
-   * up is drawn without the indicator ever having been on screen. So the token
-   * is read out of the theme and checked against the threshold, rather than
-   * the test agreeing with whatever the theme happens to say today.
-   */
-  it("waits longer than a fast answer takes, so nothing flashes", async () => {
+  it("writes no motion of its own, in either file", async () => {
     const said = loadingState();
-    const enter = classStartingWith(said, "[animation:egma-fade-in");
-
-    expect(enter).toContain("var(--duration-popover-in)");
-    // `both` is what holds it at nothing for the length of the wait.
-    expect(enter).toContain("both");
+    for (const element of [said, ...bars(said)]) {
+      expect(element.className).not.toContain("animate");
+      expect(element.className).not.toContain("animation");
+    }
 
     // `import.meta.dirname`, not a URL: this file runs under jsdom, where
     // `import.meta.url` is an http address rather than a path on disk.
-    const theme = await readFile(
+    const here = import.meta.dirname;
+    for (const file of ["../ui/page-state.tsx", "../components/ui/skeleton.tsx"]) {
+      const source = await readFile(path.join(here, file), "utf8");
+      expect(source, `${file} writes motion`).not.toContain("animation:");
+      expect(source, `${file} writes motion`).not.toContain("animate-");
+    }
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The other half: the rules those slots are keyed on.
+ *
+ * `DESIGN.md` puts loading motion in the theme beside the run state mark's
+ * turn, so this reads the theme rather than a class list. What it checks is
+ * not the exact declarations but the rules that would be broken silently — a
+ * duration that stopped being a token, an entrance short enough to flash, a
+ * reduced-motion form that went missing.
+ */
+describe("the motion the theme gives a state that is waiting", () => {
+  async function theme(): Promise<string> {
+    return readFile(
       path.join(import.meta.dirname, "../ui/tailwind-theme.css"),
       "utf8",
     );
-    const waited = /--duration-popover-in:\s*(\d+)ms/.exec(theme)?.[1];
-    expect(Number(waited)).toBeGreaterThanOrEqual(150);
+  }
+
+  function ruleFor(css: string, selector: string): string {
+    const at = css.indexOf(selector);
+    expect(at, `no rule for ${selector}`).toBeGreaterThan(-1);
+    const opened = css.indexOf("{", at);
+    return css.slice(opened, css.indexOf("}", opened));
+  }
+
+  it("breathes on a keyframe of its own rather than one Tailwind might drop", async () => {
+    const css = await theme();
+
+    // Tailwind's `pulse` is only emitted while some class list still says
+    // `animate-pulse`. Reading it from a rule here would be a keyframe that
+    // exists as a side effect of a utility nothing uses.
+    expect(css).toContain("@keyframes egma-skeleton-pulse");
   });
 
-  it("keeps the meaning under reduced motion and drops the movement", () => {
-    for (const bar of bars(loadingState())) {
-      expect(bar.className).toContain("motion-reduce:animate-none");
-    }
+  it("times the breath with tokens, never with the numbers shadcn shipped", async () => {
+    const css = await theme();
+    const rule = ruleFor(css, '[data-slot="skeleton"] {');
+
+    expect(rule).toContain("var(--duration-drawer-in)");
+    expect(rule).toContain("var(--ease-in-out)");
+    expect(rule).not.toContain("cubic-bezier");
+    expect(rule).not.toMatch(/\d+m?s/);
   });
 
   /**
-   * The offset is a custom property rather than an `animation-delay` utility.
-   * Both would be on the same element, and `animation:` resets
-   * `animation-delay`, so a delay written as its own declaration lives or dies
-   * by which rule Tailwind emits second. Folding it into the shorthand removes
-   * the question.
+   * The rule this proves is a number: a route that answers before the wait is
+   * up is drawn without the indicator ever having been on screen. The token is
+   * read out of the same file and checked against the threshold, rather than
+   * the test agreeing with whatever the theme happens to say today.
    */
-  it("staggers the bars with a variable, not with a declaration that can be reset", () => {
-    const drawn = bars(loadingState());
-    const offsets = drawn
-      .map((bar) => classStartingWith(bar, "[--pulse-delay:"))
-      .filter((one) => one !== undefined);
+  it("waits longer than a fast answer takes, so nothing flashes", async () => {
+    const css = await theme();
+    const rule = ruleFor(css, '[data-slot="route-loading"],');
 
-    expect(offsets).toHaveLength(2);
-    expect(new Set(offsets).size).toBe(2);
-    for (const bar of drawn) {
-      expect(bar.className).not.toContain("[animation-delay:");
-    }
+    expect(rule).toContain("egma-fade-in");
+    expect(rule).toContain("var(--duration-popover-in)");
+    // `both` is what holds it at nothing for the length of the wait.
+    expect(rule).toContain("both");
+
+    const waited = /--duration-popover-in:\s*(\d+)ms/.exec(css)?.[1];
+    expect(Number(waited)).toBeGreaterThanOrEqual(150);
+  });
+
+  it("gives a route fallback one entrance rather than one for each layer", async () => {
+    const css = await theme();
+    const rule = ruleFor(
+      css,
+      '[data-slot="route-loading"]\n    [data-slot="page-state"]',
+    );
+
+    expect(rule).toContain("animation: none");
+  });
+
+  it("staggers the bars by a token, and by a negative one", async () => {
+    const css = await theme();
+    const second = ruleFor(css, ':nth-child(2) {');
+    const third = ruleFor(css, ':nth-child(3) {');
+
+    expect(second).toContain("calc(var(--duration-hover) * -1)");
+    expect(third).toContain("calc(var(--duration-hover) * -2)");
+  });
+
+  /**
+   * The breath stops and the bar stays. The entrance deliberately has no rule
+   * of its own here: it is already opacity and nothing else, and `globals.css`
+   * caps every animation at one frame under this query while leaving
+   * `animation-delay` alone — so the wait survives and only the fade goes.
+   */
+  it("stops the breath under reduced motion and leaves the bar", async () => {
+    const css = await theme();
+    const from = css.indexOf('[data-slot="skeleton"] {');
+    const reduced = css.slice(from, css.indexOf('[data-slot="popover-content"]', from));
+
+    expect(reduced).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(reduced.slice(reduced.indexOf("prefers-reduced-motion"))).toContain(
+      "animation: none",
+    );
   });
 });
 
@@ -1146,8 +1215,9 @@ describe("the state a page shows while it is still waiting", () => {
  *
  * A press on a navigation item used to hold the previous page on screen with
  * nothing said until the next one was ready. The fallback answers the press
- * instead: the shell never moves, the destination is named, and the same
- * indicator runs under it.
+ * instead: the shell never moves, the destination is named in the page's own
+ * words **and the page's own header shape**, and the whole composition arrives
+ * as one thing.
  */
 describe("what the router draws while a page is still coming", () => {
   it("keeps the frame, names where the press landed, and shows the one indicator", async () => {
@@ -1169,6 +1239,49 @@ describe("what the router draws while a page is still coming", () => {
     const said = screen.getByRole("status");
     expect(said.textContent).toBe("Loading agents…");
     expect(said.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3);
+  });
+
+  /**
+   * One appearance, so there is one element for the theme to fade. Without it
+   * the header would paint at once and the card 180ms later, which is a
+   * sub-second navigation showing a title above a tall empty gap.
+   */
+  it("wraps the whole composition, header included, in one arrival", async () => {
+    apiAnswers({ "/api/me": { status: 200, body: meWith("admin") } });
+    const { container } = render(
+      <ProductShellBoundary>
+        <AgentsLoading />
+      </ProductShellBoundary>,
+    );
+    await screen.findAllByText("ada@acme.example");
+
+    const arrival = container.querySelector('[data-slot="route-loading"]');
+    expect(arrival).toBeTruthy();
+    expect(arrival?.querySelector("h1")?.textContent).toBe("Agents");
+    expect(arrival?.querySelector('[data-slot="loading-indicator"]')).toBeTruthy();
+  });
+
+  /**
+   * The header a fallback draws has to be the *shape* the page draws, not only
+   * the same words. `shell.tsx` hides the eyebrow whenever breadcrumbs are
+   * given, so a fallback with an eyebrow standing in for a page with crumbs
+   * swaps one line for another of a different height on arrival.
+   */
+  it("draws the page's own breadcrumbs, into this project, rather than an eyebrow", async () => {
+    apiAnswers({ "/api/me": { status: 200, body: meWith("admin") } });
+    render(
+      <ProductShellBoundary>
+        <TestLoading />
+      </ProductShellBoundary>,
+    );
+    await screen.findAllByText("ada@acme.example");
+
+    const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumbs).getByRole("link", { name: "Tests" }).getAttribute("href")).toBe(
+      "/projects/prj_1/tests",
+    );
+    expect(within(crumbs).getByText("Test")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Loading this test…");
   });
 });
 

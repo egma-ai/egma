@@ -18,22 +18,29 @@ import { ProductStatePage } from "../../../../ui/shell.tsx";
  *
  * **The frame is here and the data is not, which is the whole point.** The
  * sidebar never moves — it belongs to `ProductShellBoundary` in the root
- * layout, above every route — and this adds the page's own title on top of it,
- * so a press is answered by arriving somewhere named rather than by a bare
- * indicator floating in an empty column. The words are the page's own: the
- * eyebrow, the title and what is being waited for are copied from
- * `agents/page.tsx`, so the fallback and the page it stands in for cannot
- * disagree about where somebody is.
+ * layout, above every route — and this adds the page's own header on top of
+ * it, so a press is answered by arriving somewhere named rather than by a bare
+ * indicator floating in an empty column. Every word is the page's own: the
+ * eyebrow or breadcrumbs, the title and what is being waited for are copied
+ * from the page this stands in for, **including the header's shape**, because
+ * an eyebrow that becomes a breadcrumb row on arrival is a header that moves.
  *
- * What it deliberately does not carry is the page's toolbar and controls,
- * which it cannot know before the page mounts. So the header lands first and
- * the rest fills in under it. That is progressive arrival rather than a jump,
- * and it is the honest limit of a fallback that has not seen the data.
+ * What a fallback cannot carry is the page's toolbar, its controls, or a
+ * second navigation column, none of which it can know before the page mounts.
+ * So the header lands first and the rest fills in under it. That is
+ * progressive arrival rather than a jump, and it is the honest limit of a
+ * fallback that has not seen the data.
+ *
+ * The whole composition arrives as one thing, after a wait, and neither is
+ * written here: `tailwind-theme.css` keys both to the `route-loading` slot
+ * below.
  */
 export default function AgentsLoading() {
   return (
-    <ProductStatePage eyebrow="Project" title="Agents">
-      <Loading what="agents" />
-    </ProductStatePage>
+    <div data-slot="route-loading">
+      <ProductStatePage eyebrow="Project" title="Agents">
+        <Loading what="agents" />
+      </ProductStatePage>
+    </div>
   );
 }

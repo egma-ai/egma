@@ -583,6 +583,19 @@
 }
 
 /*
+ * The skeleton's breath: one dip and back, so a bar never leaves the page.
+ *
+ * It is written here rather than borrowed from Tailwind's own pulse, which is
+ * the same shape. Tailwind's arrives welded to two seconds and an easing curve
+ * of its own, and it is only emitted at all while some class list still asks
+ * for that utility — so reading it from a rule here would mean a keyframe that
+ * exists as a side effect of a class nothing wears.
+ */
+@keyframes egma-skeleton-pulse {
+  50% { opacity: 0.5; }
+}
+
+/*
  * The dialog scales on the `scale` property rather than inside `transform`,
  * and that is load-bearing rather than a style preference.
  *
@@ -648,6 +661,82 @@
 
   @media (prefers-reduced-motion: reduce) {
     [data-slot="state-mark"][data-motion="active"] {
+      animation: none;
+    }
+  }
+
+  /*
+   * The same rule's other half: a page, or a whole route, that is still
+   * waiting.
+   *
+   * **One appearance assembled out of three elements.** A route fallback wraps
+   * a whole page composition, that composition holds a state card, and the
+   * card holds the bars. Only a rule that can see all three can say "one
+   * entrance, not three", which is why this is here rather than in three class
+   * lists that cannot see each other.
+   *
+   * **The entrance waits before it draws anything.** `--duration-popover-in`
+   * of nothing, held there by `both`, and then a `--duration-hover` fade. A
+   * route that answers inside that wait — a prefetched one, a warm cache, a
+   * second visit — is drawn without this ever having been on screen, and a box
+   * that appears and vanishes inside a fifth of a second reads as a fault
+   * rather than as speed.
+   *
+   * **A fallback owns the entrance; the card inside it does not.** Otherwise
+   * the header would fade as one thing and the card as another, and the two
+   * opacities would multiply for as long as they overlapped.
+   *
+   * **Reduced motion is deliberately not given a rule of its own here.** This
+   * is already opacity and nothing else, and `globals.css` caps every
+   * animation at a single frame under that query while leaving
+   * `animation-delay` alone — so what survives is the wait, and what goes is
+   * the fade. Writing `animation: none` here would throw away the half worth
+   * keeping.
+   */
+  [data-slot="route-loading"],
+  [data-slot="page-state"]:has([data-slot="loading-indicator"]) {
+    animation: egma-fade-in var(--duration-hover) var(--ease-out)
+      var(--duration-popover-in) both;
+  }
+
+  [data-slot="route-loading"]
+    [data-slot="page-state"]:has([data-slot="loading-indicator"]) {
+    animation: none;
+  }
+
+  /*
+   * The bars themselves.
+   *
+   * One full breath is `--duration-drawer-in` twice over — 560ms, so each half
+   * of it is one drawer-enter — against the 2s a stock shadcn skeleton
+   * carries. Quicker, and still slow enough to read as waiting rather than as
+   * alarm.
+   *
+   * The stagger is `--duration-hover` per bar and **negative**, so all three
+   * are already moving on the first frame and merely out of phase. A positive
+   * delay would hold the second and third still while the first breathed,
+   * which reads as two bars that failed to start. It is a separate
+   * `animation-delay` and it is safe to be one: both declarations are in this
+   * file, in this order, and the offsets are the more specific of the two.
+   *
+   * The word above them carries the meaning, so reduced motion stops the
+   * breath and leaves the bar — the same trade the state mark makes.
+   */
+  [data-slot="skeleton"] {
+    animation: egma-skeleton-pulse calc(var(--duration-drawer-in) * 2)
+      var(--ease-in-out) infinite;
+  }
+
+  [data-slot="loading-indicator"] [data-slot="skeleton"]:nth-child(2) {
+    animation-delay: calc(var(--duration-hover) * -1);
+  }
+
+  [data-slot="loading-indicator"] [data-slot="skeleton"]:nth-child(3) {
+    animation-delay: calc(var(--duration-hover) * -2);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="skeleton"] {
       animation: none;
     }
   }

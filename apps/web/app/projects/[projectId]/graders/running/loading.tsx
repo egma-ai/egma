@@ -1,21 +1,41 @@
+"use client";
+
+import { useParams } from "next/navigation";
+
+import { RUNNING } from "../../../../../lib/grader-running-copy.ts";
+import { GRADERS_SECTION } from "../../../../../lib/graders.ts";
+import { GRADER_VIEW_LABELS } from "../../../../../lib/presentation.ts";
+import { projectPath } from "../../../../../lib/project-context.ts";
 import { Loading } from "../../../../../ui/page-state.tsx";
 import { ProductStatePage } from "../../../../../ui/shell.tsx";
-import { RUNNING } from "../../../../../lib/grader-running-copy.ts";
 
 /**
- * What the router draws between the press and `/projects/:projectId/graders/running` arriving.
+ * What the router draws between the press and
+ * `/projects/:projectId/graders/running` arriving.
  *
- * The graders tab strip is a page rather than a tab panel, so moving
- * between **Library** and **Running** is a route change and needs its own
- * boundary to stay instant.
+ * The graders tab strip is a page rather than a tab panel, so moving between
+ * **Library** and **Running** is a route change and needs its own boundary to
+ * stay instant. Every word here is read from the same modules the page reads.
  *
- * The words are the page's own and the shell above never moves.
- * `agents/loading.tsx` carries the reasoning every one of these shares.
+ * Its header is the page's own down to its shape — the same eyebrow or the
+ * same crumbs, never one standing in for the other — so nothing is redrawn a
+ * second way when the page arrives. `agents/loading.tsx` carries the
+ * reasoning every one of these shares.
  */
 export default function RunningGradersLoading() {
+  const { projectId } = useParams<{ projectId: string }>();
+
   return (
-    <ProductStatePage eyebrow="Project" title={RUNNING.title}>
-      <Loading what={RUNNING.loading} />
-    </ProductStatePage>
+    <div data-slot="route-loading">
+      <ProductStatePage
+        title={RUNNING.title}
+        breadcrumbs={[
+          { label: "Graders", href: projectPath(projectId, GRADERS_SECTION) },
+          { label: GRADER_VIEW_LABELS.running },
+        ]}
+      >
+        <Loading what={RUNNING.loading} />
+      </ProductStatePage>
+    </div>
   );
 }

@@ -29,7 +29,6 @@ function PageState({
   title,
   lead,
   action,
-  className,
   children,
 }: {
   readonly tone?: StateTone;
@@ -37,12 +36,12 @@ function PageState({
   readonly lead?: ReactNode;
   readonly action?: ReactNode;
   /**
-   * Internal, and it stays internal. The four exported states below are the
-   * whole vocabulary; a page that could pass classes in here could invent a
-   * fifth appearance, which is the one thing this component exists to stop.
+   * What a state draws under its sentence, and internal on purpose: only
+   * `Loading` has anything to put there. There is deliberately no way to pass
+   * classes in — the four states below are the whole vocabulary, and a page
+   * that could restyle one could invent a fifth appearance, which is the one
+   * thing this component exists to stop.
    */
-  readonly className?: string;
-  /** Internal too: what a state draws under its sentence. Only `Loading` does. */
   readonly children?: ReactNode;
 }) {
   return (
@@ -55,7 +54,6 @@ function PageState({
         "max-[900px]:px-5 max-[900px]:py-8",
         /* Quiet is an outline around an absence: nothing is raised off the page. */
         tone === "quiet" && "border-dashed bg-transparent",
-        className,
       )}
       role={tone === "bad" ? "alert" : "status"}
     >
@@ -84,39 +82,29 @@ function PageState({
  * above them is already announced by this section's `role="status"` and a
  * screen reader gains nothing from three rectangles.
  *
- * **Nothing flashes on a fast read.** The whole state waits
- * `--duration-popover-in` before it fades in over `--duration-hover`, held at
- * `opacity: 0` in the meantime by `both`. Anything that answers inside 180ms
- * — a warm cache, a prefetched route, a second visit — is drawn without this
- * ever having been visible, and the alternative is worse than no indicator:
- * a box that appears and vanishes inside a fifth of a second reads as a fault.
+ * **No motion is written here, and the slot names are why.** The wait before
+ * this appears, the breath in the bars and the phase between them are all in
+ * `tailwind-theme.css`, under the same `DESIGN.md` rule as the run state
+ * mark's turn and keyed on the two names this component publishes:
+ * `page-state` on the section and `loading-indicator` on the group below. That
+ * is what lets one rule treat a route fallback, the card inside it and the
+ * bars inside that as a single arrival rather than three overlapping ones —
+ * something three separate class lists could never agree on.
  *
- * **Reduced motion keeps the wait and drops the movement.** `globals.css`
- * caps every animation at a single 1ms frame under that query but leaves
- * `animation-delay` alone, so the same 180ms of quiet is followed by the state
- * simply being there, and `Skeleton` stops breathing and stays a bar. Opacity
- * and colour still carry the whole meaning, which is what the rule asks for.
- *
- * The bars are staggered by **negative** delays, so all three are already
- * moving on the first frame and merely out of phase with each other. A
- * positive delay would hold the second and third still while the first
- * breathed, which reads as two bars that failed to start.
+ * Nothing here flashes on a fast read, and reduced motion keeps the meaning:
+ * both are properties of those rules, and both are argued where they live.
  */
 export function Loading({ what }: { readonly what: string }) {
   return (
-    <PageState
-      tone="quiet"
-      title={`Loading ${what}…`}
-      className="[animation:egma-fade-in_var(--duration-hover)_var(--ease-out)_var(--duration-popover-in)_both]"
-    >
+    <PageState tone="quiet" title={`Loading ${what}…`}>
       <div
         data-slot="loading-indicator"
         className="flex w-full flex-col gap-2"
         aria-hidden="true"
       >
         <Skeleton className="h-3 w-64 max-w-full" />
-        <Skeleton className="h-3 w-48 max-w-full [--pulse-delay:calc(var(--duration-hover)*-1)]" />
-        <Skeleton className="h-3 w-32 max-w-full [--pulse-delay:calc(var(--duration-hover)*-2)]" />
+        <Skeleton className="h-3 w-48 max-w-full" />
+        <Skeleton className="h-3 w-32 max-w-full" />
       </div>
     </PageState>
   );
