@@ -61,8 +61,17 @@
   --warn-border: color-mix(in srgb, var(--warn) 38%, var(--border));
   --bad-border: color-mix(in srgb, var(--bad) 38%, var(--border));
 
-  /* The dialog scrim, which is what makes the page behind one read as inert. */
-  --scrim: color-mix(in srgb, var(--foreground) 32%, transparent);
+  /*
+   * The dialog scrim, which is what makes the page behind one read as inert.
+   *
+   * It is mixed from Midnight Ink rather than from `--foreground`, and that is
+   * the whole point: `--foreground` flips to near-white in dark theme, so a
+   * scrim derived from it *brightened* the page it was supposed to put behind
+   * a dialog. A scrim is dark in both themes because dimming is what it means.
+   * In light theme `--foreground` is Midnight Ink, so this is the value that
+   * was already being drawn.
+   */
+  --scrim: color-mix(in srgb, var(--color-midnight) 32%, transparent);
 
   /* Four-pixel spacing grid. */
   --space-1: 4px;
@@ -184,6 +193,29 @@
   --good: #55bd8c;
   --warn: #d69a38;
   --bad: #e27373;
+
+  /*
+   * Destructive follows the failure colour, in both themes.
+   *
+   * `DESIGN.md`: "Dark theme uses lighter status values that keep the same
+   * meanings." Light theme already has one red — `--destructive` and `--bad`
+   * are the same value — and dark theme lightened `--bad` alone, so a dark
+   * page showed a `#b44444` destructive button beside an `#e27373` destructive
+   * menu item and asked somebody to read them as one meaning.
+   *
+   * White text on the lighter red is 3.0:1 and fails AA, so the text on it
+   * flips to Midnight Ink at 5.4:1 — the same contrast the light theme gets
+   * from white on `#b44444`. Hover and press move *towards paper* here, where
+   * light theme moves away from it: both directions are "further from the page
+   * it sits on", which is what the feedback has to say.
+   */
+  --destructive: var(--bad);
+  --destructive-hover: color-mix(in srgb, var(--bad) 86%, var(--color-paper));
+  --destructive-pressed: color-mix(in srgb, var(--bad) 72%, var(--color-paper));
+  --destructive-text: var(--color-midnight);
+
+  /* A dark page needs more scrim than a light one to read as put away. */
+  --scrim: color-mix(in srgb, var(--color-carbon) 60%, transparent);
 }
 
 /*
