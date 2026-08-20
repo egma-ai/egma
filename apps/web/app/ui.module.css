@@ -42,8 +42,6 @@
 .definitionRow dd { margin: 0; font-weight: 400; text-align: right; }
 .definitionRow select { min-width: 160px; height: var(--tap-target); padding: 0 var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .mono { font-family: var(--mono); }
-.muted { color: var(--muted); }
-.wrong { color: var(--bad); }
 
 .detailFacts { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: clip; }
 .contextFact { display: flex; flex-direction: column; gap: var(--space-1); }
