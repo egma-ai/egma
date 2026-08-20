@@ -426,6 +426,100 @@
   }
 
   /*
+   * The product's own dialog, which is a native `<dialog>` rather than Radix.
+   *
+   * It is here for the same reason the Radix motion above is here: an entrance
+   * written with `@starting-style`, an exit that has to finish before React
+   * removes the element, three kinds that leave in three directions, a
+   * pointer-only rule, and a reduced-motion form of all of it. A class list
+   * can say each of those and cannot say them together without becoming the
+   * longest thing in the component.
+   *
+   * Only a *pointer* dismissal animates. A keyboard dismissal is immediate,
+   * because "no motion delays input" and somebody driving by keyboard has
+   * already moved on. That is why every selector below asks for
+   * `data-input="pointer"` — the component writes it, and rewrites it if the
+   * way out differs from the way in.
+   *
+   * These rules leave with the native dialog when it is retired.
+   */
+  [data-slot="dialog-scrim"][data-input="pointer"]::backdrop {
+    transition: opacity var(--duration-dialog-in) var(--ease-out);
+  }
+
+  [data-slot="dialog-scrim"][data-input="pointer"][data-closing="true"]::backdrop {
+    opacity: 0;
+    transition-duration: var(--duration-dialog-out);
+  }
+
+  [data-slot="dialog-scrim"][data-input="pointer"] [data-slot="dialog-panel"] {
+    transition:
+      opacity var(--duration-dialog-in) var(--ease-out),
+      transform var(--duration-dialog-in) var(--ease-out);
+  }
+
+  [data-slot="dialog-scrim"][data-input="pointer"][data-closing="true"]
+    [data-slot="dialog-panel"] {
+    opacity: 0;
+    transform: scale(0.98);
+    transition-duration: var(--duration-dialog-out);
+  }
+
+  /* A drawer and a sheet travel from the edge they are attached to. */
+  [data-slot="dialog-scrim"]:is([data-kind="drawer"], [data-kind="sheet"])[data-input="pointer"]
+    [data-slot="dialog-panel"] {
+    transition:
+      opacity var(--duration-drawer-in) var(--ease-drawer),
+      transform var(--duration-drawer-in) var(--ease-drawer);
+  }
+
+  [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"]::backdrop {
+    transition-duration: var(--duration-drawer-in);
+    transition-timing-function: var(--ease-drawer);
+  }
+
+  [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][data-closing="true"]::backdrop {
+    transition-duration: var(--duration-drawer-out);
+  }
+
+  [data-slot="dialog-scrim"][data-kind="drawer"][data-input="pointer"][data-closing="true"]
+    [data-slot="dialog-panel"] {
+    transform: translateX(-100%);
+    transition-duration: var(--duration-drawer-out);
+  }
+
+  [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][data-closing="true"]
+    [data-slot="dialog-panel"] {
+    transform: translateX(100%);
+    transition-duration: var(--duration-drawer-out);
+  }
+
+  @starting-style {
+    [data-slot="dialog-scrim"][data-input="pointer"][open]
+      [data-slot="dialog-panel"] {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+
+    /* The drawer arrives by moving. Fading it as well reads as two events. */
+    [data-slot="dialog-scrim"][data-kind="drawer"][data-input="pointer"][open]
+      [data-slot="dialog-panel"] {
+      opacity: 1;
+      transform: translateX(-100%);
+    }
+
+    [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][open]
+      [data-slot="dialog-panel"] {
+      opacity: 0;
+      transform: translateX(100%);
+    }
+
+    [data-slot="dialog-scrim"][data-input="pointer"][open]::backdrop {
+      opacity: 0;
+    }
+  }
+
+  /*
    * "Every movement has a reduced-motion form." Nothing scales and nothing
    * travels: what is left is opacity, which still says a surface arrived or
    * left. `globals.css` already caps every animation at a single frame under
@@ -456,6 +550,36 @@
     [data-slot="dialog-content"][data-state="closed"],
     [data-slot="dialog-overlay"][data-state="closed"] {
       animation: egma-fade-out var(--duration-hover) linear;
+    }
+
+    /*
+     * The native dialog again. Nothing travels and nothing scales; opacity
+     * alone still says the layer arrived or left, and the exit still ends in a
+     * `transitionend` on opacity, which is what the component waits for before
+     * it lets React remove the element.
+     */
+    [data-slot="dialog-scrim"][data-input="pointer"] [data-slot="dialog-panel"] {
+      transform: none;
+      transition: opacity var(--duration-popover-out) linear;
+    }
+
+    [data-slot="dialog-scrim"][data-input="pointer"][data-closing="true"]
+      [data-slot="dialog-panel"] {
+      transform: none;
+    }
+
+    [data-slot="dialog-scrim"][data-input="pointer"]::backdrop,
+    [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"]::backdrop,
+    [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][data-closing="true"]::backdrop {
+      transition: opacity var(--duration-popover-out) linear;
+    }
+
+    @starting-style {
+      [data-slot="dialog-scrim"][data-input="pointer"][open]
+        [data-slot="dialog-panel"] {
+        opacity: 0;
+        transform: none;
+      }
     }
   }
 }
