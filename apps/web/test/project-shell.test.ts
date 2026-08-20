@@ -100,13 +100,19 @@ describe("the product navigation", () => {
    *
    * Written out rather than derived, because deriving them from the module
    * under test would make this assertion agree with whatever the module says
-   * today. The groups are presentation: a person who copied any one of these
-   * links before the regroup opens the same page afterwards, and this list is
-   * the only thing that can say so.
+   * today.
+   *
+   * Five are the addresses the flat bar offered, unmoved by the regroup: the
+   * groups are presentation, and a person who copied one of those links opens
+   * the same page afterwards. Graders is the sixth and it points one step
+   * deeper now, the way Monitoring already did — its strip leads with Running,
+   * and the bar opens the tab the strip leads with. The library did not move
+   * and `/projects/prj_2/graders` still opens it; this list says where the bar
+   * points.
    */
-  const HREFS_BEFORE_THE_GROUPS = [
+  const BAR_HREFS = [
     "/projects/prj_2/agents",
-    "/projects/prj_2/graders",
+    "/projects/prj_2/graders/running",
     "/projects/prj_2/monitoring/transcripts",
     "/projects/prj_2/personas",
     "/projects/prj_2/runs",
@@ -116,9 +122,15 @@ describe("the product navigation", () => {
   const everyLink = (projectId: string) =>
     navigationFor(projectId).flatMap((group) => group.items);
 
-  it("names the two jobs, and the standing pair above them", () => {
+  /**
+   * **Two jobs are named and the pair above them is not.** The top group used
+   * to say "Global". The developer dropped the word on first sight of the built
+   * bar rather than replace it, and `null` is how the group says it has decided
+   * to stay quiet — an absent key would only mean nobody had got to it yet.
+   */
+  it("names the two jobs, and leaves the standing pair above them unnamed", () => {
     expect(NAVIGATION_GROUPS.map((group) => group.label)).toEqual([
-      "Global",
+      null,
       "Simulations",
       "Monitoring",
     ]);
@@ -126,13 +138,13 @@ describe("the product navigation", () => {
 
   /**
    * Agents stays the first row and stays the signed-in landing area. Graders
-   * moves up beside it: a grader is switched on once and then judges everything
-   * in its scope, which is what makes it standing rather than part of either
-   * job.
+   * sits beside it: a grader is switched on once and then judges everything in
+   * its scope, which is what makes it standing rather than part of either job.
    */
-  it("puts Agents and Graders under Global, Agents first", () => {
+  it("puts Agents and Graders in the unlabelled top group, Agents first", () => {
     const global = NAVIGATION_GROUPS[0];
     expect(global?.id).toBe("global");
+    expect(global?.label).toBeNull();
     expect(global?.items.map((item) => item.label)).toEqual([
       "Agents",
       "Graders",
@@ -191,10 +203,10 @@ describe("the product navigation", () => {
    * on: six links before, the same six addresses after, whatever group each one
    * is drawn under now.
    */
-  it("offers the same addresses it offered before it had groups", () => {
+  it("offers the addresses the bar points at, five of them unmoved by the groups", () => {
     const hrefs = everyLink("prj_2").map((link) => link.href);
-    expect([...hrefs].sort()).toEqual(HREFS_BEFORE_THE_GROUPS);
-    expect(hrefs).toHaveLength(HREFS_BEFORE_THE_GROUPS.length);
+    expect([...hrefs].sort()).toEqual(BAR_HREFS);
+    expect(hrefs).toHaveLength(BAR_HREFS.length);
   });
 
   /** And the item stays lit on every page inside the area, list and one alike. */

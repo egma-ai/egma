@@ -8,23 +8,43 @@ import { projectPath, sectionIn } from "./project-context.ts";
  * things both jobs share — the agent under test, and the graders that judge —
  * sit above them in a group of their own:
  *
- * - **Global**: Agents, Graders.
+ * - *(unlabelled)*: Agents, Graders.
  * - **Simulations**: Tests, Personas, Runs.
  * - **Monitoring**: Transcripts.
  *
- * **The objection to "Global", recorded because it was overruled rather than
- * answered.** It is not a glossary word, and nothing in this bar is global:
+ * **The first group has no label, and that is the whole of the change.** It
+ * used to say "Global". The objection was recorded here when the word was
+ * overruled: it is not a glossary word, and nothing in this bar is global —
  * every entry is project-scoped, so switching project changes what the group
- * holds, and a new reader may predict organization-wide settings behind the
- * label. The developer heard that and prefers the label anyway — the group
- * names what stands above both halves, and the word is theirs to spend. If
- * first-user evidence shows the misread happening, the label reopens. The
- * group itself is settled.
+ * holds, and a new reader may predict organization-wide settings behind it.
+ * Seeing it built, the developer dropped the word rather than replace it. No
+ * substitute was needed: the two rows that stand above both jobs are the two
+ * rows at the top of the bar, and their position already says so. A heading
+ * over them would name a category a person never has to think about.
  *
- * **The groups are presentation, and only presentation.** Every href is the one
- * it was before the groups existed, `activeSectionIn` still reads the address
- * rather than the group, and a copied URL keeps meaning what it meant. Nothing
- * here can move a page.
+ * So the group keeps its identity in code and loses its voice on screen. It is
+ * still a group — the rows still cluster, still space as a cluster — and it is
+ * the one group with `label: null`. Nothing announces it either: with no
+ * heading there is no accessible name to point at, so the group is drawn as a
+ * plain wrapper rather than a named region reading a heading that is not
+ * there.
+ *
+ * **The groups are presentation, and only presentation.** A group cannot move a
+ * page: `activeSectionIn` reads the address rather than the group, an item is
+ * found by its own id, and grouping these six rows moved no href at all.
+ *
+ * **What can move an href is a decision, taken here and written down.** The bar
+ * points at an address; it does not own one. Every address a row has ever
+ * pointed at still resolves, and a copied URL still opens what it opened — that
+ * is the invariant, and it is a different and smaller claim than the one this
+ * paragraph used to make.
+ *
+ * One row has moved, once. The 2026-08-20 annotation batch put Running at the
+ * front of the Graders strip, and Graders gained `opens: ["running"]` so the
+ * bar opens the tab the strip leads with — a first tab nobody lands on is not a
+ * first tab. `/projects/{projectId}/graders` is still the library and still
+ * opens it. Monitoring has pointed one step deeper since it was written, for
+ * its own reason, recorded on `opens` below.
  *
  * What the words do:
  *
@@ -39,9 +59,9 @@ import { projectPath, sectionIn } from "./project-context.ts";
  * - **Personas rises into Simulations.** It is the one rank change a person
  *   feels: a persona is authored on its own and reused across tests, and it
  *   belongs beside the tests that use it rather than in a library shelf below.
- * - **Graders moves into Global.** A grader is switched on once and then judges
- *   everything in its scope without anybody visiting it again — which is what
- *   makes it standing rather than part of either job.
+ * - **Graders joins Agents in the top group.** A grader is switched on once and
+ *   then judges everything in its scope without anybody visiting it again —
+ *   which is what makes it standing rather than part of either job.
  * - **Settings lives in the account menu.** It is administrative work rather
  *   than a project destination, so it is in no group here.
  * - **A simulation has no navigation item at all.** It is evidence, reached
@@ -75,11 +95,18 @@ export type NavigationItem = {
    * The page inside the area the item opens, where that is not the area's own
    * address.
    *
-   * Monitoring is the one that has it. `/projects/{projectId}/monitoring` is a
+   * Monitoring and Graders both have it. `/projects/{projectId}/monitoring` is a
    * real address and lands on the transcript list, but the item points straight
    * at the list rather than at a page whose whole job is to forward — a
    * navigation click should not cost a redirect, and a reserved neighbour under
    * the same area should never be able to become the landing by accident.
+   *
+   * Graders has it for a different reason: its section holds two screens behind
+   * one strip, and the strip now reads Running first. The shelf is read once
+   * and switched on; what is judging this project right now is the question a
+   * person comes back with. A first tab nobody lands on is not a first tab, so
+   * the bar opens the one the strip leads with. `/projects/{projectId}/graders`
+   * is still the library and still opens it — a copied link is unmoved.
    */
   readonly opens?: readonly string[];
 };
@@ -88,7 +115,15 @@ export type NavigationLink = NavigationItem & { readonly href: string };
 
 export type NavigationGroup<Item = NavigationItem> = {
   readonly id: NavigationGroupId;
-  readonly label: string;
+  /**
+   * The word over the group, or `null` where the group is drawn without one.
+   *
+   * `null` rather than an absent key, because a group either has decided to say
+   * nothing or has not been given a label yet, and those are different bugs. An
+   * unlabelled group gets no heading and no accessible name — not a hidden one,
+   * and not the group's id used as a stand-in.
+   */
+  readonly label: string | null;
   readonly items: readonly Item[];
 };
 
@@ -101,10 +136,10 @@ export type NavigationGroup<Item = NavigationItem> = {
 export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
   {
     id: "global",
-    label: "Global",
+    label: null,
     items: [
       { id: "agents", label: "Agents" },
-      { id: "graders", label: "Graders" },
+      { id: "graders", label: "Graders", opens: ["running"] },
     ],
   },
   {

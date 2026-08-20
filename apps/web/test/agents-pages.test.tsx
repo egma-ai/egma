@@ -570,7 +570,14 @@ describe("reading an agent's reach from the list", () => {
     expect(screen.getByText("No connections")).toBeDefined();
   });
 
-  it("leads the toolbar with Connect agent when there is a list to lead", async () => {
+  /**
+   * **The row reads left to right: narrow first, then act.** It led with the
+   * button until the developer put this page beside a competitor's dashboard,
+   * where the action is always the last thing on the strip. The button never
+   * changed size — it is the default and always was — but leading a row it
+   * shared with a full-width search box made it look like it had.
+   */
+  it("ends the toolbar with Connect agent, and holds the search box to a width", async () => {
     listOf(LISTED_AGENT);
     render(<AgentsPage />);
     await screen.findAllByText("Front desk");
@@ -578,9 +585,12 @@ describe("reading an agent's reach from the list", () => {
     const connect = await screen.findByRole("link", { name: "Connect agent" });
     expect(connect.getAttribute("href")).toBe("/projects/prj_1/agents/new");
 
-    // Leads: it is drawn before the search box rather than after it.
+    // Ends it: the search box is drawn before the action rather than after it.
     const search = screen.getByLabelText("Search agents by name");
-    expect(connect.compareDocumentPosition(search) & 4).toBe(4);
+    expect(search.compareDocumentPosition(connect) & 4).toBe(4);
+
+    // And the box stops somewhere. It used to take the whole remaining row.
+    expect(search.className).toContain("max-w-");
   });
 
   it("puts one Connect agent in the middle of a project with nothing in it", async () => {

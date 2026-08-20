@@ -63,16 +63,63 @@ export function Section({
 }
 
 /**
- * A strip of controls above a list: a search box, the filters, and nothing that
- * belongs in the page header.
+ * A strip of controls above a list: the filters, and the one action the list
+ * itself offers.
+ *
+ * **One shape on every list page, because the developer read five of them side
+ * by side and none of them agreed.** Filters go left, in the order a person
+ * narrows by; the action goes hard right. The Agents page used to do the
+ * opposite — an oversized-looking button leading the row and a search box
+ * running the whole remaining width behind it — and that single row is what
+ * made the product look like a side project beside a competitor's dashboard.
+ *
+ * The action is a slot rather than the last child, so a page cannot put it
+ * anywhere else by accident. It is `flex-none`: an action is the width of its
+ * own label, and the filters take what is left.
  */
-export function Toolbar({ children }: { readonly children: ReactNode }) {
+export function Toolbar({
+  children,
+  action,
+}: {
+  readonly children: ReactNode;
+  /** The one thing this list offers, drawn at the right end of the strip. */
+  readonly action?: ReactNode;
+}) {
   return (
-    <div className="mb-4 flex items-center gap-3 max-[900px]:flex-wrap">
-      {children}
+    <div className="mb-4 flex items-center justify-between gap-3 max-[900px]:flex-wrap">
+      <div className="flex min-w-0 flex-wrap items-center gap-3">{children}</div>
+      {action === undefined ? null : (
+        <div className="flex flex-none flex-wrap items-center justify-end gap-3">
+          {action}
+        </div>
+      )}
     </div>
   );
 }
+
+/**
+ * How wide a control in a toolbar is allowed to be.
+ *
+ * **Declared once here rather than page by page**, which is the whole point:
+ * five pages each choosing a width is what a person sees as five different
+ * products. A search box was `width: 100%` of whatever was left, so on a wide
+ * screen it ran to 1500px for a field holding a name; a filter that names one
+ * column never needs more room than its longest option.
+ *
+ * `min-w-*` keeps both usable at the wrap point, where the strip becomes two
+ * rows and each control is on its own line.
+ *
+ * **`flex-1` on the search is load-bearing, and a screenshot is what found
+ * it.** The shared `Input` is `width: 100%`, which in a wrapping flex row means
+ * 100% *of the row* — so the search box claimed the whole line and pushed the
+ * agent filter beside it onto a second one. `flex-1` sets `flex-basis: 0%`,
+ * which wins the main axis back from `width`: the box grows into whatever the
+ * filters leave and stops at its maximum.
+ */
+export const TOOLBAR_SEARCH = "min-w-[180px] w-full max-w-[380px] flex-1";
+
+/** A filter that chooses one value, held narrower than the search beside it. */
+export const TOOLBAR_FILTER = "w-auto max-w-[240px] min-w-[160px]";
 
 /** A group of controls that act on the thing the page is about. */
 export function Actions({ children }: { readonly children: ReactNode }) {

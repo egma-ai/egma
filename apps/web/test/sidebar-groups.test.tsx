@@ -37,21 +37,44 @@ const ADA: Me = {
   ],
 };
 
-/** The six addresses the bar offered before the groups existed. */
+/**
+ * The six addresses the bar offers, sorted.
+ *
+ * Five are the ones it offered before the groups existed. Graders is the one
+ * that moved, and it moved for the same reason Monitoring's did: its section
+ * holds two screens behind one strip, the strip now leads with Running, and a
+ * first tab nobody lands on is not a first tab. `/projects/prj_2/graders` is
+ * still the library and still opens it — this is where the *bar* points, not
+ * which addresses exist.
+ */
 const EVERY_ADDRESS = [
   "/projects/prj_2/agents",
-  "/projects/prj_2/graders",
+  "/projects/prj_2/graders/running",
   "/projects/prj_2/monitoring/transcripts",
   "/projects/prj_2/personas",
   "/projects/prj_2/runs",
   "/projects/prj_2/tests",
 ];
 
-const GROUPS = [
-  { label: "Global", items: ["Agents", "Graders"] },
+/**
+ * The three clusters, top to bottom. The first has no label at all — the
+ * developer dropped the word "Global" on first sight of the built bar, and
+ * nothing replaced it: the two rows that stand above both jobs are the two rows
+ * at the top, and their position already says so.
+ */
+const GROUPS: readonly {
+  readonly label: string | null;
+  readonly items: readonly string[];
+}[] = [
+  { label: null, items: ["Agents", "Graders"] },
   { label: "Simulations", items: ["Tests", "Personas", "Runs"] },
   { label: "Monitoring", items: ["Transcripts"] },
 ];
+
+/** The clusters as drawn, labelled or not — a named region is only two of them. */
+function clustersIn(navigation: HTMLElement): readonly HTMLElement[] {
+  return [...navigation.querySelectorAll<HTMLElement>('[data-slot="sidebar-group"]')];
+}
 
 function drawShell(pathname = "/projects/prj_2/agents"): void {
   routed.pathname = pathname;
@@ -82,19 +105,22 @@ afterEach(() => {
 });
 
 describe("the grouped sidebar", () => {
-  it("draws three labelled groups, in the order the bar reads", () => {
+  it("draws three clusters in the order the bar reads, the first unlabelled", () => {
     drawShell();
 
-    const groups = groupsIn(sidebarNavigation());
-    expect(groups).toHaveLength(3);
-    expect(groups.map((group) => group.getAttribute("aria-labelledby"))).not.toContain(
-      null,
-    );
+    const navigation = sidebarNavigation();
+    const clusters = clustersIn(navigation);
+    expect(clusters).toHaveLength(3);
+
     for (const [index, expected] of GROUPS.entries()) {
-      const group = groups[index]!;
-      expect(within(group).getByText(expected.label)).toBeTruthy();
+      const cluster = clusters[index]!;
+      if (expected.label === null) {
+        expect(within(cluster).queryByRole("heading")).toBeNull();
+      } else {
+        expect(within(cluster).getByText(expected.label)).toBeTruthy();
+      }
       expect(
-        within(group)
+        within(cluster)
           .getAllByRole("link")
           .map((link) => link.textContent?.trim()),
       ).toEqual(expected.items);
@@ -102,15 +128,36 @@ describe("the grouped sidebar", () => {
   });
 
   /**
+   * **The word "Global" is gone, and it is gone from the accessible tree too.**
+   * A heading removed while `aria-labelledby` still pointed at it would leave
+   * the region named and the name unreadable, which is worse than the word was.
+   */
+  it("says Global nowhere, and leaves the top cluster unnamed rather than named badly", () => {
+    drawShell();
+
+    const navigation = sidebarNavigation();
+    expect(navigation.textContent).not.toContain("Global");
+
+    const top = clustersIn(navigation)[0]!;
+    expect(top.getAttribute("role")).toBeNull();
+    expect(top.getAttribute("aria-labelledby")).toBeNull();
+    expect(top.getAttribute("aria-label")).toBeNull();
+
+    // A named region is now only the two groups that kept a word.
+    expect(groupsIn(navigation)).toHaveLength(2);
+  });
+
+  /**
    * The label belongs to the group rather than floating over it, so a screen
    * reader says which group it has entered instead of reading six links with
    * nothing between them.
    */
-  it("gives each group its label as its accessible name", () => {
+  it("gives each labelled group its label as its accessible name", () => {
     drawShell();
 
     const navigation = sidebarNavigation();
     for (const { label } of GROUPS) {
+      if (label === null) continue;
       expect(within(navigation).getByRole("group", { name: label })).toBeTruthy();
     }
   });
@@ -119,19 +166,20 @@ describe("the grouped sidebar", () => {
    * **A sectioned navigation is walked by heading.**
    *
    * The accessible name above says which group somebody is *in*. This is how
-   * they get to one at all: the heading list is Global, Simulations,
-   * Monitoring, and moving between them is one keystroke rather than six arrow
-   * presses. The two mechanisms are wired to the same element on purpose — one
-   * word, said twice, that cannot come apart.
+   * they get to one at all: the heading list is Simulations and Monitoring, and
+   * moving between them is one keystroke rather than six arrow presses. The two
+   * mechanisms are wired to the same element on purpose — one word, said twice,
+   * that cannot come apart. The top cluster is in neither list, because it is
+   * drawn with no word at all: it is where a person already is.
    */
-  it("offers the three groups as headings, in the order the bar reads", () => {
+  it("offers every labelled group as a heading, in the order the bar reads", () => {
     drawShell();
 
     const navigation = sidebarNavigation();
     const headings = within(navigation).getAllByRole("heading");
 
     expect(headings.map((heading) => heading.textContent?.trim())).toEqual(
-      GROUPS.map((group) => group.label),
+      GROUPS.map((group) => group.label).filter((label) => label !== null),
     );
     for (const heading of headings) {
       expect(heading.tagName).toBe("H2");
@@ -149,7 +197,7 @@ describe("the grouped sidebar", () => {
    * addresses after, whatever group each is drawn under now — so a copied URL
    * keeps meaning what it meant.
    */
-  it("offers the same six addresses the flat bar offered", () => {
+  it("offers six addresses, one of them a step deeper than the flat bar\u2019s", () => {
     drawShell();
 
     const hrefs = within(sidebarNavigation())
@@ -254,7 +302,7 @@ describe("the grouped sidebar", () => {
    * drift into a shorter list — and it closes behind the choice it was opened
    * to make.
    */
-  it("shows the same three groups in the mobile drawer, and closes behind a choice", () => {
+  it("shows the same three clusters in the mobile drawer, and closes behind a choice", () => {
     drawShell();
 
     fireEvent.click(
@@ -266,11 +314,12 @@ describe("the grouped sidebar", () => {
       name: "Product navigation",
     });
 
-    const groups = within(inDrawer).getAllByRole("group");
-    expect(groups).toHaveLength(3);
+    const clusters = clustersIn(inDrawer);
+    expect(clusters).toHaveLength(3);
+    expect(inDrawer.textContent).not.toContain("Global");
     for (const [index, expected] of GROUPS.entries()) {
       expect(
-        within(groups[index]!)
+        within(clusters[index]!)
           .getAllByRole("link")
           .map((link) => link.textContent?.trim()),
       ).toEqual(expected.items);

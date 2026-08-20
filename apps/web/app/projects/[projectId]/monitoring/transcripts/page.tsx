@@ -47,6 +47,7 @@ import {
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import { Toolbar, TOOLBAR_FILTER } from "../../../../../ui/section.tsx";
 import { settingsPath } from "../../../../../ui/settings-nav.tsx";
 import { useOrganizationRead } from "../../../../../ui/settings-read.ts";
 import {
@@ -366,26 +367,33 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
         title={LIST.title}
         lead={LIST.lead}
         action={
-          <>
-            <Button asChild>
-              <Link href={monitoringSetupPath(projectId)}>Set up monitoring</Link>
-            </Button>
-            <Select
-              id="window"
-              value={choice ?? DEFAULT_WINDOW}
-              aria-label={LIST.window}
-              onChange={(event) => choose(event.target.value as WindowChoice)}
-            >
-              {WINDOWS.map((one) => (
-                <option key={one.id} value={one.id}>
-                  {one.label}
-                </option>
-              ))}
-            </Select>
-          </>
+          <Button asChild>
+            <Link href={monitoringSetupPath(projectId)}>Set up monitoring</Link>
+          </Button>
         }
       />
       <PageBody>
+        {/*
+          The window is a filter, so it sits where every list page in this
+          product now keeps its filters: the left of the strip above the list.
+          A person moving between Runs and Monitoring should not have to look
+          in two places for the same kind of control.
+        */}
+        <Toolbar>
+          <Select
+            id="window"
+            className={TOOLBAR_FILTER}
+            value={choice ?? DEFAULT_WINDOW}
+            aria-label={LIST.window}
+            onChange={(event) => choose(event.target.value as WindowChoice)}
+          >
+            {WINDOWS.map((one) => (
+              <option key={one.id} value={one.id}>
+                {one.label}
+              </option>
+            ))}
+          </Select>
+        </Toolbar>
         {state.status === "failed" ? (
           <Failure
             message={state.why}

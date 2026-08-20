@@ -1310,14 +1310,19 @@ describe("changing a running copy", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("the strip between the two screens", () => {
-  it("carries the project in both addresses", () => {
+  /**
+   * Running leads now. The shelf is read once and switched on; what is judging
+   * this project right now is the question a person comes back with. Both
+   * addresses are unmoved — only the order they are offered in changed.
+   */
+  it("carries the project in both addresses, and leads with Running", () => {
     expect(graderTabsFor("prj_7")).toEqual([
-      { id: "library", label: "Library", href: "/projects/prj_7/graders" },
       {
         id: "running",
         label: "Running",
         href: "/projects/prj_7/graders/running",
       },
+      { id: "library", label: "Library", href: "/projects/prj_7/graders" },
     ]);
   });
 

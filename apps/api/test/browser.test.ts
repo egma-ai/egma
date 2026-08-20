@@ -887,9 +887,9 @@ describe("what a project recorded in production", () => {
         });
       });
 
-      // The six rows the three groups hold — Global's standing pair, the three
-      // Simulations rows, and Monitoring's one. Settings is not one of them and
-      // neither is a simulation.
+      // The six rows the three clusters hold — the unlabelled standing pair at
+      // the top, the three Simulations rows, and Monitoring's one. Settings is
+      // not one of them and neither is a simulation.
       for (const area of [
         "Agents",
         "Graders",
@@ -4043,7 +4043,10 @@ describe("the complete product, walked in order in a second project", () => {
         await walk.keyboard.press("Tab");
         expect(await focused()).toBe("Agents");
         // Graders, not Tests: the second row of the bar is the other half of
-        // the standing pair Global holds, and Tests begins the group below it.
+        // the standing pair at the top, and Tests begins the group below it.
+        // That pair sits under no heading now — the developer dropped the word
+        // "Global" rather than replace it — which changes nothing here, since a
+        // heading was never a Tab stop.
         await walk.keyboard.press("Tab");
         expect(await focused()).toBe("Graders");
       },

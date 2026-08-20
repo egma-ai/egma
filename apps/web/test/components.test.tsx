@@ -16,6 +16,7 @@ import type { Me } from "../lib/me.ts";
 import { EVERY_NAVIGATION_ITEM } from "../lib/navigation.ts";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Choice } from "../ui/choice.tsx";
 import { Field } from "../ui/form.tsx";
 import { DataTable, type Column } from "../ui/data-table.tsx";
 import { Dialog } from "../ui/dialog.tsx";
@@ -539,6 +540,107 @@ describe("a binary choice", () => {
       "A required grader can stop the test from passing.",
     );
     expect(checkbox.getAttribute("aria-describedby")).toBe(hint.id);
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The two-list choice, driven the way somebody without a pointer drives it.
+ *
+ * **This test moved here rather than being deleted, and where it came from is
+ * the point.** It lived on the Personas list, because that page was one of the
+ * two that drew this control — and the 2026-08-20 annotation batch took the
+ * archive filter's control off both of them. A test that clicks a control the
+ * page no longer draws is not a weakened test, it is a broken one, so it could
+ * not stay there. `Choice` itself is untouched by that batch: it still does
+ * every one of the things below, and after the removal there was no test in
+ * this repository that asked it to.
+ *
+ * So it is proven where the behavior lives. That is the better home anyway —
+ * `Choice` is a shared control, its keyboard contract belongs to it rather
+ * than to whichever page happened to mount it, and the proof now survives the
+ * next page that adopts or drops it.
+ *
+ * Nothing here is free. It is a `div` of `button`s wearing radio semantics, so
+ * every part of the radio group contract below is hand-written in
+ * `ui/choice.tsx` and every part of it can be lost in a refactor without one
+ * visible pixel changing.
+ */
+describe("a choice between two lists", () => {
+  const OPTIONS = [
+    { value: "active", label: "Active" },
+    { value: "archived", label: "Archived" },
+  ] as const;
+
+  type Shown = (typeof OPTIONS)[number]["value"];
+
+  function Example({ onChange }: { readonly onChange?: (value: Shown) => void }) {
+    const [shown, setShown] = useState<Shown>("active");
+    return (
+      <Choice<Shown>
+        label="Which personas to show"
+        value={shown}
+        options={OPTIONS}
+        onChange={(value) => {
+          setShown(value);
+          onChange?.(value);
+        }}
+      />
+    );
+  }
+
+  it("is one radio group, named, with the chosen option announced", () => {
+    render(<Example />);
+
+    const group = screen.getByRole("radiogroup", {
+      name: "Which personas to show",
+    });
+    expect(within(group).getAllByRole("radio").map((one) => one.textContent))
+      .toEqual(["Active", "Archived"]);
+    expect(screen.getByRole("radio", { name: "Active" }).getAttribute("aria-checked"))
+      .toBe("true");
+    expect(screen.getByRole("radio", { name: "Archived" }).getAttribute("aria-checked"))
+      .toBe("false");
+  });
+
+  /**
+   * **One Tab stop, an arrow key inside it, and selection following focus.**
+   * Roving `tabindex` is what keeps a two-option filter from costing two Tab
+   * presses on the way to the table — and a ten-option one from costing ten.
+   * Selection following focus is what keeps the keyboard and the announcement
+   * agreeing: a group that moved the highlight without moving focus would
+   * leave a screen reader saying one thing and the next keypress landing on
+   * another.
+   */
+  it("chooses the other list from the keyboard, and says which is chosen", () => {
+    const chose = vi.fn();
+    render(<Example onChange={chose} />);
+
+    const active = screen.getByRole("radio", { name: "Active" });
+    const archived = screen.getByRole("radio", { name: "Archived" });
+    expect(active.getAttribute("tabindex")).toBe("0");
+    expect(archived.getAttribute("tabindex")).toBe("-1");
+
+    active.focus();
+    fireEvent.keyDown(active, { key: "ArrowRight" });
+
+    expect(chose).toHaveBeenCalledWith("archived");
+    const now = screen.getByRole("radio", { name: "Archived" });
+    expect(now.getAttribute("aria-checked")).toBe("true");
+    expect(now.getAttribute("tabindex")).toBe("0");
+    expect(screen.getByRole("radio", { name: "Active" }).getAttribute("tabindex"))
+      .toBe("-1");
+    // Selection follows focus, so the keyboard and the announcement agree.
+    expect(document.activeElement).toBe(now);
+
+    // The same key again comes back round rather than stopping at the end: a
+    // closed set of two has no far edge to be stuck against.
+    fireEvent.keyDown(now, { key: "ArrowRight" });
+    expect(chose).toHaveBeenLastCalledWith("active");
+    expect(document.activeElement).toBe(
+      screen.getByRole("radio", { name: "Active" }),
+    );
   });
 });
 
