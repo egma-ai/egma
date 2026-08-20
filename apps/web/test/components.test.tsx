@@ -169,6 +169,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * Let the work a control deliberately defers actually happen.
+ *
+ * Radix's roving focus moves focus in a task after the key rather than during
+ * it, so React has committed the new state before anything is focused. A test
+ * that reads the DOM in the same tick is reading it before the control has
+ * finished, which is a race rather than a failure.
+ */
+const settle = () =>
+  act(async () => {
+    await new Promise((done) => setTimeout(done, 0));
+  });
+
 /* ------------------------------------------------------------------------ */
 
 describe("the organization and project selector", () => {
@@ -562,10 +575,10 @@ describe("a binary choice", () => {
  * than to whichever page happened to mount it, and the proof now survives the
  * next page that adopts or drops it.
  *
- * Nothing here is free. It is a `div` of `button`s wearing radio semantics, so
- * every part of the radio group contract below is hand-written in
- * `ui/choice.tsx` and every part of it can be lost in a refactor without one
- * visible pixel changing.
+ * It is the kit's radio group now, which is Radix's, so the contract below is
+ * no longer hand-written. It is still asked for here: what a person gets from
+ * this control is the same list of promises whoever keeps them, and a later
+ * change that swaps the primitive back out has to keep them too.
  */
 describe("a choice between two lists", () => {
   const OPTIONS = [
@@ -612,18 +625,38 @@ describe("a choice between two lists", () => {
    * agreeing: a group that moved the highlight without moving focus would
    * leave a screen reader saying one thing and the next keypress landing on
    * another.
+   *
+   * Radix moves focus in a task after the key rather than during it, so React
+   * has committed the new selection before anything is focused. That is why
+   * each key here is followed by a flush: the order a caller sees is `onChange`
+   * and then the focus move, and asking for both in the same tick would be
+   * asking for an order this control does not promise.
    */
-  it("chooses the other list from the keyboard, and says which is chosen", () => {
+  it("chooses the other list from the keyboard, and says which is chosen", async () => {
     const chose = vi.fn();
     render(<Example onChange={chose} />);
 
-    const active = screen.getByRole("radio", { name: "Active" });
-    const archived = screen.getByRole("radio", { name: "Archived" });
-    expect(active.getAttribute("tabindex")).toBe("0");
-    expect(archived.getAttribute("tabindex")).toBe("-1");
+    /*
+     * The group is the Tab stop and the options are not, which is the same
+     * promise the old hand-written `tabindex` made and a stricter way to keep
+     * it: entering forwards focus to whichever option is chosen.
+     */
+    const group = screen.getByRole("radiogroup", {
+      name: "Which personas to show",
+    });
+    expect(group.getAttribute("tabindex")).toBe("0");
+    for (const option of within(group).getAllByRole("radio")) {
+      expect(option.getAttribute("tabindex")).toBe("-1");
+    }
 
-    active.focus();
+    const active = screen.getByRole("radio", { name: "Active" });
+    act(() => active.focus());
+    expect(active.getAttribute("tabindex")).toBe("0");
+    expect(screen.getByRole("radio", { name: "Archived" }).getAttribute("tabindex"))
+      .toBe("-1");
+
     fireEvent.keyDown(active, { key: "ArrowRight" });
+    await settle();
 
     expect(chose).toHaveBeenCalledWith("archived");
     const now = screen.getByRole("radio", { name: "Archived" });
@@ -637,6 +670,7 @@ describe("a choice between two lists", () => {
     // The same key again comes back round rather than stopping at the end: a
     // closed set of two has no far edge to be stuck against.
     fireEvent.keyDown(now, { key: "ArrowRight" });
+    await settle();
     expect(chose).toHaveBeenLastCalledWith("active");
     expect(document.activeElement).toBe(
       screen.getByRole("radio", { name: "Active" }),

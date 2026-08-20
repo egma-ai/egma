@@ -1,182 +1,84 @@
 "use client";
 
+import { CircleCheckIcon, OctagonXIcon, XIcon } from "lucide-react";
 import {
-  cloneElement,
   useCallback,
   useEffect,
-  useId,
   useRef,
   useState,
-  type FocusEventHandler,
-  type KeyboardEventHandler,
-  type PointerEventHandler,
   type ReactElement,
   type ReactNode,
 } from "react";
 
+import {
+  Tooltip as TooltipRoot,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export type FeedbackInput = "keyboard" | "pointer";
-
-type TooltipTriggerProps = {
-  readonly "aria-describedby"?: string;
-  readonly onBlur?: FocusEventHandler<HTMLElement>;
-  readonly onFocus?: FocusEventHandler<HTMLElement>;
-  readonly onKeyDown?: KeyboardEventHandler<HTMLElement>;
-  readonly onPointerEnter?: PointerEventHandler<HTMLElement>;
-  readonly onPointerLeave?: PointerEventHandler<HTMLElement>;
-};
-
-let lastPointerTooltipAt = 0;
-const FIRST_TOOLTIP_DELAY = 500;
-const TOOLTIP_WARM_WINDOW = 1_000;
 
 /**
  * A short explanation attached to one control.
  *
  * Keyboard focus shows it at once and without movement. A pointer gets a short
- * delay before the first tooltip, which prevents accidental flashes while it
- * crosses the page. Nearby tooltips then open at once. The tooltip never holds
- * an action; interactive help belongs in a menu or dialog.
+ * delay before the first one, which prevents accidental flashes while it
+ * crosses the page, and the same trigger hovered again straight after opens at
+ * once. The tooltip never holds an action; interactive help belongs in a menu
+ * or dialog.
  *
- * It is centred on its trigger with `translate` and it arrives on `scale`, so
- * the two never share a property. The arrival itself is in `tailwind-theme.css`
- * keyed on `data-slot`, `data-input` and `data-instant`.
+ * **All of the timing, the positioning, the Escape, and the `aria-describedby`
+ * are the kit's now**, which is Radix's. What used to be here was a hand-written
+ * pair of timers, a module-level timestamp shared between every tooltip on the
+ * page, and a panel hard-centred over its trigger that ran off the side of a
+ * narrow window rather than answering the edge.
+ *
+ * One thing that global timestamp did is not replaced yet: Radix groups the
+ * "open the next one at once" window per provider, and the kit gives each
+ * tooltip its own, so *this* trigger re-hovered is instant while its neighbour
+ * still waits the first delay. One `TooltipProvider` near the application root
+ * restores the group, and that is a change to a file this component cannot
+ * make for itself.
+ *
+ * `data-input` is only read by the exit: Radix reports "closed" the same way
+ * whichever input opened it, and a keyboard close must not wait for a movement.
+ * It is set on the way in rather than on the way out, so it is already true by
+ * the time the exit runs.
  */
 export function Tooltip({
   label,
   children,
 }: {
   readonly label: ReactNode;
-  readonly children: ReactElement<TooltipTriggerProps>;
+  readonly children: ReactElement;
 }) {
-  const id = useId();
-  const [present, setPresent] = useState(false);
-  const [closing, setClosing] = useState(false);
   const [input, setInput] = useState<FeedbackInput>("keyboard");
-  const [instant, setInstant] = useState(true);
-  const focusedRef = useRef(false);
-  const hoveredRef = useRef(false);
-  const openTimerRef = useRef<number | null>(null);
-  const closeTimerRef = useRef<number | null>(null);
-
-  const clearTimers = useCallback(() => {
-    if (openTimerRef.current !== null) window.clearTimeout(openTimerRef.current);
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-    openTimerRef.current = null;
-    closeTimerRef.current = null;
-  }, []);
-
-  const finishClose = useCallback(() => {
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = null;
-    setClosing(false);
-    setPresent(false);
-  }, []);
-
-  const close = useCallback((animate: boolean) => {
-    if (openTimerRef.current !== null) window.clearTimeout(openTimerRef.current);
-    openTimerRef.current = null;
-    if (!present || !animate || input !== "pointer" || instant) {
-      finishClose();
-      return;
-    }
-    setClosing(true);
-    closeTimerRef.current = window.setTimeout(finishClose, 200);
-  }, [finishClose, input, instant, present]);
-
-  const openForKeyboard = useCallback(() => {
-    clearTimers();
-    setInput("keyboard");
-    setInstant(true);
-    setClosing(false);
-    setPresent(true);
-  }, [clearTimers]);
-
-  const openForPointer = useCallback(() => {
-    clearTimers();
-    const now = Date.now();
-    const warm =
-      lastPointerTooltipAt > 0 && now - lastPointerTooltipAt < TOOLTIP_WARM_WINDOW;
-    setInput("pointer");
-    setInstant(warm);
-    const show = () => {
-      openTimerRef.current = null;
-      if (!hoveredRef.current) return;
-      lastPointerTooltipAt = Date.now();
-      setClosing(false);
-      setPresent(true);
-    };
-    if (warm) show();
-    else openTimerRef.current = window.setTimeout(show, FIRST_TOOLTIP_DELAY);
-  }, [clearTimers]);
-
-  useEffect(() => clearTimers, [clearTimers]);
-
-  const describedBy = [children.props["aria-describedby"], present ? id : undefined]
-    .filter((value): value is string => value !== undefined && value !== "")
-    .join(" ") || undefined;
-
-  const trigger = cloneElement(children, {
-    "aria-describedby": describedBy,
-    onFocus: (event) => {
-      children.props.onFocus?.(event);
-      focusedRef.current = true;
-      if (!hoveredRef.current) openForKeyboard();
-    },
-    onBlur: (event) => {
-      children.props.onBlur?.(event);
-      focusedRef.current = false;
-      if (!hoveredRef.current) close(false);
-    },
-    onPointerEnter: (event) => {
-      children.props.onPointerEnter?.(event);
-      hoveredRef.current = true;
-      openForPointer();
-    },
-    onPointerLeave: (event) => {
-      children.props.onPointerLeave?.(event);
-      hoveredRef.current = false;
-      if (!focusedRef.current) close(true);
-    },
-    onKeyDown: (event) => {
-      children.props.onKeyDown?.(event);
-      if (event.key === "Escape" && present) {
-        event.stopPropagation();
-        close(false);
-      }
-    },
-  });
+  const hovered = useRef(false);
 
   return (
-    <span className="relative inline-flex">
-      {trigger}
-      {present ? (
-        <span
-          className={cn(
-            "pointer-events-none absolute bottom-[calc(100%+var(--space-2))] left-1/2 z-40",
-            "w-max max-w-[min(240px,calc(100vw-var(--space-7)))] -translate-x-1/2",
-            "rounded-button border border-foreground bg-foreground px-3 py-2",
-            "origin-bottom text-sm text-surface",
-          )}
-          data-slot="tooltip"
-          id={id}
-          role="tooltip"
-          data-input={input}
-          data-instant={instant ? "true" : "false"}
-          data-closing={closing ? "true" : "false"}
-          onTransitionEnd={(event) => {
-            if (
-              closing &&
-              event.target === event.currentTarget &&
-              event.propertyName === "opacity"
-            ) finishClose();
-          }}
-        >
-          {label}
-        </span>
-      ) : null}
-    </span>
+    <TooltipRoot>
+      <TooltipTrigger
+        asChild
+        onPointerMove={() => {
+          hovered.current = true;
+          setInput("pointer");
+        }}
+        onPointerLeave={() => {
+          hovered.current = false;
+        }}
+        onFocus={() => {
+          /*
+           * A press moves focus as well, and that is a pointer's tooltip. Radix
+           * makes the same distinction for whether to open at all.
+           */
+          if (!hovered.current) setInput("keyboard");
+        }}
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipContent data-input={input}>{label}</TooltipContent>
+    </TooltipRoot>
   );
 }
 
@@ -186,6 +88,18 @@ export function Tooltip({
  * It stays mounted for a pointer dismissal so its exit can finish. Keyboard
  * activation and dismissal are instant. The visible word and symbol carry the
  * state together, so the notification never depends on color alone.
+ *
+ * **It is not built on the kit's sonner Toaster, deliberately.** `DESIGN.md`
+ * asks a toast for a short translate plus opacity on an *interruptible
+ * transition*; sonner leaves on a CSS animation and a fixed unmount timer, so
+ * a dismissal cannot be answered at once. A page here also says whether this
+ * notification is open, rather than pushing into a queue that owns it.
+ * `components/ui/sonner.tsx` is house-correct and waiting for the surface that
+ * wants a queue; the icons below are its icons, so the two read as one product.
+ *
+ * The motion itself is in `tailwind-theme.css`, keyed on `data-slot`,
+ * `data-input` and `data-closing`, so position and motion never share a
+ * property and the reduced-motion form is written beside the full one.
  */
 export function Toast({
   open,
@@ -236,11 +150,12 @@ export function Toast({
 
   if (!present) return null;
 
+  const Mark = kind === "error" ? OctagonXIcon : CircleCheckIcon;
+
   return (
     <aside
       className={cn(
-        /* `group`, so the mark inside can read the toast's own kind. */
-        "group fixed right-6 bottom-6 z-50 grid items-start",
+        "fixed right-6 bottom-6 z-50 grid items-start",
         "w-[min(380px,calc(100vw-(2*var(--space-4))))] min-h-(--tap-target)",
         "grid-cols-[var(--control-sm)_minmax(0,1fr)_var(--control-sm)] gap-3 p-3",
         "rounded-card border border-border border-l-2 border-l-foreground",
@@ -264,16 +179,25 @@ export function Toast({
         ) finishClose();
       }}
     >
-      <span
+      {/*
+       * The shape says which state this is and the colour only supports it: a
+       * ticked circle against a crossed octagon reads as two different things
+       * with no colour at all. Neutral for "this happened" and the failure
+       * colour for "this went wrong" — never the brand colour, which
+       * `DESIGN.md` keeps away from every verdict.
+       *
+       * They are the icons `components/ui/sonner.tsx` draws for the same two
+       * states, so a queued notification and this one would not arrive looking
+       * like two different products.
+       */}
+      <Mark
         className={cn(
-          "grid size-(--control-sm) place-items-center",
-          "rounded-chip border border-foreground text-sm",
-          "group-data-[kind=error]:border-failure",
+          "size-4 justify-self-center",
+          kind === "error" ? "text-failure" : "text-foreground",
         )}
         aria-hidden="true"
-      >
-        {kind === "error" ? "!" : "✓"}
-      </span>
+        data-slot="toast-mark"
+      />
       <span className="grid min-w-0 gap-1 pt-1 text-sm [&>span]:text-muted-foreground [&_strong]:font-medium">
         <strong>{title}</strong>
         {children === undefined ? null : <span>{children}</span>}
@@ -292,7 +216,7 @@ export function Toast({
         aria-label={`Dismiss ${title}`}
         onClick={(event) => onDismiss(event.detail > 0 ? "pointer" : "keyboard")}
       >
-        <span aria-hidden="true">✕</span>
+        <XIcon className="size-4" />
       </button>
     </aside>
   );
