@@ -169,7 +169,6 @@ function columnsFor(
               <Button
                 type="button"
                 variant="secondary"
-                size="sm"
                 onClick={() => onCancel(run.id)}
               >
                 Cancel
