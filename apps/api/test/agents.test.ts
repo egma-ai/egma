@@ -1468,6 +1468,154 @@ describe("reading agents", () => {
     );
   });
 
+  /**
+   * The list answers the question a list of agents is opened to ask: which
+   * agents egma can reach, and how.
+   *
+   * **Each row's connections are checked against that agent's own read, whole.**
+   * Asserting a field or two here would go green on a list that carried a
+   * smaller connection than `GET /api/agents/{agentId}` does — two shapes
+   * behind one word, which is how a client comes to work against one of them by
+   * accident. Comparing the objects is the only assertion that cannot.
+   *
+   * And each row carries *its own*. The grouping is the part of a widened read
+   * that fails quietly: connections arrive in one answer for the whole page and
+   * are handed back out per agent, so a row wearing its neighbour's connection
+   * would look entirely plausible.
+   */
+  it("carries each agent's living connections, in the shape its own read answers", async () => {
+    api = await createApi("agents_list_connections");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const desk = await post("/api/agents", withKey(ada.secret), registration());
+    const deskId = String(agentOf(desk).id);
+    await post(
+      `/api/agents/${deskId}/connections`,
+      withKey(ada.secret),
+      {
+        // A second way into the same agent, of another type and another
+        // modality, so a row that showed one shape of connection well and
+        // another badly would be caught here rather than on screen.
+        name: "production",
+        type: "phone",
+        modality: "voice",
+        environment: "production",
+        config: { phoneNumber: "+14155550100" },
+      },
+    );
+
+    const night = await post(
+      "/api/agents",
+      withKey(ada.secret),
+      registration({ name: "Night line", retellAgentId: "agent_in_retell_9" }),
+    );
+    const nightId = String(agentOf(night).id);
+
+    // An agent nobody has given egma a way into. Its row is the one that has
+    // to say so, which it cannot do if the field is simply missing.
+    await post("/api/agents", withKey(ada.secret), { name: "Unwired" });
+
+    const page = await get("/api/agents", withKey(ada.secret));
+    expect(page.status).toBe(200);
+    const items = page.body.items as Record<string, unknown>[];
+    expect(items.map((one) => one.name)).toEqual([
+      "Unwired",
+      "Night line",
+      "Front desk",
+    ]);
+
+    const listedFor = (name: string): Record<string, unknown>[] =>
+      (items.find((one) => one.name === name)?.connections ??
+        []) as Record<string, unknown>[];
+
+    // Whole objects, against the read that already had them.
+    const deskRead = await get(`/api/agents/${deskId}`, withKey(ada.secret));
+    expect(listedFor("Front desk")).toEqual(deskRead.body.connections);
+    expect(listedFor("Front desk")).toHaveLength(2);
+
+    const nightRead = await get(`/api/agents/${nightId}`, withKey(ada.secret));
+    expect(listedFor("Night line")).toEqual(nightRead.body.connections);
+    expect(listedFor("Night line")).toHaveLength(1);
+
+    // Nobody wears anybody else's.
+    const nightIds = listedFor("Night line").map((one) => one.id);
+    expect(listedFor("Front desk").map((one) => one.id)).not.toContain(
+      nightIds[0],
+    );
+
+    // Present and empty, which is a different answer from absent.
+    const unwired = items.find((one) => one.name === "Unwired");
+    expect(Object.keys(unwired ?? {})).toContain("connections");
+    expect(unwired?.connections).toEqual([]);
+
+    // The facts a list is read for, on the row rather than one click away.
+    const wired = listedFor("Front desk").find(
+      (one) => one.name === "production",
+    );
+    expect(wired).toMatchObject({
+      type: "phone",
+      modality: "voice",
+      environment: "production",
+    });
+    // Nobody has measured this target, and the row says so rather than
+    // reading as though everything had been checked and found missing.
+    expect(wired?.capabilities).toMatchObject({
+      state: "unknown",
+      measured: null,
+      supported: null,
+      checked_at: null,
+    });
+  });
+
+  /**
+   * The two halves stay two halves. A connection that was archived is how egma
+   * *used* to reach an agent, and an agent that was archived took its
+   * connections with it — so an active list saying either of them was still
+   * there would send somebody to start work over a way in that is gone.
+   */
+  it("leaves an archived way in off the row, and an archived agent off the list", async () => {
+    api = await createApi("agents_list_archived");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const registered = await post(
+      "/api/agents",
+      withKey(ada.secret),
+      registration(),
+    );
+    const agentId = String(agentOf(registered).id);
+    const connectionId = String(connectionOf(registered).id);
+
+    const rowOf = async (query = ""): Promise<Record<string, unknown>[]> => {
+      const page = await get(`/api/agents${query}`, withKey(ada.secret));
+      return page.body.items as Record<string, unknown>[];
+    };
+
+    expect((await rowOf())[0]?.connections).toHaveLength(1);
+
+    const archived = await post(
+      `/api/agents/${agentId}/connections/${connectionId}/archive`,
+      withKey(ada.secret),
+      {},
+    );
+    expect(archived.status).toBe(200);
+
+    // The agent is still listed — it is still an agent — and its row now says
+    // egma has no way to reach it.
+    const afterConnection = await rowOf();
+    expect(afterConnection).toHaveLength(1);
+    expect(afterConnection[0]?.connections).toEqual([]);
+
+    expect(
+      (await post(`/api/agents/${agentId}/archive`, withKey(ada.secret), {}))
+        .status,
+    ).toBe(200);
+
+    expect(await rowOf()).toEqual([]);
+    const retired = await rowOf("?archived=true");
+    expect(retired.map((one) => one.id)).toEqual([agentId]);
+    expect(retired[0]?.connections).toEqual([]);
+  });
+
   it("says nothing about an agent in another customer's account", async () => {
     api = await createApi("agents_tenancy");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
