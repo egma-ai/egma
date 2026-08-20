@@ -251,6 +251,9 @@ provider because the public telemetry API has a setter but no getter.
 The fixture and live tests verify both seams before the supported range
 changes.
 
+The package also keeps the OpenAI Python package on major version 2.
+LiveKit Agents 1.6 does not support OpenAI 3.
+
 `mock_tools` writes into a side table LiveKit keeps per session. It does
 not touch your agent, your agent's class, or your tool registry, and the
 model keeps seeing your real tool schemas throughout. Never calling it

@@ -194,6 +194,8 @@ At `INFO` level, the line after the census names how many tools your agent has a
 
 The `livekit-agents` dependency is pinned to `>=1.6.7,<1.7`. This is deliberate, not an oversight.
 
+The package also keeps the OpenAI Python package on major version 2 because LiveKit Agents 1.6 does not support OpenAI 3.
+
 Mock-tool interception uses `mock_tools` from LiveKit's testing namespace. Monitoring also reads the dynamic tracer's current provider so it can add Egma without replacing LiveKit Cloud observability; LiveKit's public API currently provides a setter but no getter. The pin means an unread minor version cannot silently change either seam. Raising the ceiling is a deliberate act backed by the fixture tests and a live session in a real room.
 
 If `mock_tools` ever moves in a future version, the documented fallback is `Agent.update_tools(...)` with `function_tool(raw_schema=...)` wrappers built from the real tools' schemas. That is a heavier mechanism — it owns schema fidelity, the real implementations, and re-wrapping after handoffs — which is exactly why it is the fallback and not the current approach.

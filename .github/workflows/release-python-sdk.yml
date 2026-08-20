@@ -81,13 +81,15 @@ jobs:
           wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
           clean="$(mktemp -d)"
           uv venv --python 3.11 "$clean/venv"
-          uv pip install --python "$clean/venv/bin/python" "$wheel"
+          uv pip install --python "$clean/venv/bin/python" \
+            "$wheel" "livekit-agents[openai]==1.6.7"
           "$clean/venv/bin/python" - <<'PY'
           import asyncio
           import os
           from importlib.metadata import version
           from egma import mockable, monitor_livekit
           from egma import monitoring
+          from livekit import agents
 
 
           class Job:
@@ -105,6 +107,8 @@ jobs:
 
           expected = os.environ["GITHUB_REF_NAME"].removeprefix("python-sdk-v")
           assert version("egma") == expected
+          assert version("openai").split(".", 1)[0] == "2"
+          assert agents.JobContext is not None
           assert callable(mockable)
           assert callable(monitor_livekit)
           context = Context()

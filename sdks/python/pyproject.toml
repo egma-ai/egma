@@ -27,6 +27,9 @@ classifiers = [
 # Raising either is a deliberate act backed by the fixture and live tests.
 dependencies = [
     "livekit-agents>=1.6.7,<1.7",
+    # LiveKit Agents 1.6 passes an httpx client into OpenAI. OpenAI 3 moved
+    # to httpx2, so this range follows LiveKit's own compatibility bound.
+    "openai>=2,<3",
     "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
     "opentelemetry-sdk>=1.39,<2",
 ]
