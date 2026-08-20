@@ -33,17 +33,7 @@ const buttonVariants = cva(
     // `transition-colors` includes it, which fades the focus ring in over
     // 140ms on every Tab step — motion on keyboard navigation, which
     // `DESIGN.md` forbids outright.
-    "transition-[color,background-color,border-color,scale] duration-(--duration-press) ease-out",
-    /*
-     * The press answers in movement, the way the access surface already does:
-     * `scale` under `:active`, gated off `:focus-visible` so keyboard
-     * activation stays immediate. One duration for the list — DESIGN.md says
-     * to take the shorter token when two would both explain the change.
-     * Reduced motion takes the scale away and keeps the colour; the theme
-     * holds the same rule for consumers that reach the slot directly.
-     */
-    "[&:active:not(:focus-visible)]:scale-97",
-    "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+    "transition-[color,background-color,border-color] duration-(--duration-hover) ease-out",
     "disabled:cursor-not-allowed disabled:opacity-55",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   ],

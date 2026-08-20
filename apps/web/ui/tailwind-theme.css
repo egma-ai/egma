@@ -971,12 +971,13 @@
    */
   @media (prefers-reduced-motion: reduce) {
     /*
-     * A press answers in colour under reduced motion: the scale is the
-     * movement and is what dies; the colour transition is the reduced-motion
-     * form DESIGN.md asks every movement to keep.
+     * A press answers in colour under reduced motion: the transform above is
+     * the movement and is what dies; the colour transitions from the class
+     * list are the reduced-motion form DESIGN.md asks every movement to keep,
+     * so no rule turns them off.
      */
     [data-slot="button"]:active:not(:focus-visible):not(:disabled) {
-      scale: none;
+      transform: none;
     }
 
     [data-slot="popover-content"][data-state="open"],
