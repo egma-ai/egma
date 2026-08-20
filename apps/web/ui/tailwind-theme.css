@@ -35,10 +35,18 @@
  * below rather than left available to be reached for by accident.
  */
 
-@source "../app";
-@source "../components";
-@source "../lib";
-@source "../ui";
+/*
+ * Markup only, and deliberately narrow.
+ *
+ * Tailwind mints a utility from any bare word it finds that happens to name
+ * one, and this repository writes long prose comments — a sentence with
+ * "rounded" or "block" in it was minting `.rounded` and `.block` out of
+ * explanation. Scanning only the files that carry class attributes stops the
+ * prose being read as markup. No `.ts` file under `apps/web` holds a class
+ * name; a future one that does has to be added here.
+ */
+@source "../app/**/*.tsx";
+@source "../components/**/*.tsx";
 
 /*
  * `DESIGN.md`: "Pointer hover motion runs only under `(hover: hover) and
@@ -168,23 +176,17 @@
   --color-failure: var(--bad);
 
   /*
-   * The edge of a status chip: the state colour pulled most of the way back to
-   * the neutral line, so the chip reads as a chip and the colour stays
-   * supporting information. These three are derivations rather than tokens,
-   * and they are written here to the same recipe `system.module.css` already
-   * uses for `.badgeGood`, `.badgeWarn` and `.badgeBad` — so the CSS Modules
-   * chip and the shadcn chip are one chip while both exist. Migrating the CSS
-   * Modules chip removes the other copy.
+   * The edge of a status chip, and the dialog scrim. Both are derived rather
+   * than fixed, and both are derived in `tokens.css` — the recipe is not
+   * repeated here any more than a colour is. `system.module.css` still holds
+   * its own copy of the chip recipe for `.badgeGood`, `.badgeWarn` and
+   * `.badgeBad`; that copy goes when those components are migrated, and until
+   * then the two have to be changed together.
    */
-  --color-success-border: color-mix(in srgb, var(--good) 38%, var(--border));
-  --color-warning-border: color-mix(in srgb, var(--warn) 38%, var(--border));
-  --color-failure-border: color-mix(in srgb, var(--bad) 38%, var(--border));
-
-  /*
-   * The dialog scrim, to the same recipe as `.scrim::backdrop`. A dialog is
-   * the one place the page behind it has to read as inert.
-   */
-  --color-scrim: color-mix(in srgb, var(--foreground) 32%, transparent);
+  --color-success-border: var(--good-border);
+  --color-warning-border: var(--warn-border);
+  --color-failure-border: var(--bad-border);
+  --color-scrim: var(--scrim);
 
   /* ----------------------------------------------------------------- Shape */
 

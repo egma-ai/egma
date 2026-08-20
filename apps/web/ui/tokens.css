@@ -50,6 +50,20 @@
   --warn: #9a691c;
   --bad: #b44444;
 
+  /*
+   * The edge of a status chip: the state color pulled most of the way back to
+   * the neutral line, so the chip reads as a chip and the color stays
+   * supporting information. Derived rather than fixed, so one declaration
+   * follows both themes: the mix is resolved against whichever `--good` and
+   * `--border` are in force.
+   */
+  --good-border: color-mix(in srgb, var(--good) 38%, var(--border));
+  --warn-border: color-mix(in srgb, var(--warn) 38%, var(--border));
+  --bad-border: color-mix(in srgb, var(--bad) 38%, var(--border));
+
+  /* The dialog scrim, which is what makes the page behind one read as inert. */
+  --scrim: color-mix(in srgb, var(--foreground) 32%, transparent);
+
   /* Four-pixel spacing grid. */
   --space-1: 4px;
   --space-2: 8px;
@@ -72,6 +86,8 @@
   --radius-pill: 9999px;
 
   /* Accepted Arial type scale. */
+  --sans: Arial, Helvetica, sans-serif;
+  --mono: var(--egma-mono), "IBM Plex Mono", ui-monospace, monospace;
   --text-caption: 14px;
   --text-body: 16px;
   --text-lead: 24px;

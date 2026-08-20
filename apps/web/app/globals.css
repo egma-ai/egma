@@ -15,14 +15,20 @@
  * written.
  */
 
-@import "tailwindcss";
+/*
+ * `source(none)` turns off Tailwind's automatic file detection, so the
+ * `@source` globs in `tailwind-theme.css` are the whole list of what gets
+ * scanned. Left automatic, Tailwind reads every file under the application —
+ * including `.ts` files that hold no markup — and mints a utility from any
+ * bare word that happens to name one, so a comment with "rounded" or "block"
+ * in it becomes a class. See the globs for what is scanned instead.
+ */
+@import "tailwindcss" source(none);
 @import "../ui/tokens.css";
 @import "../ui/tailwind-theme.css";
 
 :root {
   color-scheme: light;
-  --sans: Arial, Helvetica, sans-serif;
-  --mono: var(--egma-mono), "IBM Plex Mono", ui-monospace, monospace;
 }
 
 :root[data-theme="dark"] {
@@ -47,6 +53,12 @@
    * `@layer base` and deliberately says `revert`: a utility class still wins,
    * so a shadcn surface that asks for `list-none` or `m-0` gets it, and a page
    * that asks for nothing keeps the rendering it shipped with.
+   *
+   * Heading *sizes* are deliberately not among them. Tailwind's reset makes
+   * `h1`-`h6` inherit their size, the browser's own sizes are not on the
+   * accepted type scale, and every heading in this application already takes
+   * its size from a class. So a heading here has no size of its own, and a new
+   * one that is given no class will come out at body size rather than wrong.
    */
   a { text-decoration: revert; }
   ul, ol, menu { list-style: revert; padding: revert; }
