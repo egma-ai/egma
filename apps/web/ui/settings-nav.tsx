@@ -304,23 +304,27 @@ export function SettingsLayout({
           "flex h-full min-w-0 min-h-0 flex-col gap-8 overflow-y-auto",
           "overscroll-contain pr-2 pb-10 [scrollbar-gutter:stable]",
           /*
-           * The `!` is load-bearing until the shared `Section` migrates.
+           * This container owns the gap between Settings groups, so the
+           * `Section`s inside it give up their own top margin. Without it the
+           * gap is `Section`'s 32px of margin on top of this container's 32px
+           * of gap, and the first group starts 32px below where the navigation
+           * does. Measured at `margin-top: 0px` in a browser.
            *
-           * `Section` still carries `margin-top: var(--space-7)` from
-           * `system.module.css`, and a CSS Module is unlayered: it beats every
-           * Tailwind utility whatever the specificity, because a layer loses to
-           * no layer. Without this the gap between two Settings groups is 32px
-           * of margin on top of this container's 32px gap, and the first group
-           * starts 32px below where the navigation does. It is measured at
-           * `margin-top: 0px` in a browser, and the `!` goes when the class it
-           * is overriding does.
+           * **The `!` these carried is gone with the stylesheet it was
+           * fighting.** `Section` drew its margin from `system.module.css`,
+           * and a CSS Module is unlayered — it beat every Tailwind utility
+           * whatever the specificity, because a layer loses to no layer.
+           * `Section` is a utility now, so this is an ordinary specificity
+           * question and these rules already win it: a class plus a child
+           * combinator and an element outranks the plain class the margin
+           * comes from.
            */
-          "[&>section]:mt-0!",
+          "[&>section]:mt-0",
           "[&>[role=region]]:flex [&>[role=region]]:flex-col [&>[role=region]]:gap-8",
-          "[&>[role=region]>section]:mt-0!",
+          "[&>[role=region]>section]:mt-0",
           "[&>[role=tabpanel]]:flex [&>[role=tabpanel]]:flex-col",
           "[&>[role=tabpanel]]:gap-8",
-          "[&>[role=tabpanel]>section]:mt-0!",
+          "[&>[role=tabpanel]>section]:mt-0",
         )}
       >
         {children}

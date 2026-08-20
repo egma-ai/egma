@@ -339,6 +339,37 @@ describe("the grader library, in one project", () => {
    * holding what was typed into it, so a second attempt is one keystroke rather
    * than an afternoon.
    */
+  /**
+   * Use is a row control, and the table has to be told so.
+   *
+   * `action: true` is what lets a cell out of the one-line ellipsis every other
+   * cell gets. That ellipsis is `overflow: hidden`, and an outline is clipped by
+   * an ancestor's overflow — so before this the Ember focus ring on Use was cut
+   * off on every side. The same flag puts the control at the trailing edge,
+   * which is the visible half of the change.
+   *
+   * Both halves are asserted, because they fail apart: the attribute is the
+   * column saying what it is, and the class is the table acting on it. A class
+   * assertion for the reason `design-system.test.tsx` writes down — jsdom loads
+   * no stylesheet, so what is guarded is the mapping.
+   */
+  it("marks the Use column as a row control, at the trailing edge", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/grader-library": {
+        status: 200,
+        body: { items: [BEHAVIORS, LATENCY], next_cursor: null },
+      },
+    });
+    render(<GraderLibraryPage />);
+
+    const used = (await screen.findAllByRole("button", { name: "Use" }))[0]!;
+    const cell = used.closest("td");
+    expect(cell).not.toBeNull();
+    expect(cell?.dataset.action).toBe("true");
+    expect(cell?.className).toContain("data-[action=true]:text-right");
+  });
+
   it("shows a refused Use without clearing the form", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },

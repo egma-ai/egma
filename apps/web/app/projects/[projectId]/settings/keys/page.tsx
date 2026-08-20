@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf, type Project } from "../../../../../lib/me.ts";
@@ -18,7 +18,10 @@ import {
 } from "../../../../../lib/settings.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
+import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
   Field,
   Form,
@@ -26,16 +29,13 @@ import {
   FormRow,
   Help,
   Refused,
-  Section,
-  Select,
-} from "../../../../../ui/controls.tsx";
-import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
-import { Dialog } from "../../../../../ui/dialog.tsx";
+} from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
   RelativeInstant,
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import {
   SettingsLayout,
   settingsPath,
@@ -141,8 +141,6 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
 
   const { answer, reload } = useOrganizationRead<ApiKeyList>(API_KEYS_PATH);
 
-  /* Why Create is not available, named by the control it belongs to. */
-  const whyNotCreate = useId();
   const [name, setName] = useState("");
   const [scope, setScope] = useState<string>(projectId);
   const [minted, setMinted] = useState<MintedApiKey | null>(null);
@@ -235,6 +233,18 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
       {
         key: "actions",
         header: "Actions",
+        /*
+         * A row control, said to the table rather than only drawn like one.
+         *
+         * The shared table keeps an `action` cell at the trailing edge and lets
+         * it out of the one-line ellipsis every other cell gets. That second
+         * half is why this is here: the ellipsis comes from `overflow: hidden`
+         * on the cell, and an outline is clipped by an ancestor's overflow, so a
+         * control in an unmarked cell had the Ember focus ring cut off on every
+         * side. The run list's *Stop* and the run page's *Run again* were
+         * already marked; these were the same concept drawn two ways.
+         */
+        action: true,
         cell: (key) => (
           <Button
             type="button"
@@ -322,39 +332,28 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
                         id="key-scope"
                         value={scope}
                         disabled={busy}
-                        options={[
-                          ...projects.map((project) => ({
-                            value: project.id,
-                            label: `Project · ${project.name}`,
-                          })),
-                          {
-                            value: WHOLE_ORGANIZATION,
-                            label: "Whole organization",
-                          },
-                        ]}
-                        onChange={setScope}
-                      />
+                        onChange={(event) => setScope(event.target.value)}
+                      >
+                        {projects.map((project) => (
+                          <option key={project.id} value={project.id}>
+                            {`Project · ${project.name}`}
+                          </option>
+                        ))}
+                        <option value={WHOLE_ORGANIZATION}>
+                          Whole organization
+                        </option>
+                      </Select>
                     </Field>
                   </FormRow>
                   <FormActions>
                     <Button
                       type="submit"
-                      disabled={busy || minted !== null}
-                      title={whyNot}
-                      aria-describedby={
-                        whyNot === undefined ? undefined : whyNotCreate
-                      }
+                      disabled={minted !== null}
+                      busy={busy}
+                      {...(whyNot === undefined ? {} : { why: whyNot })}
                     >
                       {busy ? "Creating…" : "Create key"}
                     </Button>
-                    {whyNot === undefined ? null : (
-                      <span
-                        className="max-w-[56ch] text-sm leading-(--line-normal) text-muted-foreground"
-                        id={whyNotCreate}
-                      >
-                        {whyNot}
-                      </span>
-                    )}
                   </FormActions>
                 </Form>
               </Section>

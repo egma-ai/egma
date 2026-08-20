@@ -20,7 +20,8 @@ import {
   type ListedTest,
   type TestPage,
 } from "../../../../lib/tests.ts";
-import { Choice, Toolbar } from "../../../../ui/controls.tsx";
+import { Choice } from "../../../../ui/choice.tsx";
+import { Toolbar } from "../../../../ui/section.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import {

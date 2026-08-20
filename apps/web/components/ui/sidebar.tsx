@@ -29,9 +29,9 @@ import { cn } from "@/lib/utils";
  * - **No mobile `Sheet`.** The drawer is the product's existing one, and the
  *   same three groups are drawn inside it rather than a second copy of them.
  *
- * Every value here is a theme key and every theme key is a `tokens.css`
- * declaration, so this bar and the legacy CSS Modules pages beside it read one
- * declaration rather than two copies of it.
+ * Every value here is a theme key and every theme key reads one of egma's own
+ * declarations in `tailwind-theme.css`, so nothing in this file holds a colour,
+ * a size or a duration of its own.
  */
 
 type SidebarContextValue = {

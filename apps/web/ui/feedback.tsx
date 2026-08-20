@@ -245,7 +245,8 @@ export function Toast({
         "grid-cols-[var(--control-sm)_minmax(0,1fr)_var(--control-sm)] gap-3 p-3",
         "rounded-card border border-border border-l-2 border-l-foreground",
         "bg-surface text-foreground shadow-popover",
-        "data-[kind=error]:border-l-brand",
+        /* The failure colour, for the reason written on `app/ui.tsx`'s notice. */
+        "data-[kind=error]:border-l-failure",
         "max-[640px]:right-4 max-[640px]:bottom-4",
       )}
       data-slot="toast"
@@ -267,7 +268,7 @@ export function Toast({
         className={cn(
           "grid size-(--control-sm) place-items-center",
           "rounded-chip border border-foreground text-sm",
-          "group-data-[kind=error]:border-brand",
+          "group-data-[kind=error]:border-failure",
         )}
         aria-hidden="true"
       >

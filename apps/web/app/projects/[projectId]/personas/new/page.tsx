@@ -18,12 +18,7 @@ import {
 } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
-import {
-  Field,
-  Form,
-  FormActions,
-  Refused,
-} from "../../../../../ui/controls.tsx";
+import { Field, Form, FormActions, Refused } from "../../../../../ui/form.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {

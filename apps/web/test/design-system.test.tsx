@@ -116,8 +116,7 @@ describe("the development design proof", () => {
      * loads no stylesheet. What they guard is the mapping: the primary action
      * asks for the theme's `primary`, and `tailwind-theme.css` is what makes
      * `primary` mean Deep Ember. The colours themselves are proved in a real
-     * browser, where the base button and the CSS Modules button were read back
-     * and agreed on every property.
+     * browser, by reading the computed value back off the element.
      */
     const start = screen.getByRole("button", { name: "Start run" });
     expect(start.getAttribute("data-slot")).toBe("button");
@@ -137,10 +136,18 @@ describe("the development design proof", () => {
     const chips = screen
       .getAllByText("Passed")
       .filter((node) => node.getAttribute("data-slot") === "badge");
-    expect(chips).toHaveLength(1);
-    expect(chips[0]!.className).toContain("border-success-border");
-    expect(chips[0]!.className).not.toContain("brand");
-    expect(chips[0]!.className).not.toContain("primary");
+    /*
+     * Two of them and one component: the chip block on the base panel, and the
+     * same chip beside a verdict in the project-context panel. That second one
+     * was the CSS Modules chip until the mop-up, so every match is read rather
+     * than only the first.
+     */
+    expect(chips).toHaveLength(2);
+    for (const chip of chips) {
+      expect(chip.className).toContain("border-success-border");
+      expect(chip.className).not.toContain("brand");
+      expect(chip.className).not.toContain("primary");
+    }
   });
 
   it("opens the base dialog on the slot its motion is keyed to", () => {
@@ -175,9 +182,24 @@ describe("the development design proof", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Register agent" })[0]!);
     const dialog = screen.getByRole("dialog", { name: "Archive Support agent?" });
     expect(dialog).toBeTruthy();
-    expect(
-      within(dialog).getByRole("button", { name: "Archive agent" }).className,
-    ).toContain("buttonDestructive");
+    /*
+     * The confirmation inside the dialog is the shared button, and it is the
+     * destructive one. Two assertions because they guard two different things:
+     * `data-slot` says the element is the base component at all, and the class
+     * says which variant was asked for. The line these replace named a CSS
+     * Modules class, `buttonDestructive`, which did both at once and is gone.
+     *
+     * The variant is worth naming rather than dropping: `DESIGN.md` says a
+     * destructive action uses the failure colour, and that brand orange never
+     * means errored. A confirmation that quietly came out Deep Ember would
+     * pass a check for "is a button".
+     */
+    const confirm = within(dialog).getByRole("button", {
+      name: "Archive agent",
+    });
+    expect(confirm.getAttribute("data-slot")).toBe("button");
+    expect(confirm.className).toContain("bg-destructive");
+    expect(confirm.className).not.toContain("bg-primary");
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }), { detail: 1 });
     expect(screen.getByRole("dialog", { name: "Archive Support agent?" })).toBe(dialog);

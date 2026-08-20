@@ -12,9 +12,9 @@ import {
   type ReactNode,
 } from "react";
 
-import { Button } from "./controls.tsx";
+import { Button } from "@/components/ui/button";
+
 import { Dialog } from "./dialog.tsx";
-import styles from "./draft-navigation.module.css";
 import {
   confirmUnsavedNavigation,
   currentDraftState,
@@ -180,13 +180,19 @@ export function DraftNavigationProvider({
         >
           {(dismiss) => (
             <>
-              <p className={styles.copy}>
+              <p className="m-0 text-base leading-(--line-normal) text-muted-foreground">
                 This page has changes that are not saved. If you leave, those
                 changes will be lost.
               </p>
-              <div className={styles.actions}>
-                <Button onClick={dismiss}>Keep editing</Button>
-                <Button weight="strong" tone="destructive" onClick={discard}>
+              {/*
+               * The two controls reverse and go full width on a narrow screen,
+               * so the destructive one is not the first thing under a thumb.
+               */}
+              <div className="mt-5 flex flex-wrap items-center justify-end gap-3 max-[40rem]:flex-col-reverse max-[40rem]:items-stretch max-[40rem]:[&>*]:w-full">
+                <Button type="button" variant="secondary" onClick={dismiss}>
+                  Keep editing
+                </Button>
+                <Button type="button" variant="destructive" onClick={discard}>
                   Discard changes
                 </Button>
               </div>

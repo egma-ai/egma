@@ -6,7 +6,7 @@ import { returnPathIn, withReturnTo } from "../../lib/return-to.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-import { Field } from "../../ui/controls.tsx";
+import { Field } from "../../ui/form.tsx";
 import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**

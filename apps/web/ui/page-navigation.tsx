@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import styles from "./page-navigation.module.css";
+import { cn } from "@/lib/utils";
 
 type ParentNavigationItem = {
   readonly label: string;
@@ -40,21 +40,40 @@ export function PageNavigation({
   readonly items: PageNavigationItems;
 }) {
   return (
-    <nav className={styles.navigation} aria-label="Breadcrumb">
-      <ol className={styles.list}>
+    <nav className="mb-3 min-w-0" aria-label="Breadcrumb">
+      <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-2 p-0">
         {items.map((item, index) => (
-          <li className={styles.item} key={`${item.href ?? "current"}-${item.label}`}>
+          <li
+            className={cn(
+              "inline-flex max-w-full min-w-0 items-center gap-2",
+              "text-sm leading-(--line-normal) text-faint",
+            )}
+            key={`${item.href ?? "current"}-${item.label}`}
+          >
             {item.href === undefined ? (
-              <span className={styles.current} aria-current="page">
+              <span
+                className="text-foreground [overflow-wrap:anywhere]"
+                aria-current="page"
+              >
                 {item.label}
               </span>
             ) : (
-              <Link className={styles.link} href={item.href}>
+              <Link
+                className={cn(
+                  "max-w-full min-w-0 text-muted-foreground [overflow-wrap:anywhere]",
+                  "decoration-border-strong decoration-1 underline-offset-4",
+                  "pointer-hover:text-foreground pointer-hover:decoration-current",
+                  /* A real touch target, without changing what a mouse gets. */
+                  "pointer-coarse:inline-flex pointer-coarse:min-h-(--tap-target)",
+                  "pointer-coarse:items-center",
+                )}
+                href={item.href}
+              >
                 {item.label}
               </Link>
             )}
             {index === items.length - 1 ? null : (
-              <span className={styles.separator} aria-hidden="true">
+              <span className="text-border-strong" aria-hidden="true">
                 /
               </span>
             )}

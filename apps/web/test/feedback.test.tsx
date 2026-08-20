@@ -3,7 +3,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { Button } from "../ui/controls.tsx";
+import { Button } from "@/components/ui/button";
+import { Notice } from "../app/ui.tsx";
 import { Toast, Tooltip, type FeedbackInput } from "../ui/feedback.tsx";
 
 afterEach(() => {
@@ -97,8 +98,53 @@ describe("shared feedback", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  /**
+   * The one rule these two surfaces broke, held where it can fail.
+   *
+   * `DESIGN.md`: "Brand orange does not mean passed, failed, skipped, or
+   * errored." Both of these once drew their error edge in Ember, and the edge
+   * is the only thing separating either from its neutral form at a glance — so
+   * it said "look here" where it had to say "this went wrong".
+   *
+   * These are class assertions rather than colour assertions because jsdom
+   * loads no stylesheet, which is the reason `design-system.test.tsx` gives for
+   * the same shape. What they guard is the mapping: the edge asks for the
+   * theme's `failure`, and `tailwind-theme.css` is what makes `failure` mean
+   * the failure colour. Asserting the absence of `brand` is the half that
+   * matters most — a later wave flipping it back fails here rather than only
+   * looking wrong in a screenshot nobody retakes.
+   */
+  it("draws an error edge in the failure colour and never in the brand one", () => {
+    const { unmount } = render(<Notice tone="error">Egma could not sign you in.</Notice>);
+    const notice = screen.getByRole("alert");
+    expect(notice.dataset.slot).toBe("notice");
+    expect(notice.className).toContain("border-l-failure");
+    expect(notice.className).not.toContain("border-l-brand");
+    unmount();
+
+    render(
+      <Toast open kind="error" title="Could not save" onDismiss={() => undefined}>
+        Try again.
+      </Toast>,
+    );
+    const toast = screen.getByRole("alert");
+    expect(toast.dataset.slot).toBe("toast");
+    expect(toast.className).toContain("data-[kind=error]:border-l-failure");
+    expect(toast.className).not.toContain("border-l-brand");
+
+    // The mark inside it carries the same state, and the same rule.
+    const mark = toast.querySelector("[aria-hidden=true]");
+    expect(mark?.textContent).toBe("!");
+    expect(mark?.className).toContain("group-data-[kind=error]:border-failure");
+    expect(mark?.className).not.toContain("border-brand");
+  });
+
   it("names a busy button and makes it inert", () => {
-    render(<Button busy>Saving agent…</Button>);
+    render(
+      <Button type="button" busy>
+        Saving agent…
+      </Button>,
+    );
     const button = screen.getByRole("button", { name: "Saving agent…" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(button.getAttribute("aria-busy")).toBe("true");

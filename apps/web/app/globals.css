@@ -2,10 +2,11 @@
  * The one stylesheet the application loads.
  *
  * Order is the whole file. Tailwind arrives first and brings its layers with
- * it; `tokens.css` declares egma's values in an unlayered `:root`, which beats
- * anything Tailwind put in `@layer theme`; and `tailwind-theme.css` hands those
- * same declarations to Tailwind by reference, so a utility and a CSS Module
- * read one value rather than two copies of it.
+ * it; then `tailwind-theme.css` declares egma's values in an unlayered
+ * `:root`, which beats anything Tailwind put in `@layer theme`, and hands
+ * those same declarations to Tailwind by reference in the same file — so a
+ * utility and the one remaining stylesheet read one value rather than two
+ * copies of it.
  *
  * The element rules below sit in `@layer base`, beside Tailwind's own reset and
  * after it, so they overrule the reset where the two disagree and a utility
@@ -24,7 +25,6 @@
  * in it becomes a class. See the globs for what is scanned instead.
  */
 @import "tailwindcss" source(none);
-@import "../ui/tokens.css";
 @import "../ui/tailwind-theme.css";
 
 :root {

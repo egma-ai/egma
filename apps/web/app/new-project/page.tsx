@@ -3,22 +3,22 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { writeJson, type Refusal } from "../../lib/api.ts";
 import { roleOf } from "../../lib/me.ts";
 import { projectLanding } from "../../lib/project-context.ts";
 import { PROJECTS_PATH, type ProjectSettings } from "../../lib/settings.ts";
+import { Section } from "../../ui/section.tsx";
 import {
-  Button,
   Field,
   Form,
   FormActions,
   Help,
   Problem,
   Refused,
-  Section,
-  TextArea,
-  TextInput,
-} from "../../ui/controls.tsx";
+} from "../../ui/form.tsx";
 import {
   AppShell,
   PageBody,
@@ -142,12 +142,14 @@ function NewProject() {
               htmlFor="new-project-name"
               hint="Egma works the address out from this, and numbers it if another project already has the same one."
             >
-              <TextInput
+              <Input
                 id="new-project-name"
                 value={name}
                 disabled={!mayAdminister}
-                invalid={!named && refused !== null}
-                onChange={setName}
+                aria-invalid={!named && refused !== null ? true : undefined}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => setName(event.target.value)}
               />
             </Field>
 
@@ -156,11 +158,12 @@ function NewProject() {
               htmlFor="new-project-description"
               hint="Optional. What this project is for."
             >
-              <TextArea
+              <Textarea
                 id="new-project-description"
                 value={description}
+                rows={3}
                 disabled={!mayAdminister}
-                onChange={setDescription}
+                onChange={(event) => setDescription(event.target.value)}
               />
             </Field>
 
@@ -168,7 +171,6 @@ function NewProject() {
 
             <FormActions>
               <Button
-                weight="strong"
                 type="submit"
                 disabled={!mayAdminister || !named || creating}
                 why={

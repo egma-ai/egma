@@ -24,10 +24,10 @@ import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { graderDisplayName } from "../../../../lib/presentation.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import { Section } from "../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
+import { Section } from "../../../../ui/section.tsx";
 import {
   AppShell,
   PageBody,
@@ -133,6 +133,18 @@ function columnsFor(
     {
       key: "use",
       header: COLUMNS.use,
+      /*
+       * A row control, said to the table rather than only drawn like one.
+       *
+       * The shared table keeps an `action` cell at the trailing edge and lets
+       * it out of the one-line ellipsis every other cell gets. That second
+       * half is why this is here: the ellipsis comes from `overflow: hidden`
+       * on the cell, and an outline is clipped by an ancestor's overflow, so a
+       * control in an unmarked cell had the Ember focus ring cut off on every
+       * side. The run list's *Stop* and the run page's *Run again* were
+       * already marked; these were the same concept drawn two ways.
+       */
+      action: true,
       width: "110px",
       cell: (entry) => (
         <Button

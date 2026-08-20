@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   readJson,
@@ -25,7 +25,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
+import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
+import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
 import {
   Field,
   Form,
@@ -33,17 +37,13 @@ import {
   FormRow,
   Help,
   Refused,
-  Section,
-  Select,
-} from "../../../../../ui/controls.tsx";
-import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
-import { Dialog } from "../../../../../ui/dialog.tsx";
-import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
+} from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
   RelativeInstant,
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import {
   SettingsLayout,
   SettingsTabs,
@@ -98,8 +98,6 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   const settled = answer?.status === "ready" ? answer.value : null;
   const mayManage = settled?.may_manage_members === true;
 
-  /* Why the membership controls are not available, for whoever asks. */
-  const whyNotManage = useId();
   const [tab, setTab] = useState<Tab>("people");
   const tabRef = useRef<Tab>("people");
   const [invitations, setInvitations] =
@@ -284,14 +282,21 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
         mayManage ? (
           <Select
             id={`role-${member.user_id}`}
-            label={`${member.email} role`}
+            aria-label={`${member.email} role`}
             value={member.role}
             disabled={busy}
-            options={ASSIGNABLE_ROLES.map((one) => ({ value: one, label: one }))}
-            onChange={(next) =>
-              void act(memberActionPath(member.user_id, "role"), { role: next })
+            onChange={(event) =>
+              void act(memberActionPath(member.user_id, "role"), {
+                role: event.target.value,
+              })
             }
-          />
+          >
+            {ASSIGNABLE_ROLES.map((one) => (
+              <option key={one} value={one}>
+                {one}
+              </option>
+            ))}
+          </Select>
         ) : (
           member.role
         ),
@@ -309,30 +314,30 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
     {
       key: "actions",
       header: "Actions",
+      /*
+       * A row control, said to the table rather than only drawn like one.
+       *
+       * The shared table keeps an `action` cell at the trailing edge and lets
+       * it out of the one-line ellipsis every other cell gets. That second
+       * half is why this is here: the ellipsis comes from `overflow: hidden`
+       * on the cell, and an outline is clipped by an ancestor's overflow, so a
+       * control in an unmarked cell had the Ember focus ring cut off on every
+       * side. The run list's *Stop* and the run page's *Run again* were
+       * already marked; these were the same concept drawn two ways.
+       */
+      action: true,
       cell: (member) => (
         <>
           <Button
             type="button"
             variant="secondary"
-            disabled={!mayManage || busy}
-            title={whyNot}
-            aria-describedby={
-              whyNot === undefined
-                ? undefined
-                : `${whyNotManage}-${member.user_id}`
-            }
+            disabled={!mayManage}
+            busy={busy}
+            {...(whyNot === undefined ? {} : { why: whyNot })}
             onClick={() => setConfirming({ action: "deactivate", member })}
           >
             Deactivate
-          </Button>
-          {whyNot === undefined ? null : (
-            <span
-              className="max-w-[56ch] text-sm leading-(--line-normal) text-muted-foreground"
-              id={`${whyNotManage}-${member.user_id}`}
-            >
-              {whyNot}
-            </span>
-          )}{" "}
+          </Button>{" "}
           <Button
             type="button"
             variant="secondary"
@@ -572,6 +577,8 @@ function Invitations({
     {
       key: "actions",
       header: "Actions",
+      /* A row control, for the reason written on the column above. */
+      action: true,
       // Nothing on a pending row: waiting is what it is for. An expired one
       // cannot be waited on, so the one thing left to do about it is here.
       cell: (invitation) =>
@@ -623,12 +630,14 @@ function Invitations({
                 id="invite-role"
                 value={role}
                 disabled={busy}
-                options={ASSIGNABLE_ROLES.map((one) => ({
-                  value: one,
-                  label: one,
-                }))}
-                onChange={setRole}
-              />
+                onChange={(event) => setRole(event.target.value)}
+              >
+                {ASSIGNABLE_ROLES.map((one) => (
+                  <option key={one} value={one}>
+                    {one}
+                  </option>
+                ))}
+              </Select>
             </Field>
           </FormRow>
           <FormActions>

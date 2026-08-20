@@ -213,6 +213,18 @@ function columnsFor(
     {
       key: "acts",
       header: RUNNING_COLUMNS.actions,
+      /*
+       * A row control, said to the table rather than only drawn like one.
+       *
+       * The shared table keeps an `action` cell at the trailing edge and lets
+       * it out of the one-line ellipsis every other cell gets. That second
+       * half is why this is here: the ellipsis comes from `overflow: hidden`
+       * on the cell, and an outline is clipped by an ancestor's overflow, so a
+       * control in an unmarked cell had the Ember focus ring cut off on every
+       * side. The run list's *Stop* and the run page's *Run again* were
+       * already marked; these were the same concept drawn two ways.
+       */
+      action: true,
       width: "200px",
       cell: (copy) => (
         <>

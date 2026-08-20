@@ -20,6 +20,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
   Field,
   Form,
@@ -27,11 +29,9 @@ import {
   Help,
   Problem,
   Refused,
-  Section,
-} from "../../../../../ui/controls.tsx";
-import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
-import { Dialog } from "../../../../../ui/dialog.tsx";
+} from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import {
   SettingsLayout,
   settingsPath,
@@ -96,11 +96,8 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
    */
   const mayAdminister = settled?.may_manage_organization === true;
 
-  /* The hint, and the sentence saying why Save is not available. The base
-     input and the base button both read nothing they are not given, so this
-     page names both and cannot leave either unpointed-at. */
+  /* The field's hint, named so the input can point at it. */
   const nameHint = useId();
-  const whyNotSave = useId();
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -264,20 +261,12 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
               <FormActions>
                 <Button
                   type="submit"
-                  disabled={!mayAdminister || !named || !changed || saving}
-                  title={whyNot}
-                  aria-describedby={whyNot === undefined ? undefined : whyNotSave}
+                  disabled={!mayAdminister || !named || !changed}
+                  busy={saving}
+                  {...(whyNot === undefined ? {} : { why: whyNot })}
                 >
                   {saving ? "Saving…" : "Save organization"}
                 </Button>
-                {whyNot === undefined ? null : (
-                  <span
-                    className="max-w-[56ch] text-sm leading-(--line-normal) text-muted-foreground"
-                    id={whyNotSave}
-                  >
-                    {whyNot}
-                  </span>
-                )}
               </FormActions>
             </Form>
           </Section>
@@ -491,6 +480,18 @@ function Credentials({
     {
       key: "archive",
       header: "",
+      /*
+       * A row control, said to the table rather than only drawn like one.
+       *
+       * The shared table keeps an `action` cell at the trailing edge and lets
+       * it out of the one-line ellipsis every other cell gets. That second
+       * half is why this is here: the ellipsis comes from `overflow: hidden`
+       * on the cell, and an outline is clipped by an ancestor's overflow, so a
+       * control in an unmarked cell had the Ember focus ring cut off on every
+       * side. The run list's *Stop* and the run page's *Run again* were
+       * already marked; these were the same concept drawn two ways.
+       */
+      action: true,
       width: "110px",
       cell: (credential) => (
         <Button
@@ -506,6 +507,8 @@ function Credentials({
     {
       key: "rotate",
       header: "",
+      /* A row control, for the reason written on the column above. */
+      action: true,
       width: "150px",
       cell: (credential) => (
         <Button

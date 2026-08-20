@@ -1,13 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { readJson, type Answer } from "../lib/api.ts";
 import { firstProjectOf, roleOf, type Me } from "../lib/me.ts";
 import { projectLanding } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
-import { Button, ButtonLink } from "../ui/controls.tsx";
 import { ProductStatePage } from "../ui/shell.tsx";
 
 /**
@@ -88,15 +89,27 @@ export default function RootPage() {
           * which is exactly when being told what to do next matters. A viewer
           * or a member sees the same control, genuinely disabled, and the
           * sentence that says who to ask.
+          *
+          * **A disabled control is genuinely inert or it is a lie.** A link
+          * cannot be disabled: `aria-disabled` on an anchor greys it out and it
+          * still follows on click and still takes the keyboard. So when this is
+          * not theirs it stops being a link and becomes a disabled button,
+          * which carries the reason where a keyboard and a screen reader can
+          * reach it.
           */}
-        <ButtonLink
-          href={NEW_PROJECT_PATH}
-          weight="strong"
-          disabled={role !== "admin"}
-          why={`Your ${role} role cannot create a project. Ask an organization admin to make the first one.`}
-        >
-          Create the first project
-        </ButtonLink>
+        {role === "admin" ? (
+          <Button asChild>
+            <Link href={NEW_PROJECT_PATH}>Create the first project</Link>
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            disabled
+            why={`Your ${role} role cannot create a project. Ask an organization admin to make the first one.`}
+          >
+            Create the first project
+          </Button>
+        )}
       </ProductStatePage>
     );
   }
@@ -106,7 +119,13 @@ export default function RootPage() {
       title="Egma could not be reached."
       lead={answer.refusal.message}
     >
-      <Button onClick={() => setAttempt((one) => one + 1)}>Try again</Button>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => setAttempt((one) => one + 1)}
+      >
+        Try again
+      </Button>
     </ProductStatePage>
   );
 }

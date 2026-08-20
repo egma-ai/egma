@@ -1,32 +1,56 @@
 /*
- * Egma's theme, handed to Tailwind by reference.
+ * Egma's values, and the theme that hands them to Tailwind.
  *
- * `DESIGN.md` decides the values, `tokens.css` declares them, and this file is
- * the only place Tailwind learns them. **Every key below is a `var()` pointing
- * back into `tokens.css`, never a copied colour, radius, or size.** That is the
- * whole point: while the CSS Modules components and the shadcn components both
- * exist, a page built from either reads the same declaration, so the two halves
- * of the product cannot drift apart. Changing a value means editing
- * `tokens.css` — editing it here is not possible, because there is nothing here
- * to edit.
+ * `DESIGN.md` decides the values; this file declares them and is the only
+ * place Tailwind learns them. The two halves are deliberately separate and
+ * deliberately in one file:
  *
- * Two mechanisms carry that, and both are worth knowing:
+ * - The `:root` blocks below are egma's own vocabulary — `--action`,
+ *   `--space-5`, `--duration-press`. They are plain CSS in no cascade layer.
+ * - The `@theme` blocks after them are the handoff. **Every key in them is a
+ *   `var()` pointing at a declaration above, never a copied colour, radius, or
+ *   size.** Changing a value means editing the declaration; editing it in the
+ *   theme is not possible, because there is nothing there to edit.
+ *
+ * They used to be two files — `tokens.css` beside this one — because a CSS
+ * Modules surface read the first and a Tailwind surface read the second, and
+ * the split was what stopped the two halves of the product drifting apart.
+ * There is no CSS Modules surface left to serve except the one named survivor,
+ * `app/ui.module.css`, which reads these declarations exactly as it always
+ * did: they are still `:root`, still unlayered, still loaded by `globals.css`
+ * before anything else. Two files for one idea outlived the reason for it.
+ *
+ * Two mechanisms carry the handoff, and both are worth knowing:
  *
  * 1. **`@theme inline`.** Tailwind normally emits its own custom property and
  *    makes utilities point at that, which would be a second copy of the value.
  *    `inline` makes the utility carry the reference instead, so `bg-primary`
- *    compiles to `background-color: var(--action)` — egma's token, in the rule
- *    itself.
- * 2. **`tokens.css` outranks `@layer theme`.** Tailwind's defaults are declared
- *    inside a cascade layer and `tokens.css` declares `:root` outside every
- *    layer, so unlayered wins whatever the specificity. Where a Tailwind
- *    default and an egma token share a name — `--radius-sm`, `--ease-out`,
- *    `--ease-in-out` — the egma value is already the one that applies.
+ *    compiles to `background-color: var(--action)` — egma's declaration, in the
+ *    rule itself.
+ * 2. **Unlayered outranks `@layer theme`.** Tailwind's defaults are declared
+ *    inside a cascade layer and the blocks below are `:root` outside every
+ *    layer, so unlayered wins whatever the specificity.
+ *
+ *    **Five names are declared twice, and egma wins all five.** The whole
+ *    list, because a partial one invites somebody to move the block into a
+ *    layer believing the rest are safe:
+ *
+ *    | Name | Tailwind's | egma's |
+ *    | --- | --- | --- |
+ *    | `--radius-sm` | `0.25rem` | `6px` |
+ *    | `--radius-md` | `0.375rem` | `8px` |
+ *    | `--radius-lg` | `0.5rem` | `12px` |
+ *    | `--ease-out` | `cubic-bezier(0, 0, 0.2, 1)` | `cubic-bezier(0.23, 1, 0.32, 1)` |
+ *    | `--ease-in-out` | `cubic-bezier(0.4, 0, 0.2, 1)` | `cubic-bezier(0.77, 0, 0.175, 1)` |
+ *
+ *    This is load-bearing rather than incidental: moving these declarations
+ *    into `@theme` would put them in that layer and hand all five names back
+ *    to Tailwind — every radius in the product and two of its easings.
  *
  * A key may not reference its own name. `@theme inline { --text-sm:
  * var(--text-sm) }` compiles, but it emits a circular declaration that only
- * resolves because `tokens.css` happens to overrule it. So every key here
- * references the `DESIGN.md`-named token underneath — `--text-sm` reads
+ * resolves because the unlayered block happens to overrule it. So every key
+ * references the `DESIGN.md`-named value underneath — `--text-sm` reads
  * `--text-caption` — which says what it means and cannot go round in a circle.
  *
  * Where shadcn has a default and `DESIGN.md` has a rule, `DESIGN.md` wins. The
@@ -45,14 +69,229 @@
  * prose being read as markup. No `.ts` file under `apps/web` holds a class
  * name; a future one that does has to be added here.
  *
- * `../ui` is the third glob because the shared components live there and are
- * being migrated onto this theme. Until that sweep finishes the directory holds
- * CSS Modules components too, whose class names are hashed by the module
- * compiler and so can never collide with a utility of the same word.
+ * `../ui` is the third glob because the shared components live there, and it
+ * is load-bearing: every one of them is on this theme now, so a class name it
+ * uses that is not scanned is a class name that is never generated.
  */
 @source "../app/**/*.tsx";
 @source "../components/**/*.tsx";
 @source "../ui/**/*.tsx";
+
+/* ----------------------------------------------------------------------
+ * egma's values. `DESIGN.md` is the source of every one of them.
+ * -------------------------------------------------------------------- */
+
+:root {
+  /* Locked Egma orange-red palette. */
+  --color-paper: #ffffff;
+  --color-midnight: #1f1f1f;
+  --color-carbon: #000000;
+  --color-graphite: #3c3c3c;
+  --color-ember: #ff5229;
+  --color-ember-deep: #c2410c;
+  --color-ember-hover: #a93609;
+  --color-ember-pressed: #872b09;
+  --color-ember-wash: #fff5f2;
+
+  /*
+   * Semantic product colors and aliases.
+   *
+   * The canvas, routine hover, progress, and read-only surfaces stay neutral.
+   * Pale orange is reserved for selected, current, open, cited, and other
+   * active-attention states.
+   */
+  --background: color-mix(in srgb, var(--color-graphite) 3%, var(--color-paper));
+  --surface: var(--color-paper);
+  --surface-soft: color-mix(in srgb, var(--color-graphite) 6%, var(--color-paper));
+  --surface-active: var(--color-ember-wash);
+  --foreground: var(--color-midnight);
+  --muted: var(--color-graphite);
+  --faint: color-mix(in srgb, var(--color-graphite) 76%, var(--color-paper));
+  --border: color-mix(in srgb, var(--color-graphite) 18%, var(--color-paper));
+  --border-strong: var(--color-midnight);
+  --focus: var(--color-ember);
+  --accent: var(--color-ember);
+  --action: var(--color-ember-deep);
+  --action-hover: var(--color-ember-hover);
+  --action-pressed: var(--color-ember-pressed);
+  --action-text: var(--color-paper);
+  --destructive: #b44444;
+  --destructive-hover: #963636;
+  --destructive-pressed: #7e2d2d;
+  --destructive-text: var(--color-paper);
+
+  /* Product state colors keep verdict meaning separate from brand meaning. */
+  --good: #28775a;
+  --warn: #9a691c;
+  --bad: #b44444;
+
+  /*
+   * The edge of a status chip: the state color pulled most of the way back to
+   * the neutral line, so the chip reads as a chip and the color stays
+   * supporting information. Derived rather than fixed, so one declaration
+   * follows both themes: the mix is resolved against whichever `--good` and
+   * `--border` are in force.
+   */
+  --good-border: color-mix(in srgb, var(--good) 38%, var(--border));
+  --warn-border: color-mix(in srgb, var(--warn) 38%, var(--border));
+  --bad-border: color-mix(in srgb, var(--bad) 38%, var(--border));
+
+  /*
+   * The dialog scrim, which is what makes the page behind one read as inert.
+   *
+   * It is mixed from Midnight Ink rather than from `--foreground`, and that is
+   * the whole point: `--foreground` flips to near-white in dark theme, so a
+   * scrim derived from it *brightened* the page it was supposed to put behind
+   * a dialog. A scrim is dark in both themes because dimming is what it means.
+   * In light theme `--foreground` is Midnight Ink, so this is the value that
+   * was already being drawn.
+   */
+  --scrim: color-mix(in srgb, var(--color-midnight) 32%, transparent);
+
+  /* Four-pixel spacing grid. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+  --space-11: 72px;
+  --space-12: 80px;
+  --space-13: 100px;
+
+  /* Component shape. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
+
+  /* Accepted Arial type scale. */
+  --sans: Arial, Helvetica, sans-serif;
+  --mono: var(--egma-mono), "IBM Plex Mono", ui-monospace, monospace;
+  --text-caption: 14px;
+  --text-body: 16px;
+  --text-lead: 24px;
+  --text-subheading: 32px;
+  --text-heading-sm: 38px;
+  --text-heading: 48px;
+  --text-heading-lg: 56px;
+  --text-display: 82px;
+  --line-caption: 1.43;
+  --line-body: 1.5;
+  --line-lead: 1.33;
+  --line-heading: 1;
+  --tracking-caption: -0.35px;
+  --tracking-body: -0.4px;
+  --tracking-lead: -0.6px;
+  --tracking-subheading: -0.8px;
+  --tracking-heading-sm: -0.95px;
+  --tracking-heading: -1.2px;
+  --tracking-heading-lg: -1.4px;
+  --tracking-display: -2.05px;
+
+  /* Compact type aliases used by shared components. */
+  --text-2xs: var(--text-caption);
+  --text-xs: var(--text-caption);
+  --text-sm: var(--text-caption);
+  --text-md: var(--text-body);
+  --text-lg: var(--text-lead);
+  --text-xl: var(--text-subheading);
+  --line-tight: var(--line-heading);
+  --line-normal: var(--line-body);
+  --tracking-label: 0.08em;
+
+  /* Dense controls keep a separate visual size from touch targets. */
+  --control-sm: 32px;
+  --control-md: 36px;
+  --control-lg: 44px;
+  --control-height: var(--control-lg);
+  --tap-target: 44px;
+
+  /* Motion tokens. */
+  --duration-press: 120ms;
+  --duration-hover: 140ms;
+  --duration-popover-in: 180ms;
+  --duration-popover-out: 140ms;
+  --duration-dialog-in: 240ms;
+  --duration-dialog-out: 180ms;
+  --duration-drawer-in: 280ms;
+  --duration-drawer-out: 220ms;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* A list row is one line of reading. */
+  --row-height: 40px;
+  --row-padding-y: var(--space-2);
+  --row-padding-x: var(--space-4);
+
+  /* Product shell measurements. */
+  --sidebar-width: 224px;
+  --topbar-height: 48px;
+  --page-gutter: var(--space-6);
+  --page-max: 1200px;
+  --page-max-wide: 1440px;
+
+  /* Orange-brown elevation is reserved for menus, dialogs, and showcase panels. */
+  --shadow-menu: 0 12px 32px rgb(122 49 23 / 0.14);
+  --shadow-dialog:
+    rgb(122 49 23 / 0.12) -8px 16px 39px 0,
+    rgb(122 49 23 / 0.1) -33px 64px 72px 0;
+  --shadow-showcase:
+    rgb(122 49 23 / 0.12) -8px 16px 39px 0,
+    rgb(122 49 23 / 0.1) -33px 64px 72px 0,
+    rgb(122 49 23 / 0.06) -73px 144px 97px 0,
+    rgb(122 49 23 / 0.02) -130px 256px 115px 0;
+}
+
+/* Dark theme semantic overrides. */
+:root[data-theme="dark"] {
+  --background: #151514;
+  --surface: #1b1b1a;
+  --surface-soft: #222220;
+  --surface-active: color-mix(in srgb, var(--color-ember) 16%, var(--surface));
+  --foreground: #f2f2ed;
+  --muted: #a3a39b;
+  --faint: #82827b;
+  --border: #30302d;
+  --border-strong: #4a4a44;
+  --focus: var(--color-ember);
+  --accent: var(--color-ember);
+  --action: var(--color-ember-deep);
+  --action-hover: var(--color-ember-hover);
+  --action-pressed: var(--color-ember-pressed);
+  --action-text: var(--color-paper);
+  --good: #55bd8c;
+  --warn: #d69a38;
+  --bad: #e27373;
+
+  /*
+   * Destructive follows the failure colour, in both themes.
+   *
+   * `DESIGN.md`: "Dark theme uses lighter status values that keep the same
+   * meanings." Light theme already has one red — `--destructive` and `--bad`
+   * are the same value — and dark theme lightened `--bad` alone, so a dark
+   * page showed a `#b44444` destructive button beside an `#e27373` destructive
+   * menu item and asked somebody to read them as one meaning.
+   *
+   * White text on the lighter red is 3.0:1 and fails AA, so the text on it
+   * flips to Midnight Ink at 5.4:1 — the same contrast the light theme gets
+   * from white on `#b44444`. Hover and press move *towards paper* here, where
+   * light theme moves away from it: both directions are "further from the page
+   * it sits on", which is what the feedback has to say.
+   */
+  --destructive: var(--bad);
+  --destructive-hover: color-mix(in srgb, var(--bad) 86%, var(--color-paper));
+  --destructive-pressed: color-mix(in srgb, var(--bad) 72%, var(--color-paper));
+  --destructive-text: var(--color-midnight);
+
+  /* A dark page needs more scrim than a light one to read as put away. */
+  --scrim: color-mix(in srgb, var(--color-carbon) 60%, transparent);
+}
 
 /*
  * `DESIGN.md`: "Pointer hover motion runs only under `(hover: hover) and
@@ -208,11 +447,10 @@
 
   /*
    * The edge of a status chip, and the dialog scrim. Both are derived rather
-   * than fixed, and both are derived in `tokens.css` — the recipe is not
-   * repeated here any more than a colour is. `system.module.css` still holds
-   * its own copy of the chip recipe for `.badgeGood`, `.badgeWarn` and
-   * `.badgeBad`; that copy goes when those components are migrated, and until
-   * then the two have to be changed together.
+   * than fixed, and both are derived above — the recipe is not repeated here
+   * any more than a colour is. There was a second copy of the chip recipe in
+   * `system.module.css`, for `.badgeGood`, `.badgeWarn` and `.badgeBad`, which
+   * had to be changed in step with this one. It went with the stylesheet.
    */
   --color-success-border: var(--good-border);
   --color-warning-border: var(--warn-border);
@@ -340,6 +578,10 @@
   to { opacity: 0; transform: scale(0.97); }
 }
 
+@keyframes egma-state-mark-spin {
+  to { transform: rotate(360deg); }
+}
+
 /*
  * The dialog scales on the `scale` property rather than inside `transform`,
  * and that is load-bearing rather than a style preference.
@@ -383,6 +625,30 @@
 
     [data-slot="button"]:active:not(:focus-visible):not(:disabled) {
       transform: scale(0.97);
+    }
+  }
+
+  /*
+   * "Loading: show progress — fast, quiet indicator."
+   *
+   * The mark beside a run's state turns only while the run is moving, which is
+   * what `data-motion="active"` says. It is a `rotate` on a 12px line symbol
+   * and nothing else on the page moves with it. Three drawer-enters is a
+   * complete turn: slow enough to read as progress rather than as a spinner
+   * demanding attention, and still a motion token rather than a number.
+   *
+   * The word beside it is what carries the meaning, so reduced motion drops
+   * the turn and loses nothing.
+   */
+  [data-slot="state-mark"][data-motion="active"] {
+    transform-origin: center;
+    animation: egma-state-mark-spin calc(var(--duration-drawer-in) * 3) linear
+      infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="state-mark"][data-motion="active"] {
+      animation: none;
     }
   }
 

@@ -648,7 +648,7 @@ function WaveformLane({
         >
           {/*
            * The ink is the page's own text colour held back to 72%, written
-           * here as a value rather than as a token. `tokens.css` names the
+           * here as a value rather than as a token. The theme names the
            * derived colours this product reuses — the status chip edges and the
            * dialog scrim — and none of them is this mix; pointing at one of
            * those would mean something else and would follow it when it moved.

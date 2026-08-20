@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-import { Field } from "../../ui/controls.tsx";
+import { Field } from "../../ui/form.tsx";
 import { AuthForm, AuthShell, LinkLine, Notice } from "../ui.tsx";
 
 function PasswordVisibilityIcon({ visible }: { readonly visible: boolean }) {

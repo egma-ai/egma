@@ -73,9 +73,12 @@ export type MenuProps = {
  * One row in a panel, as a class list.
  *
  * `Menu` uses it as the default trigger dress and `MenuItem` wears it, which is
- * why it is named once here rather than written twice.
+ * why it is named once here rather than written twice. It is exported for the
+ * one row that is neither: the shell's dark-theme switch is a `role="switch"`
+ * inside the account menu, so it has to look like the items above it without
+ * being one.
  */
-const MENU_ITEM = [
+export const MENU_ITEM = [
   "flex w-full min-h-(--control-md) items-center gap-3 px-3",
   "rounded-button border-0 bg-transparent text-left text-sm text-foreground no-underline",
   "cursor-pointer transition-transform duration-(--duration-press) ease-out",

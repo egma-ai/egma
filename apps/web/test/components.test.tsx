@@ -14,7 +14,9 @@ import RunResultsAddress from "../app/runs/[runId]/page.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
 import { EVERY_NAVIGATION_ITEM } from "../lib/navigation.ts";
-import { Button, ButtonLink, Checkbox, Field } from "../ui/controls.tsx";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field } from "../ui/form.tsx";
 import { DataTable, type Column } from "../ui/data-table.tsx";
 import { Dialog } from "../ui/dialog.tsx";
 import { Failure, NotFound } from "../ui/page-state.tsx";
@@ -421,9 +423,21 @@ describe("nested page navigation", () => {
 
 /* ------------------------------------------------------------------------ */
 
+/**
+ * The two halves of "somewhere to go, dressed as a control".
+ *
+ * The old control set had a `ButtonLink` that decided this for itself. There
+ * is no such component on the shadcn base — a page writes the fork out — so
+ * what has to be guarded is that both halves still do what the decision said,
+ * because the decision now lives in every page rather than in one file.
+ */
 describe("a control somebody may not use", () => {
-  it("is a link when it is available", () => {
-    render(<ButtonLink href="/projects/prj_1/agents/new">Register agent</ButtonLink>);
+  it("is a real link when it is available", () => {
+    render(
+      <Button asChild variant="secondary">
+        <a href="/projects/prj_1/agents/new">Register agent</a>
+      </Button>,
+    );
 
     const link = screen.getByRole("link", { name: "Register agent" });
     expect(link.getAttribute("href")).toBe("/projects/prj_1/agents/new");
@@ -431,13 +445,16 @@ describe("a control somebody may not use", () => {
 
   /**
    * A link cannot be disabled: an anchor carrying `aria-disabled` still follows
-   * on click and still takes the keyboard. So it stops being a link.
+   * on click and still takes the keyboard. So the unavailable form is not a
+   * link at all — it is a button that is disabled for real, and it says why
+   * somewhere a keyboard can reach, because a disabled control cannot be
+   * focused and a `title` alone is a reason only a pointer gets.
    */
-  it("stops being a link, and becomes a button that is disabled for real", () => {
+  it("is a button that is disabled for real, and says why", () => {
     render(
-      <ButtonLink href="/projects/prj_1/agents/new" disabled why="Your viewer role cannot.">
+      <Button type="button" disabled why="Your viewer role cannot.">
         Register agent
-      </ButtonLink>,
+      </Button>,
     );
 
     expect(screen.queryByRole("link", { name: "Register agent" })).toBeNull();
@@ -445,6 +462,12 @@ describe("a control somebody may not use", () => {
     expect((control as HTMLButtonElement).disabled).toBe(true);
     expect(control.getAttribute("href")).toBeNull();
     expect(control.getAttribute("title")).toBe("Your viewer role cannot.");
+
+    const said = control.getAttribute("aria-describedby");
+    expect(said).not.toBeNull();
+    expect(document.getElementById(said ?? "")?.textContent).toBe(
+      "Your viewer role cannot.",
+    );
   });
 });
 
@@ -456,8 +479,8 @@ describe("a binary choice", () => {
         <Checkbox
           id="include-archived"
           checked={checked}
-          label="Include archived agents"
-          onChange={setChecked}
+          aria-label="Include archived agents"
+          onChange={(event) => setChecked(event.target.checked)}
         />
       );
     }
@@ -468,6 +491,32 @@ describe("a binary choice", () => {
 
     fireEvent.click(checkbox);
     expect((checkbox as HTMLInputElement).checked).toBe(true);
+  });
+
+  /**
+   * A 44px target around an 18px box.
+   *
+   * `DESIGN.md` asks for a 44px pointer target on a coarse pointer; it does not
+   * ask for a 44px checkbox. The label is the target, because a label activates
+   * the control it wraps, so it is what grows — and only on a coarse pointer,
+   * so a mouse sees no change at all.
+   *
+   * A class assertion for the reason `design-system.test.tsx` writes down: jsdom
+   * loads no stylesheet, so what is guarded is the mapping. `pointer-coarse` is
+   * an egma variant, not a Tailwind one, and it is the whole of this fix — a
+   * later tidy that drops it takes the target back to 18px and nothing else on
+   * the page would look any different.
+   */
+  it("gives the checkbox a coarse-pointer target without growing its box", () => {
+    render(<Checkbox id="required-grader" checked onChange={() => undefined} />);
+
+    const box = screen.getByRole("checkbox");
+    expect(box.className).toContain("size-[18px]");
+
+    const target = box.parentElement;
+    expect(target?.tagName).toBe("LABEL");
+    expect(target?.className).toContain("size-[18px]");
+    expect(target?.className).toContain("pointer-coarse:size-(--tap-target)");
   });
 
   it("connects the field hint to the native checkbox", () => {
@@ -727,7 +776,11 @@ describe("a dialog", () => {
     const onClose = vi.fn();
     render(
       <Dialog title="Archive agent?" onClose={onClose}>
-        {(dismiss) => <Button onClick={dismiss}>Cancel</Button>}
+        {(dismiss) => (
+          <Button type="button" variant="secondary" onClick={dismiss}>
+            Cancel
+          </Button>
+        )}
       </Dialog>,
     );
 
@@ -749,7 +802,11 @@ describe("a dialog", () => {
     const onClose = vi.fn();
     render(
       <Dialog title="Archive agent?" onClose={onClose}>
-        {(dismiss) => <Button onClick={dismiss}>Cancel</Button>}
+        {(dismiss) => (
+          <Button type="button" variant="secondary" onClick={dismiss}>
+            Cancel
+          </Button>
+        )}
       </Dialog>,
     );
 

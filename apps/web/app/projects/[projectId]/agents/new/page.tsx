@@ -1,23 +1,18 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { AGENTS_PATH, type ListedAgent } from "../../../../../lib/agents.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
-import {
-  Button,
-  ButtonLink,
-  Field,
-  Form,
-  FormActions,
-  Problem,
-  TextArea,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
+import { Field, Form, FormActions, Problem } from "../../../../../ui/form.tsx";
 import { NotFound } from "../../../../../ui/page-state.tsx";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
@@ -186,14 +181,18 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
         <AgentOnboardingProgress current="agent" />
         <Form onSubmit={() => void register()}>
           <Field label="Name" htmlFor="agent-name">
-            <TextInput
+            <Input
               id="agent-name"
               value={name}
               placeholder="Front desk"
-              invalid={nameProblem !== null}
-              describedBy={nameProblem === null ? undefined : "agent-name-problem"}
-              onChange={(next) => {
-                setName(next);
+              aria-invalid={nameProblem !== null ? true : undefined}
+              aria-describedby={
+                nameProblem === null ? undefined : "agent-name-problem"
+              }
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => {
+                setName(event.target.value);
                 if (nameProblem !== null) setNameProblem(null);
               }}
             />
@@ -203,22 +202,24 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
           </Field>
 
           <Field label="Description" htmlFor="agent-description">
-            <TextArea
+            <Textarea
               id="agent-description"
               value={description}
               rows={3}
               placeholder="What this agent is for, so a teammate opening the list knows."
-              onChange={setDescription}
+              onChange={(event) => setDescription(event.target.value)}
             />
           </Field>
 
           {refused === null ? null : <Problem>{refused.message}</Problem>}
 
           <FormActions>
-            <Button type="submit" weight="strong" disabled={saving || !mayRegister}>
+            <Button type="submit" disabled={saving || !mayRegister}>
               {saving ? "Registering…" : "Register agent"}
             </Button>
-            <ButtonLink href={back}>Cancel</ButtonLink>
+            <Button asChild variant="secondary">
+              <Link href={back}>Cancel</Link>
+            </Button>
           </FormActions>
         </Form>
       </PageBody>

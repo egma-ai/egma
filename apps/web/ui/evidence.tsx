@@ -16,7 +16,7 @@ import {
 } from "../lib/simulations.ts";
 import { graderDisplayName } from "../lib/presentation.ts";
 import { howFarIn, howLong } from "../lib/transcripts.ts";
-import { Help } from "./controls.tsx";
+import { Help } from "./form.tsx";
 import { Empty } from "./page-state.tsx";
 import { VerdictBadge } from "./run-status.tsx";
 
@@ -32,9 +32,8 @@ import { VerdictBadge } from "./run-status.tsx";
  * second opinion inside the page and the two would disagree the day somebody
  * changed one.
  *
- * They live in their own file, beside `run-status.tsx` and for the same reason:
- * the shared system in `controls.tsx` and `system.module.css` is deliberately
- * held closed.
+ * They live in their own file, beside `run-status.tsx` and for the same
+ * reason: the shared component set is deliberately held closed.
  *
  * **Speech, timing and judgement stay three things.** The transcript is what was
  * said and nothing else — tool calls and system work are not interleaved into
@@ -60,7 +59,7 @@ import { VerdictBadge } from "./run-status.tsx";
  * The quiet hover tint on a row, and the one colour here that is written out
  * rather than named.
  *
- * `tokens.css` names the derived values that mean something on their own — a
+ * The theme names the derived values that mean something on their own — a
  * status chip's edge, the dialog scrim. This is not one of those. It is
  * `--surface-soft` held back to 62% so a row lights up under the pointer
  * without becoming a surface of its own, and nothing else in the product wants

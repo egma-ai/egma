@@ -22,15 +22,10 @@ import { roleOf } from "../../../../../lib/me.ts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
-import {
-  Field,
-  Form,
-  FormActions,
-  Help,
-  Section,
-  Select,
-} from "../../../../../ui/controls.tsx";
+import { Field, Form, FormActions, Help } from "../../../../../ui/form.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
@@ -370,20 +365,22 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
                     <Select
                       id="judge-provider"
                       value={provider}
-                      options={registry.value.providers.map((one) => ({
-                        value: one.provider,
-                        label: one.provider,
-                      }))}
                       disabled={!mayAdminister}
-                      onChange={(chosen) => {
+                      onChange={(event) => {
                         editVersion.current += 1;
-                        setProvider(chosen);
+                        setProvider(event.target.value);
                         // A credential of the old provider cannot answer for the
                         // new one, so the choice is cleared rather than left
                         // pointing at something the server would refuse.
                         setSource("");
                       }}
-                    />
+                    >
+                      {registry.value.providers.map((one) => (
+                        <option key={one.provider} value={one.provider}>
+                          {one.provider}
+                        </option>
+                      ))}
+                    </Select>
                   </Field>
 
                   {credentials === null ? (
@@ -411,37 +408,35 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
                       <Select
                         id="judge-source"
                         value={source}
-                        /*
-                         * The deployment's own judge is offered when **the deployment
-                         * has one**, and never when the project happens to be using
-                         * it. Reading it off the project's current choice would make
-                         * moving to a key of your own a one-way door — the option
-                         * would vanish the moment you stopped using it, and the way
-                         * back would be unreachable from the one page that exists to
-                         * take it. The registry answers this because it is the
-                         * deployment's fact to state.
-                         */
-                        options={[
-                          { value: "", label: "Choose a key" },
-                          ...choosable.map((credential) => ({
-                            value: credential.id,
-                            label: credentialLabel(credential),
-                          })),
-                          ...(platformJudge
-                            ? [
-                                {
-                                  value: PLATFORM_SOURCE,
-                                  label: "This deployment's own judge",
-                                },
-                              ]
-                            : []),
-                        ]}
                         disabled={!mayAdminister}
-                        onChange={(chosen) => {
+                        onChange={(event) => {
                           editVersion.current += 1;
-                          setSource(chosen);
+                          setSource(event.target.value);
                         }}
-                      />
+                      >
+                        <option value="">Choose a key</option>
+                        {choosable.map((credential) => (
+                          <option key={credential.id} value={credential.id}>
+                            {credentialLabel(credential)}
+                          </option>
+                        ))}
+                        {/*
+                          The deployment's own judge is offered when **the
+                          deployment has one**, and never when the project
+                          happens to be using it. Reading it off the project's
+                          current choice would make moving to a key of your own
+                          a one-way door — the option would vanish the moment
+                          you stopped using it, and the way back would be
+                          unreachable from the one page that exists to take it.
+                          The registry answers this because it is the
+                          deployment's fact to state.
+                        */}
+                        {platformJudge ? (
+                          <option value={PLATFORM_SOURCE}>
+                            This deployment&apos;s own judge
+                          </option>
+                        ) : null}
+                      </Select>
                     </Field>
                   )}
                 </>

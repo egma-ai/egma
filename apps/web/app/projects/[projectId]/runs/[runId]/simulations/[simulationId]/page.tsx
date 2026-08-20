@@ -17,11 +17,8 @@ import {
   type SimulationEvidence,
 } from "../../../../../../../lib/simulations.ts";
 import { Button } from "@/components/ui/button";
-import {
-  Actions,
-  Problem,
-  Refused,
-} from "../../../../../../../ui/controls.tsx";
+import { Actions } from "../../../../../../../ui/section.tsx";
+import { Problem, Refused } from "../../../../../../../ui/form.tsx";
 import { Dialog } from "../../../../../../../ui/dialog.tsx";
 import {
   Failure,
@@ -362,12 +359,7 @@ function EvidenceView({
                 <Button type="button" variant="secondary" onClick={() => dismiss()}>
                   Not now
                 </Button>
-                <Button
-                  type="button"
-                  disabled={working}
-                  aria-busy={working ? "true" : undefined}
-                  onClick={() => void regrade()}
-                >
+                <Button type="button" busy={working} onClick={() => void regrade()}>
                   {working ? "Asking…" : "Judge it again"}
                 </Button>
               </Actions>

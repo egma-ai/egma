@@ -14,19 +14,30 @@ import { cn } from "@/lib/utils";
  * been taught. `accent-color` is what dresses it, which keeps the platform's
  * own indeterminate and focus behaviour and costs nothing.
  *
- * The label wrapper is carried over from the stylesheet this replaces, at the
- * same 18px. **It is under half the 44px `DESIGN.md` asks for on a coarse
- * pointer**, and it is left at 18px here because this change is a restyle and
- * that would be a change to the product — it is flagged in the pull request
- * instead. Callers with visible copy keep that copy visible and point at the
- * control with `htmlFor`, which makes the whole label a target as well and is
- * how every caller in the product reaches it today.
+ * **The box is 18px and the target is 44px, and they are deliberately not the
+ * same number.** `DESIGN.md` asks for a 44px pointer target on a coarse
+ * pointer; it does not ask for a 44px checkbox, and an 18px box is what this
+ * control has always drawn. So the label wrapper — which is the target,
+ * because a label activates the control it wraps — grows to the tap target on
+ * a coarse pointer and stays at the box's size on a fine one. The box is
+ * centred in it either way, so a mouse sees no change at all.
+ *
+ * This was carried over at 18px by the wave that wrote this file and flagged
+ * for the developer, who approved the fix. Callers with visible copy still
+ * keep that copy visible and point at the control with `htmlFor`, which makes
+ * the whole label a target as well.
  */
 function Checkbox({ className, ...props }: ComponentProps<"input">) {
   const hint = useFieldHint();
 
   return (
-    <label className="inline-grid size-[18px] cursor-pointer place-items-center has-[:disabled]:cursor-not-allowed">
+    <label
+      className={cn(
+        "inline-grid size-[18px] cursor-pointer place-items-center",
+        "pointer-coarse:size-(--tap-target)",
+        "has-[:disabled]:cursor-not-allowed",
+      )}
+    >
       <input
         type="checkbox"
         data-slot="checkbox"

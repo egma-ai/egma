@@ -22,13 +22,13 @@ import {
 } from "../../../../../lib/graders.ts";
 import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import {
-  Actions,
   Field,
   Form,
   FormActions,
   Help,
   Refused,
-} from "../../../../../ui/controls.tsx";
+} from "../../../../../ui/form.tsx";
+import { Actions } from "../../../../../ui/section.tsx";
 import { EntryFields } from "../use-form.tsx";
 
 /**
