@@ -15,13 +15,17 @@ import {
   type VerdictCounts,
   type VerdictWord,
 } from "../lib/runs.ts";
-import { Badge, ButtonLink, type BadgeTone } from "./controls.tsx";
+import type { VariantProps } from "class-variance-authority";
+
+import { Badge, badgeVariants } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
 import { DataTable, type Column } from "./data-table.tsx";
 import { Empty, Failure, Loading } from "./page-state.tsx";
 import { RelativeInstant, useMinuteClock } from "./relative-time.tsx";
 import { useProjectRead } from "./resource.ts";
 import { Section } from "./section.tsx";
-import styles from "./run-status.module.css";
 
 /**
  * The parts every surface that shows a run is built from — and the reason they
@@ -55,11 +59,21 @@ import styles from "./run-status.module.css";
  * well — a completed run may hold nothing but failed verdicts. Painting it green
  * would answer a question this word does not ask.
  */
-const RUN_STATUS_TONE: Readonly<Record<RunStatusWord, BadgeTone>> = {
+/**
+ * The tones a state word can be said in, read off the chip that says them.
+ *
+ * It is the `Badge`'s own variant union rather than a list repeated here, so a
+ * variant that is added or withdrawn from the chip cannot leave this file
+ * naming one that no longer exists. `InlineState` is the same word without the
+ * chip around it, so it takes the same vocabulary.
+ */
+type StateTone = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
+
+const RUN_STATUS_TONE: Readonly<Record<RunStatusWord, StateTone>> = {
   pending: "neutral",
   running: "neutral",
   completed: "neutral",
-  canceled: "warn",
+  canceled: "warning",
 };
 
 const RUN_STATUS_MEANING: Readonly<Record<RunStatusWord, string>> = {
@@ -96,9 +110,15 @@ function StateMark({
 }) {
   return (
     <svg
-      className={`${styles.stateMark}${moving ? ` ${styles.stateMarkMoving}` : ""}`}
+      className="block size-3 flex-none"
+      data-slot="state-mark"
       data-motion={moving ? "active" : undefined}
       viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.4}
       aria-hidden="true"
       focusable="false"
     >
@@ -151,7 +171,7 @@ export function RunStatus({
     );
   }
   return (
-    <Badge tone={RUN_STATUS_TONE[status]} title={RUN_STATUS_MEANING[status]}>
+    <Badge variant={RUN_STATUS_TONE[status]} title={RUN_STATUS_MEANING[status]}>
       {mark}
       {status}
     </Badge>
@@ -167,15 +187,15 @@ export function RunStatus({
  * stopped; neither says anything about the agent, and neither is ever red.
  */
 const SIMULATION_STATUS_TONE: Readonly<
-  Record<SimulationStatusWord, BadgeTone>
+  Record<SimulationStatusWord, StateTone>
 > = {
   queued: "neutral",
   claimed: "neutral",
   running: "neutral",
   completed: "neutral",
-  failed: "bad",
-  canceled: "warn",
-  skipped: "warn",
+  failed: "failure",
+  canceled: "warning",
+  skipped: "warning",
 };
 
 const SIMULATION_STATUS_MEANING: Readonly<
@@ -231,7 +251,7 @@ export function SimulationStatus({
   }
   return (
     <Badge
-      tone={SIMULATION_STATUS_TONE[status]}
+      variant={SIMULATION_STATUS_TONE[status]}
       title={SIMULATION_STATUS_MEANING[status]}
     >
       {mark}
@@ -298,11 +318,11 @@ export function GradingState({
  * judge is not a failing agent. Both are amber rather than red for exactly that
  * reason.
  */
-const VERDICT_TONE: Readonly<Record<VerdictWord, BadgeTone>> = {
-  passed: "good",
-  failed: "bad",
-  skipped: "warn",
-  errored: "warn",
+const VERDICT_TONE: Readonly<Record<VerdictWord, StateTone>> = {
+  passed: "success",
+  failed: "failure",
+  skipped: "warning",
+  errored: "warning",
 };
 
 const VERDICT_MEANING: Readonly<Record<VerdictWord, string>> = {
@@ -357,7 +377,7 @@ export function VerdictBadge({
     );
   }
   return (
-    <Badge tone={VERDICT_TONE[verdict]} title={VERDICT_MEANING[verdict]}>
+    <Badge variant={VERDICT_TONE[verdict]} title={VERDICT_MEANING[verdict]}>
       <StateMark kind={VERDICT_MARK[verdict]} />
       {verdict}
     </Badge>
@@ -369,12 +389,22 @@ function InlineState({
   title,
   children,
 }: {
-  readonly tone?: BadgeTone;
+  readonly tone?: StateTone;
   readonly title: string;
   readonly children: ReactNode;
 }) {
   return (
-    <span className={styles.inlineState} data-tone={tone} title={title}>
+    <span
+      className={cn(
+        "inline-flex min-w-0 items-center gap-2 text-sm whitespace-nowrap",
+        "text-muted-foreground",
+        "data-[tone=success]:text-success",
+        "data-[tone=warning]:text-warning",
+        "data-[tone=failure]:text-failure",
+      )}
+      data-tone={tone}
+      title={title}
+    >
       {children}
     </span>
   );
@@ -408,17 +438,34 @@ export function RunFacts({
   readonly verdict: VerdictWord | null;
 }) {
   return (
-    <div className={styles.facts}>
+    <div
+      className={cn(
+        "grid grid-cols-4 overflow-hidden rounded-card border border-border bg-surface",
+        /*
+         * The dividing lines live on the strip rather than on each fact,
+         * because which edge a fact carries depends on where the strip wrapped
+         * it. Four across draws one line between neighbours; two across moves
+         * the third fact to a new line, so it loses its leading edge and the
+         * bottom row gains a top one; one across turns every line horizontal.
+         */
+        "[&>*+*]:border-s [&>*+*]:border-border",
+        "max-[52rem]:grid-cols-2",
+        "max-[52rem]:[&>*:nth-child(3)]:border-s-0",
+        "max-[52rem]:[&>*:nth-child(n+3)]:border-t max-[52rem]:[&>*:nth-child(n+3)]:border-border",
+        "max-[32rem]:grid-cols-1",
+        "max-[32rem]:[&>*+*]:border-s-0 max-[32rem]:[&>*+*]:border-t",
+      )}
+    >
       <Fact label="Run">
         <RunStatus status={status} />
       </Fact>
       <Fact label="Simulations">
-        <span className={styles.figure}>
+        <span className="tabular-nums">
           {finished} of {expected} finished
         </span>
       </Fact>
       <Fact label="Grading">
-        <span className={styles.figure}>
+        <span className="tabular-nums">
           {graded} of {gradable} judged
         </span>
       </Fact>
@@ -437,9 +484,11 @@ function Fact({
   readonly children: ReactNode;
 }) {
   return (
-    <div className={styles.fact}>
-      <span className={styles.factLabel}>{label}</span>
-      <span className={styles.factValue}>{children}</span>
+    <div className="flex min-w-0 flex-col gap-2 px-5 py-4">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+        {children}
+      </span>
     </div>
   );
 }
@@ -462,7 +511,7 @@ export function RunProgress({
   const share = expected === 0 ? 0 : Math.min(1, finished / expected);
   return (
     <div
-      className={styles.progress}
+      className="relative h-1.5 overflow-hidden rounded-chip bg-surface-soft"
       role="progressbar"
       aria-label="Simulations finished"
       aria-valuenow={finished}
@@ -471,7 +520,21 @@ export function RunProgress({
       aria-valuetext={`${String(finished)} of ${String(expected)} simulations finished`}
     >
       <span
-        className={styles.progressFill}
+        className={cn(
+          "block size-full origin-left rounded-chip bg-foreground",
+          /*
+           * 200ms is written here rather than read from the theme, and it is
+           * the one duration in this file that is not a `DESIGN.md` motion
+           * token. Those name interface motion — a press, a popover, a dialog
+           * — and this is a value catching up to a new value, which
+           * `DESIGN.md` gives a behaviour for ("transform-based fill, linear
+           * while active") and no token. It is the duration the stylesheet
+           * this replaces already used and it is under the 300ms ceiling.
+           * Called out in the pull request for the developer to overrule.
+           */
+          "transition-transform duration-200 ease-linear",
+          "motion-reduce:transition-none",
+        )}
         style={{ transform: `scaleX(${String(share)})` }}
       />
     </div>
@@ -494,7 +557,7 @@ export function SimulationTally({
     .filter((word) => (counts[word] ?? 0) > 0)
     .map((word) => `${String(counts[word] ?? 0)} ${word}`);
   return (
-    <span className={styles.tally}>
+    <span className="text-sm tabular-nums text-muted-foreground">
       {said.length === 0 ? "No simulations yet" : said.join(" · ")}
     </span>
   );
@@ -509,13 +572,21 @@ export function SimulationTally({
  */
 export function VerdictTally({ counts }: { readonly counts: VerdictCounts | null }) {
   if (counts === null || counts.total === 0) {
-    return <span className={styles.tally}>{NOT_JUDGED_YET}</span>;
+    return (
+      <span className="text-sm tabular-nums text-muted-foreground">
+        {NOT_JUDGED_YET}
+      </span>
+    );
   }
   const parts = [`${String(counts.passed)}/${String(counts.total)} passed`];
   if (counts.failed > 0) parts.push(`${String(counts.failed)} failed`);
   if (counts.skipped > 0) parts.push(`${String(counts.skipped)} skipped`);
   if (counts.errored > 0) parts.push(`${String(counts.errored)} errored`);
-  return <span className={styles.tally}>{parts.join(" · ")}</span>;
+  return (
+    <span className="text-sm tabular-nums text-muted-foreground">
+      {parts.join(" · ")}
+    </span>
+  );
 }
 
 /** A score between nought and one, or an honest dash where there is none. */
@@ -591,7 +662,9 @@ export function RecentRuns({
       title={title}
       lead={lead}
       action={
-        <ButtonLink href={projectPath(projectId, "runs")}>All runs</ButtonLink>
+        <Button asChild variant="secondary">
+          <Link href={projectPath(projectId, "runs")}>All runs</Link>
+        </Button>
       }
     >
       {answer === null || answer.status === "signed-out" ? (

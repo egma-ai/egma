@@ -340,6 +340,10 @@
   to { opacity: 0; transform: scale(0.97); }
 }
 
+@keyframes egma-state-mark-spin {
+  to { transform: rotate(360deg); }
+}
+
 /*
  * The dialog scales on the `scale` property rather than inside `transform`,
  * and that is load-bearing rather than a style preference.
@@ -383,6 +387,30 @@
 
     [data-slot="button"]:active:not(:focus-visible):not(:disabled) {
       transform: scale(0.97);
+    }
+  }
+
+  /*
+   * "Loading: show progress — fast, quiet indicator."
+   *
+   * The mark beside a run's state turns only while the run is moving, which is
+   * what `data-motion="active"` says. It is a `rotate` on a 12px line symbol
+   * and nothing else on the page moves with it. Three drawer-enters is a
+   * complete turn: slow enough to read as progress rather than as a spinner
+   * demanding attention, and still a motion token rather than a number.
+   *
+   * The word beside it is what carries the meaning, so reduced motion drops
+   * the turn and loses nothing.
+   */
+  [data-slot="state-mark"][data-motion="active"] {
+    transform-origin: center;
+    animation: egma-state-mark-spin calc(var(--duration-drawer-in) * 3) linear
+      infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="state-mark"][data-motion="active"] {
+      animation: none;
     }
   }
 
