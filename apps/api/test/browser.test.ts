@@ -3307,7 +3307,16 @@ describe("the complete product, walked in order in a second project", () => {
                 .evaluateAll((links) =>
                   links.map((link) => link.getAttribute("href") ?? ""),
                 );
-              expect(addresses.length).toBeGreaterThan(0);
+              /*
+               * **The count, and not merely "some".** `toBeGreaterThan(0)` let
+               * this sweep pass on a bar that had lost five of its six rows:
+               * the loop below only ever says that what *is* here is allowed,
+               * so an empty-ish bar satisfies every line of it. Six is the
+               * whole of `NAVIGATION_GROUPS` — Agents, Graders, Tests,
+               * Personas, Runs, Transcripts — and a row added or dropped
+               * should be a decision somebody takes here on purpose.
+               */
+              expect(addresses.length).toBe(6);
               for (const address of addresses) {
                 expect(address, address).not.toContain("simulations");
               }
