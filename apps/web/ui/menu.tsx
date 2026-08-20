@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 
-import styles from "./system.module.css";
+import { cn } from "@/lib/utils";
 
 /**
  * A button that opens a small panel, and everything that has to be true of one
@@ -41,6 +41,12 @@ import styles from "./system.module.css";
  * **Home and End belong to the caret while somebody is typing.** Stealing them
  * to jump to the ends of the list means the ends of the *text* cannot be
  * reached, which is a worse trade than the one it buys.
+ *
+ * The root carries `data-slot="menu"` and the panel carries `data-placement`.
+ * The motion — an entrance from the trigger's corner, an exit that finishes
+ * before the panel is removed, and the reduced-motion form of both — is in
+ * `tailwind-theme.css` keyed on those, beside the same rules for the Radix
+ * surfaces.
  */
 
 export type MenuProps = {
@@ -62,6 +68,28 @@ export type MenuProps = {
   readonly panelClassName?: string;
   readonly children: (close: () => void) => ReactNode;
 };
+
+/**
+ * One row in a panel, as a class list.
+ *
+ * `Menu` uses it as the default trigger dress and `MenuItem` wears it, which is
+ * why it is named once here rather than written twice. It is exported for the
+ * one row that is neither: the shell's dark-theme switch is a `role="switch"`
+ * inside the account menu, so it has to look like the items above it without
+ * being one.
+ */
+export const MENU_ITEM = [
+  "flex w-full min-h-(--control-md) items-center gap-3 px-3",
+  "rounded-button border-0 bg-transparent text-left text-sm text-foreground no-underline",
+  "cursor-pointer transition-transform duration-(--duration-press) ease-out",
+  "pointer-coarse:min-h-(--tap-target)",
+  "pointer-hover:not-disabled:bg-surface-soft",
+  "[&:active:not(:focus-visible):not(:disabled)]:scale-97",
+  "disabled:cursor-wait disabled:opacity-60",
+  "aria-[current=true]:bg-selected",
+  "motion-reduce:transition-none",
+  "motion-reduce:[&:active:not(:focus-visible):not(:disabled)]:scale-100",
+];
 
 /** Whether the caret is somewhere Home and End already mean something. */
 function typing(element: Element | null): boolean {
@@ -94,14 +122,6 @@ export function Menu({
   const closingRef = useRef(false);
   const closeTimerRef = useRef<number | null>(null);
   const returnFocusRef = useRef(false);
-  const placementClass = {
-    "below-start": styles.menuBelowStart,
-    "below-end": styles.menuBelowEnd,
-    "above-start": styles.menuAboveStart,
-    "above-end": styles.menuAboveEnd,
-    "right-start": styles.menuRightStart,
-    "right-end": styles.menuRightEnd,
-  }[placement];
 
   const finishClose = useCallback(() => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
@@ -200,7 +220,8 @@ export function Menu({
 
   return (
     <div
-      className={styles.menu}
+      className="relative"
+      data-slot="menu"
       ref={rootRef}
       onPointerDownCapture={() => setInput("pointer")}
       onKeyDown={onKeyDown}
@@ -209,7 +230,10 @@ export function Menu({
       data-input={input}
     >
       <button
-        className={`${triggerClassName ?? styles.menuItem} ${open ? (openClassName ?? "") : ""}`}
+        className={cn(
+          triggerClassName ?? MENU_ITEM,
+          open ? (openClassName ?? "") : "",
+        )}
         ref={buttonRef}
         type="button"
         aria-haspopup={panelRole}
@@ -226,7 +250,23 @@ export function Menu({
       </button>
       {open ? (
         <div
-          className={`${styles.menuPanel} ${placementClass} ${panelClassName ?? ""}`}
+          className={cn(
+            /*
+             * Where this panel sits is not here. `data-placement` below is the
+             * whole of it: `tailwind-theme.css` reads that attribute for the
+             * offsets, the corner it grows from, and the extra room the two
+             * that hang below the trigger keep off the bottom of the screen.
+             * The attribute is the mechanism rather than a label beside one, so
+             * removing it moves the panel to the corner of its trigger.
+             */
+            "absolute z-20 w-max overflow-y-auto p-2",
+            "min-w-[min(240px,calc(100vw-var(--space-8)))]",
+            "max-w-[min(320px,calc(100vw-var(--space-8)))]",
+            "rounded-card border border-border bg-surface shadow-popover",
+            panelClassName,
+          )}
+          data-slot="menu-panel"
+          data-placement={placement}
           id={panelId}
           ref={panelRef}
           role={panelRole}
@@ -262,7 +302,7 @@ export function MenuItem({
   readonly children: ReactNode;
 }) {
   const shared = {
-    className: styles.menuItem,
+    className: cn(MENU_ITEM),
     ...(role === "none" ? {} : { role }),
     "data-menu-item": "",
     ...(selected === undefined ? {} : { "aria-current": selected }),
@@ -284,9 +324,13 @@ export function MenuItem({
 }
 
 export function MenuLabel({ children }: { readonly children: ReactNode }) {
-  return <p className={styles.menuLabel}>{children}</p>;
+  return (
+    <p className="m-0 px-3 pt-2 pb-1 text-xs tracking-(--tracking-label) text-faint uppercase">
+      {children}
+    </p>
+  );
 }
 
 export function MenuDivider() {
-  return <div className={styles.menuDivider} role="separator" />;
+  return <div className="my-2 h-px bg-border" role="separator" />;
 }

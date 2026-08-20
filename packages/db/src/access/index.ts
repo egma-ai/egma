@@ -338,6 +338,7 @@ export {
   type Agent,
   type AgentChanges,
   type AgentPage,
+  type AgentWithConnections,
   type ArchivedAgent,
   type ArchivedConnection,
   type Connection,

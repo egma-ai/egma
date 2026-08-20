@@ -16,12 +16,9 @@ import {
   type RegradeAsked,
   type SimulationEvidence,
 } from "../../../../../../../lib/simulations.ts";
-import {
-  Actions,
-  Button,
-  Problem,
-  Refused,
-} from "../../../../../../../ui/controls.tsx";
+import { Button } from "@/components/ui/button";
+import { Actions } from "../../../../../../../ui/section.tsx";
+import { Problem, Refused } from "../../../../../../../ui/form.tsx";
 import { Dialog } from "../../../../../../../ui/dialog.tsx";
 import {
   Failure,
@@ -297,7 +294,7 @@ function EvidenceView({
             */}
             {!mayRevisit ? null : (
               <Button
-                weight="strong"
+                type="button"
                 disabled={working}
                 onClick={() => setConfirming(true)}
               >
@@ -359,12 +356,10 @@ function EvidenceView({
             <>
               <p>{REGRADE_IS_NOT_A_REPLAY}</p>
               <Actions>
-                <Button onClick={dismiss}>Not now</Button>
-                <Button
-                  weight="strong"
-                  disabled={working}
-                  onClick={() => void regrade()}
-                >
+                <Button type="button" variant="secondary" onClick={() => dismiss()}>
+                  Not now
+                </Button>
+                <Button type="button" busy={working} onClick={() => void regrade()}>
                   {working ? "Asking…" : "Judge it again"}
                 </Button>
               </Actions>

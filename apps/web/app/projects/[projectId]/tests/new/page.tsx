@@ -1,8 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { roleOf } from "../../../../../lib/me.ts";
@@ -14,8 +18,6 @@ import {
   type ListedTest,
 } from "../../../../../lib/tests.ts";
 import {
-  Button,
-  ButtonLink,
   Field,
   Form,
   FormActions,
@@ -23,10 +25,8 @@ import {
   Help,
   Problem,
   Refused,
-  Section,
-  TextArea,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
+} from "../../../../../ui/form.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
@@ -166,21 +166,25 @@ function NewTest({ projectId }: { readonly projectId: string }) {
           >
             <FormRow>
               <Field label="Name" htmlFor="test-name">
-                <TextInput
+                <Input
                   id="test-name"
                   value={name}
                   placeholder="Reschedules a booked appointment"
                   disabled={!mayAuthor}
-                  onChange={setName}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setName(event.target.value)}
                 />
               </Field>
               <Field label="Description" htmlFor="test-description">
-                <TextInput
+                <Input
                   id="test-description"
                   value={description}
                   placeholder="The bread-and-butter front-desk call"
                   disabled={!mayAuthor}
-                  onChange={setDescription}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setDescription(event.target.value)}
                 />
               </Field>
             </FormRow>
@@ -191,13 +195,13 @@ function NewTest({ projectId }: { readonly projectId: string }) {
             lead="What the caller wants, and the circumstances. Not what should happen — that is the next section."
           >
             <Field label="Scenario" htmlFor="test-scenario">
-              <TextArea
+              <Textarea
                 id="test-scenario"
                 value={scenario}
                 rows={5}
                 placeholder="Their cleaning is booked for Thursday morning and has to move to any afternoon next week."
                 disabled={!mayAuthor}
-                onChange={setScenario}
+                onChange={(event) => setScenario(event.target.value)}
               />
             </Field>
           </Section>
@@ -259,7 +263,6 @@ function NewTest({ projectId }: { readonly projectId: string }) {
           <FormActions>
             <Button
               type="submit"
-              weight="strong"
               disabled={!mayAuthor || saving || !usable}
               why={
                 mayAuthor
@@ -269,7 +272,9 @@ function NewTest({ projectId }: { readonly projectId: string }) {
             >
               {saving ? "Writing…" : "Write the test"}
             </Button>
-            <ButtonLink href={projectPath(projectId, "tests")}>Cancel</ButtonLink>
+            <Button asChild variant="secondary">
+              <Link href={projectPath(projectId, "tests")}>Cancel</Link>
+            </Button>
           </FormActions>
         </Form>
       </PageBody>

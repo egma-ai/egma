@@ -54,6 +54,12 @@ export default defineConfig({
   esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
+      // The web application's own alias, as `apps/web/tsconfig.json` and
+      // `apps/web/components.json` declare it. A shadcn component added by the
+      // CLI imports `@/lib/utils`, and the component tests render pages that
+      // reach it. The trailing slash matters: without it `@egma/db` also starts
+      // with `@` and would be rewritten into the web application.
+      "@/": `${resolve("./apps/web")}/`,
       "@egma/ids": resolve("./packages/ids/src/index.ts"),
       "@egma/provider-credentials": resolve(
         "./packages/provider-credentials/src/index.ts",

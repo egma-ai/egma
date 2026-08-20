@@ -2,6 +2,10 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { agentsQuery } from "../../../../lib/agents.ts";
 import { readJson } from "../../../../lib/api.ts";
 import { personasQuery } from "../../../../lib/personas.ts";
@@ -10,16 +14,9 @@ import {
   type Named,
   type TestVersionRow,
 } from "../../../../lib/tests.ts";
-import {
-  Badge,
-  Button,
-  Problem,
-  TextArea,
-  TextInput,
-} from "../../../../ui/controls.tsx";
+import { Problem } from "../../../../ui/form.tsx";
 import { Menu } from "../../../../ui/menu.tsx";
 import { RelativeInstant } from "../../../../ui/relative-time.tsx";
-import styles from "./editor.module.css";
 
 /**
  * The parts a test is authored and read through.
@@ -35,9 +32,9 @@ import styles from "./editor.module.css";
  * that did it in one press would rewrite what a test checks from a page
  * somebody opened to look at the past.
  *
- * These live in this file rather than in `ui/controls.tsx` because they are the
- * Tests area's and nothing else uses them. The controls they are built from are
- * the shared ones.
+ * These live in this file rather than in the shared set because they are the
+ * Tests area's and nothing else uses them. The controls they are built from
+ * are the shared ones.
  */
 
 /**
@@ -66,23 +63,42 @@ export function Behaviors({
     );
 
   return (
-    <div className={styles.behaviors}>
-      <ul className={styles.behaviorList} aria-label="Expected behaviors">
+    <div className="flex flex-col gap-3">
+      <ul
+        className="m-0 flex list-none flex-col gap-3 p-0"
+        aria-label="Expected behaviors"
+      >
         {behaviors.map((one, index) => (
           // These statements have no public id. Their position is kept only so
           // the frozen version and its grader assertions remain stable.
           // eslint-disable-next-line react/no-array-index-key
-          <li className={styles.behavior} key={index}>
-            <TextArea
+          <li
+            className={
+              "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 p-3 " +
+              "rounded-card border border-border bg-surface " +
+              "max-[640px]:grid-cols-1"
+            }
+            key={index}
+          >
+            {/*
+              The row's own shape, said here rather than in a stylesheet
+              reaching into the shared field. One line to start with, growing
+              with what is typed: a behavior is a sentence, and a box four lines
+              tall for a sentence is four lines of empty space per statement.
+            */}
+            <Textarea
+              className="min-h-(--control-lg) py-2 [field-sizing:content]"
               id={`${field}-behavior-${String(index)}`}
               value={one}
               rows={1}
-              label={`Expected behavior ${String(index + 1)}`}
+              aria-label={`Expected behavior ${String(index + 1)}`}
               placeholder="Verifies who it is speaking to before discussing the booking"
               disabled={disabled}
-              onChange={(behavior) => at(index, behavior)}
+              onChange={(event) => at(index, event.target.value)}
             />
             <Button
+              type="button"
+              variant="secondary"
               disabled={disabled}
               onClick={() =>
                 onChange(
@@ -97,6 +113,8 @@ export function Behaviors({
       </ul>
       <div>
         <Button
+          type="button"
+          variant="secondary"
           disabled={disabled}
           onClick={() => onChange([...behaviors, ""])}
         >
@@ -132,6 +150,9 @@ function namedPagePath(
     ? agentsQuery(asking)
     : personasQuery(asking);
 }
+
+/** The quiet supporting line inside the panel: a placeholder, a page, an absence. */
+const SELECTOR_QUIET = "text-sm text-muted-foreground";
 
 /**
  * A searchable, paged selector for server-owned agents and personas.
@@ -294,34 +315,45 @@ export function NamedSelector({
     <Menu
       label={`Choose ${label.toLocaleLowerCase()}`}
       panelRole="dialog"
-      triggerClassName={styles.namedSelector}
-      openClassName={styles.namedSelectorOpen}
-      panelClassName={styles.namedSelectorPanel}
+      triggerClassName={
+        "grid w-full min-h-(--control-lg) grid-cols-[minmax(0,1fr)_auto] " +
+        "items-center gap-3 px-4 " +
+        "rounded-input border border-border bg-surface " +
+        "cursor-pointer text-left text-sm text-foreground " +
+        "pointer-hover:border-border-strong"
+      }
+      /* Open is a state of the control, so it wears the open, attentive surface. */
+      openClassName="border-brand bg-selected"
+      panelClassName="w-[min(480px,calc(100vw-var(--space-8)))] max-w-[min(480px,calc(100vw-var(--space-8)))]"
       trigger={
         <>
-          <span className={names.length === 0 ? styles.selectorPlaceholder : ""}>
+          <span className={names.length === 0 ? SELECTOR_QUIET : ""}>
             {summary}
           </span>
-          <span className={styles.selectorChevron} aria-hidden="true">⌄</span>
+          <span className="text-base text-muted-foreground" aria-hidden="true">
+            ⌄
+          </span>
         </>
       }
     >
       {(close) => (
-        <div className={styles.selectorBody}>
-          <TextInput
+        <div className="flex flex-col gap-3">
+          <Input
             id={searchId}
-            label={`Search ${label.toLocaleLowerCase()}`}
+            aria-label={`Search ${label.toLocaleLowerCase()}`}
             placeholder={`Search ${label.toLocaleLowerCase()}`}
             value={typedSearch}
             disabled={disabled}
-            autoFocusFirst
-            onChange={setTypedSearch}
+            autoComplete="off"
+            spellCheck={false}
+            data-menu-focus-first=""
+            onChange={(event) => setTypedSearch(event.target.value)}
           />
           {problem === null ? (
             <>
-              <div className={styles.selectorOptions}>
+              <div className="flex max-h-[min(420px,55vh)] flex-col gap-1 overflow-y-auto">
                 {shown.length === 0 ? (
-                  <p className={styles.selectorEmpty}>
+                  <p className={`m-0 p-3 ${SELECTOR_QUIET}`}>
                     {busy
                       ? `Searching ${label.toLocaleLowerCase()}…`
                       : search === "" && emptyMessage !== undefined
@@ -334,7 +366,15 @@ export function NamedSelector({
                     const unavailable = (one.archived_at ?? null) !== null;
                     return (
                       <button
-                        className={styles.selectorOption}
+                        className={
+                          "grid w-full min-h-(--tap-target) items-center gap-3 " +
+                          "grid-cols-[var(--space-5)_minmax(0,1fr)_auto] " +
+                          "rounded-button border-0 bg-transparent px-3 py-2 " +
+                          "cursor-pointer text-left text-sm text-foreground " +
+                          "aria-checked:bg-selected " +
+                          "disabled:cursor-not-allowed disabled:opacity-60 " +
+                          "pointer-hover:not-disabled:bg-surface-soft"
+                        }
                         type="button"
                         role="checkbox"
                         aria-checked={selected}
@@ -350,30 +390,46 @@ export function NamedSelector({
                           )
                         }
                       >
-                        <span className={styles.selectorMark} aria-hidden="true">
+                        <span
+                          className={
+                            "grid size-(--space-5) place-items-center " +
+                            "rounded-button border border-border-strong text-brand"
+                          }
+                          aria-hidden="true"
+                        >
                           {selected ? "✓" : ""}
                         </span>
-                        <span className={unavailable ? styles.gone : ""}>
+                        <span
+                          className={
+                            unavailable ? "text-faint line-through" : ""
+                          }
+                        >
                           {one.name}
                         </span>
-                        {unavailable ? <Badge tone="warn">Archived</Badge> : null}
+                        {unavailable ? (
+                          <Badge variant="warning">Archived</Badge>
+                        ) : null}
                       </button>
                     );
                   })
                 )}
               </div>
-              <div className={styles.selectorFooter}>
-                <span className={styles.selectorPage}>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+                <span className={SELECTOR_QUIET}>
                   {busy ? "Loading…" : `Page ${String(page + 1)}`}
                 </span>
-                <div className={styles.selectorPager}>
+                <div className="flex gap-2">
                   <Button
+                    type="button"
+                    variant="secondary"
                     disabled={disabled || busy || page === 0}
                     onClick={() => setPage(page - 1)}
                   >
                     Previous
                   </Button>
                   <Button
+                    type="button"
+                    variant="secondary"
                     disabled={
                       disabled || busy || (current?.nextCursor ?? null) === null
                     }
@@ -381,14 +437,20 @@ export function NamedSelector({
                   >
                     Next
                   </Button>
-                  <Button onClick={close}>Done</Button>
+                  <Button type="button" variant="secondary" onClick={close}>
+                    Done
+                  </Button>
                 </div>
               </div>
             </>
           ) : (
             <div>
               <Problem>{problem}</Problem>
-              <Button onClick={() => setRetry((held) => held + 1)}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setRetry((held) => held + 1)}
+              >
                 Try again
               </Button>
             </div>
@@ -436,16 +498,27 @@ export function SaveAction({
           : "✓";
 
   return (
-    <div className={styles.saveAction}>
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+      {/*
+        The state carries a mark as well as a colour, because "saved", "unsaved"
+        and "failed" are three different facts and colour alone is not one of
+        the ways this product is allowed to say which.
+      */}
       <p
-        className={`${styles.saveState} ${state === "failed" ? styles.saveStateFailed : changed ? styles.saveStateChanged : ""}`}
+        className={`m-0 flex items-center gap-2 text-sm ${
+          state === "failed"
+            ? "text-failure"
+            : changed
+              ? "text-warning"
+              : "text-success"
+        }`}
         role="status"
       >
         <span aria-hidden="true">{mark}</span>
         {copy}
       </p>
       <Button
-        weight="strong"
+        type="button"
         busy={busy}
         disabled={disabled || !changed}
         {...(why === undefined ? {} : { why })}
@@ -478,19 +551,44 @@ export function VersionHistory({
 }) {
   return (
     <div>
-      <ul className={styles.history} aria-label="Version history">
+      <ul
+        className={
+          "m-0 flex list-none flex-col overflow-hidden p-0 " +
+          "rounded-card border border-border bg-surface"
+        }
+        aria-label="Version history"
+      >
         {versions.map((version) => (
           <li
-            className={`${styles.version} ${version.current ? styles.versionCurrent : ""}`}
+            className={
+              "flex min-h-(--tap-target) flex-wrap items-baseline gap-3 px-4 py-3 " +
+              "border-t border-border first:border-t-0 " +
+              /*
+               * The current version's mark: a 3px edge, carried over from the
+               * stylesheet this replaces rather than chosen, so it is written
+               * as a measurement instead of as a scale step that does not
+               * exist.
+               */
+              "border-s-[3px] " +
+              (version.current
+                ? "border-s-brand bg-selected"
+                : "border-s-transparent")
+            }
             key={version.id}
           >
-            <span className={styles.versionNumber}>v{version.version}</span>
-            <span className={styles.versionWhen}>
+            <span className="font-mono text-sm text-foreground">
+              v{version.version}
+            </span>
+            <span className="text-sm text-muted-foreground">
               <RelativeInstant instant={version.created_at} now={now} />
             </span>
-            {version.current ? <Badge tone="good">Current</Badge> : null}
-            <span className={styles.versionSpacer} />
+            {version.current ? (
+              <Badge variant="success">Current</Badge>
+            ) : null}
+            <span className="flex-1" />
             <Button
+              type="button"
+              variant="secondary"
               onClick={() =>
                 onRead(reading?.id === version.id ? null : version)
               }
@@ -502,23 +600,28 @@ export function VersionHistory({
       </ul>
 
       {reading === null ? null : (
-        <article className={styles.reading} aria-label={`Version ${reading.version}`}>
-          <h3 className={styles.readingTitle}>
+        <article
+          className="mt-4 flex flex-col gap-4 rounded-card border border-border bg-surface p-5"
+          aria-label={`Version ${reading.version}`}
+        >
+          <h3 className="m-0 text-base font-medium text-foreground">
             Version {reading.version}, as it was written
           </h3>
-          <p className={styles.readingBody}>{reading.scenario}</p>
-          <ul className={styles.readingList}>
+          <p className="m-0 whitespace-pre-wrap text-sm text-foreground">
+            {reading.scenario}
+          </p>
+          <ul className="m-0 flex flex-col gap-1 pl-6 text-sm text-foreground">
             {reading.expected_behaviors.map((one, at) => (
               // No identity of their own, and this list is read-only.
               // eslint-disable-next-line react/no-array-index-key
               <li key={at}>{one}</li>
             ))}
           </ul>
-          <p className={styles.readingBody}>
+          <p className="m-0 whitespace-pre-wrap text-sm text-foreground">
             Personas: {reading.personas.map((one) => one.name).join(", ") || "none"}
             {"."}
           </p>
-          <p className={styles.versionWhen}>
+          <p className="text-sm text-muted-foreground">
             Reading an older version changes nothing. To go back to what it says,
             copy it into the current version and save.
           </p>

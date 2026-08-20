@@ -1,4 +1,4 @@
-import { StatePage, styles } from "../../ui.tsx";
+import { LinkLine, StatePage } from "../../ui.tsx";
 
 /**
  * The end of it. The browser has nothing left to do and says so, because a page
@@ -11,13 +11,13 @@ export default function DeviceApprovedPage() {
       title="Your terminal is connected"
       lead="Go back to your terminal — it has what it needs and has already carried on."
     >
-      <p className={styles.linkLine}>
+      <LinkLine>
         The key it received is stored on that machine and was never shown here.
         You can see and revoke it later from your keys.
-      </p>
-      <p className={styles.linkLine}>
+      </LinkLine>
+      <LinkLine>
         You can close this window.
-      </p>
+      </LinkLine>
     </StatePage>
   );
 }

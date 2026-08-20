@@ -13,11 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RunResultsAddress from "../app/runs/[runId]/page.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
-import {
-  PRIMARY_NAVIGATION,
-  SECONDARY_NAVIGATION,
-} from "../lib/navigation.ts";
-import { Button, ButtonLink, Checkbox, Field } from "../ui/controls.tsx";
+import { EVERY_NAVIGATION_ITEM } from "../lib/navigation.ts";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field } from "../ui/form.tsx";
 import { DataTable, type Column } from "../ui/data-table.tsx";
 import { Dialog } from "../ui/dialog.tsx";
 import { Failure, NotFound } from "../ui/page-state.tsx";
@@ -107,9 +106,7 @@ const ACME = { id: "org_1", name: "Acme", slug: "acme", role: "admin" };
  * and the test keeps passing while saying nothing about the item nobody
  * remembered — which is exactly what a navigation test is for.
  */
-const NAVIGATION_ITEMS = [...PRIMARY_NAVIGATION, ...SECONDARY_NAVIGATION].map(
-  (item) => item.label,
-);
+const NAVIGATION_ITEMS = EVERY_NAVIGATION_ITEM.map((item) => item.label);
 
 function meWith(role: string): Me {
   return {
@@ -426,9 +423,21 @@ describe("nested page navigation", () => {
 
 /* ------------------------------------------------------------------------ */
 
+/**
+ * The two halves of "somewhere to go, dressed as a control".
+ *
+ * The old control set had a `ButtonLink` that decided this for itself. There
+ * is no such component on the shadcn base — a page writes the fork out — so
+ * what has to be guarded is that both halves still do what the decision said,
+ * because the decision now lives in every page rather than in one file.
+ */
 describe("a control somebody may not use", () => {
-  it("is a link when it is available", () => {
-    render(<ButtonLink href="/projects/prj_1/agents/new">Register agent</ButtonLink>);
+  it("is a real link when it is available", () => {
+    render(
+      <Button asChild variant="secondary">
+        <a href="/projects/prj_1/agents/new">Register agent</a>
+      </Button>,
+    );
 
     const link = screen.getByRole("link", { name: "Register agent" });
     expect(link.getAttribute("href")).toBe("/projects/prj_1/agents/new");
@@ -436,13 +445,16 @@ describe("a control somebody may not use", () => {
 
   /**
    * A link cannot be disabled: an anchor carrying `aria-disabled` still follows
-   * on click and still takes the keyboard. So it stops being a link.
+   * on click and still takes the keyboard. So the unavailable form is not a
+   * link at all — it is a button that is disabled for real, and it says why
+   * somewhere a keyboard can reach, because a disabled control cannot be
+   * focused and a `title` alone is a reason only a pointer gets.
    */
-  it("stops being a link, and becomes a button that is disabled for real", () => {
+  it("is a button that is disabled for real, and says why", () => {
     render(
-      <ButtonLink href="/projects/prj_1/agents/new" disabled why="Your viewer role cannot.">
+      <Button type="button" disabled why="Your viewer role cannot.">
         Register agent
-      </ButtonLink>,
+      </Button>,
     );
 
     expect(screen.queryByRole("link", { name: "Register agent" })).toBeNull();
@@ -450,6 +462,12 @@ describe("a control somebody may not use", () => {
     expect((control as HTMLButtonElement).disabled).toBe(true);
     expect(control.getAttribute("href")).toBeNull();
     expect(control.getAttribute("title")).toBe("Your viewer role cannot.");
+
+    const said = control.getAttribute("aria-describedby");
+    expect(said).not.toBeNull();
+    expect(document.getElementById(said ?? "")?.textContent).toBe(
+      "Your viewer role cannot.",
+    );
   });
 });
 
@@ -461,8 +479,8 @@ describe("a binary choice", () => {
         <Checkbox
           id="include-archived"
           checked={checked}
-          label="Include archived agents"
-          onChange={setChecked}
+          aria-label="Include archived agents"
+          onChange={(event) => setChecked(event.target.checked)}
         />
       );
     }
@@ -473,6 +491,32 @@ describe("a binary choice", () => {
 
     fireEvent.click(checkbox);
     expect((checkbox as HTMLInputElement).checked).toBe(true);
+  });
+
+  /**
+   * A 44px target around an 18px box.
+   *
+   * `DESIGN.md` asks for a 44px pointer target on a coarse pointer; it does not
+   * ask for a 44px checkbox. The label is the target, because a label activates
+   * the control it wraps, so it is what grows — and only on a coarse pointer,
+   * so a mouse sees no change at all.
+   *
+   * A class assertion for the reason `design-system.test.tsx` writes down: jsdom
+   * loads no stylesheet, so what is guarded is the mapping. `pointer-coarse` is
+   * an egma variant, not a Tailwind one, and it is the whole of this fix — a
+   * later tidy that drops it takes the target back to 18px and nothing else on
+   * the page would look any different.
+   */
+  it("gives the checkbox a coarse-pointer target without growing its box", () => {
+    render(<Checkbox id="required-grader" checked onChange={() => undefined} />);
+
+    const box = screen.getByRole("checkbox");
+    expect(box.className).toContain("size-[18px]");
+
+    const target = box.parentElement;
+    expect(target?.tagName).toBe("LABEL");
+    expect(target?.className).toContain("size-[18px]");
+    expect(target?.className).toContain("pointer-coarse:size-(--tap-target)");
   });
 
   it("connects the field hint to the native checkbox", () => {
@@ -732,7 +776,11 @@ describe("a dialog", () => {
     const onClose = vi.fn();
     render(
       <Dialog title="Archive agent?" onClose={onClose}>
-        {(dismiss) => <Button onClick={dismiss}>Cancel</Button>}
+        {(dismiss) => (
+          <Button type="button" variant="secondary" onClick={dismiss}>
+            Cancel
+          </Button>
+        )}
       </Dialog>,
     );
 
@@ -754,7 +802,11 @@ describe("a dialog", () => {
     const onClose = vi.fn();
     render(
       <Dialog title="Archive agent?" onClose={onClose}>
-        {(dismiss) => <Button onClick={dismiss}>Cancel</Button>}
+        {(dismiss) => (
+          <Button type="button" variant="secondary" onClick={dismiss}>
+            Cancel
+          </Button>
+        )}
       </Dialog>,
     );
 
@@ -1130,7 +1182,7 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findByText("page")).toBeDefined();
     // No link into a project the address never named — not Agents, not Tests,
-    // not Simulation runs, not Monitoring, and no href under /projects at all.
+    // not Runs, not Transcripts, and no href under /projects at all.
     for (const item of NAVIGATION_ITEMS) {
       expect(screen.queryByRole("link", { name: item })).toBeNull();
     }
@@ -1171,10 +1223,11 @@ describe("the role the shell shows", () => {
    * asks the rendered shell for the item by the words on it, and follows where
    * it goes.
    *
-   * `Simulation runs` is asked for by the same name, which is the whole of the
-   * rename: one label changed, one address unmoved.
+   * The words are the ones the groups left behind: the Monitoring group's item
+   * says `Transcripts`, and the Simulations group's says `Runs`. Both addresses
+   * are the ones they always were.
    */
-  it("puts Monitoring in the sidebar, opening this project's transcript list", async () => {
+  it("puts Transcripts in the sidebar, opening this project's transcript list", async () => {
     routed.pathname = "/projects/prj_2/agents";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -1188,14 +1241,14 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findByText("page")).toBeDefined();
 
-    const monitoring = screen.getAllByRole("link", { name: "Monitoring" })[0];
-    expect(monitoring?.getAttribute("href")).toBe(
+    const transcripts = screen.getAllByRole("link", { name: "Transcripts" })[0];
+    expect(transcripts?.getAttribute("href")).toBe(
       "/projects/prj_2/monitoring/transcripts",
     );
 
-    const runs = screen.getAllByRole("link", { name: "Simulation runs" })[0];
+    const runs = screen.getAllByRole("link", { name: "Runs" })[0];
     expect(runs?.getAttribute("href")).toBe("/projects/prj_2/runs");
-    expect(screen.queryByRole("link", { name: "Runs" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Simulation runs" })).toBeNull();
   });
 
   it("says the session is unavailable rather than that somebody is signed in", async () => {
@@ -1299,6 +1352,10 @@ describe("the Agents page", () => {
     project_id: "prj_1",
     name: "Front desk",
     description: "Answers the main line.",
+    // The list read carries every agent's connections, so a row in this
+    // fixture carries the field. An agent with none is one of the states the
+    // page draws, and it is drawn from an empty list rather than a missing one.
+    connections: [],
     created_at: "2026-08-15T10:00:00.000Z",
     updated_at: "2026-08-15T10:00:00.000Z",
   };
@@ -1352,8 +1409,8 @@ describe("the Agents page", () => {
     expect(screen.getByRole("link", { name: "Open Default" })).toBeDefined();
     expect(screen.queryByRole("alert")).toBeNull();
 
-    // Nothing to register an agent in, so nothing offers to.
-    for (const control of screen.getAllByRole("button", { name: "Register agent" })) {
+    // No project here to connect an agent to, so nothing offers to.
+    for (const control of screen.getAllByRole("button", { name: "Connect agent" })) {
       expect((control as HTMLButtonElement).disabled).toBe(true);
     }
   });
@@ -1462,13 +1519,13 @@ describe("the Agents page", () => {
     expect(screen.getAllByText("Night line").length).toBeGreaterThan(0);
   });
 
-  it("offers a member the way to register, and a viewer the same control disabled", async () => {
+  it("offers a member the way to connect an agent, and a viewer the same control disabled", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/api/agents": { status: 200, body: { items: [AGENT], next_cursor: null } },
     });
     const { unmount } = render(<AgentsPage />);
-    expect(await screen.findByRole("link", { name: "Register agent" })).toBeDefined();
+    expect(await screen.findByRole("link", { name: "Connect agent" })).toBeDefined();
     unmount();
 
     apiAnswers({
@@ -1477,9 +1534,9 @@ describe("the Agents page", () => {
     });
     render(<AgentsPage />);
 
-    const refused = await screen.findByRole("button", { name: "Register agent" });
+    const refused = await screen.findByRole("button", { name: "Connect agent" });
     expect((refused as HTMLButtonElement).disabled).toBe(true);
     expect(refused.getAttribute("title")).toContain("viewer role cannot");
-    expect(screen.queryByRole("link", { name: "Register agent" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Connect agent" })).toBeNull();
   });
 });

@@ -1,42 +1,56 @@
 import { projectPath, sectionIn } from "./project-context.ts";
 
 /**
- * The product areas, and which of them the navigation offers.
+ * The product areas, and how the navigation groups them.
  *
- * **Primary navigation is the four things a team works on today**: the agent
- * under test, the tests, the simulation runs that executed them, and the
- * monitoring of what the agent does in production. Everything else earns its
- * place separately:
+ * **The bar names the two jobs the product does.** Prove trust before release
+ * is *Simulations*; keep trust in production is *Monitoring*. The two standing
+ * things both jobs share — the agent under test, and the graders that judge —
+ * sit above them in a group of their own:
  *
- * - **Monitoring is a pillar rather than a library entry.** Production traffic
- *   is half of what a team looks at, and it was reachable at no address the
- *   product linked to at all until this item existed.
- * - **Simulation runs is a label, and only a label.** The addresses under
- *   `/projects/{projectId}/runs` do not move, the stored word stays `run`, and
- *   what changed is the two words a person reads — so that the runs surface and
- *   the monitoring surface say which kind of traffic each one holds.
+ * - **Global**: Agents, Graders.
+ * - **Simulations**: Tests, Personas, Runs.
+ * - **Monitoring**: Transcripts.
  *
- * - **Personas and Graders have direct paths and not primary slots.** A persona
- *   is authored on its own and reused across tests; a grader is switched on
- *   once and then judges everything in its scope without anybody visiting it
- *   again. Neither is one of the things a team works on all day — and neither
- *   may be reachable only from inside something else, which is how a reusable
- *   thing quietly becomes a field and how judging quietly becomes invisible.
+ * **The objection to "Global", recorded because it was overruled rather than
+ * answered.** It is not a glossary word, and nothing in this bar is global:
+ * every entry is project-scoped, so switching project changes what the group
+ * holds, and a new reader may predict organization-wide settings behind the
+ * label. The developer heard that and prefers the label anyway — the group
+ * names what stands above both halves, and the word is theirs to spend. If
+ * first-user evidence shows the misread happening, the label reopens. The
+ * group itself is settled.
  *
- *   **Graders had no item at all until wave two**, because the screens that
- *   replaced this effort's authoring surface arrived organization-wide: their
- *   addresses carried no project while the shell reads the project out of the
- *   address, so an item pointing at them would have shown whichever project was
- *   first in the viewer's list and pressing **Use** would have put a running
- *   copy on a project nobody was looking at. They are project-scoped now, so
- *   the item is back.
+ * **The groups are presentation, and only presentation.** Every href is the one
+ * it was before the groups existed, `activeSectionIn` still reads the address
+ * rather than the group, and a copied URL keeps meaning what it meant. Nothing
+ * here can move a page.
+ *
+ * What the words do:
+ *
+ * - **"Simulation runs" is now "Runs"**, because the group supplies the other
+ *   word. The pairing a person reads — Simulations → Runs — preserves the
+ *   settled reading that the runs surface holds simulated traffic and the
+ *   monitoring surface holds production traffic. The addresses under
+ *   `/projects/{projectId}/runs` do not move and the stored word stays `run`.
+ * - **The monitoring item says "Transcripts"**, because the group label now
+ *   carries the word "Monitoring" and an item should say what its page is.
+ *   Same id, same address, same `opens`.
+ * - **Personas rises into Simulations.** It is the one rank change a person
+ *   feels: a persona is authored on its own and reused across tests, and it
+ *   belongs beside the tests that use it rather than in a library shelf below.
+ * - **Graders moves into Global.** A grader is switched on once and then judges
+ *   everything in its scope without anybody visiting it again — which is what
+ *   makes it standing rather than part of either job.
  * - **Settings lives in the account menu.** It is administrative work rather
- *   than a project destination, so it does not consume a permanent sidebar
- *   slot beside Agents, Tests, Simulation runs, Monitoring, Personas, and
- *   Graders.
+ *   than a project destination, so it is in no group here.
  * - **A simulation has no navigation item at all.** It is evidence, reached
  *   from the run that produced it, and a top-level list of every simulation
  *   would be a different product.
+ *
+ * **No group holds a row for something that does not ship.** Measures joins
+ * Monitoring when the measures bridge lands and not one day before: a "soon"
+ * row is a state that is not truthful.
  *
  * Every item is a project's own, so every href carries the project. There is
  * no navigation to a page that is not in a project.
@@ -50,6 +64,9 @@ export type SectionId =
   | "personas"
   | "graders"
   | "settings";
+
+/** The three groups, which are labels over the items rather than addresses. */
+export type NavigationGroupId = "global" | "simulations" | "monitoring";
 
 export type NavigationItem = {
   readonly id: SectionId;
@@ -69,47 +86,62 @@ export type NavigationItem = {
 
 export type NavigationLink = NavigationItem & { readonly href: string };
 
-export const PRIMARY_NAVIGATION: readonly NavigationItem[] = [
-  { id: "agents", label: "Agents" },
-  { id: "tests", label: "Tests" },
-  { id: "runs", label: "Simulation runs" },
-  { id: "monitoring", label: "Monitoring", opens: ["transcripts"] },
+export type NavigationGroup<Item = NavigationItem> = {
+  readonly id: NavigationGroupId;
+  readonly label: string;
+  readonly items: readonly Item[];
+};
+
+/**
+ * The bar, top to bottom.
+ *
+ * Agents stays the first row, and stays the signed-in landing area. Everything
+ * below it is grouped rather than ranked.
+ */
+export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
+  {
+    id: "global",
+    label: "Global",
+    items: [
+      { id: "agents", label: "Agents" },
+      { id: "graders", label: "Graders" },
+    ],
+  },
+  {
+    id: "simulations",
+    label: "Simulations",
+    items: [
+      { id: "tests", label: "Tests" },
+      { id: "personas", label: "Personas" },
+      { id: "runs", label: "Runs" },
+    ],
+  },
+  {
+    id: "monitoring",
+    label: "Monitoring",
+    items: [{ id: "monitoring", label: "Transcripts", opens: ["transcripts"] }],
+  },
 ];
 
-export const SECONDARY_NAVIGATION: readonly NavigationItem[] = [
-  { id: "personas", label: "Personas" },
-  { id: "graders", label: "Graders" },
-];
+/** Every item the bar offers, in the order it offers them. */
+export const EVERY_NAVIGATION_ITEM: readonly NavigationItem[] =
+  NAVIGATION_GROUPS.flatMap((group) => group.items);
 
-export const MANAGEMENT_NAVIGATION: readonly NavigationItem[] = [];
-
-const EVERY_SECTION: readonly SectionId[] = [
-  ...PRIMARY_NAVIGATION,
-  ...SECONDARY_NAVIGATION,
-  ...MANAGEMENT_NAVIGATION,
-].map((item) => item.id);
-
-function linksFor(
-  items: readonly NavigationItem[],
-  projectId: string,
-): readonly NavigationLink[] {
-  return items.map((item) => ({
-    ...item,
-    href: projectPath(projectId, item.id, ...(item.opens ?? [])),
-  }));
-}
+const EVERY_SECTION: readonly SectionId[] = EVERY_NAVIGATION_ITEM.map(
+  (item) => item.id,
+);
 
 /** The navigation of one project, as the shell renders it. */
-export function navigationFor(projectId: string): {
-  readonly primary: readonly NavigationLink[];
-  readonly secondary: readonly NavigationLink[];
-  readonly management: readonly NavigationLink[];
-} {
-  return {
-    primary: linksFor(PRIMARY_NAVIGATION, projectId),
-    secondary: linksFor(SECONDARY_NAVIGATION, projectId),
-    management: linksFor(MANAGEMENT_NAVIGATION, projectId),
-  };
+export function navigationFor(
+  projectId: string,
+): readonly NavigationGroup<NavigationLink>[] {
+  return NAVIGATION_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({
+      ...item,
+      href: projectPath(projectId, item.id, ...(item.opens ?? [])),
+    })),
+  }));
 }
 
 /**
@@ -117,7 +149,9 @@ export function navigationFor(projectId: string): {
  *
  * Read from the address rather than passed down by each page: a page that has
  * to remember to say where it is, is a page that can be wrong about it, and
- * every detail page under an area would have to remember too.
+ * every detail page under an area would have to remember too. **The groups
+ * changed nothing here** — an item is found by its own id, so the same address
+ * lights the same item it lit before it had a group over it.
  */
 export function activeSectionIn(pathname: string): SectionId | null {
   const section = sectionIn(pathname);

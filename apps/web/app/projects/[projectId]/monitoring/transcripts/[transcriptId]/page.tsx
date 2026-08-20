@@ -11,7 +11,6 @@ import {
   LIST,
   MEASURES,
   RECORDING,
-  SPEAKERS,
   UNKNOWN_STEP_LABEL,
   stepLabel,
 } from "../../../../../../lib/transcript-copy.ts";
@@ -33,6 +32,19 @@ import {
   type Outcome,
   type Step,
 } from "../../../../../../lib/transcripts.ts";
+/*
+ * Two things this page used to keep its own copy of, taken from where the rest
+ * of the product already keeps them.
+ *
+ * `SPEAKERS` labelled a transcript's two sides here and in `ui/evidence.tsx`,
+ * with the same two words written out twice. `shownScore` turned a score into
+ * a figure here and in `ui/run-status.tsx`, with the same rounding and the
+ * same dash for a proportion of nothing. Two copies of a rule about how a
+ * verdict reads is two chances for a simulation's page and a production
+ * transcript's page to start saying it differently.
+ */
+import { SPEAKERS } from "../../../../../../ui/evidence.tsx";
+import { shownScore } from "../../../../../../ui/run-status.tsx";
 import { JudgmentCard } from "../../../../../judgment-card.tsx";
 import { RecordingPlayer } from "../../../../../recording-player.tsx";
 import { PageNavigation } from "../../../../../../ui/page-navigation.tsx";
@@ -40,13 +52,13 @@ import {
   RelativeInstant,
   useMinuteClock,
 } from "../../../../../../ui/relative-time.tsx";
+import styles from "../../../../../ui.module.css";
 import {
   AppShell,
   Notice,
   ProductPage,
   ProductStatePage,
   StatePage,
-  styles,
 } from "../../../../../ui.tsx";
 
 type State =
@@ -340,7 +352,7 @@ function Summary({ facts }: { facts: TraceFacts }) {
       {primary.map(([label, value, wrong]) => (
         <div className={styles.contextFact} key={label}>
           <span>{label}</span>
-          <strong className={wrong ? styles.wrong : undefined}>{value}</strong>
+          <strong className={wrong ? "text-failure" : undefined}>{value}</strong>
         </div>
       ))}
     </section>
@@ -376,7 +388,7 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
       {measured.length === 0 ? (
         <div className={styles.contextFact}>
           <span>{MEASURES.label}</span>
-          <strong className={styles.muted}>{MEASURES.none}</strong>
+          <strong className="text-muted-foreground">{MEASURES.none}</strong>
         </div>
       ) : (
         measured.map((one) => (
@@ -389,7 +401,7 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
       {measured.some(workedOut) ? (
         <div className={styles.contextFact}>
           <span />
-          <strong className={styles.muted}>{MEASURES.derived}</strong>
+          <strong className="text-muted-foreground">{MEASURES.derived}</strong>
         </div>
       ) : null}
     </section>
@@ -460,18 +472,6 @@ function tallyOf(counts: Outcome["counts"]): string {
   if (counts.skipped > 0) said.push(`${counts.skipped} skipped`);
   if (counts.errored > 0) said.push(`${counts.errored} errored`);
   return said.join(" · ");
-}
-
-/**
- * The fraction, as a person reads it: passed over counted, or a dash where
- * there was nothing in the denominator.
- *
- * Written once for the same reason the tally is. A proportion of nothing is not
- * a number, and both available lies are worse than saying so — so the store
- * answers absent and this answers a dash, in both lanes identically.
- */
-function shownScore(score: number | null): string {
-  return score === null ? "—" : String(Math.round(score * 1000) / 1000);
 }
 
 /**
@@ -576,7 +576,7 @@ function TranscriptView({
       {detail.spans.length === 0 ? null : (
         <details className={styles.otherSteps}>
           <summary>{DETAIL.otherSteps}</summary>
-          <p className={styles.muted}>{DETAIL.otherStepsLead}</p>
+          <p className="text-muted-foreground">{DETAIL.otherStepsLead}</p>
           <div className={styles.stepStack}>
             {detail.spans.map((step) => (
               <Timed key={step.span_id} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
@@ -623,7 +623,7 @@ function Turn({
             <small>{howLong(turn.duration_ns)} · {DETAIL.steps(inside)}</small>
           </span>
           <span className={styles.turnWords}>
-            {turn.text === "" ? <span className={styles.muted}>{DETAIL.nothingSaid}</span> : turn.text}
+            {turn.text === "" ? <span className="text-muted-foreground">{DETAIL.nothingSaid}</span> : turn.text}
           </span>
           {failed ? <small className={styles.turnProblem}>{DETAIL.failedInside}</small> : null}
         </span>
@@ -631,7 +631,7 @@ function Turn({
       </summary>
       <div className={styles.turnBody}>
         {turn.spans.length === 0 ? (
-          <p className={styles.muted}>{DETAIL.noSteps}</p>
+          <p className="text-muted-foreground">{DETAIL.noSteps}</p>
         ) : (
           <div className={styles.stepStack}>
             {turn.spans.map((step) => (
@@ -672,7 +672,7 @@ function Timed({
         </span>
         <span className={styles.stepTiming}>
           {howFarIn(step.started_at, openedAt)} · {howLong(step.duration_ns)}
-          {failed ? <span className={styles.wrong}> · {DETAIL.failed}</span> : null}
+          {failed ? <span className="text-failure"> · {DETAIL.failed}</span> : null}
         </span>
       </summary>
       <div className={styles.stepBody}>
@@ -788,7 +788,7 @@ function ExecutionView({
                     <strong>{presentedStepLabel(step)}</strong>
                     <small className={styles.mono}>{step.name}</small>
                   </span>
-                  <span className={step.status === "error" ? styles.wrong : styles.muted}>
+                  <span className={step.status === "error" ? "text-failure" : "text-muted-foreground"}>
                     {step.status === "error" ? DETAIL.failed : howLong(step.duration_ns)}
                   </span>
                 </button>
@@ -813,7 +813,7 @@ function Inspector({
   return (
     <aside className={styles.traceInspector} aria-label={DETAIL.inspector}>
       {selected === null ? (
-        <p className={styles.muted}>{DETAIL.nothingSelected}</p>
+        <p className="text-muted-foreground">{DETAIL.nothingSelected}</p>
       ) : (
         <>
           <div className={styles.inspectorHeader}>
@@ -823,7 +823,7 @@ function Inspector({
           </div>
 
           <dl className={styles.inspectorFacts}>
-            <div><dt>{FACTS.status}</dt><dd className={selected.status === "error" ? styles.wrong : undefined}>{readableStatus(selected.status)}</dd></div>
+            <div><dt>{FACTS.status}</dt><dd className={selected.status === "error" ? "text-failure" : undefined}>{readableStatus(selected.status)}</dd></div>
             <div><dt>{FACTS.started}</dt><dd>{asSecond(selected.started_at)}</dd></div>
             <div><dt>{FACTS.duration}</dt><dd>{howLong(selected.duration_ns)}</dd></div>
           </dl>
@@ -885,7 +885,7 @@ function WhereItCameFrom({ facts }: { facts: TraceFacts }) {
     <dl className={styles.recorded}>
       {shown.filter(([, value]) => value !== "").map(([label, value]) => (
         <div key={label}>
-          <dt className={styles.muted}>{label}</dt>
+          <dt className="text-muted-foreground">{label}</dt>
           <dd className={styles.mono}>{value}</dd>
         </div>
       ))}
@@ -913,7 +913,7 @@ function Recorded({ step, openedAt }: { step: Step; openedAt: string }) {
     <dl className={styles.recorded}>
       {shown.filter(([, value]) => value !== "").map(([label, value]) => (
         <div key={label}>
-          <dt className={styles.muted}>{label}</dt>
+          <dt className="text-muted-foreground">{label}</dt>
           <dd className={styles.mono}>{value}</dd>
         </div>
       ))}

@@ -181,7 +181,7 @@ curl -X POST https://your-egma-host/api/agents \
 
 `GET /api/agents`
 
-Return a paginated list of agents your credential can reach, ordered newest first. Filter by project with `?project`. Paginate using the `next_cursor` value from the previous page.
+Return a paginated list of agents your credential can reach, ordered newest first. Each agent carries the connections currently attached to it, so one request tells you which agents Egma can reach and how. Filter by project with `?project`. Paginate using the `next_cursor` value from the previous page.
 
 ### Query parameters
 
@@ -196,7 +196,13 @@ Return a paginated list of agents your credential can reach, ordered newest firs
 ### Response fields
 
 <ResponseField name="items" type="array">
-  Array of agent objects. Each has the same shape as the `agent` field in the registration response.
+  Array of agent objects. Each has the same shape as the `agent` field in the registration response, plus a `connections` array.
+
+  <Expandable title="listed agent fields">
+    <ResponseField name="connections" type="array">
+      The connections currently attached to that agent, each with the same shape as the `connection` field in the registration response. An agent with no connection carries an empty array. Archived connections are not listed here; read that one agent with `GET /api/agents/:agentId?archived=true` for those. (On this endpoint, `?archived=true` asks for archived *agents*.)
+    </ResponseField>
+  </Expandable>
 </ResponseField>
 
 <ResponseField name="next_cursor" type="string | null">

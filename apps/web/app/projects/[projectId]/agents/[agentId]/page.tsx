@@ -4,40 +4,29 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
   agentDetailQuery,
   agentPath,
+  NO_ENVIRONMENT,
   type AgentDetail,
   type ListedAgent,
   type ListedConnection,
 } from "../../../../../lib/agents.ts";
-import {
-  testsPath,
-  type ListedTest,
-  type TestPage,
-} from "../../../../../lib/tests.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
-import {
-  Actions,
-  Button,
-  ButtonLink,
-  Field,
-  Form,
-  FormActions,
-  Problem,
-  Section,
-  TextArea,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
+import { Actions, Section } from "../../../../../ui/section.tsx";
+import { Field, Form, FormActions, Problem } from "../../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
+import { useMinuteClock } from "../../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
-import { RecentRuns } from "../../../../../ui/run-status.tsx";
 import {
   AppShell,
   PageBody,
@@ -45,27 +34,27 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import styles from "./agent.module.css";
-
-type AgentSection = "runs" | "tests" | "configuration";
-
-const AGENT_SECTIONS: readonly {
-  readonly id: AgentSection;
-  readonly label: string;
-}[] = [
-  { id: "runs", label: "Recent runs" },
-  { id: "tests", label: "Attached tests" },
-  { id: "configuration", label: "Configuration" },
-];
+import { CapabilityState, modalityLabel } from "../connection-facts.tsx";
 
 /**
  * One agent: what egma owns about it, and every way egma can reach it.
  *
- * **Two halves, and the split is the product boundary.** The top is the
+ * **Two things, and the split is the product boundary.** The header is the
  * Egma-owned identity — a name and a description, and nothing about the
  * provider's prompt, model or tools, because those live where the customer
  * configures them and a copy here would be stale from the moment it was taken.
- * The bottom is the active connections, which are how Egma reaches the agent.
+ * The body is the connections, which are how Egma reaches the agent, and this
+ * is their one home: added here, opened from here, changed from there.
+ *
+ * **What this page deliberately does not hold is runs and tests.** Both were
+ * here, each behind a section of its own, and both were a second rendering of
+ * something another area owns: which tests apply to an agent is the Tests
+ * area's fact, and what an agent has been run through is the Runs area's. Two
+ * places to read one fact is two places to keep in step, and the page paid for
+ * it by burying connection custody under sections that belonged elsewhere.
+ * Starting a run from here is still one click, because starting work is an
+ * action rather than a second copy of a record.
+ *
  * Lifecycle machinery stays in the API for history and recovery, but it is not
  * a product control until customers need it.
  */
@@ -81,9 +70,19 @@ export default function AgentDetailPage() {
   );
 }
 
+/**
+ * A connection, said the same way the agents list says it.
+ *
+ * The platform's name comes down on the connection, decided by the registry
+ * that says what a connection of that type may even hold. A label table kept in
+ * this application would be a second vocabulary able to disagree with it — and
+ * a row that spelled a platform differently from the page it links to is
+ * exactly what that disagreement looks like.
+ */
 function connectionColumns(
   projectId: string,
   agentId: string,
+  now: number,
 ): readonly Column<ListedConnection>[] {
   return [
     {
@@ -105,17 +104,28 @@ function connectionColumns(
       ),
     },
     {
+      key: "environment",
+      header: "Environment",
+      width: "140px",
+      cell: (one) => one.environment ?? NO_ENVIRONMENT,
+    },
+    {
       key: "type",
       header: "Provider",
-      width: "110px",
-      cell: (one) => (one.type === "phone" ? "Phone" : one.type),
+      width: "140px",
+      cell: (one) => one.type_label,
     },
     {
       key: "modality",
       header: "Modality",
       hideOnMobile: true,
       width: "100px",
-      cell: (one) => one.modality,
+      cell: (one) => modalityLabel(one.modality),
+    },
+    {
+      key: "capabilities",
+      header: "Capabilities",
+      cell: (one) => <CapabilityState capabilities={one.capabilities} now={now} />,
     },
   ];
 }
@@ -129,6 +139,8 @@ function AgentDetailView({
 }) {
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
+  /** One clock for every relative instant on the page, rather than one per row. */
+  const now = useMinuteClock();
 
   const { answer, reload } = useProjectRead<AgentDetail>(
     agentDetailQuery(agentId, "active"),
@@ -136,7 +148,6 @@ function AgentDetailView({
   );
 
   const [editing, setEditing] = useState(false);
-  const [section, setSection] = useState<AgentSection>("runs");
 
   useEffect(() => {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
@@ -228,12 +239,16 @@ function AgentDetailView({
                * the agent is archived, because an archived agent cannot enter
                * new work at all.
                */}
-              <ButtonLink
-                href={`${projectPath(projectId, "runs", "new")}?agent=${encodeURIComponent(agent.id)}`}
-              >
-                Create a run
-              </ButtonLink>
+              <Button asChild variant="secondary">
+                <Link
+                  href={`${projectPath(projectId, "runs", "new")}?agent=${encodeURIComponent(agent.id)}`}
+                >
+                  Create a run
+                </Link>
+              </Button>
               <Button
+                type="button"
+                variant="secondary"
                 disabled={!mayAuthor}
                 onClick={() => setEditing(true)}
               >
@@ -244,79 +259,46 @@ function AgentDetailView({
         }
       />
       <PageBody>
-        <div className={styles.agentLayout}>
-          <nav className={styles.sectionNav} aria-label="Agent sections">
-            <ul className={styles.sectionList}>
-              {AGENT_SECTIONS.map((item) => (
-                <li key={item.id}>
-                  <button
-                    className={styles.sectionButton}
-                    type="button"
-                    aria-current={section === item.id ? "page" : undefined}
-                    aria-controls="agent-section-content"
-                    onClick={() => setSection(item.id)}
-                  >
-                    {item.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </nav>
-
-          <div className={styles.content} id="agent-section-content">
-            {section === "runs" ? (
-              <RecentRuns
-                projectId={projectId}
-                title="Recent runs"
-                lead="The newest runs against this agent."
-                filters={{ agent: agentId }}
-              />
-            ) : null}
-
-            {section === "tests" ? (
-              <ApplicableTests projectId={projectId} agentId={agentId} />
-            ) : null}
-
-            {section === "configuration" ? (
-              <Section
-                title="Connections"
-                lead="How Egma reaches this agent."
-                action={
-                  role === null ? undefined : (
-                    <ButtonLink
-                      href={projectPath(
-                        projectId,
-                        "agents",
-                        agentId,
-                        "connections",
-                        "new",
-                      )}
-                      disabled={!mayAuthor}
-                      why={whyNot}
-                    >
-                      Add connection
-                    </ButtonLink>
-                  )
-                }
-              >
-                {connections.length === 0 ? (
-                  <Empty
-                    title="No connections"
-                    lead="Egma cannot reach this agent yet. Add a connection to give it a way in."
-                  />
-                ) : (
-                  <DataTable
-                    label="Connections for this agent"
-                    columns={connectionColumns(projectId, agentId)}
-                    rows={connections}
-                    keyOf={(one) => one.id}
-                    stretchPrimaryLink
-                  />
-                )}
-              </Section>
-            ) : null}
-          </div>
-        </div>
+        <Section
+          title="Connections"
+          lead="How Egma reaches this agent."
+          action={
+            role === null ? undefined : mayAuthor ? (
+              <Button asChild variant="secondary">
+                <Link
+                  href={projectPath(
+                    projectId,
+                    "agents",
+                    agentId,
+                    "connections",
+                    "new",
+                  )}
+                >
+                  Add connection
+                </Link>
+              </Button>
+            ) : (
+              <Button type="button" variant="secondary" disabled why={whyNot}>
+                Add connection
+              </Button>
+            )
+          }
+        >
+          {connections.length === 0 ? (
+            <Empty
+              title="No connections"
+              lead="Egma cannot reach this agent yet. Add a connection to give it a way in."
+            />
+          ) : (
+            <DataTable
+              label="Connections for this agent"
+              columns={connectionColumns(projectId, agentId, now)}
+              rows={connections}
+              keyOf={(one) => one.id}
+              stretchPrimaryLink
+            />
+          )}
+        </Section>
       </PageBody>
 
       {editing ? (
@@ -408,13 +390,17 @@ function EditAgent({
       {(dismiss) => (
         <Form onSubmit={() => void save()}>
           <Field label="Name" htmlFor="edit-agent-name">
-            <TextInput
+            <Input
               id="edit-agent-name"
               value={name}
-              invalid={nameProblem !== null}
-              describedBy={nameProblem === null ? undefined : "edit-agent-name-problem"}
-              onChange={(next) => {
-                setName(next);
+              aria-invalid={nameProblem !== null ? true : undefined}
+              aria-describedby={
+                nameProblem === null ? undefined : "edit-agent-name-problem"
+              }
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => {
+                setName(event.target.value);
                 if (nameProblem !== null) setNameProblem(null);
               }}
             />
@@ -424,114 +410,26 @@ function EditAgent({
           </Field>
 
           <Field label="Description" htmlFor="edit-agent-description">
-            <TextArea
+            <Textarea
               id="edit-agent-description"
               value={description}
               rows={3}
-              onChange={setDescription}
+              onChange={(event) => setDescription(event.target.value)}
             />
           </Field>
 
           {refused === null ? null : <Problem>{refused.message}</Problem>}
 
           <FormActions>
-            <Button type="submit" weight="strong" disabled={saving}>
+            <Button type="submit" disabled={saving}>
               {saving ? "Saving…" : "Save"}
             </Button>
-            <Button onClick={dismiss}>Cancel</Button>
+            <Button type="button" variant="secondary" onClick={dismiss}>
+              Cancel
+            </Button>
           </FormActions>
         </Form>
       )}
     </Dialog>
-  );
-}
-
-/**
- * The tests somebody has said are worth running against this agent.
- *
- * **Coverage is a fact about the agent, so it belongs on the agent's page.**
- * The relation is edited on the test — one test applies to several agents, and
- * a set of checkboxes there is the honest place to change it — but the question
- * "what does egma actually check about this agent" is asked here, and a page
- * that could not answer it would send somebody through every test in the
- * project to find out.
- *
- * A run may only pair this agent with a test on this list, so an empty one is
- * the reason a run builder would offer nothing.
- */
-function ApplicableTests({
-  projectId,
-  agentId,
-}: {
-  readonly projectId: string;
-  readonly agentId: string;
-}) {
-  const { answer, reload } = useProjectRead<TestPage>(
-    testsPath({ agent: agentId }),
-    projectId,
-  );
-
-  const columns: readonly Column<ListedTest>[] = [
-    {
-      key: "name",
-      header: "Test",
-      primary: true,
-      cell: (test) => (
-        <Link href={projectPath(projectId, "tests", test.id)}>{test.name}</Link>
-      ),
-    },
-    {
-      key: "behaviors",
-      header: "Expects",
-      hideOnMobile: true,
-      width: "120px",
-      cell: (test) =>
-        `${String(test.expected_behaviors.length)} ${
-          test.expected_behaviors.length === 1 ? "behavior" : "behaviors"
-        }`,
-    },
-    {
-      key: "version",
-      header: "Version",
-      mono: true,
-      width: "90px",
-      cell: (test) => `v${test.version}`,
-    },
-  ];
-
-  return (
-    <Section
-      title="Attached tests"
-      lead="Tests selected to run against this agent."
-      action={
-        <ButtonLink href={projectPath(projectId, "tests")}>All tests</ButtonLink>
-      }
-    >
-      {answer === null || answer.status === "signed-out" ? (
-        <Loading what="the tests that apply to this agent" />
-      ) : answer.status === "ready" ? (
-        answer.value.items.length === 0 ? (
-          <Empty
-            title="No test applies to this agent yet"
-            lead="Link one on its own page, or write a test and select this agent."
-            action={
-              <ButtonLink href={projectPath(projectId, "tests", "new")}>
-                Write a test
-              </ButtonLink>
-            }
-          />
-        ) : (
-          <DataTable
-            label="Tests that apply to this agent"
-            columns={columns}
-            rows={answer.value.items}
-            keyOf={(test) => test.id}
-            stretchPrimaryLink
-          />
-        )
-      ) : (
-        <Failure message={answer.refusal.message} onRetry={reload} />
-      )}
-    </Section>
   );
 }

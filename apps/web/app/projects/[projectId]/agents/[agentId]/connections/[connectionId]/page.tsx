@@ -3,6 +3,9 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { readJson, writeJson, type Refusal } from "../../../../../../../lib/api.ts";
 import {
   agentDetailQuery,
@@ -20,16 +23,14 @@ import {
 import { roleOf } from "../../../../../../../lib/me.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
+import { Actions } from "../../../../../../../ui/section.tsx";
 import {
-  Actions,
-  Button,
   Field,
   Form,
   FormActions,
   Help,
   Problem,
-  TextInput,
-} from "../../../../../../../ui/controls.tsx";
+} from "../../../../../../../ui/form.tsx";
 import { Dialog } from "../../../../../../../ui/dialog.tsx";
 import { Failure, Loading, NotFound } from "../../../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../../../ui/resource.ts";
@@ -49,7 +50,42 @@ import {
   savedLiveKitDispatch,
   type LiveKitDispatch,
 } from "../livekit-dispatch.tsx";
-import styles from "./connection.module.css";
+
+/*
+ * This route's own layout: the card each block is drawn on, the header inside
+ * one, and the grid of facts under it. The shared components this page
+ * composes bring their own.
+ *
+ * They are named here rather than repeated, because each is one decision about
+ * how the page reads — the card, the heading step, the fact grid — and a
+ * decision written out twice is two decisions to keep in step.
+ */
+
+/** One block of the page: what this connection is, and where it points. */
+const SURFACE =
+  "flex min-w-0 flex-col gap-5 rounded-card border border-border bg-surface p-6 " +
+  "max-[40rem]:gap-4 max-[40rem]:p-5";
+
+/**
+ * A block's name and its one sentence, with room beside them for a control.
+ * The header stacks at the narrow width, where there is no room for both.
+ */
+const SURFACE_HEADER =
+  "flex min-w-0 flex-wrap items-start justify-between gap-4 max-[40rem]:flex-col";
+
+/**
+ * `DESIGN.md`: "Headings carry no size of their own. Every heading takes its
+ * size from a class." This is that class, and `text-lg` is the 24px lead step,
+ * which carries its own line height and letter spacing.
+ */
+const BLOCK_TITLE = "m-0 text-lg font-medium text-foreground";
+
+/**
+ * The sentence under a block heading. `68ch` is written out rather than named,
+ * because a reading measure is the width of the text itself and egma has no
+ * value for it: `ch` is not on the 4px grid and no theme key holds one.
+ */
+const BLOCK_LEAD = "mt-1 mb-0 max-w-[68ch] text-sm text-muted-foreground";
 
 type DetailFact = {
   readonly label: string;
@@ -58,11 +94,13 @@ type DetailFact = {
 
 function DetailFacts({ facts }: { readonly facts: readonly DetailFact[] }) {
   return (
-    <dl className={styles.detailFacts}>
+    <dl className="m-0 grid min-w-0 grid-cols-2 gap-5 max-[40rem]:grid-cols-1">
       {facts.map((fact) => (
-        <div className={styles.detailFact} key={fact.label}>
-          <dt>{fact.label}</dt>
-          <dd>{fact.value}</dd>
+        <div className="min-w-0" key={fact.label}>
+          <dt className="mb-1 text-sm text-muted-foreground">{fact.label}</dt>
+          <dd className="m-0 min-w-0 text-base text-foreground [overflow-wrap:anywhere]">
+            {fact.value}
+          </dd>
         </div>
       ))}
     </dl>
@@ -79,10 +117,12 @@ function SurfaceHeader({
   readonly lead: string;
 }) {
   return (
-    <header className={styles.surfaceHeader}>
-      <div>
-        <h2 id={id}>{title}</h2>
-        <p>{lead}</p>
+    <header className={SURFACE_HEADER}>
+      <div className="min-w-0">
+        <h2 className={BLOCK_TITLE} id={id}>
+          {title}
+        </h2>
+        <p className={BLOCK_LEAD}>{lead}</p>
       </div>
     </header>
   );
@@ -241,6 +281,8 @@ function ConnectionDetail({
           role === null ? undefined : (
             <Actions>
               <Button
+                type="button"
+                variant="secondary"
                 disabled={!mayAuthor || variant === undefined}
                 why={
                   variant === undefined
@@ -266,7 +308,7 @@ function ConnectionDetail({
           />
         )}
 
-        <section className={`${styles.surface} ${styles.overview}`}>
+        <section className={cn(SURFACE, "mb-6")}>
           <SurfaceHeader
             id="connection-overview-title"
             title="Overview"
@@ -283,7 +325,7 @@ function ConnectionDetail({
           />
         </section>
 
-        <section className={styles.surface}>
+        <section className={SURFACE}>
           <SurfaceHeader
             id="connection-target-title"
             title="Where it points"
@@ -410,12 +452,14 @@ function EditConnection({
       {(dismiss) => (
         <Form onSubmit={() => void save()}>
           <Field label="Name" htmlFor="edit-connection-name">
-            <TextInput
+            <Input
               id="edit-connection-name"
               value={name}
-              invalid={nameProblem !== null}
-              onChange={(value) => {
-                setName(value);
+              aria-invalid={nameProblem !== null ? true : undefined}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => {
+                setName(event.target.value);
                 if (nameProblem !== null) setNameProblem(null);
               }}
             />
@@ -446,7 +490,6 @@ function EditConnection({
           <FormActions>
             <Button
               type="submit"
-              weight="strong"
               disabled={saving || !changed || !liveKitForm.ready}
               why={
                 liveKitForm.ready
@@ -456,7 +499,9 @@ function EditConnection({
             >
               {saving ? "Saving…" : "Save"}
             </Button>
-            <Button onClick={dismiss}>Cancel</Button>
+            <Button type="button" variant="secondary" onClick={dismiss}>
+              Cancel
+            </Button>
           </FormActions>
         </Form>
       )}

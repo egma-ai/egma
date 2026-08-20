@@ -1,49 +1,11 @@
-.brand { display: block; width: 151px; height: auto; }
-:global(:root[data-theme="dark"]) .brand { filter: invert(1); }
 .eyebrow { margin: 0 0 var(--space-3); color: var(--muted); font-family: var(--mono); font-size: var(--text-caption); letter-spacing: .08em; line-height: var(--line-caption); text-transform: uppercase; }
-.themeToggle { display: grid; width: var(--tap-target); height: var(--tap-target); flex: 0 0 auto; padding: 0; place-items: center; border: 1px solid var(--foreground); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
 
-.authShell { display: grid; min-height: 100svh; grid-template-columns: minmax(340px, .92fr) minmax(520px, 1.08fr); background: var(--background); }
-.authBrandPanel { position: relative; min-width: 0; overflow: hidden; border-right: 1px solid var(--border); background: var(--surface-soft); }
-.authBrandPanel::after { position: absolute; right: var(--space-6); bottom: var(--space-6); width: var(--space-4); height: var(--space-4); background: var(--accent); content: ""; }
-.trustGate { position: absolute; inset: 0; display: block; width: 100%; height: 100%; color: var(--foreground); opacity: .42; }
-.authBrandOverlay { position: absolute; z-index: 1; inset: 0; display: flex; flex-direction: column; justify-content: space-between; padding: clamp(var(--space-7), 5vw, var(--space-10)); pointer-events: none; }
-.authStatement { max-width: 520px; }
-.authStatement > p:last-child { max-width: 480px; margin: 0; font-size: clamp(var(--text-lead), 2.8vw, var(--text-heading-sm)); letter-spacing: var(--tracking-heading-sm); line-height: 1.08; }
-.authContent { position: relative; display: grid; min-height: 100svh; padding: var(--space-12) var(--space-10); place-items: center; }
-.authTheme { position: absolute; top: var(--space-6); right: var(--space-6); }
-.authCard { width: 100%; max-width: 520px; padding: var(--space-8); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-menu); }
-.authCard h1 { max-width: 440px; margin: 0; font-size: clamp(var(--text-heading-sm), 3.4vw, var(--text-heading)); font-weight: 400; letter-spacing: var(--tracking-heading); line-height: var(--line-heading); }
-.authLead { max-width: 440px; margin: var(--space-3) 0 var(--space-7); color: var(--muted); font-size: var(--text-body); letter-spacing: var(--tracking-body); line-height: var(--line-body); }
-.emphasizedEmail { color: var(--foreground); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 4px; }
-.authCard form { max-width: none; padding: 0; border: 0; border-radius: 0; background: transparent; }
-.authCard form + .linkLine { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--border); }
-.passwordControl { position: relative; min-width: 0; }
-.passwordControl input { min-width: 0; padding-right: calc(var(--tap-target) + var(--space-2)); }
-.passwordToggle { position: absolute; top: 50%; right: 4px; display: grid; width: var(--control-md); height: var(--control-md); padding: 0; transform: translateY(-50%); place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); cursor: pointer; }
-.passwordToggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
 
-.codeInput input { font-family: var(--mono); font-size: var(--text-lead); letter-spacing: .18em; text-align: center; text-transform: uppercase; }
-.buttonRow { display: flex; gap: var(--space-3); }
-.definitionList + .buttonRow { margin-top: var(--space-6); }
-.buttonRow > * { flex: 1; }
 .linkLine { margin: var(--space-5) 0 0; color: var(--muted); font-size: var(--text-caption); letter-spacing: var(--tracking-caption); line-height: var(--line-caption); }
 .linkLine + .linkLine { margin-top: var(--space-3); }
 .linkLine a { display: inline-block; color: var(--foreground); text-decoration-color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 4px; }
-.notice { margin-bottom: var(--space-5); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-left-width: 3px; border-radius: var(--radius-md); background: var(--surface-soft); color: var(--foreground); font-size: var(--text-caption); line-height: var(--line-caption); }
-.notice-error { border-left-color: var(--accent); }
-.notice-success { border-left-color: var(--foreground); }
-.notice p { margin: 0; }
-.notice p + p { margin-top: var(--space-2); }
 
-.definitionList { margin: 0; border-top: 1px solid var(--border); }
-.definitionRow { display: flex; min-height: 56px; align-items: center; justify-content: space-between; gap: var(--space-5); padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
-.definitionRow dt { color: var(--muted); font-size: var(--text-caption); letter-spacing: var(--tracking-caption); line-height: var(--line-caption); }
-.definitionRow dd { margin: 0; font-weight: 400; text-align: right; }
-.definitionRow select { min-width: 160px; height: var(--tap-target); padding: 0 var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .mono { font-family: var(--mono); }
-.muted { color: var(--muted); }
-.wrong { color: var(--bad); }
 
 .detailFacts { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: clip; }
 .contextFact { display: flex; flex-direction: column; gap: var(--space-1); }
@@ -70,7 +32,7 @@
 .traceViewTabs button.traceViewTabActive { border-bottom-color: var(--accent); color: var(--foreground); }
 .issueNavigator { display: flex; align-items: center; gap: var(--space-2); color: var(--foreground); font-size: var(--text-caption); }
 .issueNavigator button { display: grid; width: var(--tap-target); height: var(--tap-target); padding: 0; place-items: center; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--foreground); cursor: pointer; }
-.traceToolbar + .notice { margin-top: var(--space-5); }
+.traceToolbar + [data-slot="notice"] { margin-top: var(--space-5); }
 .traceLayout { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--space-7); margin-top: var(--space-7); align-items: start; }
 .traceViews { min-width: 0; }
 .traceViewHeading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-6); margin-bottom: var(--space-4); }
@@ -122,7 +84,7 @@
 .runFacts .contextFact strong { overflow-wrap: anywhere; font-size: var(--text-caption); }
 .runFacts .contextFact[data-verdict="passed"] strong { color: var(--good); }
 .runFacts .contextFact[data-verdict="failed"] strong, .runFacts .contextFact[data-verdict="errored"] strong { color: var(--bad); }
-.runFacts + .notice { margin-top: var(--space-5); }
+.runFacts + [data-slot="notice"] { margin-top: var(--space-5); }
 .traceOutcome { grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--surface-soft); }
 .traceOutcome .contextFact:first-child { padding-left: var(--space-4); }
 .traceOutcome .contextFact:last-child { padding-right: var(--space-4); }
@@ -199,15 +161,13 @@
 .executionRow > span:last-child { flex: 0 0 auto; font-family: var(--mono); font-size: var(--text-caption); }
 
 /* Pointer feedback follows the same motion contract as the Product UI. */
-:is(.themeToggle, .linkLine a, .traceViewTabs button, .issueNavigator button, .inspectorLink a) { transition: transform var(--duration-press) var(--ease-out), color var(--duration-hover) ease, border-color var(--duration-hover) ease, background-color var(--duration-hover) ease; }
-:is(.themeToggle, .linkLine a, .traceViewTabs button, .issueNavigator button, .inspectorLink a):active:not(:focus-visible):not(:disabled) { transform: scale(.97); }
+:is(.linkLine a, .traceViewTabs button, .issueNavigator button, .inspectorLink a) { transition: transform var(--duration-press) var(--ease-out), color var(--duration-hover) ease, border-color var(--duration-hover) ease, background-color var(--duration-hover) ease; }
+:is(.linkLine a, .traceViewTabs button, .issueNavigator button, .inspectorLink a):active:not(:focus-visible):not(:disabled) { transform: scale(.97); }
 .timelineRow, .executionRow { transition: background-color var(--duration-hover) ease; }
 :is(.turn summary, .step summary):active { background: var(--surface-soft); }
 
 /* Hover feedback belongs only to a device that can keep a fine pointer there. */
 @media (hover: hover) and (pointer: fine) {
-  .themeToggle:hover { border-color: var(--foreground); background: var(--surface-soft); }
-  .passwordToggle:hover { background: var(--surface-soft); color: var(--foreground); }
   .linkLine a:hover { text-decoration-thickness: 2px; }
   .timelineRow:hover, .executionRow:hover { background: var(--surface-soft); }
   .traceViewTabs button:hover { color: var(--foreground); }
@@ -215,7 +175,6 @@
 }
 
 @media (pointer: coarse) {
-  .passwordToggle { right: 0; width: var(--tap-target); height: var(--tap-target); }
   :is(.linkLine a, .traceViewTabs button, .inspectorLink a) { min-height: var(--tap-target); align-items: center; }
   :is(.linkLine a, .inspectorLink a) { display: inline-flex; }
   .issueNavigator button { width: var(--tap-target); height: var(--tap-target); }
@@ -224,7 +183,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :is(.themeToggle, .linkLine a, .traceViewTabs button, .issueNavigator button, .inspectorLink a):active:not(:focus-visible):not(:disabled) { transform: none; }
+  :is(.linkLine a, .traceViewTabs button, .issueNavigator button, .inspectorLink a):active:not(:focus-visible):not(:disabled) { transform: none; }
   .turnMarker { transition: none; }
 }
 
@@ -234,12 +193,6 @@
 }
 
 @media (max-width: 900px) {
-  .authShell { display: block; }
-  .authBrandPanel { min-height: 220px; border-right: 0; border-bottom: 1px solid var(--border); }
-  .authBrandOverlay { padding: var(--space-7); }
-  .authContent { min-height: auto; padding: var(--space-10) var(--space-6) var(--space-12); }
-  .authStatic .authBrandPanel { min-height: 144px; }
-  .authStatic .authStatement { display: none; }
   .runFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runFacts .contextFact { padding: var(--space-4); border-top: 1px solid var(--border); }
   .runFacts .contextFact:nth-child(even) { border-right: 0; }
@@ -247,13 +200,6 @@
 }
 
 @media (max-width: 620px) {
-  .authBrandPanel, .authStatic .authBrandPanel { min-height: 144px; }
-  .authBrandOverlay { padding: var(--space-6); }
-  .authStatement, .trustGate { display: none; }
-  .authContent { padding: var(--space-11) var(--space-4) var(--space-8); }
-  .authTheme { top: var(--space-3); right: var(--space-4); }
-  .authCard { padding: var(--space-6); box-shadow: none; }
-  .authCard h1 { font-size: var(--text-heading-sm); letter-spacing: var(--tracking-heading-sm); }
   .detailHeader h1 { font-size: 39px; }
   .detailHeader { align-items: flex-start; flex-direction: column; }
   .detailFacts { grid-template-columns: repeat(2, 1fr); }
@@ -276,5 +222,4 @@
   .timelineRow { grid-template-columns: minmax(0, 1fr) 56px; padding-left: calc(10px + var(--timeline-indent)); }
   .timelineTrack { grid-row: 2; grid-column: 1 / -1; }
   .timelineDuration { grid-row: 1; grid-column: 2; }
-  .buttonRow { flex-direction: column-reverse; }
 }

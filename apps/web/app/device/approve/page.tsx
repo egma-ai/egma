@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 
 import { withReturnTo } from "../../../lib/return-to.ts";
-import { Button, Select } from "../../../ui/controls.tsx";
-import { AuthShell, Notice, StatePage, styles } from "../../ui.tsx";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+
+import { AuthShell, LinkLine, Notice, StatePage } from "../../ui.tsx";
 
 /**
  * Approving a terminal, and saying what it is being let into.
@@ -34,6 +36,17 @@ type State =
   | { at: "loading" }
   | { at: "ready"; authorization: Pending }
   | { at: "unreachable" };
+
+/*
+ * The facts about what is being approved: a list, a row, the name of a fact,
+ * and the fact itself. A row is 56px so that the one row carrying a control
+ * has room for a 44px target without the rows around it changing height.
+ */
+const FACT_LIST = "m-0 border-t border-border";
+const FACT_ROW =
+  "flex min-h-[56px] items-center justify-between gap-5 border-b border-border py-3";
+const FACT_NAME = "text-sm text-muted-foreground";
+const FACT_VALUE = "m-0 text-right font-normal";
 
 /** Where each ending sends the browser. */
 const ENDING: Record<string, string> = {
@@ -134,9 +147,9 @@ export default function ApproveDevicePage() {
         title="Egma could not be reached"
         lead="Nothing was approved. Check that your instance is running and try the code again."
       >
-        <p className={styles.linkLine}>
+        <LinkLine>
           <a href="/device">Enter the code again</a>
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -151,11 +164,7 @@ export default function ApproveDevicePage() {
       lead={
         <>
           A terminal showing the code{" "}
-          <strong
-            className={styles.mono}
-          >
-            {authorization.user_code}
-          </strong>{" "}
+          <strong className="font-mono">{authorization.user_code}</strong>{" "}
           is asking for access. Approve it only if that code is on your own
           screen.
         </>
@@ -163,38 +172,58 @@ export default function ApproveDevicePage() {
     >
       {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
-      <dl className={styles.definitionList}>
-        <div className={styles.definitionRow}><dt>Organization</dt><dd>{authorization.organization.name}</dd></div>
-
-      {projects.length > 1 ? (
-        <div className={styles.definitionRow}>
-          <dt><label htmlFor="project">Project</label></dt>
-          <dd>
-          <Select
-            id="project"
-            value={projectId}
-            options={projects.map((project) => ({
-              value: project.id,
-              label: project.name,
-            }))}
-            onChange={setProjectId}
-          />
-          </dd>
+      {/*
+       * What the terminal is being let into, as facts rather than as a form.
+       * The project is a control only when there is more than one to choose
+       * between; one project is a fact and a select over it is clutter.
+       */}
+      <dl className={FACT_LIST}>
+        <div className={FACT_ROW}>
+          <dt className={FACT_NAME}>Organization</dt>
+          <dd className={FACT_VALUE}>{authorization.organization.name}</dd>
         </div>
-      ) : (
-        <div className={styles.definitionRow}><dt>Project</dt><dd>{projects[0]?.name ?? "—"}</dd></div>
-      )}
+
+        {projects.length > 1 ? (
+          <div className={FACT_ROW}>
+            <dt className={FACT_NAME}>
+              <label htmlFor="project">Project</label>
+            </dt>
+            <dd className={`${FACT_VALUE} [&_select]:min-w-40`}>
+              <Select
+                id="project"
+                value={projectId}
+                onChange={(event) => setProjectId(event.target.value)}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </Select>
+            </dd>
+          </div>
+        ) : (
+          <div className={FACT_ROW}>
+            <dt className={FACT_NAME}>Project</dt>
+            <dd className={FACT_VALUE}>{projects[0]?.name ?? "—"}</dd>
+          </div>
+        )}
       </dl>
 
-      <div className={styles.buttonRow}>
+      {/* Deny reads first and Approve is the filled one, so the stronger of the
+          two is never the one somebody reaches by habit. Stacked on a narrow
+          screen, Approve stays at the bottom under the thumb. */}
+      <div className="mt-6 flex gap-3 max-[620px]:flex-col-reverse [&>*]:flex-1">
         <Button
+          type="button"
+          variant="secondary"
           disabled={busy}
           onClick={() => void answer("/api/device/deny")}
         >
           Deny
         </Button>
         <Button
-          weight="strong"
+          type="button"
           disabled={busy}
           onClick={() => void answer("/api/device/approve")}
         >

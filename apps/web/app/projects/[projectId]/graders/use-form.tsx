@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { NumberField } from "@/ui/number-field.tsx";
 import { writeJson, type Refusal } from "../../../../lib/api.ts";
 import {
   filledParams,
@@ -14,16 +19,12 @@ import {
 } from "../../../../lib/graders.ts";
 import { USE } from "../../../../lib/grader-library-copy.ts";
 import {
-  Button,
-  Checkbox,
   Field,
   Form,
   FormActions,
   Help,
   Refused,
-  Select,
-  TextInput,
-} from "../../../../ui/controls.tsx";
+} from "../../../../ui/form.tsx";
 
 /**
  * The **Use** form: a library entry, filled in, and a running copy of it on
@@ -101,17 +102,38 @@ export function EntryFields({
         const write = (value: string): void =>
           onFilled(parameter.name, value);
 
+        /*
+          The catalog says whether this parameter is a number, and it says so in
+          one place: `kind` already decides that what is typed is sent as a
+          number rather than a string. The control has to agree, or a person is
+          asked for a bound on a keyboard that has no digits on it.
+
+          A number gets the shared numeric field, which is where the unit now
+          lives. It used to be a sentence appended to the hint — "In ms." — and
+          before that the placeholder, which vanished the instant somebody typed,
+          exactly when knowing whether the number is milliseconds or turns starts
+          to matter. On the field it is beside the value, it is read out with it,
+          and it still changes with the choice above, because the unit belongs to
+          the measure rather than to the box.
+        */
+        if (parameter.options === undefined && parameter.kind === "number") {
+          return (
+            <NumberField
+              key={parameter.name}
+              id={control}
+              label={parameter.label}
+              hint={parameter.means}
+              value={chosen}
+              {...(unit === undefined ? {} : { unit })}
+              onChange={write}
+            />
+          );
+        }
+
         return (
           <Field
             key={parameter.name}
             label={parameter.label}
-            /*
-              The unit, beside the control and not inside it. It used to be
-              the placeholder, which meant it vanished the instant somebody
-              typed — exactly when knowing whether the number is milliseconds
-              or turns starts to matter. It changes with the choice above,
-              because the unit belongs to the measure.
-            */
             hint={
               unit === undefined || parameter.options !== undefined
                 ? parameter.means
@@ -120,29 +142,25 @@ export function EntryFields({
             htmlFor={control}
           >
             {parameter.options === undefined ? (
-              <TextInput
+              <Input
                 id={control}
                 value={chosen}
-                /*
-                  The catalog says whether this parameter is a number, and it
-                  says so in one place: `kind` already decides that what is
-                  typed is sent as a number rather than a string. The control
-                  has to agree, or a person is asked for a bound on a keyboard
-                  that has no digits on it.
-                */
-                numeric={parameter.kind === "number"}
-                onChange={write}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => write(event.target.value)}
               />
             ) : (
               <Select
                 id={control}
                 value={chosen}
-                options={parameter.options.map((option) => ({
-                  value: option.value,
-                  label: option.label,
-                }))}
-                onChange={write}
-              />
+                onChange={(event) => write(event.target.value)}
+              >
+                {parameter.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
             )}
           </Field>
         );
@@ -230,13 +248,15 @@ export function UseForm({
         <Checkbox
           id="use-required"
           checked={required}
-          onChange={setRequired}
+          onChange={(event) => setRequired(event.target.checked)}
         />
       </Field>
 
       <FormActions>
-        <Button onClick={onCancel}>{USE.cancel}</Button>
-        <Button type="submit" weight="strong" disabled={busy}>
+        <Button type="button" variant="secondary" onClick={onCancel}>
+          {USE.cancel}
+        </Button>
+        <Button type="submit" disabled={busy}>
           {busy ? USE.submitting : USE.submit}
         </Button>
       </FormActions>

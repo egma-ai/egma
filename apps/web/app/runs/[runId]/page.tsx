@@ -1,12 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 
 import { readJson } from "../../../lib/api.ts";
 import { projectPath } from "../../../lib/project-context.ts";
 import { runPath, type RunDetail } from "../../../lib/runs.ts";
-import { ButtonLink } from "../../../ui/controls.tsx";
+import { Button } from "@/components/ui/button";
 import { Failure, Loading, NotFound } from "../../../ui/page-state.tsx";
 import { ProductStatePage } from "../../../ui/shell.tsx";
 
@@ -105,7 +106,11 @@ export default function RunResultsAddress({
       <ProductStatePage eyebrow="Simulation runs" title="Run">
         <NotFound
           message={state.why}
-          action={<ButtonLink href="/">Go to your projects</ButtonLink>}
+          action={
+            <Button asChild variant="secondary">
+              <Link href="/">Go to your projects</Link>
+            </Button>
+          }
         />
       </ProductStatePage>
     );

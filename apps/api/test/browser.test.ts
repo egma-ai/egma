@@ -389,18 +389,18 @@ describe("adding a colleague, with no mail configured", () => {
       // forced click goes nowhere. A control that looked disabled and still
       // fired would promise a refusal it does not deliver — and the refusal
       // that does hold is the server's, proved in `agents.test.ts`.
-      const register = bob.getByRole("button", { name: "Register agent" });
-      await register.first().waitFor();
+      const connect = bob.getByRole("button", { name: "Connect agent" });
+      await connect.first().waitFor();
       expect(
-        await register.evaluateAll((controls) =>
+        await connect.evaluateAll((controls) =>
           controls.map((control) => (control as { disabled?: boolean }).disabled),
         ),
       ).not.toContain(false);
       expect(
-        await bob.getByRole("link", { name: "Register agent" }).count(),
+        await bob.getByRole("link", { name: "Connect agent" }).count(),
       ).toBe(0);
       const before = bob.url();
-      await register.first().click({ force: true }).catch(() => undefined);
+      await connect.first().click({ force: true }).catch(() => undefined);
       await bob.waitForTimeout(300);
       expect(bob.url()).toBe(before);
 
@@ -887,15 +887,16 @@ describe("what a project recorded in production", () => {
         });
       });
 
-      // The four product areas, and Personas and Graders beside them. Settings
-      // is not one of them and neither is a simulation.
+      // The six rows the three groups hold — Global's standing pair, the three
+      // Simulations rows, and Monitoring's one. Settings is not one of them and
+      // neither is a simulation.
       for (const area of [
         "Agents",
-        "Tests",
-        "Simulation runs",
-        "Monitoring",
-        "Personas",
         "Graders",
+        "Tests",
+        "Personas",
+        "Runs",
+        "Transcripts",
       ]) {
         expect(
           await sidebar.getByRole("link", { name: area, exact: true }).count(),
@@ -912,17 +913,23 @@ describe("what a project recorded in production", () => {
        * its presence — an item pointing at the area's own address would cost a
        * redirect on every visit, and a reserved neighbour under the same area
        * could become the landing by accident.
+       *
+       * The word `Monitoring` is the group's now, so the item says what its
+       * page is. The address it carries did not move with the word.
        */
       expect(
         await sidebar
-          .getByRole("link", { name: "Monitoring", exact: true })
+          .getByRole("link", { name: "Transcripts", exact: true })
           .getAttribute("href"),
       ).toBe(`/projects/${project ?? ""}/monitoring/transcripts`);
 
-      // And the runs surface is reached by its new label. `Runs` on its own is
-      // what it said before this effort separated the two kinds of traffic.
+      // And the runs surface is reached by the word its group left it: the
+      // pairing a person reads is Simulations → Runs, so the two-word label
+      // that stood in for the group before the groups existed is gone.
       expect(
-        await sidebar.getByRole("link", { name: "Runs", exact: true }).count(),
+        await sidebar
+          .getByRole("link", { name: "Simulation runs", exact: true })
+          .count(),
       ).toBe(0);
       expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
       expect(
@@ -2587,7 +2594,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(at("agents"));
       await saysWithin(walk, "No agents in this project yet");
 
-      await walk.getByRole("link", { name: "Register agent" }).first().click();
+      await walk.getByRole("link", { name: "Connect agent" }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/agents/new$`));
       await reactHasTakenOver(walk, "form");
 
@@ -2644,7 +2651,42 @@ describe("the complete product, walked in order in a second project", () => {
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
       await walk.getByRole("link", { name: "Finish setup" }).click();
       await walk.waitForURL(agentAddress);
-      await saysWithin(walk, "Recent runs");
+
+      /*
+       * The agent's page is its identity and its connections, and nothing else.
+       *
+       * The absences are asserted only after the connection's own name has
+       * landed. A page still loading says none of these words either, so
+       * checking them first would pass for the wrong reason — and go on
+       * passing after the connections it is meant to guard stopped being drawn.
+       */
+      await saysWithin(walk, "Retell staging");
+      const agentPage = await walk.innerText("main");
+      expect(agentPage).toContain("Connections");
+      expect(agentPage).not.toContain("Recent runs");
+      expect(agentPage).not.toContain("Attached tests");
+
+      /*
+       * And the list says egma can reach it, without anybody opening it. This
+       * is the whole point of the widened read: the row carries the platform in
+       * the registry's own words, the channel, the environment label — written
+       * out, because this connection has none — and whether the target has been
+       * measured.
+       */
+      await walk.goto(at("agents"));
+      await saysWithin(walk, "The Support line");
+      const row = walk
+        .locator('table[aria-label="Agents in this project"] tbody tr')
+        .first();
+      await expect
+        .poll(() => row.innerText(), { timeout: 30_000 })
+        .toContain("Phone number · Voice");
+      const said = await row.innerText();
+      expect(said).toContain("Unlabelled");
+      // Read without regard to case: a chip is drawn in capitals, and the word
+      // is the fact rather than the letterform it is set in.
+      expect(said.toLowerCase()).toContain("not checked");
+      expect(said.toLowerCase()).not.toContain("no connections");
     },
     SETTLE,
   );
@@ -3246,14 +3288,29 @@ describe("the complete product, walked in order in a second project", () => {
 
             if (index === 0) {
               const sidebar = opened.locator("aside");
-              const navigation = await sidebar.innerText();
-              // Monitoring used to be banned here and is deliberately not:
-              // production traffic is a navigation item now — it is what the
-              // monitoring-surface effort added. What stays excluded is a
-              // Simulations area: a simulation is evidence, reached from the
-              // run that produced it. "Simulation runs" is that run surface's
-              // label and carries no "simulations" to trip the ban.
-              expect(navigation).not.toMatch(/simulations/iu);
+              /*
+               * Monitoring used to be banned here and is deliberately not:
+               * production traffic is a navigation item now. What stays
+               * excluded is a Simulations *destination* — a simulation is
+               * evidence, reached from the run that produced it, and no row in
+               * this bar may open a list of every one.
+               *
+               * **The word is no longer the test, and it cannot be.**
+               * `Simulations` is a group label now: it names the half of the
+               * product that proves trust before release. A sweep of the bar's
+               * text would fail on that label while the thing it guards is
+               * still absent. A destination is an address, so the addresses are
+               * what is read.
+               */
+              const addresses = await sidebar
+                .getByRole("link")
+                .evaluateAll((links) =>
+                  links.map((link) => link.getAttribute("href") ?? ""),
+                );
+              expect(addresses.length).toBeGreaterThan(0);
+              for (const address of addresses) {
+                expect(address, address).not.toContain("simulations");
+              }
               expect(
                 await sidebar
                   .getByRole("link", { name: "Simulations" })
@@ -3298,11 +3355,11 @@ describe("the complete product, walked in order in a second project", () => {
 
         await walk.getByRole("link", { name: "Tests", exact: true }).first().click();
         await walk.waitForURL(at("tests"));
-        // **Simulation runs** by its label, `/runs` by its address. The rename
-        // was a label and only a label — the addresses did not move — and this
-        // line is where the two have to be spelled differently on purpose.
+        // **Runs** by its label, `/runs` by its address. Both relabelings were
+        // labels and only labels — the addresses never moved — and this line is
+        // where the word and the address have to be spelled apart on purpose.
         await walk
-          .getByRole("link", { name: "Simulation runs", exact: true })
+          .getByRole("link", { name: "Runs", exact: true })
           .first()
           .click();
         await walk.waitForURL(at("runs"));
@@ -3411,9 +3468,11 @@ describe("the complete product, walked in order in a second project", () => {
   /**
    * What a measurement is, read from a real browser.
    *
-   * A rule in a stylesheet is not a measurement — a browser decides whether it
-   * applied, which is the whole reason these two live here rather than in a
-   * regex over `system.module.css`.
+   * A rule is not a measurement — a browser decides whether it applied, which
+   * is the whole reason these two live here rather than in a regex over the
+   * source. That was already true when the rules sat in one stylesheet, and it
+   * is more true now that the classes live beside their components: a utility
+   * in a class list says even less about what was drawn than a rule did.
    */
   async function heightOf(which: Page, selector: string): Promise<number> {
     return which
@@ -3650,9 +3709,9 @@ describe("the complete product, walked in order in a second project", () => {
     /**
      * A change of visual direction, applied without touching a page.
      *
-     * The developer's hands-on pass is an edit to `tokens.css` and nothing
-     * else, and that promise is only worth making if a token really does reach
-     * every page. So one is moved here, at runtime, and two pages that share
+     * The developer's hands-on pass is an edit to
+     * `apps/web/ui/tailwind-theme.css` and nothing else, and that promise is
+     * only worth making if a value really does reach every page. So one is moved here, at runtime, and two pages that share
      * nothing but the components are held to following it — which they cannot
      * do if either of them drew its own.
      */
@@ -3723,7 +3782,8 @@ describe("the complete product, walked in order in a second project", () => {
     /**
      * Compact, and measurably so.
      *
-     * The direction is written down in `tokens.css` — a sidebar narrow enough
+     * The direction is written down in `apps/web/ui/tailwind-theme.css` — a
+     * sidebar narrow enough
      * to leave the screen to the data, a row that is one line of reading, a
      * control that sits in a toolbar rather than becoming it. What is held here
      * is the direction and not the numbers: the final art direction and the
@@ -3976,8 +4036,10 @@ describe("the complete product, walked in order in a second project", () => {
         expect(await focused()).toMatch(/^Organization/u);
         await walk.keyboard.press("Tab");
         expect(await focused()).toBe("Agents");
+        // Graders, not Tests: the second row of the bar is the other half of
+        // the standing pair Global holds, and Tests begins the group below it.
         await walk.keyboard.press("Tab");
-        expect(await focused()).toBe("Tests");
+        expect(await focused()).toBe("Graders");
       },
       SETTLE,
     );

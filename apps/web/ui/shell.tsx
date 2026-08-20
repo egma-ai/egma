@@ -12,6 +12,20 @@ import {
   type ReactNode,
 } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import {
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+} from "@/components/ui/sidebar";
+
 import { readJson } from "../lib/api.ts";
 import { organizationOf, roleOf, type Me, type Project } from "../lib/me.ts";
 import {
@@ -21,17 +35,15 @@ import {
 } from "../lib/navigation.ts";
 import { projectIdIn } from "../lib/project-context.ts";
 import { canAuthor, VIEW_ONLY, type Role } from "../lib/roles.ts";
-import { Badge } from "./controls.tsx";
 import { Dialog } from "./dialog.tsx";
 import { DraftNavigationProvider } from "./draft-navigation.tsx";
-import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
+import { MENU_ITEM, Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
 import {
   PageNavigation,
   type PageNavigationItems,
 } from "./page-navigation.tsx";
 import { ProjectSelector } from "./project-selector.tsx";
 import { settingsPath } from "./settings-nav.tsx";
-import styles from "./system.module.css";
 import { useTheme } from "./theme.tsx";
 
 /**
@@ -39,9 +51,9 @@ import { useTheme } from "./theme.tsx";
  *
  * **Compact, because the product is the data.** A narrow sidebar, a page title
  * that is a label rather than a headline, and controls that sit in a toolbar
- * instead of becoming one. Every measurement is a token in `tokens.css`, so
- * the hands-on tuning pass at the end of this effort is an edit to that file
- * rather than an edit to every page.
+ * instead of becoming one. Every measurement is a theme value, so the hands-on
+ * tuning pass at the end of this effort is an edit to the theme rather than an
+ * edit to every page.
  *
  * **Where you are comes from the address.** The project is read out of the
  * path, the navigation item is read out of the path, and nothing here keeps a
@@ -187,16 +199,33 @@ const NAVIGATION_ICON_PATHS: Record<SectionId, readonly string[]> = {
 function NavigationIcon({ section }: { readonly section: SectionId }) {
   return (
     <svg
-      className={styles.navIcon}
+      className="size-4 flex-none"
       aria-hidden="true"
       focusable="false"
       viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.35}
     >
       {NAVIGATION_ICON_PATHS[section].map((path) => <path d={path} key={path} />)}
     </svg>
   );
 }
 
+/**
+ * The three groups, drawn once for wherever the bar is being shown.
+ *
+ * **One navigation model.** The docked bar and the mobile drawer render this
+ * same component, so the drawer cannot drift into a second, shorter list of
+ * where a person may go. The drawer passes `onNavigate` and the bar does not,
+ * which is the only difference between them: a drawer closes behind the choice
+ * it was opened to make.
+ *
+ * Where an item is lit still comes from the address, never from which group it
+ * happens to be in.
+ */
 function Navigation({
   projectId,
   pathname,
@@ -206,33 +235,33 @@ function Navigation({
   readonly pathname: string;
   readonly onNavigate?: () => void;
 }) {
-  const { primary, secondary, management } = navigationFor(projectId);
+  const groups = navigationFor(projectId);
   const active = activeSectionIn(pathname);
 
-  const group = (links: ReturnType<typeof navigationFor>["primary"], label?: string) => (
-    <div className={styles.navGroup}>
-      {label === undefined ? null : <p className={styles.navLabel}>{label}</p>}
-      {links.map((link) => (
-        <Link
-          key={link.id}
-          className={`${styles.navItem} ${active === link.id ? styles.navItemActive : ""}`}
-          href={link.href}
-          aria-current={active === link.id ? "page" : undefined}
-          onClick={onNavigate}
-        >
-          <NavigationIcon section={link.id} />
-          {link.label}
-        </Link>
-      ))}
-    </div>
-  );
-
   return (
-    <nav className={styles.nav} aria-label="Product navigation">
-      {group(primary)}
-      {group(secondary, "Library")}
-      {management.length === 0 ? null : group(management, "Manage")}
-    </nav>
+    <SidebarProvider onNavigate={onNavigate}>
+      <SidebarContent asChild>
+        <nav aria-label="Product navigation">
+          {groups.map((group) => (
+            <SidebarGroup key={group.id}>
+              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              <SidebarMenu>
+                {group.items.map((link) => (
+                  <SidebarMenuItem key={link.id}>
+                    <SidebarMenuButton asChild isActive={active === link.id}>
+                      <Link href={link.href}>
+                        <NavigationIcon section={link.id} />
+                        {link.label}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroup>
+          ))}
+        </nav>
+      </SidebarContent>
+    </SidebarProvider>
   );
 }
 
@@ -250,6 +279,7 @@ function AccountMenu({
   settled,
   role,
   placement,
+  compact = false,
   projectId,
 }: {
   readonly me: Me | null;
@@ -257,6 +287,17 @@ function AccountMenu({
   /** Null until the session read says. Never guessed. */
   readonly role: Role | null;
   readonly placement: "below-end" | "right-end";
+  /**
+   * The mobile top bar, where the control is the avatar and nothing else.
+   *
+   * It used to be the shell's stylesheet reaching into this control by class
+   * name — `.topbar .account`, `.topbar .accountText`, `.topbar .avatar` —
+   * which meant the control's own size depended on which region had drawn it.
+   * It is a prop now, the way the project selector already took the same
+   * question. The hidden text is not rendered rather than `display: none`,
+   * which is the same thing for a screen reader and one element less.
+   */
+  readonly compact?: boolean;
   /**
    * The project Settings is drawn under, or nothing while the session read is
    * still in flight or the organization holds none.
@@ -286,22 +327,44 @@ function AccountMenu({
   return (
     <Menu
       label={`Account ${standing}. Open the account menu`}
-      triggerClassName={styles.account}
-      openClassName={styles.accountOpen}
+      triggerClassName={cn(
+        "grid w-full min-w-0 items-center gap-3",
+        "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) p-2",
+        "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
+        "transition-transform duration-(--duration-press) ease-out",
+        "pointer-coarse:min-h-(--tap-target)",
+        "pointer-hover:border-border pointer-hover:bg-surface",
+        "[&:active:not(:focus-visible)]:scale-97",
+        "motion-reduce:transition-none",
+        "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+        compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
+      )}
+      openClassName="border-border bg-surface"
       placement={placement}
       trigger={
         <>
-          <span className={styles.avatar} aria-hidden="true">
+          <span
+            className={cn(
+              "grid size-(--control-md) flex-none place-items-center",
+              "rounded-full border border-border bg-surface-soft text-sm",
+              compact && "size-(--tap-target)",
+            )}
+            aria-hidden="true"
+          >
             {initial}
           </span>
-          <span className={styles.accountText}>
-            <span className={styles.accountEmail}>{standing}</span>
-            {role === null ? null : (
-              <span className={styles.accountRole}>
-                {canAuthor(role) ? role : VIEW_ONLY}
+          {compact ? null : (
+            <span className="min-w-0">
+              <span className="block overflow-hidden text-sm text-ellipsis whitespace-nowrap">
+                {standing}
               </span>
-            )}
-          </span>
+              {role === null ? null : (
+                <span className="block text-xs tracking-(--tracking-label) text-faint uppercase">
+                  {canAuthor(role) ? role : VIEW_ONLY}
+                </span>
+              )}
+            </span>
+          )}
         </>
       }
     >
@@ -333,7 +396,7 @@ function ThemeItem() {
 
   return (
     <button
-      className={`${styles.menuItem} ${styles.themeItem}`}
+      className={cn(MENU_ITEM, "group/theme justify-between")}
       type="button"
       role="switch"
       aria-checked={dark}
@@ -341,8 +404,24 @@ function ThemeItem() {
       onClick={toggle}
     >
       <span>Dark theme</span>
-      <span className={styles.themeSwitch} aria-hidden="true">
-        <span className={styles.themeSwitchThumb} />
+      <span
+        className={cn(
+          "relative block h-[15px] w-[26px] flex-none",
+          "rounded-chip border border-border-strong bg-surface-soft",
+          "group-aria-checked/theme:border-foreground group-aria-checked/theme:bg-foreground",
+        )}
+        aria-hidden="true"
+      >
+        <span
+          className={cn(
+            "absolute top-0.5 left-0.5 block size-[9px] rounded-full bg-muted-foreground",
+            "transition-transform duration-(--duration-press) ease-out",
+            "group-aria-checked/theme:translate-x-[11px] group-aria-checked/theme:bg-background",
+            /* Keyboard activation is immediate: the thumb is already there. */
+            "group-focus-visible/theme:transition-none",
+            "motion-reduce:transition-none",
+          )}
+        />
       </span>
     </button>
   );
@@ -448,11 +527,36 @@ function ShellFrame({
   return (
     <SessionContext.Provider value={session}>
     <DraftNavigationProvider>
-    <div className={styles.shell}>
-      <aside className={styles.sidebar}>
-        {selector(false)}
+    <div
+      className={cn(
+        "grid min-h-svh bg-background",
+        "grid-cols-[var(--sidebar-width)_minmax(0,1fr)]",
+        /*
+         * The one layout breakpoint in the shell. It cannot be a theme value —
+         * a custom property does not exist when a media query is evaluated — so
+         * it is the same constant everywhere it is written: 900px, where the
+         * sidebar gives way to a top bar and a drawer.
+         */
+        "max-[900px]:grid-cols-[minmax(0,1fr)]",
+      )}
+    >
+      {/*
+       * The `<aside>` stays the shell's own: it is a column of the grid above
+       * and it is what the one layout breakpoint hides, so its class keeps
+       * living beside the breakpoint that reads it. Everything inside it is on
+       * the sidebar primitives — the switcher topmost in the header slot, the
+       * groups in the content, the account control in the footer slot.
+       */}
+      <aside
+        className={cn(
+          "sticky top-0 z-20 flex h-svh flex-col gap-5 overflow-visible p-4",
+          "border-r border-border bg-surface",
+          "max-[900px]:hidden",
+        )}
+      >
+        <SidebarHeader>{selector(false)}</SidebarHeader>
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
-        <div className={styles.sidebarFoot}>
+        <SidebarFooter>
           {role !== null && !canAuthor(role) ? (
             <Badge title="Your role can read, not author">{VIEW_ONLY}</Badge>
           ) : null}
@@ -463,14 +567,35 @@ function ShellFrame({
             placement="right-end"
             projectId={shown}
           />
-        </div>
+        </SidebarFooter>
       </aside>
 
-      <div className={styles.body}>
-        <header className={styles.topbar}>
+      <div className="flex min-w-0 flex-col bg-background">
+        <header
+          className={cn(
+            "sticky top-0 z-10 hidden h-(--topbar-height) items-center gap-3 px-4",
+            "border-b border-border backdrop-blur-[12px]",
+            /*
+             * Nearly the raised surface, so what scrolls under the bar is felt
+             * rather than read. Written here because it is one derived value
+             * used in one place, and the theme holds no key for it.
+             */
+            "bg-[color-mix(in_srgb,var(--surface)_94%,transparent)]",
+            "max-[900px]:flex",
+          )}
+        >
           {shown === null ? null : (
             <button
-              className={styles.iconButton}
+              className={cn(
+                "grid size-(--control-md) flex-none cursor-pointer place-items-center p-0",
+                "rounded-button border border-border bg-surface text-sm text-foreground",
+                "transition-transform duration-(--duration-press) ease-out",
+                "pointer-coarse:size-(--tap-target)",
+                "pointer-hover:border-border-strong pointer-hover:bg-surface-soft",
+                "[&:active:not(:focus-visible)]:scale-97",
+                "motion-reduce:transition-none",
+                "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+              )}
               type="button"
               aria-label="Open product navigation"
               aria-expanded={drawer}
@@ -480,13 +605,14 @@ function ShellFrame({
             </button>
           )}
           {selector(true)}
-          <span className={styles.topbarSpacer} />
+          <span className="flex-1" />
           {role !== null && !canAuthor(role) ? <Badge>{VIEW_ONLY}</Badge> : null}
           <AccountMenu
             me={me}
             settled={session.settled}
             role={role}
             placement="below-end"
+            compact
             projectId={shown}
           />
         </header>
@@ -529,9 +655,24 @@ export function ProductPage({
 }) {
   return (
     <main
-      className={`${styles.page} ${wide ? styles.pageWide : ""} ${
-        viewport ? styles.pageViewport : ""
-      }`}
+      className={cn(
+        "mx-auto w-full max-w-(--page-max) px-(--page-gutter) py-10",
+        "max-[900px]:px-4 max-[900px]:pt-5 max-[900px]:pb-8",
+        wide && "max-w-(--page-max-wide)",
+        viewport && [
+          "flex h-svh min-h-0 flex-col overflow-hidden",
+          "max-[900px]:h-[calc(100svh-var(--topbar-height))]",
+          /*
+           * Settings is a set of views rather than a long document: the page
+           * title stays put and the body owns the remaining height. The rule
+           * is on the page because only the page knows it was asked for a
+           * viewport.
+           */
+          "[&>[data-slot=page-body]]:min-h-0",
+          "[&>[data-slot=page-body]]:flex-1",
+          "[&>[data-slot=page-body]]:overflow-hidden",
+        ],
+      )}
     >
       {children}
     </main>
@@ -557,22 +698,66 @@ export function PageHeader({
       {breadcrumbs === undefined ? null : (
         <PageNavigation items={breadcrumbs} />
       )}
-      <header className={styles.pageHeader}>
+      {/*
+       * **Both halves wrap**, and they have to. A run can offer long action
+       * labels such as Cancel run and Retry, and on a phone they once sat on
+       * one unbreakable line inside a 390px screen, which pushed the whole
+       * document sideways: every page then scrolled horizontally, including
+       * the parts that fit perfectly.
+       *
+       * Not behind the breakpoint: a header runs out of room when its own
+       * contents are wider than it, which is a narrow window rather than a
+       * phone, and a page with one control has nothing to wrap at any width.
+       */}
+      <header
+        className={cn(
+          "flex flex-wrap items-start justify-between gap-5",
+          "border-b border-border pb-4",
+          "max-[900px]:flex-col",
+        )}
+      >
         <div>
           {eyebrow === undefined || breadcrumbs !== undefined ? null : (
-            <p className={styles.eyebrow}>{eyebrow}</p>
+            <p className="mt-0 mb-1 text-xs tracking-(--tracking-label) text-faint uppercase">
+              {eyebrow}
+            </p>
           )}
-          <h1>{title}</h1>
-          {lead === undefined ? null : <p className={styles.pageLead}>{lead}</p>}
+          {/* A heading carries no size of its own; the class is the size. */}
+          <h1 className="m-0 text-xl font-medium">{title}</h1>
+          {lead === undefined ? null : (
+            <p className="mt-2 mb-0 max-w-[62ch] text-base leading-(--line-normal) text-muted-foreground">
+              {lead}
+            </p>
+          )}
         </div>
-        {action === undefined ? null : <div className={styles.pageActions}>{action}</div>}
+        {action === undefined ? null : (
+          /*
+           * `flex-initial` — grow 0, **shrink 1**. Refusing to grow is right;
+           * a strip of controls should not stretch across a wide page. Refusing
+           * to shrink made this box as wide as its contents laid out on one
+           * line, whatever the screen was, and a box already at its preferred
+           * width has nothing to wrap — so the wrap above did nothing until
+           * this changed with it.
+           *
+           * `min-w-0` for the reason one flex item in three needs it: `auto`
+           * floors a flex item at its content, and the sentence saying why a
+           * control is unavailable is a whole sentence.
+           */
+          <div className="flex min-w-0 flex-initial flex-wrap items-center gap-3">
+            {action}
+          </div>
+        )}
       </header>
     </>
   );
 }
 
 export function PageBody({ children }: { readonly children: ReactNode }) {
-  return <div className={styles.pageBody}>{children}</div>;
+  return (
+    <div className="mt-5" data-slot="page-body">
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -610,34 +795,3 @@ export function ProductStatePage({
   );
 }
 
-/**
- * A titled block of one page: the traits, the history, what uses this.
- *
- * A detail page is a stack of these rather than one long form, because the
- * blocks answer different questions and are written at different times — and
- * because a heading is what lets somebody land on the part they came for.
- */
-export function Section({
-  title,
-  lead,
-  action,
-  children,
-}: {
-  readonly title: string;
-  readonly lead?: ReactNode;
-  readonly action?: ReactNode;
-  readonly children: ReactNode;
-}) {
-  return (
-    <section className={styles.section}>
-      <div className={styles.sectionHead}>
-        <div>
-          <h2 className={styles.sectionTitle}>{title}</h2>
-          {lead === undefined ? null : <p className={styles.sectionLead}>{lead}</p>}
-        </div>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}

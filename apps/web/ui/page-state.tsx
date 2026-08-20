@@ -2,8 +2,8 @@
 
 import type { ReactNode } from "react";
 
-import styles from "./system.module.css";
-import { Button } from "./controls.tsx";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 /**
  * What a page shows when it is not showing its data.
@@ -15,6 +15,10 @@ import { Button } from "./controls.tsx";
  *
  * Every state is the same component with a different tone, so a page that
  * grows a fifth state cannot invent a fifth appearance for it.
+ *
+ * The tone is also on the element as `data-tone`, because the appearance is now
+ * a class list rather than a named module class. A page under test, or a person
+ * reading the inspector, can still ask which of the four this is.
  */
 
 export type StateTone = "quiet" | "plain" | "bad";
@@ -30,16 +34,27 @@ function PageState({
   readonly lead?: ReactNode;
   readonly action?: ReactNode;
 }) {
-  const toneClass =
-    tone === "bad" ? styles.stateBad : tone === "quiet" ? styles.stateQuiet : "";
-
   return (
     <section
-      className={`${styles.state} ${toneClass}`}
+      data-slot="page-state"
+      data-tone={tone}
+      className={cn(
+        "flex flex-col items-start gap-3 text-left",
+        "rounded-card border border-border bg-surface px-8 py-10",
+        "max-[900px]:px-5 max-[900px]:py-8",
+        /* Quiet is an outline around an absence: nothing is raised off the page. */
+        tone === "quiet" && "border-dashed bg-transparent",
+      )}
       role={tone === "bad" ? "alert" : "status"}
     >
-      <h2 className={styles.stateTitle}>{title}</h2>
-      {lead === undefined ? null : <p className={styles.stateLead}>{lead}</p>}
+      <h2
+        className={cn("m-0 text-lg font-medium", tone === "bad" && "text-failure")}
+      >
+        {title}
+      </h2>
+      {lead === undefined ? null : (
+        <p className="m-0 max-w-[62ch] text-base text-muted-foreground">{lead}</p>
+      )}
       {action}
     </section>
   );
@@ -66,6 +81,10 @@ export function Empty({
 /**
  * Egma refused, or could not be reached. The API's own sentence is shown
  * unchanged — it names the next move — and there is always a way to try again.
+ *
+ * `Try again` is the quiet button it has always been. shadcn's `default` is the
+ * filled one, so the variant is said out loud: a migration that drops it turns
+ * a retry into the strongest thing on a failed page.
  */
 export function Failure({
   title = "Egma could not answer this page.",
@@ -83,7 +102,9 @@ export function Failure({
       lead={message}
       action={
         onRetry === undefined ? undefined : (
-          <Button onClick={onRetry}>Try again</Button>
+          <Button type="button" variant="secondary" onClick={onRetry}>
+            Try again
+          </Button>
         )
       }
     />
@@ -102,5 +123,7 @@ export function NotFound({
   readonly message: string;
   readonly action?: ReactNode;
 }) {
-  return <PageState tone="plain" title="Not available here" lead={message} action={action} />;
+  return (
+    <PageState tone="plain" title="Not available here" lead={message} action={action} />
+  );
 }

@@ -19,14 +19,11 @@ import {
   type VerdictWord,
 } from "../../../../../lib/runs.ts";
 import { simulationRerunPath } from "../../../../../lib/simulations.ts";
-import {
-  Actions,
-  Button,
-  Field,
-  Refused,
-  Section,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { Actions, Section } from "../../../../../ui/section.tsx";
+import { Field, Refused } from "../../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
@@ -53,7 +50,6 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import styles from "./run.module.css";
 
 /**
  * One run: what it froze, what happened, and what the graders made of it.
@@ -86,6 +82,49 @@ export default function RunDetailPage() {
 
 /** How often the feed is asked for more while anything is still moving. */
 const AGAIN_MS = 2000;
+
+/**
+ * One fact in the run's overview: a quiet uppercase label over its value.
+ *
+ * The value takes the 14px table step whole — its line height and its letter
+ * spacing included — rather than the 14px-with-body-leading the stylesheet
+ * this replaces mixed by hand. That step is the one `DESIGN.md` names for
+ * table and caption text, and taking it whole is what stops this page drifting
+ * from every other 14px value in the product.
+ */
+const FACT = cn(
+  "min-w-0 [&_dd]:min-w-0",
+  "[&_dt]:mb-1 [&_dt]:text-xs [&_dt]:tracking-(--tracking-label)",
+  "[&_dt]:text-faint [&_dt]:uppercase",
+  "[&_dd]:m-0 [&_dd]:text-sm [&_dd]:text-foreground [&_dd]:[overflow-wrap:anywhere]",
+  /* "Metrics, dates, durations, and scores use tabular numerals." */
+  "[&_time]:tabular-nums",
+);
+
+/** A name and, where it applies, the note saying it has been archived. */
+const IDENTITY = "inline-flex flex-wrap items-center gap-2";
+
+/**
+ * A cell that wraps instead of being cut off at one line.
+ *
+ * **This is what replaced a reach-in.** The route used to style the shared
+ * table's own cell spans from its stylesheet — `.simulationsTable td > span`
+ * — to turn off the ellipsis every list row gets. That rule reached past the
+ * component's surface into its internals, and an unlayered route stylesheet
+ * beats the component's own utilities, so the component could never take that
+ * decision back. What a route legitimately owns is what it puts *in* a cell,
+ * so the wrapping lives on this page's own element inside the cell instead.
+ */
+const WRAPS = "block min-w-0 whitespace-normal";
+
+/**
+ * Why a conversation never happened, or could not be conducted.
+ *
+ * It wraps rather than truncating. The whole value of this column is the
+ * sentence, and half a sentence about a skip is how somebody comes to believe
+ * their agent failed.
+ */
+const WHY = "block whitespace-normal text-sm text-muted-foreground";
 
 /** What one conversation's row shows after the feed has moved it. */
 type Moved = {
@@ -438,6 +477,8 @@ function RunDetailView({
           !mayControl || !active ? undefined : (
             <Actions>
               <Button
+                type="button"
+                variant="secondary"
                 disabled={working}
                 onClick={() => setConfirmingCancel(true)}
               >
@@ -450,13 +491,17 @@ function RunDetailView({
       <PageBody>
         {refused === null ? null : <Refused message={refused.message} />}
 
+        {/*
+          The run's compact overview: the facts that do not move, in one
+          block above the conversations that do.
+        */}
         <section
-          className={styles.overview}
+          className="rounded-card border border-border bg-surface px-5 py-4 max-[900px]:p-4"
           role="group"
           aria-label="Run summary"
         >
-          <dl className={styles.overviewFacts}>
-            <div className={styles.overviewFact}>
+          <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-x-6 gap-y-4">
+            <div className={FACT}>
               <dt>Started</dt>
               <dd>
                 <RelativeInstant instant={read.created_at} now={now} />
@@ -472,45 +517,45 @@ function RunDetailView({
                 )}
               </dd>
             </div>
-            <div className={styles.overviewFact}>
+            <div className={FACT}>
               <dt>Status</dt>
               <dd>
                 <RunStatus status={status} compact />
               </dd>
             </div>
-            <div className={styles.overviewFact}>
+            <div className={FACT}>
               <dt>Grading</dt>
               <dd>
                 {read.graded_count} of {read.gradable_count} judged
               </dd>
             </div>
-            <div className={styles.overviewFact}>
+            <div className={FACT}>
               <dt>Verdict</dt>
               <dd>
                 <VerdictBadge verdict={read.verdict} compact />
               </dd>
             </div>
-            <div className={styles.overviewFact}>
+            <div className={FACT}>
               <dt>Agent</dt>
               <dd>
                 {read.agent === null ? (
                   "Unavailable"
                 ) : (
-                  <span className={styles.identity}>
+                  <span className={IDENTITY}>
                     <Link href={projectPath(projectId, "agents", read.agent.id)}>
                       {read.agent.name}
                     </Link>
                     {read.agent.archived ? (
-                      <span className={styles.archivedNote}>Archived</span>
+                      <span className="text-sm text-warning">Archived</span>
                     ) : null}
                   </span>
                 )}
               </dd>
             </div>
-            <div className={styles.overviewFact}>
+            <div className={FACT}>
               <dt>Connection</dt>
               <dd>
-                <span className={styles.identity}>
+                <span className={IDENTITY}>
                   {read.connection === null ? (
                     "Unavailable"
                   ) : (
@@ -527,7 +572,7 @@ function RunDetailView({
                     </Link>
                   )}
                   {read.connection?.archived === true ? (
-                    <span className={styles.archivedNote}>Archived</span>
+                    <span className="text-sm text-warning">Archived</span>
                   ) : null}
                 </span>
               </dd>
@@ -542,19 +587,17 @@ function RunDetailView({
               lead="This run's simulations appear here as Egma writes them."
             />
           ) : (
-            <div className={styles.simulationsTable}>
-              <DataTable
-                label="Simulations in this run"
-                columns={simulationColumns(
-                  projectId,
-                  runId,
-                  mayControl ? openRerun : undefined,
-                )}
-                rows={simulations}
-                keyOf={(one) => one.id}
-                stretchPrimaryLink
-              />
-            </div>
+            <DataTable
+              label="Simulations in this run"
+              columns={simulationColumns(
+                projectId,
+                runId,
+                mayControl ? openRerun : undefined,
+              )}
+              rows={simulations}
+              keyOf={(one) => one.id}
+              stretchPrimaryLink
+            />
           )}
         </Section>
       </PageBody>
@@ -577,8 +620,23 @@ function RunDetailView({
                 becomes completed.
               </p>
               <Actions>
-                <Button onClick={dismiss}>Keep running</Button>
-                <Button tone="destructive" disabled={working} onClick={() => void cancel()}>
+                {/*
+                  `dismiss` is called rather than handed the click event, which
+                  is what the control set this replaces did: it dropped the
+                  event, so a pointer dismissal took the immediate path. Passing
+                  the event would switch this dialog to the animated exit — a
+                  change to how it behaves rather than to how it looks, and not
+                  this ticket's to make.
+                */}
+                <Button type="button" variant="secondary" onClick={() => dismiss()}>
+                  Keep running
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={working}
+                  onClick={() => void cancel()}
+                >
                   {working ? "Canceling…" : "Cancel run"}
                 </Button>
               </Actions>
@@ -591,7 +649,7 @@ function RunDetailView({
         <Dialog title="Run this simulation again?" onClose={closeRerun}>
           {(dismiss) => (
             <form
-              className={styles.rerunDialog}
+              className="flex flex-col gap-5 [&_p]:m-0 [&_p]:text-sm [&_p]:text-muted-foreground"
               onSubmit={(event) => {
                 event.preventDefault();
                 void rerun();
@@ -605,25 +663,32 @@ function RunDetailView({
                 evidence stays unchanged.
               </p>
               <Field label="Run name" htmlFor="rerun-name">
-                <TextInput
+                <Input
                   id="rerun-name"
                   name="label"
+                  type="text"
                   value={rerunName}
                   required
+                  autoComplete="off"
+                  spellCheck={false}
                   disabled={rerunWorking}
-                  onChange={setRerunName}
+                  onChange={(event) => setRerunName(event.target.value)}
                 />
               </Field>
               {rerunRefused === null ? null : (
                 <Refused message={rerunRefused.message} />
               )}
               <Actions>
-                <Button disabled={rerunWorking} onClick={() => dismiss()}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={rerunWorking}
+                  onClick={() => dismiss()}
+                >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
-                  weight="strong"
                   busy={rerunWorking}
                   disabled={rerunName.trim() === ""}
                 >
@@ -657,11 +722,11 @@ function simulationColumns(
       header: "Simulation",
       primary: true,
       cell: (one) => (
-        <span className={styles.conversation}>
-          <span className={styles.position}>
+        <span className={cn(WRAPS, "flex items-start gap-3")}>
+          <span className="flex-none tabular-nums text-sm text-muted-foreground">
             {String(one.position).padStart(2, "0")}
           </span>
-          <span>
+          <span className="min-w-0 [&_a]:[overflow-wrap:anywhere] [&_strong]:block [&_strong]:font-medium [&_strong]:text-foreground [&_strong]:[overflow-wrap:anywhere]">
             {/*
               The way in to this conversation's own evidence: what was said, when
               each thing happened, what judged it and any later human correction.
@@ -682,14 +747,15 @@ function simulationColumns(
       key: "persona",
       header: "Persona",
       width: "22%",
-      cell: (one) => one.persona_name,
+      /* A name is a name: it wraps rather than ending in an ellipsis. */
+      cell: (one) => <span className={WRAPS}>{one.persona_name}</span>,
     },
     {
       key: "status",
       header: "Execution",
       width: "18%",
       cell: (one) => (
-        <span className={styles.simulationState}>
+        <span className={cn(WRAPS, "flex flex-col items-start gap-1")}>
           <SimulationStatus status={one.status} compact />
           <SimulationReason simulation={one} />
         </span>
@@ -717,7 +783,13 @@ function simulationColumns(
       width: "128px",
       cell: (one) =>
         !isTerminalSimulation(one.status) ? null : (
-          <Button onClick={() => onRerun(one)}>Run again</Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => onRerun(one)}
+          >
+            Run again
+          </Button>
         ),
     });
   }
@@ -746,7 +818,7 @@ function SimulationReason({
         ? `This connection does not support ${capabilities}.`
         : `Support for ${capabilities} was not measured.`;
     return (
-      <span className={styles.why}>
+      <span className={WHY}>
         {decision} Egma did not conduct this simulation. This says nothing about
         the agent.
       </span>
@@ -754,7 +826,7 @@ function SimulationReason({
   }
   if (simulation.status !== "failed") return null;
   return (
-    <span className={styles.why}>
+    <span className={WHY}>
       {simulation.reason ?? "Egma could not conduct this simulation."} This is an
       execution problem, not a failed grader verdict, and says nothing about the
       agent.

@@ -22,27 +22,28 @@ import {
   type Member,
   type Roster,
 } from "../../../../../lib/settings.ts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+
+import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
+import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
 import {
-  Badge,
-  Button,
   Field,
   Form,
   FormActions,
   FormRow,
   Help,
   Refused,
-  Section,
-  Select,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
-import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
-import { Dialog } from "../../../../../ui/dialog.tsx";
-import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
+} from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
   RelativeInstant,
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import {
   SettingsLayout,
   SettingsTabs,
@@ -212,6 +213,11 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   }
 
   const shownTab: Tab = mayManage ? tab : "people";
+  /** Said only to somebody the server would refuse, and only once it has said so. */
+  const whyNot =
+    mayManage || role === null
+      ? undefined
+      : `Your ${role} role cannot manage members. Ask an organization admin.`;
 
   if (answer === null) {
     return (
@@ -276,14 +282,21 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
         mayManage ? (
           <Select
             id={`role-${member.user_id}`}
-            label={`${member.email} role`}
+            aria-label={`${member.email} role`}
             value={member.role}
             disabled={busy}
-            options={ASSIGNABLE_ROLES.map((one) => ({ value: one, label: one }))}
-            onChange={(next) =>
-              void act(memberActionPath(member.user_id, "role"), { role: next })
+            onChange={(event) =>
+              void act(memberActionPath(member.user_id, "role"), {
+                role: event.target.value,
+              })
             }
-          />
+          >
+            {ASSIGNABLE_ROLES.map((one) => (
+              <option key={one} value={one}>
+                {one}
+              </option>
+            ))}
+          </Select>
         ) : (
           member.role
         ),
@@ -293,28 +306,41 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       header: "Standing",
       cell: (member) =>
         member.deactivated_at === null ? (
-          <Badge tone="good">Active</Badge>
+          <Badge variant="success">Active</Badge>
         ) : (
-          <Badge tone="warn">Deactivated</Badge>
+          <Badge variant="warning">Deactivated</Badge>
         ),
     },
     {
       key: "actions",
       header: "Actions",
+      /*
+       * A row control, said to the table rather than only drawn like one.
+       *
+       * The shared table keeps an `action` cell at the trailing edge and lets
+       * it out of the one-line ellipsis every other cell gets. That second
+       * half is why this is here: the ellipsis comes from `overflow: hidden`
+       * on the cell, and an outline is clipped by an ancestor's overflow, so a
+       * control in an unmarked cell had the Ember focus ring cut off on every
+       * side. The run list's *Stop* and the run page's *Run again* were
+       * already marked; these were the same concept drawn two ways.
+       */
+      action: true,
       cell: (member) => (
         <>
           <Button
-            disabled={!mayManage || busy}
-            why={
-              mayManage || role === null
-                ? undefined
-                : `Your ${role} role cannot manage members. Ask an organization admin.`
-            }
+            type="button"
+            variant="secondary"
+            disabled={!mayManage}
+            busy={busy}
+            {...(whyNot === undefined ? {} : { why: whyNot })}
             onClick={() => setConfirming({ action: "deactivate", member })}
           >
             Deactivate
           </Button>{" "}
           <Button
+            type="button"
+            variant="secondary"
             disabled={!mayManage || busy}
             onClick={() => setConfirming({ action: "remove", member })}
           >
@@ -408,9 +434,12 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
                   ? "will lose membership in this organization. Everything they authored stays where it is, with their name on it."
                   : "will no longer be able to use this organization, and every key they minted stops working on the next request."}
               </p>
-              <Button onClick={dismiss}>Cancel</Button>{" "}
+              <Button type="button" variant="secondary" onClick={dismiss}>
+                Cancel
+              </Button>{" "}
               <Button
-                tone="destructive"
+                type="button"
+                variant="destructive"
                 disabled={busy}
                 onClick={() => {
                   const chosen = confirming;
@@ -532,7 +561,7 @@ function Invitations({
       header: "Standing",
       cell: (invitation) =>
         standingOf(invitation) === "expired" ? (
-          <Badge tone="warn">Expired</Badge>
+          <Badge variant="warning">Expired</Badge>
         ) : (
           <Badge>Pending</Badge>
         ),
@@ -548,11 +577,15 @@ function Invitations({
     {
       key: "actions",
       header: "Actions",
+      /* A row control, for the reason written on the column above. */
+      action: true,
       // Nothing on a pending row: waiting is what it is for. An expired one
       // cannot be waited on, so the one thing left to do about it is here.
       cell: (invitation) =>
         standingOf(invitation) === "expired" ? (
           <Button
+            type="button"
+            variant="secondary"
             disabled={busy}
             onClick={() => void send(invitation.email, invitation.role)}
           >
@@ -583,11 +616,13 @@ function Invitations({
         <Form onSubmit={() => void invite()}>
           <FormRow>
             <Field label="Email" htmlFor="invite-email">
-              <TextInput
+              <Input
                 id="invite-email"
                 value={email}
+                autoComplete="off"
+                spellCheck={false}
                 disabled={busy}
-                onChange={setEmail}
+                onChange={(event) => setEmail(event.target.value)}
               />
             </Field>
             <Field label="Role" htmlFor="invite-role">
@@ -595,20 +630,18 @@ function Invitations({
                 id="invite-role"
                 value={role}
                 disabled={busy}
-                options={ASSIGNABLE_ROLES.map((one) => ({
-                  value: one,
-                  label: one,
-                }))}
-                onChange={setRole}
-              />
+                onChange={(event) => setRole(event.target.value)}
+              >
+                {ASSIGNABLE_ROLES.map((one) => (
+                  <option key={one} value={one}>
+                    {one}
+                  </option>
+                ))}
+              </Select>
             </Field>
           </FormRow>
           <FormActions>
-            <Button
-              weight="strong"
-              type="submit"
-              disabled={busy || email.trim() === ""}
-            >
+            <Button type="submit" disabled={busy || email.trim() === ""}>
               {busy ? "Inviting…" : "Send invitation"}
             </Button>
           </FormActions>
