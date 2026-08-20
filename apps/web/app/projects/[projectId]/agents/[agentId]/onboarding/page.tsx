@@ -328,7 +328,34 @@ function AttachTests({
     <ProductPage>
       {header}
       <PageBody>
-        <AgentOnboardingProgress current="tests" />
+        {/*
+          * Somebody can be standing here with the connection stage behind them
+          * and no connection on the agent, and the bar must not count that as
+          * work done. This page already holds the agent's connections, so it is
+          * the one place that can see it without a second read.
+          *
+          * **The word says the state, not how it got there**, and that is the
+          * whole of the wording. An empty list has two histories: "Skip
+          * connection for now", and a connection that was made and later
+          * archived — this read returns the active ones. They are the same list
+          * and nothing here can tell them apart, so a word like "Skipped" would
+          * be right for one person and wrong for the other. "Needs a
+          * connection" is true either way: the agent has none now, and
+          * `DESIGN.md` gives the warning tone to exactly that — limited, or
+          * needs attention.
+          *
+          * Reading the archived connections too would only buy a nicer word for
+          * one of the two, at the cost of a second request on every visit to
+          * this page. The state is what the reader has to act on either way.
+          */}
+        <AgentOnboardingProgress
+          current="tests"
+          unfinished={
+            parentAgent.value.connections.length === 0
+              ? { connection: "Needs a connection" }
+              : {}
+          }
+        />
 
         {pages.length === 0 && busyTests ? (
           <Loading what="this project's tests" />

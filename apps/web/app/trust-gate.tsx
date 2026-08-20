@@ -55,6 +55,26 @@ export function TrustGate() {
         alpha: 0.18 + randomAt(index + 399) * 0.62,
         drift: 0.5 + randomAt(index + 499) * 2.2,
       }));
+      still();
+    }
+
+    /**
+     * One frame, for the two moments when no other frame is coming.
+     *
+     * Under reduced motion the loop draws once and stops, which is the whole
+     * point of it — but two things afterwards invalidate what is on the canvas
+     * and neither used to redraw it. **Setting `canvas.width` clears the
+     * canvas**, so every resize left the field blank until a reload; and the
+     * theme observer re-reads the ink without repainting, so a light-to-dark
+     * switch left the old colour standing. Both were invisible in normal
+     * motion, where the next animation frame covered them a moment later.
+     *
+     * `draw` ignores the timestamp under reduced motion — `seconds` is pinned
+     * to 0 — so zero is the honest argument rather than a placeholder, and the
+     * static field it paints is the same one every time.
+     */
+    function still(): void {
+      if (reduced) draw(0);
     }
 
     function circle(x: number, y: number, radius: number): void {
@@ -112,6 +132,7 @@ export function TrustGate() {
     const observer = new ResizeObserver(resize);
     const themeObserver = new MutationObserver(() => {
       ink = getComputedStyle(canvasElement).color;
+      still();
     });
     observer.observe(canvasElement);
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });

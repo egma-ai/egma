@@ -754,6 +754,31 @@ describe("onboarding an agent", () => {
     expect(within(progress).getByText("Connection").getAttribute("aria-current"))
       .toBe("step");
     expect(screen.queryByText(/Step 2 of 3/u)).toBeNull();
+
+    /*
+     * The bar counts stages *finished*, so the second stage reads one of three
+     * rather than two. A bar that filled a stage ahead of the work would be
+     * claiming the page in front of somebody was already done.
+     */
+    const bar = within(progress).getByRole("progressbar", {
+      name: "Agent setup progress",
+    });
+    expect(bar.getAttribute("aria-valuenow")).toBe("1");
+    expect(bar.getAttribute("aria-valuemax")).toBe("3");
+    expect(bar.getAttribute("aria-valuetext")).toBe("1 of 3 stages finished");
+
+    /*
+     * What the eye is given, against what the screen reader is given.
+     *
+     * This is the assertion that guards the fix in `components/ui/progress.tsx`.
+     * The registry's indicator computes `100 - value` and ignores `max`, so this
+     * bar announced "1 of 3 stages finished" and was drawn 99% empty. The two
+     * must be the same fact: one stage of three is a third filled, which is
+     * two thirds still to travel.
+     */
+    const fill = bar.querySelector("[data-slot='progress-indicator']");
+    expect(fill?.getAttribute("style")).toContain("translateX(-66.6");
+    expect(fill?.getAttribute("style")).not.toContain("-99%");
     expect(
       screen.getByRole("link", { name: "Skip connection for now" })
         .getAttribute("href"),
@@ -775,6 +800,92 @@ describe("onboarding an agent", () => {
         "/projects/prj_1/agents/agt_1/onboarding",
       ),
     );
+  });
+
+  /**
+   * An agent with no connection, and the bar that has to tell the truth about
+   * it without guessing how it got that way.
+   *
+   * Being behind the current stage is not the same as being finished. Somebody
+   * reaches the tests page with two stages behind them and one of them not
+   * done, and an agent with no connection cannot run a simulation at all — so a
+   * bar reading "2 of 3 stages finished" would call the setup nearly complete
+   * when the part that makes it work is missing.
+   *
+   * **The word is asserted as a state rather than an intention**, and that is
+   * the point of this test rather than an incidental detail. This page reads
+   * the active connections, so an empty list is both "Skip connection for now"
+   * and "connected once, archived it later". A word like "Skipped" is right for
+   * one of those people and wrong for the other, and nothing on this page can
+   * tell which one is reading it.
+   *
+   * Both halves are checked, because `DESIGN.md` will not let a state rest on a
+   * mark and a colour: the count, and the words beside the stage.
+   */
+  it("says an agent with no connection needs one, without calling it a skip", async () => {
+    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/api/tests": [
+        { status: 200, body: { items: [onboardingTest()], next_cursor: null } },
+      ],
+    });
+    render(<AgentOnboardingPage />);
+
+    const progress = await screen.findByRole("navigation", {
+      name: "Agent setup",
+    });
+    const bar = within(progress).getByRole("progressbar", {
+      name: "Agent setup progress",
+    });
+    expect(bar.getAttribute("aria-valuenow")).toBe("1");
+    expect(bar.getAttribute("aria-valuetext")).toBe(
+      "1 of 3 stages finished, Connection not finished",
+    );
+
+    const connection = within(progress).getByText("Connection");
+    expect(connection.getAttribute("data-unfinished")).toBe("true");
+    expect(connection.getAttribute("data-complete")).toBeNull();
+    expect(within(progress).getByText("Needs a connection")).toBeTruthy();
+    /*
+     * The word this must never go back to. Both people who see this screen have
+     * the same empty list, and only one of them pressed Skip.
+     */
+    expect(within(progress).queryByText(/skipped/iu)).toBeNull();
+  });
+
+  /** The same page with a connection in place, so the count moves. */
+  it("counts a connection that is in place, and says nothing beside it", async () => {
+    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [CONNECTION] },
+      },
+      "/api/tests": [
+        { status: 200, body: { items: [onboardingTest()], next_cursor: null } },
+      ],
+    });
+    render(<AgentOnboardingPage />);
+
+    const progress = await screen.findByRole("navigation", {
+      name: "Agent setup",
+    });
+    const bar = within(progress).getByRole("progressbar", {
+      name: "Agent setup progress",
+    });
+    expect(bar.getAttribute("aria-valuenow")).toBe("2");
+    expect(bar.getAttribute("aria-valuetext")).toBe("2 of 3 stages finished");
+
+    const connection = within(progress).getByText("Connection");
+    expect(connection.getAttribute("data-complete")).toBe("true");
+    expect(connection.getAttribute("data-unfinished")).toBeNull();
+    expect(within(progress).queryByText("Needs a connection")).toBeNull();
   });
 
   it("attaches selected existing tests through each test's applicability revision", async () => {
