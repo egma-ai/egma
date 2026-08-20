@@ -79,7 +79,7 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   grading_job: "gjb",
   // One project's setup for one production agent platform.
   monitoring_setup: "mns",
-  // One provider agent selected under a Retell monitoring setup.
+  // One platform agent selected under a Retell monitoring setup.
   retell_monitored_agent: "rma",
   // The exactly-once ledger for a conversation egma watched on somebody else's
   // platform. Its identity is its own because the row outlives the write it

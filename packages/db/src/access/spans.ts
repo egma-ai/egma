@@ -95,7 +95,7 @@ export type NewSpan = {
   readonly providerCallId: string;
   /** The product or framework that produced this production evidence. */
   readonly agentPlatform: string;
-  /** Provider-owned agent identity, when the platform supplies it. */
+  /** The platform agent reference, when the platform supplies it. */
   readonly platformAgentId: string;
   readonly platformAgentName: string;
   readonly platformAgentVersion: string;
@@ -106,10 +106,10 @@ export type NewSpan = {
   readonly testVersionId: string;
   readonly personaVersionId: string;
   /**
-   * Safe provider data for this span. A platform adapter removes credentials
-   * and bearer-like values before this boundary; generic OTLP keeps the source
-   * span document. This field is never truncated, while child spans may hold a
-   * normalized provider-specific subset.
+   * Safe provider data for this span. Every platform adapter removes
+   * credentials and bearer-like values before this boundary. This field is
+   * never truncated, while child spans may hold a normalized
+   * provider-specific subset.
    */
   readonly payload: string;
 };
@@ -149,10 +149,10 @@ const SPANS_TABLE = "spans";
  * ClickHouse stores and what a `String` column is measured in. The cut itself
  * still lands on a character boundary; see `truncated`.
  *
- * Only the normalised columns are capped, and never the safe provider payload — the
- * whole arrangement is that a cap costs presentation rather than data, because
- * the untruncated original is on the same row. Transcripts and tool payloads
- * are what actually reach these, which is why they get the generous ones.
+ * Only the normalised columns are capped, and never the safe provider payload.
+ * A cap costs presentation rather than data because the untruncated safe copy
+ * is on the same row. Transcripts and tool payloads are what actually reach
+ * these, which is why they get the generous ones.
  */
 const FIELD_LIMITS = {
   name: 1_024,

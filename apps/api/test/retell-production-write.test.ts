@@ -22,8 +22,8 @@ const AUTH = {
 const TARGET: RetellMonitoringTarget = {
   setupId: "mns_write_test",
   monitoredAgentId: "rma_write_test",
-  providerAgentId: "agent_in_retell_1",
-  providerAgentName: "Front desk",
+  platformAgentId: "agent_in_retell_1",
+  platformAgentName: "Front desk",
   apiKey: "retell-key-never-logged",
   scanKind: "historical_import",
   scanFrom: new Date("2026-07-20T00:00:00.000Z"),
@@ -40,7 +40,7 @@ function capturedCall(overrides: Partial<RetellCall> = {}): RetellCall {
   return {
     call_id: "call_a1b2c3d4e5f6",
     call_type: "phone_call",
-    agent_id: TARGET.providerAgentId,
+    agent_id: TARGET.platformAgentId,
     call_status: "ended",
     start_timestamp: 1_786_000_000_000,
     end_timestamp: 1_786_000_074_000,
@@ -58,7 +58,7 @@ type Recorded = {
   grading: number;
   finished: string[];
   received: number;
-  replayedProviderAgentIds: string[];
+  replayedPlatformAgentIds: string[];
 };
 
 function writeStore(
@@ -85,7 +85,7 @@ function writeStore(
     },
     async recordRetellMonitoringReceived(_auth, input) {
       recorded.received += 1;
-      recorded.replayedProviderAgentIds.push(input.providerAgentId);
+      recorded.replayedPlatformAgentIds.push(input.platformAgentId);
     },
   };
 }
@@ -96,7 +96,7 @@ function recording(): Recorded {
     grading: 0,
     finished: [],
     received: 0,
-    replayedProviderAgentIds: [],
+    replayedPlatformAgentIds: [],
   };
 }
 
@@ -111,9 +111,9 @@ describe("the shared Retell production writer", () => {
       id: "ptc_write_test",
       traceId: "unused-by-the-write-result",
       providerCallId: String(call["call_id"]),
-      providerAgentId: TARGET.providerAgentId,
-      providerAgentName: TARGET.providerAgentName,
-      providerAgentVersion: "7",
+      platformAgentId: TARGET.platformAgentId,
+      platformAgentName: TARGET.platformAgentName,
+      platformAgentVersion: "7",
       payload: "{}",
       endedAt: new Date("2026-08-19T00:00:00.000Z"),
       degraded: false,
@@ -130,9 +130,9 @@ describe("the shared Retell production writer", () => {
     expect(outcome.kind).toBe("written");
     expect(recorded.claimed).toMatchObject({
       providerCallId: call["call_id"],
-      providerAgentId: TARGET.providerAgentId,
-      providerAgentName: TARGET.providerAgentName,
-      providerAgentVersion: "7",
+      platformAgentId: TARGET.platformAgentId,
+      platformAgentName: TARGET.platformAgentName,
+      platformAgentVersion: "7",
     });
     expect(recorded.claimed).not.toHaveProperty("connectionId");
     expect(recorded.claimed?.payload).toContain('"access_token":"[REDACTED]"');
@@ -162,7 +162,38 @@ describe("the shared Retell production writer", () => {
     expect(recorded.received).toBe(0);
   });
 
-  it("keeps historical provider identity and refuses a different agent id", async () => {
+  it("stores a transcript-free terminal call without offering it for grading", async () => {
+    const recorded = recording();
+    const call = capturedCall({
+      call_status: "not_connected",
+      transcript_with_tool_calls: undefined,
+    });
+    const claim = {
+      id: "ptc_transcript_free",
+      traceId: "unused-by-the-write-result",
+      providerCallId: String(call["call_id"]),
+      platformAgentId: TARGET.platformAgentId,
+      platformAgentName: TARGET.platformAgentName,
+      payload: "{}",
+      endedAt: new Date(Number(call["end_timestamp"])),
+      degraded: false,
+      auth: AUTH,
+    } satisfies ProductionTraceClaim;
+
+    const outcome = await writeRetellCall(
+      TARGET,
+      call,
+      new Date("2026-08-19T00:00:05.000Z"),
+      writeStore(recorded, claim),
+    );
+
+    expect(outcome.kind).toBe("written");
+    expect(recorded.appended).toBe(1);
+    expect(recorded.grading).toBe(0);
+    expect(recorded.finished).toEqual([outcome.traceId]);
+  });
+
+  it("keeps the historical platform agent reference and refuses a different agent id", async () => {
     const historical = recording();
     const call = capturedCall({
       agent_name: "Historical Retell name",
@@ -172,9 +203,9 @@ describe("the shared Retell production writer", () => {
       id: "ptc_historical_identity",
       traceId: "unused",
       providerCallId: String(call["call_id"]),
-      providerAgentId: TARGET.providerAgentId,
-      providerAgentName: "Historical Retell name",
-      providerAgentVersion: "4",
+      platformAgentId: TARGET.platformAgentId,
+      platformAgentName: "Historical Retell name",
+      platformAgentVersion: "4",
       payload: "{}",
       endedAt: new Date(Number(call["end_timestamp"])),
       degraded: false,
@@ -188,9 +219,9 @@ describe("the shared Retell production writer", () => {
       writeStore(historical, claim),
     );
     expect(historical.claimed).toMatchObject({
-      providerAgentId: TARGET.providerAgentId,
-      providerAgentName: "Historical Retell name",
-      providerAgentVersion: "4",
+      platformAgentId: TARGET.platformAgentId,
+      platformAgentName: "Historical Retell name",
+      platformAgentVersion: "4",
     });
 
     const mismatch = recording();
@@ -213,9 +244,9 @@ describe("the shared Retell production writer", () => {
       id: "ptc_replay_test",
       traceId: "unused",
       providerCallId: String(call["call_id"]),
-      providerAgentId: TARGET.providerAgentId,
-      providerAgentName: TARGET.providerAgentName,
-      providerAgentVersion: "7",
+      platformAgentId: TARGET.platformAgentId,
+      platformAgentName: TARGET.platformAgentName,
+      platformAgentVersion: "7",
       payload: "{}",
       endedAt: new Date(Number(call["end_timestamp"])),
       degraded: false,
@@ -241,8 +272,46 @@ describe("the shared Retell production writer", () => {
     expect(recorded.grading).toBe(recorded.appended);
     expect(recorded.finished).toEqual([stale.traceId]);
     expect(recorded.received).toBe(1);
-    expect(recorded.replayedProviderAgentIds).toEqual([
-      stale.providerAgentId,
+    expect(recorded.replayedPlatformAgentIds).toEqual([
+      stale.platformAgentId,
     ]);
+  });
+
+  it("replays a transcript-free stale claim without offering it for grading", async () => {
+    const call = capturedCall({
+      call_status: "error",
+      transcript_with_tool_calls: undefined,
+    });
+    const first = recording();
+    await writeRetellCall(
+      TARGET,
+      call,
+      new Date("2026-08-19T00:00:05.000Z"),
+      writeStore(first, {
+        id: "ptc_transcript_free_replay",
+        traceId: "unused",
+        providerCallId: String(call["call_id"]),
+        platformAgentId: TARGET.platformAgentId,
+        platformAgentName: TARGET.platformAgentName,
+        payload: "{}",
+        endedAt: new Date(Number(call["end_timestamp"])),
+        degraded: false,
+        auth: AUTH,
+      }),
+    );
+    if (first.claimed === undefined) throw new Error("the claim was not offered");
+
+    const recorded = recording();
+    const stale: ProductionTraceClaim = {
+      id: "ptc_transcript_free_replay",
+      ...first.claimed,
+      degraded: false,
+      auth: AUTH,
+    };
+    await replayProductionClaim(stale, writeStore(recorded, undefined));
+
+    expect(recorded.appended).toBe(1);
+    expect(recorded.grading).toBe(0);
+    expect(recorded.finished).toEqual([stale.traceId]);
   });
 });

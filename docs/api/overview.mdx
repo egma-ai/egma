@@ -144,7 +144,7 @@ Egma accepts OpenTelemetry traces at the standard OTLP/HTTP endpoint:
 POST /v1/traces
 ```
 
-This endpoint is the direct OTLP path for an agent runtime that already emits
+This endpoint is the direct OTLP path for an agent process that already emits
 OpenTelemetry spans. For LiveKit Agents, use the Egma Python SDK's
 `monitor_livekit(ctx)` helper to create or safely reuse the tracer provider and
 add the exporter. Retell Monitoring uses API polling instead of this endpoint.

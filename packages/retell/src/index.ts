@@ -169,9 +169,8 @@ async function ask(
   const url = `${base(reach)}${request.path}`;
   const fetchImpl = reach.fetchImpl ?? fetch;
 
-  let response: Response;
   try {
-    response = await fetchImpl(url, {
+    const response = await fetchImpl(url, {
       method: request.method,
       headers: {
         authorization: `Bearer ${key.reveal()}`,
@@ -180,11 +179,10 @@ async function ask(
       ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
       ...(reach.signal === undefined ? {} : { signal: reach.signal }),
     });
+    return { status: response.status, body: await response.text() };
   } catch (cause) {
     throw new RetellUnreachableError(base(reach), cause);
   }
-
-  return { status: response.status, body: await response.text() };
 }
 
 /** A safe refusal. Retell's raw error body never leaves this client. */

@@ -3,15 +3,21 @@ import {
   claimDueRetellMonitoringAgent,
   claimRetellIngestionFailureReplay,
   claimProductionTrace,
+  configureLiveKitMonitoring,
   configureRetellMonitoring,
   failRetellIngestionFailureReplay,
   failRetellMonitoringTarget,
   finishRetellMonitoringScan,
+  finishProductionTrace,
   listMonitoringSetups,
   NotPermittedError,
+  recordLiveKitMonitoringReceived,
+  recordRetellCallReceived,
   recordRetellIngestionFailure,
   recordRetellMonitoringReceived,
+  recoverRetellMonitoringSetup,
   releaseRetellIngestionFailureReplay,
+  releaseRetellMonitoringLease,
   resolveRetellIngestionFailureReplay,
   renewRetellMonitoringLease,
   yieldRetellMonitoringLease,
@@ -29,6 +35,9 @@ import {
 
 import {
   createConnectedDatabase,
+  errorCodeOf,
+  openSingleConnection,
+  POSTGRES_ERROR,
   type MigratedDatabase,
 } from "./support/database.ts";
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
@@ -36,10 +45,12 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
 let database: MigratedDatabase;
 
 const acme = { organization: newId("org"), project: newId("prj") };
+const acmeOther = { organization: acme.organization, project: newId("prj") };
 const globex = { organization: newId("org"), project: newId("prj") };
 const ada = newId("usr");
 const gene = newId("usr");
 const RETELL_KEY = "key_live_retell_monitoring_secret_QRST";
+const ROTATED_RETELL_KEY = "key_live_retell_monitoring_rotated_WXYZ";
 const SETUP_TIME = new Date("2026-08-20T08:00:00.000Z");
 
 function at(
@@ -59,8 +70,8 @@ function at(
 function selected() {
   return [
     {
-      providerAgentId: "agent_retell_voice_1",
-      providerAgentName: "Front desk",
+      platformAgentId: "agent_retell_voice_1",
+      platformAgentName: "Front desk",
     },
   ] as const;
 }
@@ -69,6 +80,7 @@ beforeAll(async () => {
   database = await createConnectedDatabase("production_monitoring");
   await seedOrganization(database, acme.organization, [
     { id: acme.project, slug: "default" },
+    { id: acmeOther.project, slug: "other" },
   ]);
   await seedOrganization(database, globex.organization, [
     { id: globex.project, slug: "default" },
@@ -102,8 +114,8 @@ describe("Retell Monitoring setup", () => {
       credentialsHint: "QRST",
       agents: [
         {
-          providerAgentId: "agent_retell_voice_1",
-          providerAgentName: "Front desk",
+          platformAgentId: "agent_retell_voice_1",
+          platformAgentName: "Front desk",
           state: "importing",
           scanKind: "historical_import",
         },
@@ -132,6 +144,167 @@ describe("Retell Monitoring setup", () => {
     });
   });
 
+  it("lets two first saves share one Retell Monitoring setup", async () => {
+    const auth = at(acme, ada);
+    await database.sql(`
+      create function pause_first_monitoring_setup_insert()
+      returns trigger language plpgsql as $$
+      begin
+        perform pg_sleep(0.15);
+        return new;
+      end
+      $$
+    `);
+    await database.sql(`
+      create trigger pause_first_monitoring_setup_insert
+      before insert on monitoring_setup
+      for each row execute function pause_first_monitoring_setup_insert()
+    `);
+    try {
+      const [first, second] = await Promise.all([
+        configureRetellMonitoring(auth, {
+          apiKey: RETELL_KEY,
+          agents: selected(),
+          now: SETUP_TIME,
+        }),
+        configureRetellMonitoring(auth, {
+          apiKey: RETELL_KEY,
+          agents: selected(),
+          now: SETUP_TIME,
+        }),
+      ]);
+
+      expect(first.id).toBe(second.id);
+      expect(
+        await database.sql<{ count: string }>(
+          "select count(*) from monitoring_setup where project_id = $1 " +
+            "and agent_platform = 'retell'",
+          [acme.project],
+        ),
+      ).toMatchObject({ rows: [{ count: "1" }] });
+    } finally {
+      await database.sql(
+        "drop trigger pause_first_monitoring_setup_insert on monitoring_setup",
+      );
+      await database.sql("drop function pause_first_monitoring_setup_insert()");
+    }
+  });
+
+  it("lists Monitoring setup only inside the acting project", async () => {
+    await configureRetellMonitoring(at(acme, ada), {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+
+    expect(await listMonitoringSetups(at(acmeOther, ada))).toEqual([]);
+  });
+
+  it("records received production evidence only in the acting project", async () => {
+    const acmeAuth = at(acme, ada);
+    const otherAuth = at(acmeOther, ada);
+    for (const auth of [acmeAuth, otherAuth]) {
+      await configureRetellMonitoring(auth, {
+        apiKey: RETELL_KEY,
+        agents: selected(),
+        now: SETUP_TIME,
+      });
+      await configureLiveKitMonitoring(auth);
+    }
+
+    const retellReceivedAt = new Date("2026-08-20T08:01:00.000Z");
+    const liveKitReceivedAt = new Date("2026-08-20T08:02:00.000Z");
+    await recordRetellMonitoringReceived(acmeAuth, {
+      platformAgentId: selected()[0].platformAgentId,
+      receivedAt: retellReceivedAt,
+    });
+    await recordLiveKitMonitoringReceived(acmeAuth, liveKitReceivedAt);
+
+    const acmeSetups = await listMonitoringSetups(acmeAuth);
+    expect(
+      acmeSetups.find((setup) => setup.agentPlatform === "retell"),
+    ).toMatchObject({
+      lastReceivedAt: retellReceivedAt,
+      agents: [{ lastCallReceivedAt: retellReceivedAt }],
+    });
+    expect(
+      acmeSetups.find((setup) => setup.agentPlatform === "livekit_agents"),
+    ).toMatchObject({ lastReceivedAt: liveKitReceivedAt });
+
+    const otherSetups = await listMonitoringSetups(otherAuth);
+    expect(
+      otherSetups.find((setup) => setup.agentPlatform === "retell"),
+    ).toMatchObject({
+      lastReceivedAt: null,
+      agents: [{ lastCallReceivedAt: null }],
+    });
+    expect(
+      otherSetups.find((setup) => setup.agentPlatform === "livekit_agents"),
+    ).toMatchObject({ lastReceivedAt: null });
+  });
+
+  it("rejects a selected agent that pairs another tenant with the setup key", async () => {
+    await configureRetellMonitoring(at(acme, ada), {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const setup = await database.sql<{ id: string }>(
+      "select id from monitoring_setup",
+    );
+
+    await expect(
+      database.sql(
+        `insert into retell_monitored_agent
+           (id, monitoring_setup_id, organization_id, project_id,
+            platform_agent_id, platform_agent_name, next_regular_poll_at,
+            next_poll_at, next_reconciliation_at)
+         values ($1, $2, $3, $4, 'agent_cross_tenant', 'Cross tenant',
+                 $5, $5, $5)`,
+        [
+          newId("rma"),
+          setup.rows[0]?.id,
+          globex.organization,
+          globex.project,
+          SETUP_TIME,
+        ],
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("rejects a failed call that pairs another tenant with the selected agent", async () => {
+    await configureRetellMonitoring(at(acme, ada), {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const monitored = await database.sql<{ id: string }>(
+      "select id from retell_monitored_agent",
+    );
+
+    await expect(
+      database.sql(
+        `insert into retell_ingestion_failure
+           (id, organization_id, project_id, retell_monitored_agent_id,
+            provider_call_id, error_kind, last_attempt_at)
+         values ($1, $2, $3, $4, 'call_cross_tenant', 'invalid_document', $5)`,
+        [
+          newId("rif"),
+          globex.organization,
+          globex.project,
+          monitored.rows[0]?.id,
+          SETUP_TIME,
+        ],
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
   it("lets only one replica claim one due selected agent", async () => {
     await configureRetellMonitoring(at(acme, ada), {
       apiKey: RETELL_KEY,
@@ -149,7 +322,7 @@ describe("Retell Monitoring setup", () => {
 
     expect(held).toHaveLength(1);
     expect(held[0]).toMatchObject({
-      providerAgentId: "agent_retell_voice_1",
+      platformAgentId: "agent_retell_voice_1",
       apiKey: RETELL_KEY,
       scanKind: "historical_import",
       seenPaginationKeys: [],
@@ -161,14 +334,261 @@ describe("Retell Monitoring setup", () => {
     });
   });
 
+  it("keeps a retained agent's active lease when setup is saved", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const active = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(active).toBeDefined();
+    if (active === undefined) return;
+
+    const savedAt = new Date(SETUP_TIME.getTime() + 1_000);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: savedAt,
+    });
+
+    expect(
+      await claimDueRetellMonitoringAgent({ now: savedAt }),
+    ).toBeUndefined();
+    expect(
+      await renewRetellMonitoringLease(active.auth, active, { now: savedAt }),
+    ).toBe(true);
+  });
+
+  it("ignores a provider failure from a lease that used the previous key", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(stale).toBeDefined();
+    if (stale === undefined) return;
+
+    const rotatedAt = new Date(SETUP_TIME.getTime() + 1_000);
+    await configureRetellMonitoring(auth, {
+      apiKey: ROTATED_RETELL_KEY,
+      agents: selected(),
+      now: rotatedAt,
+    });
+    await failRetellMonitoringTarget(stale.auth, stale, {
+      kind: "invalid_credential",
+      retryAt: new Date("9999-12-31T23:59:59.999Z"),
+      now: rotatedAt,
+    });
+
+    expect((await listMonitoringSetups(auth))[0]).toMatchObject({
+      healthState: "healthy",
+      blockedUntil: null,
+      consecutiveFailures: 0,
+    });
+    expect(
+      await claimDueRetellMonitoringAgent({ now: rotatedAt }),
+    ).toMatchObject({ apiKey: ROTATED_RETELL_KEY });
+  });
+
+  it("ignores a provider failure after the target lost its lease", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(stale).toBeDefined();
+    if (stale === undefined) return;
+    await yieldRetellMonitoringLease(stale.auth, stale, {
+      retryAt: new Date(SETUP_TIME.getTime() + 30_000),
+      now: SETUP_TIME,
+    });
+
+    await failRetellMonitoringTarget(stale.auth, stale, {
+      kind: "invalid_credential",
+      retryAt: new Date("9999-12-31T23:59:59.999Z"),
+      now: SETUP_TIME,
+    });
+
+    expect((await listMonitoringSetups(auth))[0]).toMatchObject({
+      healthState: "healthy",
+      blockedUntil: null,
+      consecutiveFailures: 0,
+    });
+  });
+
+  it("ignores a permanent call failure from the previous key", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(stale).toBeDefined();
+    if (stale === undefined) return;
+
+    const rotatedAt = new Date(SETUP_TIME.getTime() + 1_000);
+    await configureRetellMonitoring(auth, {
+      apiKey: ROTATED_RETELL_KEY,
+      agents: selected(),
+      now: rotatedAt,
+    });
+
+    expect(
+      await recordRetellIngestionFailure(stale.auth, stale, {
+        providerCallId: "call_from_previous_key",
+        errorKind: "provider_call_not_found",
+        now: rotatedAt,
+      }),
+    ).toEqual({ recorded: false, changed: false });
+    expect((await listMonitoringSetups(auth))[0]?.agents[0]).toMatchObject({
+      state: "importing",
+      failures: [],
+    });
+  });
+
+  it("ignores a permanent call failure after its lease is reassigned", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(stale).toBeDefined();
+    if (stale === undefined) return;
+
+    const reassignedAt = new Date(SETUP_TIME.getTime() + 30_000);
+    expect(
+      await yieldRetellMonitoringLease(stale.auth, stale, {
+        retryAt: reassignedAt,
+        now: SETUP_TIME,
+      }),
+    ).toBe(true);
+    const current = await claimDueRetellMonitoringAgent({ now: reassignedAt });
+    expect(current).toBeDefined();
+    if (current === undefined) return;
+    expect(current.leaseOwner).not.toBe(stale.leaseOwner);
+
+    expect(
+      await recordRetellIngestionFailure(stale.auth, stale, {
+        providerCallId: "call_from_previous_lease",
+        errorKind: "provider_call_not_found",
+        now: reassignedAt,
+      }),
+    ).toEqual({ recorded: false, changed: false });
+    expect(
+      await renewRetellMonitoringLease(current.auth, current, {
+        now: reassignedAt,
+      }),
+    ).toBe(true);
+    expect((await listMonitoringSetups(auth))[0]?.agents[0]).toMatchObject({
+      state: "importing",
+      failures: [],
+    });
+  });
+
+  it("releases an old-key target without attaching its contract error", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(stale).toBeDefined();
+    if (stale === undefined) return;
+
+    const rotatedAt = new Date(SETUP_TIME.getTime() + 1_000);
+    await configureRetellMonitoring(auth, {
+      apiKey: ROTATED_RETELL_KEY,
+      agents: selected(),
+      now: rotatedAt,
+    });
+    await releaseRetellMonitoringLease(stale.auth, stale, {
+      retryAt: new Date(rotatedAt.getTime() + 30_000),
+      errorKind: "provider_contract",
+      now: rotatedAt,
+    });
+
+    expect((await listMonitoringSetups(auth))[0]?.agents[0]).toMatchObject({
+      lastErrorKind: null,
+      consecutiveFailures: 0,
+    });
+    expect(
+      await claimDueRetellMonitoringAgent({ now: rotatedAt }),
+    ).toMatchObject({ apiKey: ROTATED_RETELL_KEY });
+  });
+
+  it("does not release a selected agent through another setup id", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const liveKit = await configureLiveKitMonitoring(auth);
+    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(target).toBeDefined();
+    if (target === undefined) return;
+
+    await failRetellMonitoringTarget(
+      target.auth,
+      { ...target, setupId: liveKit.id },
+      {
+        kind: "provider_unavailable",
+        retryAt: new Date(SETUP_TIME.getTime() + 30_000),
+        now: SETUP_TIME,
+      },
+    );
+
+    expect(
+      await renewRetellMonitoringLease(target.auth, target, {
+        now: SETUP_TIME,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not receive a Retell call through another setup id", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const liveKit = await configureLiveKitMonitoring(auth);
+    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(target).toBeDefined();
+    if (target === undefined) return;
+
+    await recordRetellCallReceived(
+      target.auth,
+      {
+        setupId: liveKit.id,
+        monitoredAgentId: target.monitoredAgentId,
+      },
+      new Date(SETUP_TIME.getTime() + 1_000),
+    );
+
+    const retell = (await listMonitoringSetups(auth)).find(
+      (setup) => setup.agentPlatform === "retell",
+    );
+    expect(retell?.agents[0]?.lastCallReceivedAt).toBeNull();
+  });
+
   it("stops an already leased agent when another agent sets the key-wide gate", async () => {
     await configureRetellMonitoring(at(acme, ada), {
       apiKey: RETELL_KEY,
       agents: [
         ...selected(),
         {
-          providerAgentId: "agent_retell_voice_2",
-          providerAgentName: "Overflow desk",
+          platformAgentId: "agent_retell_voice_2",
+          platformAgentName: "Overflow desk",
         },
       ],
       now: SETUP_TIME,
@@ -195,6 +615,133 @@ describe("Retell Monitoring setup", () => {
         { now: new Date(SETUP_TIME.getTime() + 1_000) },
       ),
     ).toBe(false);
+  });
+
+  it("does not clear a newer key-wide failure from an older successful target", async () => {
+    await configureRetellMonitoring(at(acme, ada), {
+      apiKey: RETELL_KEY,
+      agents: [
+        ...selected(),
+        {
+          platformAgentId: "agent_retell_voice_2",
+          platformAgentName: "Overflow desk",
+        },
+      ],
+      now: SETUP_TIME,
+    });
+    const failed = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const staleSuccess = await claimDueRetellMonitoringAgent({
+      now: SETUP_TIME,
+    });
+    expect(failed).toBeDefined();
+    expect(staleSuccess).toBeDefined();
+    if (failed === undefined || staleSuccess === undefined) return;
+
+    const retryAt = new Date(SETUP_TIME.getTime() + 60_000);
+    await failRetellMonitoringTarget(failed.auth, failed, {
+      kind: "rate_limited",
+      retryAt,
+      now: SETUP_TIME,
+    });
+
+    expect(
+      await recoverRetellMonitoringSetup(
+        staleSuccess.auth,
+        staleSuccess,
+        SETUP_TIME,
+      ),
+    ).toEqual({ recovered: false });
+    expect((await listMonitoringSetups(staleSuccess.auth))[0]).toMatchObject({
+      healthState: "rate_limited",
+      blockedUntil: retryAt,
+      consecutiveFailures: 1,
+    });
+  });
+
+  it("keeps invalid credentials until the customer changes the key", async () => {
+    await configureRetellMonitoring(at(acme, ada), {
+      apiKey: RETELL_KEY,
+      agents: [
+        ...selected(),
+        {
+          platformAgentId: "agent_retell_voice_2",
+          platformAgentName: "Overflow desk",
+        },
+      ],
+      now: SETUP_TIME,
+    });
+    const invalid = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const lateUnavailable = await claimDueRetellMonitoringAgent({
+      now: SETUP_TIME,
+    });
+    expect(invalid).toBeDefined();
+    expect(lateUnavailable).toBeDefined();
+    if (invalid === undefined || lateUnavailable === undefined) return;
+
+    const invalidUntil = new Date("9999-12-31T23:59:59.999Z");
+    await failRetellMonitoringTarget(invalid.auth, invalid, {
+      kind: "invalid_credential",
+      retryAt: invalidUntil,
+      now: SETUP_TIME,
+    });
+    await failRetellMonitoringTarget(
+      lateUnavailable.auth,
+      lateUnavailable,
+      {
+        kind: "provider_unavailable",
+        retryAt: new Date(SETUP_TIME.getTime() + 30_000),
+        now: new Date(SETUP_TIME.getTime() + 1_000),
+      },
+    );
+
+    expect((await listMonitoringSetups(invalid.auth))[0]).toMatchObject({
+      healthState: "invalid_credential",
+      blockedUntil: invalidUntil,
+    });
+  });
+
+  it("does not shorten a newer Retry-After gate", async () => {
+    await configureRetellMonitoring(at(acme, ada), {
+      apiKey: RETELL_KEY,
+      agents: [
+        ...selected(),
+        {
+          platformAgentId: "agent_retell_voice_2",
+          platformAgentName: "Overflow desk",
+        },
+      ],
+      now: SETUP_TIME,
+    });
+    const rateLimited = await claimDueRetellMonitoringAgent({
+      now: SETUP_TIME,
+    });
+    const lateUnavailable = await claimDueRetellMonitoringAgent({
+      now: SETUP_TIME,
+    });
+    expect(rateLimited).toBeDefined();
+    expect(lateUnavailable).toBeDefined();
+    if (rateLimited === undefined || lateUnavailable === undefined) return;
+
+    const retryAt = new Date(SETUP_TIME.getTime() + 120_000);
+    await failRetellMonitoringTarget(rateLimited.auth, rateLimited, {
+      kind: "rate_limited",
+      retryAt,
+      now: SETUP_TIME,
+    });
+    await failRetellMonitoringTarget(
+      lateUnavailable.auth,
+      lateUnavailable,
+      {
+        kind: "provider_unavailable",
+        retryAt: new Date(SETUP_TIME.getTime() + 30_000),
+        now: new Date(SETUP_TIME.getTime() + 1_000),
+      },
+    );
+
+    expect((await listMonitoringSetups(rateLimited.auth))[0]).toMatchObject({
+      healthState: "rate_limited",
+      blockedUntil: retryAt,
+    });
   });
 
   it("keeps the provider cursor and fixed window when bounded work yields", async () => {
@@ -399,8 +946,8 @@ describe("Retell Monitoring setup", () => {
       target: {
         failureId,
         providerCallId: "call_exact_replay",
-        providerAgentId: "agent_retell_voice_1",
-        providerAgentName: "Front desk",
+        platformAgentId: "agent_retell_voice_1",
+        platformAgentName: "Front desk",
         apiKey: RETELL_KEY,
         auth: {
           organizationId: acme.organization,
@@ -417,6 +964,13 @@ describe("Retell Monitoring setup", () => {
     expect(
       await claimRetellIngestionFailureReplay(
         at(globex, gene),
+        failureId,
+        { now: SETUP_TIME },
+      ),
+    ).toEqual({ kind: "not_found" });
+    expect(
+      await claimRetellIngestionFailureReplay(
+        at(acmeOther, ada),
         failureId,
         { now: SETUP_TIME },
       ),
@@ -490,6 +1044,258 @@ describe("Retell Monitoring setup", () => {
     ).toMatchObject({ kind: "claimed" });
   });
 
+  it("ignores a replay failure that used the previous key", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(target).toBeDefined();
+    if (target === undefined) return;
+    await recordRetellIngestionFailure(target.auth, target, {
+      providerCallId: "call_rotated_replay",
+      errorKind: "provider_call_not_found",
+      now: SETUP_TIME,
+    });
+    const failureId = (await listMonitoringSetups(auth))[0]?.agents[0]
+      ?.failures[0]?.id;
+    expect(failureId).toBeDefined();
+    if (failureId === undefined) return;
+    const stale = await claimRetellIngestionFailureReplay(auth, failureId, {
+      now: SETUP_TIME,
+    });
+    expect(stale.kind).toBe("claimed");
+    if (stale.kind !== "claimed") return;
+
+    const rotatedAt = new Date(SETUP_TIME.getTime() + 1_000);
+    await configureRetellMonitoring(auth, {
+      apiKey: ROTATED_RETELL_KEY,
+      agents: selected(),
+      now: rotatedAt,
+    });
+    expect(
+      await failRetellIngestionFailureReplay(
+        stale.target.auth,
+        stale.target,
+        {
+          kind: "invalid_credential",
+          retryAt: new Date("9999-12-31T23:59:59.999Z"),
+          now: rotatedAt,
+        },
+      ),
+    ).toMatchObject({ recorded: false, changed: false, failures: 0 });
+    expect((await listMonitoringSetups(auth))[0]).toMatchObject({
+      healthState: "healthy",
+      blockedUntil: null,
+      consecutiveFailures: 0,
+    });
+    expect(
+      await claimRetellIngestionFailureReplay(auth, failureId, {
+        now: rotatedAt,
+      }),
+    ).toMatchObject({
+      kind: "claimed",
+      target: { apiKey: ROTATED_RETELL_KEY },
+    });
+  });
+
+  it("does not replace a failed call reason with an old-key replay result", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const poll = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(poll).toBeDefined();
+    if (poll === undefined) return;
+    await recordRetellIngestionFailure(poll.auth, poll, {
+      providerCallId: "call_old_key_replay_result",
+      errorKind: "provider_call_not_found",
+      now: SETUP_TIME,
+    });
+    const failureId = (await listMonitoringSetups(auth))[0]?.agents[0]
+      ?.failures[0]?.id;
+    expect(failureId).toBeDefined();
+    if (failureId === undefined) return;
+    const stale = await claimRetellIngestionFailureReplay(auth, failureId, {
+      now: SETUP_TIME,
+    });
+    expect(stale.kind).toBe("claimed");
+    if (stale.kind !== "claimed") return;
+
+    const rotatedAt = new Date(SETUP_TIME.getTime() + 1_000);
+    await configureRetellMonitoring(auth, {
+      apiKey: ROTATED_RETELL_KEY,
+      agents: selected(),
+      now: rotatedAt,
+    });
+    expect(
+      await releaseRetellIngestionFailureReplay(
+        stale.target.auth,
+        stale.target,
+        { errorKind: "platform_agent_mismatch", now: rotatedAt },
+      ),
+    ).toBe(false);
+    expect((await listMonitoringSetups(auth))[0]?.agents[0]?.failures).toEqual([
+      expect.objectContaining({
+        id: failureId,
+        errorKind: "provider_call_not_found",
+      }),
+    ]);
+    expect(
+      await claimRetellIngestionFailureReplay(auth, failureId, {
+        now: rotatedAt,
+      }),
+    ).toMatchObject({
+      kind: "claimed",
+      target: { apiKey: ROTATED_RETELL_KEY },
+    });
+  });
+
+  it("does not weaken an invalid-key gate with a late replay failure", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(target).toBeDefined();
+    if (target === undefined) return;
+    for (const providerCallId of ["call_invalid_key", "call_late_failure"]) {
+      await recordRetellIngestionFailure(target.auth, target, {
+        providerCallId,
+        errorKind: "provider_call_not_found",
+        now: SETUP_TIME,
+      });
+    }
+    const failures = (await listMonitoringSetups(auth))[0]?.agents[0]
+      ?.failures;
+    expect(failures).toHaveLength(2);
+    if (failures === undefined) return;
+    const invalid = await claimRetellIngestionFailureReplay(
+      auth,
+      failures[0]!.id,
+      { now: SETUP_TIME },
+    );
+    const late = await claimRetellIngestionFailureReplay(
+      auth,
+      failures[1]!.id,
+      { now: SETUP_TIME },
+    );
+    expect(invalid.kind).toBe("claimed");
+    expect(late.kind).toBe("claimed");
+    if (invalid.kind !== "claimed" || late.kind !== "claimed") return;
+
+    const invalidUntil = new Date("9999-12-31T23:59:59.999Z");
+    await failRetellIngestionFailureReplay(
+      invalid.target.auth,
+      invalid.target,
+      {
+        kind: "invalid_credential",
+        retryAt: invalidUntil,
+        now: SETUP_TIME,
+      },
+    );
+    await failRetellIngestionFailureReplay(late.target.auth, late.target, {
+      kind: "provider_unavailable",
+      retryAt: new Date(SETUP_TIME.getTime() + 30_000),
+      now: new Date(SETUP_TIME.getTime() + 1_000),
+    });
+
+    expect((await listMonitoringSetups(auth))[0]).toMatchObject({
+      healthState: "invalid_credential",
+      blockedUntil: invalidUntil,
+    });
+  });
+
+  it("does not deadlock a replay failure behind setup work", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    const poll = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    expect(poll).toBeDefined();
+    if (poll === undefined) return;
+    await recordRetellIngestionFailure(poll.auth, poll, {
+      providerCallId: "call_lock_order",
+      errorKind: "provider_call_not_found",
+      now: SETUP_TIME,
+    });
+    const failureId = (await listMonitoringSetups(auth))[0]?.agents[0]
+      ?.failures[0]?.id;
+    expect(failureId).toBeDefined();
+    if (failureId === undefined) return;
+    const replay = await claimRetellIngestionFailureReplay(auth, failureId, {
+      now: SETUP_TIME,
+    });
+    expect(replay.kind).toBe("claimed");
+    if (replay.kind !== "claimed") return;
+
+    const setupWork = await openSingleConnection(database.url);
+    let setupWorkOpen = true;
+    try {
+      await setupWork.sql("begin");
+      await setupWork.sql(
+        "select id from monitoring_setup where id = $1 for update",
+        [replay.target.setupId],
+      );
+
+      const recording = failRetellIngestionFailureReplay(
+        replay.target.auth,
+        replay.target,
+        {
+          kind: "provider_unavailable",
+          retryAt: new Date(SETUP_TIME.getTime() + 30_000),
+          now: SETUP_TIME,
+        },
+      ).then(
+        (value) => ({ kind: "recorded" as const, value }),
+        (error: unknown) => ({ kind: "failed" as const, error }),
+      );
+
+      let waitingForSetup = false;
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const activity = await database.sql<{ waiting: boolean }>(`
+          select exists (
+            select 1 from pg_stat_activity
+            where datname = current_database()
+              and state = 'active'
+              and wait_event_type = 'Lock'
+              and query like '%monitoring_setup%'
+          ) as waiting
+        `);
+        waitingForSetup = activity.rows[0]?.waiting ?? false;
+        if (waitingForSetup) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(waitingForSetup).toBe(true);
+
+      // Setup removal and reconfiguration take this child row after the setup
+      // row. This must be available while the replay failure waits above.
+      await setupWork.sql(
+        "select id from retell_ingestion_failure where id = $1 for update",
+        [failureId],
+      );
+      await setupWork.sql("commit");
+      setupWorkOpen = false;
+
+      const outcome = await recording;
+      expect(outcome.kind).toBe("recorded");
+      if (outcome.kind === "recorded") {
+        expect(outcome.value).toMatchObject({ recorded: true, failures: 1 });
+      }
+    } finally {
+      if (setupWorkOpen) await setupWork.sql("rollback").catch(() => undefined);
+      await setupWork.close();
+    }
+  });
+
   it("clears degraded state only after every failed call is resolved", async () => {
     const auth = at(acme, ada);
     await configureRetellMonitoring(auth, {
@@ -554,15 +1360,46 @@ describe("Retell Monitoring setup", () => {
     const offer = {
       traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       providerCallId: "call_one_visible_trace",
-      providerAgentId: "agent_retell_voice_1",
-      providerAgentName: "Front desk",
-      providerAgentVersion: "7",
+      platformAgentId: "agent_retell_voice_1",
+      platformAgentName: "Front desk",
+      platformAgentVersion: "7",
       payload: '{"call_id":"call_one_visible_trace"}',
       endedAt: SETUP_TIME,
     };
 
     expect(await claimProductionTrace(auth, offer)).toMatchObject(offer);
     expect(await claimProductionTrace(auth, offer)).toBeUndefined();
+  });
+
+  it("finishes a production trace only inside the acting project", async () => {
+    const offer = {
+      traceId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      providerCallId: "call_project_owned_trace",
+      platformAgentId: "agent_retell_voice_1",
+      payload: '{"call_id":"call_project_owned_trace"}',
+      endedAt: SETUP_TIME,
+    };
+    expect(await claimProductionTrace(at(acme, ada), offer)).toBeDefined();
+
+    await finishProductionTrace(at(acmeOther, ada), {
+      traceId: offer.traceId,
+      degraded: false,
+    });
+    let stored = await database.sql<{ status: string }>(
+      "select status from production_trace_claim where trace_id = $1",
+      [offer.traceId],
+    );
+    expect(stored.rows[0]?.status).toBe("claimed");
+
+    await finishProductionTrace(at(acme, ada), {
+      traceId: offer.traceId,
+      degraded: false,
+    });
+    stored = await database.sql<{ status: string }>(
+      "select status from production_trace_claim where trace_id = $1",
+      [offer.traceId],
+    );
+    expect(stored.rows[0]?.status).toBe("written");
   });
 
   it("restores selected-agent progress when a stale trace claim replays", async () => {
@@ -575,7 +1412,7 @@ describe("Retell Monitoring setup", () => {
     const replayedAt = new Date("2026-08-20T08:03:00.000Z");
 
     await recordRetellMonitoringReceived(auth, {
-      providerAgentId: selected()[0].providerAgentId,
+      platformAgentId: selected()[0].platformAgentId,
       receivedAt: replayedAt,
     });
 

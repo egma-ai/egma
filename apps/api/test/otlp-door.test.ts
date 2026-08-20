@@ -237,6 +237,119 @@ describe("the JSON encoding", () => {
     expect(row).toEqual({ organization_id: organizationId, project_id: projectId });
   });
 
+  it("redacts credential-like OTLP data before fields or payload are stored", async () => {
+    const traceId = "19191919191919191919191919191919";
+    const response = await post(
+      JSON.stringify({
+        resourceSpans: [
+          {
+            resource: {
+              attributes: [
+                {
+                  key: "session.id",
+                  value: { stringValue: "Bearer resource-secret" },
+                },
+                {
+                  key: "api_key",
+                  value: { stringValue: "resource-api-secret" },
+                },
+              ],
+            },
+            scopeSpans: [
+              {
+                scope: {
+                  name: "livekit-agents",
+                  attributes: [
+                    {
+                      key: "authorization",
+                      value: { stringValue: "Bearer scope-secret" },
+                    },
+                  ],
+                },
+                spans: [
+                  jsonSpan({
+                    traceId,
+                    spanId: "1919191919191919",
+                    attributes: [
+                      {
+                        key: "lk.response.text",
+                        value: { stringValue: "Bearer transcript-secret" },
+                      },
+                      {
+                        key: "lk.agent_name",
+                        value: { stringValue: "Basic agent-secret" },
+                      },
+                      {
+                        key: "password",
+                        value: { stringValue: "span-password-secret" },
+                      },
+                      {
+                        key: "metadata",
+                        value: {
+                          kvlistValue: {
+                            values: [
+                              {
+                                key: "access_token",
+                                value: { stringValue: "nested-token-secret" },
+                              },
+                            ],
+                          },
+                        },
+                      },
+                    ],
+                    events: [
+                      {
+                        name: "provider-event",
+                        timeUnixNano: "1785693880781989804",
+                        attributes: [
+                          {
+                            key: "client_secret",
+                            value: { stringValue: "event-client-secret" },
+                          },
+                        ],
+                      },
+                    ],
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(response.statusCode).toBe(200);
+
+    const [row] = await store().rows<{
+      payload: string;
+      provider_call_id: string;
+      text: string;
+      platform_agent_name: string;
+    }>(
+      `select payload, provider_call_id, text, platform_agent_name from spans ` +
+        `where trace_id = '${traceId}'`,
+    );
+    expect(row).toBeDefined();
+    const stored = JSON.stringify(row);
+    for (const secretValue of [
+      "resource-secret",
+      "resource-api-secret",
+      "scope-secret",
+      "transcript-secret",
+      "agent-secret",
+      "span-password-secret",
+      "nested-token-secret",
+      "event-client-secret",
+    ]) {
+      expect(stored).not.toContain(secretValue);
+    }
+    expect(row).toMatchObject({
+      provider_call_id: "",
+      text: "",
+      platform_agent_name: "",
+    });
+    expect(row?.payload).toContain("[REDACTED]");
+  });
+
   it("keeps a Pipecat service span whole without making a transcript turn", async () => {
     const traceId = "21212121212121212121212121212121";
     const frameworkSpan = jsonSpan({

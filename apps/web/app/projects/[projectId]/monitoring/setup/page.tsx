@@ -21,6 +21,7 @@ import {
   type MonitoringSetups,
   type RetellAgentChoice,
   type RetellAgentChoices,
+  type RetellMonitoredAgent,
 } from "../../../../../lib/monitoring.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
@@ -41,6 +42,10 @@ import {
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import {
+  StateMark,
+  type StateMarkKind,
+} from "../../../../../ui/run-status.tsx";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
@@ -118,7 +123,7 @@ function Setup({ projectId }: { readonly projectId: string }) {
         { label: "Monitoring", href: back },
         { label: "Setup" },
       ]}
-      lead="Choose the agent platform. Egma then shows the setup for production conversations on that platform."
+      lead="Choose the agent platform. Egma then shows how to monitor production conversations on that platform."
     />
   );
 
@@ -245,15 +250,36 @@ function Setup({ projectId }: { readonly projectId: string }) {
   );
 }
 
-function statusText(setup: MonitoringSetup): string {
+type StatusPresentation = {
+  readonly text: string;
+  readonly mark: StateMarkKind;
+  readonly moving?: boolean;
+};
+
+function statusPresentation(setup: MonitoringSetup): StatusPresentation {
   if (setup.health.state === "invalid_credential") {
-    return "Retell rejected the stored key. Enter a new key below.";
+    return {
+      text: "Retell rejected the stored key. Enter a new key below.",
+      mark: "error",
+    };
   }
   if (setup.health.state === "rate_limited") {
-    return "Retell is rate limiting this setup. Egma will retry.";
+    return {
+      text: "Retell is rate limiting this setup. Egma will retry.",
+      mark: "waiting",
+    };
   }
   if (setup.health.state === "provider_unavailable") {
-    return "Retell did not answer. Egma will retry.";
+    return { text: "Retell did not answer. Egma will retry.", mark: "error" };
+  }
+  const unexpected = setup.agents.filter(
+    (agent) => agent.last_error_kind === "provider_contract",
+  ).length;
+  if (unexpected > 0) {
+    return {
+      text: `${unexpected} ${unexpected === 1 ? "agent received" : "agents received"} an unexpected Retell response. Egma will retry.`,
+      mark: "error",
+    };
   }
   const degraded = setup.agents.filter(
     (agent) => agent.state === "degraded",
@@ -263,19 +289,49 @@ function statusText(setup: MonitoringSetup): string {
   ).length;
   if (degraded > 0) {
     const affected = `${degraded} ${degraded === 1 ? "agent needs" : "agents need"} attention.`;
-    return importing === 0
-      ? affected
-      : `${affected} ${importing} ${importing === 1 ? "agent is" : "agents are"} still importing.`;
+    return {
+      text:
+        importing === 0
+          ? affected
+          : `${affected} ${importing} ${importing === 1 ? "agent is" : "agents are"} still importing.`,
+      mark: "error",
+    };
   }
   if (importing > 0) {
-    return `${importing} ${importing === 1 ? "agent is" : "agents are"} importing the previous 30 days.`;
+    return {
+      text: `${importing} ${importing === 1 ? "agent is" : "agents are"} importing the previous 30 days.`,
+      mark: "active",
+      moving: true,
+    };
   }
   if (setup.health.last_received_at === null) {
-    return "Waiting for the first production conversation.";
+    return {
+      text: "Waiting for the first production conversation.",
+      mark: "waiting",
+    };
   }
-  return `Last production conversation received ${new Date(
-    setup.health.last_received_at,
-  ).toLocaleString()}.`;
+  return {
+    text: `Last production conversation received ${new Date(
+      setup.health.last_received_at,
+    ).toLocaleString()}.`,
+    mark: "complete",
+  };
+}
+
+function agentProgress(agent: RetellMonitoredAgent): StatusPresentation {
+  if (agent.last_error_kind === "provider_contract") {
+    return { text: "Unexpected Retell response", mark: "error" };
+  }
+  if (agent.state === "degraded") {
+    return { text: "Needs attention", mark: "error" };
+  }
+  if (agent.state === "importing") {
+    return { text: "Importing 30 days", mark: "active", moving: true };
+  }
+  if (agent.scan_kind === "reconciliation") {
+    return { text: "Checking recent history", mark: "active", moving: true };
+  }
+  return { text: "Active", mark: "complete" };
 }
 
 function SetupStatus({
@@ -294,6 +350,7 @@ function SetupStatus({
   const [retrying, setRetrying] = useState<string | null>(null);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const label = setup.agent_platform === "retell" ? "Retell" : "LiveKit Agents";
+  const status = statusPresentation(setup);
 
   async function remove(): Promise<void> {
     setRemoving(true);
@@ -344,7 +401,10 @@ function SetupStatus({
     <div className={styles.status}>
       <div>
         <h3 className={styles.statusTitle}>{label}</h3>
-        <p className={styles.statusText}>{statusText(setup)}</p>
+        <div className={styles.statusSummary}>
+          <StateMark kind={status.mark} moving={status.moving} />
+          <p className={styles.statusText}>{status.text}</p>
+        </div>
         {setup.agent_platform === "retell" ? (
           <>
             <p className={styles.detail}>
@@ -356,30 +416,32 @@ function SetupStatus({
                 : ` · key ending ${setup.credentials_hint}`}
             </p>
             <ul className={styles.agentProgress}>
-              {setup.agents.map((agent) => (
-                <li key={agent.id}>
-                  <span>
-                    <strong>{agent.platform_agent_name}</strong>
-                    <code>{agent.platform_agent_id}</code>
-                  </span>
-                  <span>
-                    {agent.state === "degraded"
-                      ? "Needs attention"
-                      : agent.state === "importing"
-                        ? "Importing 30 days"
-                        : agent.scan_kind === "reconciliation"
-                          ? "Checking recent history"
-                          : "Active"}
-                  </span>
-                </li>
-              ))}
+              {setup.agents.map((agent) => {
+                const progress = agentProgress(agent);
+                return (
+                  <li key={agent.id}>
+                    <span>
+                      <strong>{agent.platform_agent_name}</strong>
+                      <code>{agent.platform_agent_id}</code>
+                    </span>
+                    <span className={styles.stateWord}>
+                      <StateMark kind={progress.mark} moving={progress.moving} />
+                      {progress.text}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
             {setup.agents.flatMap((agent) =>
               agent.failures.map((failure) => (
                 <div className={styles.failedImport} key={failure.id}>
-                  <span>
-                    Retell call <code>{failure.provider_call_id}</code> could not
-                    be imported.
+                  <span className={styles.stateWord}>
+                    <StateMark kind="error" />
+                    <span>
+                      Retell conversation{" "}
+                      <code>{failure.provider_call_id}</code> could not be
+                      imported.
+                    </span>
                   </span>
                   <Button
                     disabled={!mayConfigure}
@@ -414,13 +476,16 @@ function SetupStatus({
       {refused === null ? null : <Problem>{refused.message}</Problem>}
     </div>
     {confirmingRemove ? (
-      <Dialog title={`Remove ${label} Monitoring setup?`} onClose={() => setConfirmingRemove(false)}>
+      <Dialog
+        title={`Remove ${label} Monitoring setup?`}
+        onClose={() => setConfirmingRemove(false)}
+      >
         {(dismiss) => (
           <>
             <p>
               {setup.agent_platform === "retell"
-                ? "Egma will stop polling every selected Retell agent. Existing production traces stay in Monitoring."
-                : "Egma will remove this setup status. Existing traces stay, and the LiveKit worker keeps exporting until you remove its Egma SDK configuration."}
+                ? "Egma will stop polling every selected Retell agent. Existing production conversations stay in Monitoring."
+                : "Egma will remove this setup status. Existing production conversations stay, and the LiveKit worker keeps exporting until you remove its Egma SDK configuration."}
             </p>
             <Actions>
               <Button onClick={dismiss}>Keep setup</Button>
@@ -589,9 +654,9 @@ function RetellSetup({
 
         {agents === null ? null : (
           <Help>
-            Egma imports the previous 30 days for each selected agent, without
-            creating another transcript for a call it already imported. It then
-            checks for new calls about every 30 seconds.
+            Egma imports the previous 30 days for each selected agent without
+            creating duplicate conversations. It then checks for new
+            conversations about every 30 seconds.
           </Help>
         )}
         {refused === null ? null : <Problem>{refused.message}</Problem>}

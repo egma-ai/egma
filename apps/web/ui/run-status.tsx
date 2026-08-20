@@ -71,7 +71,7 @@ const RUN_STATUS_MEANING: Readonly<Record<RunStatusWord, string>> = {
     "Somebody stopped this run, or the agent or connection it used was archived. Work already reported stays on the record.",
 };
 
-type StateMarkKind =
+export type StateMarkKind =
   | "waiting"
   | "active"
   | "complete"
@@ -87,7 +87,7 @@ type StateMarkKind =
  * badges easier to scan and keeps their difference visible without asking a
  * reader to learn the temporary green, amber, and red compatibility palette.
  */
-function StateMark({
+export function StateMark({
   kind,
   moving = false,
 }: {
@@ -97,6 +97,7 @@ function StateMark({
   return (
     <svg
       className={`${styles.stateMark}${moving ? ` ${styles.stateMarkMoving}` : ""}`}
+      data-state-mark={kind}
       data-motion={moving ? "active" : undefined}
       viewBox="0 0 12 12"
       aria-hidden="true"

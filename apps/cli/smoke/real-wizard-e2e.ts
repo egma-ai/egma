@@ -1011,7 +1011,7 @@ async function main(): Promise<void> {
     check(gate.refused.length === 0, "nothing but reads was asked of Retell");
 
     if (walks > 1) {
-      // A second walk over the same provider agent finds the registration the
+      // A second walk over the same platform agent finds the registration the
       // first one made. Two identities for one voice agent would split a
       // team's results history in half, so a retry has to land on the first.
       const [first, second] = registered;

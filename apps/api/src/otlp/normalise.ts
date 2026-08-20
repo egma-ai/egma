@@ -24,9 +24,10 @@ import type {
  * per-turn spans — inventing structure that was never measured would corrupt
  * every comparison the numbers exist for.
  *
- * **Nothing is dropped.** What the columns do not have a place for stays in the
- * verbatim payload, resource and scope attributes included, because the one
- * mistake no later migration can undo is not having captured something.
+ * **Safe provider data is kept.** What the columns do not have a place for
+ * stays in the payload, resource and scope attributes included. Credential
+ * fields and bearer-like values are redacted before any field is read or any
+ * payload is serialized.
  *
  * **Tenancy is not the payload's business.** A resource attribute naming an
  * organization or a project is read by nothing here, deliberately. The customer
@@ -252,6 +253,56 @@ const PLATFORM_AGENT_NAME_ATTRIBUTES = ["lk.agent_name"];
 const PLATFORM_AGENT_VERSION_ATTRIBUTES = ["lk.agent_version"];
 const CONNECTION_KIND_ATTRIBUTES = ["egma.connection_kind"];
 
+/** The visible marker left where an OTLP producer supplied a credential. */
+const OTLP_REDACTED = "[REDACTED]";
+
+function normalizedKey(value: string): string {
+  return value.trim().toLowerCase().replaceAll(/[^a-z0-9]+/gu, "-");
+}
+
+function isCredentialKey(key: string): boolean {
+  const normalized = normalizedKey(key);
+  return /(?:^|-)(?:access-token|api-key|auth|authorization|credential|cookie|password|secret|signature|token)(?:-|$)/u.test(
+    normalized,
+  );
+}
+
+const AUTHORIZATION_VALUE = /\b(?:bearer|basic)\s+[^\s,;]+/giu;
+const CREDENTIAL_ASSIGNMENT =
+  /([?&;]\s*(?:access[_-]?token|api[_-]?key|auth|authorization|credential|password|secret|signature|token)=)[^&#;\s]+/giu;
+
+function safeString(value: string): string {
+  return value
+    .replace(AUTHORIZATION_VALUE, OTLP_REDACTED)
+    .replace(CREDENTIAL_ASSIGNMENT, `$1${OTLP_REDACTED}`);
+}
+
+/** Copy one decoded OTLP document after removing credential-bearing values. */
+function safeOtlpProviderData<T>(value: T): T {
+  const copied = (held: unknown): unknown => {
+    if (typeof held === "string") return safeString(held);
+    if (Array.isArray(held)) return held.map(copied);
+    if (typeof held !== "object" || held === null) return held;
+
+    const row = held as Readonly<Record<string, unknown>>;
+    const attributeKey = typeof row["key"] === "string" ? row["key"] : "";
+    const redactsAttribute =
+      attributeKey !== "" && isCredentialKey(attributeKey);
+    const safe: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(row)) {
+      if (redactsAttribute && key === "value") {
+        safe[key] = { stringValue: OTLP_REDACTED };
+      } else if (isCredentialKey(key)) {
+        safe[key] = OTLP_REDACTED;
+      } else {
+        safe[key] = copied(nested);
+      }
+    }
+    return safe;
+  };
+  return copied(value) as T;
+}
+
 /**
  * How much of one export egma will turn into rows.
  *
@@ -264,7 +315,7 @@ const CONNECTION_KIND_ATTRIBUTES = ["egma.connection_kind"];
  * Both caps are needed because they answer different requests. A body inside
  * the wire limit can still carry a hundred thousand tiny spans, which is what
  * the count is for; and it can carry two thousand spans sharing one enormous
- * resource, where every row repeats that resource verbatim and a 1.3 MiB
+ * resource, where every row repeats the safe resource and a 1.3 MiB
  * request becomes gigabytes of rows. The byte budget is measured on what the
  * rows actually weigh, which is the only number that predicts the memory.
  */
@@ -300,7 +351,9 @@ function attribute(
   key: string,
 ): string {
   const found = (attributes ?? []).find((entry) => entry.key === key);
-  return found === undefined ? "" : textOf(found.value);
+  if (found === undefined) return "";
+  const value = textOf(found.value);
+  return value === OTLP_REDACTED ? "" : value;
 }
 
 function firstAttribute(
@@ -463,11 +516,10 @@ function environmentOf(
  * Everything on a row except the span itself, serialised once for the whole
  * scope rather than once per span.
  *
- * The resource and the scope ride every row on purpose — a row has to say where
- * it came from without a join — but they are the same two objects for every
- * span in the group, and re-serialising a megabyte of resource attributes ten
- * thousand times is how a small request becomes gigabytes of work. Built lazily,
- * so a group whose spans are all refused never pays for it at all.
+ * The safe resource and scope ride every row on purpose — a row has to say
+ * where it came from without a join — but they are the same two objects for
+ * every span in the group. Built lazily, so a group whose spans are all
+ * refused never pays for serialization.
  */
 function payloadPrefixFor(
   resourceSpans: OtlpResourceSpans,
@@ -491,8 +543,8 @@ const TOO_MANY_SPANS =
 
 const TOO_MANY_BYTES =
   `this export's spans came to more than the ${MAXIMUM_NORMALISED_BYTES / (1024 * 1024)} MiB of rows Egma ` +
-  "writes from one request — every span carries its resource and its scope " +
-  "verbatim, so a large resource repeated across many spans reaches this long " +
+  "writes from one request — every span carries its safe resource and scope, " +
+  "so a large resource repeated across many spans reaches this long " +
   "before the body does. The spans that fitted were stored and the rest were " +
   "refused rather than retried; flush smaller batches.";
 
@@ -520,7 +572,8 @@ export function normaliseOtlpExport(
   let excess: RejectedSpan | undefined;
   let normalisedBytes = 0;
 
-  for (const resourceSpans of request.resourceSpans ?? []) {
+  for (const receivedResourceSpans of request.resourceSpans ?? []) {
+    const resourceSpans = safeOtlpProviderData(receivedResourceSpans);
     const environment = environmentOf(resourceSpans);
     const attribution =
       attributionFor?.(resourceSpans) ?? INGESTED_AT_THIS_DOOR;

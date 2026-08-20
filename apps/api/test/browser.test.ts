@@ -1161,7 +1161,7 @@ describe("what a project recorded in production", () => {
         `${FIXTURE_TRACE.humanTurns} human · ${FIXTURE_TRACE.agentTurns} agent`,
       );
       expect(shown).toContain(String(FIXTURE_TRACE.spans));
-      expect(shown).toContain("livekit");
+      expect(shown).toContain("LiveKit Agents");
 
       /*
        * **And no column saying `production`.** Every row on this surface is
@@ -2609,6 +2609,10 @@ describe("the complete product, walked in order in a second project", () => {
       // browser, so waiting for the first field is waiting for that read.
       await walk.waitForSelector("#agent-platform");
 
+      await walk.getByLabel("Platform").selectOption("retell");
+      await walk
+        .getByLabel("Access")
+        .selectOption("phone_number.public_e164");
       await walk.fill("#connection-name", "Retell staging");
       await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
       await walk.getByRole("button", { name: "Load Retell agents" }).click();

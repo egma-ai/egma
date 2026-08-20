@@ -132,7 +132,7 @@ For each selected voice agent, Egma:
 - imports the previous 30 days;
 - checks for new terminal calls about every 30 seconds;
 - performs a daily 30-day reconciliation for a call that appeared late;
-- shows one transcript per Retell call in the project, even when an import page
+- shows one production conversation per Retell call in the project, even when an import page
   or historical window is retried;
 - shows import, last received, invalid-credential, rate-limit, provider-unavailable,
   and degraded-call state on the setup page.
@@ -141,7 +141,7 @@ If Retell cannot supply one complete call after bounded retries, Egma keeps a
 safe failure record and continues importing later calls. The setup page names
 that Retell call and offers **Retry import**. This exact-call retry still works
 after the call has moved outside the normal 30-day list window, and the project
-claim prevents it from creating a second transcript.
+claim prevents it from creating a second production conversation.
 
 Polling reads Retell's current v3 List Calls contract and then reads the full
 call document for transcript and tool evidence. It imports terminal `ended`,

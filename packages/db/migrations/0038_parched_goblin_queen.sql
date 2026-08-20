@@ -33,6 +33,7 @@ CREATE TABLE "monitoring_setup" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "monitoring_setup_project_platform_unique" UNIQUE("project_id","agent_platform"),
+	CONSTRAINT "monitoring_setup_id_tenant_unique" UNIQUE("id","project_id","organization_id"),
 	CONSTRAINT "monitoring_setup_id_prefix" CHECK ("monitoring_setup"."id" ~ '^mns_[0-9A-HJKMNP-TV-Z]{26}$'),
 	CONSTRAINT "monitoring_setup_platform_allowed" CHECK ("monitoring_setup"."agent_platform" in ('retell', 'livekit_agents')),
 	CONSTRAINT "monitoring_setup_strategy_allowed" CHECK ("monitoring_setup"."strategy" in ('retell_api_polling', 'livekit_otlp')),
@@ -68,8 +69,8 @@ CREATE TABLE "retell_monitored_agent" (
 	"monitoring_setup_id" text COLLATE "C" NOT NULL,
 	"organization_id" text COLLATE "C" NOT NULL,
 	"project_id" text COLLATE "C" NOT NULL,
-	"provider_agent_id" text NOT NULL,
-	"provider_agent_name" text NOT NULL,
+	"platform_agent_id" text NOT NULL,
+	"platform_agent_name" text NOT NULL,
 	"state" text DEFAULT 'importing' NOT NULL,
 	"scan_kind" text,
 	"scan_from" timestamp with time zone,
@@ -94,7 +95,8 @@ CREATE TABLE "retell_monitored_agent" (
 	"last_call_received_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "retell_monitored_agent_setup_provider_unique" UNIQUE("monitoring_setup_id","provider_agent_id"),
+	CONSTRAINT "retell_monitored_agent_setup_platform_agent_unique" UNIQUE("monitoring_setup_id","platform_agent_id"),
+	CONSTRAINT "retell_monitored_agent_id_tenant_unique" UNIQUE("id","project_id","organization_id"),
 	CONSTRAINT "retell_monitored_agent_id_prefix" CHECK ("retell_monitored_agent"."id" ~ '^rma_[0-9A-HJKMNP-TV-Z]{26}$'),
 	CONSTRAINT "retell_monitored_agent_state_allowed" CHECK ("retell_monitored_agent"."state" in ('importing', 'active', 'degraded')),
 	CONSTRAINT "retell_monitored_agent_scan_kind_allowed" CHECK ("retell_monitored_agent"."scan_kind" in ('historical_import', 'regular', 'reconciliation')),
@@ -175,9 +177,9 @@ CREATE TABLE "production_trace_claim" (
 	"project_id" text COLLATE "C" NOT NULL,
 	"trace_id" text NOT NULL,
 	"provider_call_id" text NOT NULL,
-	"provider_agent_id" text NOT NULL,
-	"provider_agent_name" text,
-	"provider_agent_version" text,
+	"platform_agent_id" text NOT NULL,
+	"platform_agent_name" text,
+	"platform_agent_version" text,
 	"payload" text NOT NULL,
 	"ended_at" timestamp with time zone NOT NULL,
 	"degraded" boolean DEFAULT false NOT NULL,
@@ -196,9 +198,9 @@ ALTER TABLE "monitoring_setup" ADD CONSTRAINT "monitoring_setup_organization_id_
 ALTER TABLE "monitoring_setup" ADD CONSTRAINT "monitoring_setup_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "monitoring_setup" ADD CONSTRAINT "monitoring_setup_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "retell_ingestion_failure" ADD CONSTRAINT "retell_ingestion_failure_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "retell_ingestion_failure" ADD CONSTRAINT "retell_ingestion_failure_retell_monitored_agent_id_retell_monitored_agent_id_fk" FOREIGN KEY ("retell_monitored_agent_id") REFERENCES "public"."retell_monitored_agent"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "retell_ingestion_failure" ADD CONSTRAINT "retell_ingestion_failure_agent_tenant_fk" FOREIGN KEY ("retell_monitored_agent_id","project_id","organization_id") REFERENCES "public"."retell_monitored_agent"("id","project_id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "retell_ingestion_failure" ADD CONSTRAINT "retell_ingestion_failure_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "retell_monitored_agent" ADD CONSTRAINT "retell_monitored_agent_monitoring_setup_id_monitoring_setup_id_fk" FOREIGN KEY ("monitoring_setup_id") REFERENCES "public"."monitoring_setup"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "retell_monitored_agent" ADD CONSTRAINT "retell_monitored_agent_setup_tenant_fk" FOREIGN KEY ("monitoring_setup_id","project_id","organization_id") REFERENCES "public"."monitoring_setup"("id","project_id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "retell_monitored_agent" ADD CONSTRAINT "retell_monitored_agent_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "retell_monitored_agent" ADD CONSTRAINT "retell_monitored_agent_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "production_trace_claim" ADD CONSTRAINT "production_trace_claim_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

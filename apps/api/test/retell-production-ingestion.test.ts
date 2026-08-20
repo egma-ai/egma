@@ -17,7 +17,10 @@ import {
   type RetellProductionProvider,
   type RetellProductionWriter,
 } from "../src/retell-production-ingestion.ts";
-import type { RetellCallPageRequest } from "../src/retell/api.ts";
+import {
+  hydrateRetellCall,
+  type RetellCallPageRequest,
+} from "../src/retell/api.ts";
 import type { RetellCall } from "../src/retell/normalise.ts";
 
 const BASE = new Date("2026-08-19T12:00:00.000Z");
@@ -32,8 +35,8 @@ const AUTH = {
 const TARGET: RetellMonitoringTarget = {
   setupId: "mns_ingestion_test",
   monitoredAgentId: "rma_ingestion_test",
-  providerAgentId: "agent-secret-id-must-not-be-logged",
-  providerAgentName: "Private agent name must not be logged",
+  platformAgentId: "agent-secret-id-must-not-be-logged",
+  platformAgentName: "Private agent name must not be logged",
   apiKey: "retell-key-must-not-be-logged",
   scanKind: "historical_import",
   scanFrom: new Date("2026-07-20T12:00:00.000Z"),
@@ -51,8 +54,8 @@ const REPLAY_TARGET: RetellIngestionFailureReplayTarget = {
   monitoredAgentId: TARGET.monitoredAgentId,
   failureId: "rif_explicit_replay_test",
   providerCallId: "call_older_than_import_window",
-  providerAgentId: TARGET.providerAgentId,
-  providerAgentName: TARGET.providerAgentName,
+  platformAgentId: TARGET.platformAgentId,
+  platformAgentName: TARGET.platformAgentName,
   apiKey: TARGET.apiKey,
   setupConsecutiveFailures: 0,
   leaseOwner: "replay-lease-secret-must-not-be-logged",
@@ -193,7 +196,7 @@ function replayStore(
 function summary(callId: string): RetellCall {
   return {
     call_id: callId,
-    agent_id: TARGET.providerAgentId,
+    agent_id: TARGET.platformAgentId,
     call_status: "ended",
     call_type: "phone_call",
     start_timestamp: BASE.getTime() - 20_000,
@@ -426,6 +429,27 @@ describe("Retell production ingestion", () => {
     expect(calls).toBe(2);
     expect(recorded.checkpoints).toHaveLength(1);
     expect(recorded.releases).toEqual(["provider_contract"]);
+    expect(result.stoppedBecause).toBe("provider_contract");
+  });
+
+  it("preserves a provider-contract refusal from the Retell adapter", async () => {
+    const recorded = record();
+    const { log } = logger();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return { kind: "refused", reason: "provider-contract" };
+        },
+      }),
+      writer: writer(),
+      clock: () => BASE,
+    });
+
+    expect(recorded.releases).toEqual(["provider_contract"]);
+    expect(recorded.failures).toEqual([]);
     expect(result.stoppedBecause).toBe("provider_contract");
   });
 
@@ -833,8 +857,8 @@ describe("Retell production ingestion", () => {
     expect(recorded.failures[0]?.retryAt.getUTCFullYear()).toBe(9999);
     expect(events.error).toHaveLength(1);
     expect(JSON.stringify(events)).not.toContain(TARGET.apiKey);
-    expect(JSON.stringify(events)).not.toContain(TARGET.providerAgentId);
-    expect(JSON.stringify(events)).not.toContain(TARGET.providerAgentName);
+    expect(JSON.stringify(events)).not.toContain(TARGET.platformAgentId);
+    expect(JSON.stringify(events)).not.toContain(TARGET.platformAgentName);
   });
 
   it("records a missing hydrated call, continues the page, and logs one degraded transition", async () => {
@@ -877,6 +901,97 @@ describe("Retell production ingestion", () => {
     expect(events.info).toHaveLength(1);
     expect(JSON.stringify(events)).not.toContain("private-missing-call-id");
     expect(JSON.stringify(events)).not.toContain("private-good-call-id");
+  });
+
+  it("stops a stale target when its permanent failure is not recorded", async () => {
+    const recorded = record();
+    const { log } = logger();
+    let providerRequests = 0;
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded, TARGET, {
+        async recordRetellIngestionFailure() {
+          return { recorded: false, changed: false };
+        },
+      }),
+      provider: provider({
+        async listTerminalCalls() {
+          providerRequests += 1;
+          return {
+            kind: "calls",
+            calls: [summary("private-stale-call-id")],
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall() {
+          return { kind: "not-found" };
+        },
+      }),
+      writer: writer(),
+      clock: () => BASE,
+    });
+
+    expect(providerRequests).toBe(1);
+    expect(result).toMatchObject({
+      stoppedBecause: "lease_lost",
+      permanentFailures: 0,
+    });
+  });
+
+  it("records a malformed full call after bounded retries and continues the page", async () => {
+    const recorded = record();
+    const writes: RetellCall[] = [];
+    let malformedHydrationAttempts = 0;
+    const { log } = logger();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: [
+              summary("private-malformed-call-id"),
+              summary("private-good-call-id"),
+            ],
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        hydrateRetellCall,
+      }),
+      writer: writer(writes),
+      reach: {
+        url: "https://retell.invalid",
+        fetchImpl: (async (input: string | URL | Request) => {
+          const callId = decodeURIComponent(String(input).split("/").at(-1) ?? "");
+          if (callId === "private-malformed-call-id") {
+            malformedHydrationAttempts += 1;
+            return new Response(
+              JSON.stringify({
+                ...hydrated(callId),
+                transcript_with_tool_calls: "Agent: Hello.",
+              }),
+              { status: 200 },
+            );
+          }
+          return new Response(JSON.stringify(hydrated(callId)), { status: 200 });
+        }) as typeof fetch,
+      },
+      clock: () => BASE,
+    });
+
+    expect(malformedHydrationAttempts).toBe(3);
+    expect(recorded.permanentFailures).toEqual([
+      "private-malformed-call-id",
+    ]);
+    expect(writes.map((call) => call["call_id"])).toEqual([
+      "private-good-call-id",
+    ]);
+    expect(result).toMatchObject({ written: 1, permanentFailures: 1 });
   });
 
   it("applies a request deadline and classifies a timed-out read as unavailable", async () => {
@@ -947,9 +1062,9 @@ describe("Retell production ingestion", () => {
       id: "ptc_stale",
       traceId: "0123456789abcdef0123456789abcdef",
       providerCallId: "private-stale-call",
-      providerAgentId: "private-stale-agent",
-      providerAgentName: "Private stale agent",
-      providerAgentVersion: "3",
+      platformAgentId: "private-stale-agent",
+      platformAgentName: "Private stale agent",
+      platformAgentVersion: "3",
       payload: JSON.stringify(hydrated("private-stale-call")),
       endedAt: BASE,
       degraded: false,

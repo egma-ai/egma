@@ -51,6 +51,63 @@ afterEach(() => {
 });
 
 describe("Monitoring setup", () => {
+  it("shows an unexpected Retell response instead of calling the agent active", async () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const at = new URL(String(input), "http://egma.test");
+        if (at.pathname === "/api/me") return json(200, ME);
+        if (at.pathname === "/api/monitoring") {
+          return json(200, {
+            setups: [
+              {
+                id: "mns_1",
+                project_id: "prj_2",
+                agent_platform: "retell",
+                strategy: "retell_api_polling",
+                credentials_hint: "cdef",
+                health: {
+                  state: "healthy",
+                  blocked_until: null,
+                  consecutive_failures: 0,
+                  last_error_at: null,
+                  last_recovered_at: null,
+                  last_received_at: null,
+                },
+                agents: [
+                  {
+                    id: "rma_1",
+                    platform_agent_id: "agent_1",
+                    platform_agent_name: "Front desk",
+                    state: "active",
+                    scan_kind: null,
+                    last_success_at: null,
+                    last_conversation_at: null,
+                    last_error_kind: "provider_contract",
+                    last_error_at: "2026-08-20T00:00:00.000Z",
+                    consecutive_failures: 1,
+                    failures: [],
+                  },
+                ],
+              },
+            ],
+          });
+        }
+        throw new Error(`nothing stubbed for GET ${at.pathname}`);
+      }),
+    );
+
+    render(<MonitoringSetupPage />);
+    expect(
+      await screen.findByText(
+        "1 agent received an unexpected Retell response. Egma will retry.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Unexpected Retell response")).toBeTruthy();
+    expect(screen.queryByText("Active")).toBeNull();
+  });
+
   it("retries one durable Retell import failure and refreshes its status", async () => {
     const asked: { method: string; path: string }[] = [];
     let reads = 0;
@@ -129,11 +186,14 @@ describe("Monitoring setup", () => {
     expect(await screen.findByText("1 agent needs attention.")).toBeTruthy();
     expect(screen.getByText("Front desk")).toBeTruthy();
     expect(screen.getByText("Needs attention")).toBeTruthy();
+    expect(document.querySelector('[data-state-mark="error"]')).toBeTruthy();
     const retry = await screen.findByRole("button", { name: "Retry import" });
     fireEvent.click(retry);
 
     await waitFor(() => expect(reads).toBe(2));
     expect(screen.queryByRole("button", { name: "Retry import" })).toBeNull();
+    expect(await screen.findByText("Active")).toBeTruthy();
+    expect(document.querySelector('[data-state-mark="complete"]')).toBeTruthy();
     expect(asked).toContainEqual({
       method: "POST",
       path: "/api/monitoring/retell/failures/rif_1/replay",
@@ -194,7 +254,13 @@ describe("Monitoring setup", () => {
     expect(
       within(dialog).getByText(/stop polling every selected Retell agent/u),
     ).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Remove setup" }));
+    expect(
+      within(dialog).getByText(/production conversations stay/u),
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/traces stay/u)).toBeNull();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Remove setup" }),
+    );
 
     await waitFor(() => expect(deletes).toBe(1));
   });

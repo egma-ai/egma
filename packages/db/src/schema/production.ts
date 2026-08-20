@@ -123,6 +123,13 @@ export const monitoringSetup = pgTable(
       table.projectId,
       table.agentPlatform,
     ),
+    // The selected-agent row repeats the tenant facts so its composite foreign
+    // key can prove that it uses this project's setup and credential.
+    unique("monitoring_setup_id_tenant_unique").on(
+      table.id,
+      table.projectId,
+      table.organizationId,
+    ),
     foreignKey({
       name: "monitoring_setup_project_organization_fk",
       columns: [table.projectId, table.organizationId],
@@ -137,15 +144,13 @@ export const retellMonitoredAgent = pgTable(
   "retell_monitored_agent",
   {
     id: idText("id").primaryKey(),
-    monitoringSetupId: idText("monitoring_setup_id")
-      .notNull()
-      .references(() => monitoringSetup.id, { onDelete: "cascade" }),
+    monitoringSetupId: idText("monitoring_setup_id").notNull(),
     organizationId: idText("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
-    providerAgentId: text("provider_agent_id").notNull(),
-    providerAgentName: text("provider_agent_name").notNull(),
+    platformAgentId: text("platform_agent_id").notNull(),
+    platformAgentName: text("platform_agent_name").notNull(),
     state: text("state").notNull().default("importing"),
     /** The fixed provider window and opaque page cursor currently in flight. */
     scanKind: text("scan_kind"),
@@ -203,14 +208,34 @@ export const retellMonitoredAgent = pgTable(
       "retell_monitored_agent_lease_agrees",
       sql`(${table.leaseOwner} is null) = (${table.leaseExpiresAt} is null)`,
     ),
-    unique("retell_monitored_agent_setup_provider_unique").on(
+    unique("retell_monitored_agent_setup_platform_agent_unique").on(
       table.monitoringSetupId,
-      table.providerAgentId,
+      table.platformAgentId,
+    ),
+    // Failed-call rows repeat the tenant facts, so they can prove that their
+    // selected agent belongs to the same project and organization.
+    unique("retell_monitored_agent_id_tenant_unique").on(
+      table.id,
+      table.projectId,
+      table.organizationId,
     ),
     foreignKey({
       name: "retell_monitored_agent_project_organization_fk",
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "retell_monitored_agent_setup_tenant_fk",
+      columns: [
+        table.monitoringSetupId,
+        table.projectId,
+        table.organizationId,
+      ],
+      foreignColumns: [
+        monitoringSetup.id,
+        monitoringSetup.projectId,
+        monitoringSetup.organizationId,
+      ],
     }).onDelete("cascade"),
     index("retell_monitored_agent_due_idx").on(
       table.nextPollAt,
@@ -237,9 +262,9 @@ export const productionTraceClaim = pgTable(
     projectId: idText("project_id").notNull(),
     traceId: text("trace_id").notNull(),
     providerCallId: text("provider_call_id").notNull(),
-    providerAgentId: text("provider_agent_id").notNull(),
-    providerAgentName: text("provider_agent_name"),
-    providerAgentVersion: text("provider_agent_version"),
+    platformAgentId: text("platform_agent_id").notNull(),
+    platformAgentName: text("platform_agent_name"),
+    platformAgentVersion: text("platform_agent_version"),
     /** Safe Retell document with bearer-like fields removed. */
     payload: text("payload").notNull(),
     endedAt: moment("ended_at").notNull(),
@@ -283,9 +308,7 @@ export const retellIngestionFailure = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
-    retellMonitoredAgentId: idText("retell_monitored_agent_id")
-      .notNull()
-      .references(() => retellMonitoredAgent.id, { onDelete: "cascade" }),
+    retellMonitoredAgentId: idText("retell_monitored_agent_id").notNull(),
     providerCallId: text("provider_call_id").notNull(),
     /** Stable low-cardinality class, never the provider's message or body. */
     errorKind: text("error_kind").notNull(),
@@ -321,6 +344,19 @@ export const retellIngestionFailure = pgTable(
       name: "retell_ingestion_failure_project_organization_fk",
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "retell_ingestion_failure_agent_tenant_fk",
+      columns: [
+        table.retellMonitoredAgentId,
+        table.projectId,
+        table.organizationId,
+      ],
+      foreignColumns: [
+        retellMonitoredAgent.id,
+        retellMonitoredAgent.projectId,
+        retellMonitoredAgent.organizationId,
+      ],
     }).onDelete("cascade"),
     index("retell_ingestion_failure_open_idx")
       .on(table.retellMonitoredAgentId, table.lastAttemptAt)

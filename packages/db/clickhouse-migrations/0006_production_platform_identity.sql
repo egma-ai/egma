@@ -1,6 +1,6 @@
 -- Production traces identify the agent platform independently from any saved
--- simulation connection. Provider agent identity is optional and stays empty
--- when the platform does not supply it.
+-- simulation connection. The platform agent reference is optional and stays
+-- empty when the platform does not supply it.
 ALTER TABLE spans
     ADD COLUMN IF NOT EXISTS agent_platform LowCardinality(String) AFTER provider_call_id,
     ADD COLUMN IF NOT EXISTS platform_agent_id String AFTER agent_platform,

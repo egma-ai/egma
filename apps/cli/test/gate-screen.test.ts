@@ -274,7 +274,7 @@ describe("the files arriving", () => {
       IN_ORDER[0] as string,
       "default persona",
       "more (↑↓ browse · e opens in $EDITOR)",
-      "Run these against order-line over retell-1 (retell, chat)?",
+      "Run these against order-line over retell_chat_api-1 (Retell chat, chat)?",
       ...GATE_HINTS,
     );
     expect(list).toContain("5 tests generated");
@@ -423,10 +423,10 @@ describe("the gate", () => {
    * The keystroke over a phone connection is the expensive one in this product,
    * and the screen has to say so before it is pressed rather than after.
    *
-   * A connection's name does not say what it is: `retell-1` and `phone-1` are
-   * both names the platform picks, and one of them dials a real telephone
-   * twelve times. So the kind is on the screen beside the name, and the number
-   * every simulation will ring is on the line under it — public by
+   * A connection's name does not say what it is: `retell_chat_api-1` and
+   * `phone_number-1` are both names the platform picks, and one of them dials a
+   * real telephone twelve times. So the product label is on the screen beside
+   * the name, and the number every simulation will ring is on the line under it — public by
    * construction, because a destination number is the half of a phone
    * connection that carries no credential at all.
    */
@@ -448,7 +448,7 @@ describe("the gate", () => {
     await showing(
       run,
       "5 tests generated",
-      "Run these against order-line over phone-1 (phone, voice)?",
+      "Run these against order-line over phone_number-1 (Retell phone, voice)?",
       `Every simulation dials ${DIALLED}.`,
       ...GATE_HINTS,
     );
@@ -530,7 +530,7 @@ describe("the gate", () => {
       "5 tests generated",
       'suite "first-suite"',
       IN_ORDER[0] as string,
-      "Run these against order-line over retell-1 (retell, chat)?",
+      "Run these against order-line over retell_chat_api-1 (Retell chat, chat)?",
       ...GATE_HINTS,
     );
     expect(back).not.toContain("STAND-IN EDITOR HAS THE SCREEN");

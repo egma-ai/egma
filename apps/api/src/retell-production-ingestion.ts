@@ -408,7 +408,15 @@ async function recover(
     RetellProductionIngestionStore,
     "recoverRetellMonitoringSetup"
   >,
-  target: Pick<RetellMonitoringTarget, "setupId" | "auth">,
+  target: {
+    readonly setupId: string;
+    readonly monitoredAgentId: string;
+    readonly failureId?: string | undefined;
+    readonly leaseOwner: string;
+    readonly apiKey: string;
+    readonly setupConsecutiveFailures: number;
+    readonly auth: AuthContext;
+  },
   log: RetellProductionIngestionLog,
   now: Date,
 ): Promise<void> {
@@ -576,7 +584,7 @@ export async function replayRetellIngestionFailure(
     );
     if (retrieved.kind === "call") {
       if (!retellCallBelongsToTarget(target, retrieved.call)) {
-        const errorKind = "provider_agent_mismatch";
+        const errorKind = "platform_agent_mismatch";
         const released = await store.releaseRetellIngestionFailureReplay(
           target.auth,
           target,
@@ -775,7 +783,7 @@ async function runTarget(
           options.provider.listTerminalCalls(
             target.apiKey,
             {
-              retellAgentId: target.providerAgentId,
+              retellAgentId: target.platformAgentId,
               from: target.scanFrom,
               to: target.scanThrough,
               ...(paginationKey === undefined ? {} : { paginationKey }),
@@ -786,6 +794,24 @@ async function runTarget(
       );
       if (listed.kind !== "calls") {
         const now = options.clock();
+        if (
+          listed.kind === "refused" &&
+          listed.reason === "provider-contract"
+        ) {
+          await options.store.releaseRetellMonitoringLease(
+            target.auth,
+            target,
+            {
+              retryAt: new Date(
+                now.getTime() + regularPollMilliseconds(target),
+              ),
+              errorKind: "provider_contract",
+              now,
+            },
+          );
+          leaseFinished = true;
+          return completed("provider_contract");
+        }
         await failForProvider(
           options.store,
           target,
@@ -875,6 +901,10 @@ async function runTarget(
                 now: options.clock(),
               },
             );
+            if (recorded.recorded === false) {
+              leaseFinished = true;
+              return completed("lease_lost");
+            }
             counts.permanentFailures += 1;
             if (recorded.changed) {
               options.log.warn(
@@ -907,11 +937,15 @@ async function runTarget(
             target,
             {
               providerCallId,
-              errorKind: "provider_agent_mismatch",
+              errorKind: "platform_agent_mismatch",
               safePayload: safePayload(hydrated.call),
               now: options.clock(),
             },
           );
+          if (recorded.recorded === false) {
+            leaseFinished = true;
+            return completed("lease_lost");
+          }
           counts.permanentFailures += 1;
           if (recorded.changed) {
             options.log.warn(

@@ -81,6 +81,11 @@ const config: NextConfig = {
           source: "/api/agents/:path*",
           destination: `${api}/api/agents/:path*`,
         },
+        { source: "/api/monitoring", destination: `${api}/api/monitoring` },
+        {
+          source: "/api/monitoring/:path*",
+          destination: `${api}/api/monitoring/:path*`,
+        },
         // What a connection can be, and what one turned out to be able to do.
         // Both are read by the connection forms rather than posted to.
         {

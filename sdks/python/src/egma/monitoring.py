@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import threading
 from dataclasses import dataclass
 from urllib.parse import SplitResult, urlsplit, urlunsplit
@@ -31,6 +32,7 @@ logger = logging.getLogger("egma")
 
 _TRACE_PATH = "/v1/traces"
 _FLUSH_MARKER = "_egma_monitoring_flush_registered"
+_PROJECT_KEY_PATTERN = re.compile(r"egma_sk_[A-Za-z0-9_-]{43}\Z")
 
 
 @dataclass(frozen=True)
@@ -113,7 +115,7 @@ def _setting(explicit: str | None, environment_name: str) -> str:
 
 
 def _project_key(value: str) -> str:
-    if "\r" in value or "\n" in value:
+    if _PROJECT_KEY_PATTERN.fullmatch(value) is None:
         raise ValueError(
             "LiveKit monitoring setup received an invalid EGMA_API_KEY."
         )

@@ -141,7 +141,7 @@ export async function verifyRetellVoiceRoute(
  * Prove that a legacy direct Retell row points at a chat agent before its
  * credential is handed to the simulator.
  *
- * Old rows store the requested Egma modality, not the provider agent channel.
+ * Old rows store the requested Egma modality, not the platform agent channel.
  * The registry pair check therefore cannot catch a voice agent id in a row
  * labelled chat. The shared provider listing is the source of truth here.
  */

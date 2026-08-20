@@ -1,5 +1,5 @@
 {
-  "id": "95715ba6-e4ea-479e-b592-3662836e9850",
+  "id": "70df371b-40d8-41b8-95fc-fdd3b823f07c",
   "prevId": "9106f89e-4b89-480f-8b84-cda283b76c09",
   "version": "7",
   "dialect": "postgresql",
@@ -2435,6 +2435,15 @@
             "project_id",
             "agent_platform"
           ]
+        },
+        "monitoring_setup_id_tenant_unique": {
+          "name": "monitoring_setup_id_tenant_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "project_id",
+            "organization_id"
+          ]
         }
       },
       "policies": {},
@@ -2500,20 +2509,20 @@
           "primaryKey": false,
           "notNull": true
         },
-        "provider_agent_id": {
-          "name": "provider_agent_id",
+        "platform_agent_id": {
+          "name": "platform_agent_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "provider_agent_name": {
-          "name": "provider_agent_name",
+        "platform_agent_name": {
+          "name": "platform_agent_name",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "provider_agent_version": {
-          "name": "provider_agent_version",
+        "platform_agent_version": {
+          "name": "platform_agent_version",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -2776,19 +2785,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "retell_ingestion_failure_retell_monitored_agent_id_retell_monitored_agent_id_fk": {
-          "name": "retell_ingestion_failure_retell_monitored_agent_id_retell_monitored_agent_id_fk",
-          "tableFrom": "retell_ingestion_failure",
-          "tableTo": "retell_monitored_agent",
-          "columnsFrom": [
-            "retell_monitored_agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "retell_ingestion_failure_project_organization_fk": {
           "name": "retell_ingestion_failure_project_organization_fk",
           "tableFrom": "retell_ingestion_failure",
@@ -2799,6 +2795,23 @@
           ],
           "columnsTo": [
             "id",
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "retell_ingestion_failure_agent_tenant_fk": {
+          "name": "retell_ingestion_failure_agent_tenant_fk",
+          "tableFrom": "retell_ingestion_failure",
+          "tableTo": "retell_monitored_agent",
+          "columnsFrom": [
+            "retell_monitored_agent_id",
+            "project_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
+            "project_id",
             "organization_id"
           ],
           "onDelete": "cascade",
@@ -2865,14 +2878,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "provider_agent_id": {
-          "name": "provider_agent_id",
+        "platform_agent_id": {
+          "name": "platform_agent_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "provider_agent_name": {
-          "name": "provider_agent_name",
+        "platform_agent_name": {
+          "name": "platform_agent_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -3068,19 +3081,6 @@
         }
       },
       "foreignKeys": {
-        "retell_monitored_agent_monitoring_setup_id_monitoring_setup_id_fk": {
-          "name": "retell_monitored_agent_monitoring_setup_id_monitoring_setup_id_fk",
-          "tableFrom": "retell_monitored_agent",
-          "tableTo": "monitoring_setup",
-          "columnsFrom": [
-            "monitoring_setup_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "retell_monitored_agent_organization_id_organization_id_fk": {
           "name": "retell_monitored_agent_organization_id_organization_id_fk",
           "tableFrom": "retell_monitored_agent",
@@ -3108,16 +3108,42 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "retell_monitored_agent_setup_tenant_fk": {
+          "name": "retell_monitored_agent_setup_tenant_fk",
+          "tableFrom": "retell_monitored_agent",
+          "tableTo": "monitoring_setup",
+          "columnsFrom": [
+            "monitoring_setup_id",
+            "project_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
+            "project_id",
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "retell_monitored_agent_setup_provider_unique": {
-          "name": "retell_monitored_agent_setup_provider_unique",
+        "retell_monitored_agent_setup_platform_agent_unique": {
+          "name": "retell_monitored_agent_setup_platform_agent_unique",
           "nullsNotDistinct": false,
           "columns": [
             "monitoring_setup_id",
-            "provider_agent_id"
+            "platform_agent_id"
+          ]
+        },
+        "retell_monitored_agent_id_tenant_unique": {
+          "name": "retell_monitored_agent_id_tenant_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "project_id",
+            "organization_id"
           ]
         }
       },

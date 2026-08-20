@@ -539,7 +539,7 @@ describe("the whole generate step", () => {
 
     const config = await readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8");
     expect(config).toContain("name: order-line");
-    expect(config).toContain("name: retell-1");
+    expect(config).toContain("name: retell_chat_api-1");
     expect(config).toContain("name: first-suite");
 
     // The list a developer scans says the two things worth scanning.

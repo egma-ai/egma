@@ -815,7 +815,7 @@ and production grading code.
 
 ### Direct OTLP
 
-Egma also accepts standard OTLP/HTTP from an exporter your agent runtime
+Egma also accepts standard OTLP/HTTP from an exporter your agent process
 already creates. Point that exporter at this instance with an Egma project key:
 
 ```bash
@@ -824,7 +824,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
 ```
 
 These variables configure an existing exporter. They do not create a tracer
-provider or register one with an agent runtime. The LiveKit helper owns that
+provider or register one in an agent process. The LiveKit helper owns that
 setup for LiveKit Agents.
 
 The `%20` is not a typo: the OpenTelemetry specification says this variable is a
@@ -833,18 +833,11 @@ is not one of the characters a value may contain. Several SDKs pass an
 unencoded space straight through and the header arrives fine; others refuse the
 whole variable, and the failure looks like an agent that exports nothing.
 
-**Point an exporter at the API itself, and not at the pages.** On a self-host
-that is the API's own port — `http://localhost:3100` above, or whatever address
-you publish it on. On hosted Egma it is `https://api.egma.ai`, not
-`https://app.egma.ai`.
-
-The one-origin rule further up is about a browser: the pages proxy the API so
-that one session cookie is valid for both, which is what makes signing in depend
-on nothing you do not run. **This door is not a browser's.** It is authenticated
-by a Bearer key, carries no cookie, and is driven by an agent process — so the
-rule that governs the rest of the surface was never about it, and routing an
-exporter through a page server buys nothing but a hop and one more thing that
-can be down.
+Prefer the API address for an exporter. On a self-host that is the API's own
+port — `http://localhost:3100` above, or whatever address you publish it on. The
+web address also works because Egma forwards `/v1/traces` to the API; it only
+adds one hop. This lets the Monitoring setup page show its own reachable origin
+without making that origin a second telemetry contract.
 
 `POST /v1/traces` accepts OTLP/HTTP in both encodings the specification defines
 — `application/x-protobuf` and `application/json`, gzipped or not — and answers
@@ -863,11 +856,10 @@ A few things worth knowing about what happens next:
 - **The ids are yours.** Egma stores the trace and span ids that arrived and
   mints neither; a span carrying no usable id is reported back as rejected
   rather than given one.
-- **Direct OTLP keeps the evidence it receives.** One accepted span is one row;
+- **Direct OTLP keeps safe provider evidence.** One accepted span is one row;
   attributes, events, and resource fields that have no typed column remain in
-  that span's payload. Retell takes a different path: Egma removes access
-  tokens and authentication header values before its provider payload reaches
-  storage.
+  that span's payload. Egma removes credential fields and bearer-like values
+  before any OTLP or Retell provider payload reaches storage.
 - **A recent exact retry is free.** ClickHouse suppresses a byte-identical
   insert block while that block remains in its recent deduplication window.
   A later repeat can append, and regrouping, reordering, or changing any
@@ -985,9 +977,8 @@ Five things about the contract are worth knowing before you build on it:
   exactly as an id nobody ever minted does.
 - **The stored payload is not in either response.** It is by a wide margin the
   largest thing on a span, and a transcript carrying it would be megabytes of
-  JSON nobody asked to render. Direct OTLP span payloads stay on their rows;
-  Retell provider payloads stay there after credential-like values are
-  redacted.
+  JSON nobody asked to render. Safe Direct OTLP and Retell provider payloads
+  stay on their rows after credential-like values are redacted.
 - **A transcript of more than 10,000 spans is a prefix, and says so.**
   `spans_truncated` is then `true`, and it means exactly one thing: `turns` and
   `spans` hold the first 10,000 spans in time order, while `span_count` and every
@@ -1001,7 +992,7 @@ within a few months, and a silently rounded latency is worse than no latency.
 
 ## Reading one in the dashboard
 
-Sign in and open **Monitoring**. You get that project's production transcripts,
+Sign in and open **Monitoring**. You get that project's production conversations,
 newest first, defaulting to the last twenty-four hours — when each one started,
 how long it ran, how many turns each speaker took, how many steps and tools and
 failures are in it, and the first thing the human said. Test traffic is not

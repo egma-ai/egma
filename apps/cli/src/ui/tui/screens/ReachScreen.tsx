@@ -21,7 +21,7 @@ import { REACH_ASK_LINE, REACH_LINES, type Reach } from "../../../retell/connect
 import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 
 export type ReachScreenProps = {
-  /** Only paths the current provider agent can safely use. */
+  /** Only paths the current platform agent can safely use. */
   readonly options: readonly Reach[];
   /** The chosen way, or `null` when the developer chose neither. */
   readonly onAnswer: (reach: Reach | null) => void;

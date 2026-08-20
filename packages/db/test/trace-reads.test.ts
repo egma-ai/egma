@@ -224,19 +224,19 @@ describe("another customer's trace", () => {
 });
 
 /**
- * Some exporters send the root after one or more children. The provider
- * identity may exist only on that root. A trace read must therefore prefer a
+ * Some exporters send the root after one or more children. The platform agent
+ * reference may exist only on that root. A trace read must therefore prefer a
  * non-empty root fact over an empty child rather than use whichever row an
  * aggregate happens to see first.
  */
-describe("provider identity carried only by a late root", () => {
+describe("platform agent reference carried only by a late root", () => {
   const ROOT_ONLY = "abab2222222222222222222222222222";
 
   beforeAll(async () => {
     const root = spanId();
 
-    // The child lands first, in its own insert, with none of the provider
-    // identity fields. This is the ordering that exposed `any()` as unsafe.
+    // The child lands first, in its own insert, with none of the platform agent
+    // reference fields. This is the ordering that exposed `any()` as unsafe.
     await appendSpans(at(identityProof, SUPPORT), [
       span({
         traceId: ROOT_ONLY,
@@ -267,7 +267,7 @@ describe("provider identity carried only by a late root", () => {
     ]);
   });
 
-  it("returns the same provider identity in the list and detail", async () => {
+  it("returns the same platform agent reference in the list and detail", async () => {
     const expected = {
       providerCallId: "room-root-only",
       agentPlatform: "livekit_agents",

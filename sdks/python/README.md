@@ -32,9 +32,10 @@ export EGMA_URL=https://api.egma.ai
 export EGMA_API_KEY=egma_sk_...
 ```
 
-For self-hosted Egma, `EGMA_URL` is the published API address, such as
-`http://localhost:3100`. Do not use the dashboard address. The agent process
-must be able to make HTTP or HTTPS requests to this address.
+For self-hosted Egma, prefer the published API address, such as
+`http://localhost:3100`. The web address also works because Egma forwards
+`/v1/traces` to the API, but the API is one hop shorter. The agent process must
+be able to make HTTP or HTTPS requests to the address you choose.
 
 In a customer-hosted worker, set these values through your normal deployment
 secret store. For LiveKit Cloud, place them in a gitignored secrets file and

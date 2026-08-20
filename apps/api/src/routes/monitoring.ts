@@ -86,8 +86,8 @@ function described(setup: MonitoringSetup): Record<string, unknown> {
     },
     agents: setup.agents.map((agent) => ({
       id: agent.id,
-      platform_agent_id: agent.providerAgentId,
-      platform_agent_name: agent.providerAgentName,
+      platform_agent_id: agent.platformAgentId,
+      platform_agent_name: agent.platformAgentName,
       state: agent.state,
       scan_kind: agent.scanKind,
       last_success_at: agent.lastSuccessAt?.toISOString() ?? null,
@@ -128,12 +128,12 @@ function selectedIn(body: Body): readonly SelectedRetellAgent[] | undefined {
       return undefined;
     }
     const held = item as Record<string, unknown>;
-    const providerAgentId = text(held["id"]);
-    const providerAgentName = text(held["name"]);
-    if (providerAgentId === undefined || providerAgentName === undefined) {
+    const platformAgentId = text(held["id"]);
+    const platformAgentName = text(held["name"]);
+    if (platformAgentId === undefined || platformAgentName === undefined) {
       return undefined;
     }
-    selected.push({ providerAgentId, providerAgentName });
+    selected.push({ platformAgentId, platformAgentName });
   }
   return selected;
 }
@@ -243,7 +243,7 @@ export async function monitoringRoutes(
     );
     const canonical: SelectedRetellAgent[] = [];
     for (const selected of agents) {
-      const agent = voiceAgents.get(selected.providerAgentId);
+      const agent = voiceAgents.get(selected.platformAgentId);
       if (agent === undefined) {
         return unprocessable(
           reply,
@@ -251,8 +251,8 @@ export async function monitoringRoutes(
         );
       }
       canonical.push({
-        providerAgentId: agent.id,
-        providerAgentName: agent.name || agent.id,
+        platformAgentId: agent.id,
+        platformAgentName: agent.name || agent.id,
       });
     }
 
@@ -260,7 +260,7 @@ export async function monitoringRoutes(
     const history = await listTerminalCalls(
       apiKey,
       {
-        retellAgentId: canonical[0]?.providerAgentId ?? "",
+        retellAgentId: canonical[0]?.platformAgentId ?? "",
         from: new Date(now.getTime() - 60_000),
         to: now,
         limit: 1,
@@ -270,14 +270,14 @@ export async function monitoringRoutes(
     if (history.kind === "invalid-key") {
       return unprocessable(
         reply,
-        "Retell rejected call-history access. Give this key Monitor or History Read permission.",
+        "Retell rejected access to production transcript history. Give this key Monitor or History Read permission.",
       );
     }
     if (history.kind !== "calls") {
       return sendRefusal(
         reply,
         "provider_unavailable",
-        "Retell did not answer the call-history setup check. Try again.",
+        "Retell did not answer the production transcript history setup check. Try again.",
       );
     }
     const configured = await configureRetellMonitoring(resolved.auth, {
@@ -363,7 +363,7 @@ export async function monitoringRoutes(
         return sendRefusal(
           reply,
           "conflict",
-          "Retell still cannot provide a complete conversation. The import failure remains open.",
+          "Retell still cannot provide a complete production transcript. The import failure remains open.",
         );
       }
       if (replayed.kind === "invalid_credential") {

@@ -111,7 +111,7 @@ jobs:
           monitor_livekit(
               context,
               endpoint="http://127.0.0.1:9",
-              api_key="release-proof-key",
+              api_key="egma_sk_" + "r" * 43,
           )
           assert monitoring._state is not None
           assert monitoring._livekit_provider() is monitoring._state.provider

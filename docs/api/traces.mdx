@@ -5,7 +5,7 @@ description: "Send OpenTelemetry spans from your voice agent to Egma and query t
 ---
 
 Traces are the storage record of a conversation. Egma accepts standard
-OTLP/HTTP from an agent runtime that already emits OpenTelemetry spans. LiveKit
+OTLP/HTTP from an agent process that already emits OpenTelemetry spans. LiveKit
 Agents should use `monitor_livekit(ctx)` from the Egma Python SDK to create or
 safely reuse the required telemetry setup. Retell Monitoring polls Retell and
 writes normalized production traces without using this ingest endpoint. Use the
@@ -65,7 +65,7 @@ curl -X POST https://your-egma-instance/v1/traces \
 ```
 
 <Note>
-  Prefer your Egma instance's API port for telemetry ingest — port **3100** by default. The web UI port (3101) also reaches this endpoint because the web application forwards `/v1/traces` to the API. The API is one hop shorter. Both addresses may differ in self-hosted deployments, so check `EGMA_API_URL`.
+  Prefer your Egma instance's API port for telemetry ingest — port **3100** by default. The web UI port (3101) also reaches this endpoint because the web application forwards `/v1/traces` to the API. The API is one hop shorter. Both addresses may differ in self-hosted deployments, so check `EGMA_URL`.
 </Note>
 
 <Note>
@@ -74,6 +74,10 @@ curl -X POST https://your-egma-instance/v1/traces \
 
 <Note>
   Telemetry sent with a project-scoped API key appears in the dashboard under that project. An organization-scoped key groups traces at the organization level. For traces to appear under a specific project, mint a key scoped to that project via `POST /api/keys` with `project_id` set.
+</Note>
+
+<Note>
+  Egma removes credential fields and bearer-like values before it reads typed fields or stores the provider payload. Do not send secrets as telemetry attributes.
 </Note>
 
 ---
@@ -173,7 +177,7 @@ curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-
 </ResponseField>
 
 <ResponseField name="emitter" type="string">
-  The SDK or runtime that emitted this trace.
+  The SDK or agent process that emitted this trace.
 </ResponseField>
 
 <ResponseField name="environment" type="string">

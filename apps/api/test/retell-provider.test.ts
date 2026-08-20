@@ -112,7 +112,7 @@ describe("Retell production call reads", () => {
 
       expect(answer).toEqual({
         kind: "refused",
-        reason: "invalid-response",
+        reason: "provider-contract",
       });
     }
   });
@@ -145,6 +145,8 @@ describe("Retell production call reads", () => {
           agent_id: "agent_voice_1",
           call_status: "ended",
           call_type: "web_call",
+          start_timestamp: 1_786_000_000_000,
+          end_timestamp: 1_786_000_074_000,
           access_token: "hydrated-web-call-token",
           custom_sip_headers: {
             "Proxy-Authorization": "Basic customer-secret",
@@ -179,6 +181,8 @@ describe("Retell production call reads", () => {
         agent_id: "agent_voice_1",
         call_status: "ended",
         call_type: "web_call",
+        start_timestamp: 1_786_000_000_000,
+        end_timestamp: 1_786_000_074_000,
         access_token: "[REDACTED]",
         custom_sip_headers: {
           "Proxy-Authorization": "[REDACTED]",
@@ -235,6 +239,27 @@ describe("Retell production call reads", () => {
       reason: "rate-limited",
       status: 429,
       retryAfterMilliseconds: 12_000,
+    });
+    expect(JSON.stringify(answer)).not.toContain(providerSecret);
+  });
+
+  it("treats a response body read failure as unreachable without exposing its cause", async () => {
+    const providerSecret = "SENTINEL-provider-body-read-secret";
+    const response = new Response("", { status: 200 });
+    Object.defineProperty(response, "text", {
+      value: async () => {
+        throw new DOMException(providerSecret, "AbortError");
+      },
+    });
+
+    const answer = await listTerminalCalls("retell-api-key", WINDOW, {
+      url: "https://retell.invalid",
+      fetchImpl: (async () => response) as typeof fetch,
+    });
+
+    expect(answer).toEqual({
+      kind: "unreachable",
+      reason: "Retell at https://retell.invalid did not answer",
     });
     expect(JSON.stringify(answer)).not.toContain(providerSecret);
   });

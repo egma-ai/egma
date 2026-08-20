@@ -42,8 +42,8 @@ export type WriteOutcome =
 export type RetellProductionWriteTarget = {
   readonly setupId: string;
   readonly monitoredAgentId: string;
-  readonly providerAgentId: string;
-  readonly providerAgentName: string;
+  readonly platformAgentId: string;
+  readonly platformAgentName: string;
   readonly auth: AuthContext;
 };
 
@@ -79,17 +79,17 @@ function providerText(value: unknown): string {
 }
 
 export function retellCallBelongsToTarget(
-  target: Pick<RetellProductionWriteTarget, "providerAgentId">,
+  target: Pick<RetellProductionWriteTarget, "platformAgentId">,
   call: RetellCall,
 ): boolean {
-  const providerAgentId = providerText(call["agent_id"]);
-  return providerAgentId === "" || providerAgentId === target.providerAgentId;
+  const platformAgentId = providerText(call["agent_id"]);
+  return platformAgentId === "" || platformAgentId === target.platformAgentId;
 }
 
-function providerIdentityOf(
+function platformAgentReferenceOf(
   target: Pick<
     RetellProductionWriteTarget,
-    "providerAgentId" | "providerAgentName"
+    "platformAgentId" | "platformAgentName"
   >,
   call: RetellCall,
 ): { readonly id: string; readonly name: string; readonly version: string } {
@@ -97,13 +97,13 @@ function providerIdentityOf(
     throw new Error("A Retell call belongs to a different selected agent");
   }
   return {
-    id: providerText(call["agent_id"]) || target.providerAgentId,
-    name: providerText(call["agent_name"]) || target.providerAgentName,
-    version: providerAgentVersionOf(call),
+    id: providerText(call["agent_id"]) || target.platformAgentId,
+    name: providerText(call["agent_name"]) || target.platformAgentName,
+    version: platformAgentVersionOf(call),
   };
 }
 
-function providerAgentVersionOf(call: RetellCall): string {
+function platformAgentVersionOf(call: RetellCall): string {
   const value = call["agent_version"];
   return typeof value === "string" || typeof value === "number"
     ? String(value)
@@ -131,15 +131,15 @@ export async function writeRetellCall(
   stores: RetellProductionWriteStore = STORES,
 ): Promise<WriteOutcome> {
   const safeCall = safeRetellProviderData(call);
-  const providerIdentity = providerIdentityOf(target, safeCall);
+  const platformAgentReference = platformAgentReferenceOf(target, safeCall);
   const normalised = normaliseRetellCall(
     safeCall,
     {
       projectId: projectIdOf(target),
       environment: "production",
-      platformAgentId: providerIdentity.id,
-      platformAgentName: providerIdentity.name,
-      platformAgentVersion: providerIdentity.version,
+      platformAgentId: platformAgentReference.id,
+      platformAgentName: platformAgentReference.name,
+      platformAgentVersion: platformAgentReference.version,
     },
     receivedAt.getTime(),
   );
@@ -147,11 +147,11 @@ export async function writeRetellCall(
   const claim = await stores.claimProductionTrace(target.auth, {
     traceId: normalised.traceId,
     providerCallId: normalised.providerCallId,
-    providerAgentId: providerIdentity.id,
-    providerAgentName: providerIdentity.name,
-    ...(providerIdentity.version === ""
+    platformAgentId: platformAgentReference.id,
+    platformAgentName: platformAgentReference.name,
+    ...(platformAgentReference.version === ""
       ? {}
-      : { providerAgentVersion: providerIdentity.version }),
+      : { platformAgentVersion: platformAgentReference.version }),
     payload: JSON.stringify(safeCall),
     endedAt: normalised.endedAt,
   });
@@ -166,7 +166,13 @@ export async function writeRetellCall(
   }
 
   await stores.appendSpans(target.auth, normalised.spans);
-  await stores.recordProductionTraces(target.auth, normalised.spans);
+  if (
+    normalised.spans.some(
+      (span) => span.kind === "turn:human" || span.kind === "turn:agent",
+    )
+  ) {
+    await stores.recordProductionTraces(target.auth, normalised.spans);
+  }
   // Keep the claim replayable until every side effect of accepting this
   // provider conversation is durable. If this health update fails, the claim
   // remains stale and replay can finish it instead of leaving Monitoring in
@@ -201,9 +207,9 @@ export async function replayProductionClaim(
     {
       projectId,
       environment: "production",
-      platformAgentId: claim.providerAgentId,
-      platformAgentName: claim.providerAgentName ?? "",
-      platformAgentVersion: claim.providerAgentVersion ?? "",
+      platformAgentId: claim.platformAgentId,
+      platformAgentName: claim.platformAgentName ?? "",
+      platformAgentVersion: claim.platformAgentVersion ?? "",
     },
     claim.endedAt.getTime(),
   );
@@ -215,9 +221,15 @@ export async function replayProductionClaim(
   }
 
   await stores.appendSpans(claim.auth, normalised.spans);
-  await stores.recordProductionTraces(claim.auth, normalised.spans);
+  if (
+    normalised.spans.some(
+      (span) => span.kind === "turn:human" || span.kind === "turn:agent",
+    )
+  ) {
+    await stores.recordProductionTraces(claim.auth, normalised.spans);
+  }
   await stores.recordRetellMonitoringReceived(claim.auth, {
-    providerAgentId: claim.providerAgentId,
+    platformAgentId: claim.platformAgentId,
   });
   await stores.finishProductionTrace(claim.auth, {
     traceId: claim.traceId,

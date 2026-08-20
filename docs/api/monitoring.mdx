@@ -1,5 +1,5 @@
 ---
-title: "Configure Production Monitoring by Agent Platform"
+title: "Configure production monitoring by agent platform"
 sidebarTitle: "Monitoring setup"
 description: "List and configure project Monitoring setup for Retell polling and LiveKit Agents OTLP export."
 ---
@@ -96,7 +96,7 @@ permission in addition to Agent Read permission.
 
 A new selected agent starts a fixed 30-day import. Changing the key keeps
 existing progress. Removing an agent from the selection stops its polling and
-keeps its imported production transcripts. Polling checks for new terminal
+keeps its imported production conversations. Polling checks for new terminal
 conversations about every 30 seconds after the first import finishes.
 
 ```bash
@@ -138,7 +138,7 @@ See [Egma Python SDK](/integrations/python-sdk) for the worker setup.
 Retries the exact Retell call named by one open import failure. It reads the
 call directly, so it still works after that call is outside the normal 30-day
 list window. The production claim prevents a successful retry from creating a
-second transcript.
+second production conversation.
 
 <ParamField path="failureId" type="string" required>
   Failure id from a selected agent's `failures` array.
@@ -161,7 +161,7 @@ temporary provider failure returns `503`.
 **`DELETE /api/monitoring/:platform`**
 
 Use `retell` or `livekit-agents` for `platform`. A successful delete returns
-`204 No Content` and keeps production transcripts already stored.
+`204 No Content` and keeps production conversations already stored.
 
 Deleting a Retell setup stops its polling. Deleting a LiveKit Agents setup
 removes Egma's setup-status record; it does not change code or secrets in a
@@ -173,4 +173,3 @@ curl -X DELETE \
   "https://your-egma-host/api/monitoring/retell?project=prj_abc123" \
   -H "Authorization: Bearer egma_sk_..."
 ```
-

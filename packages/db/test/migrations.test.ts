@@ -4098,9 +4098,9 @@ describe("the direct Monitoring cutover (0038)", () => {
       [newId("gjb"), organizationId, projectId, oldProductionJob.traceId],
     );
     await client.query(
-      `insert into production_trace_claim
+       `insert into production_trace_claim
          (id, organization_id, project_id, trace_id, provider_call_id,
-          provider_agent_id, payload, ended_at, status, claimed_at)
+          platform_agent_id, payload, ended_at, status, claimed_at)
        values ($1, $2, $3, $4, $5, 'agent_retell_chat', '{}', now(), 'claimed', now())`,
       [
         newId("ptc"),

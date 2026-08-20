@@ -1,6 +1,9 @@
 import { safeRetellProviderData } from "@egma/retell";
 
-import type { RetellCall } from "./normalise.ts";
+import {
+  retellCallDocumentIsComplete,
+  type RetellCall,
+} from "./normalise.ts";
 
 /**
  * The provider reads Egma uses for Retell Monitoring.
@@ -32,6 +35,7 @@ export type RetellRefusalReason =
   | "invalid-window"
   | "invalid-response"
   | "invalid-call-id"
+  | "provider-contract"
   | "rate-limited"
   | "provider-unavailable"
   | "request-refused";
@@ -107,9 +111,8 @@ async function ask(
   const url = `${base(reach)}${request.path}`;
   const fetchImpl = reach.fetchImpl ?? fetch;
 
-  let response: Response;
   try {
-    response = await fetchImpl(url, {
+    const response = await fetchImpl(url, {
       method: request.method,
       headers: {
         authorization: `Bearer ${apiKey}`,
@@ -122,17 +125,16 @@ async function ask(
         : { body: JSON.stringify(request.body) }),
       ...(reach.signal === undefined ? {} : { signal: reach.signal }),
     });
+    return {
+      status: response.status,
+      body: await response.text(),
+      retryAfter: response.headers.get("retry-after"),
+    };
   } catch {
     return {
       unreachable: `Retell at ${base(reach)} did not answer`,
     };
   }
-
-  return {
-    status: response.status,
-    body: await response.text(),
-    retryAfter: response.headers.get("retry-after"),
-  };
 }
 
 function retryAfterMilliseconds(value: string | null): number | undefined {
@@ -269,7 +271,7 @@ export async function listTerminalCalls(
   ) {
     return {
       kind: "refused",
-      reason: "invalid-response",
+      reason: "provider-contract",
     };
   }
 
@@ -322,7 +324,11 @@ export async function getRetellCall(
   if (typeof call["call_id"] !== "string" || call["call_id"].trim() !== wanted) {
     return { kind: "refused", reason: "invalid-response" };
   }
-  return { kind: "call", call: safeRetellProviderData(call) };
+  const safeCall = safeRetellProviderData(call);
+  if (!retellCallDocumentIsComplete(safeCall)) {
+    return { kind: "refused", reason: "invalid-response" };
+  }
+  return { kind: "call", call: safeCall };
 }
 
 /**

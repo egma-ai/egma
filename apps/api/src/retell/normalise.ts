@@ -377,6 +377,15 @@ function turnsIn(call: RetellCall): Transcript {
   return { turns, toolCalls, whole };
 }
 
+/** Whether a full Get Call document can be normalized without inventing facts. */
+export function retellCallDocumentIsComplete(call: RetellCall): boolean {
+  return (
+    text(call["call_id"]) !== "" &&
+    extent(call, 0).whole &&
+    turnsIn(call).whole
+  );
+}
+
 /**
  * What Retell measured about the whole conversation, gathered onto the root.
  *

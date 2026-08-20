@@ -67,7 +67,7 @@ export type RegisteredConnection = {
   /** The last characters of the sealed secret, which is all that comes back. */
   readonly credentialsHint: string | null;
   /**
-   * What to reach, as the platform stores it — a number, provider agent id,
+   * What to reach, as the platform stores it — a number, platform agent id,
    * server URL, or endpoint. Never a secret: config is the public half of a
    * connection by construction.
    */

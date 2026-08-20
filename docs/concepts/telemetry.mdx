@@ -1,5 +1,5 @@
 ---
-title: "Production Monitoring: Retell and LiveKit Agents"
+title: "Production monitoring: Retell and LiveKit Agents"
 sidebarTitle: "Telemetry"
 description: "Set up platform-specific production Monitoring, then read real conversations as transcripts, measures, and grader verdicts."
 ---
@@ -9,8 +9,9 @@ Egma receives real production conversations through a platform-specific
 finishes. LiveKit Agents uses OpenTelemetry from the running Python agent
 process.
 
-Both paths produce the same Egma result: a structured transcript, tool evidence,
-supported measures, and production grader work.
+Both paths produce the same Egma conversation record. Egma shows a structured
+transcript, tool evidence, supported measures, and production grader work when
+the received evidence supports them.
 
 The same grading engine that evaluates simulations can also evaluate production traces. You control the scope on each grader.
 
@@ -33,13 +34,13 @@ Egma stores the resulting spans and shows each production conversation under
 `scope: production` or `scope: both` can judge it automatically.
 
 The ingest endpoint also accepts standard OTLP/HTTP in protobuf or JSON form.
-This is an advanced path for another instrumented agent runtime. Environment
-variables configure an exporter that the runtime already creates. They do not
+This is an advanced path for another instrumented agent process. Environment
+variables configure an exporter that the process already creates. They do not
 create an exporter or register an OpenTelemetry tracer provider.
 
 ## Generic OTLP configuration
 
-If your runtime already creates and registers an OTLP exporter, point it at
+If your agent process already creates and registers an OTLP exporter, point it at
 Egma with these values:
 
 ```bash

@@ -25,6 +25,8 @@ from room_stub import egma_metadata
 from egma import monitor_livekit
 from egma import monitoring as livekit_monitoring
 
+PROJECT_KEY = f"egma_sk_{'a' * 43}"
+
 
 @dataclass
 class StubJob:
@@ -71,13 +73,13 @@ def test_environment_configures_the_exact_egma_trace_endpoint(monkeypatch):
 
     monkeypatch.setattr(livekit_monitoring, "_build_exporter", build_exporter)
     monkeypatch.setenv("EGMA_URL", "https://api.egma.ai/")
-    monkeypatch.setenv("EGMA_API_KEY", "egma_sk_project")
+    monkeypatch.setenv("EGMA_API_KEY", PROJECT_KEY)
     context = StubJobContext()
 
     monitor_livekit(context)
 
     assert built_with == [
-        ("https://api.egma.ai/v1/traces", "egma_sk_project")
+        ("https://api.egma.ai/v1/traces", PROJECT_KEY)
     ]
     assert len(context.shutdown_callbacks) == 1
     provider.shutdown()
@@ -110,7 +112,7 @@ async def test_real_exporter_posts_protobuf_with_the_project_key(monkeypatch):
     provider = TracerProvider()
     install_provider(monkeypatch, provider)
     context = StubJobContext()
-    key = "egma_sk_project"
+    key = PROJECT_KEY
 
     try:
         monitor_livekit(
@@ -147,7 +149,7 @@ def test_an_egma_simulation_does_not_create_a_production_exporter(monkeypatch):
 @pytest.mark.parametrize(
     ("environment", "said"),
     [
-        ({"EGMA_API_KEY": "egma_sk_project"}, "EGMA_URL"),
+        ({"EGMA_API_KEY": PROJECT_KEY}, "EGMA_URL"),
         ({"EGMA_URL": "https://api.egma.ai"}, "EGMA_API_KEY"),
     ],
 )
@@ -163,7 +165,7 @@ def test_missing_configuration_names_the_setting_without_showing_a_key(
         monitor_livekit(StubJobContext())
 
     assert said in str(refused.value)
-    assert "egma_sk_project" not in str(refused.value)
+    assert PROJECT_KEY not in str(refused.value)
 
 
 def test_invalid_endpoint_never_echoes_a_credential(monkeypatch):
@@ -180,10 +182,33 @@ def test_invalid_endpoint_never_echoes_a_credential(monkeypatch):
     assert secret not in str(refused.value)
 
 
+@pytest.mark.parametrize(
+    "invalid_key",
+    [
+        "not-an-egma-key",
+        "egma_sk_short",
+        f"egma_sk_{'a' * 42}",
+        f"egma_sk_{'a' * 44}",
+        f"egma_sk_{'a' * 42}*",
+        f"egma_sk_{'a' * 21}\n{'a' * 21}",
+    ],
+)
+def test_invalid_project_key_is_refused_before_exporter_setup(invalid_key):
+    with pytest.raises(ValueError) as refused:
+        monitor_livekit(
+            StubJobContext(),
+            endpoint="https://api.egma.ai",
+            api_key=invalid_key,
+        )
+
+    assert "invalid EGMA_API_KEY" in str(refused.value)
+    assert invalid_key not in str(refused.value)
+
+
 def test_processor_setup_failure_never_echoes_a_credential(monkeypatch):
     provider = TracerProvider()
     install_provider(monkeypatch, provider)
-    secret = "egma_sk_do_not_repeat"
+    secret = f"egma_sk_{'b' * 43}"
     monkeypatch.setattr(
         livekit_monitoring,
         "_build_exporter",
@@ -234,7 +259,7 @@ async def test_existing_telemetry_and_egma_both_receive_the_same_span(
     monitor_livekit(
         context,
         endpoint="https://api.egma.ai",
-        api_key="egma_sk_project",
+        api_key=PROJECT_KEY,
     )
     with provider.get_tracer("livekit-agents").start_as_current_span("session"):
         pass
@@ -264,7 +289,7 @@ def test_repeated_setup_adds_one_exporter_and_one_job_callback(monkeypatch):
         monitor_livekit(
             context,
             endpoint="https://api.egma.ai/v1/traces",
-            api_key="egma_sk_project",
+            api_key=PROJECT_KEY,
         )
 
     assert len(exporters) == 1
@@ -289,7 +314,7 @@ def test_a_second_job_reuses_the_exporter_but_gets_its_own_flush(monkeypatch):
         monitor_livekit(
             context,
             endpoint="https://api.egma.ai",
-            api_key="egma_sk_project",
+            api_key=PROJECT_KEY,
         )
 
     assert len(exporters) == 1
@@ -354,19 +379,19 @@ def test_changing_configuration_requires_a_worker_restart(monkeypatch):
     monitor_livekit(
         context,
         endpoint="https://api.egma.ai",
-        api_key="egma_sk_first",
+        api_key=f"egma_sk_{'a' * 43}",
     )
 
     with pytest.raises(ValueError) as refused:
         monitor_livekit(
             context,
             endpoint="https://api.egma.ai",
-            api_key="egma_sk_second",
+            api_key=f"egma_sk_{'b' * 43}",
         )
 
     assert "Restart" in str(refused.value)
-    assert "egma_sk_first" not in str(refused.value)
-    assert "egma_sk_second" not in str(refused.value)
+    assert f"egma_sk_{'a' * 43}" not in str(refused.value)
+    assert f"egma_sk_{'b' * 43}" not in str(refused.value)
     provider.shutdown()
 
 

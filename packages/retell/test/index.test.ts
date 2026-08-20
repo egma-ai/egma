@@ -39,6 +39,28 @@ describe("Retell agent discovery", () => {
       ],
     });
   });
+
+  it("treats a response body read failure as unreachable without exposing its cause", async () => {
+    const providerSecret = "SENTINEL-provider-body-read-secret";
+    const response = new Response("", { status: 200 });
+    Object.defineProperty(response, "text", {
+      value: async () => {
+        throw new DOMException(providerSecret, "AbortError");
+      },
+    });
+
+    const listed = await listAgents(key, {
+      url: "https://retell.invalid",
+      fetchImpl: (async () => response) as typeof fetch,
+    });
+
+    expect(listed).toEqual({
+      kind: "unreachable",
+      reason:
+        "Retell at https://retell.invalid did not answer. Check this machine's network, then try again.",
+    });
+    expect(JSON.stringify(listed)).not.toContain(providerSecret);
+  });
 });
 
 describe("Retell phone-number discovery", () => {

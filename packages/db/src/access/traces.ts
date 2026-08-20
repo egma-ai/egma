@@ -738,10 +738,10 @@ export async function listTraces(
  * One aggregate row as the facts both endpoints report.
  *
  * Most trace-level columns are denormalised onto every span, which makes
- * `any()` the right aggregate for them. Provider identity is different: an
- * emitter may put it only on the root. Those fields are selected from a
- * parentless non-empty row first, then from any non-empty row, so an empty
- * child can never erase the identity the root carried.
+ * `any()` the right aggregate for them. The platform agent reference is
+ * different: an emitter may put it only on the root. Those fields are selected
+ * from a parentless non-empty row first, then from any non-empty row, so an
+ * empty child can never erase the reference the root carried.
  */
 function factsOf(traceId: string, row: SummaryRow): TraceFacts {
   const startedAt = BigInt(row.started_at_micros);
@@ -838,10 +838,10 @@ function isTurn(kind: string): boolean {
  * what makes fetching one of them cheap, and the list that found it already
  * said.
  *
- * **The verbatim payload is not returned.** It is by a wide margin the largest
- * column on the row — every span carries its resource and its scope exactly as
- * they arrived — and a transcript that shipped it would be megabytes of JSON
- * nobody asked to render. It is neither lost nor unreachable: it is on the row,
+ * **The safe provider payload is not returned.** It is by a wide margin the
+ * largest column on the row — every span carries its resource and scope after
+ * credential redaction — and a transcript that shipped it would be megabytes
+ * of JSON nobody asked to render. It is neither lost nor unreachable: it is on the row,
  * and the way a caller will reach it is a per-span read
  * (`GET /v1/traces/:traceId/spans/:spanId`) that this ticket deliberately does
  * not build, because nothing consumes it yet and an endpoint with no caller is a
