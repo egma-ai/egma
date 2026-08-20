@@ -417,12 +417,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The agent editors use the same layout primitive as every other product form. */
+/**
+ * The agent editors use the same layout primitive as every other product form.
+ *
+ * It asks the elements what they are rather than what they are painted with.
+ * A class name used to be the fingerprint of a shared component, because a CSS
+ * Module hashes one and nothing else can produce it. On the Tailwind base a
+ * class list is copyable, so a hand-rolled `<div className="flex gap-3">` would
+ * pass a class check — and the migration itself failed one, which is the other
+ * half of the same problem. `data-slot` is what `Form` and `FormActions` put on
+ * the elements they draw, and a page that stopped using them fails this.
+ */
 function expectSharedFormLayout(action: HTMLElement): void {
   const form = action.closest("form");
   expect(form).not.toBeNull();
-  expect(form?.className).toContain("form");
-  expect(action.parentElement?.className).toContain("formActions");
+  expect(form?.dataset.slot).toBe("form");
+  expect(action.parentElement?.dataset.slot).toBe("form-actions");
 }
 
 /* ------------------------------------------------------------------------ */

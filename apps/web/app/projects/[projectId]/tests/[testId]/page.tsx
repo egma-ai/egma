@@ -23,7 +23,7 @@ import {
   type TestVersionPage,
   type TestVersionRow,
 } from "../../../../../lib/tests.ts";
-import { Actions, Section } from "../../../../../ui/controls.tsx";
+import { Actions, Section } from "../../../../../ui/section.tsx";
 import { Field, Problem, Refused } from "../../../../../ui/form.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";

@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-import { Section, TextArea } from "../../../../ui/controls.tsx";
+import { TextArea } from "../../../../ui/controls.tsx";
 import {
   Field,
   Form,
@@ -22,6 +22,7 @@ import {
   Refused,
 } from "../../../../ui/form.tsx";
 import { Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
+import { Section } from "../../../../ui/section.tsx";
 import { SettingsLayout } from "../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,

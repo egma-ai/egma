@@ -17,7 +17,7 @@ import {
   type SimulationEvidence,
 } from "../../../../../../../lib/simulations.ts";
 import { Button } from "@/components/ui/button";
-import { Actions } from "../../../../../../../ui/controls.tsx";
+import { Actions } from "../../../../../../../ui/section.tsx";
 import { Problem, Refused } from "../../../../../../../ui/form.tsx";
 import { Dialog } from "../../../../../../../ui/dialog.tsx";
 import {

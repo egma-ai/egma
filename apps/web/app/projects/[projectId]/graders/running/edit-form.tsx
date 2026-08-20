@@ -21,7 +21,6 @@ import {
   type RunningGrader,
 } from "../../../../../lib/graders.ts";
 import { graderDisplayName } from "../../../../../lib/presentation.ts";
-import { Actions } from "../../../../../ui/controls.tsx";
 import {
   Field,
   Form,
@@ -29,6 +28,7 @@ import {
   Help,
   Refused,
 } from "../../../../../ui/form.tsx";
+import { Actions } from "../../../../../ui/section.tsx";
 import { EntryFields } from "../use-form.tsx";
 
 /**

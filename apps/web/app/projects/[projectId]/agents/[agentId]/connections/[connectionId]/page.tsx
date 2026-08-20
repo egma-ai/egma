@@ -20,11 +20,8 @@ import {
 import { roleOf } from "../../../../../../../lib/me.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
-import {
-  Actions,
-  Button,
-  TextInput,
-} from "../../../../../../../ui/controls.tsx";
+import { Actions } from "../../../../../../../ui/section.tsx";
+import { Button, TextInput } from "../../../../../../../ui/controls.tsx";
 import {
   Field,
   Form,

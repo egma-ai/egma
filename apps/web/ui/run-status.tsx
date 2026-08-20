@@ -20,7 +20,7 @@ import { DataTable, type Column } from "./data-table.tsx";
 import { Empty, Failure, Loading } from "./page-state.tsx";
 import { RelativeInstant, useMinuteClock } from "./relative-time.tsx";
 import { useProjectRead } from "./resource.ts";
-import { Section } from "./shell.tsx";
+import { Section } from "./section.tsx";
 import styles from "./run-status.module.css";
 
 /**

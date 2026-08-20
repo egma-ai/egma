@@ -13,11 +13,8 @@ import {
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import {
-  ButtonLink,
-  TextInput,
-  Toolbar,
-} from "../../../../ui/controls.tsx";
+import { ButtonLink, TextInput } from "../../../../ui/controls.tsx";
+import { Toolbar } from "../../../../ui/section.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useMinuteClock } from "../../../../ui/relative-time.tsx";

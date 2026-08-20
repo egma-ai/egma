@@ -18,12 +18,11 @@ import {
   type ListedTest,
   type TestPage,
 } from "../../../../../../lib/tests.ts";
+import { Actions, Section } from "../../../../../../ui/section.tsx";
 import {
-  Actions,
   Button,
   ButtonLink,
   Checkbox,
-  Section,
   TextInput,
 } from "../../../../../../ui/controls.tsx";
 import {

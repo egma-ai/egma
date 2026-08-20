@@ -43,16 +43,13 @@ import {
 import type { Me } from "../../lib/me.ts";
 import type { EvidenceTranscript } from "../../lib/simulations.ts";
 import {
-  Actions,
   Badge,
   Button,
   Checkbox,
   Choice,
-  Section,
   Select,
   TextArea,
   TextInput,
-  Toolbar,
 } from "../../ui/controls.tsx";
 import { DataTable, type Column } from "../../ui/data-table.tsx";
 import { Dialog } from "../../ui/dialog.tsx";
@@ -64,6 +61,7 @@ import { NumberField } from "../../ui/number-field.tsx";
 import { Empty, Failure, Loading } from "../../ui/page-state.tsx";
 import { ProjectSelector } from "../../ui/project-selector.tsx";
 import { RunProgress, VerdictBadge } from "../../ui/run-status.tsx";
+import { Actions, Section, Toolbar } from "../../ui/section.tsx";
 import { SettingsNav } from "../../ui/settings-nav.tsx";
 import { AppShell, ProductPage } from "../../ui/shell.tsx";
 

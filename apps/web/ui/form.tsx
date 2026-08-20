@@ -120,7 +120,10 @@ export function FormRow({ children }: { readonly children: ReactNode }) {
 /** The controls that finish a form. */
 export function FormActions({ children }: { readonly children: ReactNode }) {
   return (
-    <div className="flex items-center gap-3 pt-2 max-[900px]:flex-wrap">
+    <div
+      className="flex items-center gap-3 pt-2 max-[900px]:flex-wrap"
+      data-slot="form-actions"
+    >
       {children}
     </div>
   );

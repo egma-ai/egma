@@ -24,7 +24,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import { Field, Form, FormActions, Help } from "../../../../../ui/form.tsx";
-import { Section, Select } from "../../../../../ui/controls.tsx";
+import { Section } from "../../../../../ui/section.tsx";
+import { Select } from "../../../../../ui/controls.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";

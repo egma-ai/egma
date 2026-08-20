@@ -20,7 +20,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-import { Section } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
@@ -32,6 +31,7 @@ import {
   Refused,
 } from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import {
   SettingsLayout,
   settingsPath,

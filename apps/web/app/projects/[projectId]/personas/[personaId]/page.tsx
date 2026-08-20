@@ -26,7 +26,7 @@ import {
 } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
-import { Facts } from "../../../../../ui/controls.tsx";
+import { Facts } from "../../../../../ui/section.tsx";
 import { Field, Form, FormActions, Refused } from "../../../../../ui/form.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import {

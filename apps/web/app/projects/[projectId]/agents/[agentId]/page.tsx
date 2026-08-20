@@ -16,11 +16,10 @@ import {
 import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
+import { Actions, Section } from "../../../../../ui/section.tsx";
 import {
-  Actions,
   Button,
   ButtonLink,
-  Section,
   TextArea,
   TextInput,
 } from "../../../../../ui/controls.tsx";

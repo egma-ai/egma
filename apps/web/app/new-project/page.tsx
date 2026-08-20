@@ -7,7 +7,8 @@ import { writeJson, type Refusal } from "../../lib/api.ts";
 import { roleOf } from "../../lib/me.ts";
 import { projectLanding } from "../../lib/project-context.ts";
 import { PROJECTS_PATH, type ProjectSettings } from "../../lib/settings.ts";
-import { Button, Section, TextArea, TextInput } from "../../ui/controls.tsx";
+import { Button, TextArea, TextInput } from "../../ui/controls.tsx";
+import { Section } from "../../ui/section.tsx";
 import {
   Field,
   Form,

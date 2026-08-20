@@ -24,10 +24,10 @@ import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { graderDisplayName } from "../../../../lib/presentation.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import { Section } from "../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
+import { Section } from "../../../../ui/section.tsx";
 import {
   AppShell,
   PageBody,

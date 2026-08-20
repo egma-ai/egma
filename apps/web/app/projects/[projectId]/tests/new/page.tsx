@@ -26,7 +26,7 @@ import {
   Problem,
   Refused,
 } from "../../../../../ui/form.tsx";
-import { Section } from "../../../../../ui/controls.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
