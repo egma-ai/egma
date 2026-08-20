@@ -220,6 +220,8 @@ type Transcript = {
   readonly whole: boolean;
 };
 
+const NANOSECONDS_PER_SECOND = 10 ** 9;
+
 /** Retell word bounds, measured from the start of the call. */
 function reportedTimingIn(row: Readonly<Record<string, unknown>>): {
   readonly startedAfterNanoseconds: bigint;
@@ -244,9 +246,11 @@ function reportedTimingIn(row: Readonly<Record<string, unknown>>): {
   }
 
   const startedAfterNanoseconds = BigInt(
-    Math.round(first.start * 1_000_000_000),
+    Math.round(first.start * NANOSECONDS_PER_SECOND),
   );
-  const endedAfterNanoseconds = BigInt(Math.round(last.end * 1_000_000_000));
+  const endedAfterNanoseconds = BigInt(
+    Math.round(last.end * NANOSECONDS_PER_SECOND),
+  );
   return {
     startedAfterNanoseconds,
     durationNanoseconds: endedAfterNanoseconds - startedAfterNanoseconds,
