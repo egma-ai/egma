@@ -9,6 +9,7 @@ implementations before it starts the same service loop used in production.
 # ruff: noqa: E402 -- removing Loguru's sink before service imports is the test seam
 from __future__ import annotations
 
+import logging
 import sys
 
 from loguru import logger as loguru_logger
@@ -24,6 +25,24 @@ from egma_simulator import service
 from egma_simulator.__main__ import main
 from egma_simulator.model import ScriptedModel
 from egma_simulator.speech import SCRIPTED_PAIR
+
+
+class _DrainLogWitness(logging.Filter):
+    """Expose one safe service log as a fixed test-only output marker."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.name == service.__name__ and record.getMessage().startswith(
+            "stop requested; claiming nothing new"
+        )
+
+
+if "--observe-drain" in sys.argv:
+    drain_witness = logging.StreamHandler(sys.stderr)
+    drain_witness.addFilter(_DrainLogWitness())
+    drain_witness.setFormatter(
+        logging.Formatter('{"egma.test.event":"service_drain_started","body":"%(message)s"}')
+    )
+    service.logger.addHandler(drain_witness)
 
 
 def _scripted_model(spec):

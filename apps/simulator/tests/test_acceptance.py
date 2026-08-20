@@ -452,16 +452,23 @@ async def test_a_second_stop_signal_tears_down_at_once(
             max_duration_seconds=600,
         )
     )
-    simulator = start_simulator(workbench)
+    simulator = start_simulator(workbench, observe_drain=True)
 
     await workbench.wait_for(
         lambda records: len(turns_for(records, "sim-drain-hard-001")) >= 2
     )
+    output_lines_before_stop = len(simulator.output().splitlines())
     simulator.process.send_signal(signal.SIGTERM)
-    await asyncio.sleep(0.3)
+    await simulator.wait_for_output(
+        lambda output: any(
+            '"egma.test.event":"service_drain_started"' in line
+            and '"body":"stop requested; claiming nothing new' in line
+            for line in output.splitlines()[output_lines_before_stop:]
+        )
+    )
     simulator.process.send_signal(signal.SIGTERM)
 
-    simulator.process.wait(timeout=15)
+    await asyncio.to_thread(simulator.process.wait, timeout=15)
     assert (
         terminal_event_for(await workbench.records(), "sim-drain-hard-001")
         is None

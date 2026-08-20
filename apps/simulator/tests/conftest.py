@@ -175,6 +175,26 @@ class SimulatorProcess:
             errors="replace"
         ) + self.stderr_path.read_text(errors="replace")
 
+    async def wait_for_output(
+        self,
+        predicate: Callable[[str], bool],
+        *,
+        within_seconds: float = 10.0,
+        interval: float = 0.02,
+    ) -> str:
+        """Poll process output until ``predicate`` holds."""
+        deadline = asyncio.get_running_loop().time() + within_seconds
+        output = self.output()
+        while not predicate(output):
+            if asyncio.get_running_loop().time() > deadline:
+                pytest.fail(
+                    "process output never satisfied the predicate; last output:\n"
+                    + output
+                )
+            await asyncio.sleep(interval)
+            output = self.output()
+        return output
+
     def kill_hard(self) -> None:
         """SIGKILL: no goodbye, no cleanup — the crash the orphan sweep exists for."""
         self.process.send_signal(signal.SIGKILL)
@@ -205,6 +225,7 @@ def start_simulator(
         extra_env: dict[str, str] | None = None,
         direct_model: bool = False,
         direct_speech: bool = False,
+        observe_drain: bool = False,
     ) -> SimulatorProcess:
         stdout_path = tmp_path / f"simulator-{len(started)}.out"
         stderr_path = tmp_path / f"simulator-{len(started)}.err"
@@ -258,6 +279,8 @@ def start_simulator(
                 command.append("--direct-speech")
             if direct_model:
                 command.append("--direct-model")
+            if observe_drain:
+                command.append("--observe-drain")
             process = subprocess.Popen(
                 command,
                 stdout=stdout,
