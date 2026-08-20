@@ -754,6 +754,31 @@ describe("onboarding an agent", () => {
     expect(within(progress).getByText("Connection").getAttribute("aria-current"))
       .toBe("step");
     expect(screen.queryByText(/Step 2 of 3/u)).toBeNull();
+
+    /*
+     * The bar counts stages *finished*, so the second stage reads one of three
+     * rather than two. A bar that filled a stage ahead of the work would be
+     * claiming the page in front of somebody was already done.
+     */
+    const bar = within(progress).getByRole("progressbar", {
+      name: "Agent setup progress",
+    });
+    expect(bar.getAttribute("aria-valuenow")).toBe("1");
+    expect(bar.getAttribute("aria-valuemax")).toBe("3");
+    expect(bar.getAttribute("aria-valuetext")).toBe("1 of 3 stages finished");
+
+    /*
+     * What the eye is given, against what the screen reader is given.
+     *
+     * This is the assertion that guards the fix in `components/ui/progress.tsx`.
+     * The registry's indicator computes `100 - value` and ignores `max`, so this
+     * bar announced "1 of 3 stages finished" and was drawn 99% empty. The two
+     * must be the same fact: one stage of three is a third filled, which is
+     * two thirds still to travel.
+     */
+    const fill = bar.querySelector("[data-slot='progress-indicator']");
+    expect(fill?.getAttribute("style")).toContain("translateX(-66.6");
+    expect(fill?.getAttribute("style")).not.toContain("-99%");
     expect(
       screen.getByRole("link", { name: "Skip connection for now" })
         .getAttribute("href"),

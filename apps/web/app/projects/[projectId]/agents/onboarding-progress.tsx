@@ -1,3 +1,5 @@
+import { Progress } from "@/components/ui/progress";
+
 export type AgentOnboardingStage = "agent" | "connection" | "tests";
 
 const STAGES: readonly {
@@ -16,18 +18,51 @@ const STAGES: readonly {
  * task sits without repeating numbered progress copy or putting three forms in
  * one large wizard card.
  *
- * Nothing here moves, so there is no reduced-motion form to write: a stage is
- * either done or it is not, and the tick says which without animating in.
+ * **The bar is the kit's `Progress` rather than a shape drawn here**, which is
+ * the whole of this file's part in the primitives migration. What it adds over
+ * the stage list on its own is the measure: the list says which stage is being
+ * worked on, and the bar says how much of the setup is behind it. `DESIGN.md`
+ * asks a state for a word as well as a shape, so the two are shown together and
+ * neither is asked to carry the meaning alone.
+ *
+ * **It counts stages finished, not the stage being worked on**, so it reads 0
+ * of 3 on the first page and 2 of 3 on the last. It never reaches 3, because
+ * finishing the last stage leaves onboarding — a bar that filled completely on
+ * a page still asking for something would be claiming the work was done.
+ *
+ * The reduced-motion form is the primitive's: `components/ui/progress.tsx`
+ * carries `motion-reduce:transition-none`, so the bar is simply at its new
+ * length and the stage words are what say it moved. Nothing else here moves.
  */
 export function AgentOnboardingProgress({
   current,
 }: {
   readonly current: AgentOnboardingStage;
 }) {
-  const currentIndex = STAGES.findIndex((stage) => stage.id === current);
+  /*
+   * Clamped, because `Progress` is given this number. `current` is typed to one
+   * of the three stages so the miss cannot happen through the types, but a -1
+   * reaching Radix is a console error and a bar drawn at an impossible length,
+   * and the floor costs one call.
+   */
+  const finished = Math.max(0, STAGES.findIndex((stage) => stage.id === current));
 
   return (
     <nav className="mb-6 border-b border-border pb-4" aria-label="Agent setup">
+      <Progress
+        className="mb-4"
+        value={finished}
+        max={STAGES.length}
+        aria-label="Agent setup progress"
+        /*
+         * A percentage is the wrong unit for three named stages: "33%" is a
+         * number nobody can act on, while "1 of 3 stages finished" is the same
+         * fact said in the words the list beside it already uses.
+         */
+        getValueLabel={(value, max) =>
+          `${String(value)} of ${String(max)} stages finished`
+        }
+      />
       {/*
         `m-0 p-0 list-none` is doing work rather than repeating a reset:
         `globals.css` hands the browser's own list defaults back in
@@ -36,7 +71,7 @@ export function AgentOnboardingProgress({
       */}
       <ol className="m-0 flex list-none flex-wrap gap-4 p-0 max-[36rem]:gap-3">
         {STAGES.map((stage, index) => {
-          const complete = index < currentIndex;
+          const complete = index < finished;
           return (
             <li
               className={

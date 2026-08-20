@@ -11,6 +11,23 @@ vi.mock("next/navigation", () => ({
 
 beforeEach(() => {
   vi.stubGlobal("scrollTo", vi.fn());
+  /*
+   * Radix measures a tooltip's arrow with `ResizeObserver`, which jsdom does
+   * not implement, and it does the measuring only once the tooltip is open —
+   * so this is needed by the one test that opens one rather than by the render.
+   *
+   * A stub rather than a polyfill: nothing here asserts a measurement, and a
+   * real implementation would only add a way for these tests to depend on
+   * layout jsdom does not compute.
+   */
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
 });
 
 afterEach(() => {
@@ -208,5 +225,130 @@ describe("the development design proof", () => {
     const panel = dialog.firstElementChild as HTMLElement;
     fireEvent.transitionEnd(panel, { propertyName: "opacity" });
     expect(screen.queryByRole("dialog", { name: "Archive Support agent?" })).toBeNull();
+  });
+
+  /**
+   * The primitives the kit gained, on the one surface that draws them.
+   *
+   * They are asserted through what a reader is actually given — the selected
+   * tab and the panel it names, the chosen option, the value a progress bar
+   * announces — rather than through class names. jsdom loads no stylesheet, so
+   * a class assertion here would prove the string and not the behaviour, and
+   * the behaviour is the half these six were added for.
+   */
+  it("proves the tab set, the single choice, and the skeleton the kit gained", () => {
+    render(<DesignSystemProof />);
+
+    /*
+     * One set, one panel. Two tab sets are drawn, so both panels are counted:
+     * a `getByRole` that happened to find one would pass just as well if the
+     * other had quietly stopped rendering.
+     */
+    expect(screen.getAllByRole("tabpanel")).toHaveLength(2);
+    const simulations = screen.getByRole("tab", { name: "Simulations" });
+    expect(simulations.getAttribute("aria-selected")).toBe("true");
+    expect(
+      screen.getByText(/Ten simulations ran/u),
+    ).toBeTruthy();
+
+    /*
+     * Radix switches a tab on `mousedown` rather than on `click`, which is the
+     * detail a test written against the wrong event passes without ever
+     * changing a panel.
+     */
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Graders" }), {
+      button: 0,
+    });
+    expect(simulations.getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByText(/Both were frozen when it started/u)).toBeTruthy();
+    expect(screen.queryByText(/Ten simulations ran/u)).toBeNull();
+
+    /* The other set is the `line` variant, and it is a separate set. */
+    expect(screen.getByRole("tab", { name: "Transcript" }).getAttribute("aria-selected")).toBe("true");
+
+    /* One answer out of the set, and the page says which one it heard. */
+    const fresh = screen.getByRole("radio", {
+      name: "A new persona for each simulation",
+    });
+    expect(fresh.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(fresh);
+    expect(fresh.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("Chosen: a new persona")).toBeTruthy();
+
+    /*
+     * A skeleton is a shape and nothing else, so the word has to be beside it.
+     * `DESIGN.md` asks a loading state to say what is happening, and the shapes
+     * themselves are hidden from assistive technology precisely because they
+     * say nothing.
+     */
+    const loading = screen.getByText("Loading graders…");
+    expect(loading.parentElement?.getAttribute("aria-busy")).toBe("true");
+  });
+
+  /**
+   * The progress bar's three states, and the one it is easiest to get wrong.
+   *
+   * A value on its way up, a value that has arrived, and no value at all. The
+   * last is the state a happy example always skips: an indeterminate bar must
+   * not report a number, because "amount unknown" and "nothing done yet" are
+   * different claims and only one of them is true.
+   */
+  it("proves the progress bar counting, complete, and indeterminate", () => {
+    render(<DesignSystemProof />);
+
+    const running = screen.getByRole("progressbar", {
+      name: "Simulations judged",
+    });
+    expect(running.getAttribute("aria-valuenow")).toBe("7");
+    expect(running.getAttribute("aria-valuemax")).toBe("10");
+    expect(running.getAttribute("aria-valuetext")).toBe(
+      "7 of 10 simulations judged",
+    );
+    expect(running.getAttribute("data-state")).toBe("loading");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Judge one more simulation" }),
+    );
+    expect(running.getAttribute("aria-valuenow")).toBe("8");
+    expect(screen.getByText("8 of 10 simulations judged")).toBeTruthy();
+
+    const complete = screen.getByRole("progressbar", { name: "Transcripts collected" });
+    expect(complete.getAttribute("data-state")).toBe("complete");
+
+    const unknown = screen.getByRole("progressbar", {
+      name: "Recording being prepared",
+    });
+    expect(unknown.getAttribute("data-state")).toBe("indeterminate");
+    /* No number claimed, and no fill drawn either. */
+    expect(unknown.getAttribute("aria-valuenow")).toBeNull();
+    expect(
+      unknown
+        .querySelector("[data-slot='progress-indicator']")
+        ?.getAttribute("style"),
+    ).toContain("translateX(-100%)");
+  });
+
+  /**
+   * The two arrivals: a tooltip attached to one control, and a notification.
+   *
+   * Both are proved on the kit primitives rather than on the shared components
+   * above them, because the shared ones are already covered by the feedback
+   * tests and these two have no other caller yet.
+   */
+  it("opens the base tooltip and the base toast", async () => {
+    render(<DesignSystemProof />);
+
+    const trigger = screen.getByRole("button", {
+      name: "What a frozen grader means",
+    });
+    fireEvent.focus(trigger);
+    expect(
+      (await screen.findByText(/editing the grader never changes a verdict/u)),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show a saved notification" }),
+    );
+    expect(await screen.findByText("Grader saved")).toBeTruthy();
   });
 });
