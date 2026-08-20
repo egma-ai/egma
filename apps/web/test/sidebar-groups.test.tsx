@@ -116,6 +116,35 @@ describe("the grouped sidebar", () => {
   });
 
   /**
+   * **A sectioned navigation is walked by heading.**
+   *
+   * The accessible name above says which group somebody is *in*. This is how
+   * they get to one at all: the heading list is Global, Simulations,
+   * Monitoring, and moving between them is one keystroke rather than six arrow
+   * presses. The two mechanisms are wired to the same element on purpose — one
+   * word, said twice, that cannot come apart.
+   */
+  it("offers the three groups as headings, in the order the bar reads", () => {
+    drawShell();
+
+    const navigation = sidebarNavigation();
+    const headings = within(navigation).getAllByRole("heading");
+
+    expect(headings.map((heading) => heading.textContent?.trim())).toEqual(
+      GROUPS.map((group) => group.label),
+    );
+    for (const heading of headings) {
+      expect(heading.tagName).toBe("H2");
+      const named = within(navigation).getByRole("group", {
+        name: heading.textContent?.trim() ?? "",
+      });
+      expect(named.getAttribute("aria-labelledby")).toBe(
+        heading.getAttribute("id"),
+      );
+    }
+  });
+
+  /**
    * **The assertion the regroup rests on.** Six links before, the same six
    * addresses after, whatever group each is drawn under now — so a copied URL
    * keeps meaning what it meant.

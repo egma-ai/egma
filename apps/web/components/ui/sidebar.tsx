@@ -158,19 +158,33 @@ function SidebarGroup({ className, ...props }: ComponentProps<"div">) {
 /**
  * The word over a group.
  *
+ * **It is a heading, because a sectioned navigation is walked by heading.** The
+ * `aria-labelledby` wiring above already gives the group its accessible name;
+ * this is the other half, and they answer different questions. The name is what
+ * a person hears once they are *inside* a group. A heading is how they get to
+ * one at all — the heading list is Global, Simulations, Monitoring, and jumping
+ * between them is one keystroke rather than six arrow presses.
+ *
+ * `h2` because the bar has no heading above it and the page's own title is the
+ * `h1` beside it. It carries no size of its own — `DESIGN.md` removed those —
+ * so `text-sm` is the size, and `globals.css` holds every heading at weight
+ * 400. `mt-0` is not decoration: `globals.css` gives headings the browser's own
+ * margins back for the legacy pages, and a heading here must not inherit them.
+ *
  * Weight 400 and the compact label treatment, which is what the bar already
  * used for the one group label it had. It is quiet on purpose: the label says
- * where a row belongs, and the row is the thing being read.
+ * where a row belongs, and the row is the thing being read. `px-3` is the row's
+ * own padding, so the label starts exactly where the row's content starts.
  */
-function SidebarGroupLabel({ className, ...props }: ComponentProps<"div">) {
+function SidebarGroupLabel({ className, ...props }: ComponentProps<"h2">) {
   const labelId = useContext(SidebarGroupLabelId);
 
   return (
-    <div
+    <h2
       data-slot="sidebar-group-label"
       id={labelId ?? undefined}
       className={cn(
-        "mb-1 px-2 text-sm text-faint tracking-(--tracking-label) uppercase",
+        "mt-0 mb-1 px-3 text-sm text-faint tracking-(--tracking-label) uppercase",
         className,
       )}
       {...props}
