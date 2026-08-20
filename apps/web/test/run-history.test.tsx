@@ -627,10 +627,13 @@ describe("one run's page", () => {
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_9");
 
     // Re-running creates a new run. The original row and its evidence link are
-    // still on this page until navigation completes.
+    // still on this page until navigation completes. `hidden` because the
+    // confirmation is still open and a dialog puts the page behind it out of
+    // reach, which is what makes it a dialog.
     expect(
       within(table).getByRole("link", {
         name: "Reschedules a booked appointment",
+        hidden: true,
       }),
     ).toBeTruthy();
   });

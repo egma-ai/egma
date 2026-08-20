@@ -5,6 +5,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { Suspense, useState } from "react";
@@ -332,7 +333,29 @@ describe("the organization and project selector", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("keeps a pointer-dismissed panel present through its short exit", () => {
+  /**
+   * The panel leaves under its own motion, and the theme is what times it.
+   *
+   * The exit is a CSS animation keyed on `data-state="closed"`, and the kit
+   * removes the panel on `animationend` rather than on the press — so "an exit
+   * runs to completion" is a property of the surface rather than a timer this
+   * page keeps. What is read here is the state the animation is keyed on.
+   */
+  it("marks the panel closed and leaves on the animation, not on the press", () => {
+    const trigger = open();
+    const panel = screen.getByRole("dialog");
+    expect(panel.dataset.slot).toBe("popover-content");
+    expect(panel.dataset.state).toBe("open");
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search projects" }), {
+      key: "Escape",
+    });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger.getAttribute("data-state")).toBe("closed");
+  });
+
+  it("closes when the pointer lands somewhere else on the page", async () => {
     render(
       <ProjectSelector
         organization={ACME}
@@ -343,26 +366,24 @@ describe("the organization and project selector", () => {
     const trigger = screen.getByRole("button", { name: /^Organization Acme/ });
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
-    const panel = screen.getByRole("dialog");
+    expect(screen.getByRole("dialog")).toBeDefined();
 
+    // Two things about a press outside, and both are the panel's own rule.
+    // It starts listening on the task after it opened, so the press that
+    // opened it is not also the press that closes it. And it leaves on the
+    // *finished* press rather than on the way down, so a selection that starts
+    // in the panel and ends outside it does not close what it was reading.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     fireEvent.pointerDown(document.body);
+    expect(screen.getByRole("dialog")).toBeDefined();
+    fireEvent.click(document.body);
 
-    expect(screen.getByRole("dialog")).toBe(panel);
-    expect(trigger.parentElement?.getAttribute("data-closing")).toBe("true");
-    fireEvent.transitionEnd(panel, { propertyName: "opacity" });
     expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("uses the pointer exit when a keyboard-opened panel is clicked away", () => {
-    const trigger = open();
-    const panel = screen.getByRole("dialog");
-
-    fireEvent.pointerDown(document.body);
-
-    expect(trigger.parentElement?.getAttribute("data-input")).toBe("pointer");
-    expect(trigger.parentElement?.getAttribute("data-closing")).toBe("true");
-    fireEvent.transitionEnd(panel, { propertyName: "opacity" });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    // A press elsewhere is a way of leaving, so the keyboard is not dragged
+    // back to the control somebody has just moved away from.
+    expect(document.activeElement).not.toBe(trigger);
   });
 
   /**
@@ -763,29 +784,73 @@ describe("a page of rows", () => {
 
 /* ------------------------------------------------------------------------ */
 
+/**
+ * A closing animation, said out loud, because jsdom runs no stylesheet.
+ *
+ * The kit removes a dialog on `animationend`, and it decides whether there is
+ * an animation to wait for by reading the computed style. jsdom loads no CSS,
+ * so every surface there claims `animationName: ""` and leaves the instant it
+ * is closed — which would make "an exit runs to completion" untestable in this
+ * lane. This answers the way the real theme answers: the entrance while the
+ * surface is open, the exit once it is closed. Nothing else is changed, so the
+ * test still drives the kit's own presence machine rather than a stand-in.
+ */
+function finishExit(surface: HTMLElement, animationName: string): void {
+  // jsdom has no `AnimationEvent`, so the one property the kit reads is put on
+  // an ordinary event rather than left undefined by a constructor that ignores
+  // it. The kit's own listener is on the element, so this reaches it.
+  const ended = new Event("animationend", { bubbles: false });
+  Object.defineProperty(ended, "animationName", { value: animationName });
+  fireEvent(surface, ended);
+}
+
+function withClosingAnimation(): void {
+  const real = window.getComputedStyle.bind(window);
+  vi.stubGlobal(
+    "getComputedStyle",
+    (element: Element, pseudo?: string | null) => {
+      const styles = real(element, pseudo);
+      const slot =
+        element instanceof HTMLElement ? (element.dataset.slot ?? "") : "";
+      if (!slot.startsWith("dialog-")) return styles;
+      return new Proxy(styles, {
+        get(target, key, receiver) {
+          if (key !== "animationName") return Reflect.get(target, key, receiver);
+          return (element as HTMLElement).dataset.state === "closed"
+            ? "egma-dialog-out"
+            : "egma-dialog-in";
+        },
+      });
+    },
+  );
+}
+
 describe("a dialog", () => {
-  it("uses the browser's modal lifecycle and turns Escape into a cancel request", () => {
+  it("puts the page behind it out of reach, and closes on Escape", () => {
     const onClose = vi.fn();
     render(
-      <Dialog title="Navigation" onClose={onClose}>
-        <a href="/projects/prj_1/tests">Tests</a>
-      </Dialog>,
+      <>
+        <button type="button">Elsewhere</button>
+        <Dialog title="Navigation" onClose={onClose}>
+          <a href="/projects/prj_1/tests">Tests</a>
+        </Dialog>
+      </>,
     );
 
     const panel = screen.getByRole("dialog", { name: "Navigation" });
-    expect(panel.tagName).toBe("DIALOG");
-    expect(panel.getAttribute("aria-modal")).toBe("true");
+
+    // Inert is not a class on the page behind: the kit hides it from the
+    // accessibility tree, so a control out there is no longer reachable at all.
+    expect(screen.queryByRole("button", { name: "Elsewhere" })).toBeNull();
 
     // Focus is inside, so the keyboard is no longer driving the page beneath.
     expect(panel.contains(document.activeElement)).toBe(true);
 
-    const cancel = new Event("cancel", { cancelable: true });
-    fireEvent(panel, cancel);
-    expect(cancel.defaultPrevented).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("restores the exact control that opened it", () => {
+  it("restores the exact control that opened it", async () => {
     function Example() {
       const [open, setOpen] = useState(false);
       return (
@@ -802,20 +867,19 @@ describe("a dialog", () => {
 
     render(<Example />);
     const opener = screen.getByRole("button", { name: "Open navigation" });
-    const matches = vi.spyOn(opener, "matches").mockImplementation(
-      (selector) => selector === ":focus-visible",
-    );
     opener.focus();
     fireEvent.click(opener);
-    const dialog = screen.getByRole("dialog", { name: "Navigation" });
-    expect(dialog.getAttribute("data-input")).toBe("keyboard");
+    expect(screen.getByRole("dialog", { name: "Navigation" })).toBeDefined();
+
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
-    expect(document.activeElement).toBe(opener);
-    matches.mockRestore();
+    expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+    // The kit hands focus back once the layer above it has gone, which is the
+    // task after the press rather than the press itself.
+    await waitFor(() => expect(document.activeElement).toBe(opener));
   });
 
-  it("uses the same modal lifecycle for a right-side sheet", () => {
+  it("uses the same modal layer for a right-side sheet", async () => {
     function Example() {
       const [open, setOpen] = useState(false);
       return (
@@ -845,18 +909,24 @@ describe("a dialog", () => {
       name: "Transcript and audio",
     });
     expect(sheet.getAttribute("data-kind")).toBe("sheet");
-    expect(sheet.getAttribute("aria-modal")).toBe("true");
     expect(sheet.contains(document.activeElement)).toBe(true);
     expect(within(sheet).getByRole("button", { name: "Close" })).toBeTruthy();
 
-    const cancel = new Event("cancel", { cancelable: true });
-    fireEvent(sheet, cancel);
-    expect(cancel.defaultPrevented).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Transcript and audio" })).toBeNull();
-    expect(document.activeElement).toBe(opener);
+    await waitFor(() => expect(document.activeElement).toBe(opener));
   });
 
-  it("keeps a pointer-dismissed dialog present through its short exit", () => {
+  /**
+   * "An exit runs to completion and is never cut off. A surface that is closed
+   * finishes leaving before it is removed."
+   *
+   * So `onClose` — the owner's instruction to take the dialog away — is not the
+   * press. It is the end of the closing animation, and the dialog is still on
+   * screen for the whole of it.
+   */
+  it("keeps a dismissed dialog present until its exit has finished", () => {
+    withClosingAnimation();
     const onClose = vi.fn();
     render(
       <Dialog title="Archive agent?" onClose={onClose}>
@@ -864,82 +934,23 @@ describe("a dialog", () => {
       </Dialog>,
     );
 
-    const dialog = screen.getByRole("dialog", { name: "Archive agent?" });
-    fireEvent.pointerDown(dialog);
+    const panel = screen.getByRole("dialog", { name: "Archive agent?" });
+    expect(panel.dataset.slot).toBe("dialog-content");
+    expect(panel.dataset.state).toBe("open");
 
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(screen.getByRole("dialog", { name: "Archive agent?" })).toBe(panel);
+    expect(panel.dataset.state).toBe("closed");
     expect(onClose).not.toHaveBeenCalled();
-    expect(dialog.getAttribute("data-closing")).toBe("true");
-    fireEvent.transitionEnd(dialog.firstElementChild as HTMLElement, {
-      propertyName: "opacity",
-    });
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
 
-  it("uses the pointer exit after a dialog was opened with the keyboard", () => {
-    function Example() {
-      const [open, setOpen] = useState(false);
-      return (
-        <>
-          <button type="button" onClick={() => setOpen(true)}>Open archive</button>
-          {open ? (
-            <Dialog title="Archive agent?" onClose={() => setOpen(false)}>
-              <p>Archive it.</p>
-            </Dialog>
-          ) : null}
-        </>
-      );
-    }
+    finishExit(panel, "egma-dialog-out");
 
-    render(<Example />);
-    const opener = screen.getByRole("button", { name: "Open archive" });
-    const matches = vi.spyOn(opener, "matches").mockImplementation(
-      (selector) => selector === ":focus-visible",
-    );
-    opener.focus();
-    fireEvent.click(opener);
-
-    const dialog = screen.getByRole("dialog", { name: "Archive agent?" });
-    expect(dialog.getAttribute("data-input")).toBe("keyboard");
-    const close = screen.getByRole("button", { name: "Close" });
-    fireEvent.pointerDown(close);
-    fireEvent.click(close, { detail: 1 });
-
-    expect(dialog.getAttribute("data-input")).toBe("pointer");
-    expect(dialog.getAttribute("data-closing")).toBe("true");
-    fireEvent.transitionEnd(dialog.firstElementChild as HTMLElement, {
-      propertyName: "opacity",
-    });
     expect(screen.queryByRole("dialog", { name: "Archive agent?" })).toBeNull();
-    matches.mockRestore();
-  });
-
-  it("gives pointer Cancel actions the same short exit as the close button", () => {
-    const onClose = vi.fn();
-    render(
-      <Dialog title="Archive agent?" onClose={onClose}>
-        {(dismiss) => (
-          <Button type="button" variant="secondary" onClick={dismiss}>
-            Cancel
-          </Button>
-        )}
-      </Dialog>,
-    );
-
-    const dialog = screen.getByRole("dialog", { name: "Archive agent?" });
-    const cancel = screen.getByRole("button", { name: "Cancel" });
-    fireEvent.pointerDown(cancel);
-    fireEvent.click(cancel, { detail: 1 });
-
-    expect(onClose).not.toHaveBeenCalled();
-    expect(dialog.getAttribute("data-input")).toBe("pointer");
-    expect(dialog.getAttribute("data-closing")).toBe("true");
-    fireEvent.transitionEnd(dialog.firstElementChild as HTMLElement, {
-      propertyName: "opacity",
-    });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps keyboard Cancel actions immediate", () => {
+  it("gives a Cancel action written by the caller the same way out", () => {
     const onClose = vi.fn();
     render(
       <Dialog title="Archive agent?" onClose={onClose}>
@@ -953,7 +964,30 @@ describe("a dialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
+    expect(screen.queryByRole("dialog", { name: "Archive agent?" })).toBeNull();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * A successful write may take the dialog away itself, and the owner has
+   * already been told. Reporting the exit as a second close would ask the page
+   * to answer twice for one action.
+   */
+  it("stays quiet when the owner removes the dialog itself", () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <>
+        <Dialog title="Archive agent?" onClose={onClose}>
+          <button type="button">Confirm archive</button>
+        </Dialog>
+      </>,
+    );
+    expect(screen.getByRole("dialog", { name: "Archive agent?" })).toBeDefined();
+
+    rerender(<></>);
+
+    expect(screen.queryByRole("dialog", { name: "Archive agent?" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("does not restore focus to an opener removed while the dialog closes", () => {
@@ -1301,7 +1335,7 @@ describe("the shared draft navigation guard", () => {
     );
   }
 
-  it("keeps a draft on the page until the discard action is explicit", () => {
+  it("keeps a draft on the page until the discard action is explicit", async () => {
     render(<DraftPage />);
     fireEvent.click(screen.getByRole("button", { name: "Change name" }));
     expect(screen.getByLabelText("Draft state").textContent).toBe("unsaved");
@@ -1316,7 +1350,9 @@ describe("the shared draft navigation guard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(screen.queryByRole("dialog", { name: "Leave without saving?" }))
       .toBeNull();
-    expect(document.activeElement).toBe(destination);
+    // The dialog hands focus back once its layer has gone, which is the task
+    // after the press rather than the press itself.
+    await waitFor(() => expect(document.activeElement).toBe(destination));
 
     const [projectSelector] = screen.getAllByRole("button", {
       name: /^Organization Acme/u,
@@ -1332,7 +1368,7 @@ describe("the shared draft navigation guard", () => {
       .toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(routed.push).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(projectSelector);
+    await waitFor(() => expect(document.activeElement).toBe(projectSelector));
 
     fireEvent.click(destination);
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));

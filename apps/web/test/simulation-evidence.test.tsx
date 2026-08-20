@@ -578,7 +578,9 @@ describe("one simulation's evidence", () => {
     });
     const turns = within(messages).getAllByRole("listitem");
 
-    expect(evidenceSheet.getAttribute("aria-modal")).toBe("true");
+    // A sheet is a panel docked beside this page rather than a layer over it,
+    // so the grader results stay reachable while the transcript is open. What
+    // it keeps from a dialog is its own label, focus, and Escape.
     expect(evidenceSheet.getAttribute("data-kind")).toBe("sheet");
     expect(evidenceSheet.contains(document.activeElement)).toBe(true);
     expect(turns).toHaveLength(2);
@@ -715,7 +717,9 @@ describe("one simulation's evidence", () => {
     const workspace = await screen.findByRole("region", {
       name: "Simulation evidence",
     });
-    expect(within(workspace).getByText("You are all set.")).toBeTruthy();
+    // The transcript is drawn in the sheet, and a sheet is drawn at the end of
+    // the page so its position never depends on what it sits inside.
+    expect(screen.getByText("You are all set.")).toBeTruthy();
     expect(
       within(workspace).getByText("The agent never said the new time back."),
     ).toBeTruthy();

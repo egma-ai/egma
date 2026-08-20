@@ -1,65 +1,155 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
+import {
+  Dialog as KitDialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 export type DialogDismiss = (event?: { readonly detail?: number }) => void;
 
 /**
- * Something that takes over the screen until it is answered or dismissed.
+ * A layer that is answered or dismissed before the page goes on.
  *
- * The compact mobile shell uses one for its navigation, and the authoring
- * tickets after this one will use it for confirmations. So the two rules that
- * are always forgotten are here rather than in each caller: **Escape closes
- * it**, and **opening it moves focus inside** so that a keyboard is not still
- * driving the page underneath.
+ * The compact mobile shell uses one for its navigation, confirmations use one
+ * to name what they are about, and the evidence panel is the same surface
+ * attached to an edge. So the two rules that are always forgotten are here
+ * rather than in each caller: **Escape closes it**, and **opening it moves
+ * focus inside** so that a keyboard is not still driving the page underneath.
  *
- * The browser owns the modal lifecycle through its native `dialog`: focus is
- * trapped, the page behind it is inert, and Escape becomes a cancel request.
- * We only restore the exact opener when React removes the dialog. A dialog is
- * never the security boundary and never the only place a fact is stated. It is
- * a way of asking, and closing one always leaves the page as it was.
+ * **The modal lifecycle is the kit's.** `components/ui/dialog.tsx` is Radix,
+ * and Radix traps focus, makes the page behind it inert, turns Escape into a
+ * close, and blocks the page to the pointer while it is up. This file used to
+ * do all of that by hand on a native `<dialog>`; it now says only what the kit
+ * does not know — which of the three shapes to wear, which of them takes the
+ * screen, where focus goes back to, and when the owner may remove it.
+ *
+ * **`onClose` still means "now take me away", and it is called last.** Owners
+ * mount this component and remove it, so an exit has to finish before React
+ * unmounts anything: `ExitGate` below sits inside the panel and reports the
+ * moment Radix lets go of it, which is the moment the closing animation ended.
+ * A dialog is never the security boundary and never the only place a fact is
+ * stated. It is a way of asking, and closing one always leaves the page as it
+ * was.
  *
  * A child function receives the same dismiss path as the close button and the
- * backdrop. Pointer dismissal gets the short exit. Keyboard dismissal stays
- * immediate. Successful writes may still call the owner's `onClose` directly,
- * because the system response should not wait for decoration.
+ * scrim. Successful writes may still call the owner's `onClose` directly,
+ * because the system response should not wait for decoration — the gate below
+ * stays quiet on that path rather than closing the same dialog twice.
  *
- * **The appearance is here and the motion is not.** Sizes, surfaces and the
- * three shapes are utilities on the elements below. The entrance, the exit and
- * the reduced-motion form of both are in `tailwind-theme.css`, keyed on the
- * `data-slot` and `data-kind` this file writes — the same arrangement the Radix
- * surfaces already use, and for the same reason: an exit that has to finish
- * before the element is removed is a thing a class list says badly.
+ * **The centred motion is not here.** `tailwind-theme.css` keys the entrance,
+ * the exit and the reduced-motion form of both on the `data-slot` and
+ * `data-state` the kit writes. The two edge-attached kinds add the travel that
+ * `DESIGN.md` asks of them, because the theme's edge rules were written for the
+ * native `<dialog>` this file just retired and the Radix slots have no drawer
+ * rule of their own yet.
  */
 
-/** What each shape is, once, so the panel and the scrim cannot disagree. */
-const SCRIM_SHAPE = {
-  dialog: "open:items-center open:justify-center open:p-5",
-  drawer: "open:items-stretch open:justify-start open:p-0",
-  sheet: "open:items-stretch open:justify-end open:p-0",
-} as const;
-
+/**
+ * What each shape is, as an override of the kit's centred panel.
+ *
+ * The kit centres with `-translate-x-1/2 -translate-y-1/2` on the `translate`
+ * property and animates `scale`, so position and motion never share a property.
+ * The two edge kinds keep that arrangement: they sit at their edge with no
+ * centring shift, and the travel below is written on `translate` as well, so
+ * the theme's `scale` animation and this file's slide compose instead of
+ * cancelling each other.
+ */
 const PANEL_SHAPE = {
-  dialog: "w-[min(420px,100%)] origin-center p-5",
+  /* A tall dialog scrolls inside the viewport rather than off it. */
+  dialog: "max-h-[calc(100svh-var(--space-8))] overflow-y-auto",
   drawer: [
-    "w-[min(340px,calc(100%-var(--space-7)))] min-h-full origin-left p-5",
-    "rounded-[0_var(--radius-lg)_var(--radius-lg)_0] border-y-0 border-l-0",
+    "top-0 left-0 h-full max-h-none",
+    "w-[min(340px,calc(100vw-var(--space-7)))] translate-x-0 translate-y-0",
+    "overflow-y-auto rounded-[0_var(--radius-lg)_var(--radius-lg)_0]",
+    "border-y-0 border-l-0",
   ],
   sheet: [
-    "flex h-full min-h-full w-[min(640px,100%)] flex-col overflow-hidden",
-    "origin-right rounded-none border-y-0 border-r-0 p-0",
-    "max-[40rem]:w-full max-[40rem]:rounded-none max-[40rem]:border-l-0",
+    "top-0 right-0 left-auto h-full max-h-none",
+    "w-[min(640px,100vw)] translate-x-0 translate-y-0",
+    "gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0",
+    "max-[40rem]:w-full max-[40rem]:border-l-0",
   ],
 } as const;
+
+/**
+ * The travel of the two kinds that are attached to an edge.
+ *
+ * `DESIGN.md`: "Mobile drawer — translate from its attached edge." The theme
+ * holds the panel for the length of its `scale` animation, which is what Radix
+ * waits for before unmounting, so the slide is given the same two tokens and
+ * ends with it rather than being cut off halfway. `@starting-style` is what
+ * makes the entrance a movement: without it a panel that mounts already open
+ * has nowhere to travel from.
+ *
+ * Reduced motion drops the transition and nothing else. The panel then arrives
+ * and leaves in place, and the opacity the theme still runs is what says a
+ * surface came or went.
+ */
+const PANEL_TRAVEL = {
+  dialog: "",
+  drawer: [
+    "transition-[translate] duration-(--duration-dialog-in) ease-out",
+    "starting:-translate-x-full",
+    "data-[state=closed]:-translate-x-full",
+    "data-[state=closed]:duration-(--duration-dialog-out)",
+    "motion-reduce:transition-none",
+  ],
+  sheet: [
+    "transition-[translate] duration-(--duration-dialog-in) ease-out",
+    "starting:translate-x-full",
+    "data-[state=closed]:translate-x-full",
+    "data-[state=closed]:duration-(--duration-dialog-out)",
+    "motion-reduce:transition-none",
+  ],
+} as const;
+
+/** A sheet's head is a fixed bar over a body that scrolls under it. */
+const HEAD_SHAPE = {
+  dialog: "",
+  drawer: "",
+  sheet: "flex-none border-b border-border p-5",
+} as const;
+
+/**
+ * The moment the panel finished leaving.
+ *
+ * It renders nothing and exists for its unmount: Radix removes the panel only
+ * after the closing animation ends, so this component's cleanup is that end.
+ * Waiting on it rather than on a timer means the exit is never cut short and
+ * never guessed at, and the duration stays in the theme where `DESIGN.md` puts
+ * it.
+ */
+function ExitGate({ onGone }: { readonly onGone: () => void }) {
+  const gone = useRef(onGone);
+  gone.current = onGone;
+  useEffect(() => () => gone.current(), []);
+  return null;
+}
+
+/**
+ * Which of the three shapes takes the screen, and which sits beside the work.
+ *
+ * A confirmation and the mobile navigation are questions: nothing behind them
+ * can be reached until they are answered, which is `DESIGN.md`'s "dialogs trap
+ * focus, make the background inert". A sheet is not that. It is a panel docked
+ * to an edge, the simulation page opens one by default, and that page is built
+ * to be read with the transcript open beside the grader results — so a sheet
+ * that put the page behind it out of reach would break the page it belongs to.
+ *
+ * A sheet keeps everything else a dialog has: focus moves into it, Escape
+ * closes it, and the control that opened it is focused again afterwards. What
+ * it drops is the scrim, the scroll lock, and the inert page.
+ *
+ * **This is a design call rather than a fact, and it is called out in the pull
+ * request for the developer to overrule.** The surface it changes is the
+ * transcript-and-audio sheet and the persona version history.
+ */
+const TAKES_THE_SCREEN = { dialog: true, drawer: true, sheet: false } as const;
 
 export function Dialog({
   kind = "dialog",
@@ -75,164 +165,94 @@ export function Dialog({
   readonly returnFocusTo?: HTMLElement | null;
   readonly children: ReactNode | ((dismiss: DialogDismiss) => ReactNode);
 }) {
-  const titleId = useId();
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(true);
   const closeRef = useRef(onClose);
-  const closingRef = useRef(false);
-  const closeTimerRef = useRef<number | null>(null);
-  const [closing, setClosing] = useState(false);
+  const dismissedRef = useRef(false);
   closeRef.current = onClose;
 
-  const finishClose = useCallback(() => {
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = null;
-    closingRef.current = false;
-    setClosing(false);
-    closeRef.current();
+  /**
+   * The control that was in hand when this dialog appeared.
+   *
+   * Read while rendering rather than in an effect, because by the time an
+   * effect runs the kit has already moved focus inside the panel and the
+   * answer is gone. Owners mount this component instead of opening it from a
+   * `DialogTrigger`, so the kit has no trigger of its own to go back to and
+   * would otherwise leave focus on the page body.
+   */
+  const [opener] = useState<HTMLElement | null>(() =>
+    typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
+
+  const dismiss = useCallback<DialogDismiss>(() => {
+    dismissedRef.current = true;
+    setOpen(false);
   }, []);
 
-  const requestClose = useCallback((animate: boolean) => {
-    if (!animate) {
-      finishClose();
-      return;
-    }
-    // Input can change while the dialog is open. A keyboard-opened dialog that
-    // is later dismissed with the pointer must use the pointer exit selectors;
-    // otherwise it remains inert until the safety timer with no visible motion.
-    if (dialogRef.current !== null) dialogRef.current.dataset.input = "pointer";
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setClosing(true);
-    // `transitionend` is the normal path. This fallback prevents a modal from
-    // trapping the page if a browser or injected stylesheet drops the event.
-    closeTimerRef.current = window.setTimeout(finishClose, 280);
-  }, [finishClose]);
-
-  const dismiss = useCallback<DialogDismiss>((event) => {
-    requestClose((event?.detail ?? 0) > 0);
-  }, [requestClose]);
-
-  useEffect(() => () => {
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-  }, []);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (dialog === null) return undefined;
-
-    const opener = returnFocusTo ?? (
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null
-    );
-    dialog.dataset.input = opener?.matches(":focus-visible") === true
-      ? "keyboard"
-      : "pointer";
-
-    // jsdom does not implement the modal methods. Keeping the fallback local
-    // lets the rendered component tests prove focus without weakening the real
-    // browser path, which always uses `showModal`.
-    const hasNativeModal = typeof dialog.showModal === "function";
-    const fallbackEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") requestClose(false);
-    };
-    if (hasNativeModal) dialog.showModal();
-    else {
-      dialog.setAttribute("open", "");
-      document.addEventListener("keydown", fallbackEscape);
-    }
-
-    const first = dialog.querySelector<HTMLElement>(
-      "[autofocus], a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)",
-    );
-    (first ?? dialog)?.focus();
-
-    return () => {
-      if (!hasNativeModal) document.removeEventListener("keydown", fallbackEscape);
-      if (dialog.open && typeof dialog.close === "function") dialog.close();
-      else dialog.removeAttribute("open");
-      if (opener?.isConnected === true) opener.focus();
-    };
-  }, [requestClose, returnFocusTo]);
+  /**
+   * Focus goes back the moment the panel does, rather than a task later.
+   *
+   * The kit hands focus back from a timer, which is soon enough to look right
+   * and one task too late for anything that reads `document.activeElement`
+   * straight after a press. `DESIGN.md` asks a control to answer on press, so
+   * this puts focus back as the panel is removed. `onCloseAutoFocus` below
+   * keeps the kit from moving it again afterwards, and repeats the same move
+   * in case a future version removes the panel differently.
+   */
+  const restoreFocus = () => {
+    const back = returnFocusTo ?? opener;
+    if (back !== null && back.isConnected) back.focus();
+  };
 
   return (
-    <dialog
-      className={cn(
-        /*
-         * The `<dialog>` element is the scrim. The browser gives it a border, a
-         * padding and a centred box of its own, so every one of those is said
-         * away here and the layout is the flex box below.
-         */
-        "fixed inset-0 z-30 m-0 h-full max-h-none w-full max-w-none",
-        "overflow-y-auto border-0 bg-transparent p-0 text-foreground",
-        /*
-         * The scrim colour is a utility and its opacity deliberately is not.
-         * Utilities outrank `@layer components`, so an `opacity-100` here would
-         * beat the theme rule that fades the backdrop out and the dialog would
-         * leave with its scrim still at full strength. A backdrop is opaque by
-         * default, so there is nothing to say.
-         */
-        "backdrop:bg-scrim",
-        "open:flex",
-        SCRIM_SHAPE[kind],
-      )}
-      data-slot="dialog-scrim"
-      ref={dialogRef}
-      aria-labelledby={titleId}
-      aria-modal="true"
-      data-kind={kind}
-      data-closing={closing ? "true" : "false"}
-      onCancel={(event) => {
-        event.preventDefault();
-        requestClose(false);
-      }}
-      onPointerDown={(event) => {
-        event.currentTarget.dataset.input = "pointer";
-        if (event.target === event.currentTarget) requestClose(true);
+    <KitDialog
+      open={open}
+      modal={TAKES_THE_SCREEN[kind]}
+      onOpenChange={(next) => {
+        if (!next) dismiss();
       }}
     >
-      <div
-        className={cn(
-          "rounded-card border border-border bg-surface shadow-modal",
-          PANEL_SHAPE[kind],
-        )}
-        data-slot="dialog-panel"
-        onTransitionEnd={(event) => {
-          if (closing && event.target === event.currentTarget && event.propertyName === "opacity") {
-            finishClose();
-          }
+      <DialogContent
+        className={cn(PANEL_SHAPE[kind], PANEL_TRAVEL[kind])}
+        data-kind={kind}
+        /*
+         * Every caller writes its own body, and most bodies are not one
+         * sentence a description could stand in for. Saying so removes the
+         * attribute rather than pointing it at nothing.
+         */
+        aria-describedby={undefined}
+        onCloseAutoFocus={(event) => {
+          // The kit's own answer here is its `DialogTrigger`, which these
+          // callers do not use, so this says where focus belongs instead: the
+          // control a caller named, or the one that was in hand. An opener
+          // removed by the very write this dialog confirmed is left alone —
+          // focus falls to the page rather than to something nobody can see.
+          event.preventDefault();
+          restoreFocus();
+        }}
+        /*
+         * A sheet stays open while the page beside it is used. Without this a
+         * press on the grader results would close the transcript being read
+         * against them, which is the one thing that page is for.
+         */
+        onInteractOutside={(event) => {
+          if (!TAKES_THE_SCREEN[kind]) event.preventDefault();
         }}
       >
-        <div
-          className={cn(
-            "mb-4 flex items-center justify-between gap-4",
-            /* A sheet's head is a fixed bar over a scrolling body. */
-            kind === "sheet" &&
-              "mb-0 flex-none border-b border-border p-5",
-          )}
-        >
-          <h2 className="m-0 text-lg font-medium" id={titleId}>
-            {title}
-          </h2>
-          <button
-            className={cn(
-              "grid size-(--control-md) shrink-0 place-items-center p-0",
-              "rounded-button border border-border bg-surface text-sm text-foreground",
-              "cursor-pointer transition-transform duration-(--duration-press) ease-out",
-              "pointer-hover:border-border-strong pointer-hover:bg-surface-soft",
-              "[&:active:not(:focus-visible)]:scale-97",
-              "pointer-coarse:size-(--tap-target)",
-              "motion-reduce:transition-none motion-reduce:[&:active:not(:focus-visible)]:scale-100",
-            )}
-            type="button"
-            aria-label="Close"
-            onClick={(event) => requestClose(event.detail > 0)}
-          >
-            <span aria-hidden="true">✕</span>
-          </button>
-        </div>
+        <DialogHeader className={cn(HEAD_SHAPE[kind])}>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
         {typeof children === "function" ? children(dismiss) : children}
-      </div>
-    </dialog>
+        <ExitGate
+          onGone={() => {
+            restoreFocus();
+            if (!dismissedRef.current) return;
+            dismissedRef.current = false;
+            closeRef.current();
+          }}
+        />
+      </DialogContent>
+    </KitDialog>
   );
 }
