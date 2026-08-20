@@ -888,15 +888,16 @@ describe("what a project recorded in production", () => {
         });
       });
 
-      // The four product areas, and Personas and Graders beside them. Settings
-      // is not one of them and neither is a simulation.
+      // The six rows the three groups hold — Global's standing pair, the three
+      // Simulations rows, and Monitoring's one. Settings is not one of them and
+      // neither is a simulation.
       for (const area of [
         "Agents",
-        "Tests",
-        "Simulation runs",
-        "Monitoring",
-        "Personas",
         "Graders",
+        "Tests",
+        "Personas",
+        "Runs",
+        "Transcripts",
       ]) {
         expect(
           await sidebar.getByRole("link", { name: area, exact: true }).count(),
@@ -913,17 +914,23 @@ describe("what a project recorded in production", () => {
        * its presence — an item pointing at the area's own address would cost a
        * redirect on every visit, and a reserved neighbour under the same area
        * could become the landing by accident.
+       *
+       * The word `Monitoring` is the group's now, so the item says what its
+       * page is. The address it carries did not move with the word.
        */
       expect(
         await sidebar
-          .getByRole("link", { name: "Monitoring", exact: true })
+          .getByRole("link", { name: "Transcripts", exact: true })
           .getAttribute("href"),
       ).toBe(`/projects/${project ?? ""}/monitoring/transcripts`);
 
-      // And the runs surface is reached by its new label. `Runs` on its own is
-      // what it said before this effort separated the two kinds of traffic.
+      // And the runs surface is reached by the word its group left it: the
+      // pairing a person reads is Simulations → Runs, so the two-word label
+      // that stood in for the group before the groups existed is gone.
       expect(
-        await sidebar.getByRole("link", { name: "Runs", exact: true }).count(),
+        await sidebar
+          .getByRole("link", { name: "Simulation runs", exact: true })
+          .count(),
       ).toBe(0);
       expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
       expect(
@@ -3254,14 +3261,29 @@ describe("the complete product, walked in order in a second project", () => {
 
             if (index === 0) {
               const sidebar = opened.locator("aside");
-              const navigation = await sidebar.innerText();
-              // Monitoring used to be banned here and is deliberately not:
-              // production traffic is a navigation item now — it is what the
-              // monitoring-surface effort added. What stays excluded is a
-              // Simulations area: a simulation is evidence, reached from the
-              // run that produced it. "Simulation runs" is that run surface's
-              // label and carries no "simulations" to trip the ban.
-              expect(navigation).not.toMatch(/simulations/iu);
+              /*
+               * Monitoring used to be banned here and is deliberately not:
+               * production traffic is a navigation item now. What stays
+               * excluded is a Simulations *destination* — a simulation is
+               * evidence, reached from the run that produced it, and no row in
+               * this bar may open a list of every one.
+               *
+               * **The word is no longer the test, and it cannot be.**
+               * `Simulations` is a group label now: it names the half of the
+               * product that proves trust before release. A sweep of the bar's
+               * text would fail on that label while the thing it guards is
+               * still absent. A destination is an address, so the addresses are
+               * what is read.
+               */
+              const addresses = await sidebar
+                .getByRole("link")
+                .evaluateAll((links) =>
+                  links.map((link) => link.getAttribute("href") ?? ""),
+                );
+              expect(addresses.length).toBeGreaterThan(0);
+              for (const address of addresses) {
+                expect(address, address).not.toContain("simulations");
+              }
               expect(
                 await sidebar
                   .getByRole("link", { name: "Simulations" })
@@ -3306,11 +3328,11 @@ describe("the complete product, walked in order in a second project", () => {
 
         await walk.getByRole("link", { name: "Tests", exact: true }).first().click();
         await walk.waitForURL(at("tests"));
-        // **Simulation runs** by its label, `/runs` by its address. The rename
-        // was a label and only a label — the addresses did not move — and this
-        // line is where the two have to be spelled differently on purpose.
+        // **Runs** by its label, `/runs` by its address. Both relabelings were
+        // labels and only labels — the addresses never moved — and this line is
+        // where the word and the address have to be spelled apart on purpose.
         await walk
-          .getByRole("link", { name: "Simulation runs", exact: true })
+          .getByRole("link", { name: "Runs", exact: true })
           .first()
           .click();
         await walk.waitForURL(at("runs"));
@@ -3984,8 +4006,10 @@ describe("the complete product, walked in order in a second project", () => {
         expect(await focused()).toMatch(/^Organization/u);
         await walk.keyboard.press("Tab");
         expect(await focused()).toBe("Agents");
+        // Graders, not Tests: the second row of the bar is the other half of
+        // the standing pair Global holds, and Tests begins the group below it.
         await walk.keyboard.press("Tab");
-        expect(await focused()).toBe("Tests");
+        expect(await focused()).toBe("Graders");
       },
       SETTLE,
     );
