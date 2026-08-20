@@ -57,7 +57,10 @@ async function signUpWithAKey(
     method: "POST",
     url: "/api/keys",
     headers: { cookie: cookiesFrom(created.headers["set-cookie"]) },
-    payload: { name: `${organizationName}'s agent` },
+    payload: {
+      name: `${organizationName}'s agent`,
+      project_id: landed.project.id,
+    },
   });
   expect(minted.statusCode).toBe(201);
 
@@ -149,21 +152,15 @@ describe("the captured trace, posted at the door", () => {
     }
   });
 
-  /**
-   * The key this capture arrived on names no project, because that is what a
-   * key minted for a whole customer does. Its rows file under the sentinel the
-   * schema declares rather than under whichever project happened to be oldest —
-   * pointing an organization-scoped credential at one product area would be
-   * silent, and wrong the moment anything is read back by project.
-   */
-  it("files every row under the organization the key names, and under no project it did not", async () => {
+  /** The project on the key is the project that owns every landed row. */
+  it("files every row under the organization and project the key names", async () => {
     const rows = await store().rows<{
       organization_id: string;
       project_id: string;
     }>("select distinct organization_id, project_id from spans");
 
     expect(rows).toEqual([
-      { organization_id: acme.organizationId, project_id: "default" },
+      { organization_id: acme.organizationId, project_id: acme.projectId },
     ]);
   });
 

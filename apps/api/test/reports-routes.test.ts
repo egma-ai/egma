@@ -55,7 +55,7 @@ const RETELL = {
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
-/** The direct Retell fixture in this file is a chat agent. */
+/** The Retell chat fixture in this file points at a chat agent. */
 const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
   const url = String(input);
   if (!url.includes("/v2/list-agents")) {

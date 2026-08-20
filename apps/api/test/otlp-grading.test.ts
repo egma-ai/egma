@@ -109,6 +109,7 @@ async function jobsFor(organizationId: string): Promise<JobRow[]> {
 
 let acme: Customer;
 let globex: Customer;
+let globexOrganizationKey: string;
 
 beforeAll(async () => {
   requests = await capturedRequests();
@@ -118,7 +119,7 @@ beforeAll(async () => {
   await replay(await mintKey(acme, "Acme's agent", acme.projectId));
 
   globex = await signUp("gene@globex.example", "Globex");
-  await replay(await mintKey(globex, "Globex's agent"));
+  globexOrganizationKey = await mintKey(globex, "Globex's organization");
 });
 
 afterAll(async () => {
@@ -181,12 +182,31 @@ describe("a captured conversation arriving on a project's key", () => {
   });
 });
 
-describe("the same conversation arriving on a key for the whole customer", () => {
-  it("is stored and not queued, because a trace in no project has no graders", async () => {
-    // Its spans file under the store's own sentinel rather than under a project
-    // row, so there is no tenancy for a job to carry — and graders belong to
-    // projects, so there would be nothing to judge it by. The spans are kept:
-    // what is refused is the pretence that somebody chose to monitor them.
+describe("telemetry sent with a key for the whole customer", () => {
+  it("is refused before its body is decoded or any trace is stored", async () => {
+    const response = await api.app.inject({
+      method: "POST",
+      url: OTLP_TRACES_PATH,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${globexOrganizationKey}`,
+      },
+      // Deliberately invalid OTLP. Project scope must be checked before a body
+      // is decoded, because there is nowhere correct to file this telemetry.
+      payload: "not valid OTLP JSON",
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      message: expect.stringContaining("project API key"),
+    });
     expect(await jobsFor(globex.organizationId)).toEqual([]);
+
+    const traceStore = api.traceStore;
+    if (traceStore === undefined) throw new Error("this API has no trace store");
+    const [stored] = await traceStore.rows<{ n: string }>(
+      `select count() as n from spans where organization_id = '${globex.organizationId}'`,
+    );
+    expect(Number(stored?.n ?? -1)).toBe(0);
   });
 });

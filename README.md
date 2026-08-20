@@ -849,10 +849,8 @@ A few things worth knowing about what happens next:
 - **Which organization and project the spans land in comes from the key**, never
   from the payload. An attribute naming an account is stored with everything
   else and consulted by nothing, so a leaked key cannot be pointed somewhere
-  else. A key minted for a whole organization files its spans under no project —
-  and **those spans do not appear in the dashboard**, because a browser session
-  reads the project it is acting in. Mint the exporter's key against a project
-  and the two agree.
+  else. Customer OTLP export requires a project key. Egma rejects an
+  organization-wide key before it decodes or stores the request body.
 - **The ids are yours.** Egma stores the trace and span ids that arrived and
   mints neither; a span carrying no usable id is reported back as rejected
   rather than given one.
@@ -1026,10 +1024,10 @@ Two things about this are worth knowing:
   under it needs one. That is why the link works when you send it to somebody,
   and why opening a transcript's address with no window asks you to come in from
   the list.
-- **A key minted for a whole organization files its spans under no project at
-  all** (see above), and those do not appear here. **Mint the exporter's key
-  against a project** and its telemetry lands where the page looks — the empty
-  page says so, and links to where the key is minted.
+- **Customer OTLP export requires a project key.** Egma rejects an
+  organization-wide key before it decodes or stores the request body. The empty
+  page says which scope is required and links to where the project key is
+  minted.
 
 The pages are drawn from the two v1 endpoints above — the same contract you
 would integrate against, on the same origin, authenticated by the same session

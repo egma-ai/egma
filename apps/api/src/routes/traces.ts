@@ -605,6 +605,22 @@ export async function traceRoutes(
 
     const { auth } = requesterOf(request);
 
+    // Production telemetry must name the project it belongs to. An
+    // organization-wide key cannot provide that fact, and accepting the body
+    // would leave valid-looking spans that no Monitoring page or grader owns.
+    // Refuse it before decoding so the customer gets one clear setup error and
+    // no part of the export can land under a storage sentinel.
+    if (auth.projectId === undefined) {
+      return statusResponse(
+        reply,
+        encoding,
+        403,
+        RPC_PERMISSION_DENIED,
+        "Production trace export requires a project API key. Create a key " +
+          "for the project you want to monitor, then use that key for OTLP export.",
+      );
+    }
+
     // Writing telemetry is a write, so it goes through the same function every
     // other write in the product goes through, before the body is looked at.
     // A read-only credential that could still file spans would be read-only in

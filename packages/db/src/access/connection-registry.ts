@@ -804,7 +804,7 @@ export const CONNECTION_REGISTRY: Readonly<
   retell_chat_api: {
     label: "Retell chat API",
     agentPlatforms: ["retell"],
-    // The direct Retell adapter uses the chat-session API. Voice agents are
+    // The Retell chat adapter uses the chat-session API. Voice agents are
     // reached through a phone connection after provider setup resolves one of
     // their routed numbers. Admitting `voice` here would create a connection
     // the simulator cannot conduct and fail it only after dispatch.

@@ -27,7 +27,7 @@ import { startInstance, type Instance } from "./support/instance.ts";
 /** The value `startInstance` configures the API with. */
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
 
-/** The direct Retell fixture in this socket test is a chat agent. */
+/** The Retell chat fixture in this socket test points at a chat agent. */
 const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
   const url = String(input);
   if (!url.includes("/v2/list-agents")) {

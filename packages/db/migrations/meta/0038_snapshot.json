@@ -6217,10 +6217,11 @@
             "simulation_id"
           ]
         },
-        "grading_job_trace_id_unique": {
-          "name": "grading_job_trace_id_unique",
+        "grading_job_project_id_trace_id_unique": {
+          "name": "grading_job_project_id_trace_id_unique",
           "nullsNotDistinct": false,
           "columns": [
+            "project_id",
             "trace_id"
           ]
         }

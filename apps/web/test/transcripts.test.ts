@@ -384,12 +384,7 @@ describe("which guidance a quiet page shows", () => {
     }
   });
 
-  /**
-   * The one step of that setup that fails in silence: everything is accepted
-   * and stored, and none of it is in a project. Telling somebody who already
-   * exported to go and export is the unhelpful answer, so this replaces the
-   * teaching rather than joining it.
-   */
+  /** A visible organization key points to the exact scope that must change. */
   it("names the organization-wide key instead, when one is visible", () => {
     expect(seen({ organizationWideKeys: 1 })).toBe("key-names-the-organization");
   });

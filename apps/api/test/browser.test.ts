@@ -560,12 +560,9 @@ function cookiesFrom(header: string | null): string {
  * at egma with it.
  *
  * **The key names a project, and that is load-bearing rather than
- * incidental.** A key minted for a whole organization files its spans under no
- * project at all, while a browser session always acts inside one — so an
- * organization-wide key exports telemetry the dashboard cannot then find. That
- * asymmetry is the API's rather than these pages', and it is reported with the
- * ticket; what it means here is that the exporter is configured the way the
- * README says to configure it.
+ * incidental.** Customer OTLP export rejects a key minted for the whole
+ * organization, because no project would own its Monitoring evidence. The
+ * exporter is configured with the project key the product requires.
  */
 async function keyForTheProject(cookie: string, name: string): Promise<string> {
   const me = await fetch(`${origin}/api/me`, { headers: { cookie } });

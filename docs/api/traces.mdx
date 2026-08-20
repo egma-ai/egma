@@ -21,7 +21,7 @@ Sends an OTLP export to Egma. Use this endpoint as the `OTEL_EXPORTER_OTLP_TRACE
 
 ### Authentication
 
-Send a Bearer API key in the `Authorization` header. Use a key scoped to the project you want telemetry to appear under.
+Send a Bearer API key in the `Authorization` header. Customer OTLP production ingest requires a key scoped to the project that will own the telemetry. Egma rejects an organization-wide key before it decodes or stores the request body.
 
 ```
 Authorization: Bearer egma_sk_...
@@ -72,9 +72,9 @@ curl -X POST https://your-egma-instance/v1/traces \
   In `OTEL_EXPORTER_OTLP_HEADERS`, encode the space in `Bearer egma_sk_...` as `%20`. A literal space can make an OpenTelemetry SDK reject or misread the header.
 </Note>
 
-<Note>
-  Telemetry sent with a project-scoped API key appears in the dashboard under that project. An organization-scoped key groups traces at the organization level. For traces to appear under a specific project, mint a key scoped to that project via `POST /api/keys` with `project_id` set.
-</Note>
+<Warning>
+  Customer OTLP production ingest requires a project-scoped API key. An organization-wide key is rejected, and Egma stores no spans from that request. Organization-wide keys can still use the trace read APIs to query across the organization. Mint an ingest key via `POST /api/keys` with `project_id` set.
+</Warning>
 
 <Note>
   Egma removes credential fields and bearer-like values before it reads typed fields or stores the provider payload. Do not send secrets as telemetry attributes.

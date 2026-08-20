@@ -226,8 +226,7 @@ create one. The API (`3100`) is the direct ingest address. The web application
 endpoint when the exporter appends its signal path.
 
 Use a project-scoped Egma key for LiveKit or direct OTLP Monitoring. An
-organization-scoped key does not place the evidence on a project's Monitoring
-page.
+organization-scoped key is rejected before Egma decodes or stores the export.
 
 ## Single-organization mode
 

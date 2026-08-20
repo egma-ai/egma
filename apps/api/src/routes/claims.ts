@@ -29,7 +29,7 @@ import { acceptsServiceToken } from "../auth/service-token.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import {
-  verifyRetellDirectChatAgent,
+  verifyRetellChatAgent,
   type RetellDirectTargetCheck,
 } from "../providers/retell.ts";
 
@@ -360,7 +360,7 @@ async function assembledSpec(
     const agentId = connection.config["retellAgentId"] ?? "";
     let checked = retellTargets.get(connection.connectionId);
     if (checked === undefined) {
-      checked = verifyRetellDirectChatAgent(
+      checked = verifyRetellChatAgent(
         apiKey,
         agentId,
         retellFetch,

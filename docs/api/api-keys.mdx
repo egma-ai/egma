@@ -21,7 +21,7 @@ Mints a new API key. Copy the `secret` field immediately — it is shown exactly
 </ParamField>
 
 <ParamField body="project_id" type="string">
-  Scope the key to a specific project. Omit to create an organization-scoped key that can read and write across all projects. Pass a `prj_` identifier to restrict the key to one project area.
+  Scope the key to a specific project. Omit to create an organization-scoped key for permitted organization-wide reads and management operations. Customer OTLP production ingest requires a `prj_` identifier and rejects an organization-scoped key.
 </ParamField>
 
 Returns `201 Created` with the new key object including the plaintext secret.
@@ -138,7 +138,7 @@ Pass the key in the `Authorization` header on every request:
 Authorization: Bearer egma_sk_...
 ```
 
-For telemetry ingest (`POST /v1/traces`), use the same header. Configure your OpenTelemetry exporter's headers to include it:
+For telemetry ingest (`POST /v1/traces`), use a **project-scoped** key in the same header. Egma rejects an organization-scoped key before it decodes or stores the export. Configure your OpenTelemetry exporter's headers to include the project key:
 
 ```bash title="Example: set key for telemetry exporter"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20egma_sk_..."

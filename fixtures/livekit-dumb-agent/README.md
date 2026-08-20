@@ -108,8 +108,7 @@ export EGMA_API_KEY=egma_sk_...
 
 `EGMA_URL` is the API address and carries no `/v1/traces` on the end. On
 hosted Egma it is `https://api.egma.ai`. The key must name a **project**:
-an organization-wide key files telemetry outside every project, where no
-Monitoring page is looking.
+Egma rejects an organization-wide key before it decodes or stores the export.
 
 The same setup works when this worker is customer-hosted or hosted in LiveKit
 Cloud. The helper preserves LiveKit Cloud observability, batches export to

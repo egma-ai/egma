@@ -93,7 +93,7 @@ The same helper works for customer-hosted and LiveKit Cloud-hosted Python agents
 
 ## API key requirements
 
-The API key you use for telemetry export must be **project-scoped**. An organization-wide key files spans under no project at all, and those traces will not appear in the dashboard.
+The API key you use for customer OTLP production export must be **project-scoped**. Egma rejects an organization-wide key before it decodes or stores the request body. Organization-wide keys can still use the trace read APIs to query across the organization.
 
 To mint a project-scoped key, open **Settings → API keys** in the dashboard and create a key there; every row states its scope. If nothing is appearing under **Monitoring**, first check the platform setup state and then widen the transcript time window.
 

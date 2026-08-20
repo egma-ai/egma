@@ -11,6 +11,13 @@ DROP TABLE IF EXISTS "retell_webhook_refusal" CASCADE;
 -- trace with the same deterministic id needs to enqueue fresh grading work.
 DELETE FROM "grading_job" WHERE "source" = 'production';
 --> statement-breakpoint
+-- A production trace id comes from the customer. It is unique only inside the
+-- project named by that customer's credential; another project may send the
+-- same bytes without updating or suppressing this project's grading work.
+ALTER TABLE "grading_job" DROP CONSTRAINT "grading_job_trace_id_unique";
+--> statement-breakpoint
+ALTER TABLE "grading_job" ADD CONSTRAINT "grading_job_project_id_trace_id_unique" UNIQUE("project_id","trace_id");
+--> statement-breakpoint
 DROP TABLE IF EXISTS "production_trace_claim" CASCADE;
 --> statement-breakpoint
 

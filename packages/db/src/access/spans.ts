@@ -227,6 +227,14 @@ function asDateTime64(microseconds: bigint): string {
   return `${whole.replace("T", " ")}.${remainder.toString().padStart(6, "0")}`;
 }
 
+/** The project every stored span must belong to. */
+function projectForTrace(auth: AuthContext): string {
+  if (auth.projectId === undefined) {
+    throw new Error("trace spans require a project-scoped authorization context");
+  }
+  return auth.projectId;
+}
+
 /** One span as the columns of the `spans` table, tenancy included. */
 function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
   return {
@@ -234,9 +242,7 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
     span_id: span.spanId,
     parent_span_id: span.parentSpanId,
     organization_id: auth.organizationId,
-    // A credential naming no project is for the whole customer, and its rows
-    // file under the sentinel the schema already declares.
-    project_id: auth.projectId ?? "default",
+    project_id: projectForTrace(auth),
     source: span.source,
     emitter: span.emitter,
     environment: truncated(span.environment, FIELD_LIMITS.environment),

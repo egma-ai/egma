@@ -524,17 +524,14 @@ export function transcriptReadPath(asking: {
  *   known to be wrong.
  * - `set-up-capture` — nothing has arrived **anywhere**, at any window this page
  *   can ask about. The reader has an agent and no export, so what they need is
- *   the address, the two variables and a key — and the caution about the key
- *   that fails silently, which rides with the teaching so that every role meets
- *   it. It does not matter which window is selected: a developer whose first
+ *   the address, the two variables and a project key. It does not matter which
+ *   window is selected: a developer whose first
  *   ever page is empty is the person this teaching exists for, and the default
  *   window is where they land.
  * - `key-names-the-organization` — the same emptiness, with a key that names no
- *   project actually **visible** to this reader. That key is the one step of
- *   the setup path that fails in silence: everything is accepted and stored,
- *   and none of it is in any project, so a correct-looking export shows nothing
- *   here. Saying "point an export at Egma" to somebody who already did is the
- *   unhelpful answer, so this replaces the teaching rather than joining it.
+ *   project actually **visible** to this reader. Customer OTLP rejects that
+ *   scope because no project would own the evidence. This state points to the
+ *   specific key change instead of repeating generic export setup.
  * - `nothing-watches-production` — traffic is arriving and no grader is scoped
  *   to it, so verdicts will stay absent. Every new grader defaults to
  *   simulations, and the seeded expected-behaviors copy is structurally
@@ -605,7 +602,7 @@ export function watchesProduction(grader: { readonly scope: string }): boolean {
 }
 
 /**
- * Keys minted against the whole organization, which file outside every project.
+ * Keys minted against the whole organization, which customer OTLP rejects.
  *
  * **A revoked one is not one of them.** It authenticates nothing, so it can file
  * nothing anywhere — and a page that counted it would explain an empty list with

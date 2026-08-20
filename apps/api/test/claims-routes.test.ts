@@ -84,7 +84,7 @@ const PHONE = {
   config: { phoneNumber: "+15551234567" },
 } as const;
 
-/** The ordinary direct Retell target in these route tests is a chat agent. */
+/** The Retell chat target in these route tests is a chat agent. */
 const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
   const url = String(input);
   if (!url.includes("/v2/list-agents")) {
@@ -691,7 +691,7 @@ describe("what the claim door never touches", () => {
 });
 
 describe("a simulation the platform cannot hand over", () => {
-  it("blocks a legacy text-labelled row when Retell says its agent is voice", async () => {
+  it("blocks a Retell chat connection when Retell says its agent is voice", async () => {
     const providerReads: string[] = [];
     const retellFetch: typeof fetch = async (input) => {
       providerReads.push(String(input));

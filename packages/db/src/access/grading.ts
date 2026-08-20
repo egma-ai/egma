@@ -433,10 +433,9 @@ type ProductionTraceActivity = {
  *
  * The row is written on the first export that carries any span of a trace and
  * updated by every export after it, which is why the whole thing is one upsert
- * against the `trace_id` unique: an exporter flushes a conversation in as many
- * batches as it likes, in whatever order, and they all land on one row. That
- * unique is also why no conversation is ever judged twice — a second job for a
- * trace is unrepresentable rather than merely never written.
+ * against the project-and-trace unique: an exporter flushes a conversation in
+ * as many batches as it likes, in whatever order, and they all land on one row.
+ * The project is part of that key because a trace id comes from the customer.
  *
  * **A job already claimed or already graded is not touched**, which is the whole
  * of what late spans do. Telemetry that arrives after egma judged a trace does
@@ -444,12 +443,10 @@ type ProductionTraceActivity = {
  * second judgment: re-grading history is a deliberate action somebody asks for,
  * never something a straggling export causes.
  *
- * **A credential naming no project writes nothing here, deliberately.** Its
- * spans file under the store's `default` sentinel, which is not a project row
- * and could not carry the tenancy triangle a job needs; and graders belong to
- * projects, so such a trace has no graders to be judged by in the first place.
- * The same sentence the grader factory says: a credential for the whole customer
- * is acting in no project.
+ * The supported ingest door and the shared span writer both refuse telemetry
+ * without a project. The guard below remains as a narrow data-access invariant:
+ * a grading job cannot be formed when its project side of the tenancy triangle
+ * is absent.
  *
  * No permission is asked for, on the same terms as `appendSpans` beside it: what
  * may write telemetry is decided once, at the door, before a byte of the body is
@@ -488,7 +485,7 @@ export async function recordProductionTraces(
       })),
     )
     .onConflictDoUpdate({
-      target: gradingJob.traceId,
+      target: [gradingJob.projectId, gradingJob.traceId],
       set: {
         // Widened, never replaced: exports arrive in the order an exporter felt
         // like sending them, so the window a trace is read inside is the widest
@@ -963,11 +960,11 @@ export async function listGradingJobsForSimulation(
 /**
  * The job standing behind one production trace, if egma has heard of it.
  *
- * One rather than a list, and that is the `trace_id` unique speaking: a trace
- * has exactly one job for its whole life, from the first span that arrives to
- * the verdicts that land. So this answers three questions with one row — has
- * egma seen this conversation, is it over, has it been judged — and it is what a
- * test asserts a second grading never created.
+ * One rather than a list, and that is the project-and-trace unique speaking: a
+ * trace has exactly one job in this project for its whole life, from the first
+ * span that arrives to the verdicts that land. So this answers three questions
+ * with one row — has egma seen this conversation, is it over, has it been
+ * judged — without trusting a customer-controlled id across tenants.
  */
 export async function getGradingJobForTrace(
   auth: AuthContext,

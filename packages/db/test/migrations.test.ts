@@ -4065,7 +4065,7 @@ describe("the direct Monitoring cutover (0038)", () => {
     }
   });
 
-  it("deletes an unrepresentable direct Retell voice connection and its run", async () => {
+  it("deletes the old unrepresentable Retell voice connection and its run", async () => {
     const { rows } = await client.query<{
       connection: string | null;
       run: string | null;

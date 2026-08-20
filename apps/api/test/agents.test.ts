@@ -1164,7 +1164,7 @@ describe("registering the same vendor agent again", () => {
     expect(rows[0]).toEqual({ agents: "1", connections: "1" });
   });
 
-  it("refuses a direct Retell voice row before it can be stored", async () => {
+  it("refuses voice modality on a Retell chat API connection", async () => {
     api = await createApi("agents_connection_added");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 

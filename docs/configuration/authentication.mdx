@@ -84,15 +84,16 @@ The same header format applies to the OpenTelemetry exporter endpoint, the REST 
 ## Key scoping and trace ingestion
 
 <Warning>
-  **A key minted for the whole organization cannot file telemetry spans to the dashboard.** Keys are scoped when they are created: a project-scoped key routes incoming spans to that project, where the dashboard can find them. An org-wide key files spans under no project at all, and those spans are invisible in the dashboard.
+  **A key minted for the whole organization cannot ingest customer OTLP production spans.** Keys are scoped when they are created. A project-scoped key routes incoming spans to that project. Egma rejects an organization-wide key before it decodes or stores the request body.
 
   Always mint the key your agent's exporter uses against a specific project.
 </Warning>
 
-The distinction matters in two places:
+The distinction matters in three places:
 
-- **Trace ingestion** (`POST /v1/traces`): use a project-scoped key. Org-wide keys at `member` or `admin` role are not refused, but the spans they carry are filed under no project at all — invisible in the dashboard. A key held by a `viewer` is refused for trace ingestion regardless of scope, because sending spans is a write.
-- **Management operations** (creating projects, reading members, calling `PATCH /api/platform/settings`): an org-wide key works fine.
+- **Trace ingestion** (`POST /v1/traces`): use a project-scoped key. Organization-wide keys are rejected. A key held by a `viewer` is also rejected because sending spans is a write.
+- **Trace reads** (`GET /v1/traces` and `GET /v1/traces/:traceId`): an organization-wide key can read across the organization. A project-scoped key can read only that project.
+- **Management operations** (creating projects, reading members, calling `PATCH /api/platform/settings`): an organization-wide key works fine.
 
 ---
 

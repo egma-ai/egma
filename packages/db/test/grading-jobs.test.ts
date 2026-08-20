@@ -381,9 +381,8 @@ describe("a production trace at the door", () => {
     expect(job.firstSpanAt?.getTime()).toBe(middle - 30_000);
     expect(job.lastSpanAt?.getTime()).toBe(middle + 30_000);
 
-    // One row, and nothing in the module is what makes it one: a second job for
-    // a trace is unrepresentable, which is what stops any conversation ever
-    // being judged twice.
+    // One row in this project, and nothing in the module is what makes it one:
+    // a second job for the same project and trace is unrepresentable.
     await expect(
       database.sql(
         "insert into grading_job (id, organization_id, project_id, source, trace_id, status, first_span_at, last_span_at, last_seen_at) values ($1, $2, $3, 'production', $4, 'pending', now(), now(), now())",
@@ -525,6 +524,32 @@ describe("a production trace at the door", () => {
     expect(
       await getGradingJobForTrace(actingAsGlobex(), traceId),
     ).toBeUndefined();
+  });
+
+  it("keeps the same wire trace id as separate work in separate projects", async () => {
+    const traceId = wireId(16);
+
+    // A customer controls this id. Two exporters can choose the same bytes,
+    // and the project on the credential is what makes them two conversations.
+    await recordProductionTraces(auth, [aSpan({ traceId })]);
+    await recordProductionTraces(actingAsGlobex(), [aRootSpan(traceId)]);
+
+    const acmeJob = await getGradingJobForTrace(auth, traceId);
+    const globexJob = await getGradingJobForTrace(actingAsGlobex(), traceId);
+    expect(acmeJob).toMatchObject({
+      projectId: acme.project,
+      rootClosedAt: null,
+    });
+    expect(globexJob).toMatchObject({
+      projectId: globex.project,
+      rootClosedAt: expect.any(Date),
+    });
+
+    const counted = await database.sql<{ n: string }>(
+      "select count(*) as n from grading_job where trace_id = $1",
+      [traceId],
+    );
+    expect(Number(counted.rows[0]?.n ?? 0)).toBe(2);
   });
 });
 
