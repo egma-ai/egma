@@ -119,13 +119,14 @@ credential list. Create one SIP username/password in that list per developer,
 plus one for production. Each developer uses the shared trunk address and
 source number with their own credential.
 
-Setup asks for `EGMA_PHONE_TRUNK_ADDRESS`, `EGMA_PHONE_SOURCE_NUMBER`,
-`EGMA_PHONE_TRUNK_USERNAME`, and `EGMA_PHONE_TRUNK_PASSWORD`, then copies all
-four into the platform store. A fresh database copies the same values again
-from that developer's environment. Setup never asks for the Twilio Account SID
-or Auth Token and never contacts or changes Twilio. Press Enter at the trunk
-address question to leave the phone for later. `--json` is the same work with
-nobody watching.
+Setup asks for the trunk address and source number, plus the SIP username and
+password when the carrier uses credential authentication. It writes that
+complete route into the platform store. Keep the same values in the ignored
+`.env` file or a password manager if a fresh database must restore them later;
+the CLI does not write an environment file. Setup never asks for the Twilio
+Account SID or Auth Token and never contacts or changes Twilio. Press Enter at
+the trunk address question to leave the phone for later. `--json` is the same
+work with nobody watching.
 
 **Every carrier answer is written through the platform's own API, and the
 platform is the only thing that seals.** The route lives in Postgres, with its
@@ -135,7 +136,7 @@ the phone work order it claims, so a second simulator on another host needs no
 carrier credential copied to it. The CLI keeps none of it.
 
 **Phone readiness is one optional capability, not platform readiness.** A
-platform with no carrier runs chat and text simulations. `self-host up` reports
+platform with no carrier runs chat simulations. `self-host up` reports
 the platform ready and reports `phone: setup_required` beside it.
 
 **Normal setup never receives the Twilio Auth Token.** A running Egma receives
@@ -550,38 +551,17 @@ trunk; it cannot manage the Twilio account. It is sealed in the platform's own
 store with the same key a connection's credentials are sealed with, and it
 reaches a simulator only on the work order that simulator claims.
 
-### The whole thing, end to end
+### Real end-to-end proof
 
-One command, with your own number and your own credentials in the environment:
+Do not use the workbench to prove a real phone simulation. Its checked-in
+fixtures use placeholder destinations and sentinel provider keys. The workbench
+proves the simulator contract, but it does not resolve deployment credentials or
+create a real run.
 
-```bash
-EGMA_WORKBENCH_PHONE_NUMBER=+15551234567 \
-docker compose -f docker-compose.yml -f docker-compose.workbench.yml \
-  up --build simulator workbench
-```
-
-Naming the two services is what keeps the API and the two databases out of it;
-the phone stack comes along because the simulator depends on it. What starts is a workbench holding one spec, pointed at your
-number instead of the fixture's placeholder, and a simulator that can dial it.
-Then watch the workbench's log: the claim, the call, each turn of the
-conversation as it is spoken, the timings measured off the audio, and the
-recording's reference. The `.wav` is in the object store, with the persona on one
-channel and the agent on the other. From a full deployment you press play on the
-run's results — or beside the turns of that conversation's transcript, which is
-where a turn looks wrong in the first place — and hear it; the workbench overlay
-starts no API and no pages, so this brings it out to listen to instead:
-
-```bash
-docker compose exec minio sh -c \
-  'mc alias set egma http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
-   mc cat "egma/egma-recordings/<reference>"' > call.wav
-```
-
-The workbench fixture must carry a complete contract-v2 `models` block and its
-direct provider keys. It has no model, key, or voice fallback from the
-simulator container. The checked-in fixtures use sentinel keys, so production
-adapters refuse them; deterministic model and speech implementations are test
-injections only.
+Create the run through the platform with a phone connection. The simulator then
+claims one work order that carries the selected destination, the complete
+carrier route, the pinned persona models, and the current deployment provider
+credentials. Read the transcript, recording, and grades on that run's results.
 
 Pipecat and the transport own any media conversion. Egma does not force or
 report a processing rate. The WAV header is the only sample-rate fact Egma

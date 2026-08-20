@@ -71,6 +71,7 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
         "additionalProperties",
         "model",
     ),
+    "spec/phone-carrier-missing.json": ("", "required", "platform"),
     "spec/persona-missing-language.json": (
         "/persona/traits",
         "required",

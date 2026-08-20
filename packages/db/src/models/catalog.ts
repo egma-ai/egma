@@ -18,6 +18,7 @@ export type ProviderCatalogEntry = {
   readonly model: string;
   readonly label: string;
   readonly recommendedVoiceId?: string;
+  readonly recommendedSpeed?: number;
 };
 
 export const PROVIDER_CATALOG = [
@@ -47,6 +48,7 @@ export const PROVIDER_CATALOG = [
     model: "sonic-3.5",
     label: "Cartesia",
     recommendedVoiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+    recommendedSpeed: 1,
   },
   {
     provider: "openai",
@@ -54,6 +56,7 @@ export const PROVIDER_CATALOG = [
     model: "gpt-4o-mini-tts",
     label: "OpenAI",
     recommendedVoiceId: "alloy",
+    recommendedSpeed: 1,
   },
 ] as const satisfies readonly ProviderCatalogEntry[];
 

@@ -6,7 +6,9 @@ from typing import Any
 
 import pytest
 
+from egma_simulator.contract import spec_validator
 from egma_simulator.speech import (
+    CARTESIA_SPEED_RANGE,
     PersonaVoice,
     SpeechFault,
     SpeechProviders,
@@ -15,6 +17,16 @@ from egma_simulator.speech import (
 )
 
 A_KEY = "sk-only-this-test-holds-this-one"
+
+
+def contract_tts_speed_range() -> tuple[float, float]:
+    speed_schema = spec_validator().schema["$defs"]["tts_selection"]["properties"][
+        "speed"
+    ]
+    return (speed_schema["minimum"], speed_schema["maximum"])
+
+
+CONTRACT_TTS_SPEED_RANGE = contract_tts_speed_range()
 
 
 def capture_construction(
@@ -37,7 +49,11 @@ def cartesia_voice(speed: float = 1.1) -> PersonaVoice:
     )
 
 
-@pytest.mark.parametrize("speed", [0.6, 1.5])
+def test_cartesia_speed_range_matches_the_simulation_contract():
+    assert CARTESIA_SPEED_RANGE == CONTRACT_TTS_SPEED_RANGE
+
+
+@pytest.mark.parametrize("speed", CONTRACT_TTS_SPEED_RANGE)
 def test_cartesia_receives_the_pinned_model_voice_and_speed(
     monkeypatch: pytest.MonkeyPatch,
     speed: float,
@@ -77,7 +93,10 @@ def test_cartesia_refuses_an_incomplete_selection(
         _mouth(providers, cartesia_voice())
 
 
-@pytest.mark.parametrize("speed", [0.5999, 1.5001])
+@pytest.mark.parametrize(
+    "speed",
+    [CONTRACT_TTS_SPEED_RANGE[0] - 0.0001, CONTRACT_TTS_SPEED_RANGE[1] + 0.0001],
+)
 def test_cartesia_refuses_a_speed_it_cannot_honor(speed: float):
     with pytest.raises(SpeechFault, match="supported range"):
         _mouth(

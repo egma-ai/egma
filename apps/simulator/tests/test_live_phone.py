@@ -15,16 +15,16 @@ line::
 
     TEST_LIVEKIT_URL=wss://... \\
     TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
-    TEST_SIP_TRUNK_ADDRESS=... \\
+    TEST_SIP_TRUNK_ADDRESS=... TEST_SIP_TRUNK_NUMBER=+1... \\
     TEST_SIP_TRUNK_USERNAME=... TEST_SIP_TRUNK_PASSWORD=... \\
     TEST_PHONE_NUMBER=+1... \\
     TEST_DEEPGRAM_API_KEY=... TEST_CARTESIA_API_KEY=... \\
     uv run pytest tests/test_live_phone.py -v
 
-The test writes ``TEST_SIP_TRUNK_ADDRESS``, optional
-``TEST_SIP_TRUNK_NUMBER``, and the username/password pair into the work
-order's platform carrier. They never enter deployment configuration. The
-number is the caller ID the call appears to come from.
+The test writes ``TEST_SIP_TRUNK_ADDRESS``, ``TEST_SIP_TRUNK_NUMBER``, and
+the optional username/password pair into the work order's platform carrier.
+They never enter deployment configuration. The number is the caller ID the
+call appears to come from.
 
 What is asserted is *structure*, not content: a live agent says different
 words every time and a carrier's latency is nobody's to pin. So this
@@ -80,6 +80,7 @@ REQUIRED = {
     "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
     "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
     "TEST_SIP_TRUNK_ADDRESS": TRUNK_ADDRESS,
+    "TEST_SIP_TRUNK_NUMBER": TRUNK_NUMBER,
     "TEST_MODEL_API_KEY": MODEL_API_KEY,
 }
 MISSING = sorted(name for name, value in REQUIRED.items() if not value)
@@ -161,9 +162,11 @@ def deployment() -> dict[str, str]:
 
 def platform() -> dict:
     """The only carrier source: the platform block on the work order."""
-    carrier = {"trunk_address": TRUNK_ADDRESS}
+    carrier = {
+        "trunk_address": TRUNK_ADDRESS,
+        "trunk_number": TRUNK_NUMBER,
+    }
     for name, value in (
-        ("trunk_number", TRUNK_NUMBER),
         ("trunk_username", TRUNK_USERNAME),
         ("trunk_password", TRUNK_PASSWORD),
     ):

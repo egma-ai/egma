@@ -25,9 +25,9 @@ import {
  * The one way anything writes a verdict, and the one way anything reads one.
  *
  * Everything here runs against a real ClickHouse, because everything here is a
- * ClickHouse behaviour: whether a re-run of the same judgment collapses onto the
- * one it replaces, whether a re-grade at a new grader version lands beside the
- * old rather than over it, whether a second grader's word about the same
+ * ClickHouse behaviour: whether a simulation re-grade of the same pinned
+ * judgment collapses onto the one it replaces, whether production judgments at
+ * different grader versions stay beside each other, whether another grader's
  * assertion stands on its own. A substitute would confirm the strings egma sends
  * and nothing about what they do — and what they do is the entire point of the
  * table's identity.
@@ -347,11 +347,10 @@ describe("judging the same thing again", () => {
   });
 
   /**
-   * Re-grading at a tightened grader is the case the identity was designed
-   * around. Both rows are kept, because "v1 said pass, v2 says fail" is exactly
-   * the comparison that makes editing a grader meaningful — and the fold counts
-   * the assertion once, at the newer grading, so the old mistake does not go on
-   * failing the run forever.
+   * Production grading at a newer current version keeps both rows. "v1 said
+   * pass, v2 says fail" remains visible, while the fold counts the assertion
+   * once at the newer grading. A simulation re-grade cannot create this shape;
+   * it stays on the run-pinned version.
    */
   it("adds beside the old row when the grader version changed", async () => {
     const regraded = "3333333333333333333333333333bbbb";

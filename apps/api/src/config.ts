@@ -97,7 +97,7 @@ export type Config = {
    * `environment` makes the deployment environment the source of truth.
    * Startup reconciles the carrier route after seeding on every start. A
    * changed complete route replaces the stored route, and no carrier values
-   * removes it. Other platform settings remain seed-only in both modes.
+   * removes it.
    *
    * This decision is independent of whether the deployment serves one or
    * several organizations. Tenancy does not say who owns a carrier route.

@@ -8,7 +8,12 @@ import {
   type PredefinedGrader,
 } from "../grader-library/catalog.ts";
 import { RECOMMENDED_GRADER_MODEL } from "../models/selections.ts";
-import { grader, graderVersion } from "../schema/graders.ts";
+import {
+  grader,
+  graderLibrary,
+  graderLibraryVersion,
+  graderVersion,
+} from "../schema/graders.ts";
 import { project } from "../schema/tenancy.ts";
 import type { GraderConfig } from "./graders.ts";
 
@@ -77,10 +82,10 @@ const SEEDING_RUNNING_GRADERS = "egma:seed-running-graders";
  * first, naming a version that does not exist yet, because that pointer's
  * constraint is deferred and Postgres checks it at commit.
  *
- * Nothing here reads the entry from the database. The identifier is the
- * catalog's own fixed one, and the foreign key is what says the row is really
- * there — a project seeded before egma's own graders reached the shelf is
- * refused rather than left pointing at nothing.
+ * The exact immutable Library revision is read from the database. The catalog
+ * owns the fixed identity, while the row says which revision this deployment
+ * currently uses. A project born after a prompt update therefore starts on the
+ * new definition and never reconstructs it from process memory.
  */
 export async function insertSeededGrader(
   on: Queryable,
@@ -93,16 +98,43 @@ export async function insertSeededGrader(
   const id = newId("grd");
   const versionId = newId("grv");
 
+  const [definition] = await on
+    .select({
+      libraryId: graderLibraryVersion.libraryId,
+      libraryVersion: graderLibraryVersion.version,
+      name: graderLibrary.name,
+      type: graderLibrary.type,
+    })
+    .from(graderLibrary)
+    .innerJoin(
+      graderLibraryVersion,
+      and(
+        eq(graderLibraryVersion.libraryId, graderLibrary.id),
+        eq(
+          graderLibraryVersion.version,
+          graderLibrary.currentDefinitionVersion,
+        ),
+      ),
+    )
+    .where(eq(graderLibrary.id, THE_SEEDED_ENTRY.id))
+    .limit(1)
+    .for("share", { of: graderLibrary });
+  if (definition === undefined) {
+    throw new Error(
+      "Egma's expected-behaviors Library definition is not installed",
+    );
+  }
+
   await on.insert(grader).values({
     id,
     organizationId: values.organizationId,
     projectId: values.projectId,
-    libraryId: THE_SEEDED_ENTRY.id,
-    // Name and type off the catalog entry itself, so the row a project is born
-    // with is the row pressing Use would have made.
-    name: THE_SEEDED_ENTRY.name,
+    libraryId: definition.libraryId,
+    // The display name comes from the installed Library identity, so this is
+    // the same row pressing Use would make. Type stays owned by that identity
+    // and is not copied onto the running copy.
+    name: definition.name,
     description: null,
-    type: THE_SEEDED_ENTRY.type,
     // Required, and simulations-only. Structurally: a production trace has no
     // test, so there are no expected behaviors for this grader to read there.
     required: true,
@@ -115,6 +147,8 @@ export async function insertSeededGrader(
     id: versionId,
     graderId: id,
     version: 1,
+    libraryId: definition.libraryId,
+    libraryVersion: definition.libraryVersion,
     config: NOTHING_TO_FILL_IN,
     // The seeded entry is model-judged, so its first version owns a complete
     // cataloged model choice from birth. There is no project default to fill it

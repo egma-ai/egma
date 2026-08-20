@@ -631,37 +631,6 @@ describe("starting a run", () => {
     expect(simulations).toEqual([]);
   });
 
-  it("says which half of the phone configuration is missing, so a partly-configured platform is not told to start again", async () => {
-    api = await createApi("runs_phone_half_set", {
-      platformSettings: PHONE_IS_SET_UP,
-    });
-    // Current writers refuse an incomplete route. Remove one row after a valid
-    // seed to model a database written by an older release, and prove the run
-    // door still gives that upgrade state an actionable refusal.
-    await api.database.sql(
-      "delete from platform_setting where name = 'carrier_trunk_number'",
-    );
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const key = await projectKeyFor(api.app, ada);
-    await createPersona(contextFor(ada, "member"), {
-      name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
-    });
-    const dialled = await registerAgentThrough(key, "Front desk line", PHONE);
-    const { versionId } = await pushTest(key, "Reschedules", ["Impatient Rita"]);
-
-    const refused = await request("POST", "/api/runs", key, {
-      connection: dialled.connectionId,
-      test_versions: [versionId],
-      idempotency_key: newId("run"),
-    });
-
-    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
-    expect(String(refused.body.message)).toContain(
-      "It is missing the source number.",
-    );
-  });
-
   it("lets a run over a connection that does not use the platform's carrier through a platform with none", async () => {
     // The whole point of two readiness facts rather than one: an egma nobody
     // has given a carrier is a working egma for everything that is not a

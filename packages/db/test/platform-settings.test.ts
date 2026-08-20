@@ -255,7 +255,7 @@ describe("carrier write validation", () => {
         ...FIRST_ROUTE,
         carrier_trunk_password: "short",
       }),
-    ).rejects.toThrow(/shorter than any provider issues/u);
+    ).rejects.toThrow(/shorter than a valid SIP credential/u);
   });
 });
 
@@ -331,18 +331,21 @@ describe("boot seeding", () => {
     );
   });
 
-  it("repairs a legacy partial route as one complete bundle", async () => {
+  it("refuses a stored partial route instead of repairing it at boot", async () => {
     await writePlatformSettings(owner(), ONE_TEAM, SECOND_ROUTE);
     await database.sql(
       "delete from platform_setting where name <> 'carrier_trunk_username'",
     );
 
-    expect([...(await seedPlatformSettings(FIRST_ROUTE))].sort()).toEqual(
-      Object.keys(FIRST_ROUTE).sort(),
+    await expect(seedPlatformSettings({})).rejects.toThrow(
+      /stored carrier route is incomplete/u,
     );
-    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
-      FIRST_ROUTE,
+    await expect(seedPlatformSettings(FIRST_ROUTE)).rejects.toThrow(
+      /stored carrier route is incomplete/u,
     );
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual({
+      carrier_trunk_username: SECOND_ROUTE.carrier_trunk_username,
+    });
   });
 
   it("refuses a partial environment route before writing any part", async () => {

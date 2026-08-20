@@ -155,7 +155,7 @@ export async function writeSettings(
  * is held by a check rather than by an import. `self-host-setup-catalog.test.ts`
  * fails when the two drift: a setting added there and not here would be one the
  * interview never asks for, and a required one at that would leave an operator
- * who finished the whole documented setup still reading `setup required`.
+ * who finished the whole documented setup still reading `phone setup required`.
  *
  * The route moves as one two-value or four-value bundle. The trunk address and
  * number can be shared while each developer or production uses its own SIP

@@ -1149,12 +1149,12 @@
           "primaryKey": false,
           "notNull": true
         },
-    "default_persona_id": {
-      "name": "default_persona_id",
-      "type": "text COLLATE \"C\"",
-      "primaryKey": false,
-      "notNull": true,
-      "default": "'prs_01M0E4EVJ6ECGVJEA4NSBTC0CC'"
+        "default_persona_id": {
+          "name": "default_persona_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'prs_01M0E4EVJ6ECGVJEA4NSBTC0CC'"
         },
         "deleted_at": {
           "name": "deleted_at",
@@ -1225,7 +1225,7 @@
           "columnsTo": [
             "id"
           ],
-      "onDelete": "restrict",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "project_created_by_user_id_fk": {
@@ -2552,12 +2552,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "required": {
           "name": "required",
           "type": "boolean",
@@ -2728,16 +2722,21 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "grader_id_library_id_unique": {
+          "name": "grader_id_library_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "library_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "grader_id_prefix": {
           "name": "grader_id_prefix",
           "value": "\"grader\".\"id\" ~ '^grd_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "grader_type_allowed": {
-          "name": "grader_type_allowed",
-          "value": "\"grader\".\"type\" in ('llm_as_judge', 'code')"
         },
         "grader_scope_allowed": {
           "name": "grader_scope_allowed",
@@ -2800,36 +2799,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 1
-        },
-        "prompt": {
-          "name": "prompt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "params": {
-          "name": "params",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "output_definition": {
-          "name": "output_definition",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_code": {
-          "name": "source_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_code_language": {
-          "name": "source_code_language",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -2913,6 +2882,21 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "grader_library_current_version_fk": {
+          "name": "grader_library_current_version_fk",
+          "tableFrom": "grader_library",
+          "tableTo": "grader_library_version",
+          "columnsFrom": [
+            "id",
+            "version"
+          ],
+          "columnsTo": [
+            "library_id",
+            "version"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2930,14 +2914,103 @@
         "grader_library_tenancy_is_whole_or_egmas": {
           "name": "grader_library_tenancy_is_whole_or_egmas",
           "value": "(\"grader_library\".\"organization_id\" is null) = (\"grader_library\".\"project_id\" is null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.grader_library_version": {
+      "name": "grader_library_version",
+      "schema": "",
+      "columns": {
+        "library_id": {
+          "name": "library_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
         },
-        "grader_library_source_code_within_budget": {
-          "name": "grader_library_source_code_within_budget",
-          "value": "\"grader_library\".\"source_code\" is null or octet_length(\"grader_library\".\"source_code\") <= 262144"
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
         },
-        "grader_library_source_code_columns_agree": {
-          "name": "grader_library_source_code_columns_agree",
-          "value": "(\"grader_library\".\"source_code\" is null) = (\"grader_library\".\"source_code_language\" is null)"
+        "prompt": {
+          "name": "prompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "params": {
+          "name": "params",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "output_definition": {
+          "name": "output_definition",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_code": {
+          "name": "source_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_code_language": {
+          "name": "source_code_language",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "grader_library_version_library_id_grader_library_id_fk": {
+          "name": "grader_library_version_library_id_grader_library_id_fk",
+          "tableFrom": "grader_library_version",
+          "tableTo": "grader_library",
+          "columnsFrom": [
+            "library_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "grader_library_version_library_id_version_pk": {
+          "name": "grader_library_version_library_id_version_pk",
+          "columns": [
+            "library_id",
+            "version"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "grader_library_version_library_id_prefix": {
+          "name": "grader_library_version_library_id_prefix",
+          "value": "\"grader_library_version\".\"library_id\" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "grader_library_version_source_code_within_budget": {
+          "name": "grader_library_version_source_code_within_budget",
+          "value": "\"grader_library_version\".\"source_code\" is null or octet_length(\"grader_library_version\".\"source_code\") <= 262144"
+        },
+        "grader_library_version_source_code_columns_agree": {
+          "name": "grader_library_version_source_code_columns_agree",
+          "value": "(\"grader_library_version\".\"source_code\" is null) = (\"grader_library_version\".\"source_code_language\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -2960,6 +3033,18 @@
         },
         "version": {
           "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "library_id": {
+          "name": "library_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "library_version": {
+          "name": "library_version",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
@@ -2992,19 +3077,6 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "grader_version_grader_id_grader_id_fk": {
-          "name": "grader_version_grader_id_grader_id_fk",
-          "tableFrom": "grader_version",
-          "tableTo": "grader",
-          "columnsFrom": [
-            "grader_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "grader_version_created_by_user_id_fk": {
           "name": "grader_version_created_by_user_id_fk",
           "tableFrom": "grader_version",
@@ -3016,6 +3088,36 @@
             "id"
           ],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "grader_version_library_version_fk": {
+          "name": "grader_version_library_version_fk",
+          "tableFrom": "grader_version",
+          "tableTo": "grader_library_version",
+          "columnsFrom": [
+            "library_id",
+            "library_version"
+          ],
+          "columnsTo": [
+            "library_id",
+            "version"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "grader_version_grader_library_fk": {
+          "name": "grader_version_grader_library_fk",
+          "tableFrom": "grader_version",
+          "tableTo": "grader",
+          "columnsFrom": [
+            "grader_id",
+            "library_id"
+          ],
+          "columnsTo": [
+            "id",
+            "library_id"
+          ],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

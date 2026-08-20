@@ -1,7 +1,6 @@
 import {
   appendVerdicts,
   getGrader,
-  getGraderLibraryEntry,
   getSimulation,
   pinnedSimulationGraders,
   readTrace,
@@ -10,13 +9,15 @@ import {
   type ExecutableGrader,
   type GradingClaim,
   type GradingSource,
-  type LibraryEntry,
   type NewVerdict,
   type Simulation,
   type TimeWindow,
   type TraceDetail,
 } from "@egma/db";
-import type { ProviderCredentialBundle } from "@egma/provider-credentials";
+import type {
+  ProviderCredentialBundle,
+  ProviderCredentialSource,
+} from "@egma/provider-credentials";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 
 import {
@@ -73,11 +74,10 @@ import { applicableProductionGraders } from "./resolve.ts";
  * rather than by a branch here, which is the same fact said where a person can
  * change it.
  *
- * **The definition is read through the copy's pointer, once per entry.** A
- * grader's judge prompt lives on its library entry and is never written down
- * onto the copy, so judging reads it here and hands it to the executor. Two
- * copies of one entry cost one read, because the answer is remembered for the
- * length of this conversation and no longer.
+ * **The definition comes from the pinned grader version.** Runtime joins the
+ * Library identity's DB-guarded stable type, but never follows its mutable
+ * current-definition pointer. A catalog change mints and promotes a new grader
+ * version for future work; an existing run keeps the exact revision it pinned.
  *
  * **A claim reopened for one grader judges that grader and nothing else.**
  * Somebody who fixed one grader asked for one grader's judgment, and every other
@@ -99,8 +99,8 @@ export type Graded = {
 export class NotGradable extends Error {}
 
 export type GradeOptions = {
-  /** The current deployment bundle, loaded once for this claimed job. */
-  readonly credentials: ProviderCredentialBundle;
+  /** Reads the current deployment bundle only when a resolved grader needs it. */
+  readonly providerCredentials: ProviderCredentialSource;
   /**
    * How each judge provider is spoken to. The default speaks to the real ones;
    * a test hands over a scripted judge, which is what lets the whole engine
@@ -162,15 +162,13 @@ export async function gradeClaim(
       ? await theProductionTrace(claim)
       : await theSimulation(claim);
 
+  const credentials = graders.some(
+    (grader) => grader.definition.type === "llm_as_judge",
+  )
+    ? await options.providerCredentials.load()
+    : {};
   const makers = options.makers ?? JUDGE_MAKERS;
-  const judges = judgesFor(graders, options.credentials, makers);
-
-  // The definitions, read through the copies' pointers and remembered for the
-  // length of this conversation. Two copies of one entry cost one read; nothing
-  // is remembered past this call, because a definition is read *at judging
-  // time* and a cache that outlived the job would be the copied definition this
-  // whole shape exists to rule out.
-  const definitionOf = definitionsOnce(claim.auth);
+  const judges = judgesFor(graders, credentials, makers);
 
   // What every grader that judges is handed besides the conversation: the
   // simulation to read a test off, and whose it is.
@@ -184,7 +182,7 @@ export async function gradeClaim(
     await Promise.all(
       graders.map(async (grader) =>
         (
-          await judgmentsOf(grader, await definitionOf(grader), {
+          await judgmentsOf(grader, {
             conversation,
             judging: {
               judge: judges.get(grader.versionId) ?? null,
@@ -218,7 +216,7 @@ function judgesFor(
 ): ReadonlyMap<string, AskableJudge> {
   const resolved = new Map<string, AskableJudge>();
   for (const grader of graders) {
-    if (grader.type === "code") continue;
+    if (grader.definition.type === "code") continue;
     if (grader.judgeModel === null) {
       throw new Error(
         `model-judged grader version ${grader.versionId} has no judge model`,
@@ -230,37 +228,6 @@ function judgesFor(
     );
   }
   return resolved;
-}
-
-/**
- * The library entry behind a running copy, read at most once per entry for this
- * conversation.
- *
- * **Read through `library_id` rather than off the copy**, every time a
- * conversation is judged. That is the whole of the two-level shape: the judge
- * prompt lives in one place, the Library screen reads that place, and a release
- * that improves the words improves what a judge is actually sent. A definition
- * written down onto the copy would be a second string that drifts, silently, in
- * the direction of the screen being wrong about how conversations are judged.
- *
- * The promise is remembered rather than its answer, so two copies of one entry
- * racing each other in a `Promise.all` share one read instead of starting two.
- * An entry that comes back absent cannot happen — the pointer is a foreign key
- * — and is answered rather than asserted, because a grading service is not the
- * place to throw over a row that came out of its own database.
- */
-function definitionsOnce(
-  auth: AuthContext,
-): (grader: ExecutableGrader) => Promise<LibraryEntry | undefined> {
-  const reading = new Map<string, Promise<LibraryEntry | undefined>>();
-  return (grader) => {
-    const held = reading.get(grader.libraryId);
-    if (held !== undefined) return held;
-
-    const started = getGraderLibraryEntry(auth, grader.libraryId);
-    reading.set(grader.libraryId, started);
-    return started;
-  };
 }
 
 /**
@@ -424,12 +391,6 @@ async function theProductionTrace(claim: GradingClaim): Promise<Resolved> {
 /**
  * What one grader says about this conversation.
  *
- * **The definition is required, and a copy pointing at nothing is `errored`.**
- * The pointer is a foreign key, so this cannot happen; answering it rather than
- * asserting it is what keeps a grading service from throwing over a row that
- * came out of its own database, and the word is `errored` because egma failed to
- * make a check rather than the agent failing one.
- *
  * **A conversation with nothing to judge is `errored` too, and the executor
  * decides the shape of that answer.** Either it never happened — the agent never
  * joined, the line was never answered, egma's own runtime broke — or it happened
@@ -460,34 +421,17 @@ async function theProductionTrace(claim: GradingClaim): Promise<Resolved> {
  */
 export async function judgmentsOf(
   grader: ExecutableGrader,
-  definition: LibraryEntry | undefined,
   execution: {
     readonly conversation: Conversation;
     readonly judging: Judging;
     readonly reading: Reading;
   },
 ): Promise<readonly Judgment[]> {
-  if (definition === undefined) {
-    return [
-      {
-        // The pointer rather than the copy's name: a name is text a person
-        // wrote and may rewrite, and a key that moved with it would split every
-        // row written before the rename from every row written after.
-        assertion: grader.libraryId,
-        verdict: "errored",
-        score: 0,
-        rationale:
-          "this grader points at a library entry Egma cannot read, so there was nothing to judge by.",
-        citedSpanIds: [],
-      },
-    ];
-  }
-
   // The definition and the copy's filled-in values, and nothing about whose
   // grader this is or what it is called: an executor that could see any of that
   // could be written to answer with it.
   const asked = {
-    definition,
+    definition: grader.definition,
     config: grader.config,
     conversation: execution.conversation,
     judging: execution.judging,
@@ -516,8 +460,9 @@ export async function judgmentsOf(
  * a row; every project runs a copy of the library entry instead, so every row
  * this writes names a real grader and the version that decided it — which is
  * what keeps the row interpretable after the grader is tightened, since the
- * values it was decided by are frozen behind that id and a re-grade at the next
- * version writes beside rather than over.
+ * values it was decided by are frozen behind that id. A production re-grade can
+ * use the copy's current version. A simulation re-grade follows the run plan and
+ * uses the same pinned version again.
  */
 function verdictRow(
   grader: ExecutableGrader,

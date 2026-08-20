@@ -62,10 +62,10 @@ const personaShelf = await seedPersonaLibrary();
 // project reading its Library a second later has to find them there.
 //
 // An upsert keyed by fixed identifiers, so this is free on every boot after the
-// first: a release that improved a judge prompt refreshes that row and bumps
-// its version, and a release that changed nothing writes nothing at all — not
-// even `updated_at`. That is what makes running it every time the mechanism
-// rather than half of one.
+// first. A release that changes an executable definition creates one immutable
+// shared revision and promotes each active copy to a new grader version that
+// points at it. Old run plans keep their exact revision. A release that changed
+// nothing writes nothing at all — not even `updated_at`.
 const shelved = await seedGraderLibrary();
 
 // And the other half of it: a shelf full of definitions judges nothing until a
@@ -111,7 +111,7 @@ if (shelved.length > 0) {
   // that arrived while anything higher is one whose definition changed.
   app.log.info(
     { graders: shelved },
-    "Egma-provided graders were written to the library",
+    "Predefined graders were written to the library",
   );
 }
 if (judging.length > 0) {

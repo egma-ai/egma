@@ -81,18 +81,11 @@ export class ProviderCredentialMissingError extends Error {
   }
 }
 
-/**
- * The provider account behind an execution adapter.
- *
- * OpenAI segmented and realtime transcription use different transports but
- * the same OpenAI account. Keeping that translation here prevents a realtime
- * adapter from asking for a second, invented credential.
- */
+/** One provider account named by the executable model catalog. */
 export function providerAccountFor(
-  executionProvider: string,
+  provider: string,
 ): ProviderAccount | undefined {
-  if (executionProvider === "openai_realtime") return "openai";
-  return PROVIDER_ACCOUNTS.find((account) => account === executionProvider);
+  return PROVIDER_ACCOUNTS.find((account) => account === provider);
 }
 
 /** One selected provider's key, with no fallback to another account. */

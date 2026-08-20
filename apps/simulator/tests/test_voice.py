@@ -71,7 +71,7 @@ from egma_simulator.speech import (
 )
 from egma_simulator.walk import Conducted, WalkControls
 
-TRAITS_VOICE = {"provider": "cartesia", "voiceId": "warm-alto-2", "speed": 0.9}
+TTS_VOICE = {"provider": "cartesia", "voiceId": "warm-alto-2", "speed": 0.9}
 
 NANOSECONDS_PER_MILLISECOND = 1_000_000
 
@@ -191,7 +191,7 @@ def test_quiet_and_length_are_measured_from_the_audio():
 
 
 def test_the_persona_voice_comes_from_the_pinned_tts_selection():
-    spec = spec_for(voice=TRAITS_VOICE)
+    spec = spec_for(voice=TTS_VOICE)
     voice = voice_from_models(spec.models)
     assert (voice.voice_id, voice.provider, voice.speed) == (
         "warm-alto-2",
@@ -1143,8 +1143,8 @@ async def test_the_speaking_leg_is_built_with_the_pinned_tts_voice(
     tmp_path: Path,
 ):
     """The pipeline is assembled from this simulation's own spec, and the
-    persona's voice is part of that spec — so the leg that just spoke a
-    whole exchange is the one holding the authored voice."""
+    pinned persona model selection owns the voice in that spec — so the leg
+    that just spoke a whole exchange holds that exact authored choice."""
     observed = await voice_simulation(
         tmp_path,
         scenario="One point.",
@@ -1211,7 +1211,7 @@ def test_a_counterpart_cannot_both_echo_and_read_a_script(tmp_path: Path):
 
 async def test_the_unit_speech_pair_uses_the_voice_from_models(tmp_path: Path):
     """The deterministic pair is a test injection, not a runtime fallback."""
-    spec = spec_for(voice=TRAITS_VOICE)
+    spec = spec_for(voice=TTS_VOICE)
     assembled = assemble(
         spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
     )

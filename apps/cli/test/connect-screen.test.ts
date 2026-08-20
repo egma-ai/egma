@@ -309,7 +309,7 @@ describe("the choice between text and phone", () => {
     // Retell voice agents support only phone. It is the only row, and the
     // developer must still confirm before Egma can dial it.
     expect(offered).toContain("\u203a Phone");
-    expect(offered).not.toContain("Text —");
+    expect(offered).not.toContain("Chat —");
 
     run.write("\r");
 

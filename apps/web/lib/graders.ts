@@ -70,10 +70,10 @@ export type LibraryPage = {
 /**
  * One running copy: what this project is judged by.
  *
- * `library_id` is what the row *is* — the pointer its definition is read
- * through at judging time — so a renamed copy is still a copy of the same
- * entry. `config` holds the copy's own filled-in values and never a definition:
- * the judge prompt lives on the entry, in one place, and this is not it.
+ * `library_id` is what the row *is*: the stable definition family, so a renamed
+ * copy is still a copy of the same entry. `config` holds only the copy's
+ * filled-in values. Each grader version points at one immutable shared
+ * definition revision; no prompt or source code is duplicated in this shape.
  */
 export type RunningGrader = {
   readonly id: string;

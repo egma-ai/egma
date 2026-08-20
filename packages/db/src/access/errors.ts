@@ -640,14 +640,11 @@ export class PredefinedGraderError extends Error {
 /**
  * A delete named a library entry that graders still point at.
  *
- * **Refusal, and never `set null`.** A copy's `library_id` is the whole of what
- * says what it judges by — the definition is read through it every time a
- * conversation is judged, and never written down onto the copy — so an entry
- * taken off the shelf underneath one would leave a grader that resolves to
- * nothing and judges nothing while still appearing on the Running graders
- * screen. That is a check somebody believes in that can never fire, which is the
- * false trust this product exists to kill. The database says the same thing with
- * `on delete restrict`; this is the half that can name what is in the way.
+ * **Refusal, and never `set null`.** Every grader version references an
+ * immutable definition owned by its Library identity. Removing the identity
+ * would remove the definition history needed to interpret old verdicts. The
+ * database says the same thing with restrictive foreign keys; this is the half
+ * that can name what is in the way.
  *
  * **A copy somebody switched off still counts**, and that is not an oversight.
  * Deleting a copy is a soft delete: the row stays and so do its versions, so
@@ -671,7 +668,7 @@ export class GraderLibraryEntryInUseError extends Error {
     super(
       `"${graderName}" (${libraryId}) is still pointed at by ${graders.length} ${
         graders.length === 1 ? "grader" : "graders"
-      } (${spelledOutAndCounted(graders)}), and a grader reads its definition through that pointer every time it judges — including one that was switched off, whose past verdicts are still read through it; keep the entry, or delete those graders and the verdicts that name them, and then delete the entry`,
+      } (${spelledOutAndCounted(graders)}), whose version history references immutable definitions owned by that Library entry; keep the entry, or delete those graders and the verdicts that name them, and then delete the entry`,
     );
     this.name = "GraderLibraryEntryInUseError";
     this.libraryId = libraryId;

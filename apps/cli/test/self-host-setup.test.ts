@@ -179,7 +179,7 @@ describe("egma self-host setup", () => {
     platform = await startPlatform();
     await workspace.signIn(platform);
 
-    const run = await runSetup(["--apply", "--yes", "--json"], EVERY_ANSWER);
+    const run = await runSetup(["--yes", "--json"], EVERY_ANSWER);
 
     // Exactly one document on standard output and nothing else, so that a
     // coding agent driving this parses the whole answer rather than picking a
@@ -216,7 +216,7 @@ describe("egma self-host setup", () => {
     });
     await workspace.signIn(platform);
 
-    const run = await runSetup(["--apply", "--yes", "--json"], SHARED_CARRIER);
+    const run = await runSetup(["--yes", "--json"], SHARED_CARRIER);
 
     expect(run.code, run.stderr).toBe(0);
     expect(platform.written).toEqual([
@@ -235,7 +235,7 @@ describe("egma self-host setup", () => {
     await workspace.signIn(platform);
     const answers = { ...EVERY_ANSWER, [missing]: "" };
 
-    const run = await runSetup(["--apply", "--yes", "--json"], answers);
+    const run = await runSetup(["--yes", "--json"], answers);
 
     expect(run.code).toBe(2);
     expect(run.stderr).toContain(missing);
@@ -255,7 +255,7 @@ describe("egma self-host setup", () => {
     });
     await workspace.signIn(platform);
 
-    const run = await runSetup(["--apply", "--yes", "--json"]);
+    const run = await runSetup(["--yes", "--json"]);
     const answered = JSON.parse(run.stdout) as Record<string, unknown>;
 
     expect(run.code, run.stderr).toBe(0);
@@ -273,7 +273,7 @@ describe("egma self-host setup", () => {
     });
     await workspace.signIn(platform);
 
-    const run = await runSetup(["--apply", "--yes", "--json"], SOURCE_IP_CARRIER);
+    const run = await runSetup(["--yes", "--json"], SOURCE_IP_CARRIER);
 
     expect(run.code, run.stderr).toBe(0);
     expect(platform.written).toEqual([
@@ -289,7 +289,7 @@ describe("egma self-host setup", () => {
     platform = await startPlatform();
     await workspace.signIn(platform);
 
-    const run = await runSetup(["--apply", "--yes", "--json"], {
+    const run = await runSetup(["--yes", "--json"], {
       ...EVERY_ANSWER,
       TWILIO_ACCOUNT_SID: IGNORED_ACCOUNT_SID,
       TWILIO_AUTH_TOKEN: IGNORED_AUTH_TOKEN,
@@ -307,12 +307,12 @@ describe("egma self-host setup", () => {
     // The first run still sees to the media-server credential, because that is
     // the workspace's rather than the platform's: a deployment can be perfectly
     // configured and still be running on a pair published in this repository.
-    const first = await runSetup(["--apply", "--yes"], EVERY_ANSWER);
+    const first = await runSetup(["--yes"], EVERY_ANSWER);
     expect(first.code, first.stderr).toBe(0);
     expect(first.stdout).toContain("changed: the media-server credential");
 
     // The second has nothing left to do anywhere, and says exactly that.
-    const run = await runSetup(["--apply", "--yes"], EVERY_ANSWER);
+    const run = await runSetup(["--yes"], EVERY_ANSWER);
 
     expect(run.code, run.stderr).toBe(0);
     expect(run.stdout).toContain("status: ready");
@@ -441,7 +441,7 @@ describe("egma self-host setup", () => {
     platform = await startPlatform({ holds: EVERYTHING_HELD });
     await workspace.signIn(platform);
 
-    const run = await runSetup(["--apply", "--yes"], {
+    const run = await runSetup(["--yes"], {
       ...EVERY_ANSWER,
       EGMA_BASE_URL: `${platform.url}/`,
     });
@@ -479,7 +479,7 @@ describe("egma self-host setup", () => {
     await writeFile(workspace.dockerShim, "#!/bin/sh\nexit 1\n");
     await chmod(workspace.dockerShim, 0o755);
 
-    const run = await runSetup(["--apply", "--yes"], EVERY_ANSWER);
+    const run = await runSetup(["--yes"], EVERY_ANSWER);
 
     expect(run.code).toBe(4);
     expect(run.stdout).toContain("status: incomplete");
@@ -494,7 +494,7 @@ describe("egma self-host setup", () => {
     const address = platform.url;
     await platform.close();
 
-    const run = await runSetup(["--apply", "--yes"], {
+    const run = await runSetup(["--yes"], {
       ...EVERY_ANSWER,
       EGMA_BASE_URL: address,
     });
@@ -515,7 +515,7 @@ describe("egma self-host setup", () => {
     // an operator to read source at the moment they are holding a credential.
     platform = await startPlatform();
 
-    const run = await runSetup(["--apply", "--yes"], EVERY_ANSWER);
+    const run = await runSetup(["--yes"], EVERY_ANSWER);
 
     expect(run.code).toBe(3);
     expect(run.stderr).toContain("not signed in");
@@ -534,7 +534,7 @@ describe("egma self-host setup", () => {
     platform = await startPlatform({ refuses: { status: 403, message: refusal } });
     await workspace.signIn(platform);
 
-    const run = await runSetup(["--apply", "--yes"], EVERY_ANSWER);
+    const run = await runSetup(["--yes"], EVERY_ANSWER);
 
     expect(run.code).toBe(4);
     expect(run.stderr).toContain(refusal);
@@ -545,7 +545,7 @@ describe("egma self-host setup", () => {
     platform = await startPlatform();
     await workspace.signIn(platform);
 
-    const run = await runSetup(["--apply", "--yes", "--json"], {
+    const run = await runSetup(["--yes", "--json"], {
       ...EVERY_ANSWER,
       TWILIO_ACCOUNT_SID: IGNORED_ACCOUNT_SID,
       TWILIO_AUTH_TOKEN: IGNORED_AUTH_TOKEN,
@@ -593,7 +593,6 @@ describe("egma self-host setup", () => {
     await workspace.signIn(platform);
 
     const run = await runSetup([
-      "--apply",
       "--yes",
       "--auth-token",
       IGNORED_AUTH_TOKEN,
@@ -658,6 +657,16 @@ describe("egma self-host setup", () => {
     expect(run.code).not.toBe(0);
     expect(run.stderr).toContain("does not know the option --nonsense");
     expect(run.stderr).not.toContain("something-private");
+    expect(twilio.requests).toEqual([]);
+  });
+
+  it("refuses the removed --apply compatibility spelling", async () => {
+    platform = await startPlatform();
+
+    const run = await runSetup(["--apply"]);
+
+    expect(run.code).not.toBe(0);
+    expect(run.stderr).toContain("does not know the option --apply");
     expect(twilio.requests).toEqual([]);
   });
 

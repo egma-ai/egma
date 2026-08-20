@@ -282,9 +282,9 @@ export function simulationSection(runId: string): readonly string[] {
 /**
  * One judged assertion, with the judgment that counts and the ones beneath it.
  *
- * **An earlier judgment is kept and shown, never replaced.** A re-grade writes a
- * new row rather than over the old one, and a page that hid the earlier one
- * would make "this grader was tightened and now disagrees" invisible.
+ * **Different grader-version judgments stay visible.** Re-grading this
+ * simulation replaces the prior row for its same run-pinned version. Any row
+ * already stored under another version remains as superseded evidence.
  */
 export type JudgedAssertion = {
   readonly key: string;
@@ -324,10 +324,10 @@ function whenJudged(row: EvidenceVerdict): number {
  * it: **the newest judgment speaks, and the ones under it stay readable.**
  *
  * Decided by the clock on the rows and by nothing else. The grader version each
- * row was written at is deliberately not on this wire — a copy's definition is
- * read through its library pointer at judging time and a version identifier is
- * not something a reader can act on — so "which grading" is answered by when,
- * which is the same order a re-grade actually happened in.
+ * row was written at is deliberately not on this wire because this browser
+ * fold only needs to choose the latest judgment. The server already executed
+ * the exact immutable definition revision pinned by that grader version, so a
+ * catalog edit cannot change what an older row meant.
  *
  * This is the browser's copy of an algebra the server also performs, and that is
  * deliberate rather than accidental duplication: the server folds it into one
@@ -422,12 +422,11 @@ export function planExplanation(state: EvidencePlan["state"]): string {
  * The sentence a page shows above a full re-grade.
  *
  * It is never described as a replay. A re-grade judges this conversation again
- * at **today's** grader versions, so a grader somebody has since tightened will
- * say something different — which is the point, and which somebody who read
- * "run it again" would not expect.
+ * with the immutable grader versions its run pinned. An edit applies only to a
+ * new run, so neither the simulation nor its grading meaning changes here.
  */
 export const REGRADE_IS_NOT_A_REPLAY =
-  "A regrade judges this simulation again at today's grader versions. The simulation itself is not conducted again — nothing is dialed, nothing is said, and the transcript below does not change. A grader that has been edited since will write a new row beside the old one rather than over it, and both stay readable.";
+  "A regrade judges this simulation again with the exact grader versions frozen when its run started. The simulation itself is not conducted again — nothing is dialed, nothing is said, and the transcript below does not change. An edited grader applies only to a new run; this regrade replaces the prior judgment for the same pinned version.";
 
 /*
  * **There was a sentence here about disagreeing with a judge, and it goes with

@@ -59,7 +59,7 @@ describe("egma self-host setup, with somebody watching", () => {
   function start(): TerminalRun {
     return runInTerminal({
       command: process.execPath,
-      args: [CLI_ENTRY, "self-host", "setup", "--apply"],
+      args: [CLI_ENTRY, "self-host", "setup"],
       cwd: workspace.dir,
       env: {
         ...process.env,

@@ -130,6 +130,7 @@
       "description": "Deployment carrier data. It contains the SIP trunk only. The media backend remains deployment configuration.",
       "type": "object",
       "additionalProperties": false,
+      "required": ["carrier"],
       "properties": {
         "carrier": { "$ref": "#/$defs/platform_carrier" }
       }
@@ -140,9 +141,14 @@
   },
   "$defs": {
     "platform_carrier": {
-      "description": "The SIP trunk used for a phone simulation.",
+      "description": "The complete carrier route used for a phone simulation. Address and number are always present. SIP username and password are either both absent for source-IP authentication or both present for credential authentication.",
       "type": "object",
       "additionalProperties": false,
+      "required": ["trunk_address", "trunk_number"],
+      "dependentRequired": {
+        "trunk_username": ["trunk_password"],
+        "trunk_password": ["trunk_username"]
+      },
       "properties": {
         "trunk_address": {
           "type": "string",
@@ -286,6 +292,32 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "object",
+            "properties": { "type": { "const": "phone" } },
+            "required": ["type"]
+          }
+        },
+        "required": ["connection"]
+      },
+      "then": {
+        "type": "object",
+        "properties": { "platform": {} },
+        "required": ["platform"]
+      },
+      "else": {
+        "type": "object",
+        "not": {
+          "type": "object",
+          "properties": { "platform": {} },
+          "required": ["platform"]
+        }
+      }
+    },
     {
       "if": {
         "properties": { "modality": { "const": "voice" } },

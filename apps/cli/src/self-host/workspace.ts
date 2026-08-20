@@ -168,10 +168,8 @@ export function bootstrapVariables(
  *
  * **The `chmod` is the point, not the `mkdir`.** `mkdirSync`'s `mode` applies
  * only when it creates the directory, so whichever write happened to be first
- * decided the mode for good — and the documented order runs `--plan` before
- * `--apply`, so the directory was created by the receipt at the default 0755
- * and the later private write never tightened it. This is the one door both
- * writers go through, and it sets the mode every time.
+ * decided the mode for good. A plan can create the receipt directory before a
+ * later setup writes private state; this one door sets the mode every time.
  */
 export function platformDirectory(workspace: string): string {
   const directory = path.join(workspace, PLATFORM_DIRECTORY);

@@ -122,8 +122,8 @@ function itemsFor(
  * rather than by a name somebody could rename.
  *
  * It is an ordinary item now — one kind of item is all there is — and finding
- * it through `library_id` is the same pointer the engine resolves a definition
- * through, so a renamed copy is still this one.
+ * it through `library_id` uses the same stable identity as its pinned immutable
+ * definition revision, so a renamed copy is still this one.
  */
 function behaviorsItem(items: readonly PlanItem[]): PlanItem | undefined {
   return items.find(
@@ -376,7 +376,7 @@ describe("the review, before anybody starts anything", () => {
 });
 
 describe("the grading plan a run freezes", () => {
-  it("holds one group per pinned version, each carrying the built-in", async () => {
+  it("holds one group per pinned version, each carrying the seeded grader", async () => {
     const started = await startRun(actingAsAcme(), {
       agentId,
       connectionId: measured,

@@ -27,11 +27,13 @@
 import {
   LARGEST_MOCK_TOOL_ANSWER_BYTES,
   LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
+  connectionTypeMetadata,
 } from "@egma/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { REFUSALS } from "../../api/src/http/refusals.ts";
 import { agentNotApplicable } from "../src/sync/refusals.ts";
+import { FIXTURE_CONNECTION_TYPE_FACTS } from "./support/fixture-platform/agents.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 
 let platform: Platform;
@@ -105,12 +107,27 @@ function connectionPayload(
 ): Record<string, unknown> {
   return {
     type: "retell",
-    modality: "voice",
+    modality: "chat",
     config: { retellAgentId: "agent_in_retell_2" },
     credentials: { apiKey: "retell-secret-B2C3D4E5WXYZ" },
     ...overrides,
   };
 }
+
+describe("the offline connection catalog", () => {
+  it("matches every public type fact in the real registry", () => {
+    expect(FIXTURE_CONNECTION_TYPE_FACTS).toEqual(
+      connectionTypeMetadata().map(
+        ({ type, modalities, topology, simulatorAdapter }) => ({
+          type,
+          modalities,
+          topology,
+          simulatorAdapter,
+        }),
+      ),
+    );
+  });
+});
 
 function agentOf(answer: Answer): Record<string, unknown> {
   return answer.body.agent as Record<string, unknown>;
@@ -951,7 +968,7 @@ describe("a connection payload its type will not take", () => {
       name: "Front desk",
       connection: {
         type: "retell",
-        modality: "voice",
+        modality: "chat",
         config: { retellAgentId: "agent_in_retell_2" },
       },
     });
@@ -1155,24 +1172,6 @@ describe("registering the same vendor agent again", () => {
     expect(platform.registered.connections).toHaveLength(1);
   });
 
-  it("adds a second way of reaching the same agent when the modality changed", async () => {
-    const chat = await ask("POST", "/api/agents", registration());
-    const voice = await ask("POST", "/api/agents", registration({ modality: "voice" }));
-
-    expect(voice.status).toBe(201);
-    expect(voice.body.result).toBe("connection_added");
-    expect(agentOf(voice).id).toBe(agentOf(chat).id);
-    expect(connectionOf(voice).id).not.toBe(connectionOf(chat).id);
-    expect(connectionOf(voice)).toMatchObject({ name: "retell-2", modality: "voice" });
-
-    const one = await ask("GET", `/api/agents/${String(agentOf(chat).id)}`);
-    expect((one.body.connections as { name: string }[]).map((held) => held.name)).toEqual([
-      "retell-1",
-      "retell-2",
-    ]);
-    expect(platform.registered.agents).toHaveLength(1);
-  });
-
   /**
    * A registration that would be a reuse is held to exactly what a registration
    * that would be a create is held to.
@@ -1210,7 +1209,7 @@ describe("registering the same vendor agent again", () => {
         {
           error: "invalid_request",
           message:
-            "a retell connection speaks chat or voice, and this one was asked for telepathy",
+            "a retell connection speaks chat, and this one was asked for telepathy",
         },
       ],
     ] as const;
@@ -1507,7 +1506,7 @@ describe("starting a run", () => {
         type === "retell"
           ? {
               type: "retell",
-              modality: "voice",
+              modality: "chat",
               config: { retellAgentId: "agent_in_retell_1" },
               credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
             }
@@ -1749,7 +1748,7 @@ describe("starting a run", () => {
 
 describe("reading and following a run", () => {
   async function aRun(): Promise<string> {
-    const registered = await ask("POST", "/api/agents", registration({ modality: "voice" }));
+    const registered = await ask("POST", "/api/agents", registration());
     const created = await ask("POST", "/api/tests", { ...RESCHEDULING });
     const started = await ask("POST", "/api/runs", {
       connection: String(connectionOf(registered).id),

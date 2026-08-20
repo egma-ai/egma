@@ -1,6 +1,7 @@
 import { UnprocessableInputError } from "../access/errors.ts";
 import {
   PROVIDERS_BY_JOB,
+  RECOMMENDED_ENTRY,
   catalogEntry,
   type ModelJob,
   type ModelProvider,
@@ -156,18 +157,36 @@ export function graderModelFromRow(
   }
 }
 
+function recommendedSelection(job: ModelJob): ModelSelection {
+  const entry = RECOMMENDED_ENTRY[job];
+  return { provider: entry.provider, model: entry.model };
+}
+
+function recommendedSpeech(): SpeechSelection {
+  const entry = RECOMMENDED_ENTRY.tts;
+  if (
+    entry.recommendedVoiceId === undefined ||
+    entry.recommendedSpeed === undefined ||
+    entry.recommendedSpeed < SPEED_RANGE.slowest ||
+    entry.recommendedSpeed > SPEED_RANGE.fastest
+  ) {
+    throw new Error(
+      "the recommended TTS catalog entry needs a voice and an in-range speed",
+    );
+  }
+  return {
+    provider: entry.provider,
+    model: entry.model,
+    voiceId: entry.recommendedVoiceId,
+    speed: entry.recommendedSpeed,
+  };
+}
+
 export const RECOMMENDED_PERSONA_MODELS: PersonaModels = {
-  llm: { provider: "openai", model: "gpt-4o-mini" },
-  stt: { provider: "openai", model: "gpt-live-transcribe" },
-  tts: {
-    provider: "cartesia",
-    model: "sonic-3.5",
-    voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
-    speed: 1,
-  },
+  llm: recommendedSelection("llm"),
+  stt: recommendedSelection("stt"),
+  tts: recommendedSpeech(),
 };
 
-export const RECOMMENDED_GRADER_MODEL: GraderModel = {
-  provider: "openai",
-  model: "gpt-4o-mini",
-};
+export const RECOMMENDED_GRADER_MODEL: GraderModel =
+  recommendedSelection("llm");

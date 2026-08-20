@@ -29,10 +29,10 @@ import { newRevision } from "../revisions.ts";
  * the simulation happened, so editing today never rewrites what an old result
  * meant. Renames touch the identity row only; behavior lives in the version.
  *
- * **A project-owned persona is archived, never deleted.** Archive takes it out
+ * **A Custom persona is archived, never deleted.** Archive takes it out
  * of the lists somebody authors from and leaves every historical row exactly
  * where it was. Egma-provided personas have null tenancy, stay active and
- * read-only, and can be forked into a project-owned persona for customization.
+ * read-only, and can be forked into a Custom persona for customization.
  * Permanent removal is a compliance workflow and is not this table's business.
  */
 
@@ -45,7 +45,7 @@ export const persona = pgTable(
       () => organization.id,
       { onDelete: "cascade" },
     ),
-    /** Null together with organizationId when Egma owns this persona. */
+    /** Null together with organizationId for an Egma-provided persona. */
     projectId: idText("project_id"),
     name: text("name").notNull(),
     description: text("description"),
@@ -59,7 +59,7 @@ export const persona = pgTable(
     /**
      * The opaque token an edit, an Archive or a Restore has to name to be
      * allowed to land — see `revisions.ts`. Defaulted here rather than at each
-     * call site so that catalog seeding and the project-owned factory cannot
+     * call site so that catalog seeding and the Custom factory cannot
      * come to disagree about filling it.
      */
     revision: text("revision").notNull().$defaultFn(newRevision),

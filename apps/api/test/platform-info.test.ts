@@ -12,7 +12,7 @@ import { testConfig } from "./support/api.ts";
 
 /**
  * What an instance with no carrier answers about its optional phone half. The
- * platform itself is ready because chat and text simulations can run.
+ * platform itself is ready because chat simulations can run.
  */
 const NO_CARRIER = {
   state: "setup_required",
@@ -53,7 +53,7 @@ it("keeps one public platform identity across an API restart", async () => {
       origin: config.baseUrl,
       repository_contract: REPOSITORY_CONTRACT,
       // Carrier setup is one optional capability. It does not make the whole
-      // platform unready when chat and text simulations can run.
+      // platform unready when chat simulations can run.
       phone: NO_CARRIER,
     });
 
@@ -113,7 +113,7 @@ it("reads its identity rather than writing on every public request", async () =>
         // answer including the ones served entirely from memory.
         repository_contract: REPOSITORY_CONTRACT,
         // A platform with no carrier says so here rather than making a
-        // developer discover it during a phone run. Chat and text still work.
+        // developer discover it during a phone run. Chat still works.
         phone: NO_CARRIER,
       });
     }

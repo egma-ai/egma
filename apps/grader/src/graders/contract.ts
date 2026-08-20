@@ -1,7 +1,7 @@
 import type {
   AuthContext,
   ExecutableGrader,
-  LibraryEntry,
+  GraderDefinitionSnapshot,
   Verdict,
 } from "@egma/db";
 
@@ -32,13 +32,12 @@ export type Judgment = {
    * Which 0-or-1 check inside the grader was judged, as its **key**: one
    * expected behavior's position, or one filled-in entry of the copy's config.
    *
-   * **It is a key and never content**, and it must be stable across the
-   * grader's versions — a hard constraint rather than a preference. The fold
-   * counts one assertion once, keyed by the conversation, the grader and this
-   * name, and prefers the latest grading of it. A name that changed when the
-   * config changed would make a re-grade at a tightened bound a *second*
-   * assertion, counted beside the first forever, with both of them speaking. So
-   * nothing derived from what a person wrote may appear here.
+   * **It is a key and never content.** A simulation re-grade uses the version
+   * its run pinned, so its keys cannot move. A production trace has no run plan
+   * and a re-grade uses the running copy's current version; there the key must
+   * remain stable across versions so a tightened bound replaces the older
+   * judgment instead of becoming a second assertion. Nothing derived from what
+   * a person wrote may appear here.
    */
   readonly assertion: string;
   readonly verdict: Verdict;
@@ -91,12 +90,11 @@ export type Reading = {
  *
  * Three things, and the first two are the two levels the redesign is made of:
  *
- * - **`definition`** — the library entry, **read through the copy's
- *   `library_id` at judging time and never copied down onto it.** The judge
- *   prompt a model is sent is this row's, so the words on the Library screen and
- *   the words in the request are one string. A definition written onto the copy
- *   would be a second string, and the day the two disagreed the screen would go
- *   on describing a judgment nobody was making.
+ * - **`definition`** — the stable Library type plus the immutable revision
+ *   referenced by the grader version. Runtime never follows the Library's
+ *   mutable current-definition pointer. A catalog update creates one new shared
+ *   revision and promotes active copies with new grader versions, while an
+ *   existing run keeps the definition it pinned.
  * - **`config`** — the copy's own filled-in values, frozen on the version that
  *   is judging.
  * - the conversation, a way to reach a judge, and the narrow reading window
@@ -106,7 +104,7 @@ export type Reading = {
  * executor that could see any of those could be written to answer with them.
  */
 export type Execution = {
-  readonly definition: LibraryEntry;
+  readonly definition: GraderDefinitionSnapshot;
   readonly config: ExecutableGrader["config"];
   readonly conversation: Conversation;
   readonly judging: Judging;
@@ -114,9 +112,9 @@ export type Execution = {
 };
 
 /**
- * One library entry, executed. Asynchronous because a judged entry calls a model
- * and a computed one does not, and a seam that only fitted the computed ones
- * would have to be rebuilt for the first judge.
+ * One immutable library-definition revision, executed. Asynchronous because a
+ * judged definition calls a model and a computed one does not, and a seam that
+ * only fitted computed definitions would have to be rebuilt for the first judge.
  */
 export type Executor = (
   execution: Execution,
@@ -168,6 +166,6 @@ export type GraderExecutor = {
  * A grader that judges several things at once names each of them itself and
  * never comes here.
  */
-export function theOneCheck(definition: LibraryEntry): string {
-  return definition.id;
+export function theOneCheck(definition: GraderDefinitionSnapshot): string {
+  return definition.libraryId;
 }

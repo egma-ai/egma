@@ -49,11 +49,10 @@ type Query = {
 /**
  * One entry as every read of one describes it.
  *
- * The prompt rides along because the whole point of the entry carrying it is
- * that a developer can read the words their conversations are judged by; the
- * parameters ride along because the **Use** form is drawn from them. Neither is
- * a secret and neither belongs to a customer — these are egma's own product
- * behaviour, published.
+ * The current immutable revision's prompt rides along so a developer can read
+ * the words new runs will be judged by; its parameters draw the **Use** form.
+ * Older runs keep the revision they pinned. Neither field is a secret — these
+ * are egma's published product behaviour.
  */
 function described(entry: LibraryEntry): Record<string, unknown> {
   return {

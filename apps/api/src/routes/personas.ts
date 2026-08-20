@@ -41,7 +41,7 @@ import { identityConflict, sendRefusal } from "../http/refusals.ts";
 
 /**
  * The personas available to one project: the shared definitions Egma ships,
- * the project-owned definitions a team authors, their history and their uses.
+ * the Custom definitions a team authors, their history and their uses.
  *
  * A **persona** is the synthetic person who speaks with the agent. Name and
  * Description identify them. Personality is human behavior. Models are the
@@ -56,7 +56,7 @@ import { identityConflict, sendRefusal } from "../http/refusals.ts";
  * `expected_revision` for the identity and `expected_version_id` for the
  * content, refused separately because they are separately recoverable.
  *
- * **A project-owned persona is never deleted.** Archive takes them out of the
+ * **A Custom persona is never deleted.** Archive takes them out of the
  * authoring list and leaves every version in place. Egma-provided personas
  * have no project lifecycle and cannot be changed; Fork is how a team gets a
  * Custom version of one.
@@ -586,7 +586,7 @@ export async function personaRoutes(
   });
 
   /**
-   * A project-owned persona carrying the source's current name, description,
+   * A Custom persona carrying the source's current name, description,
    * complete human traits, and model selections. A fork starts its own history
    * and is editable even when the source is an Egma-provided persona.
    */

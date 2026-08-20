@@ -98,7 +98,7 @@ export const project = pgTable(
      * The persona a test created naming none receives, so authoring a first
      * test never waits on authoring a persona. New projects point directly at
      * Egma's shared, read-only default persona. An admin may replace it with
-     * another Egma-provided persona or with a project-owned fork. This is
+     * another Egma-provided persona or with a Custom fork. This is
      * required. The database default also protects direct internal inserts.
      *
      * **It lives on the project, and this is the one place the layering
@@ -108,7 +108,7 @@ export const project = pgTable(
      * it is one answer for the whole product area, changed in one place, and
      * putting it anywhere else would mean each test carrying a copy of a
      * decision nobody made per test. A migration trigger enforces that the
-     * target is either Egma-owned or owned by this exact project.
+     * target is either Egma-provided or owned by this exact project.
      *
      * **The resulting import cycle is deliberate and safe**, and it is worth
      * knowing why before either file is rearranged. `persona` names

@@ -11,17 +11,20 @@ import {
 } from "../src/index.ts";
 
 describe("provider credential accounts", () => {
-  it("maps both OpenAI speech adapters to one OpenAI account", () => {
+  it("accepts only provider-account names from the model catalog", () => {
     expect(providerAccountFor("openai")).toBe("openai");
-    expect(providerAccountFor("openai_realtime")).toBe("openai");
     expect(providerAccountFor("deepgram")).toBe("deepgram");
     expect(providerAccountFor("cartesia")).toBe("cartesia");
+    expect(providerAccountFor("openai_realtime")).toBeUndefined();
     expect(providerAccountFor("unknown-provider")).toBeUndefined();
   });
 
   it("resolves only the selected account and never falls back", () => {
     const bundle = { openai: "openai-current" } as const;
-    expect(credentialFor(bundle, "openai_realtime")).toBe("openai-current");
+    expect(credentialFor(bundle, "openai")).toBe("openai-current");
+    expect(() => credentialFor(bundle, "openai_realtime")).toThrow(
+      "no credential-account mapping",
+    );
     expect(() => credentialFor(bundle, "deepgram")).toThrow(
       ProviderCredentialMissingError,
     );

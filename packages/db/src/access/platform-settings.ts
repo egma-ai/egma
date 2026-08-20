@@ -163,7 +163,7 @@ function validValue(
   if (definition.secret && trimmed.length < SHORTEST_PASSWORD) {
     throw new UnprocessableInputError(
       `${definition.label} is at least ${SHORTEST_PASSWORD} characters, and ` +
-        "this one is shorter than any provider issues",
+        "this one is shorter than a valid SIP credential",
     );
   }
   if (definition.name === "carrier_trunk_number" && !E164.test(trimmed)) {
@@ -454,12 +454,11 @@ export async function platformFacts(): Promise<PlatformFacts> {
  * **This is the second way in.** `egma self-host setup` writes a route through
  * the API. An automated deployment supplies the same route in its environment.
  *
- * **It never overwrites a complete configuration.** A setting somebody has
- * changed has been changed, and a restart is not an occasion to put a script's
- * old copy back. The one repair is a complete two-value IP route or
- * four-value credential route offered to a platform that holds only an invalid
- * part of one. The old part is removed and the new route is written together.
- * Once either complete shape exists, every later ordinary boot leaves it alone.
+ * **It never overwrites a configuration.** A setting somebody has changed has
+ * been changed, and a restart is not an occasion to put a script's old copy
+ * back. An empty store receives one complete two-value IP route or four-value
+ * credential route. Any stored partial is invalid data and stops startup; this
+ * function does not contain a repair path for an older shape.
  *
  * It has no `AuthContext` because there is no user here. This is the deployment
  * acting on its own configuration while it starts.
@@ -468,7 +467,6 @@ export async function seedPlatformSettings(
   values: PlatformSettingValues,
 ): Promise<readonly PlatformSettingName[]> {
   const named = Object.keys(values) as PlatformSettingName[];
-  if (named.length === 0) return [];
   requireWholeCarrier(values, "seed");
 
   const now = new Date();
@@ -477,8 +475,8 @@ export async function seedPlatformSettings(
     .map((name) => rowFor(name, values[name], now));
   return db().transaction(async (tx) => {
     // A carrier route has either two rows or four. Hold this small table while
-    // deciding whether the stored route is absent, valid or a legacy partial,
-    // so two API starts and a settings write cannot interleave the rows.
+    // deciding whether the stored route is absent or valid, so two API starts
+    // and a settings write cannot interleave the rows.
     await tx.execute(
       sql`lock table ${platformSetting} in share row exclusive mode`,
     );
@@ -497,12 +495,15 @@ export async function seedPlatformSettings(
       heldNames.has(name),
     );
     if (heldIpRoute || heldCredentialRoute) return [];
+    if (heldNames.size > 0) {
+      throw new UnprocessableInputError(
+        "the stored carrier route is incomplete. Replace it with one complete " +
+          "source-IP or SIP-credential route before this platform starts.",
+      );
+    }
+    if (named.length === 0) return [];
 
-    // An empty platform and an invalid legacy partial take the same path:
-    // remove every old member, then insert exactly the offered complete route.
-    await tx
-      .delete(platformSetting)
-      .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+    // Only an empty platform reaches this write.
     const written = await tx
       .insert(platformSetting)
       .values(rows)

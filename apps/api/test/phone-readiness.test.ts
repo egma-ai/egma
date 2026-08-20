@@ -1,10 +1,15 @@
 /** Phone readiness is the carrier-route fact beside platform health. */
 
+import { PLATFORM_SETTINGS } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
 import { TEST_ENCRYPTION_KEY } from "../../../packages/db/test/support/database.ts";
 import { loadConfig } from "../src/config.ts";
-import { phoneReadiness, phoneSetupRequiredMessage } from "../src/phone-readiness.ts";
+import {
+  PHONE_SETUP_FACTS,
+  phoneReadiness,
+  phoneSetupRequiredMessage,
+} from "../src/phone-readiness.ts";
 
 const BASE = {
   DATABASE_URL: "postgres://unused/unused",
@@ -15,6 +20,14 @@ const BASE = {
 } as const;
 
 describe("phone readiness", () => {
+  it("derives its required route from the platform catalog", () => {
+    expect(
+      PLATFORM_SETTINGS.filter((setting) => setting.required).map(
+        (setting) => setting.name,
+      ),
+    ).toEqual(Object.values(PHONE_SETUP_FACTS));
+  });
+
   it("names both missing carrier facts", () => {
     const readiness = phoneReadiness({});
 

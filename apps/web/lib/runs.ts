@@ -57,7 +57,7 @@ export type PlanGrader = {
   readonly grader_id: string;
   readonly grader_version_id: string;
   readonly name: string;
-  /** The library entry this copy reads its definition through. */
+  /** Stable library identity for the immutable definition revision it pins. */
   readonly library_id: string;
   readonly required: boolean;
   readonly scope: string;

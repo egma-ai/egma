@@ -646,7 +646,7 @@ async function lockPersonaProject(
   }
 }
 
-/** Write one complete project-owned persona on the caller's transaction. */
+/** Write one complete Custom persona on the caller's transaction. */
 async function insertPersonaWithTraits(
   tx: Transaction,
   auth: AuthContext,
@@ -893,7 +893,7 @@ export async function editPersona(
         throw new EgmaProvidedPersonaError(locked.id, locked.name);
       }
       if (locked.projectId === null) {
-        throw new Error(`customer-owned persona ${locked.id} has no project`);
+        throw new Error(`Custom persona ${locked.id} has no project`);
       }
       const currentProjectId = locked.projectId;
       const { currentVersionId, organizationId: _organizationId, ...current } =
@@ -1277,7 +1277,7 @@ export async function resolvePersonaNames(
  * the same stance as create and archive, and it keeps `undefined` meaning
  * invisible rather than refused. `getPersona`'s `read` permission applies
  * because the fork hands the source's traits back, which is a read. The
- * independent project-owned copy is written on that same transaction. If
+ * independent Custom copy is written on that same transaction. If
  * reading ever gains a gate of its own, a caller who may not read the source
  * must be refused out loud here — never handed an `undefined` that pretends
  * the source does not exist, which would make Fork the one path that reads
@@ -1541,7 +1541,7 @@ export async function archivePersona(
         throw new EgmaProvidedPersonaError(locked.id, locked.name);
       }
       if (locked.projectId === null) {
-        throw new Error(`customer-owned persona ${locked.id} has no project`);
+        throw new Error(`Custom persona ${locked.id} has no project`);
       }
       const lockedProjectId = locked.projectId;
       expectRevision(locked, request.expectedRevision);

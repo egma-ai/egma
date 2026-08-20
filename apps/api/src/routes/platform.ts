@@ -69,7 +69,7 @@ export const platformRoutes: FastifyPluginAsync<PlatformRouteOptions> = async (
   app.get(PLATFORM_IDENTITY_PATH, async (_request, reply) => {
     // Read from the store on every request rather than held from start, which
     // is the whole point of the route living there: an operator who supplies
-    // the missing carrier stops seeing `setup required` without a restart.
+    // the missing carrier stops seeing `phone setup required` without a restart.
     // It is a select and never an insert, on the identity read's own reasoning
     // — this door is public and anybody who can reach the platform may knock as
     // often as they like.

@@ -69,20 +69,15 @@ export const gradingPlan = pgTable(
      */
     capturedAt: moment("captured_at"),
     /**
-     * The plan: groups under a tagged test reference, each holding its items.
+     * The plan: groups under a tagged test reference, each holding the ordinary
+     * running copies that judge it. Every item has one grader identity and one
+     * pinned immutable grader version. The seeded expected-behaviors copy has
+     * the same shape as every other copy.
      *
-     * **A tagged union, never one nullable shape.** A group is either a pinned
-     * test version or the one testless group an upgraded instance's older
-     * simulations fall into, and an item is either an authored grader or a
-     * built-in — and the two item shapes genuinely differ. An authored item has
-     * a grader identity, a pinned grader version, an origin, a scope and one
-     * priority for the whole item; the built-in has a reserved key and an
-     * engine version, and its verdicts take their priority one at a time from
-     * the behaviors of the pinned test version. Folding the two into one row of
-     * mostly-null columns would make every reader guess which half applied.
-     *
-     * `access/run-plans.ts` owns the shape and is the only thing that writes
-     * one. Empty on `not_recorded`, where the state is the whole answer.
+     * The group tag distinguishes a pinned test version from the historical
+     * testless group an upgraded database can hold. `access/run-plans.ts` owns
+     * the shape and is the only writer. Empty on `not_recorded`, where the state
+     * is the whole answer.
      */
     groups: jsonb("groups").notNull(),
     createdAt: createdAt(),

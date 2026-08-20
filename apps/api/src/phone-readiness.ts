@@ -9,7 +9,7 @@ import {
  * cannot.
  *
  * **Phone readiness is not platform readiness.** A deployment that has never
- * been given a carrier still runs chat and text simulations. `self-host up`
+ * been given a carrier still runs chat simulations. `self-host up`
  * brings that platform up ready, and this says only whether it can place a
  * phone call.
  *
@@ -62,13 +62,10 @@ export const PHONE_SETUP_FACTS = {
   sourceNumber: "carrier_trunk_number",
 } as const satisfies Record<string, PlatformSettingName>;
 
-/** Read one setting's public label from the only platform-settings catalog. */
-function labelOf(name: PlatformSettingName): string {
-  const definition = PLATFORM_SETTINGS.find(
-    (setting) => setting.name === name,
-  );
-  return definition?.label ?? name;
-}
+/** Required route members, derived from the platform catalog that owns them. */
+const REQUIRED_PHONE_SETTINGS = PLATFORM_SETTINGS.filter(
+  (setting) => setting.required,
+);
 
 /**
  * Whether the store holds a setting at all.
@@ -87,11 +84,9 @@ export function phoneReadiness(held: PlatformFacts): PhoneReadiness {
 
   // Ask about presence, never the value: `platformFacts` answers `null` for a
   // secret, so a value test would read a secret setting as absent forever.
-  const missing = (
-    Object.keys(PHONE_SETUP_FACTS) as (keyof typeof PHONE_SETUP_FACTS)[]
-  )
-    .filter((which) => !holds(held, PHONE_SETUP_FACTS[which]))
-    .map((which) => labelOf(PHONE_SETUP_FACTS[which]));
+  const missing = REQUIRED_PHONE_SETTINGS.filter(
+    (setting) => !holds(held, setting.name),
+  ).map((setting) => setting.label);
 
   return {
     state: missing.length === 0 ? "ready" : "setup_required",

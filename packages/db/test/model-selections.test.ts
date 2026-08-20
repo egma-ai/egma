@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   RECOMMENDED_PERSONA_MODELS,
+  SPEED_RANGE,
   personaModelsFromRow,
   validPersonaModels,
 } from "../src/models/selections.ts";
@@ -13,7 +14,7 @@ describe("one complete persona model selection", () => {
     );
   });
 
-  it.each([0.6, 1.5])(
+  it.each([SPEED_RANGE.slowest, SPEED_RANGE.fastest])(
     "accepts the shared speaking-speed boundary %s",
     (speed) => {
       expect(
@@ -25,7 +26,7 @@ describe("one complete persona model selection", () => {
     },
   );
 
-  it.each([0.5999, 1.5001])(
+  it.each([SPEED_RANGE.slowest - 0.0001, SPEED_RANGE.fastest + 0.0001])(
     "refuses speaking speed %s before a simulation can claim it",
     (speed) => {
       expect(() =>
@@ -33,7 +34,9 @@ describe("one complete persona model selection", () => {
           ...RECOMMENDED_PERSONA_MODELS,
           tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
         }),
-      ).toThrow("speaking speed must be between 0.6 and 1.5");
+      ).toThrow(
+        `speaking speed must be between ${SPEED_RANGE.slowest} and ${SPEED_RANGE.fastest}`,
+      );
     },
   );
 

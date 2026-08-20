@@ -104,7 +104,7 @@ curl -s http://localhost:3101/api/platform | jq '.phone'
 
 A complete two-value or four-value route reports `phone.state: "ready"`. With
 no route, phone readiness is `setup_required`. The platform remains ready, and
-chat and text simulations can still run.
+chat simulations can still run.
 
 <Warning>
   Back up `EGMA_ENCRYPTION_KEY` with Postgres. A database backup without this

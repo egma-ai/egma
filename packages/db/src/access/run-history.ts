@@ -387,8 +387,8 @@ export async function rerunSimulation(
  * "we ran it again" about a different run, and the two results would be
  * compared as though they were about the same thing.
  *
- * **It is honestly not a replay.** Persona versions, the project's running
- * copies, the judge setting, the connection's current configuration and
+ * **It is honestly not a replay.** Persona versions, the project's current
+ * grader copies and versions, the connection's current configuration and
  * credential, and the project's mock tools are all resolved fresh by `startRun`
  * — because those are what a run under current conditions means. The earlier run
  * is never reopened and never changed. A copy switched off since is therefore

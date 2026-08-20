@@ -18,13 +18,11 @@ The same driver serves a self-hosted LiveKit and LiveKit Cloud, which
 are the same API behind the same URL: a deployment moves between them by
 changing one variable, and nothing in this file knows the difference.
 
-The trunk is the deployment's, not the spec's: a customer brings one from
-any carrier, either as a reference to a trunk already stored in LiveKit
-or as the inline fields LiveKit documents for outbound credential auth.
-Both are checked at startup (see
-:class:`egma_simulator.config.MediaSettings`) and arrive here already
-good, so nothing in this file reads an environment variable and nothing
-in it can be the first to discover a deployment cannot dial.
+The carrier route belongs to the deployment and arrives on each validated
+phone work order. :class:`egma_simulator.config.MediaSettings` combines it
+with the LiveKit bridge this container reads at startup, then checks the
+complete result before dialling. Nothing in this file reads an environment
+variable or connection credential.
 
 What can only be known at dial time stays at dial time: a trunk whose
 credentials the *carrier* rejects is a SIP refusal like any other, and it
@@ -68,8 +66,8 @@ class LiveKitBackend:
         if config:
             raise MediaBackendError(
                 "the livekit media backend reads no connection config: its "
-                f"trunk belongs to the deployment, so {sorted(config)} was "
-                "handed over by mistake"
+                "carrier route arrives on the phone work order, so "
+                f"{sorted(config)} was handed over by mistake"
             )
         if settings.livekit_url is None:
             # Unreachable through a started simulator, which checks this at

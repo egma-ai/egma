@@ -21,8 +21,8 @@ import { judgeFor } from "../../src/judge/index.ts";
  *
  * It records what it was asked and what it was made from, which is how a test
  * asserts the two things that are otherwise invisible: that each call saw one
- * criterion and no other behavior's words, and that the key resolved out of the
- * credential store actually reached the provider seam — without that key ever
+ * criterion and no other behavior's words, and that the key resolved from the
+ * deployment bundle actually reached the provider seam — without that key ever
  * being written anywhere a verdict, a log or a report could pick it up.
  */
 

@@ -198,6 +198,7 @@ export {
  * application would be a second opinion able to disagree with the gate.
  */
 export {
+  connectionUsesPlatformCarrier,
   connectionTypeMetadata,
   credentialRuleOf,
   variantById,

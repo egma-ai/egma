@@ -68,23 +68,17 @@ import { given, projectNamed, text } from "../http/reading.ts";
  * outlive it, so an old run keeps its own meaning rather than quietly losing a
  * grader's worth of evidence.
  *
- * **Delete is not part of that authoring surface, and it took a wave to notice
- * that it was being treated as though it were.** ADR-0009 shelved *defining*
- * graders; it made switching one off the plainest act in the area — "dormant is
- * no copy at all; there is no enable switch and no `none` value". The data
- * access module has said so since the redesign landed, the start-up backfill is
- * built around a person having taken that decision, and the door that would let
- * anybody take it was never registered. So a product whose only loudness
- * control is delete had no delete, and the screens that displayed the running
- * copies could only display them. It is a verb here now. Edit is still absent,
- * because editing a copy's values is the authoring surface, and that is what
- * was shelved.
+ * ADR-0009 shelved authoring new Library definitions, not managing a running
+ * copy. This route therefore supports both actions a project needs after Use:
+ * PATCH changes the copy's config, model, or live settings, and DELETE switches
+ * it off. There is still no custom-definition authoring door here.
  *
- * **A copy's definition never crosses this door.** What a read answers is the
- * pointer, the filled-in values, and where the grader applies. The judge prompt
- * is on the library entry and is read from `/api/grader-library`, which is the
- * same place the engine reads it at judging time — so the words on screen and
- * the words a model is sent are one row.
+ * **A copy's executable definition never crosses this door.** What a read
+ * answers is the stable library identity, the filled-in values, and where the
+ * grader applies. `/api/grader-library` shows the library's current immutable
+ * definition revision. The engine instead executes the exact revision pinned
+ * by the selected grader version, so a later catalog change cannot alter an
+ * old run.
  *
  * The addresses follow the standing rule: nothing is rooted at a project and
  * the organization is never in a path. A write may name a project in its body
@@ -147,8 +141,8 @@ function unknownKeyIn(
  * The one key an edit refuses in its own words rather than as an unknown one.
  *
  * `library_id` is not a key an edit forgot to support — it is the pointer, and
- * every version behind this copy holds values shaped by the type that pointer
- * decided. A copy that could be moved to another entry would be a different
+ * every version behind this copy holds values shaped by that library's stable
+ * type. A copy that could be moved to another entry would be a different
  * grader wearing the old one's history, and its verdicts would name assertion
  * keys nothing on the new shelf can read. Saying so beats "no such key",
  * because somebody sending it wants a copy of the other entry and Use makes one.
@@ -156,9 +150,9 @@ function unknownKeyIn(
 function repointing(body: Body): string | undefined {
   if (!("library_id" in body)) return undefined;
   return (
-    "a grader cannot be moved to another library entry: its type came from " +
-    "the entry it is a copy of, and every version behind it holds values that " +
-    "type shapes. Press Use on the entry you want, which makes a second copy " +
+    "a grader cannot be moved to another library entry: the entry owns its " +
+    "stable type, and every version behind the copy holds values that type " +
+    "shapes. Press Use on the entry you want, which makes a second copy " +
     "and leaves this one's history saying what it always said."
   );
 }
@@ -166,10 +160,11 @@ function repointing(body: Body): string | undefined {
 /**
  * One running copy as every read of one describes it.
  *
- * `library_id` rides at the front because it is what this row *is*: everything
- * a person wants to know about how it judges is read through it. The config is
- * the copy's own filled-in values and nothing else — no prompt, no criteria,
- * because those are the entry's and are never written down here.
+ * `library_id` rides at the front because it is what this row *is*: the stable
+ * identity of the definition family it runs. The config is the copy's own
+ * filled-in values and nothing else. Each immutable grader version stores the
+ * exact library-definition revision it executes; the copy does not duplicate
+ * that prompt or source code in its config.
  */
 function described(one: Grader): Record<string, unknown> {
   return {
@@ -675,9 +670,9 @@ export async function graderRoutes(
    * here rather than a tidier one.
    *
    * The library entry behind it is **not** released: a switched-off copy still
-   * points at its definition, and that definition has to outlive it for the
-   * verdicts to stay interpretable. Deleting the entry stays refused, which is
-   * what the foreign key underneath says too.
+   * owns immutable grader versions that point at exact definition revisions.
+   * Both have to outlive it for old verdicts to stay interpretable. Deleting
+   * the entry stays refused, which is what the foreign keys underneath say too.
    *
    * **A project may end up judged by nothing at all**, and that is allowed
    * rather than refused. The seeded expected-behaviors copy is an ordinary

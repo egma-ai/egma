@@ -970,23 +970,11 @@ async function validateNamedPersonas(
 /**
  * The one persona the project points at, for a write that named none.
  *
- * The pointer can be wrong in two different ways and they need different words,
- * because they need different fixes. A pointer at a persona who has since been
- * deleted wants a living one; a pointer at nothing, or at another project's
- * persona — which the column's plain foreign key allows — wants pointing
- * somewhere real. Reading the row without the deleted filter is what lets the
- * two be told apart, instead of reporting every reachable failure as a
- * deletion.
- *
- * **Every way this fails is the instance's fault rather than the writer's**, and
- * these stay plain errors for that reason. Signup seeds a project's persona and
- * points the project at them in the same transaction that makes the project, so
- * a project pointing at nobody is a project something else broke — and a write
- * answered as though the body were at fault would send the writer looking at
- * their own file for a problem that is not in it.
- *
- * Every way this fails says what to do about it and writes nothing: a test
- * whose persona egma picked for itself would be a test nobody authored.
+ * The database requires this pointer to name one active Custom persona in this
+ * project or one active Egma-provided persona. It also refuses archiving the
+ * pointed-at row before the pointer moves. This read therefore has one normal
+ * answer and one corruption answer; it carries no nullable, missing, or
+ * archived compatibility path.
  */
 async function projectDefaultPersona(
   on: Queryable,
@@ -999,12 +987,12 @@ async function projectDefaultPersona(
     .where(theProject(auth, projectId))
     .limit(1);
 
-  const id = row?.defaultPersonaId ?? null;
-  if (id === null) {
+  if (row === undefined) {
     throw new Error(
-      "this test names no persona and the project has no default persona; name one on the test, or set the project's default",
+      `this test names no persona and project ${projectId} is not available to this credential`,
     );
   }
+  const id = row.defaultPersonaId;
 
   // The shared lock a named persona is read under, for the same reason and on
   // the same terms: the pointer resolves to a persona this write is about to
@@ -1012,22 +1000,21 @@ async function projectDefaultPersona(
   // refuse the write, or wait behind it and be refused itself. A default
   // resolved without the lock would be the one way past the rule.
   const [pointed] = await on
-    .select({ id: persona.id, archivedAt: persona.archivedAt })
+    .select({ id: persona.id })
     .from(persona)
     .where(
-      personaAvailableToProject(auth, projectId, eq(persona.id, id)),
+      personaAvailableToProject(
+        auth,
+        projectId,
+        and(eq(persona.id, id), isNull(persona.archivedAt)),
+      ),
     )
     .limit(1)
     .for("share");
 
   if (pointed === undefined) {
     throw new Error(
-      `this test names no persona and the project's default points at ${id}, and there is no persona ${id} in this project; name one on the test, or point the project's default at a living persona of this project`,
-    );
-  }
-  if (pointed.archivedAt !== null) {
-    throw new Error(
-      `this test names no persona and the project's default persona ${id} is archived; name one on the test, or point the project's default at an active persona`,
+      `project ${projectId} violates its active default-persona invariant`,
     );
   }
 
@@ -2252,10 +2239,10 @@ export async function archivedTests(
  * The walk starts from the join table, where `persona_id` is indexed for
  * exactly this question, and keeps the rows a live test currently points at.
  *
- * The project is required. A Egma-provided persona can be named by tests in every
+ * The project is required. An Egma-provided persona can be named by tests in every
  * customer, so the persona id alone is not a boundary. The customer predicate
  * comes from the caller's context and the project is the one whose usage or
- * Archive is being decided. A project-owned persona reaches the same set it did
+ * Archive is being decided. A Custom persona reaches the same set it did
  * before; the explicit scope stops a shared id from joining unrelated tests.
  *
  * Exported to the module, not from the package: this answers a question the

@@ -10,11 +10,10 @@ import { and, desc, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import {
-  GRADER_LIBRARY_CATALOG,
-  PREDEFINED_GRADERS,
-  type LibraryParameter,
-  type PredefinedGrader,
-} from "../grader-library/catalog.ts";
+  snapshotLibraryDefinition,
+  type GraderDefinitionSnapshot,
+} from "../grader-library/snapshot.ts";
+import type { LibraryParameter } from "../grader-library/catalog.ts";
 import {
   RECOMMENDED_GRADER_MODEL,
   graderModelFromRow,
@@ -25,6 +24,7 @@ import {
 import {
   grader,
   graderLibrary,
+  graderLibraryVersion,
   graderVersion,
   GRADER_SCOPES,
   type GraderScope,
@@ -41,6 +41,8 @@ import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { inActingProject, within } from "./within.ts";
 
+export type { GraderDefinitionSnapshot } from "../grader-library/snapshot.ts";
+
 /**
  * Reading and writing the **running copies** — what they are is the schema
  * file's story (`schema/graders.ts`); this file is how they are reached.
@@ -55,9 +57,8 @@ import { inActingProject, within } from "./within.ts";
  * made from a library entry: the entry decides the type and what the form asks
  * for, the copy holds the answers. That is why nothing here takes a type, and
  * why nothing here takes criteria — a grader nobody could point at a definition
- * would be a check with no words behind it, and the whole two-level shape exists
- * so that the words live in one place and are read through the pointer at
- * judging time.
+ * would be a check with no words behind it. Each grader version stores one
+ * exact reference to the shared immutable Library definition it executes.
  *
  * The line this factory holds that the two before it do not is **between what a
  * verdict was decided by and where the decision applies.** The filled-in values
@@ -164,7 +165,7 @@ export type Grader = {
   readonly libraryId: string;
   readonly name: string;
   readonly description: string | null;
-  /** Copied from the entry at Use time and frozen there. */
+  /** Derived from the Library identity's DB-guarded stable type. */
   readonly type: LibraryType;
   /** `false` makes this a diagnostic: judged, shown, never able to fail a test. */
   readonly required: boolean;
@@ -175,6 +176,8 @@ export type Grader = {
   readonly versionId: string;
   readonly config: GraderConfig;
   readonly judgeModel: JudgeModel | null;
+  /** The current version's immutable executable Library definition. */
+  readonly definition: GraderDefinitionSnapshot;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
@@ -188,7 +191,7 @@ export type Grader = {
  */
 export type ExecutableGrader = Pick<
   Grader,
-  "id" | "libraryId" | "type" | "versionId" | "config" | "judgeModel"
+  "id" | "versionId" | "config" | "judgeModel" | "definition"
 >;
 
 /**
@@ -196,11 +199,10 @@ export type ExecutableGrader = Pick<
  * the filled-in values and the judge model are what a verdict was decided by,
  * and version on any change. Absent means keep.
  *
- * **Neither the type nor the pointer is here.** A copy's type came from its
- * entry and every version behind it holds values that type shapes, so changing
- * either would leave the history holding answers to questions this grader no
- * longer asks — a different grader wearing the old one's history. Pressing Use
- * again costs one call and says what actually happened.
+ * **Neither the stable Library identity nor its type is here.** Every version
+ * behind a copy holds values shaped by that identity's type, so changing either
+ * would leave history holding answers to questions this grader no longer asks.
+ * Pressing Use again makes the different grader that actually happened.
  *
  * **The values arrive by either of two names, and they mean one thing.**
  * `params` is the entry's form filled in once — the shape **Use** takes, so a
@@ -231,6 +233,7 @@ export type GraderVersion = {
   readonly type: LibraryType;
   readonly config: GraderConfig;
   readonly judgeModel: JudgeModel | null;
+  readonly definition: GraderDefinitionSnapshot;
   readonly createdAt: Date;
 };
 
@@ -243,13 +246,65 @@ const COLUMNS = {
   libraryId: grader.libraryId,
   name: grader.name,
   description: grader.description,
-  type: grader.type,
   required: grader.required,
   scope: grader.scope,
   productionSampleRate: grader.productionSampleRate,
   createdAt: grader.createdAt,
   updatedAt: grader.updatedAt,
 } as const;
+
+/** The immutable Library-version columns every executable read joins. */
+const DEFINITION_COLUMNS = {
+  definitionLibraryId: graderLibraryVersion.libraryId,
+  definitionLibraryVersion: graderLibraryVersion.version,
+  definitionType: graderLibrary.type,
+  definitionPrompt: graderLibraryVersion.prompt,
+  definitionParams: graderLibraryVersion.params,
+  definitionOutput: graderLibraryVersion.outputDefinition,
+  definitionSourceCode: graderLibraryVersion.sourceCode,
+  definitionSourceCodeLanguage: graderLibraryVersion.sourceCodeLanguage,
+} as const;
+
+type SelectedDefinition = {
+  readonly definitionLibraryId: string;
+  readonly definitionLibraryVersion: number;
+  readonly definitionType: string;
+  readonly definitionPrompt: string | null;
+  readonly definitionParams: unknown;
+  readonly definitionOutput: unknown;
+  readonly definitionSourceCode: string | null;
+  readonly definitionSourceCodeLanguage: string | null;
+};
+
+function definitionFromSelection(
+  row: SelectedDefinition,
+): GraderDefinitionSnapshot {
+  return snapshotLibraryDefinition({
+    id: row.definitionLibraryId,
+    version: row.definitionLibraryVersion,
+    type: row.definitionType,
+    prompt: row.definitionPrompt,
+    params: row.definitionParams,
+    outputDefinition: row.definitionOutput,
+    sourceCode: row.definitionSourceCode,
+    sourceCodeLanguage: row.definitionSourceCodeLanguage,
+  });
+}
+
+function selectionFromDefinition(
+  definition: GraderDefinitionSnapshot,
+): SelectedDefinition {
+  return {
+    definitionLibraryId: definition.libraryId,
+    definitionLibraryVersion: definition.libraryVersion,
+    definitionType: definition.type,
+    definitionPrompt: definition.prompt,
+    definitionParams: definition.params,
+    definitionOutput: definition.outputDefinition,
+    definitionSourceCode: definition.sourceCode,
+    definitionSourceCodeLanguage: definition.sourceCodeLanguage,
+  };
+}
 
 /**
  * What a copy is worth when whoever pressed Use said nothing about it.
@@ -319,25 +374,18 @@ function fields(value: unknown, what: string): Record<string, unknown> {
 }
 
 /**
- * What the write door needs off a library entry: the type it copies down, and
- * the declaration every filled-in value is checked against.
+ * What the write door needs off a library entry: its stable type, current
+ * immutable definition revision and display name for useful refusals.
  */
-type Definition = {
-  readonly id: string;
-  readonly name: string;
-  readonly type: LibraryType;
-  readonly params: readonly LibraryParameter[];
-};
+type Definition = GraderDefinitionSnapshot & { readonly name: string };
 
 /**
  * The entry this copy is being made from, or a refusal naming it.
  *
- * **Read through the same door the Library screen reads**: egma's own entries,
- * which belong to nobody and are therefore on everybody's shelf, plus the
- * caller's own organization's when custom authoring arrives. An entry belonging
- * to another customer is not refused differently from one that does not exist,
- * because saying which it was would answer a question about somebody else's
- * shelf.
+ * It joins the Library identity to the immutable revision its current pointer
+ * names. Egma's entries belong to nobody and are on everybody's shelf; custom
+ * entries belong to the caller's organization. Another customer's entry is not
+ * refused differently from one that does not exist.
  */
 async function definitionOf(
   on: Queryable,
@@ -346,37 +394,40 @@ async function definitionOf(
 ): Promise<Definition> {
   const [row] = await on
     .select({
-      id: graderLibrary.id,
       organizationId: graderLibrary.organizationId,
+      id: graderLibraryVersion.libraryId,
+      version: graderLibraryVersion.version,
       name: graderLibrary.name,
       type: graderLibrary.type,
-      params: graderLibrary.params,
+      prompt: graderLibraryVersion.prompt,
+      params: graderLibraryVersion.params,
+      outputDefinition: graderLibraryVersion.outputDefinition,
+      sourceCode: graderLibraryVersion.sourceCode,
+      sourceCodeLanguage: graderLibraryVersion.sourceCodeLanguage,
     })
     .from(graderLibrary)
+    .innerJoin(
+      graderLibraryVersion,
+      and(
+        eq(graderLibraryVersion.libraryId, graderLibrary.id),
+        eq(
+          graderLibraryVersion.version,
+          graderLibrary.currentDefinitionVersion,
+        ),
+      ),
+    )
     .where(
       and(
         eq(graderLibrary.id, libraryId),
         sql`(${graderLibrary.organizationId} is null or ${graderLibrary.organizationId} = ${auth.organizationId})`,
       ),
     )
-    .limit(1);
+    .limit(1)
+    .for("share", { of: graderLibrary });
 
   if (row === undefined) throw new UnknownGraderLibraryEntryError(libraryId);
 
-  if (!Array.isArray(row.params)) {
-    throw new Error(
-      `library entry ${row.id} holds parameters in a shape Egma never writes; the row needs repairing before anybody can use it`,
-    );
-  }
-
-  return {
-    id: row.id,
-    name: row.name,
-    // Pinned by a check constraint on the way in, so what comes back is one of
-    // the two words the shelf writes.
-    type: row.type as LibraryType,
-    params: row.params as readonly LibraryParameter[],
-  };
+  return { ...snapshotLibraryDefinition(row), name: row.name };
 }
 
 /**
@@ -523,13 +574,12 @@ function validAssertion(
  * enforced below; only the first one used to be.
  *
  * **And no measure twice, which is the rule that makes an assertion knowable.**
- * A verdict row is filed under the measure its check bounds, because a copy's
- * config is not pinned by a run and a position therefore names a different check
- * after an edit. That key has to be unique inside a copy or it is not a key: two
- * entries bounding one measure would write two judgments under one name, and the
- * verdict store's sorting key ends at the assertion — so the two would collapse
- * into one row and a check somebody wrote down would vanish inside a single
- * grading, silently.
+ * A verdict row is filed under the measure its check bounds. Simulation runs
+ * pin their grader version, while a production re-grade can use a newer one;
+ * the measure stays the stable assertion identity in both cases. It must also
+ * be unique inside one version: two entries bounding one measure would write
+ * two judgments under one name, and the verdict store's sorting key ends at the
+ * assertion, so one check would vanish inside a single grading.
  *
  * It is a small product restriction and an honest one. What a second bound on
  * one measure usually means is a second *copy* — a strict one that blocks and a
@@ -730,6 +780,28 @@ function configFromRow(value: unknown, versionId: string): GraderConfig {
   };
 }
 
+/**
+ * Refuse a catalog definition that cannot execute an active copy unchanged.
+ *
+ * Catalog reconciliation calls this before it writes a new shared definition
+ * revision. There is no guessed config migration: if the new form or stable
+ * type cannot accept a copy's exact stored config and model, the release must
+ * supply an explicit migration or use a new Library identity.
+ */
+export function assertGraderVersionCompatibleWithDefinition(
+  definition: GraderDefinitionSnapshot,
+  libraryName: string,
+  value: {
+    readonly versionId: string;
+    readonly config: unknown;
+    readonly judgeModel: unknown;
+  },
+): void {
+  const stored = configFromRow(value.config, value.versionId);
+  validConfig({ ...definition, name: libraryName }, stored);
+  judgeModelFromRow(value.judgeModel, value.versionId, definition.type);
+}
+
 function judgeModelFromRow(
   value: unknown,
   versionId: string,
@@ -785,13 +857,12 @@ function theGrader(auth: AuthContext, id: string): SQL {
 }
 
 /** What a read hands back, from the row the identity and version join made. */
-function answer(row: {
+function answer(row: SelectedDefinition & {
   readonly id: string;
   readonly projectId: string;
   readonly libraryId: string;
   readonly name: string;
   readonly description: string | null;
-  readonly type: string;
   readonly required: boolean;
   readonly scope: string;
   readonly productionSampleRate: number;
@@ -802,19 +873,28 @@ function answer(row: {
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }): Grader {
-  const { type, config, judgeModel, scope, ...rest } = row;
+  const definition = definitionFromSelection(row);
   return {
-    ...rest,
-    // The identity row's own enumerated columns are pinned by check
-    // constraints, so what comes back is one of the words this module writes.
-    type: type as LibraryType,
-    scope: scope as GraderScope,
-    config: configFromRow(config, row.versionId),
+    id: row.id,
+    projectId: row.projectId,
+    libraryId: row.libraryId,
+    name: row.name,
+    description: row.description,
+    type: definition.type,
+    required: row.required,
+    scope: row.scope as GraderScope,
+    productionSampleRate: row.productionSampleRate,
+    version: row.version,
+    versionId: row.versionId,
+    config: configFromRow(row.config, row.versionId),
     judgeModel: judgeModelFromRow(
-      judgeModel,
+      row.judgeModel,
       row.versionId,
-      type as LibraryType,
+      definition.type,
     ),
+    definition,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -829,8 +909,9 @@ function answer(row: {
  * version is a grader nothing can read a config off, and a version with no copy
  * is a config nothing judges by; neither is a state this door can leave behind.
  *
- * The entry is read **inside** the transaction, so the definition the type was
- * copied from is the definition that existed when the copy was written.
+ * The entry is read **inside** the transaction under a share lock. The first
+ * grader version therefore stores the exact immutable definition revision that
+ * was current when the copy was written.
  */
 export async function useLibraryEntry(
   auth: AuthContext,
@@ -888,12 +969,11 @@ export async function useLibraryEntry(
         id,
         organizationId: auth.organizationId,
         projectId,
-        libraryId: definition.id,
+        libraryId: definition.libraryId,
         // Defaulted from the entry, so a copy nobody renamed says on screen
         // which grader it is a copy of.
         name: name ?? definition.name,
         description: input.description ?? null,
-        type: definition.type,
         required,
         scope,
         productionSampleRate,
@@ -908,12 +988,14 @@ export async function useLibraryEntry(
       id: versionId,
       graderId: id,
       version: 1,
+      libraryId: definition.libraryId,
+      libraryVersion: definition.libraryVersion,
       config,
       judgeModel,
       createdBy: auth.userId,
     });
 
-    return { identity, config, judgeModel };
+    return { identity, config, judgeModel, definition };
   });
 
   // Through the same shaper every other read goes through, so what Use hands
@@ -925,6 +1007,7 @@ export async function useLibraryEntry(
     versionId,
     config: written.config,
     judgeModel: written.judgeModel,
+    ...selectionFromDefinition(written.definition),
   });
 }
 
@@ -940,9 +1023,18 @@ function selectWithCurrentVersion() {
       versionId: graderVersion.id,
       config: graderVersion.config,
       judgeModel: graderVersion.judgeModel,
+      ...DEFINITION_COLUMNS,
     })
     .from(grader)
-    .innerJoin(graderVersion, eq(grader.currentVersionId, graderVersion.id));
+    .innerJoin(graderLibrary, eq(grader.libraryId, graderLibrary.id))
+    .innerJoin(graderVersion, eq(grader.currentVersionId, graderVersion.id))
+    .innerJoin(
+      graderLibraryVersion,
+      and(
+        eq(graderLibraryVersion.libraryId, graderVersion.libraryId),
+        eq(graderLibraryVersion.version, graderVersion.libraryVersion),
+      ),
+    );
 }
 
 /**
@@ -979,9 +1071,9 @@ export async function getGrader(
  * comes back.
  *
  * What an edit leaves out, it keeps — and values it does give are checked
- * against the **entry this copy points at**, read live, which is the same check
- * Use made and the reason an edit cannot smuggle in a parameter the form never
- * asked for.
+ * against the **current immutable definition of the entry this copy points
+ * at**, which is the same check Use makes. If the catalog moved forward, the
+ * edit mints a version that references that new definition too.
  *
  * Editing what the caller cannot see returns what reading it would have:
  * `undefined`, with nothing disturbed.
@@ -1014,6 +1106,17 @@ export async function editGrader(
   const asked = valuesIn(changes);
 
   return db().transaction(async (tx) => {
+    // Lock order is Library identity, then running copy. Catalog reconciliation
+    // uses the same order, so a prompt release and a user edit cannot deadlock
+    // or leave a copy behind on the old current definition.
+    const [found] = await tx
+      .select({ libraryId: grader.libraryId })
+      .from(grader)
+      .where(theGrader(auth, id))
+      .limit(1);
+    if (found === undefined) return undefined;
+    const currentDefinition = await definitionOf(tx, auth, found.libraryId);
+
     const [locked] = await tx
       .select({ ...COLUMNS, currentVersionId: grader.currentVersionId })
       .from(grader)
@@ -1023,6 +1126,9 @@ export async function editGrader(
 
     if (locked === undefined) return undefined;
     const { currentVersionId, ...current } = locked;
+    if (current.libraryId !== found.libraryId) {
+      throw new Error("a grader cannot move between Library identities");
+    }
 
     // This select and the update below are the two `where`s in this file that
     // start from a bare `eq` rather than `within`: each names an id that just
@@ -1034,19 +1140,29 @@ export async function editGrader(
         version: graderVersion.version,
         config: graderVersion.config,
         judgeModel: graderVersion.judgeModel,
+        ...DEFINITION_COLUMNS,
       })
       .from(graderVersion)
+      .innerJoin(graderLibrary, eq(graderVersion.libraryId, graderLibrary.id))
+      .innerJoin(
+        graderLibraryVersion,
+        and(
+          eq(graderLibraryVersion.libraryId, graderVersion.libraryId),
+          eq(graderLibraryVersion.version, graderVersion.libraryVersion),
+        ),
+      )
       .where(eq(graderVersion.id, currentVersionId))
       .limit(1);
     if (currentVersion === undefined) {
       throw new Error("the grader's current version is missing");
     }
 
+    const storedDefinition = definitionFromSelection(currentVersion);
     const stored = configFromRow(currentVersion.config, currentVersion.id);
     const storedJudgeModel = judgeModelFromRow(
       currentVersion.judgeModel,
       currentVersion.id,
-      current.type as LibraryType,
+      storedDefinition.type,
     );
 
     // The one refusal that needs the stored config in front of it: whether the
@@ -1060,22 +1176,23 @@ export async function editGrader(
     const config =
       asked === undefined
         ? stored
-        : validConfig(
-            await definitionOf(tx, auth, current.libraryId),
-            asked.values,
-          );
-    if (current.type === "llm_as_judge" && judgeModel === null) {
+        : validConfig(currentDefinition, asked.values);
+    if (currentDefinition.type === "llm_as_judge" && judgeModel === null) {
       throw new UnprocessableInputError(
         "a model-judged grader needs one supported judge model; it cannot be cleared",
       );
     }
-    if (current.type === "code" && judgeModel !== undefined && judgeModel !== null) {
+    if (
+      currentDefinition.type === "code" &&
+      judgeModel !== undefined &&
+      judgeModel !== null
+    ) {
       throw new UnprocessableInputError(
         "a code grader makes no model call, so it cannot carry a judge model",
       );
     }
     const nextJudgeModel =
-      current.type === "code"
+      currentDefinition.type === "code"
         ? null
         : judgeModel === undefined
           ? storedJudgeModel
@@ -1083,7 +1200,9 @@ export async function editGrader(
 
     const mintsVersion =
       !sameConfig(stored, config) ||
-      !sameJudgeModel(storedJudgeModel, nextJudgeModel);
+      !sameJudgeModel(storedJudgeModel, nextJudgeModel) ||
+      storedDefinition.libraryId !== currentDefinition.libraryId ||
+      storedDefinition.libraryVersion !== currentDefinition.libraryVersion;
     const settingsChanged =
       changes.name !== undefined ||
       changes.description !== undefined ||
@@ -1093,20 +1212,20 @@ export async function editGrader(
 
     const settled = {
       ...current,
-      type: current.type as LibraryType,
       required: changes.required ?? current.required,
       scope: scope ?? (current.scope as GraderScope),
       productionSampleRate: productionSampleRate ?? current.productionSampleRate,
     };
 
     if (!mintsVersion && !settingsChanged) {
-      return {
+      return answer({
         ...settled,
         version: currentVersion.version,
         versionId: currentVersion.id,
         config: stored,
         judgeModel: storedJudgeModel,
-      };
+        ...selectionFromDefinition(storedDefinition),
+      });
     }
 
     let versionId = currentVersion.id;
@@ -1118,6 +1237,8 @@ export async function editGrader(
         id: versionId,
         graderId: current.id,
         version,
+        libraryId: currentDefinition.libraryId,
+        libraryVersion: currentDefinition.libraryVersion,
         config,
         judgeModel: nextJudgeModel,
         createdBy: auth.userId,
@@ -1147,6 +1268,9 @@ export async function editGrader(
       versionId,
       config,
       judgeModel: nextJudgeModel,
+      ...selectionFromDefinition(
+        mintsVersion ? currentDefinition : storedDefinition,
+      ),
     });
   });
 }
@@ -1169,15 +1293,22 @@ export async function getGraderVersion(
     .select({
       id: graderVersion.id,
       graderId: graderVersion.graderId,
-      libraryId: grader.libraryId,
       version: graderVersion.version,
-      type: grader.type,
       config: graderVersion.config,
       judgeModel: graderVersion.judgeModel,
       createdAt: graderVersion.createdAt,
+      ...DEFINITION_COLUMNS,
     })
     .from(graderVersion)
     .innerJoin(grader, eq(graderVersion.graderId, grader.id))
+    .innerJoin(graderLibrary, eq(graderVersion.libraryId, graderLibrary.id))
+    .innerJoin(
+      graderLibraryVersion,
+      and(
+        eq(graderLibraryVersion.libraryId, graderVersion.libraryId),
+        eq(graderLibraryVersion.version, graderVersion.libraryVersion),
+      ),
+    )
     .where(
       within(
         auth,
@@ -1189,12 +1320,21 @@ export async function getGraderVersion(
 
   if (row === undefined) return undefined;
 
-  const { type, config, judgeModel, ...rest } = row;
+  const definition = definitionFromSelection(row);
   return {
-    ...rest,
-    type: type as LibraryType,
-    config: configFromRow(config, row.id),
-    judgeModel: judgeModelFromRow(judgeModel, row.id, type as LibraryType),
+    id: row.id,
+    graderId: row.graderId,
+    libraryId: definition.libraryId,
+    version: row.version,
+    type: definition.type,
+    config: configFromRow(row.config, row.id),
+    judgeModel: judgeModelFromRow(
+      row.judgeModel,
+      row.id,
+      definition.type,
+    ),
+    definition,
+    createdAt: row.createdAt,
   };
 }
 
@@ -1260,8 +1400,8 @@ export type GraderFacts = {
  * blocker into a diagnostic this morning reads its whole history that way from
  * this morning on. That is the decision the flag's placement already made:
  * nothing about the judgment changed, only what the project lets a failure do.
- * The pointer is read live for the opposite reason — it can never be edited at
- * all, so there is no other value it could have.
+ * The Library identity is read from the copy for the opposite reason — it can
+ * never be edited, so there is no other value it could have.
  *
  * **Deliberately no deleted filter.** A deleted copy's verdicts are still shown
  * — its versions outlive it so that they stay interpretable — and a diagnostic

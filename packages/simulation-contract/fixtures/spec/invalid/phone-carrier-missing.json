@@ -1,6 +1,6 @@
 {
   "contract_version": 2,
-  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWES",
+  "simulation_id": "sim_fixture_phone_carrier_missing",
   "modality": "voice",
   "connection": {
     "type": "phone",

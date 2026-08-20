@@ -89,13 +89,13 @@ import {
  * than the page being the check.
  *
  * - `POST /api/simulations/:id/regrade` reopens this conversation's grading job.
- *   With no grader named it resolves the whole applicable set again; naming one
- *   narrows to that grader at its **current** version, which is what somebody
- *   who has just fixed one rubric is asking for. The built-in expected-behaviors
- *   grader is never a row in any table, so it has no identity to name and cannot
- *   be asked for alone — asking for the conversation is how its behaviors are
- *   judged again. Run and window re-grades stay where they were, on their own
- *   surfaces, because a conversation is not the only grain anybody re-scores.
+ *   With no grader named it reuses the whole grader set frozen in the run plan;
+ *   naming one narrows that set while keeping the immutable version this run
+ *   pinned. A grader or catalog edit applies only to a new run. The predefined
+ *   expected-behaviors copy has an ordinary `grd_` identity and can be named in
+ *   exactly the same way. Run and window re-grades stay where they were, on
+ *   their own surfaces, because a conversation is not the only grain anybody
+ *   re-scores.
  * **There is no corrections endpoint, and there was one.** It wrote a person's
  * disagreement as a whole verdict row beside the machine's. ADR-0009 takes
  * corrections and their calibration data out of v0: the capability returns as
@@ -540,7 +540,8 @@ export async function simulationRoutes(
   /**
    * Judge this conversation again.
    *
-   * Whole by default, or narrowed to one authored grader at its current version.
+   * Whole by default, or narrowed to one authored grader identity. The
+   * simulation still uses the immutable version its run pinned.
    * A grader that has been archived is unreachable and answers as absent, which
    * is right: an archived grader judges nothing from now on and a re-grade is
    * from now on.
@@ -549,7 +550,7 @@ export async function simulationRoutes(
    * same terms as starting a run — the engine claims the reopened job and the
    * verdicts land through the ordinary path. A conversation that was already
    * waiting is left exactly alone and counted, because it was already going to
-   * be judged at today's versions, which is everything a re-grade asks for.
+   * be judged from this run's pinned versions.
    *
    * **Except when what is already running is narrower than what was asked**, and
    * then this refuses. A job somebody has claimed is judged under the
@@ -576,9 +577,7 @@ export async function simulationRoutes(
         reply,
         `"${named}" is not a grader id. Send grader_id as the grd_ id of an ` +
           `active grader to judge with that one alone, or leave it out to ` +
-          `judge this conversation with everything that applies. The ` +
-          `expected-behaviors built-in is never a row and has no id, so it ` +
-          `cannot be asked for on its own.`,
+          `judge this conversation with everything that applies.`,
       );
     }
 

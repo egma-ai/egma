@@ -409,11 +409,6 @@ MAY_BE_ABSENT = {
     "EGMA_S3_REGION": "empty is right for the store this file runs",
     "EGMA_BLOB_REGION": "falls back to EGMA_S3_REGION, which may be empty",
     "EGMA_SIMULATOR_S3_REGION": "falls back to EGMA_S3_REGION, which may be empty",
-    # The workbench overlay, which `docker compose up` does not start. Empty is
-    # the ordinary case and the useful one: every fixture is queued as written
-    # and the phone fixture dials an obvious placeholder, so setting this is
-    # what turns a demo into a real call rather than what makes one work.
-    "EGMA_WORKBENCH_PHONE_NUMBER": "empty queues every fixture as written",
 }
 """Every variable the deployment description may leave empty, and why.
 

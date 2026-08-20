@@ -2,7 +2,7 @@
  * The agent and connection endpoints of the fixture platform.
  *
  * This is the contract the CLI is built against, written down as something that
- * runs: register a voice agent together with the first way of reaching it, read
+ * runs: register an agent together with the first way of reaching it, read
  * it back, and attach another connection later.
  *
  * It answers what the real instance answers, including which refusal goes with
@@ -290,7 +290,7 @@ function jsonObjectText(key: string, value: unknown): string {
  */
 const REGISTRY: Readonly<Record<string, Descriptor>> = {
   retell: {
-    modalities: ["chat", "voice"],
+    modalities: ["chat"],
     topology: "hosted-broker",
     variants: [
       {
@@ -394,6 +394,21 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
 };
 
 const CONNECTION_TYPES = Object.keys(REGISTRY);
+
+/**
+ * The public facts this offline fixture duplicates from the real registry.
+ * The agreement test compares every type, so adding or changing a shipped
+ * type cannot leave the CLI's fake platform accepting a different contract.
+ */
+export const FIXTURE_CONNECTION_TYPE_FACTS = CONNECTION_TYPES.map((type) => {
+  const descriptor = REGISTRY[type] as Descriptor;
+  return {
+    type,
+    modalities: descriptor.modalities,
+    topology: descriptor.topology,
+    simulatorAdapter: descriptor.simulatorAdapter,
+  };
+});
 
 /**
  * The shape a config is in, out of the shapes it could be in: one config key
@@ -944,8 +959,8 @@ export function agentRoutes(options: {
    * The living connection in this project that is about the same vendor agent,
    * if there is one — the whole of what makes registering retry-safe.
    *
-   * Oldest first, so which agent a second modality attaches to is the same
-   * answer every time.
+   * Oldest first, so a repeated registration chooses the same agent every
+   * time.
    */
   const sameVendorAgent = (
     projectId: string,
@@ -958,9 +973,9 @@ export function agentRoutes(options: {
     const named = input.config[reuseKey];
     if (named === undefined || named.trim() === "") return [];
 
-    // Oldest first, so which agent gains a second way of being reached is the
-    // same answer every time. The ids sort by mint time, so the order they were
-    // written in and the order the real instance sorts them by are one thing.
+    // Oldest first, so a repeated registration chooses the same agent every
+    // time. The ids sort by mint time, so the order they were written in and
+    // the order the real instance sorts them by are one thing.
     return connections.filter(
       (held) =>
         held.projectId === projectId &&
@@ -974,15 +989,14 @@ export function agentRoutes(options: {
     routes: [
       {
         /**
-         * Register a voice agent, with the first way of reaching it written in
+         * Register an agent, with the first way of reaching it written in
          * the same request: an agent nothing can reach is not worth having, so
          * the happy path never produces one.
          *
          * Both rows or neither, and the reuse rule runs in the same breath:
          * a living connection about the same vendor agent decides the outcome.
-         * Same modality answers what is there with the credential rotated
-         * whole; a different modality gives that same agent another way of
-         * being reached; no match writes both. `result` says which.
+         * A matching Retell Chat connection answers what is there with the
+         * credential rotated whole; no match writes both. `result` says which.
          */
         method: "POST",
         path: "/api/agents",

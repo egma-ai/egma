@@ -415,8 +415,8 @@ export function unsignableReference(
  *
  * **A refusal rather than a success with a caveat in it, and that is the whole
  * decision.** Every other outstanding job answers a re-grade by carrying it out
- * — it is going to be judged at today's grader versions, which is all the ask
- * was for — and a 200 saying "already waiting" is true of those. This one is
+ * — a simulation from its pinned plan, or a production trace from current
+ * versions — and a 200 saying "already waiting" is true of those. This one is
  * not: the claimed job judges one grader that is not the one asked about,
  * nothing is queued behind it, and no verdict for the ask will ever land. A 200
  * carrying a new field would leave every client written before that field

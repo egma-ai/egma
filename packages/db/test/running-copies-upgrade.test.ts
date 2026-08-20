@@ -481,8 +481,10 @@ async function activeCopiesIn(projectId: string): Promise<
     scope: string;
     type: string;
   }>(
-    `select id, library_id, required, scope, type from grader
-      where project_id = $1 and deleted_at is null order by id`,
+    `select g.id, g.library_id, g.required, g.scope, gl.type
+       from grader g
+       join grader_library gl on gl.id = g.library_id
+      where g.project_id = $1 and g.deleted_at is null order by g.id`,
     [projectId],
   );
   return rows;

@@ -1,6 +1,7 @@
 import {
   authorize,
   cancelRun,
+  connectionUsesPlatformCarrier,
   connectionTypeOf,
   foldRun,
   foldSimulation,
@@ -133,18 +134,6 @@ export type RunRoutesOptions = {
   /** Where this instance is, for the address a person opens results at. */
   readonly baseUrl: string;
 };
-
-/**
- * The connection types this deployment cannot dial over until its phone half
- * has been set up.
- *
- * One entry, and it is a list rather than an `=== "phone"` so that the next
- * carrier-backed type is a line here instead of a condition somebody has to
- * find. What makes a type belong is not that it is telephony-shaped: it is that
- * conducting it spends the platform's *own* carrier, which is the thing
- * `egma self-host setup` provides.
- */
-const NEEDS_THE_PLATFORMS_CARRIER: readonly string[] = ["phone"];
 
 export const RUNS_PATH = "/api/runs";
 /**
@@ -597,11 +586,9 @@ function describedRun(
  * plan reconstructed from today's graders would be a claim about an old run that
  * nobody can check.
  *
- * The groups keep their tagged shape whole. An authored item has a grader
- * identity and a pinned grader version; the built-in has a reserved key and an
- * engine version and takes its priority one behavior at a time. Folding the two
- * into one shape of mostly-null fields would make every reader guess which half
- * applied.
+ * The groups keep their tagged shape whole. Every item is an ordinary running
+ * copy with one grader identity and one pinned immutable grader version. The
+ * seeded expected-behaviors copy uses that same shape.
  */
 function describedGradingPlan(plan: GradingPlan): Record<string, unknown> {
   return {
@@ -929,13 +916,13 @@ export async function runRoutes(
    * What a run would freeze, for whichever selection is on screen.
    *
    * **The same resolution the start does, and that is the whole point.** A
-   * review step that worked out the pins, the skips and the judge for itself
+   * review step that worked out the pins, the skips and the graders for itself
    * would be a second opinion, and the moment the two disagreed a person would
    * have approved one run and started another. So this calls `planRun`, and so
    * does `startRun`.
    *
    * It answers rather than refuses wherever the answer is a state the page has
-   * to draw — a project with no judge, a test that would be skipped — and
+   * to draw — a project with no running graders, a test that would be skipped — and
    * refuses only what could never be written at all.
    */
   app.get(RUN_PLAN_PATH, async (request, reply) => {
@@ -1006,7 +993,7 @@ export async function runRoutes(
     const carrier = phoneReadiness(await platformFacts());
     if (carrier.state !== "ready") {
       const type = await connectionTypeOf(acting.auth, text(body.connection));
-      if (type !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(type)) {
+      if (type !== undefined && connectionUsesPlatformCarrier(type)) {
         return phoneSetupRequired(reply, phoneSetupRequiredMessage(carrier));
       }
     }
@@ -1278,9 +1265,10 @@ export async function runRoutes(
    * two results would then be compared as though they were about the same thing.
    *
    * **It is honestly not a replay, and the answer says so by what it resolves.**
-   * Persona and grader versions, project-default graders, the judge setting, the
-   * connection's current configuration, and the project's mock tools are all
-   * resolved fresh — because a retry under current conditions is what this is.
+   * The earlier test versions stay exact. The new run resolves the executable
+   * persona versions, the current running-copy grader versions, the connection's
+   * current configuration, and the project's mock tools again — because a retry
+   * under current conditions is what this is.
    */
   app.post(RUN_RETRY_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1376,7 +1364,7 @@ export async function runRoutes(
     const carrier = phoneReadiness(await platformFacts());
     if (carrier.state !== "ready") {
       const type = await connectionTypeOf(acting.auth, source.connectionId);
-      if (type !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(type)) {
+      if (type !== undefined && connectionUsesPlatformCarrier(type)) {
         return phoneSetupRequired(reply, phoneSetupRequiredMessage(carrier));
       }
     }

@@ -239,9 +239,10 @@ loopback simulations do not need a carrier route.
 Where the LiveKit server itself comes from is the root README's story:
 it, its SIP gateway and their Redis are part of the default deployment,
 told there with the honest account of what that gateway needs from your
-network. `egma-workbench --phone-number +1...` is the other half of the
-local demo — it points the phone fixture at a real agent instead of the
-placeholder it carries, and queues nothing else.
+network. The workbench is not a real-call launcher. Its fixtures use sentinel
+provider keys and only prove the simulator contract. Create a run through the
+platform to prove a real phone simulation through the same claim path that
+production uses.
 
 Pipecat and the transport choose the media rate. Egma does not force a
 phone processing rate or store a separate sample-rate field. The

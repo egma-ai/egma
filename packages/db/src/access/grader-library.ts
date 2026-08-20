@@ -1,4 +1,15 @@
-import { and, asc, eq, gt, isNull, or, sql, type SQL } from "drizzle-orm";
+import { newId } from "@egma/ids";
+import { isDeepStrictEqual } from "node:util";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  isNull,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 
 import { db } from "../client.ts";
 import {
@@ -7,9 +18,12 @@ import {
   type LibraryParameter,
   type PredefinedGrader,
 } from "../grader-library/catalog.ts";
+import { snapshotLibraryDefinition } from "../grader-library/snapshot.ts";
 import {
   grader,
   graderLibrary,
+  graderLibraryVersion,
+  graderVersion,
   type LibraryType,
 } from "../schema/graders.ts";
 import type { AuthContext } from "./context.ts";
@@ -20,6 +34,7 @@ import {
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { inActingProject, within } from "./within.ts";
+import { assertGraderVersionCompatibleWithDefinition } from "./graders.ts";
 
 /**
  * The grader library: the shelf of definitions, as it is seeded, read and
@@ -92,83 +107,33 @@ const COLUMNS = {
   name: graderLibrary.name,
   description: graderLibrary.description,
   type: graderLibrary.type,
-  version: graderLibrary.version,
-  prompt: graderLibrary.prompt,
-  params: graderLibrary.params,
-  outputDefinition: graderLibrary.outputDefinition,
+  version: graderLibrary.currentDefinitionVersion,
+  prompt: graderLibraryVersion.prompt,
+  params: graderLibraryVersion.params,
+  outputDefinition: graderLibraryVersion.outputDefinition,
   createdAt: graderLibrary.createdAt,
   updatedAt: graderLibrary.updatedAt,
 } as const;
 
-/**
- * **The definition: every field the catalog owns, and the one type all three
- * writers are held to.**
- *
- * Three things have to agree about this list, and each of them is a separate
- * piece of SQL: what the insert writes, what the conflicting update writes, and
- * what the update compares before it writes anything. Written out three times
- * by hand they would drift — and the drift nobody would notice is the third
- * one, because a field left out of the comparison is a field whose edit
- * refreshes with the version standing still, which is precisely the thing the
- * version exists to make answerable.
- *
- * So none of the three is written by hand. `definitionOf` below is the insert's
- * half and `FROM_THE_CATALOG` is the update's, both typed over this one shape
- * so the compiler refuses either that is missing a field; and the comparison is
- * read off the update's own keys, so it cannot be missing one at all.
- */
+/** The executable fields one immutable Library definition revision owns. */
 type Definition = {
-  readonly name: string;
-  readonly description: string;
-  readonly type: LibraryType;
   readonly prompt: string | null;
   readonly params: readonly LibraryParameter[];
   readonly outputDefinition: LibraryOutputDefinition | null;
+  readonly sourceCode: string | null;
+  readonly sourceCodeLanguage: string | null;
 };
 
-/** What the insert writes, from the catalog entry — every field, or no build. */
+/** What one catalog entry asks the immutable definition store to execute. */
 function definitionOf(entry: PredefinedGrader): Definition {
   return {
-    name: entry.name,
-    description: entry.description,
-    type: entry.type,
     prompt: entry.prompt,
     params: entry.params,
     outputDefinition: entry.outputDefinition,
+    sourceCode: null,
+    sourceCodeLanguage: null,
   };
 }
-
-/**
- * What the conflicting update writes, as `on conflict` names the row that was
- * being inserted — every field again, held by the same type.
- */
-const FROM_THE_CATALOG: Readonly<Record<keyof Definition, SQL>> = {
-  name: sql`excluded.name`,
-  description: sql`excluded.description`,
-  type: sql`excluded.type`,
-  prompt: sql`excluded.prompt`,
-  params: sql`excluded.params`,
-  outputDefinition: sql`excluded.output_definition`,
-};
-
-/**
- * Whether the catalog says anything different from what the row already holds.
- *
- * Read off the map above rather than listed again, so the comparison covers
- * exactly what the update writes and can never cover less.
- *
- * `is distinct from` rather than `<>`, because half of these are nullable and
- * `null <> null` is null — which would make every boot look like a change on an
- * entry with no prompt, bumping a version for nothing. jsonb compares as a
- * value, so key order on the way in cannot mint a version either.
- */
-const THE_CATALOG_HAS_MOVED: SQL = sql.join(
-  (Object.keys(FROM_THE_CATALOG) as (keyof Definition)[]).map(
-    (field) =>
-      sql`${graderLibrary[field]} is distinct from ${FROM_THE_CATALOG[field]}`,
-  ),
-  sql` or `,
-);
 
 /** One entry the seeding wrote, as the boot log names it. */
 export type SeededGrader = {
@@ -187,13 +152,12 @@ export type SeededGrader = {
  * left it and writes nothing at all — not even `updated_at`, which says when
  * the *definition* last moved rather than when a container last started.
  *
- * **And refreshing.** Change an entry's words in the catalog, ship the release,
- * and the next boot updates that row and bumps its `version` — so an improved
- * judge prompt reaches every project on every deployment with nobody
- * migrating anything, and which words judged a given verdict stays answerable
- * from the catalog's history and this number. The bump happens only where
- * something actually differs, which is what keeps the number meaningful:
- * a version that moved every Tuesday would say nothing about anything.
+ * **And refreshing.** Change an entry's words in the catalog and the same
+ * transaction updates the Library template, inserts one shared immutable
+ * Library-version row, then mints and promotes a grader version for every
+ * active running copy. A run that already pinned an older grader version keeps
+ * the older definition; the next run sees the new one. The bump happens only
+ * where something differs, which keeps every step idempotent.
  *
  * **Not authorized against an `AuthContext`, on the platform settings' exact
  * terms.** There is no user here: this is the deployment writing its own
@@ -212,44 +176,185 @@ export async function seedGraderLibrary(
   if (catalog.length === 0) return [];
 
   const now = new Date();
-  const written = await db()
-    .insert(graderLibrary)
-    .values(
-      catalog.map((entry) => ({
-        id: entry.id,
-        // Null on both, which is how this schema says "egma owns it". Written
-        // out rather than omitted, so the one exception to hard-required
-        // tenancy is visible at the site that takes it.
-        organizationId: null,
-        projectId: null,
-        ...definitionOf(entry),
-        // The day egma shipped the entry, from the catalog — not the day this
-        // container happened to boot. `updated_at` starts there too and moves
-        // only when the words do.
-        createdAt: entry.createdAt,
-        updatedAt: entry.createdAt,
-      })),
-    )
-    .onConflictDoUpdate({
-      target: graderLibrary.id,
-      set: {
-        ...FROM_THE_CATALOG,
-        version: sql`${graderLibrary.version} + 1`,
-        updatedAt: now,
-      },
-      // Nothing is written where nothing changed, which is what makes running
-      // this on every boot free rather than merely harmless: no row is touched,
-      // no version moves, and `returning` hands back exactly what this release
-      // brought.
-      setWhere: THE_CATALOG_HAS_MOVED,
-    })
-    .returning({
-      id: graderLibrary.id,
-      name: graderLibrary.name,
-      version: graderLibrary.version,
-    });
+  return db().transaction(async (tx) => {
+    // More than one service can boot at once. Serialize this small catalog so
+    // two first boots cannot both decide the same fixed identity is absent.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext('egma:grader-library-catalog'))`,
+    );
 
-  return written;
+    const written: SeededGrader[] = [];
+    for (const entry of catalog) {
+      const [installed] = await tx
+        .select({
+          id: graderLibrary.id,
+          organizationId: graderLibrary.organizationId,
+          projectId: graderLibrary.projectId,
+          name: graderLibrary.name,
+          description: graderLibrary.description,
+          type: graderLibrary.type,
+          version: graderLibrary.currentDefinitionVersion,
+          prompt: graderLibraryVersion.prompt,
+          params: graderLibraryVersion.params,
+          outputDefinition: graderLibraryVersion.outputDefinition,
+          sourceCode: graderLibraryVersion.sourceCode,
+          sourceCodeLanguage: graderLibraryVersion.sourceCodeLanguage,
+        })
+        .from(graderLibrary)
+        .leftJoin(
+          graderLibraryVersion,
+          and(
+            eq(graderLibraryVersion.libraryId, graderLibrary.id),
+            eq(
+              graderLibraryVersion.version,
+              graderLibrary.currentDefinitionVersion,
+            ),
+          ),
+        )
+        .where(eq(graderLibrary.id, entry.id))
+        .limit(1)
+        .for("update", { of: graderLibrary });
+
+      const wanted = definitionOf(entry);
+      if (installed === undefined) {
+        await tx.insert(graderLibrary).values({
+          id: entry.id,
+          organizationId: null,
+          projectId: null,
+          name: entry.name,
+          description: entry.description,
+          type: entry.type,
+          currentDefinitionVersion: 1,
+          createdAt: entry.createdAt,
+          updatedAt: entry.createdAt,
+        });
+        await tx.insert(graderLibraryVersion).values({
+          libraryId: entry.id,
+          version: 1,
+          ...wanted,
+          createdAt: entry.createdAt,
+        });
+        written.push({ id: entry.id, name: entry.name, version: 1 });
+        continue;
+      }
+
+      if (installed.organizationId !== null || installed.projectId !== null) {
+        throw new Error(
+          `catalog identity ${entry.id} is already owned by a customer`,
+        );
+      }
+      if (installed.type !== entry.type) {
+        throw new Error(
+          `catalog entry ${entry.id} cannot change type from ${installed.type} to ${entry.type}; a different execution kind needs a new Library identity`,
+        );
+      }
+      if (installed.params === null) {
+        throw new Error(
+          `catalog entry ${entry.id} points at a missing immutable definition revision`,
+        );
+      }
+
+      const stored: Definition = {
+        prompt: installed.prompt,
+        params: installed.params as readonly LibraryParameter[],
+        outputDefinition:
+          installed.outputDefinition as LibraryOutputDefinition | null,
+        sourceCode: installed.sourceCode,
+        sourceCodeLanguage: installed.sourceCodeLanguage,
+      };
+      const definitionMoved = !isDeepStrictEqual(stored, wanted);
+      const identityMoved =
+        installed.name !== entry.name ||
+        installed.description !== entry.description;
+      if (!definitionMoved && !identityMoved) continue;
+
+      let version = installed.version;
+      if (definitionMoved) {
+        version += 1;
+        const nextDefinition = snapshotLibraryDefinition({
+          id: entry.id,
+          version,
+          type: installed.type,
+          ...wanted,
+        });
+        const copies = await tx
+          .select({
+            id: grader.id,
+            currentVersionId: grader.currentVersionId,
+            versionId: graderVersion.id,
+            version: graderVersion.version,
+            config: graderVersion.config,
+            judgeModel: graderVersion.judgeModel,
+          })
+          .from(grader)
+          .innerJoin(
+            graderVersion,
+            eq(grader.currentVersionId, graderVersion.id),
+          )
+          .where(
+            and(
+              isNull(grader.deletedAt),
+              eq(grader.libraryId, entry.id),
+            ),
+          )
+          .orderBy(grader.id)
+          .for("update", { of: grader });
+
+        for (const copy of copies) {
+          try {
+            assertGraderVersionCompatibleWithDefinition(
+              nextDefinition,
+              entry.name,
+              copy,
+            );
+          } catch (cause) {
+            throw new Error(
+              `catalog definition ${entry.id} version ${version} cannot replace active grader ${copy.id} without an explicit config migration`,
+              { cause },
+            );
+          }
+        }
+
+        await tx.insert(graderLibraryVersion).values({
+          libraryId: entry.id,
+          version,
+          ...wanted,
+          createdAt: now,
+        });
+
+        for (const copy of copies) {
+          const versionId = newId("grv");
+          await tx.insert(graderVersion).values({
+            id: versionId,
+            graderId: copy.id,
+            version: copy.version + 1,
+            libraryId: entry.id,
+            libraryVersion: version,
+            config: copy.config,
+            judgeModel: copy.judgeModel,
+            createdBy: null,
+          });
+          await tx
+            .update(grader)
+            .set({ currentVersionId: versionId, updatedAt: now })
+            .where(eq(grader.id, copy.id));
+        }
+      }
+
+      await tx
+        .update(graderLibrary)
+        .set({
+          name: entry.name,
+          description: entry.description,
+          currentDefinitionVersion: version,
+          updatedAt: now,
+        })
+        .where(eq(graderLibrary.id, entry.id));
+      written.push({ id: entry.id, name: entry.name, version });
+    }
+
+    return written;
+  });
 }
 
 /**
@@ -358,6 +463,16 @@ export async function listGraderLibrary(
   const rows = await db()
     .select(COLUMNS)
     .from(graderLibrary)
+    .innerJoin(
+      graderLibraryVersion,
+      and(
+        eq(graderLibraryVersion.libraryId, graderLibrary.id),
+        eq(
+          graderLibraryVersion.version,
+          graderLibrary.currentDefinitionVersion,
+        ),
+      ),
+    )
     .where(and(readable(auth), afterCursor))
     .orderBy(asc(graderLibrary.id))
     .limit(limit + 1);
@@ -376,6 +491,16 @@ export async function getGraderLibraryEntry(
   const [row] = await db()
     .select(COLUMNS)
     .from(graderLibrary)
+    .innerJoin(
+      graderLibraryVersion,
+      and(
+        eq(graderLibraryVersion.libraryId, graderLibrary.id),
+        eq(
+          graderLibraryVersion.version,
+          graderLibrary.currentDefinitionVersion,
+        ),
+      ),
+    )
     .where(and(readable(auth), eq(graderLibrary.id, id)))
     .limit(1);
 
@@ -392,11 +517,9 @@ export type DeletedLibraryEntry = {
  * Take a team's entry off the shelf — and refuse to take one of egma's, or one
  * anything is still judging with.
  *
- * **Two refusals, and both are about a copy that would be left holding
- * nothing.** A copy reads its definition through `library_id` every time it
- * judges; the words are never written down onto it, precisely so that the
- * screen and the judge cannot drift. That is what makes an entry's delete a
- * question about the copies rather than about the entry:
+ * **Two refusals, and both preserve version history.** Every grader version
+ * references one immutable definition owned by this Library identity. Removing
+ * the identity would remove the shared history old runs and verdicts name:
  *
  * - **egma's own entries are undeletable at all.** They are written again at
  *   the next start, so a delete that appeared to work would be a grader that
@@ -452,8 +575,8 @@ export async function deleteGraderLibraryEntry(
     // And not only the living ones, which is the part worth arguing. Deleting a
     // copy is a soft delete: the row stays, and so do its versions, precisely so
     // that a verdict written under one is still interpretable. That chain runs
-    // verdict → version → copy → entry, so the definition has to outlive the
-    // copies that used it or the chain breaks at its last link. It is also what
+    // verdict → grader version → immutable Library definition, so the Library
+    // identity has to outlive every copy that used it. It is also what
     // the database enforces underneath — `on delete restrict` counts the rows
     // that are there, not the ones still switched on — and a module that
     // disagreed with its own foreign key would refuse in one place and raise a

@@ -37,5 +37,11 @@
       "speed": 1,
       "key": "fixture-not-a-real-secret-tts"
     }
+  },
+  "platform": {
+    "carrier": {
+      "trunk_address": "fixture.pstn.twilio.com",
+      "trunk_number": "+15550000000"
+    }
   }
 }

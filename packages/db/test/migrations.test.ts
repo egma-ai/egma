@@ -15,6 +15,14 @@ import {
   readMigrations,
   runMigrations,
 } from "../src/migrate.ts";
+import {
+  PROVIDER_CATALOG,
+  PROVIDERS_BY_JOB,
+} from "../src/models/catalog.ts";
+import {
+  RECOMMENDED_PERSONA_MODELS,
+  SPEED_RANGE,
+} from "../src/models/selections.ts";
 import * as schema from "../src/schema/index.ts";
 import {
   createEmptyDatabase,
@@ -2623,7 +2631,9 @@ describe("grading plans over installed runs (0033)", () => {
 
     // The project's judge, migrated into its own credential by 0030 — which is
     // what a plan may point at, and the reason this migration comes after it.
-    const credentialId = newId("jcr");
+    // A retired identifier used only to model the database before 0037. It is
+    // deliberately not part of the current public id vocabulary.
+    const credentialId = "jcr_01M01JADGE0000000000000000";
     await client.query(
       `insert into judge_credential
          (id, organization_id, label, provider, credentials, credentials_hint, revision)
@@ -3031,7 +3041,41 @@ describe("persona availability over installed references (0037)", () => {
     }
   });
 
-  it("accepts project-owned and Egma-owned default personas", async () => {
+  it("refuses an installed default persona that is already archived", async () => {
+    const prepared = await beforePersonaLibrary("persona_default_archived");
+    try {
+      const fixture = await installedTestLink(prepared.client, false);
+      await prepared.client.query(
+        "update project set default_persona_id = $1 where id = $2",
+        [fixture.firstPersonaId, fixture.firstProjectId],
+      );
+      await prepared.client.query(
+        "update persona set archived_at = now() where id = $1",
+        [fixture.firstPersonaId],
+      );
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+
+      let failure: unknown;
+      try {
+        await runMigrations(prepared.database.url, prepared.directory);
+      } catch (error) {
+        failure = error;
+      }
+      expect(postgresCause(failure)).toMatchObject({
+        code: "23503",
+        constraint: "project_default_persona_availability",
+      });
+    } finally {
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it("accepts Custom and Egma-provided default personas", async () => {
     const prepared = await beforePersonaLibrary("persona_default_valid");
     try {
       const fixture = await installedTestLink(prepared.client, false);
@@ -3136,6 +3180,7 @@ describe("persona availability over installed references (0037)", () => {
         "voice_activity_provider",
         "media_backend",
         "carrier_trunk_address",
+        "carrier_trunk_number",
       ]) {
         await prepared.client.query(
           `insert into platform_setting (id, name, value, hint)
@@ -3185,7 +3230,10 @@ describe("persona availability over installed references (0037)", () => {
       const remaining = await prepared.client.query<{ name: string }>(
         "select name from platform_setting order by name",
       );
-      expect(remaining.rows).toEqual([{ name: "carrier_trunk_address" }]);
+      expect(remaining.rows).toEqual([
+        { name: "carrier_trunk_address" },
+        { name: "carrier_trunk_number" },
+      ]);
 
       await expect(
         prepared.client.query(
@@ -3198,16 +3246,42 @@ describe("persona availability over installed references (0037)", () => {
         constraint: "platform_setting_name_allowed",
       });
 
-      const validModels = {
-        llm: { provider: "openai", model: "gpt-4o-mini" },
-        stt: { provider: "openai", model: "gpt-live-transcribe" },
-        tts: {
-          provider: "cartesia",
-          model: "sonic-3.5",
-          voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
-          speed: 1,
-        },
-      };
+      const validModels = RECOMMENDED_PERSONA_MODELS;
+
+      for (const [offset, entry] of PROVIDER_CATALOG.entries()) {
+        const models =
+          entry.job === "llm"
+            ? {
+                ...validModels,
+                llm: { provider: entry.provider, model: entry.model },
+              }
+            : entry.job === "stt"
+              ? {
+                  ...validModels,
+                  stt: { provider: entry.provider, model: entry.model },
+                }
+              : {
+                  ...validModels,
+                  tts: {
+                    ...validModels.tts,
+                    provider: entry.provider,
+                    model: entry.model,
+                    voiceId: entry.recommendedVoiceId,
+                  },
+                };
+        await prepared.client.query(
+          `insert into persona_version (id, persona_id, version, traits, models)
+           values ($1, $2, $3, $4::jsonb, $5::jsonb)`,
+          [
+            newId("prsv"),
+            fixture.firstPersonaId,
+            10 + offset,
+            JSON.stringify({ personality: "Plain", language: "en-US" }),
+            JSON.stringify(models),
+          ],
+        );
+      }
+
       await expect(
         prepared.client.query(
           `insert into persona_version (id, persona_id, version, traits, models)
@@ -3246,7 +3320,10 @@ describe("persona availability over installed references (0037)", () => {
         constraint: "persona_version_traits_valid",
       });
 
-      for (const [offset, speed] of [0.6, 1.5].entries()) {
+      for (const [offset, speed] of [
+        SPEED_RANGE.slowest,
+        SPEED_RANGE.fastest,
+      ].entries()) {
         await prepared.client.query(
           `insert into persona_version (id, persona_id, version, traits, models)
            values ($1, $2, $3, $4::jsonb, $5::jsonb)`,
@@ -3263,7 +3340,11 @@ describe("persona availability over installed references (0037)", () => {
         );
       }
 
-      for (const [offset, speed] of [0.5999, 1.5001].entries()) {
+      const justOutside = 0.0001;
+      for (const [offset, speed] of [
+        SPEED_RANGE.slowest - justOutside,
+        SPEED_RANGE.fastest + justOutside,
+      ].entries()) {
         await expect(
           prepared.client.query(
             `insert into persona_version (id, persona_id, version, traits, models)
@@ -3316,6 +3397,53 @@ describe("persona availability over installed references (0037)", () => {
         [fixture.firstPersonaId],
       );
       expect(authors.rows).toEqual([{ created_by: null }]);
+    } finally {
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it.each([
+    {
+      label: "routing half",
+      names: ["carrier_trunk_address"],
+    },
+    {
+      label: "SIP credential half",
+      names: [
+        "carrier_trunk_address",
+        "carrier_trunk_number",
+        "carrier_trunk_username",
+      ],
+    },
+  ])("refuses an installed carrier $label", async ({ label, names }) => {
+    const prepared = await beforePersonaLibrary(
+      `carrier_${label.replaceAll(" ", "_")}`,
+    );
+    try {
+      for (const name of names) {
+        await prepared.client.query(
+          `insert into platform_setting (id, name, value, hint)
+           values ($1, $2, 'sealed', 'hint')`,
+          [newId("pfs"), name],
+        );
+      }
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+
+      let failure: unknown;
+      try {
+        await runMigrations(prepared.database.url, prepared.directory);
+      } catch (error) {
+        failure = error;
+      }
+      expect(postgresCause(failure)).toMatchObject({
+        code: "23514",
+        constraint: "platform_setting_carrier_complete",
+      });
     } finally {
       await prepared.client.end();
       await rm(prepared.directory, { recursive: true, force: true });
@@ -3504,8 +3632,10 @@ describe("persona availability over installed references (0037)", () => {
       const versions = await prepared.client.query<{
         id: string;
         judge_model: unknown;
+        library_id: string;
+        library_version: number;
       }>(
-        `select id, judge_model from grader_version
+        `select id, judge_model, library_id, library_version from grader_version
           where id in ($1, $2) order by id`,
         [modelVersionId, codeVersionId],
       );
@@ -3517,6 +3647,59 @@ describe("persona availability over installed references (0037)", () => {
         [modelVersionId]: { provider: "openai", model: "gpt-4o-mini" },
         [codeVersionId]: null,
       });
+      expect(
+        Object.fromEntries(
+          versions.rows.map((row) => [
+            row.id,
+            [row.library_id, row.library_version],
+          ]),
+        ),
+      ).toEqual({
+        [modelVersionId]: [modelLibraryId, 1],
+        [codeVersionId]: [codeLibraryId, 1],
+      });
+
+      const definitions = await prepared.client.query<{
+        library_id: string;
+        prompt: string | null;
+      }>(
+        `select library_id, prompt from grader_library_version
+          where library_id in ($1, $2) order by library_id`,
+        [modelLibraryId, codeLibraryId],
+      );
+      expect(Object.fromEntries(
+        definitions.rows.map((row) => [row.library_id, row.prompt]),
+      )).toEqual({
+        [modelLibraryId]: "Judge it",
+        [codeLibraryId]: null,
+      });
+
+      // The database accepts every LLM pair from the executable catalog. If a
+      // catalog entry is added without changing the migration constraint, this
+      // upgrade proof fails instead of allowing authoring and storage to drift.
+      for (const [offset, entry] of PROVIDERS_BY_JOB.llm.entries()) {
+        await prepared.client.query(
+          `insert into grader_version
+             (id, grader_id, version, library_id, library_version, config, judge_model)
+           values ($1, $2, $3, $4, 1, '{}'::jsonb, $5::jsonb)`,
+          [
+            newId("grv"),
+            modelGraderId,
+            10 + offset,
+            modelLibraryId,
+            JSON.stringify({ provider: entry.provider, model: entry.model }),
+          ],
+        );
+      }
+      await expect(
+        prepared.client.query(
+          `insert into grader_version
+             (id, grader_id, version, library_id, library_version, config, judge_model)
+           values ($1, $2, 99, $3, 1, '{}'::jsonb,
+             '{"provider":"openai","model":"not-cataloged"}'::jsonb)`,
+          [newId("grv"), modelGraderId, modelLibraryId],
+        ),
+      ).rejects.toThrow(/grader_version_judge_model_allowed/u);
 
       const plan = await prepared.client.query<{ groups: unknown }>(
         "select groups from grading_plan where id = $1",
@@ -3556,7 +3739,27 @@ describe("persona availability over installed references (0037)", () => {
             where id = $1`,
           [modelVersionId],
         ),
-      ).rejects.toThrow(/grader_version_judge_model_allowed/u);
+      ).rejects.toThrow(/judgment cannot change/u);
+      await expect(
+        prepared.client.query(
+          "update grader_library_version set prompt = 'changed in place' where library_id = $1 and version = 1",
+          [modelLibraryId],
+        ),
+      ).rejects.toThrow(/definition version cannot change/u);
+      await expect(
+        prepared.client.query(
+          `update grader_version
+              set config = '{"assertions":[{"changed":1}]}'::jsonb
+            where id = $1`,
+          [modelVersionId],
+        ),
+      ).rejects.toThrow(/judgment cannot change/u);
+      await expect(
+        prepared.client.query(
+          "update grader_library set type = 'code' where id = $1",
+          [modelLibraryId],
+        ),
+      ).rejects.toThrow(/type cannot change/u);
     } finally {
       await prepared.client.query("rollback").catch(() => undefined);
       await prepared.client.end();

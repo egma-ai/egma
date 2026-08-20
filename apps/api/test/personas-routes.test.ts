@@ -5,6 +5,7 @@ import {
   archiveTest,
   editTest,
   RECOMMENDED_PERSONA_MODELS,
+  SPEED_RANGE,
   type PersonaModels,
   type PersonaTraits,
 } from "@egma/db";
@@ -129,7 +130,7 @@ describe("creating and reading a persona", () => {
 
     expect(form.statusCode).toBe(200);
     expect(form.body.recommended_models).toEqual(RECOMMENDED_PERSONA_MODELS);
-    expect(form.body.speed_range).toEqual({ slowest: 0.6, fastest: 1.5 });
+    expect(form.body.speed_range).toEqual(SPEED_RANGE);
     expect(form.body.model_catalog).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -273,7 +274,7 @@ describe("creating and reading a persona", () => {
     api = await createApi("personas_speed_range");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    for (const speed of [0.6, 1.5]) {
+    for (const speed of [SPEED_RANGE.slowest, SPEED_RANGE.fastest]) {
       const made = await browse("POST", "/api/personas", ada, {
         project: ada.projectId,
         name: `Speed ${speed}`,
@@ -287,7 +288,10 @@ describe("creating and reading a persona", () => {
       expect(personaIn(made).models.tts.speed).toBe(speed);
     }
 
-    for (const speed of [0.5999, 1.5001]) {
+    for (const speed of [
+      SPEED_RANGE.slowest - 0.0001,
+      SPEED_RANGE.fastest + 0.0001,
+    ]) {
       const refused = await browse("POST", "/api/personas", ada, {
         project: ada.projectId,
         name: `Speed ${speed}`,
@@ -300,7 +304,9 @@ describe("creating and reading a persona", () => {
       expect(refused.statusCode).toBe(422);
       expect(refused.body).toEqual({
         error: "unprocessable",
-        message: "speaking speed must be between 0.6 and 1.5",
+        message:
+          `speaking speed must be between ${SPEED_RANGE.slowest} and ` +
+          `${SPEED_RANGE.fastest}`,
       });
     }
   });

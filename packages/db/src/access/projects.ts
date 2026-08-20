@@ -13,7 +13,7 @@ import { authorize, here } from "./permissions.ts";
 /**
  * The one project factory, shared with signup.
  *
- * **This import closes a cycle — `projects` → `provisioning` → `judges` →
+ * **This import closes a cycle — `projects` → `provisioning` → `seeded-graders` →
  * `projects` — and it is safe on the one condition that keeps any such cycle
  * safe: nothing on either side is read while the other is still being
  * evaluated.** `insertProject` is called from inside a function here, and

@@ -19,9 +19,10 @@ import { startService } from "./service.ts";
  * no benefit. It reads a schema somebody else applied, which is the whole reason
  * it can be one more copy rather than one more decision.
  *
- * Provider keys come from the deployment credential source. The service reads
- * its current bundle for each claimed job, then uses only the provider selected
- * by each frozen grader version. Nothing is unsealed from Postgres.
+ * Provider keys come from the deployment credential source. After a claimed
+ * job resolves its frozen grader versions, the service reads the current bundle
+ * once only when at least one of them calls a model. Nothing is unsealed from
+ * Postgres, and code-only work does not depend on a credential store.
  */
 const config = loadConfig();
 const log = makeLog(config.logLevel, config.claimant);

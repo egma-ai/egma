@@ -23,10 +23,11 @@ Its config keys, like every plug's, are its own:
   deployment does not use is refused: a script nobody reads was written
   by mistake.
 
-Which media backend places the call is the deployment's, not the spec's, and so
-is the trunk: both are checked once at startup and arrive here already
-good. A spec that names a number on a simulator configured to place no
-calls is refused with the variable to set.
+Which media backend places the call is the deployment's and is checked at
+startup. The complete carrier route arrives on each phone simulation's work
+order. The v2 contract has already checked its two-value source-IP or four-value
+SIP-credential shape before this plug receives it. A spec that names a number
+on a simulator configured to place no calls is refused with the variable to set.
 
 Credentials are refused outright. A phone connection carries no secret of
 its own.
@@ -113,11 +114,10 @@ class PhoneCall:
                 f"{BACKEND_VARIABLE} on this container to one of "
                 f"{sorted(BACKENDS)}"
             )
-        # **The moment a carrier's own refusals belong.** The settings are
-        # assembled for every simulation and most of them never dial, so a
-        # half-configured phone must not fail the chat work beside it. Here
-        # a call is about to be placed, so here is where a missing trunk or
-        # a missing bridge is the honest reason this one cannot happen.
+        # **The moment a carrier's own refusals belong.** Contract v2 already
+        # proved that this phone work order carries a complete route. Here a
+        # call is about to be placed, so backend-specific value checks belong
+        # here and a refusal names why this simulation cannot dial.
         try:
             settings = settings.checked()
         except ValueError as cannot_dial:
@@ -152,8 +152,9 @@ class PhoneCall:
         if credentials is not None:
             raise PlugError(
                 "a phone connection carries no credentials: the trunk belongs "
-                "to the deployment and arrives from its environment, so "
-                "anything sealed onto this connection is read by nobody"
+                "to the deployment and arrives on the claimed phone work "
+                "order, so anything sealed onto this connection is read by "
+                "nobody"
             )
 
         self._number = number.strip()

@@ -354,7 +354,7 @@ describe("re-grading a run", () => {
     expect(asked?.reopened).toEqual([]);
     expect(asked?.alreadyWaiting).toBe(1);
     // Untouched: a conversation in the queue is already going to be judged at
-    // today's grader versions, which is everything a re-grade would have asked.
+    // this simulation's run-pinned grader versions.
     expect((await theJobFor(waiting.simulationId)).attempts).toBe(0);
   });
 
@@ -490,8 +490,8 @@ describe("re-grading one conversation", () => {
     await deleteGrader(auth, gone);
 
     expect(await regrade(auth, { simulationId, graderId: gone })).toBeUndefined();
-    // An archived grader judges nothing from now on, and a re-grade is from now
-    // on — so nothing was reopened on the strength of naming one.
+    // Pinning preserves meaning, not targetability: an archived grader identity
+    // cannot be named for new work, so nothing was reopened.
     expect((await theJobFor(simulationId)).status).toBe("graded");
   });
 

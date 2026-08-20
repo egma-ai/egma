@@ -208,7 +208,6 @@ export type SelfHostInvocation = {
 const VALUED_OPTIONS = ["--cwd"] as const;
 const FLAGS = [
   "--plan",
-  "--apply",
   "--yes",
   "--json",
   "--replace-carrier",
@@ -257,7 +256,7 @@ export function parseSelfHostArgs(argv: readonly string[]): SelfHostInvocation {
   return {
     verb: words.join(" "),
     cwd,
-    planOnly: flags.has("--plan") && !flags.has("--apply"),
+    planOnly: flags.has("--plan"),
     replaceCarrier: flags.has("--replace-carrier"),
     confirmed: flags.has("--yes"),
     asJson: flags.has("--json"),
@@ -520,7 +519,7 @@ async function runUp(
     );
   } else {
     options.fail(
-      "Chat and text simulations can run now. Phone calls are optional and are not ready yet.",
+      "Chat simulations can run now. Phone calls are optional and are not ready yet.",
     );
     // **The whole optional phone step, not just its last command.** Setup
     // writes the carrier route through the platform's own API, and that door
@@ -820,9 +819,9 @@ async function runSetup(
     heldCarrierNames.has(name),
   );
   // A complete source-IP route needs no SIP pair. The guided Twilio flow asks
-  // for all four values only when no complete route exists, or when an
-  // operator explicitly replaces the route. An invalid partial route also
-  // comes through this path; setup cannot safely combine it with new values.
+  // for all four values only when no route exists, or when an operator
+  // explicitly replaces the route. The API refuses any partial stored route
+  // before setup can read it.
   const carrierWanted =
     mode.replaceCarrier ||
     (!heldIpRoute && !heldCredentialRoute);
@@ -985,9 +984,9 @@ async function runSetup(
   // Read once rather than waited for. Readiness is built from the store on
   // every request, so the answer is already true the moment the write lands.
   const platform = await readPlatform(address);
-  // A held source-IP route makes carrierWanted false before the interview. If a
-  // route was absent or partial, setup must not call the result ready until a
-  // complete two-value or four-value route has been supplied.
+  // A held source-IP route makes carrierWanted false before the interview. If
+  // no route existed, setup must not call the result ready until a complete
+  // two-value or four-value route has been supplied.
   const carrierBundleMissing = carrierWanted && carrierBundle === null;
   const stillMissing = [
     ...(platform?.phoneMissing ?? []),

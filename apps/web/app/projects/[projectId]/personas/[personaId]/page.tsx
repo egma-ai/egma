@@ -74,7 +74,7 @@ import { TraitFields } from "../traits-editor.tsx";
  * one where it is.
  * A project persona keeps the fields in one form and one partial write: identity
  * changes stay live, while a human-traits change also mints one version. An
- * Egma-owned persona shows the same public fields as one read-only definition
+ * Egma-provided persona shows the same public fields as one read-only definition
  * and offers Fork instead of an editor. Both read immutable history in the same
  * right-side sheet, away from the current definition.
  *

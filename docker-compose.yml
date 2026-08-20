@@ -267,10 +267,11 @@ services:
       # reader of this repository can mint a session with. `openssl rand
       # -base64 32` makes one; see .env.example.
       EGMA_AUTH_SECRET: ${EGMA_AUTH_SECRET:?no default — openssl rand -base64 32 makes one, set it in .env}
-      # Seals connection credentials and every platform setting before they
-      # reach the database. No default, and this is the sharpest of the three:
+      # Seals connection credentials and the carrier route before they reach
+      # the database. No default, and this is the sharpest of the three:
       # a deployment sealed with a key printed in a public repository is not
-      # sealed, and a copy of its database is a copy of its provider accounts.
+      # sealed, and a database copy carries the credentials needed to reach
+      # customer agents plus the platform's carrier route.
       # `openssl rand -hex 32` makes one. Back it up alongside the database;
       # losing it loses every stored credential and every stored setting.
       EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?no default — openssl rand -hex 32 makes one, set it in .env and back it up beside the database}
@@ -638,8 +639,9 @@ services:
       # exporter's conversations unjudged for an afternoon.
       EGMA_GRADER_TRACE_IDLE_SECONDS: ${EGMA_GRADER_TRACE_IDLE_SECONDS:-}
       EGMA_GRADER_LOG_LEVEL: ${EGMA_GRADER_LOG_LEVEL:-INFO}
-      # The grader resolves the same current provider bundle once for each
-      # claimed grading job. It never reads a model key from Postgres.
+      # The grader resolves the current provider bundle once only when a
+      # claimed job includes a model-judged grader. Code-only grading does not
+      # depend on the secret store. No model key comes from Postgres.
       EGMA_OPENAI_API_KEY: ${EGMA_OPENAI_API_KEY:-}
       EGMA_DEEPGRAM_API_KEY: ${EGMA_DEEPGRAM_API_KEY:-}
       EGMA_CARTESIA_API_KEY: ${EGMA_CARTESIA_API_KEY:-}

@@ -3,6 +3,7 @@ import {
   createPersona,
   getSimulation,
   listRunEvents,
+  SPEED_RANGE,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
 import { ProviderCredentialSourceUnavailableError } from "@egma/provider-credentials";
@@ -166,6 +167,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
   label: string,
   options: TestApiOptions = {},
   connection: typeof LIVEKIT | typeof PHONE = LIVEKIT,
+  speed = 1,
 ): Promise<{
   ada: Customer;
   key: string;
@@ -193,7 +195,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
         provider: "cartesia",
         model: "sonic-3.5",
         voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
-        speed: 1,
+        speed,
       },
     },
   });
@@ -1010,14 +1012,19 @@ describe("a simulation the platform cannot hand over", () => {
 describe("one source of execution truth", () => {
   it("keeps OpenAI realtime STT paired with its model and OpenAI account key", async () => {
     const { key, connectionId, versionId } =
-      await aRealtimeVoiceCustomerReadyToRun("claims_realtime_stt_pair", {
-        providerCredentials: {
-          load: async () => ({
-            openai: "one-openai-account-key",
-            cartesia: "one-cartesia-account-key",
-          }),
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_realtime_stt_pair",
+        {
+          providerCredentials: {
+            load: async () => ({
+              openai: "one-openai-account-key",
+              cartesia: "one-cartesia-account-key",
+            }),
+          },
         },
-      });
+        LIVEKIT,
+        SPEED_RANGE.slowest,
+      );
     await aQueuedRun(key, connectionId, versionId);
 
     const answered = await claim(api.config.simulatorServiceToken, {
@@ -1042,11 +1049,27 @@ describe("one source of execution truth", () => {
         provider: "cartesia",
         model: "sonic-3.5",
         voice_id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
-        speed: 1,
+        speed: SPEED_RANGE.slowest,
         key: "one-cartesia-account-key",
       },
     });
     expect(spec?.platform).toBeUndefined();
+
+    const withSpeed = (speed: number): Record<string, unknown> => {
+      const changed = structuredClone(spec ?? {});
+      const models = changed.models as Record<string, Record<string, unknown>>;
+      const tts = models.tts;
+      if (tts === undefined) throw new Error("the claimed spec has no TTS model");
+      tts.speed = speed;
+      return changed;
+    };
+    expect(specComplaints(withSpeed(SPEED_RANGE.fastest))).toEqual([]);
+    expect(
+      specComplaints(withSpeed(SPEED_RANGE.slowest - 0.0001)),
+    ).not.toEqual([]);
+    expect(
+      specComplaints(withSpeed(SPEED_RANGE.fastest + 0.0001)),
+    ).not.toEqual([]);
   });
 
   it("keeps the carrier credential out of a connection that cannot use it", async () => {

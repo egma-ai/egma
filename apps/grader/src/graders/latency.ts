@@ -19,11 +19,11 @@ import type { Execution, Judgment } from "./contract.ts";
  * number. Each entry is one 0-or-1 check and one verdict row.
  *
  * **The assertion key is the measure the entry bounds** — not its position, and
- * not the bound. `assertionKey` below argues the whole of it out: a copy's
- * config is not pinned by a run, so a position names a different check after an
- * edit, while a bound in the key would make a re-grade at a tightened bound a
- * second assertion counted beside the first forever. The measure survives both,
- * and the write door keeps it unique inside a copy so that it is an identity.
+ * not the bound. `assertionKey` below argues the whole of it out: an edit mints
+ * a new grader version, and production history may contain both versions. A
+ * position can name a different check after an edit, while a bound in the key
+ * would count the same check twice. The measure survives both versions, and
+ * the write door keeps it unique inside a copy so that it is an identity.
  *
  * **The worst measurement decides.** A bound is "the most this measure may be",
  * so a conversation holds it only if every measurement held it. A mean would
@@ -175,18 +175,17 @@ function keyOf(
  *
  * ## Why not the entry's position, which is what this used to be
  *
- * A copy's config is **not pinned by a run**. Judging reads the grader through
- * `grader.current_version_id` every time — `applicableGraders` → `listGraders`,
- * and the same on a re-grade — so a conversation judged last week and re-judged
- * today is judged by *today's* config, at a new version, writing rows beside the
- * old ones. Meanwhile the fold counts one assertion once per
+ * An edit mints a grader version. A simulation keeps the version its run
+ * pinned. A production trace has no run plan, so an explicit re-grade can use
+ * the copy's newer current version and write beside the old row. The fold counts
+ * one assertion once per
  * `[trace, grader, assertion, source]` and deliberately **not** per version,
  * because that is what makes a re-grade supersede rather than double.
  *
  * Put those two together and a position is not an identity. A copy holding
  * `[turn_response_latency, first_response_latency]`, edited to drop the first,
- * re-grades to a config whose *first* entry is `first_response_latency` — so the
- * key `assertion_1` named one measure on Monday and a different one on Tuesday,
+ * can re-grade a production trace with `first_response_latency` now first — so
+ * the key `assertion_1` named one measure on Monday and another on Tuesday,
  * and Tuesday's row silently replaced Monday's. A verdict about one measure
  * overwritten by a verdict about another is not a stale answer; it is a wrong
  * one, filed under a name that says it is about something else.
@@ -194,9 +193,9 @@ function keyOf(
  * ## Why the measure is an identity where a position is not
  *
  * `contract.ts` says an assertion key is never content, and the reason it gives
- * is precise: a key that moved when the config moved would make a re-grade at a
- * **tightened bound** a second assertion, counted beside the first forever. The
- * measure survives exactly that — tightening 2000 to 500 leaves
+ * is precise: a key that moved when the config moved would make a production
+ * re-grade at a **tightened bound** a second assertion, counted beside the first
+ * forever. The measure survives exactly that — tightening 2000 to 500 leaves
  * `turn_response_latency` alone — while the position does not survive an edit
  * the rule never contemplated. So this honours the rule's reason where the
  * position honoured only its letter.

@@ -95,10 +95,11 @@
  * disagreeing with the page beneath.
  *
  * The one way a judgment is ever revisited is exported beside them, and it is
- * not an edit: `regrade` reopens the queue so the engine judges a run or a
- * window again at each grader's current version — narrowed to one grader when
- * the ask names one, which is a decision about judge spend rather than about
- * what the rows come to say. A person's disagreement is not a door here at all:
+ * not an edit: `regrade` reopens the queue. A simulation keeps the grader
+ * versions its run pinned; a production window has no run plan and uses current
+ * versions. Either can be narrowed to one grader identity when the ask names
+ * one, which is a decision about judge spend rather than about what the rows
+ * come to say. A person's disagreement is not a door here at all:
  * corrections leave v0 with the `judged_by` column that carried them, and return
  * as the reserved `human` grader type, which writes ordinary verdict rows under
  * a grader id of its own.
@@ -536,6 +537,7 @@ export {
   type GraderChanges,
   type GraderConfig,
   type GraderConfigInput,
+  type GraderDefinitionSnapshot,
   type GraderPage,
   type GraderVersion,
   type JudgeModel,

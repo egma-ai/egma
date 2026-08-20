@@ -419,7 +419,7 @@ describe("what lands on the platform", () => {
         pulled: { vendor: "retell", documents: [], prompt: null, voice: null, tools: [] },
         connection: {
           type: "retell",
-          modality: "voice",
+          modality: "chat",
           config: { retellAgentId: "agent_0001" },
           credentials: { apiKey: KEY },
         },
@@ -676,7 +676,7 @@ describe("the platform's own rules, held by the fixture", () => {
         name: "front-desk",
         connection: {
           type: "retell",
-          modality: "voice",
+          modality: "chat",
           config: { retellAgentId: "agent_0001", retellLlmId: "llm_0001" },
           credentials: { apiKey: KEY },
         },
@@ -740,7 +740,7 @@ describe("the platform's own rules, held by the fixture", () => {
       body: JSON.stringify({
         name: "retell-1",
         type: "retell",
-        modality: "voice",
+        modality: "chat",
         config: { retellAgentId: "agent_0003" },
         credentials: { apiKey: OTHER_KEY },
       }),
@@ -791,7 +791,7 @@ describe("a registration answer this build cannot read", () => {
     id: "con_01K000000000000000000000BB",
     name: "retell-1",
     type: "retell",
-    modality: "voice",
+    modality: "chat",
     credentials_hint: "WXYZ",
   };
 
@@ -812,7 +812,7 @@ describe("a registration answer this build cannot read", () => {
         name: "order-line",
         connection: {
           type: "retell",
-          modality: "voice",
+          modality: "chat",
           config: { retellAgentId: "agent_0001" },
         },
       },
@@ -840,7 +840,7 @@ describe("a registration answer this build cannot read", () => {
           id: CONNECTION.id,
           name: "retell-1",
           type: "retell",
-          modality: "voice",
+          modality: "chat",
           credentialsHint: "WXYZ",
           config: {},
         },

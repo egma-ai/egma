@@ -127,7 +127,7 @@ afterAll(async () => {
 });
 
 describe("the shared default persona", () => {
-  it("is one Egma-owned identity used by every new project", async () => {
+  it("is one Egma-provided identity used by every new project", async () => {
     expect(await defaultOf(acme.projectId)).toBe(
       EGMA_PROVIDED_PERSONAS.defaultPersona,
     );

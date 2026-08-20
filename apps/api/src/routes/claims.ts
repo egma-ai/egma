@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   claimSimulations,
+  connectionUsesPlatformCarrier,
   failSimulationDispatch,
   getPersonaVersion,
   getRun,
@@ -379,7 +380,7 @@ async function assembledSpec(
   // Read the live carrier route only for the plug that dials it. A Retell or
   // LiveKit claim must not carry a SIP password it cannot use.
   const platform =
-    connection.type === "phone"
+    connectionUsesPlatformCarrier(connection.type)
       ? platformBlock(await resolvePlatformSettings(claim.auth))
       : undefined;
 

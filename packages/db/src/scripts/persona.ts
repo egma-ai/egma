@@ -226,7 +226,7 @@ async function main(): Promise<void> {
       cursor: values.cursor,
     });
     console.log(JSON.stringify(page, null, 2));
-  } else if (command === "fork" || command === "clone") {
+  } else if (command === "fork") {
     const id = requiredId(rest);
     printPersona(id, await forkPersona(auth, id));
   } else if (command === "archive") {

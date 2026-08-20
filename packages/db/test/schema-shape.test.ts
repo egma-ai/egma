@@ -51,6 +51,9 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // the entry — so its identity is its own rather than somebody's key, and the
   // nullable pair is asserted on its own below.
   grader_library: "grl",
+  // One immutable executable revision. Its identity is the Library id plus a
+  // revision number, so its leading id keeps the Library prefix.
+  grader_library_version: "grl",
   grader_version: "grv",
   mock_tool: "mck",
   // The scope's junction, pinning the mock tool it narrows — the shape the
@@ -534,7 +537,6 @@ describe("every enumerated value", () => {
       { table: "connection", column: "type" },
       { table: "connection", column: "modality" },
       { table: "connection", column: "topology" },
-      { table: "grader", column: "type" },
       { table: "grader_library", column: "type" },
       { table: "grader", column: "scope" },
       { table: "run", column: "status" },

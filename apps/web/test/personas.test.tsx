@@ -1084,7 +1084,7 @@ describe("one persona's page", () => {
     expect(screen.getAllByText("Archived").length).toBeGreaterThan(0);
   });
 
-  it("shows an Egma-owned persona as plain text with history in a sheet, then forks it", async () => {
+  it("shows an Egma-provided persona as plain text with history in a sheet, then forks it", async () => {
     const egmaProvided: Persona = {
       ...DEFAULT_PERSONA,
       id: "prs_1",

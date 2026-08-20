@@ -75,7 +75,7 @@ export type Service = {
 export type ServiceOptions = {
   readonly config: Config;
   readonly log: Log;
-  /** Read fresh exactly once for each claimed grading job. */
+  /** Read fresh once when a claimed job resolves at least one model grader. */
   readonly providerCredentials: ProviderCredentialSource;
   /**
    * Told after each pass, so a test can watch the service work instead of
@@ -240,9 +240,8 @@ async function gradeHeldClaim(
   beating.unref();
 
   try {
-    const credentials = await options.providerCredentials.load();
     const graded = await gradeClaim(claim, {
-      credentials,
+      providerCredentials: options.providerCredentials,
       ...(options.makers === undefined ? {} : { makers: options.makers }),
     });
     // The verdicts are written before the job is finished, in that order and

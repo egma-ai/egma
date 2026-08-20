@@ -142,6 +142,11 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     keyword: "additionalProperties",
     property: "model",
   },
+  "spec/phone-carrier-missing.json": {
+    at: "",
+    keyword: "required",
+    property: "platform",
+  },
   "spec/persona-missing-language.json": {
     at: "/persona/traits",
     keyword: "required",
@@ -238,7 +243,16 @@ describe("the two schemas, as one contract", () => {
       return spec;
     };
 
-    for (const speed of [0.6, 1.5]) {
+    const tts = (
+      specSchema.$defs as Record<
+        string,
+        { properties: { speed: { minimum: number; maximum: number } } }
+      >
+    ).tts_selection;
+    if (tts === undefined) throw new Error("the contract has no TTS selection");
+    const { minimum, maximum } = tts.properties.speed;
+
+    for (const speed of [minimum, maximum]) {
       const spec = withSpeed(speed);
       expect(
         validators.spec(spec),
@@ -247,13 +261,80 @@ describe("the two schemas, as one contract", () => {
     }
 
     for (const [speed, keyword] of [
-      [0.5999, "minimum"],
-      [1.5001, "maximum"],
+      [minimum - 0.0001, "minimum"],
+      [maximum + 0.0001, "maximum"],
     ] as const) {
       expect(validators.spec(withSpeed(speed))).toBe(false);
       expect(validators.spec.errors).toContainEqual(
         expect.objectContaining({
           instancePath: "/models/tts/speed",
+          keyword,
+        }),
+      );
+    }
+  });
+
+  it("accepts only complete carrier routes", async () => {
+    const base = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-phone-platform-configured.json",
+    );
+    const without = (...names: string[]): Record<string, unknown> => {
+      const spec = structuredClone(base);
+      const platform = spec.platform as Record<string, unknown>;
+      const carrier = platform.carrier as Record<string, unknown>;
+      for (const name of names) delete carrier[name];
+      return spec;
+    };
+
+    // The fixture proves the four-value credential-authenticated route. The
+    // two-value shape is the complete source-IP-authenticated route.
+    expect(validators.spec(base), ajv.errorsText(validators.spec.errors)).toBe(
+      true,
+    );
+    const sourceIpRoute = without("trunk_username", "trunk_password");
+    expect(
+      validators.spec(sourceIpRoute),
+      ajv.errorsText(validators.spec.errors),
+    ).toBe(true);
+
+    const phoneWithoutCarrier = structuredClone(base);
+    delete phoneWithoutCarrier.platform;
+    expect(validators.spec(phoneWithoutCarrier)).toBe(false);
+    expect(validators.spec.errors).toContainEqual(
+      expect.objectContaining({
+        instancePath: "",
+        keyword: "required",
+        params: { missingProperty: "platform" },
+      }),
+    );
+
+    const nonPhoneWithCarrier = structuredClone(base);
+    const connection = nonPhoneWithCarrier.connection as Record<
+      string,
+      unknown
+    >;
+    connection.type = "retell";
+    expect(validators.spec(nonPhoneWithCarrier)).toBe(false);
+    expect(validators.spec.errors).toContainEqual(
+      expect.objectContaining({
+        instancePath: "",
+        keyword: "not",
+      }),
+    );
+
+    for (const [missing, keyword] of [
+      [["trunk_address"], "required"],
+      [["trunk_number"], "required"],
+      [["trunk_username"], "dependentRequired"],
+      [["trunk_password"], "dependentRequired"],
+    ] as const) {
+      expect(validators.spec(without(...missing))).toBe(false);
+      expect(validators.spec.errors).toContainEqual(
+        expect.objectContaining({
+          instancePath: "/platform/carrier",
           keyword,
         }),
       );

@@ -29,13 +29,9 @@ import { insertMembership } from "./memberships.ts";
  * action.
  *
  * **One factory, two callers, and that is the whole reason it is a function.**
- * Signup provisions the first project and an admin creates every one after it,
- * and the two used to be different code — which is how a project created from
- * Settings came to have no default persona while a project created at signup
- * did. A project half-built is not a smaller project; it is one
- * that refuses the first test somebody writes in it and returns errored
- * verdicts on the first run, both for reasons nobody could see from the page
- * they were on.
+ * Signup provisions the first project and an admin creates every one after it.
+ * Both paths create the same complete project. There is no smaller project
+ * shape without an active default persona or its seeded grader.
  *
  * It takes the transaction rather than opening one, because both callers have
  * other rows to write in the same breath — an organization and a membership for

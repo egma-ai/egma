@@ -466,9 +466,9 @@ export function MockToolEvidence({
 /**
  * One judged assertion: what counts now, why, and the judgments underneath it.
  *
- * **An earlier judgment is preserved and shown, never replaced.** A re-grade
- * writes a new row beside the old one, and a page that hid the old one would
- * make "this grader was tightened and now disagrees" invisible.
+ * **Different grader-version judgments are preserved and shown.** A re-grade
+ * replaces the row for this simulation's same pinned version. Any row already
+ * stored under another version remains visible as superseded evidence.
  *
  * The page groups rows under their grader and marks that whole grader as
  * required or reports-only once. Repeating a storage id and lane on every

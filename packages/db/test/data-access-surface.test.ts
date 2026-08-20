@@ -141,9 +141,8 @@ const WORK_DISPATCHING = [
  *
  * `regrade` and `reopenGradingJob` are the one way a judgment is ever revisited,
  * and neither is an edit: they reopen the queue so the engine judges again at
- * today's grader versions, narrowed to one grader when the ask names one. There
- * are no routes above them yet, so this surface is the altitude re-grading is
- * reachable at.
+ * a simulation's pinned versions or a production trace's current versions,
+ * narrowed to one grader identity when the ask names one.
  */
 const CONTEXT_REQUIRING = [
   "addConnection",
@@ -263,8 +262,8 @@ const CONTEXT_REQUIRING = [
   "markSimulationCanceled",
   "readOrganization",
   "readOrganizationSettings",
-  // The deployment's own non-secret settings. Provider credentials have their
-  // own runtime source and never enter this store.
+  // Safe carrier-setting metadata and secret hints. Model-provider credentials
+  // have their own runtime source and never enter this store.
   "readPlatformSettings",
   // Hosted egma has no organization owner who may configure its shared carrier
   // route. Startup reconciles that deployment-owned route from a complete
@@ -310,8 +309,8 @@ const CONTEXT_REQUIRING = [
   "restoreConnection",
   // No `listGraderVersions` and no `restoreGrader`, and both were here. A
   // running copy has no version history a person browses and no archive to come
-  // back from: it is made by pressing **Use** and deleted whole, and what it
-  // judges by is read through its library entry at judging time.
+  // back from: it is made by pressing **Use** and deleted whole. Internally each
+  // grader version pins the exact immutable library-definition revision it runs.
   // The same translation for a mock tool's scope: names off a reviewed file
   // turned into the agents it applies to. It reads agents and nothing else, and
   // only ones the context already reaches.
@@ -323,11 +322,11 @@ const CONTEXT_REQUIRING = [
   // Which active tests currently name a persona — the same question their
   // Archive asks, so a page and a refusal can never disagree about it.
   "testsUsingPersona",
-  // The dispatch path's door to the deployment's own settings in the clear —
-  // the third secret egma holds, and the same door the connection's
-  // credentials below come through. It takes the context like everything else
-  // and then refuses every one that did not come from a simulation claim,
-  // because conducting is the only thing egma does with these.
+  // The dispatch path's door to the deployment's carrier route in the clear.
+  // A credential-auth route may contain its SIP pair; model-provider keys do
+  // not use this table or this door. It takes the context like everything else
+  // and refuses every one that did not come from a simulation claim, because
+  // conducting a phone simulation is the only thing egma does with this route.
   "resolvePlatformSettings",
   // The dispatch path's door to a connection's plaintext. It takes the context
   // like everything else — and then refuses every one that did not come from a
@@ -472,10 +471,10 @@ const VALUES = [
   // A connection could not be brought back on the terms its own shape sets.
   // Four rules, four codes, and the reason travels beside the sentence.
   "ConnectionRestoreRefusedError",
-  // A library entry cannot leave the shelf while graders point at it. A copy
-  // reads its definition through that pointer every time it judges, so an entry
-  // taken away underneath one would leave a grader that judges nothing while
-  // still appearing on screen — refusal, never `set null`, never orphaned.
+  // A library entry cannot leave the shelf while graders point at it. Their
+  // immutable versions reference exact definition revisions owned by that
+  // identity, so removing it would break old judgment history — refusal, never
+  // `set null`, never orphaned.
   "GraderLibraryEntryInUseError",
   // The grader factory has no refusal of its own any more. A copy's delete used
   // to be turned away while a live test named it; a test names no graders, so
@@ -591,9 +590,10 @@ const VALUES = [
   // one in its place.
   "transportCapabilities",
   // The connection registry, as a browser may be told about it — labels, field
-  // shapes, the credential rule, and the two adapter facts. Never a gate, a
+  // shapes, the credential rule, and the adapter facts. Never a gate, a
   // hint function, a refusal sentence or a credential.
   "connectionTypeMetadata",
+  "connectionUsesPlatformCarrier",
   "credentialRuleOf",
   "variantById",
   "variantIdOf",

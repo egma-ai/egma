@@ -1,10 +1,10 @@
 ---
-title: "Connect Your Retell Voice Agent to Egma for Testing"
+title: "Connect Your Retell Agent to Egma for Testing"
 sidebarTitle: "Retell"
-description: "Register your Retell agent with Egma in one command. Choose text or phone reach, seal your credentials, and start running simulations."
+description: "Register your Retell agent with Egma in one command. Its Retell modality determines whether Egma creates a Chat or Phone connection."
 ---
 
-The fastest way to connect a Retell agent is `egma connect`. Run it from your agent's repository and the wizard prompts you for your Retell API key, lists the agents on your account, and asks you to choose how Egma should reach the one you pick — all without writing anything to a file or passing a secret as a command argument.
+The fastest way to connect a Retell agent is `egma connect`. Run it from your agent's repository. The wizard asks for your Retell API key, lists the agents on your account, and asks you to confirm the one connection that matches the selected agent. It does not write the key to a local file or pass it as a command argument.
 
 ## Prerequisites
 
@@ -33,11 +33,10 @@ The wizard walks you through every step. Here is what it looks like from start t
   › customer-support
 
 ◇ How should Egma reach this agent?
-  › Text — Egma exchanges messages with the agent. No phone call, nothing dialled.
-    Phone — Egma dials one of the agent's numbers and talks to it over the
-    telephone network, the way the people who call it do.
+  › Chat — Egma exchanges messages with this Retell chat agent. No phone call,
+    nothing dialled.
 
-  Egma creates the one you choose, and only that one.
+  Egma creates this connection only after you confirm it.
 ```
 
 After you confirm, Egma registers the agent and prints one fact per line:
@@ -54,8 +53,8 @@ agent_id: agt_01K…
 agent_name: customer-support
 connection_id: con_01K…
 connection_name: text-1
-connection_type: text
-connection_modality: text
+connection_type: retell
+connection_modality: chat
 registration: created
 agent_registration: created
 connection_registration: created
@@ -64,23 +63,23 @@ grounded_in: retell
 status: connected
 ```
 
-Your agent is now registered. Egma sealed the API key on arrival — reading the connection back shows the last four characters of the key and no line at all for the secret.
+Your agent is now registered. A Retell Chat connection stores the API key in sealed form; reading it back shows only a hint. A Phone connection stores the number and no Retell credential.
 
-## Reach types
+## How the connection is chosen
 
-Choosing the right reach is the one decision that shapes what a simulation exercises. The two are not interchangeable and both are worth running.
+Retell gives each agent one modality. Egma reads that fact and offers only the connection it can conduct.
 
 <CardGroup cols={2}>
-  <Card title="Text reach" icon="message">
-    Egma exchanges text messages with your agent directly. No audio, no phone call, nothing dialled. Tests your agent's reasoning, prompt logic, and tool calls at full speed. This is the default for new integrations and works on any Egma instance with no additional setup.
+  <Card title="Retell chat agent" icon="message">
+    Egma creates a Retell connection with the Chat modality. It exchanges messages directly with the agent. This path uses the sealed Retell API key and does not make a phone call.
   </Card>
-  <Card title="Phone reach" icon="phone">
-    Egma dials one of your agent's Retell numbers over a real SIP trunk and Twilio, exactly as a caller would. Tests everything text tests — plus speech recognition, text-to-speech, interruption handling, and the telephone line itself. Requires a phone number configured on your Egma instance.
+  <Card title="Retell voice agent" icon="phone">
+    Egma creates a Phone connection with the Voice modality. It dials one of the numbers Retell routes to that agent and tests the speech stack and telephone path. This requires a carrier route on your Egma instance.
   </Card>
 </CardGroup>
 
 <Note>
-  The same test run over both reaches is the sharpest signal Egma can give you: a test that passes on text and fails on phone means your prompt is fine and your speech stack is not.
+  A Retell voice agent cannot use the Retell Chat connection. A Retell chat agent cannot use the Phone connection. Egma refuses a mismatched `--reach` before it writes anything.
 </Note>
 
 ### Phone reach requirements
@@ -92,16 +91,16 @@ Phone reach calls your agent's number through the public telephone network. Your
 For CI pipelines, automated scripts, or any environment without an interactive terminal, pass the key through the environment and name every choice on the command line:
 
 ```bash
-# Text reach — minimum required flags
+# Retell chat agent. The CLI flag is named "text"; the stored modality is Chat.
 EGMA_RETELL_API_KEY=key_live_… egma connect --reach text
 
-# Phone reach — also name the number when the agent has more than one
+# Retell voice agent. Name the number when the agent has more than one.
 EGMA_RETELL_API_KEY=key_live_… egma connect \
   --reach phone \
   --phone-number +14155550111
 ```
 
-Pass `--headless` to suppress all prompts. With `--headless` and no `--reach`, the command exits with code 5 — Egma will not decide on your behalf whether to dial somebody's telephone.
+Pass `--headless` to suppress all prompts. With `--headless` and no `--reach`, the command exits with code 5. The selected agent determines the compatible value, but Egma still requires you to state it before the command writes a connection.
 
 All environment variables the command reads:
 
@@ -114,7 +113,7 @@ All environment variables the command reads:
 
 ## Running connect more than once
 
-`egma connect` is idempotent. Running it again over the same Retell agent does not create a duplicate — it adds the new reach as a second connection on the same agent record, or reuses the one it already registered.
+`egma connect` is idempotent. Running it again for the same Retell agent and compatible reach reuses the connection that is already registered.
 
 The `registration:` line in the output tells you exactly what happened:
 
@@ -122,9 +121,9 @@ The `registration:` line in the output tells you exactly what happened:
 |---|---|
 | `created` | A new agent record and connection were created |
 | `reused` | The agent and connection already existed; nothing changed |
-| `connection_added` | The agent already existed; a second connection (the other reach) was added |
+| `connection_added` | Egma matched an existing agent record and added this compatible connection |
 
-When a connection is added, Egma also prints a `note:` line saying so in plain words. One voice agent, two connections, one results history.
+When a connection is added, Egma also prints a `note:` line saying so in plain words.
 
 ## Exit codes
 
@@ -142,7 +141,7 @@ When a connection is added, Egma also prints a `note:` line saying so in plain w
 
 ## What happens after connect
 
-Once `egma connect` completes, Egma holds a sealed copy of your Retell credentials and a record of the agent. Nothing in this step writes to your Retell account — every request Egma makes during connect is a read.
+Once `egma connect` completes, Egma holds the agent record and its compatible connection. A Retell Chat connection holds a sealed copy of the key. A Phone connection does not. Nothing in this step writes to your Retell account — every request Egma makes during connect is a read.
 
 From here you can write tests in `egma/tests/` and run them with `egma run`. Each test becomes one simulation per persona, and each simulation calls your agent through the connection Egma just registered.
 

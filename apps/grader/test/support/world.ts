@@ -220,7 +220,7 @@ export async function theSeededGrader(world: World): Promise<string> {
 }
 
 /**
- * The one judge key every test in this suite configures, and it is written here
+ * The one deployment provider key every test in this suite supplies, written here
  * rather than inline so a test can assert it never appears anywhere else.
  *
  * Distinctive on purpose: a substring nothing else in the codebase, the

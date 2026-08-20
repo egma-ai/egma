@@ -1,17 +1,14 @@
-"""Environment-driven configuration.
+"""Deployment configuration for the simulator process.
 
-The simulator is one more compose container that only dials out, so
-everything it needs to know arrives as ``EGMA_SIMULATOR_*`` environment
-variables — no flags, no config files, nothing that would make the hosted
-and self-hosted deployments differ.
+The environment configures this worker: its control plane, capacity, media
+bridge, storage, and telemetry. Each claimed work order carries the facts for
+one simulation instead: the pinned persona models, the provider keys selected
+for those models, and the carrier route for a phone connection. Those facts do
+not fall back to this process configuration.
 
-A container's whole conversation with whoever deployed it is its
-environment and its first log lines, which settles how everything below
-behaves. One variable is required, because a simulator with no control
-plane is nothing; everything else has a default that works. Anything set
-to something unusable is refused here, at startup, in a sentence naming
-the variable — never discovered halfway through somebody's first
-simulation, and never guessed at.
+Anything set to something unusable is refused at startup in a sentence that
+names the variable. A work order is validated against its own contract before
+the simulator starts that simulation.
 """
 
 from __future__ import annotations
@@ -91,9 +88,9 @@ def _text(name: str, fallback: str | None = None) -> str | None:
     Compose passes an unset optional through as an empty string rather
     than leaving it out, which is what lets a compose entry carry a
     ``${VAR:-}`` default at all. So "" and "never set" have to mean the
-    same thing here: otherwise a blank model base URL would become a base
-    URL of nothing, and the first request would go nowhere with no idea
-    why.
+    same thing here. For example, a blank optional S3 endpoint means use
+    the provider's normal endpoint rather than try to send a request to
+    an empty address.
     """
     raw = os.environ.get(name)
     if raw is None or not raw.strip():
@@ -270,13 +267,10 @@ class MediaSettings:
         has no media backend. A work order cannot create one.
 
         **It never refuses.** This runs for every simulation, and most
-        simulations never dial: a platform whose carrier is half configured
-        still runs chat and text work perfectly well, and failing that work
-        over a trunk it was never going to use would be a broken phone
-        breaking the telephone-free half of the product. So what is
-        assembled here is whatever the two sides between them have, and
-        every refusal lives in :meth:`checked`, which the phone plug calls
-        when a call is really about to be placed.
+        simulations never dial. Contract v2 gives a phone simulation one
+        complete carrier and gives every non-phone simulation none. A missing
+        deployment media backend is still checked by the phone plug, because
+        failing chat work over a phone path it never uses would be wrong.
 
         Address, number, username and password always move together from
         the work order. No field can come from an older container setting.

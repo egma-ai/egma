@@ -469,7 +469,7 @@ export type PlanItem = {
   readonly graderId: string;
   readonly graderVersionId: string;
   readonly graderName: string;
-  /** The library entry this copy reads its definition through. */
+  /** The stable Library identity; `graderVersionId` pins its exact definition. */
   readonly libraryId: string;
   /** `false` makes it a diagnostic: judged, shown, never able to fail a test. */
   readonly required: boolean;
@@ -731,11 +731,10 @@ export async function pinnedSimulationGraders(
       }
       return {
         id: version.graderId,
-        libraryId: version.libraryId,
-        type: version.type,
         versionId: version.id,
         config: version.config,
         judgeModel: version.judgeModel,
+        definition: version.definition,
       };
     }),
   );

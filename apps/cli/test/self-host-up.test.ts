@@ -46,12 +46,12 @@ describe("egma self-host up", () => {
       expect(run.stdout).toContain(`url: ${platform.url}`);
       expect(run.stdout).toContain("status: ready");
       // The platform is ready even when its optional phone capability is not.
-      // Chat and text simulations stay usable without a carrier route.
+      // Chat simulations stay usable without a carrier route.
       expect(run.stdout).toContain("phone: setup_required");
       expect(run.stdout).toContain("phone_missing: the carrier trunk");
       expect(run.stdout).not.toMatch(/^setup(?:_missing)?:/mu);
       expect(run.stderr).toContain(`Egma is ready at ${platform.url}`);
-      expect(run.stderr).toContain("Chat and text simulations can run now");
+      expect(run.stderr).toContain("Chat simulations can run now");
       // The whole optional phone step is named because setup writes through
       // the platform API, whose door opens for an organization owner.
       expect(run.stderr).toContain(`Sign up at ${platform.url}`);
