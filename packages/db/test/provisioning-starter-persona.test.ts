@@ -22,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createConnectedDatabase,
+  openSingleConnection,
   type MigratedDatabase,
 } from "./support/database.ts";
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
@@ -61,6 +62,23 @@ async function defaultOf(projectId: string): Promise<string | null> {
     [projectId],
   );
   return rows[0]?.default_persona_id ?? null;
+}
+
+/** Wait for a real Postgres lock edge, not an elapsed-time guess. */
+async function waitUntilBlockedBy(blockerPid: number): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const { rows } = await database.sql<{ blocked: boolean }>(
+      `select exists (
+         select 1
+           from pg_stat_activity
+          where $1::integer = any(pg_blocking_pids(pid))
+       ) as blocked`,
+      [blockerPid],
+    );
+    if (rows[0]?.blocked === true) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("the fork never waited for the source version change");
 }
 
 let acme: Provisioned;
@@ -171,7 +189,7 @@ describe("the shared default persona", () => {
   });
 });
 
-describe("forking a library persona", () => {
+describe("forking a persona", () => {
   it("copies traits and models atomically into an independent version", async () => {
     const source = await getPersona(
       acme.auth,
@@ -210,6 +228,89 @@ describe("forking a library persona", () => {
     expect(
       (await getPersona(acme.auth, EGMA_PROVIDED_PERSONAS.defaultPersona))?.version,
     ).toBe(1);
+  });
+
+  it("copies the source version that wins the source-row lock", async () => {
+    const source = await createPersona(acme.auth, {
+      name: "Concurrent source",
+      traits: {
+        personality: "Starts as the first version.",
+        language: "en-US",
+      },
+    });
+    const nextVersionId = newId("prsv");
+    const nextTraits = {
+      personality: "Is the committed current version.",
+      language: "en-US",
+      patience: "Waits for a complete answer.",
+    } as const;
+    const holder = await openSingleConnection(database.url);
+    let forking: ReturnType<typeof forkPersona> | undefined;
+
+    try {
+      await holder.sql("begin");
+      const { rows: sessions } = await holder.sql<{ pid: number }>(
+        "select pg_backend_pid() as pid",
+      );
+      const blockerPid = sessions[0]?.pid;
+      if (blockerPid === undefined) throw new Error("the holder has no pid");
+
+      await holder.sql(
+        `insert into persona_version
+           (id, persona_id, version, traits, models, created_by)
+         values ($1, $2, 2, $3::jsonb, $4::jsonb, $5)`,
+        [
+          nextVersionId,
+          source.id,
+          JSON.stringify(nextTraits),
+          JSON.stringify(source.models),
+          acme.auth.userId,
+        ],
+      );
+      await holder.sql(
+        `update persona
+            set current_version_id = $1,
+                revision = 'source-version-moved',
+                updated_at = now()
+          where id = $2`,
+        [nextVersionId, source.id],
+      );
+
+      // The old implementation read version 1 without a lock and created its
+      // copy while this transaction was still open. Fork must instead wait on
+      // this source row, then copy the version that commits.
+      forking = forkPersona(acme.auth, source.id);
+      await waitUntilBlockedBy(blockerPid);
+      const { rows: copiesBeforeCommit } = await database.sql<{ count: number }>(
+        `select count(*)::integer as count
+           from persona
+          where project_id = $1 and name = $2`,
+        [acme.projectId, source.name],
+      );
+      expect(copiesBeforeCommit[0]?.count).toBe(1);
+      await holder.sql("commit");
+
+      const fork = await forking;
+      expect(fork).toMatchObject({
+        owner: "organization",
+        projectId: acme.projectId,
+        version: 1,
+        traits: nextTraits,
+        models: source.models,
+        isDefault: false,
+      });
+      const { rows: copiesAfterCommit } = await database.sql<{ count: number }>(
+        `select count(*)::integer as count
+           from persona
+          where project_id = $1 and name = $2`,
+        [acme.projectId, source.name],
+      );
+      expect(copiesAfterCommit[0]?.count).toBe(2);
+    } finally {
+      await holder.sql("rollback").catch(() => undefined);
+      await forking?.catch(() => undefined);
+      await holder.close();
+    }
   });
 });
 

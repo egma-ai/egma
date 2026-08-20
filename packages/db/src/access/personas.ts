@@ -13,7 +13,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 
-import { db, type Queryable } from "../client.ts";
+import { db, type Queryable, type Transaction } from "../client.ts";
 import {
   PERSONA_LIBRARY_CATALOG,
   type PersonaTraits,
@@ -51,7 +51,6 @@ import {
   personaAvailableToProject,
   readablePersona,
 } from "./persona-availability.ts";
-import { isProjectOfOrganization } from "./projects.ts";
 import { liveTestsNamingPersona } from "./tests.ts";
 import { within } from "./within.ts";
 
@@ -603,47 +602,89 @@ async function createPersonaWithTraits(
   validateName(input.name);
   validateTraits(traits);
   const storedModels = validPersonaModels(models);
-  if (!(await isProjectOfOrganization(auth, projectId))) {
+
+  return db().transaction(async (tx) => {
+    await lockPersonaProject(tx, auth, projectId);
+    return insertPersonaWithTraits(
+      tx,
+      auth,
+      projectId,
+      input,
+      normalizedTraits(traits),
+      storedModels,
+    );
+  });
+}
+
+/**
+ * Hold the project a persona write lands in until that write commits.
+ *
+ * Project first is the shared lock order for a fork: lifecycle writes also
+ * take the project before a persona. A fork that took the source first could
+ * deadlock with an Archive that already held the project and was waiting for
+ * that same source. The shared lock also makes project deletion wait until the
+ * new identity and version either both commit or both roll back.
+ */
+async function lockPersonaProject(
+  tx: Transaction,
+  auth: AuthContext,
+  projectId: string,
+): Promise<void> {
+  const [target] = await tx
+    .select({ id: project.id })
+    .from(project)
+    .where(
+      within(
+        auth,
+        project,
+        and(eq(project.id, projectId), isNull(project.deletedAt)),
+      ),
+    )
+    .limit(1)
+    .for("share", { of: project });
+  if (target === undefined) {
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
+}
 
+/** Write one complete project-owned persona on the caller's transaction. */
+async function insertPersonaWithTraits(
+  tx: Transaction,
+  auth: AuthContext,
+  projectId: string,
+  input: Pick<NewPersona, "name" | "description">,
+  storedTraits: PersonaTraits,
+  storedModels: PersonaModels,
+): Promise<Persona> {
   const id = newId("prs");
   const versionId = newId("prsv");
-  const storedTraits = normalizedTraits(traits);
-  const inserted = await db().transaction(async (tx) => {
-    const [identity] = await tx
-      .insert(persona)
-      .values({
-        id,
-        organizationId: auth.organizationId,
-        projectId,
-        name: input.name,
-        description: input.description ?? null,
-        currentVersionId: versionId,
-        createdBy: auth.userId,
-      })
-      .returning(COLUMNS);
-    await tx.insert(personaVersion).values({
-      id: versionId,
-      personaId: id,
-      version: 1,
-      traits: storedTraits,
-      models: storedModels,
-      createdBy: auth.userId,
-    });
-    return identity;
+  await tx.insert(persona).values({
+    id,
+    organizationId: auth.organizationId,
+    projectId,
+    name: input.name,
+    description: input.description ?? null,
+    currentVersionId: versionId,
+    createdBy: auth.userId,
   });
-  if (inserted === undefined) throw new Error("the persona was not written");
-  const { organizationId: _organizationId, ...identity } = inserted;
-  return {
-    ...identity,
-    owner: "organization",
+  await tx.insert(personaVersion).values({
+    id: versionId,
+    personaId: id,
     version: 1,
-    versionId,
     traits: storedTraits,
     models: storedModels,
-    isDefault: false,
-  };
+    createdBy: auth.userId,
+  });
+
+  // Read through the ordinary seam while both rows and the project lock are
+  // still on this transaction. This is the authoritative answer for the
+  // version and project-default pointer; no hand-built return value can drift
+  // from what a following read will see.
+  const inserted = await readPersonaOn(tx, auth, id);
+  if (inserted === undefined) {
+    throw new Error("the persona was not written");
+  }
+  return inserted;
 }
 
 export async function createPersona(
@@ -1228,16 +1269,16 @@ export async function resolvePersonaNames(
  * A fork is a create with the retyping saved: fresh `prs_` and `prsv_` ids,
  * version numbering starting over at 1, and no link back — the source's
  * history is the source's, and nothing of it comes along. The source is read
- * through the same seam as `getPersona`, so a fork can only be taken from a
- * Egma-provided persona or a persona available in the acting project.
+ * through the same tenancy predicate as `getPersona`, so a fork can only be
+ * taken from an Egma-provided persona or one available in the acting project.
  *
  * Authorization is layered on purpose, not by accident of delegation. The
  * leading check refuses a viewer before anything is read, and a credential
  * acting in no project is refused right after it, still before the read —
  * the same stance as create and archive, and it keeps `undefined` meaning
- * invisible rather than refused. `getPersona`'s `read` applies because
- * the fork hands the source's traits back, which is a read;
- * `createPersonaWithTraits` writes the independent project-owned copy. If
+ * invisible rather than refused. `getPersona`'s `read` permission applies
+ * because the fork hands the source's traits back, which is a read. The
+ * independent project-owned copy is written on that same transaction. If
  * reading ever gains a gate of its own, a caller who may not read the source
  * must be refused out loud here — never handed an `undefined` that pretends
  * the source does not exist, which would make Fork the one path that reads
@@ -1247,6 +1288,15 @@ export async function resolvePersonaNames(
  * back into the archive for a starting point is a reasonable thing to want,
  * and the fork is a new identity with its own lifecycle — nothing about the
  * source is disturbed, and nothing archived comes back by the back door.
+ *
+ * **The project, source pointer, source version, and new copy are one
+ * transaction.** The project is locked first, matching Archive's lock order.
+ * The source identity is then share-locked before its current-version pointer
+ * is read. An Edit or catalog update that moves that pointer therefore happens
+ * wholly before or wholly after Fork; Fork never copies a version that stopped
+ * being current while the new identity was being written. The source version
+ * itself is immutable, so reading it after the pointer lock completes the
+ * snapshot without another lock.
  */
 export async function forkPersona(
   auth: AuthContext,
@@ -1260,18 +1310,53 @@ export async function forkPersona(
     );
   }
 
-  const source = await getPersona(auth, id);
-  if (source === undefined) return undefined;
+  authorize(auth, "read", here(auth));
+  const { projectId } = auth;
 
-  return createPersonaWithTraits(
-    auth,
-    {
-      name: source.name,
-      description: source.description ?? undefined,
-    },
-    source.traits,
-    source.models,
-  );
+  return db().transaction(async (tx) => {
+    // Project before persona is the same order as Archive. If either is busy,
+    // this fork waits before it holds the other row, so the two paths cannot
+    // form a lock cycle.
+    await lockPersonaProject(tx, auth, projectId);
+
+    const [source] = await tx
+      .select({
+        name: persona.name,
+        description: persona.description,
+        currentVersionId: persona.currentVersionId,
+      })
+      .from(persona)
+      .where(thePersona(auth, id))
+      .limit(1)
+      .for("share", { of: persona });
+    if (source === undefined) return undefined;
+    validateName(source.name);
+
+    const [current] = await tx
+      .select({
+        id: personaVersion.id,
+        traits: personaVersion.traits,
+        models: personaVersion.models,
+      })
+      .from(personaVersion)
+      .where(eq(personaVersion.id, source.currentVersionId))
+      .limit(1);
+    if (current === undefined) {
+      throw new Error("the persona's current version is missing");
+    }
+
+    return insertPersonaWithTraits(
+      tx,
+      auth,
+      projectId,
+      {
+        name: source.name,
+        description: source.description ?? undefined,
+      },
+      normalizedTraits(traitsFromRow(current.traits, current.id)),
+      personaModelsFromRow(current.models, current.id),
+    );
+  });
 }
 
 /** @deprecated Use the product word `forkPersona`. */
