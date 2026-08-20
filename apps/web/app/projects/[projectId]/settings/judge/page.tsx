@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -18,17 +19,17 @@ import {
   type ProjectJudge,
 } from "../../../../../lib/judge.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
 import {
-  Badge,
-  Button,
-  ButtonLink,
   Field,
   Form,
   FormActions,
   Help,
   Section,
   Select,
-  TextInput,
 } from "../../../../../ui/controls.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
@@ -294,7 +295,7 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
           >
             {judge.value.state === "needs_setup" ? (
               <Help>
-                <Badge tone="warn">Needs setup</Badge> This project has no judge, so
+                <Badge variant="warning">Needs setup</Badge> This project has no judge, so
                 a grader that judges by asking a model cannot run — the predefined
                 expected-behaviors grader among them, which every project starts
                 with. Add a judge credential under Organization settings, then
@@ -331,13 +332,15 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
 
             <Form onSubmit={() => void saveChoice()}>
               <Field label="Model" htmlFor="judge-model">
-                <TextInput
+                <Input
                   id="judge-model"
                   value={model}
+                  autoComplete="off"
+                  spellCheck={false}
                   disabled={!mayAdminister}
-                  onChange={(chosen) => {
+                  onChange={(event) => {
                     editVersion.current += 1;
-                    setModel(chosen);
+                    setModel(event.target.value);
                   }}
                 />
               </Field>
@@ -454,7 +457,6 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
 
               <FormActions>
                 <Button
-                  weight="strong"
                   type="submit"
                   disabled={!mayAdminister || !complete || !changed || saving}
                 >
@@ -477,9 +479,11 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
               A judge key belongs to the organization rather than to this project,
               so one key can serve every project. Add, label and replace them
               under{" "}
-              <ButtonLink href={settingsPath(projectId, "organization")}>
-                Organization settings
-              </ButtonLink>
+              <Button asChild variant="secondary">
+                <Link href={settingsPath(projectId, "organization")}>
+                  Organization settings
+                </Link>
+              </Button>
               .
             </Help>
           </Section>

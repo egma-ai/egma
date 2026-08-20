@@ -40,13 +40,13 @@ import {
   RelativeInstant,
   useMinuteClock,
 } from "../../../../../../ui/relative-time.tsx";
+import styles from "../../../../../ui.module.css";
 import {
   AppShell,
   Notice,
   ProductPage,
   ProductStatePage,
   StatePage,
-  styles,
 } from "../../../../../ui.tsx";
 
 type State =

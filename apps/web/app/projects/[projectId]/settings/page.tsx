@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { IDENTITY_CONFLICT, writeJson, type Refusal } from "../../../../lib/api.ts";
 import { roleOf } from "../../../../lib/me.ts";
@@ -9,8 +9,10 @@ import {
   projectSettingsPath,
   type ProjectSettings,
 } from "../../../../lib/settings.ts";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
 import {
-  Button,
   Field,
   Form,
   FormActions,
@@ -19,7 +21,6 @@ import {
   Refused,
   Section,
   TextArea,
-  TextInput,
 } from "../../../../ui/controls.tsx";
 import { Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { SettingsLayout } from "../../../../ui/settings-nav.tsx";
@@ -91,6 +92,15 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
    */
   const mayAdminister = settled?.may_manage_projects ?? false;
 
+  /*
+   * The id of the sentence saying why Save is not available.
+   *
+   * The base button is a `<button>` and draws nothing beside itself, so the
+   * page writes the sentence and names it. A disabled control cannot take
+   * focus, which is exactly why the reason may not live in a `title` alone:
+   * that is a reason only a pointer can reach.
+   */
+  const whyNotSave = useId();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
@@ -135,6 +145,11 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   }, [answer]);
 
   const named = name.trim() !== "";
+  /** Said only to somebody the server would refuse, and only once it has said so. */
+  const whyNot =
+    mayAdminister || role === null
+      ? undefined
+      : `Your ${role} role cannot change project settings. Ask an organization admin.`;
   const changed =
     settled !== null &&
     (name.trim() !== settled.name ||
@@ -244,7 +259,13 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                 message={refused.message}
                 action={
                   refused.error === IDENTITY_CONFLICT ? (
-                    <Button onClick={reload}>Read this project again</Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={reload}
+                    >
+                      Read this project again
+                    </Button>
                   ) : undefined
                 }
               />
@@ -252,14 +273,16 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
 
             <Form onSubmit={() => void save()}>
               <Field label="Name" htmlFor="project-name">
-                <TextInput
+                <Input
                   id="project-name"
                   value={name}
+                  autoComplete="off"
+                  spellCheck={false}
                   disabled={!mayAdminister}
-                  invalid={name.trim() === ""}
-                  onChange={(next) => {
+                  aria-invalid={name.trim() === "" ? true : undefined}
+                  onChange={(event) => {
                     editVersion.current += 1;
-                    setName(next);
+                    setName(event.target.value);
                     setSaved(false);
                   }}
                 />
@@ -291,17 +314,21 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
 
               <FormActions>
                 <Button
-                  weight="strong"
                   type="submit"
                   disabled={!mayAdminister || !named || !changed || saving}
-                  why={
-                    mayAdminister || role === null
-                      ? undefined
-                      : `Your ${role} role cannot change project settings. Ask an organization admin.`
-                  }
+                  title={whyNot}
+                  aria-describedby={whyNot === undefined ? undefined : whyNotSave}
                 >
                   {saving ? "Saving…" : "Save project"}
                 </Button>
+                {whyNot === undefined ? null : (
+                  <span
+                    className="max-w-[56ch] text-sm leading-(--line-normal) text-muted-foreground"
+                    id={whyNotSave}
+                  >
+                    {whyNot}
+                  </span>
+                )}
               </FormActions>
             </Form>
           </Section>

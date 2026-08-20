@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 
-import styles from "./ui.module.css";
+import { cn } from "@/lib/utils";
 
 type Dot = {
   phase: number;
@@ -126,5 +126,23 @@ export function TrustGate() {
     };
   }, [seed]);
 
-  return <canvas ref={canvasRef} className={styles.trustGate} aria-hidden="true" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      /*
+       * The ink is read back off this element with `getComputedStyle`, so the
+       * colour has to be a real declaration rather than a value passed in: the
+       * canvas follows the theme because `text-foreground` does.
+       *
+       * It leaves the page entirely on a narrow screen. The brand panel is a
+       * strip there, and a field of moving dots in a 144px band is decoration
+       * competing with the one sentence somebody came to read.
+       */
+      className={cn(
+        "absolute inset-0 block h-full w-full text-foreground opacity-[0.42]",
+        "max-[620px]:hidden",
+      )}
+      aria-hidden="true"
+    />
+  );
 }

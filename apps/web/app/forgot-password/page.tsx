@@ -3,8 +3,11 @@
 import { useEffect, useState } from "react";
 
 import { returnPathIn, withReturnTo } from "../../lib/return-to.ts";
-import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
-import { AuthShell, Notice, StatePage, styles } from "../ui.tsx";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+import { Field } from "../../ui/controls.tsx";
+import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**
  * Asking for a way back in.
@@ -68,8 +71,11 @@ export default function ForgotPasswordPage() {
         title="Check your email"
         lead={
           <>
-            If <span className={styles.emphasizedEmail}>{email}</span> has an
-            account, a link to reset password has been sent
+            If{" "}
+            <span className="text-foreground underline decoration-brand decoration-1 underline-offset-4">
+              {email}
+            </span>{" "}
+            has an account, a link to reset password has been sent
           </>
         }
       />
@@ -81,27 +87,28 @@ export default function ForgotPasswordPage() {
       eyebrow="Forgotten password"
       title="Set a new password."
     >
-      <Form onSubmit={() => void submit()}>
+      <AuthForm onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
         <Field label="Email" htmlFor="email">
-          <TextInput
+          <Input
             id="email"
             name="email"
             type="email"
             autoComplete="email"
+            spellCheck={false}
             required
             value={email}
-            onChange={setEmail}
+            onChange={(event) => setEmail(event.target.value)}
           />
         </Field>
 
-        <Button weight="strong" type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting}>
           {submitting ? "Sending…" : "Send reset link"}
         </Button>
-      </Form>
+      </AuthForm>
 
-      <p className={styles.linkLine}>
+      <LinkLine>
         Remembered it?{" "}
         <a
           href={
@@ -111,7 +118,7 @@ export default function ForgotPasswordPage() {
           Sign in
         </a>
         .
-      </p>
+      </LinkLine>
     </AuthShell>
   );
 }

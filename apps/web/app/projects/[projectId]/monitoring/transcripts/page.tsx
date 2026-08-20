@@ -52,7 +52,8 @@ import {
   PageHeader,
   ProductPage,
 } from "../../../../../ui/shell.tsx";
-import { Notice, styles } from "../../../../ui.tsx";
+import styles from "../../../../ui.module.css";
+import { Notice } from "../../../../ui.tsx";
 import setup from "./setup.module.css";
 
 /**

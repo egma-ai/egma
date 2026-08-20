@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import {
   readJson,
@@ -22,9 +22,11 @@ import {
   type Member,
   type Roster,
 } from "../../../../../lib/settings.ts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
 import {
-  Badge,
-  Button,
   Field,
   Form,
   FormActions,
@@ -33,7 +35,6 @@ import {
   Refused,
   Section,
   Select,
-  TextInput,
 } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
@@ -97,6 +98,8 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   const settled = answer?.status === "ready" ? answer.value : null;
   const mayManage = settled?.may_manage_members === true;
 
+  /* Why the membership controls are not available, for whoever asks. */
+  const whyNotManage = useId();
   const [tab, setTab] = useState<Tab>("people");
   const tabRef = useRef<Tab>("people");
   const [invitations, setInvitations] =
@@ -212,6 +215,11 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   }
 
   const shownTab: Tab = mayManage ? tab : "people";
+  /** Said only to somebody the server would refuse, and only once it has said so. */
+  const whyNot =
+    mayManage || role === null
+      ? undefined
+      : `Your ${role} role cannot manage members. Ask an organization admin.`;
 
   if (answer === null) {
     return (
@@ -293,9 +301,9 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       header: "Standing",
       cell: (member) =>
         member.deactivated_at === null ? (
-          <Badge tone="good">Active</Badge>
+          <Badge variant="success">Active</Badge>
         ) : (
-          <Badge tone="warn">Deactivated</Badge>
+          <Badge variant="warning">Deactivated</Badge>
         ),
     },
     {
@@ -304,17 +312,30 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       cell: (member) => (
         <>
           <Button
+            type="button"
+            variant="secondary"
             disabled={!mayManage || busy}
-            why={
-              mayManage || role === null
+            title={whyNot}
+            aria-describedby={
+              whyNot === undefined
                 ? undefined
-                : `Your ${role} role cannot manage members. Ask an organization admin.`
+                : `${whyNotManage}-${member.user_id}`
             }
             onClick={() => setConfirming({ action: "deactivate", member })}
           >
             Deactivate
-          </Button>{" "}
+          </Button>
+          {whyNot === undefined ? null : (
+            <span
+              className="max-w-[56ch] text-sm leading-(--line-normal) text-muted-foreground"
+              id={`${whyNotManage}-${member.user_id}`}
+            >
+              {whyNot}
+            </span>
+          )}{" "}
           <Button
+            type="button"
+            variant="secondary"
             disabled={!mayManage || busy}
             onClick={() => setConfirming({ action: "remove", member })}
           >
@@ -408,9 +429,12 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
                   ? "will lose membership in this organization. Everything they authored stays where it is, with their name on it."
                   : "will no longer be able to use this organization, and every key they minted stops working on the next request."}
               </p>
-              <Button onClick={dismiss}>Cancel</Button>{" "}
+              <Button type="button" variant="secondary" onClick={dismiss}>
+                Cancel
+              </Button>{" "}
               <Button
-                tone="destructive"
+                type="button"
+                variant="destructive"
                 disabled={busy}
                 onClick={() => {
                   const chosen = confirming;
@@ -532,7 +556,7 @@ function Invitations({
       header: "Standing",
       cell: (invitation) =>
         standingOf(invitation) === "expired" ? (
-          <Badge tone="warn">Expired</Badge>
+          <Badge variant="warning">Expired</Badge>
         ) : (
           <Badge>Pending</Badge>
         ),
@@ -553,6 +577,8 @@ function Invitations({
       cell: (invitation) =>
         standingOf(invitation) === "expired" ? (
           <Button
+            type="button"
+            variant="secondary"
             disabled={busy}
             onClick={() => void send(invitation.email, invitation.role)}
           >
@@ -583,11 +609,13 @@ function Invitations({
         <Form onSubmit={() => void invite()}>
           <FormRow>
             <Field label="Email" htmlFor="invite-email">
-              <TextInput
+              <Input
                 id="invite-email"
                 value={email}
+                autoComplete="off"
+                spellCheck={false}
                 disabled={busy}
-                onChange={setEmail}
+                onChange={(event) => setEmail(event.target.value)}
               />
             </Field>
             <Field label="Role" htmlFor="invite-role">
@@ -604,11 +632,7 @@ function Invitations({
             </Field>
           </FormRow>
           <FormActions>
-            <Button
-              weight="strong"
-              type="submit"
-              disabled={busy || email.trim() === ""}
-            >
+            <Button type="submit" disabled={busy || email.trim() === ""}>
               {busy ? "Inviting…" : "Send invitation"}
             </Button>
           </FormActions>

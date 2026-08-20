@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import {
   DEFAULT_SIGNED_IN_PATH,
@@ -11,8 +11,11 @@ import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
 } from "../../lib/signup-defaults.ts";
-import { Button, Field, Form, TextInput } from "../../ui/controls.tsx";
-import { AuthShell, Notice, StatePage, styles } from "../ui.tsx";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+import { Field } from "../../ui/controls.tsx";
+import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**
  * Signing up: one page, one submit, and an organization and a project at the
@@ -30,6 +33,14 @@ import { AuthShell, Notice, StatePage, styles } from "../ui.tsx";
 type Availability = { open: boolean; message?: string };
 
 export default function SignUpPage() {
+  /*
+   * The hint's own id, held here rather than inside `Field`.
+   *
+   * A hint nothing points at is a hint only a sighted reader ever gets, and the
+   * base input is a plain `<input>` that reads no context. So the page that
+   * writes the sentence is the page that names it, and the two cannot drift.
+   */
+  const organizationHint = useId();
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -114,7 +125,7 @@ export default function SignUpPage() {
         animated
         title="Ask an admin for an invitation to this Egma instance."
       >
-        <p className={styles.linkLine}>
+        <LinkLine>
           Already have an account?{" "}
           <a
             href={
@@ -124,7 +135,7 @@ export default function SignUpPage() {
             Sign in
           </a>
           .
-        </p>
+        </LinkLine>
       </StatePage>
     );
   }
@@ -136,63 +147,73 @@ export default function SignUpPage() {
       title="Set up Egma"
       lead="One step. Your organization and your first project are created together."
     >
-      <Form onSubmit={() => void submit()}>
+      <AuthForm onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
         <Field label="Email" htmlFor="email">
-          <TextInput
+          <Input
             id="email"
             name="email"
             type="email"
             autoComplete="email"
+            spellCheck={false}
             required
             value={email}
-            onChange={onEmailChange}
+            onChange={(event) => onEmailChange(event.target.value)}
           />
         </Field>
 
         <Field label="Password" htmlFor="password">
-          <TextInput
+          <Input
             id="password"
             name="password"
             type="password"
             autoComplete="new-password"
+            spellCheck={false}
             required
             minLength={8}
             value={password}
-            onChange={setPassword}
+            onChange={(event) => setPassword(event.target.value)}
           />
         </Field>
 
-        <Field label="Organization" hint="Filled in from your email. Change it if you like." htmlFor="organizationName">
-          <TextInput
+        <Field label="Organization" htmlFor="organizationName">
+          <Input
             id="organizationName"
             name="organizationName"
+            autoComplete="off"
+            spellCheck={false}
             required
+            aria-describedby={organizationHint}
             value={organizationName}
-            onChange={(value) => {
+            onChange={(event) => {
               setOrganizationEdited(true);
-              setOrganizationName(value);
+              setOrganizationName(event.target.value);
             }}
           />
+          <p className="m-0 text-sm leading-(--line-normal) text-faint" id={organizationHint}>
+            Filled in from your email. Change it if you like.
+          </p>
         </Field>
 
         <Field label="First project" htmlFor="projectName">
-          <TextInput
+          <Input
             id="projectName"
             name="projectName"
+            autoComplete="off"
+            spellCheck={false}
             required
             value={projectName}
-            onChange={setProjectName}
+            onChange={(event) => setProjectName(event.target.value)}
           />
         </Field>
 
-        <Button weight="strong" type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting}>
           {submitting ? "Setting up…" : "Create my Egma instance"}
         </Button>
-      </Form>
+      </AuthForm>
 
-      <p className={styles.linkLine}>
+      <LinkLine>
         Already have an account?{" "}
         <a
           href={returnTo === null ? "/sign-in" : withReturnTo("/sign-in", returnTo)}
@@ -200,7 +221,7 @@ export default function SignUpPage() {
           Sign in
         </a>
         .
-      </p>
+      </LinkLine>
     </AuthShell>
   );
 }

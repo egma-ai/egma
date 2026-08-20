@@ -303,12 +303,24 @@ export function SettingsLayout({
         className={cn(
           "flex h-full min-w-0 min-h-0 flex-col gap-8 overflow-y-auto",
           "overscroll-contain pr-2 pb-10 [scrollbar-gutter:stable]",
-          "[&>section]:mt-0",
+          /*
+           * The `!` is load-bearing until the shared `Section` migrates.
+           *
+           * `Section` still carries `margin-top: var(--space-7)` from
+           * `system.module.css`, and a CSS Module is unlayered: it beats every
+           * Tailwind utility whatever the specificity, because a layer loses to
+           * no layer. Without this the gap between two Settings groups is 32px
+           * of margin on top of this container's 32px gap, and the first group
+           * starts 32px below where the navigation does. It is measured at
+           * `margin-top: 0px` in a browser, and the `!` goes when the class it
+           * is overriding does.
+           */
+          "[&>section]:mt-0!",
           "[&>[role=region]]:flex [&>[role=region]]:flex-col [&>[role=region]]:gap-8",
-          "[&>[role=region]>section]:mt-0",
+          "[&>[role=region]>section]:mt-0!",
           "[&>[role=tabpanel]]:flex [&>[role=tabpanel]]:flex-col",
           "[&>[role=tabpanel]]:gap-8",
-          "[&>[role=tabpanel]>section]:mt-0",
+          "[&>[role=tabpanel]>section]:mt-0!",
         )}
       >
         {children}
