@@ -227,8 +227,28 @@ export type AgentChanges = {
   readonly expectedRevision?: string | undefined;
 };
 
+/**
+ * An agent as a list of them answers it: its identity, and every living way
+ * egma can reach it.
+ *
+ * **The connections travel with the agent because they are the question the
+ * list exists to answer.** Which agents egma can reach, and how, is what
+ * somebody opens a list of agents to find out. A shape that answered only the
+ * names would make that one request per row, and a project of four hundred
+ * agents would ask four hundred times for what one read already holds.
+ *
+ * They are the *active* ones, always, and the split is the one
+ * `listConnections` already keeps: an archived connection is how egma used to
+ * reach an agent, which is a different question and is asked separately. An
+ * archived agent, whose Archive took its connections with it, therefore
+ * carries none — which is the truth about it rather than a gap in the read.
+ */
+export type AgentWithConnections = Agent & {
+  readonly connections: readonly Connection[];
+};
+
 export type AgentPage = {
-  readonly items: readonly Agent[];
+  readonly items: readonly AgentWithConnections[];
   /** Hand back as `cursor` to continue; absent on the last page. */
   readonly nextCursor: string | undefined;
 };
@@ -944,6 +964,59 @@ const DEFAULT_PAGE_SIZE = 50;
 const LARGEST_PAGE_SIZE = 200;
 
 /**
+ * The living connections of every agent on one page, fetched together.
+ *
+ * **One query for the page, never one per row.** Asking for each agent's
+ * connections as each agent is read is the shape that turns a list of fifty
+ * agents into fifty-one round trips, and it degrades exactly where it hurts —
+ * on the biggest projects. So the whole page's ids go down in a single `in`
+ * and the answer is grouped back up here.
+ *
+ * The tenancy predicate is the same one every other read of a connection
+ * carries. The agents were already narrowed to what this context may see, but
+ * a second query is a second chance to read somebody else's row, and a filter
+ * that is only implied by an earlier query is one that a later refactor drops
+ * with nothing saying so.
+ */
+async function connectionsOf(
+  auth: AuthContext,
+  agents: readonly Agent[],
+): Promise<readonly AgentWithConnections[]> {
+  if (agents.length === 0) return [];
+
+  const rows = await db()
+    .select(CONNECTION_COLUMNS)
+    .from(connection)
+    .where(
+      within(
+        auth,
+        connection,
+        and(
+          inArray(
+            connection.agentId,
+            agents.map((one) => one.id),
+          ),
+          connectionNotArchived,
+        ),
+      ),
+    )
+    .orderBy(asc(connection.id));
+
+  const held = new Map<string, Connection[]>();
+  for (const row of rows) {
+    const one = connectionFromRow(row);
+    const already = held.get(one.agentId);
+    if (already === undefined) held.set(one.agentId, [one]);
+    else already.push(one);
+  }
+
+  // An agent with none keeps an empty list rather than losing the field. "No
+  // way in" is a fact a list has to be able to show, and a missing key would
+  // read as "nobody asked".
+  return agents.map((one) => ({ ...one, connections: held.get(one.id) ?? [] }));
+}
+
+/**
  * One page of the agents the caller can reach — the acting project's, or the
  * whole customer's for a credential acting in none — and where the next page
  * starts.
@@ -953,6 +1026,10 @@ const LARGEST_PAGE_SIZE = 200;
  * — no second sort column, no offset to drift when rows arrive mid-scroll.
  * Newest first, because the agent somebody is looking for is usually the one
  * they just registered.
+ *
+ * **Every agent comes back with its living connections on it.** That costs one
+ * more query for the whole page and saves one per row, and it is what lets a
+ * list say which agents egma can reach without opening every one of them.
  */
 export async function listAgents(
   auth: AuthContext,
@@ -1017,7 +1094,9 @@ export async function listAgents(
 
   const items = rows.slice(0, limit);
   return {
-    items,
+    items: await connectionsOf(auth, items),
+    // Read off the agent rows rather than off the widened items: the cursor is
+    // an agent id and stays one, whatever else now travels beside it.
     nextCursor: rows.length > limit ? items[items.length - 1]?.id : undefined,
   };
 }
