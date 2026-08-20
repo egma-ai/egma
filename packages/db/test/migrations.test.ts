@@ -3798,6 +3798,7 @@ describe("the direct Monitoring cutover (0038)", () => {
   let before: string;
   let client: pg.Client;
   let applied: readonly string[];
+  let frozenFinishedAt: Date;
 
   const organizationId = newId("org");
   const projectId = newId("prj");
@@ -3876,6 +3877,27 @@ describe("the direct Monitoring cutover (0038)", () => {
     connectionId: newId("con"),
     runId: newId("run"),
   };
+
+  /**
+   * A run that has already reported its numbers.
+   *
+   * `guard_run_lifecycle` refuses every update to a run whose `finished_at` is
+   * set, so 0038's snapshot backfill only meets that refusal where a database
+   * holds history. Every other run in this file is `pending` and every database
+   * this migration met before production was empty — which is how the backfill
+   * reached production, raised the guard, and rolled the deploy back without one
+   * test noticing. This row is that history, and the reason 0038 lifts the guard
+   * around its own statement and puts it straight back.
+   *
+   * It rides the LiveKit token-endpoint connection, so the branch reading
+   * `tokenEndpoint` out of the frozen config is exercised on a frozen row too.
+   */
+  const finishedRun = {
+    id: newId("run"),
+    reach: reaches[3],
+    counts: { completed: 3, failed: 1, canceled: 0, skipped: 0 },
+  } as const;
+
   const oldProductionJob = {
     id: newId("gjb"),
     traceId: "a".repeat(32),
@@ -3993,6 +4015,50 @@ describe("the direct Monitoring cutover (0038)", () => {
       config: { retellAgentId: "agent_retell_voice" },
     });
 
+    // Frozen before 0038 runs: the four counts land with `finished_at`, as
+    // `run_counts_written_together` requires, and the snapshot is still written
+    // in the old vocabulary.
+    await client.query(
+      `insert into run
+         (id, organization_id, project_id, agent_id, connection_id, status,
+          triggered_via, pinned_test_versions, requested_personas,
+          connection_snapshot, mock_tool_snapshot, expected_simulation_count,
+          started_at, finished_at,
+          completed_count, failed_count, canceled_count, skipped_count)
+       values ($1, $2, $3, $4, $5, 'completed', 'manual', $6::jsonb, $7::jsonb,
+          $8::jsonb, $9::jsonb, 4,
+          now() - interval '1 hour', now() - interval '30 minutes',
+          $10, $11, $12, $13)`,
+      [
+        finishedRun.id,
+        organizationId,
+        projectId,
+        agentId,
+        finishedRun.reach.connectionId,
+        JSON.stringify({ testVersionIds: [] }),
+        JSON.stringify({ personaIds: [] }),
+        JSON.stringify({
+          type: finishedRun.reach.type,
+          modality: finishedRun.reach.modality,
+          topology: finishedRun.reach.topology,
+          environment: null,
+          config: finishedRun.reach.config,
+        }),
+        JSON.stringify({ defaults: [], overrides: {} }),
+        finishedRun.counts.completed,
+        finishedRun.counts.failed,
+        finishedRun.counts.canceled,
+        finishedRun.counts.skipped,
+      ],
+    );
+    // Read back rather than computed here, so the assertion after the migration
+    // compares against the exact instant the row was frozen at.
+    const { rows: frozen } = await client.query<{ finished_at: Date }>(
+      "select finished_at from run where id = $1",
+      [finishedRun.id],
+    );
+    frozenFinishedAt = frozen[0]!.finished_at;
+
     await client.query(
       `insert into production_trace_claim
          (id, organization_id, project_id, connection_id, trace_id,
@@ -4063,6 +4129,68 @@ describe("the direct Monitoring cutover (0038)", () => {
         config: reach.config,
       });
     }
+  });
+
+  it("reaches the frozen snapshot of a run that had already finished", async () => {
+    const { rows } = await client.query<{
+      connection_snapshot: Record<string, unknown>;
+    }>("select connection_snapshot from run where id = $1", [finishedRun.id]);
+
+    expect(rows[0]?.connection_snapshot).toEqual({
+      agentPlatform: finishedRun.reach.expected.agentPlatform,
+      connectionKind: finishedRun.reach.expected.connectionKind,
+      accessVariant: finishedRun.reach.expected.accessVariant,
+      modality: finishedRun.reach.modality,
+      topology: finishedRun.reach.topology,
+      environment: null,
+      config: finishedRun.reach.config,
+    });
+  });
+
+  it("changes a finished run's vocabulary and none of the answers it reported", async () => {
+    const { rows } = await client.query<{
+      status: string;
+      finished_at: Date;
+      completed_count: number;
+      failed_count: number;
+      canceled_count: number;
+      skipped_count: number;
+    }>(
+      `select status, finished_at, completed_count, failed_count,
+              canceled_count, skipped_count
+         from run where id = $1`,
+      [finishedRun.id],
+    );
+
+    expect(rows[0]).toEqual({
+      status: "completed",
+      finished_at: frozenFinishedAt,
+      completed_count: finishedRun.counts.completed,
+      failed_count: finishedRun.counts.failed,
+      canceled_count: finishedRun.counts.canceled,
+      skipped_count: finishedRun.counts.skipped,
+    });
+  });
+
+  /**
+   * The guard is lifted for one statement, never taught an exception. Proving
+   * the lift ended is what stops a later edit leaving it off: without this, a
+   * migration that dropped the `ENABLE TRIGGER` line would still pass every
+   * other assertion here while quietly unguarding the table for good.
+   */
+  it("puts the lifecycle guard back, so a finished header is still written once", async () => {
+    await expect(
+      client.query(`update "run" set "status" = 'canceled' where "id" = $1`, [
+        finishedRun.id,
+      ]),
+    ).rejects.toThrow(
+      /is finished, and a finished run's header is written once/,
+    );
+
+    const { rows } = await client.query<{ tgenabled: string }>(
+      "select tgenabled from pg_trigger where tgname = 'run_lifecycle_guard'",
+    );
+    expect(rows).toEqual([{ tgenabled: "O" }]);
   });
 
   it("deletes the old unrepresentable Retell voice connection and its run", async () => {
