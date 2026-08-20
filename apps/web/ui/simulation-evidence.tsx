@@ -628,7 +628,15 @@ function WaveformLane({
       {/* The hairline down the middle is the silence line the peaks grow from. */}
       <div
         className={cn(
-          "relative h-13 overflow-hidden rounded-input border border-border bg-background",
+          /*
+           * 52px is the track's own height and it is off the 4px spacing list
+           * in `DESIGN.md`. It is carried over rather than chosen — the
+           * stylesheet this replaces said `height: 52px` — so it is written as
+           * a measurement instead of `h-13`, which would read as a scale step
+           * that does not exist. Worth settling in the tuning pass: 48px is on
+           * the list and is one pixel of waveform away.
+           */
+          "relative h-[52px] overflow-hidden rounded-input border border-border bg-background",
           "bg-[linear-gradient(to_bottom,transparent_49.5%,var(--border)_49.5%,var(--border)_50.5%,transparent_50.5%)]",
         )}
       >

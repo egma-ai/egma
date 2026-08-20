@@ -340,7 +340,7 @@ export function ExecutionTimeline({
           >
             <div
               className={cn(
-                "grid min-h-11 items-center gap-3",
+                "grid min-h-(--tap-target) items-center gap-3",
                 "grid-cols-[56px_12px_minmax(0,1fr)_max-content]",
                 /* Narrow, the duration drops under the step it belongs to. */
                 "max-[40rem]:grid-cols-[48px_12px_minmax(0,1fr)]",

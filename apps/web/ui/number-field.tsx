@@ -120,12 +120,20 @@ export function NumberField({
       <label className="text-sm font-medium text-foreground" htmlFor={id}>
         {label}
       </label>
-      <div className="relative">
+      {/*
+       * The unit sits beside the field rather than inside it.
+       *
+       * Inside, the field has to reserve room for it, and the room has to be a
+       * fixed number — which is a guess about the longest unit anybody will
+       * ever pass. The first guess was 56px, and "seconds" already needs more
+       * than that, so a value long enough to reach it would have slid under
+       * the word. Beside it, the field takes whatever is left and every unit
+       * fits, including ones nobody has written yet.
+       */}
+      <div className="flex items-center gap-2">
         <Input
           className={cn(
-            "tabular-nums",
-            /* Room for the unit, so a long value never runs under it. */
-            unit === undefined ? undefined : "pr-14",
+            "min-w-0 flex-1 tabular-nums",
             /*
              * The spin buttons, in both families of browser. They are drawn
              * differently by each and match nothing else in this product.
@@ -152,13 +160,7 @@ export function NumberField({
           onChange={(event) => onChange(event.target.value)}
         />
         {unit === undefined ? null : (
-          <span
-            className={cn(
-              "pointer-events-none absolute inset-y-0 right-3 flex items-center",
-              "text-sm text-muted-foreground",
-            )}
-            id={unitId}
-          >
+          <span className="shrink-0 text-sm text-muted-foreground" id={unitId}>
             {unit}
           </span>
         )}
