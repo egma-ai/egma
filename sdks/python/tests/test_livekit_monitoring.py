@@ -3,7 +3,7 @@
 These tests never use an external service. They use real OpenTelemetry
 providers, in-memory exporters, and one local HTTP collector. This proves that
 Egma is added beside existing telemetry only once and that a LiveKit job
-flushes the shared provider when it stops.
+flushes Egma's own processor when it stops.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import pytest
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
@@ -272,6 +272,70 @@ async def test_existing_telemetry_and_egma_both_receive_the_same_span(
     provider.shutdown()
 
 
+@pytest.mark.parametrize("other_flush_result", [None, False])
+async def test_shared_telemetry_cannot_block_egmas_shutdown_flush(
+    monkeypatch, caplog, other_flush_result
+):
+    class NoFlushResult(SpanProcessor):
+        def on_start(self, span, parent_context=None):
+            return None
+
+        def on_end(self, span):
+            return None
+
+        def shutdown(self):
+            return None
+
+        def force_flush(self, timeout_millis=30_000):
+            return other_flush_result
+
+    class DeterministicBatchProcessor(SpanProcessor):
+        def __init__(self, exporter):
+            self.exporter = exporter
+            self.pending = []
+
+        def on_start(self, span, parent_context=None):
+            return None
+
+        def on_end(self, span):
+            self.pending.append(span)
+
+        def shutdown(self):
+            self.force_flush()
+            self.exporter.shutdown()
+
+        def force_flush(self, timeout_millis=30_000):
+            self.exporter.export(tuple(self.pending))
+            self.pending.clear()
+            return True
+
+    provider = TracerProvider()
+    provider.add_span_processor(NoFlushResult())
+    install_provider(monkeypatch, provider)
+    egma = InMemorySpanExporter()
+    monkeypatch.setattr(
+        livekit_monitoring, "BatchSpanProcessor", DeterministicBatchProcessor
+    )
+    monkeypatch.setattr(
+        livekit_monitoring, "_build_exporter", lambda _endpoint, _key: egma
+    )
+    context = StubJobContext()
+
+    monitor_livekit(
+        context,
+        endpoint="https://api.egma.ai",
+        api_key=PROJECT_KEY,
+    )
+    with provider.get_tracer("livekit-agents").start_as_current_span("session"):
+        pass
+
+    await context.shutdown_callbacks[0]()
+
+    assert [span.name for span in egma.get_finished_spans()] == ["session"]
+    assert "could not flush" not in caplog.text
+    provider.shutdown()
+
+
 def test_repeated_setup_adds_one_exporter_and_one_job_callback(monkeypatch):
     provider = TracerProvider()
     install_provider(monkeypatch, provider)
@@ -398,12 +462,12 @@ def test_changing_configuration_requires_a_worker_restart(monkeypatch):
 async def test_shutdown_failure_is_safe_and_does_not_stop_the_job(caplog):
     secret = "egma_sk_do_not_repeat"
 
-    class RefusingProvider:
+    class RefusingProcessor:
         def force_flush(self):
             raise RuntimeError(secret)
 
     context = StubJobContext()
-    livekit_monitoring._register_shutdown_flush(context, RefusingProvider())
+    livekit_monitoring._register_shutdown_flush(context, RefusingProcessor())
 
     await context.shutdown_callbacks[0]()
 

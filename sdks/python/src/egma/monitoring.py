@@ -42,6 +42,7 @@ class _MonitoringState:
     endpoint: str
     api_key_digest: bytes
     provider: TracerProvider
+    processor: BatchSpanProcessor
 
 
 _state: _MonitoringState | None = None
@@ -85,11 +86,14 @@ def monitor_livekit(
     with _state_lock:
         if _state is None:
             provider = _select_compatible_provider()
-            _configure_provider(provider, trace_endpoint, project_key)
+            processor = _configure_provider(
+                provider, trace_endpoint, project_key
+            )
             _state = _MonitoringState(
                 endpoint=trace_endpoint,
                 api_key_digest=key_digest,
                 provider=provider,
+                processor=processor,
             )
         elif (
             _state.endpoint != trace_endpoint
@@ -101,7 +105,7 @@ def monitor_livekit(
                 "EGMA_URL or EGMA_API_KEY."
             )
 
-        _register_shutdown_flush(ctx, _state.provider)
+        _register_shutdown_flush(ctx, _state.processor)
 
 
 def _setting(explicit: str | None, environment_name: str) -> str:
@@ -241,7 +245,7 @@ def _build_exporter(endpoint: str, api_key: str) -> SpanExporter:
 
 def _configure_provider(
     provider: TracerProvider, endpoint: str, api_key: str
-) -> None:
+) -> BatchSpanProcessor:
     """Attach one safe Egma processor and register its shared provider."""
 
     exporter = _build_exporter(endpoint, api_key)
@@ -249,6 +253,7 @@ def _configure_provider(
         processor = BatchSpanProcessor(exporter)
         _register_provider(provider)
         provider.add_span_processor(processor)
+        return processor
     except Exception:
         # Telemetry libraries can include exporter state in exception text.
         # Close the unused exporter and replace that text with a safe message.
@@ -262,13 +267,15 @@ def _configure_provider(
         ) from None
 
 
-def _register_shutdown_flush(ctx: JobContext, provider: TracerProvider) -> None:
+def _register_shutdown_flush(
+    ctx: JobContext, processor: BatchSpanProcessor
+) -> None:
     if getattr(ctx, _FLUSH_MARKER, False):
         return
 
     async def flush() -> None:
         try:
-            flushed = await asyncio.to_thread(provider.force_flush)
+            flushed = await asyncio.to_thread(processor.force_flush)
         except Exception:
             logger.warning(
                 "LiveKit monitoring could not flush every buffered span "
